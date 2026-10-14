@@ -43,6 +43,8 @@ import java.security.MessageDigest
  * before the fingerprint existed carry none and are replayed as before. Residual, as documented in the threat model: two concurrent FIRST attempts
  * with one key can both run (the store is written after the response); every money-moving step
  * below this layer is idempotent on its own key or unique index as well.
+ * Participant snapshot capture uses its own atomic database receipt scoped to the validated
+ * OAuth issuer/client/subject, so this pre-handler cache deliberately excludes that route.
  */
 class IdempotencyReplayFilter {
 
@@ -116,6 +118,12 @@ class IdempotencyReplayFilter {
 
     private fun scopeOf(request: ContainerRequestContext): String? {
         if (request.method !in MUTATING || !request.uriInfo.path.startsWith(API_PREFIX)) return null
+        // Snapshot capture has an atomic receipt keyed by verified issuer+client+subject. This
+        // generic response cache keys only on the displayed principal name and runs before the
+        // endpoint's hard JWT guard; replaying here could disclose a prior receipt to a different
+        // client presenting the same username. Always let that endpoint authenticate first.
+        val path = request.uriInfo.pathSegments.joinToString("/") { it.path }.trim('/')
+        if (path == PARTICIPANT_SNAPSHOT_PATH || path.startsWith("$PARTICIPANT_SNAPSHOT_PATH/")) return null
         val key = request.getHeaderString(IDEMPOTENCY_KEY_HEADER)?.takeIf {
             it.isNotBlank() && it.length <= MAX_IDEMPOTENCY_KEY_LENGTH
         } ?: return null
@@ -128,6 +136,7 @@ class IdempotencyReplayFilter {
 
     private companion object {
         const val API_PREFIX = "/api/v2/pension"
+        const val PARTICIPANT_SNAPSHOT_PATH = "api/v2/pension/reporting/participant-snapshots"
         const val PARTY_HEADER = "X-Customer-Party-Id"
         const val REPLAY_HEADER = "Idempotent-Replayed"
         const val SCOPE_PROPERTY = "pension.idempotency.scope"

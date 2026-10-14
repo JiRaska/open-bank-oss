@@ -475,6 +475,23 @@ test_others_cannot_read_participant_aggregates if {
 	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []}, "action": "pension.reporting.aggregate"}
 }
 
+test_only_verified_tax_client_captures_and_reads_participant_snapshots if {
+	principal := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"], "client_id": "openbank-tax-reporting"}
+	rest.allow with input as {"principal": principal, "action": "pension.reporting.snapshot.capture"}
+	rest.allow with input as {"principal": principal, "action": "pension.reporting.snapshot.inspect"}
+	not rest.allow with input as {"principal": tax_reporting_principal, "action": "pension.reporting.snapshot.capture"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"], "client_id": "openbank-edge"}, "action": "pension.reporting.snapshot.capture"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_ADMIN"]}, "action": "pension.reporting.snapshot.capture"}
+}
+
+test_staff_and_shared_backends_cannot_read_or_capture_participant_snapshots if {
+	every action in {"pension.reporting.snapshot.capture", "pension.reporting.snapshot.inspect"} {
+		not rest.allow with input as {"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_ADMIN"], "service_account": false}, "action": action}
+		not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", "ROLE_OPERATOR"], "service_account": true}, "action": action}
+		not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API", "ROLE_OPERATOR"], "client_id": "openbank-edge", "service_account": true}, "action": action}
+	}
+}
+
 # must-DENY: tax-reporting reaches no participant-level route.
 test_tax_reporting_reaches_no_participant_route if {
 	every a in {"pension.contract.inspect", "pension.exit.inspect", "pension.funding.inspect", "pension.operator.inspect", "pension.transfer.inspect", "pension.onboarding.inspect", "pension.death.inspect", "pension.annuity.inspect"} {
@@ -630,6 +647,7 @@ pension_actions := {
 	"pension.operator.annuity-write", "pension.operator.contribution", "pension.operator.exit-read",
 	"pension.operator.inspect", "pension.operator.mandate-read", "pension.operator.transfer",
 	"pension.reporting.aggregate",
+	"pension.reporting.snapshot.capture", "pension.reporting.snapshot.inspect",
 	"pension.simulation.run",
 	"pension.transfer.consent", "pension.transfer.inspect", "pension.transfer.provider-request",
 	"pension.transfer.request-out", "pension.transfer.withdraw",

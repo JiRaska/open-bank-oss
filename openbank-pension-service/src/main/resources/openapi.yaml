@@ -22,7 +22,8 @@ info:
   #        exemption applies (check-api-contract.py has none for an undeployed service). /api/v1
   #        is therefore not served at all; every route moved unchanged to /api/v2.
   # 2.1.0: additive (#12425) — participant aggregates for the ČNB statutory returns, one read route.
-  version: 2.1.0
+  # 2.2.0: additive (#12425) — immutable aggregate-only technical participant source snapshots.
+  version: 2.2.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
@@ -50,6 +51,51 @@ security:
   - bearerAuth: []
 
 paths:
+  /api/v2/pension/reporting/participant-snapshots:
+    post:
+      tags: [Reporting]
+      operationId: captureParticipantSnapshot
+      summary: Capture immutable aggregate-only participant source bytes
+      description: |
+        Technical source capture for the validated tax-reporting OAuth client only. It is not
+        legal, product, or statutory approval. Retry with the same Idempotency-Key returns the
+        original source after corrections; a new key captures a new revision. The company must
+        equal this deployment's configured provider. UNKNOWN period-end status remains UNKNOWN.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CaptureParticipantSnapshot' }
+      responses:
+        '200':
+          description: Immutable source receipt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParticipantSnapshotReceipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v2/pension/reporting/participant-snapshots/{snapshotId}:
+    get:
+      tags: [Reporting]
+      operationId: getParticipantSnapshot
+      summary: Read exact immutable participant source bytes
+      parameters:
+        - { name: snapshotId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: companyId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Immutable source and receipt; SHA-256 covers UTF-8 payloadJson bytes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ParticipantSnapshot' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v2/pension/reporting/participant-aggregates:
     get:
       tags: [Reporting]
@@ -67,7 +113,10 @@ paths:
         Late status events
         can correct an earlier period. Served to staff and to
         tax-reporting-service's own client only (`pension.reporting.aggregate`).
+        The companyId must match this deployment's configured pension provider; every
+        aggregate is scoped to that company's contracts.
       parameters:
+        - { name: companyId, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
         - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
       responses:
@@ -3830,6 +3879,32 @@ components:
             properties:
               amount: { type: number }
               count: { type: integer, format: int64 }
+    CaptureParticipantSnapshot:
+      type: object
+      required: [companyId, periodStart, periodEnd]
+      properties:
+        companyId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+    ParticipantSnapshotReceipt:
+      type: object
+      required: [snapshotId, companyId, periodStart, periodEnd, revision, payloadSchemaVersion, sha256]
+      properties:
+        snapshotId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        revision: { type: integer, minimum: 1 }
+        payloadSchemaVersion: { type: string, example: participant-period-aggregates/2.0 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    ParticipantSnapshot:
+      type: object
+      required: [receipt, payloadJson]
+      properties:
+        receipt: { $ref: '#/components/schemas/ParticipantSnapshotReceipt' }
+        payloadJson:
+          type: string
+          description: Exact canonical JSON source string; sha256 covers its UTF-8 bytes before decoding.
     ParticipantAggregates:
       type: object
       required: [periodStart, periodEnd, currency, participants, contributions, contributionsYtd, stateContributions, payouts, payoutsYtd, transfers]
@@ -3845,7 +3920,14 @@ components:
             newInPeriod: { type: integer, format: int64 }
             exitedInPeriod: { type: integer, format: int64 }
             contributing: { type: integer, format: int64 }
-            pensioners: { type: integer, format: int64 }
+            pensioners:
+              type: integer
+              format: int64
+              description: >-
+                Operational count of distinct contracts with a non-rejected pension payment
+                instruction created in the requested interval. This is not a verified count
+                of pension beneficiaries at the regulatory reference date and must not be
+                used as the PSP31 beneficiary stock.
             byProductLine: { type: object, additionalProperties: { type: integer, format: int64 } }
             byAgeBand: { type: object, additionalProperties: { type: integer, format: int64 } }
             byStatusAtPeriodEnd: { type: object, additionalProperties: { type: integer, format: int64 } }

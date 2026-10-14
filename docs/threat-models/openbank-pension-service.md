@@ -199,12 +199,25 @@ tax-reporting-service's OWN client, `service-account-openbank-tax-reporting` (RO
 | STRIDE | Threat | Mitigation |
 |---|---|---|
 | **Information disclosure** | The read model leaks participants (ids, birth dates, amounts per person) | Every statement in `PgParticipantReportingQueries` is an aggregate (COUNT/SUM ... GROUP BY); age leaves the database already in years and is banded before it leaves the service; `ParticipantReportingApiIT` asserts none of the six seeded contract ids appears in the payload |
+| **Information disclosure / tampering** | An unscoped aggregate includes another provider's contracts or an unknown payout/currency from that provider changes the filing | The required `companyId` must equal this deployment's configured provider UUID; every aggregate SELECT and completeness guard filters by that provider's contracts inside one read-only database snapshot. The two-company PostgreSQL test adds foreign currency and unknown settlement rows and proves the configured provider's result is unchanged. The consumer Pact also requires HTTP 400 for a different provider UUID, preventing an older endpoint that ignores the query from passing provider verification. |
 | **Elevation of privilege** | The shared service-account (HUMAN + ROLE_OPERATOR) or another service reads the aggregates through base `operator-read-any` | The action is `pension.reporting.aggregate` — deliberately not a `.read`/`.list` verb, which the generic rule grants to any operator-role principal; admitted only for real staff and the tax-reporting client (`pension_rest_ext.rego`), must-ALLOW/must-DENY in `opa test` and `opa eval` on the bundle; sabotage (dropping the principal-id condition) fails the must-DENY test |
 | **Tampering** | A closed period answers differently on each read | Intervals are closed on dates and timestamps are bucketed by UTC day, independent of the session time zone (the IT's 1 April 00:30Z instruction lands in April); a period booked in more than one currency is refused (409), never summed |
+| **Spoofing / elevation of privilege** | A backend with `ROLE_API` or a staff-shaped username captures a source snapshot | The capture and historical-read routes require the verified JWT issuer, subject, `azp=openbank-tax-reporting`, its own service-account username and `ROLE_API` in the REST guard before a database call. Their separate OPA actions require `principal.client_id` derived by `ServiceAccountIdentity` from the validated-token envelope; advisory OPA mode cannot loosen the local guard. No realm role or generic service grant is added. |
+| **Tampering / repudiation** | A correction or lost response silently changes a return's participant source | A capture holds canonical aggregate-only JSON bytes, explicit schema version, SHA-256, company and period in an append-only row. A successful command receipt binds the caller/key/body to that row in the same transaction; retry gets the original even after correction, a new key creates a new revision. PostgreSQL rejects UPDATE/DELETE of either evidence table. Historical reads scope by company, verify the digest and fail closed for an unknown schema. This is a technical source snapshot, not statutory approval. |
 
 Residual: contract status at period end is only knowable while the contract has not changed since
 — later changes are reported under `CHANGED_AFTER_PERIOD_END`, not guessed; there is no status
 history table.
+
+The existing `participants.pensioners` read-model field counts distinct contracts with a
+non-rejected pension payment instruction created during the interval. It does not establish the
+stock of eligible pension beneficiaries at the regulatory reference date. An immutable technical
+snapshot preserves that observed field and its source bytes; it does not make the field suitable
+for PSP31. Source eligibility and the reference-date rule require separate reviewed work.
+
+The aggregate snapshot does not retain individual participant identifiers or independently
+reconstruct all old transaction rows. Its retention and lawful disposal require a separately
+reviewed source-specific policy; the general service retention label is not that decision.
 
 ## 5. Residual risks / assumptions
 

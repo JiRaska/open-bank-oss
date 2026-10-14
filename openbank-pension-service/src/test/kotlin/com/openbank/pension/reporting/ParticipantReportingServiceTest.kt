@@ -4,6 +4,7 @@
 
 package com.openbank.pension.reporting
 
+import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.out.ParticipantReportingQueries
 import com.openbank.pension.application.usecase.ParticipantReportingService
 import com.openbank.pension.domain.reporting.AgeBand
@@ -21,11 +22,18 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
+import java.util.UUID
 
 class ParticipantReportingServiceTest {
 
+    private val providerId = UUID.fromString("00000000-0000-4000-8000-000000000001")
+
     private class Fake(val currencies: Set<String> = setOf("CZK"), val unknownSettlementTime: Boolean = false) :
         ParticipantReportingQueries {
+        override suspend fun <T> consistentRead(
+            providerEntityId: UUID,
+            block: suspend (ParticipantReportingQueries) -> T,
+        ): T = block(this)
         val contributionWindows = mutableListOf<Pair<LocalDate, LocalDate>>()
         override suspend fun hasUnknownSettlementTime(to: LocalDate) = unknownSettlementTime
         override suspend fun currencies(from: LocalDate, to: LocalDate) = currencies
@@ -58,8 +66,8 @@ class ParticipantReportingServiceTest {
     fun `unknown historical settlement time refuses incomplete figures`() {
         assertThatThrownBy {
             runBlocking {
-                ParticipantReportingService(Fake(unknownSettlementTime = true), "CZK")
-                    .aggregates(LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
+                ParticipantReportingService(Fake(unknownSettlementTime = true), "CZK", ProviderBoundary(providerId))
+                    .aggregates(providerId, LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
             }
         }.isInstanceOf(UnknownSettlementTimeException::class.java)
     }
@@ -75,7 +83,8 @@ class ParticipantReportingServiceTest {
                 ParticipantReportingService(
                     Fake(),
                     "CZK",
-                ).aggregates(LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
+                    ProviderBoundary(providerId),
+                ).aggregates(providerId, LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
             }
         assertThat(a.participants.inForce).isEqualTo(10)
         assertThat(a.participants.byAgeBand).containsEntry("0-17", 1).containsEntry("18-34", 2)
@@ -92,7 +101,8 @@ class ParticipantReportingServiceTest {
                 ParticipantReportingService(
                     fake,
                     "CZK",
-                ).aggregates(LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
+                    ProviderBoundary(providerId),
+                ).aggregates(providerId, LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
             }
         assertThat(a.contributions.total).isEqualByComparingTo("123")
         assertThat(a.payouts.total).isEqualByComparingTo("15")
@@ -109,7 +119,8 @@ class ParticipantReportingServiceTest {
                 ParticipantReportingService(
                     Fake(setOf("CZK", "EUR")),
                     "CZK",
-                ).aggregates(LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
+                    ProviderBoundary(providerId),
+                ).aggregates(providerId, LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
             }
         }.isInstanceOf(MixedCurrencyException::class.java)
         assertThatThrownBy {
@@ -117,8 +128,21 @@ class ParticipantReportingServiceTest {
                 ParticipantReportingService(
                     Fake(),
                     "CZK",
-                ).aggregates(LocalDate.parse("2026-09-30"), LocalDate.parse("2026-07-01"))
+                    ProviderBoundary(providerId),
+                ).aggregates(providerId, LocalDate.parse("2026-09-30"), LocalDate.parse("2026-07-01"))
             }
         }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `a different company is refused before any aggregate read`() {
+        val fake = Fake()
+        assertThatThrownBy {
+            runBlocking {
+                ParticipantReportingService(fake, "CZK", ProviderBoundary(providerId))
+                    .aggregates(UUID.randomUUID(), LocalDate.parse("2026-07-01"), LocalDate.parse("2026-09-30"))
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(fake.contributionWindows).isEmpty()
     }
 }

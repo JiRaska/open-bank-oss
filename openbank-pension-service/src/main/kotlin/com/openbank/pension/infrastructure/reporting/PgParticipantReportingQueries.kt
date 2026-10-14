@@ -13,15 +13,20 @@ import com.openbank.pension.domain.reporting.PayoutTotals
 import com.openbank.pension.domain.reporting.StateContributionFigures
 import com.openbank.pension.domain.reporting.StatusBuckets
 import com.openbank.pension.domain.reporting.TransferTotals
-import com.openbank.pension.infrastructure.persistence.funding.PgFundingSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
+import io.vertx.mutiny.sqlclient.SqlClient
 import io.vertx.mutiny.sqlclient.Tuple
+import jakarta.inject.Inject
 import jakarta.inject.Singleton
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.UUID
 
 /**
  * Every statement here ends in an aggregate (COUNT/SUM ... GROUP BY): the reporting read model is
@@ -35,26 +40,78 @@ import java.time.ZoneOffset
 // One query per reported figure, and column indexes into each aggregate row.
 @Suppress("TooManyFunctions", "MagicNumber")
 @Singleton
-class PgParticipantReportingQueries(client: Pool) :
-    PgFundingSupport(client),
-    ParticipantReportingQueries {
+class PgParticipantReportingQueries private constructor(
+    client: SqlClient,
+    private val pool: Pool?,
+    private val providerEntityId: UUID?,
+) : ParticipantReportingQueries {
+
+    private val queryClient: SqlClient = client
+
+    @Inject
+    constructor(pool: Pool) : this(pool, pool, null)
+
+    /**
+     * A fresh read-only REPEATABLE READ transaction and connection for each report request.
+     * Catching Throwable includes cancellation; cleanup must still release the pooled connection.
+     * A close failure escapes finally only when no earlier failure exists.
+     */
+    @Suppress("TooGenericExceptionCaught", "ThrowingExceptionFromFinally")
+    override suspend fun <T> consistentRead(
+        providerEntityId: UUID,
+        block: suspend (ParticipantReportingQueries) -> T,
+    ): T {
+        val connection = checkNotNull(pool) { "nested participant reporting snapshot is unsupported" }
+            .connection.awaitSuspending()
+        var failure: Throwable? = null
+        try {
+            val transaction = connection.begin().awaitSuspending()
+            try {
+                connection.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+                    .execute().awaitSuspending()
+                val result = block(PgParticipantReportingQueries(connection, null, providerEntityId))
+                transaction.commit().awaitSuspending()
+                return result
+            } catch (failure: Throwable) {
+                withContext(NonCancellable) {
+                    runCatching { transaction.rollback().awaitSuspending() }
+                        .exceptionOrNull()?.let(failure::addSuppressed)
+                }
+                throw failure
+            }
+        } catch (cause: Throwable) {
+            failure = cause
+            throw cause
+        } finally {
+            withContext(NonCancellable) {
+                try {
+                    connection.close().awaitSuspending()
+                } catch (closeFailure: Throwable) {
+                    if (failure != null) failure.addSuppressed(closeFailure) else throw closeFailure
+                }
+            }
+        }
+    }
 
     override suspend fun hasUnknownSettlementTime(to: LocalDate): Boolean = count(
         """
         SELECT COUNT(*) FROM pension_payment_instructions
          WHERE status = 'SETTLED' AND settled_at IS NULL AND created_at < $1
+           AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $2)
         """.trimIndent(),
-        Tuple.of(endExclusive(to)),
+        Tuple.of(endExclusive(to), provider()),
     ) > 0
 
     override suspend fun currencies(from: LocalDate, to: LocalDate): Set<String> = rows(
         """
         SELECT DISTINCT currency FROM pension_contributions WHERE value_date BETWEEN $1 AND $2
+         AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $5)
         UNION
         SELECT DISTINCT currency FROM pension_payment_instructions
          WHERE settled_at >= $3 AND settled_at < $4 AND status = 'SETTLED'
+           AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $5)
         """.trimIndent(),
-        Tuple.of(from, to, start(from), endExclusive(to)),
+        Tuple.of(from, to, start(from), endExclusive(to), provider()),
     ).map { it.getString(0).trim() }.toSet()
 
     override suspend fun inForce(asOf: LocalDate): List<InForceGroup> = rows(
@@ -64,49 +121,54 @@ class PgParticipantReportingQueries(client: Pool) :
                CASE WHEN updated_at < $2 THEN status ELSE '${StatusBuckets.CHANGED_AFTER_PERIOD_END}' END AS status_at_end,
                COUNT(*) AS n
           FROM pension_contracts
-         WHERE start_date IS NOT NULL AND start_date <= $1
+         WHERE start_date IS NOT NULL AND start_date <= $1 AND provider_entity_id = $3
            AND NOT (status IN ($TERMINAL) AND updated_at < $2)
          GROUP BY 1, 2, 3
         """.trimIndent(),
-        Tuple.of(asOf, endExclusive(asOf)),
+        Tuple.of(asOf, endExclusive(asOf), provider()),
     ).map { InForceGroup(it.getString(0), it.getInteger(1), it.getString(2), it.getLong(3)) }
 
     override suspend fun startedBetween(from: LocalDate, to: LocalDate): Long = count(
-        "SELECT COUNT(*) FROM pension_contracts WHERE start_date BETWEEN $1 AND $2",
-        Tuple.of(from, to),
+        "SELECT COUNT(*) FROM pension_contracts WHERE start_date BETWEEN $1 AND $2 AND provider_entity_id = $3",
+        Tuple.of(from, to, provider()),
     )
 
     override suspend fun exitedBetween(from: LocalDate, to: LocalDate): Long = count(
         """
         SELECT COUNT(*) FROM pension_contracts
          WHERE start_date IS NOT NULL AND status IN ($TERMINAL) AND updated_at >= $1 AND updated_at < $2
+           AND provider_entity_id = $3
         """.trimIndent(),
-        Tuple.of(start(from), endExclusive(to)),
+        Tuple.of(start(from), endExclusive(to), provider()),
     )
 
     override suspend fun contributingBetween(from: LocalDate, to: LocalDate): Long = count(
         """
         SELECT COUNT(DISTINCT contract_id) FROM pension_contributions
          WHERE source IN ('PARTICIPANT', 'EMPLOYER') AND value_date BETWEEN $1 AND $2
+           AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
         """.trimIndent(),
-        Tuple.of(from, to),
+        Tuple.of(from, to, provider()),
     )
 
     override suspend fun pensionersBetween(from: LocalDate, to: LocalDate): Long = count(
         """
         SELECT COUNT(DISTINCT contract_id) FROM pension_payment_instructions
          WHERE purpose IN ($PENSION_PURPOSES) AND status <> 'REJECTED' AND created_at >= $1 AND created_at < $2
+           AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
         """.trimIndent(),
-        Tuple.of(start(from), endExclusive(to)),
+        Tuple.of(start(from), endExclusive(to), provider()),
     )
 
     override suspend fun contributions(from: LocalDate, to: LocalDate): ContributionTotals {
         val bySource = rows(
             """
             SELECT source, COALESCE(SUM(amount), 0) FROM pension_contributions
-             WHERE value_date BETWEEN $1 AND $2 GROUP BY source
+             WHERE value_date BETWEEN $1 AND $2
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
+             GROUP BY source
             """.trimIndent(),
-            Tuple.of(from, to),
+            Tuple.of(from, to, provider()),
         ).associate { it.getString(0) to it.money(1) }
         return ContributionTotals(
             participant = bySource["PARTICIPANT"] ?: ZERO,
@@ -121,25 +183,29 @@ class PgParticipantReportingQueries(client: Pool) :
             """
             SELECT COALESCE(SUM(claimed_amount), 0) FROM pension_incentive_claims
              WHERE period >= $1 AND period <= $2 AND status <> 'REJECTED'
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
             """.trimIndent(),
-            Tuple.of(month(from), month(to)),
+            Tuple.of(month(from), month(to), provider()),
         ).single().money(0)
         val ledger = rows(
             """
             SELECT kind, COALESCE(SUM(amount), 0) FROM pension_incentive_ledger
-             WHERE occurred_at >= $1 AND occurred_at < $2 GROUP BY kind
+             WHERE occurred_at >= $1 AND occurred_at < $2
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
+             GROUP BY kind
             """.trimIndent(),
-            Tuple.of(start(from), endExclusive(to)),
+            Tuple.of(start(from), endExclusive(to), provider()),
         ).associate { it.getString(0) to it.money(1) }
         return StateContributionFigures(claimed, ledger["RECEIVED"] ?: ZERO, ledger["RETURNED"] ?: ZERO)
     }
 
     override suspend fun payouts(from: LocalDate, to: LocalDate): PayoutTotals {
-        val window = Tuple.of(start(from), endExclusive(to))
+        val window = Tuple.of(start(from), endExclusive(to), provider())
         val byForm = rows(
             """
             SELECT purpose, COALESCE(SUM(amount), 0), COUNT(*) FROM pension_payment_instructions
              WHERE purpose IN ($PAYOUT_PURPOSES) AND status = 'SETTLED' AND settled_at >= $1 AND settled_at < $2
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
              GROUP BY purpose
             """.trimIndent(),
             window,
@@ -148,6 +214,7 @@ class PgParticipantReportingQueries(client: Pool) :
             """
             SELECT COALESCE(SUM(amount), 0) FROM pension_payment_instructions
              WHERE purpose LIKE '%WITHHOLDING' AND status = 'SETTLED' AND settled_at >= $1 AND settled_at < $2
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
             """.trimIndent(),
             window,
         ).single().money(0)
@@ -155,6 +222,7 @@ class PgParticipantReportingQueries(client: Pool) :
             """
             SELECT COUNT(DISTINCT contract_id) FROM pension_payment_instructions
              WHERE purpose IN ($PAYOUT_PURPOSES) AND status = 'SETTLED' AND settled_at >= $1 AND settled_at < $2
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
             """.trimIndent(),
             window,
         )
@@ -168,9 +236,10 @@ class PgParticipantReportingQueries(client: Pool) :
                    COALESCE(SUM(COALESCE((payload::jsonb ->> 'netAmount')::numeric, 0)), 0)
               FROM pension_transfer_requests
              WHERE status = 'COMPLETED' AND updated_at >= $1 AND updated_at < $2
+               AND contract_id IN (SELECT contract_id FROM pension_contracts WHERE provider_entity_id = $3)
              GROUP BY direction
             """.trimIndent(),
-            Tuple.of(start(from), endExclusive(to)),
+            Tuple.of(start(from), endExclusive(to), provider()),
         ).associate { it.getString(0) to (it.getLong(1) to it.money(2)) }
         val inbound = byDirection["IN"] ?: (0L to ZERO)
         val outbound = byDirection["OUT"] ?: (0L to ZERO)
@@ -178,6 +247,11 @@ class PgParticipantReportingQueries(client: Pool) :
     }
 
     private suspend fun count(sql: String, args: Tuple): Long = rows(sql, args).single().getLong(0)
+
+    private fun provider(): UUID = checkNotNull(providerEntityId) { "participant reporting requires a scoped snapshot" }
+
+    private suspend fun rows(sql: String, args: Tuple): List<Row> =
+        queryClient.preparedQuery(sql).execute(args).awaitSuspending().toList()
 
     private fun Row.money(i: Int): BigDecimal = getBigDecimal(i).setScale(MONEY_SCALE, java.math.RoundingMode.HALF_EVEN)
 

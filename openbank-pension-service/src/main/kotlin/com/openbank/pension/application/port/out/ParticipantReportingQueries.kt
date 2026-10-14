@@ -10,6 +10,7 @@ import com.openbank.pension.domain.reporting.PayoutTotals
 import com.openbank.pension.domain.reporting.StateContributionFigures
 import com.openbank.pension.domain.reporting.TransferTotals
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Aggregate reads for statutory reporting (#12425). Every method answers with GROUP BY results —
@@ -21,6 +22,9 @@ import java.time.LocalDate
 // One aggregate query per statutory figure, plus the completeness guard.
 @Suppress("TooManyFunctions")
 interface ParticipantReportingQueries {
+    /** All aggregate SELECTs in [block] observe one database snapshot, including completeness guards. */
+    suspend fun <T> consistentRead(providerEntityId: UUID, block: suspend (ParticipantReportingQueries) -> T): T
+
     /** True if a settled payout created by [to] lacks its persisted domestic transition time. */
     suspend fun hasUnknownSettlementTime(to: LocalDate): Boolean
 
