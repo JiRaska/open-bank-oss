@@ -8,6 +8,8 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -24,7 +26,11 @@ import org.junit.jupiter.api.Test
     restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
+@TestProfile(StatutoryReturnApiIT.ApiProfile::class)
 class StatutoryReturnApiIT {
+    // Keep this class-scoped database separate from other Quarkus boots.
+    class ApiProfile : QuarkusTestProfile
+
     private val path = "/api/v1/statutory-returns"
     private val absentId = "00000000-0000-0000-0000-000000000099"
     private val assembleBody = """{
