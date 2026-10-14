@@ -48,6 +48,12 @@ openbank:
     dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s
+  referral:
+    # Base URL the shareable referral link is composed from (base + token) at invite issuance.
+    # Optional at the service: injected as Optional<String> with an in-code fallback to
+    # https://app.open-bank.tech/r/ — a ${VAR:} empty default would make it REQUIRED (SmallRye
+    # SRCFG00014), so the default is spelled out here and in ReferralService.
+    link-base-url: "https://app.open-bank.tech/r/"
 
 mp:
   messaging:
