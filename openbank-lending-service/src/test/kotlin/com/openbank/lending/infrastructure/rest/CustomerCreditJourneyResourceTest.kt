@@ -259,7 +259,7 @@ class CustomerCreditJourneyResourceTest {
     }
 
     @Test
-    fun `the customer's own withdrawal answers 200 with the journey body`() = runBlocking {
+    fun `the customer's own withdrawal answers 200 with the journey body`(): Unit = runBlocking {
         val app = application()
         val response = resource(listOf(app))
             .withdraw(
@@ -276,7 +276,7 @@ class CustomerCreditJourneyResourceTest {
     }
 
     @Test
-    fun `a foreign application id still reads as 404 through the withdraw leg`() = runBlocking {
+    fun `a foreign application id still reads as 404 through the withdraw leg`(): Unit = runBlocking {
         val theirs = application(owner = stranger)
         val response = resource(listOf(theirs))
             .withdraw(
