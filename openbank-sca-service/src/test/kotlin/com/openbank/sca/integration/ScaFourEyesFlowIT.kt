@@ -229,6 +229,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(11)
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `edge self service enrollment retains its existing policy exemption`() {
         given().contentType("application/json")
             .body(enrollment + ("credentialId" to "edge-${UUID.randomUUID()}"))
@@ -238,6 +245,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(12)
     @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "preferred_username", value = "service-account-openbank-services"),
+        ],
+    )
     fun `shared service consume reaches domain validation under its existing exemption`() {
         given().contentType("application/json").body(mapOf("partyId" to party))
             .post("/api/v1/sca/challenges/${UUID.randomUUID()}/consume").then().statusCode(404)

@@ -50,6 +50,13 @@ class PensionFundHoldingEnforcedAuthzIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-pension"),
+            Claim(key = "preferred_username", value = "service-account-openbank-pension"),
+        ],
+    )
     fun `own pension client passes HTTP and OPA gates`() {
         given().get(ordersPath).then().statusCode(200)
     }
