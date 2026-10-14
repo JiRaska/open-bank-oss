@@ -13,10 +13,10 @@ import com.openbank.agent.domain.mergerecord.AgentMergeRecord
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
 import java.time.Clock
-import java.util.UUID
 
 /**
  * The recorded-human-merge lifecycle (ADR-0031 phase 3). `agent.proposal.decided` records that a
@@ -39,7 +39,7 @@ class MergeRecordService(
 
     override fun record(command: MergeRecordCommand): AgentMergeRecordRepository.InsertResult {
         val record = AgentMergeRecord(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             agentId = command.agentId,
             prNumber = command.prNumber,
             prUrl = command.prUrl,
