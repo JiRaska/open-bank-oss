@@ -52,6 +52,10 @@ class DocumentRenderService(
                 ?: error("No published template for ${cmd.templateCode}")
         }
 
+        check(!template.bodyHtml.contains("LEGAL-REVIEW-REQUIRED")) {
+            "Template ${template.code} v${template.version} requires legal review before rendering"
+        }
+
         val html = templateRenderPort.renderHtml(template, cmd.data)
         val pdf = pdfRenderPort.htmlToPdf(html)
 
