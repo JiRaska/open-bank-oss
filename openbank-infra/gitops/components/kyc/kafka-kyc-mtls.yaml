@@ -68,9 +68,21 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Granted TWICE on purpose (#8877 pattern): `kyc-service-sanctions-list` is the group the
+      # msg-override ConfigMap will set in the follow-up that lands once an image carrying the
+      # `sanctions-list-changes-in` channel is deployed; `openbank-kyc-service` is the fallback
+      # group id SmallRye uses until then (quarkus.application.name). Without the fallback grant
+      # every poll answers GroupAuthorizationException in that window — silently, since a
+      # consumer that cannot join a group looks exactly like a topic with nothing on it.
       - resource:
           type: group
           name: kyc-service-sanctions-list
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-kyc-service
           patternType: literal
         operations: [Read]
         host: "*"
