@@ -234,6 +234,7 @@ class CustomerEdgeIncentivePactConsumerTest {
     private fun resource(mockServer: MockServer): CustomerEdgeResource {
         val base = "http://127.0.0.1:${trustedStub.address.port}"
         val upstream = UpstreamClient().apply {
+            tlsConfigurationName = java.util.Optional.empty()
             tokenEndpointBase = base
             clientId = "openbank-customer-edge"
             clientSecret = "pact"

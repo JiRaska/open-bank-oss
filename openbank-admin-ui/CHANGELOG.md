@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v2.0.0...admin-ui-v3.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
+## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v1.0.0...admin-ui-v2.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **pension:** final integration of follow-ups F1-F7 (ADR-0334 final integration) ([#12435](https://github.com/JiRaska/open-bank-oss/issues/12435)) ([1a7bd7e](https://github.com/JiRaska/open-bank-oss/commit/1a7bd7e31b28ed2c938abbb95cf4a73757c26eed))
+
 ## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.3...admin-ui-v1.0.0) (2026-10-12)
 
 
