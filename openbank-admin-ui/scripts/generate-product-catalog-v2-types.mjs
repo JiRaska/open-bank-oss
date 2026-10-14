@@ -28,6 +28,7 @@ const selected = [
   'ProductRevision',
   'SchemaViolation', 'ValidateCatalogRequest', 'ValidateCatalogResponse', 'CatalogValidationProblem',
   'CatalogEvent', 'CatalogEventPage',
+  'PensionApprovalRequest', 'PensionApprovalResponse',
 ]
 
 function typeOf(schema = {}) {

@@ -21,6 +21,7 @@ import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
+import com.openbank.pensionfund.domain.model.OrderType
 import com.openbank.pensionfund.domain.model.Precision
 import com.openbank.pensionfund.domain.model.PricedPosition
 import com.openbank.pensionfund.domain.model.TransactionCorrection
@@ -40,10 +41,12 @@ data class NavPublication(val nav: NavRecord, val settledOrders: Int, val correc
 
 /**
  * NAV lifecycle: calculate (maker) → publish (checker). Publishing an ordinary NAV settles every
- * order queued for the fund before that moment; publishing a CORRECTION supersedes the original
- * and re-prices every transaction that settled at it, adjusting holdings by the difference.
+ * eligible order queued before that moment, with a UTC placement date at most the valuation date.
+ * Publishing a CORRECTION supersedes the original and re-prices every transaction that settled
+ * at it, adjusting holdings by the difference.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // NAV maker/checker lifecycle and its settlement helpers
 class NavService(
     private val store: PensionFundStore,
     private val prices: MarketPricePort,
@@ -166,7 +169,11 @@ class NavService(
     }
 
     private suspend fun publishAndSettle(nav: NavRecord, isin: String, currency: String): NavPublication {
-        val pending = store.pendingOrders(nav.fundId).filter { it.placedAt.isBefore(nav.publishedAt) }
+        val pending = store.pendingOrders(nav.fundId).filter {
+            it.placedAt.isBefore(nav.publishedAt) &&
+                !nav.valuationDate.isBefore(it.placedAt.atZone(ZoneOffset.UTC).toLocalDate())
+        }
+        validateSwitchCurrencies(nav.fundId, pending)
         val holdings = mutableMapOf<UUID, UnitHolding>()
         val orders = mutableListOf<UnitOrder>()
         val transactions = mutableListOf<UnitTransaction>()
@@ -201,6 +208,34 @@ class NavService(
             }?.let { metrics.settledAmount(isin, it.type, tx.amount, currency) }
         }
         return NavPublication(nav, pending.size, emptyList())
+    }
+
+    /** Legacy pending orders must not reinterpret source proceeds as another currency. */
+    private suspend fun validateSwitchCurrencies(fundId: UUID, pending: List<UnitOrder>) {
+        val switches = pending.filter { it.type == OrderType.SWITCH_OUT || it.type == OrderType.SWITCH_IN }
+        if (switches.isEmpty()) return
+        val fund = store.fund(fundId) ?: throw NotFoundException("fund $fundId not found")
+        val parentsByContract = mutableMapOf<UUID, Map<UUID, UnitOrder>>()
+        switches.forEach { order ->
+            val otherFundId = if (order.type == OrderType.SWITCH_OUT) {
+                checkNotNull(order.targetFundId)
+            } else {
+                val parents = parentsByContract[order.contractId] ?: store.orders(order.contractId)
+                    .associateBy { it.id }.also { parentsByContract[order.contractId] = it }
+                val parent = checkNotNull(parents[order.parentOrderId]) { "switch-in has no source order" }
+                check(
+                    parent.type == OrderType.SWITCH_OUT &&
+                        parent.status == OrderStatus.SETTLED &&
+                        parent.contractId == order.contractId &&
+                        parent.targetFundId == fundId,
+                ) { "switch-in has an invalid source order" }
+                parent.fundId
+            }
+            val otherFund = store.fund(otherFundId) ?: throw NotFoundException("fund $otherFundId not found")
+            check(fund.currency == otherFund.currency) {
+                "cross-currency switches are not supported: ${fund.currency} and ${otherFund.currency}"
+            }
+        }
     }
 
     private suspend fun publishCorrection(correction: NavRecord): NavPublication {
