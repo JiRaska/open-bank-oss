@@ -369,3 +369,7 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
   or its revision/threshold differs from the one pinned on the grant (T40). Risk class: elevation
   of privilege / tampering. Rollback: flip the flag off first (new offers refused, existing
   proposals keep their snapshots), then revert; migrations V29–V32 are additive.
+
+## Machine-caller identity binding (#12448)
+
+Recertification confirmation (`POST /recertifications/{id}/confirm`) admits only customer-edge, recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT with `azp` = `openbank-edge` and `preferred_username` = `service-account-openbank-edge`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying that username but issued to another client is refused with 403.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/wealth-service-v0.3.0...wealth-service-v0.3.1) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/wealth-service-v0.2.2...wealth-service-v0.3.0) (2026-10-04)
 
 
