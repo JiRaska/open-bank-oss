@@ -22,6 +22,28 @@ Statutory-return access requires a staff identity as well as the route's role an
 
 `/capability` is authoritative for the current deployment. Pension figures are read from pension-fund-service's period figures (fund balance sheet, year-to-date P&L, unit roll-forward, portfolio, entitlements, participant counts) and pension-service's participant aggregates (contributions by source, payouts, pensioners), using this service's own machine client. Fund PSP 20-12 uses separate non-negative revaluation gains, revaluation losses and management fees, alongside signed other investment result and profit/loss. Fund PEF 13-04 uses classified closing loans; unknown positions or unavailable result lines make assembly unavailable rather than zero. The pension company's own balance sheet and P&L use its separate ledger's frozen closes; a returned close for a different requested period makes assembly unavailable. Capital, organisation and dividend facts require approved, effective corporate-register entries. The company's own PSP 34-12 portfolio remains unavailable: a ledger balance cannot supply its instruments and holdings count. Source mappings do not prove that an instance is deployed or populated; missing period data still refuses assembly. The regulator wire renderer is unavailable, and this service does not claim to have transmitted a regulator file; verified cell-level rendering is tracked separately. The configured reporting entity IDs and reporting start must be supplied before never-assembled pension returns can be monitored.
 
+The additive `POST /api/v1/statutory-returns/source-assemblies` requires an Idempotency-Key and is
+limited to PSP31-04 and PSP40-01. PSP31-04 currently refuses with 503 before capture because the
+provider has no verified as-of beneficiary stock for its pensioner cell; an instruction count is not
+that stock. PSP40-01 captures an immutable participant source snapshot with Tax's
+machine identity, verifies the exact returned payload hash before decoding, and stores the snapshot
+receipt and participant cell paths with the return revision. An exact-key retry returns that revision;
+a changed request with the same key is rejected. The older `/assemble` route remains available with
+its original v1 hash semantics and does not establish immutable source lineage. Company dividend,
+and other source closes still need their own lineage and reconciliation proof before CZ launch.
+
+The new `/api/v2/statutory-returns` surface exposes the complete return lifecycle with hash
+versions 1, 2 and 3. Its source-assembly command requires staff to select a sealed `fundCloseId`
+for a FUND return. Tax reads that exact close, checks its raw payload hash and scope before
+decoding, and binds the close receipt and required cell paths to the revision's v3 hash. It does
+not seal a fund period or infer a latest close. The v1 return lifecycle remains available with
+its original response enum (hash versions 1 and 2); its list excludes v3 and its get, approve
+and submit routes refuse v3 revisions. Deploying the v2 source alone does not prove regulatory
+reconciliation, provider deployment, or a submitted wire file. Before deprecating v1, configure
+the existing runtime deprecation headers and governance declaration with at least 180 days from
+the first public notice, notify both documented channels, and verify the removal criteria in
+ADR-0145. No sunset date is assigned by this source change.
+
 The corporate register is available at `/api/v1/corporate-register` for the reporting company. Entries name their source document and are versioned and effective-dated. Only approved entries feed a return; the proposer cannot decide their own entry, and decided entries are append-only. Missing approved values produce an unavailable return response rather than zero.
 
 For fund PSP 20-12, the return uses the provider's year-to-date revaluation gains, revaluation losses, management fees, other investment result, and profit/loss figures. Revaluation gains, revaluation losses, and management fees are non-negative amounts; other investment result and profit/loss are signed. The catalogue checks the reported profit/loss against its component lines. If the provider cannot supply the required lines, assembly returns unavailable with the provider's reason.

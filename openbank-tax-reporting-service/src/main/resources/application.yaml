@@ -128,7 +128,7 @@ authz:
 
 openbank:
   api:
-    version: "1"
+    version: "2"
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
@@ -144,6 +144,9 @@ openbank:
     commit: "${GIT_COMMIT:unknown}"
 
 "%test":
+  openbank:
+    statutory-returns:
+      company-id: 00000000-0000-4000-8000-000000000001
   quarkus:
     datasource:
       reactive:

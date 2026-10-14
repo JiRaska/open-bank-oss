@@ -23,6 +23,7 @@ import com.openbank.tax.infrastructure.returns.pension.ParticipantAggregatesDto
 import com.openbank.tax.infrastructure.returns.pension.PensionFundReportingClient
 import com.openbank.tax.infrastructure.returns.pension.PensionReportingSources
 import com.openbank.tax.infrastructure.returns.pension.PensionReturnDataAdapter
+import com.openbank.tax.infrastructure.returns.pension.VerifiedFundClose
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import kotlinx.coroutines.runBlocking
@@ -120,6 +121,75 @@ class TaxReportingPensionFundPactConsumerTest {
         .status(401)
         .toPact()
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun sealedClosePact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(SEALED_STATE)
+        .uponReceiving("GET an explicitly selected immutable fund reporting close")
+        .path(SEALED_PATH)
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(
+            mapOf(
+                "Content-Type" to "application/json",
+                "X-Reporting-Close-Id" to SEALED_CLOSE_ID,
+                "X-Reporting-Payload-Schema-Version" to "1.3.0",
+            ),
+        )
+        .matchHeader("X-Reporting-Close-Revision", "[1-9][0-9]*", "1")
+        .matchHeader("X-Reporting-Payload-SHA256", "[0-9a-f]{64}", "a".repeat(64))
+        .body(
+            newJsonBody { o ->
+                o.stringValue("fundId", SEALED_FUND_ID)
+                o.stringValue("currency", "CZK")
+                o.stringValue("periodStart", "2014-01-01")
+                o.stringValue("periodEnd", "2014-03-31")
+                o.stringType("closingNavId", "8c16d486-14f1-48e4-aace-acf956cbf38b")
+                o.stringValue("closingValuationDate", "2014-03-31")
+                o.`object`("balanceSheet") { b ->
+                    b.numberType("totalAssets", 1)
+                    b.numberType("totalLiabilities", 0)
+                    b.numberType("totalEquity", 1)
+                }
+                o.`object`("profitAndLossYtd") { p ->
+                    p.numberType("managementFees", 0)
+                    p.numberType("profitLoss", 0)
+                }
+                o.`object`("units") { u ->
+                    u.numberType("opening", 0)
+                    u.numberType("issued", 0)
+                    u.numberType("cancelled", 0)
+                    u.numberType("closing", 0)
+                    u.numberType("unitValue", 0)
+                    u.numberType("unitValuePeriodMax", 0)
+                }
+                o.`object`("portfolio") { }
+                o.`object`("entitlements") { e ->
+                    e.numberType("opening", 0)
+                    e.numberType("increase", 0)
+                    e.numberType("decrease", 0)
+                    e.numberType("closing", 0)
+                }
+                o.`object`("participants") { p ->
+                    p.integerType("holders", 0)
+                    p.integerType("subscribing", 0)
+                }
+                o.array("basisNavIds") { ids -> ids.stringType("8c16d486-14f1-48e4-aace-acf956cbf38b") }
+                o.stringType("fingerprint", "a".repeat(64))
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun sealedCloseNoAuthPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET an immutable fund close without M2M identity is refused")
+        .path(SEALED_PATH)
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     @Test
     @PactTestFor(pactMethod = "periodFiguresPact")
     fun `the fund figures decode into the adapter DTO and assemble every sourced fund return`(mockServer: MockServer) {
@@ -152,10 +222,71 @@ class TaxReportingPensionFundPactConsumerTest {
             .get(clientPath()).then().statusCode(401)
     }
 
-    private class FixedSources(private val figures: FundPeriodFiguresDto) : PensionReportingSources {
+    @Test
+    @PactTestFor(pactMethod = "sealedClosePact")
+    fun `selected sealed close exposes raw JSON scope and immutable receipt headers`(mockServer: MockServer) {
+        assertThat(sealedClientPath()).isEqualTo(SEALED_PATH)
+        val response = given().baseUri(
+            mockServer.getUrl(),
+        ).get(sealedClientPath()).then().statusCode(200).extract().response()
+        assertThat(response.header("X-Reporting-Close-Id")).isEqualTo(SEALED_CLOSE_ID)
+        assertThat(response.header("X-Reporting-Close-Revision")).matches("[1-9][0-9]*")
+        assertThat(response.header("X-Reporting-Payload-Schema-Version")).isEqualTo("1.3.0")
+        assertThat(response.header("X-Reporting-Payload-SHA256")).matches("[0-9a-f]{64}")
+        val payload = mapper.readTree(response.asByteArray())
+        val figures = mapper.treeToValue(payload, FundPeriodFiguresDto::class.java)
+        assertThat(payload.path("fundId").asText()).isEqualTo(SEALED_FUND_ID)
+        assertThat(payload.path("periodEnd").asText()).isEqualTo("2014-03-31")
+        assertThat(payload.path("currency").asText()).isEqualTo("CZK")
+        val adapter = PensionReturnDataAdapter(
+            FixedSources(
+                figures,
+                VerifiedFundClose(
+                    UUID.fromString(SEALED_CLOSE_ID),
+                    1,
+                    "1.3.0",
+                    response.header("X-Reporting-Payload-SHA256"),
+                    figures,
+                    payload,
+                ),
+            ),
+            NoCorporateFacts,
+            NoCompanyBooks,
+        )
+        val catalogue = CatalogueParser.parse(mapper, "statutory-returns/cz/pension-cnb.v1.json")
+        listOf("PEF12-04-FUND", "PEF14-04").forEach { code ->
+            val definition = catalogue.definition(code)!!
+            val extraction = runBlocking {
+                adapter.fetchClosedFund(
+                    catalogue,
+                    definition,
+                    UUID.fromString(SEALED_FUND_ID),
+                    ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2014-03-31")),
+                    UUID.fromString(SEALED_CLOSE_ID),
+                )
+            }
+            assertThat(extraction.values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
+            assertThat(
+                extraction.fundCloseLineage.cellPaths.keys,
+            ).containsExactlyInAnyOrderElementsOf(definition.datapoints)
+        }
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "sealedCloseNoAuthPact")
+    fun `selected sealed close without identity is refused`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).get(sealedClientPath()).then().statusCode(401)
+    }
+
+    private class FixedSources(
+        private val figures: FundPeriodFiguresDto,
+        private val closed: VerifiedFundClose? = null,
+    ) : PensionReportingSources {
         override suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate) = figures
 
-        override suspend fun participants(from: LocalDate, to: LocalDate): ParticipantAggregatesDto =
+        override suspend fun closedFund(fundId: UUID, closeId: UUID): VerifiedFundClose = checkNotNull(closed)
+
+        override suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate): ParticipantAggregatesDto =
             error("not used by fund returns")
     }
 
@@ -167,15 +298,26 @@ class TaxReportingPensionFundPactConsumerTest {
         /** Must match PensionFundPactFolderProviderVerificationTest (openbank-pension-fund-service). */
         const val STATE = "a pension fund with a published September 2026 NAV exists"
         const val FUND_ID = "f0a7c1e2-0000-4000-8000-000000012425"
+        const val SEALED_STATE = "a sealed pension fund reporting close exists for March 2014"
+        const val SEALED_FUND_ID = "f0a7c1e2-0000-4000-8000-000000012426"
+        const val SEALED_CLOSE_ID = "f0a7c1e2-0000-4000-8000-0000000c2014"
 
         /** LITERAL, retyped from pension-fund-service's FundReportingResource — never derived from the client. */
         const val EXPECTED_PATH = "/api/v1/reporting/funds/$FUND_ID/period-figures"
+        const val SEALED_PATH = "/api/v1/reporting/funds/$SEALED_FUND_ID/period-closes/$SEALED_CLOSE_ID"
 
         fun clientPath(): String {
             val base = PensionFundReportingClient::class.java.getAnnotation(Path::class.java).value
             val sub = PensionFundReportingClient::class.java.methods.single { it.name == "periodFigures" }
                 .getAnnotation(Path::class.java).value
             return (base + sub).replace("{fundId}", FUND_ID)
+        }
+
+        fun sealedClientPath(): String {
+            val base = PensionFundReportingClient::class.java.getAnnotation(Path::class.java).value
+            val sub = PensionFundReportingClient::class.java.methods.single { it.name == "sealedPeriod" }
+                .getAnnotation(Path::class.java).value
+            return (base + sub).replace("{fundId}", SEALED_FUND_ID).replace("{closeId}", SEALED_CLOSE_ID)
         }
     }
 }

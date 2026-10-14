@@ -4,6 +4,7 @@
 
 package com.openbank.tax.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.tax.application.port.out.ReturnDataPort
@@ -12,6 +13,8 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.usecase.ReturnBreach
 import com.openbank.tax.application.usecase.StatutoryReturnNotFoundException
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.returns.FundCloseLineage
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnValidationException
 import com.openbank.tax.domain.returns.StatutoryReturn
@@ -20,6 +23,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -68,7 +72,11 @@ class StatutoryReturnResource(
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "tax.statutory-return.inspect")
     @Operation(summary = "List return revisions, newest period first")
-    suspend fun list(): Response = Response.ok(service.list().map { it.toResponse() }).build()
+    suspend fun list(): Response = Response.ok(
+        service.list().filter {
+            it.contentHashVersion <= 2
+        }.map { it.toResponse() },
+    ).build()
 
     @GET
     @Path("/catalogues")
@@ -107,7 +115,8 @@ class StatutoryReturnResource(
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "tax.statutory-return.inspect")
     @Operation(summary = "Get one return revision")
-    suspend fun get(@PathParam("id") id: String): Response = Response.ok(service.get(parseId(id)).toResponse()).build()
+    suspend fun get(@PathParam("id") id: String): Response =
+        Response.ok(service.legacyReturn(parseId(id)).toResponse()).build()
 
     @POST
     @Path("/assemble")
@@ -126,12 +135,43 @@ class StatutoryReturnResource(
     }
 
     @POST
+    @Path("/source-assemblies")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.assemble")
+    @Operation(summary = "Assemble a participant-sourced return from a pinned immutable provider close")
+    suspend fun assembleFromParticipantClose(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: SourceAssemblyRequest?,
+    ): Response {
+        val actor = TaxReportingActor.verifiedStaffActor(identity, "assemble a statutory return")
+        val command = requireNotNull(request) { "source assembly body is required" }
+        require(command.fundCloseId == null) { "fundCloseId is not accepted on the v1 participant command" }
+        val key = requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        return Response.ok(
+            service.assembleFromParticipantClose(
+                command.catalogueId,
+                command.returnCode,
+                command.entityId,
+                command.period,
+                actor.subject,
+                actor.issuer,
+                key,
+            ).toResponse(),
+        ).build()
+    }
+
+    @POST
     @Path("/{id}/approve")
+    @Consumes(MediaType.WILDCARD)
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "tax.statutory-return.approve", resource = "#id")
     @Operation(summary = "Approve and attest the content hash (ASSEMBLED → APPROVED; four-eyes)")
-    suspend fun approve(@PathParam("id") id: String): Response =
-        Response.ok(service.approve(parseId(id), actingPrincipal()).toResponse()).build()
+    suspend fun approve(@PathParam("id") id: String): Response {
+        val actor = actingPrincipal()
+        val parsed = parseId(id)
+        service.legacyReturn(parsed)
+        return Response.ok(service.approve(parsed, actor).toResponse()).build()
+    }
 
     @POST
     @Path("/{id}/submitted")
@@ -140,21 +180,152 @@ class StatutoryReturnResource(
     @Operation(
         summary = "Record the regulator submission reference (APPROVED → SUBMITTED; refused if content ≠ attestation)",
     )
-    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response =
-        Response.ok(service.submit(parseId(id), request.reference, actingPrincipal()).toResponse()).build()
-
-    private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
-        ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
+    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response {
+        val actor = actingPrincipal()
+        val parsed = parseId(id)
+        service.legacyReturn(parsed)
+        return Response.ok(service.submit(parsed, request.reference, actor).toResponse()).build()
+    }
 
     private fun actingPrincipal(): String =
         TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
 }
+
+/** V2 exposes immutable fund-close revisions alongside historical returns; V1 remains unchanged. */
+@Path("/api/v2/statutory-returns")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "StatutoryReturn", description = "Versioned regulatory return lifecycle")
+class StatutoryReturnV2Resource(
+    private val service: StatutoryReturnService,
+    private val dataPort: ReturnDataPort,
+    private val renderer: ReturnWireRendererPort,
+) {
+    @Inject
+    lateinit var identity: SecurityIdentity
+
+    @GET
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
+    suspend fun list(): Response = Response.ok(service.list().map { it.toResponse() }).build()
+
+    @GET
+    @Path("/catalogues")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
+    fun catalogues(): Response = Response.ok(service.catalogues().map { it.toResponse() }).build()
+
+    @GET
+    @Path("/breaches")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
+    suspend fun breaches(): Response = Response.ok(service.breaches().map { it.toResponse() }).build()
+
+    @GET
+    @Path("/capability")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
+    fun capability(): Response = Response.ok(
+        ReturnCapabilityResponse(
+            dataSourceAvailable = dataPort.available,
+            wireFormatAvailable = renderer.available,
+            note = "Source-aware fund assembly requires an explicitly selected sealed close; " +
+                "the regulator wire file is not rendered by this service.",
+        ),
+    ).build()
+
+    @GET
+    @Path("/{id}")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "tax.statutory-return.inspect")
+    suspend fun get(@PathParam("id") id: String): Response = Response.ok(service.get(parseId(id)).toResponse()).build()
+
+    @POST
+    @Path("/assemble")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.assemble")
+    suspend fun assemble(request: AssembleReturnRequest): Response = Response.ok(
+        service.assemble(
+            request.catalogueId,
+            request.returnCode,
+            request.entityId,
+            request.period,
+            actingPrincipal(),
+        ).toResponse(),
+    ).build()
+
+    @POST
+    @Path("/source-assemblies")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.assemble")
+    suspend fun assembleFromSource(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: SourceAssemblyRequest?,
+    ): Response {
+        val actor = TaxReportingActor.verifiedStaffActor(identity, "assemble a statutory return")
+        val command = requireNotNull(request) { "source assembly body is required" }
+        val key = requireNotNull(idempotencyKey) { "Idempotency-Key header is required" }
+        val assembled = if (command.fundCloseId == null) {
+            service.assembleFromParticipantClose(
+                command.catalogueId,
+                command.returnCode,
+                command.entityId,
+                command.period,
+                actor.subject,
+                actor.issuer,
+                key,
+            )
+        } else {
+            service.assembleFromFundClose(
+                command.catalogueId,
+                command.returnCode,
+                command.entityId,
+                command.period,
+                command.fundCloseId,
+                actor.subject,
+                actor.issuer,
+                key,
+            )
+        }
+        return Response.ok(assembled.toResponse()).build()
+    }
+
+    @POST
+    @Path("/{id}/approve")
+    @Consumes(MediaType.WILDCARD)
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.approve", resource = "#id")
+    suspend fun approve(@PathParam("id") id: String): Response =
+        Response.ok(service.approve(parseId(id), actingPrincipal()).toResponse()).build()
+
+    @POST
+    @Path("/{id}/submitted")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.submit", resource = "#id")
+    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response =
+        Response.ok(service.submit(parseId(id), request.reference, actingPrincipal()).toResponse()).build()
+
+    private fun actingPrincipal(): String =
+        TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
+}
+
+private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
+    ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
 data class AssembleReturnRequest(
     val catalogueId: String,
     val returnCode: String,
     val entityId: String,
     val period: String,
+)
+
+/** Only the source-aware command accepts an explicit immutable fund close. */
+data class SourceAssemblyRequest(
+    val catalogueId: String,
+    val returnCode: String,
+    val entityId: String,
+    val period: String,
+    val fundCloseId: UUID? = null,
 )
 
 data class RecordSubmissionRequest(val reference: String)
@@ -177,6 +348,10 @@ data class StatutoryReturnResponse(
     val status: String,
     val datapoints: Map<String, BigDecimal>,
     val contentHash: String,
+    val contentHashVersion: Int,
+    val participantCloseLineage: ParticipantCloseLineage?,
+    @field:JsonInclude(JsonInclude.Include.NON_NULL)
+    val fundCloseLineage: FundCloseLineage?,
     val dueDate: String,
     val assembledBy: String,
     val assembledAt: String,
@@ -227,6 +402,9 @@ private fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
     status = status.name,
     datapoints = datapoints,
     contentHash = contentHash,
+    contentHashVersion = contentHashVersion,
+    participantCloseLineage = participantCloseLineage,
+    fundCloseLineage = fundCloseLineage,
     dueDate = dueDate.toString(),
     assembledBy = assembledBy,
     assembledAt = assembledAt.toString(),
@@ -258,6 +436,10 @@ private fun ReturnCatalogue.toResponse() = ReturnCatalogueResponse(
 
 private fun ReturnBreach.toResponse() =
     ReturnBreachResponse(catalogueId, returnCode, entityId, period, dueDate.toString(), kind.name)
+
+private suspend fun StatutoryReturnService.legacyReturn(id: UUID): StatutoryReturn = get(id).also {
+    if (it.contentHashVersion > 2) throw StatutoryReturnNotFoundException("No v1 statutory return $id")
+}
 
 @Provider
 class StatutoryReturnNotFoundExceptionMapper : ExceptionMapper<StatutoryReturnNotFoundException> {

@@ -4,10 +4,19 @@
 
 package com.openbank.tax.infrastructure.returns.pension
 
+import com.fasterxml.jackson.core.JsonProcessingException
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.tax.application.port.out.CorporateFactsPort
+import com.openbank.tax.application.port.out.FundCloseDataPort
+import com.openbank.tax.application.port.out.FundReturnExtraction
+import com.openbank.tax.application.port.out.ParticipantCloseDataPort
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
+import com.openbank.tax.application.port.out.ReturnExtraction
 import com.openbank.tax.domain.corporate.CorporateFact
+import com.openbank.tax.domain.returns.FundCloseLineage
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
@@ -16,7 +25,9 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.rest.client.inject.RestClient
+import org.jboss.resteasy.reactive.RestResponse
 import java.math.BigDecimal
+import java.security.MessageDigest
 import java.time.LocalDate
 import java.time.YearMonth
 import java.util.UUID
@@ -25,19 +36,118 @@ import java.util.UUID
 interface PensionReportingSources {
     suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate): FundPeriodFiguresDto
 
-    suspend fun participants(from: LocalDate, to: LocalDate): ParticipantAggregatesDto
+    suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate): ParticipantAggregatesDto
+
+    suspend fun closedFund(fundId: UUID, closeId: UUID): VerifiedFundClose =
+        throw ReturnDataUnavailableException("No immutable fund close source is bound")
+
+    suspend fun closedParticipants(
+        companyId: UUID,
+        from: LocalDate,
+        to: LocalDate,
+        idempotencyKey: String,
+    ): VerifiedParticipantSnapshot =
+        throw ReturnDataUnavailableException("No immutable participant close source is bound")
 }
+
+data class VerifiedParticipantSnapshot(
+    val receipt: ParticipantSnapshotReceiptDto,
+    val aggregates: ParticipantAggregatesDto,
+)
+
+data class VerifiedFundClose(
+    val closeId: UUID,
+    val revision: Long,
+    val payloadSchemaVersion: String,
+    val sha256: String,
+    val figures: FundPeriodFiguresDto,
+    val payload: JsonNode,
+)
+
+private const val FUND_CLOSE_SCHEMA = "1.3.0"
 
 @ApplicationScoped
 class RestPensionReportingSources(
     @RestClient private val funds: PensionFundReportingClient,
     @RestClient private val pension: PensionReportingClient,
+    private val objectMapper: ObjectMapper,
 ) : PensionReportingSources {
     override suspend fun fund(fundId: UUID, from: LocalDate, to: LocalDate) =
         sourced("pension-fund-service") { funds.periodFigures(fundId, from, to) }
 
-    override suspend fun participants(from: LocalDate, to: LocalDate) =
-        sourced("pension-service") { pension.participantAggregates(from, to) }
+    override suspend fun participants(companyId: UUID, from: LocalDate, to: LocalDate) =
+        sourced("pension-service") { pension.participantAggregates(companyId, from, to) }
+
+    override suspend fun closedFund(fundId: UUID, closeId: UUID): VerifiedFundClose = sourced("pension-fund-service") {
+        funds.sealedPeriod(fundId, closeId).use { response ->
+            if (response.status != jakarta.ws.rs.core.Response.Status.OK.statusCode) {
+                throw ReturnDataUnavailableException("Fund close source answered ${response.status}")
+            }
+            // RestResponse<ByteArray> is materialized asynchronously by the reactive client.
+            // Calling readEntity here would block the Quarkus IO thread on the wire stream.
+            val body = response.entity ?: throw ReturnDataUnavailableException("Fund close body is absent")
+            val revision = response.verifiedFundRevision(closeId, body)
+            val (payload, figures) = objectMapper.decodeFundPayload(body)
+            figures.requireFundScope(fundId)
+            VerifiedFundClose(closeId, revision, FUND_CLOSE_SCHEMA, sha256(body), figures, payload)
+        }
+    }
+
+    override suspend fun closedParticipants(
+        companyId: UUID,
+        from: LocalDate,
+        to: LocalDate,
+        idempotencyKey: String,
+    ): VerifiedParticipantSnapshot {
+        val receipt = sourced("pension-service") {
+            pension.captureParticipantSnapshot(idempotencyKey, ParticipantSnapshotRequest(companyId, from, to))
+        }
+        val snapshot = sourced("pension-service") { pension.participantSnapshot(receipt.snapshotId, companyId) }
+        validateReceipt(receipt, snapshot.receipt, companyId, from, to)
+        val actualSha = MessageDigest.getInstance("SHA-256")
+            .digest(snapshot.payloadJson.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        if (actualSha != receipt.sha256) {
+            throw ReturnDataUnavailableException("Participant close payload hash does not match its receipt")
+        }
+        val aggregate = try {
+            objectMapper.readValue(snapshot.payloadJson, ParticipantAggregatesDto::class.java)
+        } catch (e: JsonProcessingException) {
+            throw ReturnDataUnavailableException("Participant close payload cannot be decoded", e)
+        }
+        if (aggregate.periodStart != from || aggregate.periodEnd != to) {
+            throw ReturnDataUnavailableException("Participant close payload has a different period")
+        }
+        if (aggregate.currency != "CZK") {
+            throw ReturnDataUnavailableException("Participant close payload has a non-CZK currency")
+        }
+        return VerifiedParticipantSnapshot(receipt, aggregate)
+    }
+
+    private fun validateReceipt(
+        receipt: ParticipantSnapshotReceiptDto,
+        stored: ParticipantSnapshotReceiptDto,
+        companyId: UUID,
+        from: LocalDate,
+        to: LocalDate,
+    ) {
+        val fieldsMatch =
+            stored.snapshotId == receipt.snapshotId &&
+                stored.companyId == companyId &&
+                receipt.companyId == companyId &&
+                stored.periodStart == from &&
+                receipt.periodStart == from &&
+                stored.periodEnd == to &&
+                receipt.periodEnd == to &&
+                stored.revision == receipt.revision &&
+                stored.payloadSchemaVersion == receipt.payloadSchemaVersion &&
+                stored.sha256 == receipt.sha256
+        if (!fieldsMatch ||
+            receipt.revision <= 0 ||
+            receipt.payloadSchemaVersion != "participant-period-aggregates/2.0"
+        ) {
+            throw ReturnDataUnavailableException("Participant close receipt and immutable snapshot disagree")
+        }
+    }
 
     /**
      * Any failure to obtain the figures is "unavailable" (503), never a zero and never a 500: a
@@ -54,6 +164,42 @@ class RestPensionReportingSources(
     }
 }
 
+private fun RestResponse<ByteArray>.verifiedFundRevision(closeId: UUID, body: ByteArray): Long {
+    val declaredId = runCatching { UUID.fromString(getHeaderString("X-Reporting-Close-Id")) }.getOrNull()
+    val revision = getHeaderString("X-Reporting-Close-Revision")?.toLongOrNull()
+        ?: throw ReturnDataUnavailableException("Fund close receipt or payload integrity is unavailable")
+    val validIdentity = declaredId == closeId && revision > 0
+    val validPayload = getHeaderString("X-Reporting-Payload-Schema-Version") == FUND_CLOSE_SCHEMA &&
+        getHeaderString("X-Reporting-Payload-SHA256") == sha256(body)
+    val validMediaType = mediaType?.isCompatible(jakarta.ws.rs.core.MediaType.APPLICATION_JSON_TYPE) == true
+    if (!validIdentity || !validPayload || !validMediaType) {
+        throw ReturnDataUnavailableException("Fund close receipt or payload integrity is unavailable")
+    }
+    return revision
+}
+
+private fun ObjectMapper.decodeFundPayload(body: ByteArray): Pair<JsonNode, FundPeriodFiguresDto> = try {
+    val tree = readTree(body)
+    require(tree != null && tree.isObject) { "Fund close payload is not an object" }
+    tree to treeToValue(tree, FundPeriodFiguresDto::class.java)
+} catch (e: JsonProcessingException) {
+    throw ReturnDataUnavailableException("Fund close payload cannot be decoded", e)
+} catch (e: IllegalArgumentException) {
+    throw ReturnDataUnavailableException("Fund close payload cannot be decoded", e)
+}
+
+private fun FundPeriodFiguresDto.requireFundScope(fundId: UUID) {
+    val validFund = this.fundId == fundId && currency == "CZK"
+    val validNav = closingNavId != null && closingNavId in (basisNavIds ?: emptyList())
+    val validFingerprint = fingerprint.matches(Regex("[0-9a-f]{64}"))
+    if (!validFund || !validNav || !validFingerprint) {
+        throw ReturnDataUnavailableException("Fund close payload scope or source fingerprint is invalid")
+    }
+}
+
+private fun sha256(body: ByteArray): String = MessageDigest.getInstance("SHA-256")
+    .digest(body).joinToString("") { "%02x".format(it) }
+
 /**
  * The ČNB pension catalogue (`cz-pension-cnb`) mapped onto the providers' read models (#12425).
  *
@@ -66,7 +212,9 @@ class PensionReturnDataAdapter(
     private val sources: PensionReportingSources,
     private val corporate: CorporateFactsPort,
     private val companyBooks: CompanyBooksPort,
-) : ReturnDataPort {
+) : ReturnDataPort,
+    ParticipantCloseDataPort,
+    FundCloseDataPort {
     override val available: Boolean = true
 
     override suspend fun fetch(
@@ -83,7 +231,7 @@ class PensionReturnDataAdapter(
         }
         val from = periodStart(period)
         val to = period.endDate
-        if (definition.code == "PSP31-04") return companyFlows(sources.participants(from, to))
+        if (definition.code == "PSP31-04") return companyFlows(sources.participants(companyUuid(entityId), from, to))
         if (definition.code in COMPANY_BOOK_RETURNS) return companyBooks(definition.code, companyBooks.figures(to))
         CORPORATE_RETURNS[definition.code]?.let { needed ->
             return corporateReturn(definition.code, entityId, needed, from, to)
@@ -91,6 +239,93 @@ class PensionReturnDataAdapter(
         val extract = FUND_RETURNS[definition.code]
             ?: throw ReturnDataUnavailableException("${definition.code}: no mapping to a source read model")
         return extract(definition.code, entityId, fund(entityId, from, to))
+    }
+
+    override suspend fun fetchClosed(
+        catalogue: ReturnCatalogue,
+        definition: ReturnDefinition,
+        companyId: UUID,
+        period: ReportingPeriod,
+        sourceIdempotencyKey: String,
+    ): ReturnExtraction {
+        if (catalogue.id != CATALOGUE_ID || definition.code !in setOf("PSP31-04", "PSP40-01")) {
+            throw ReturnDataUnavailableException("No participant close mapping for ${definition.code}")
+        }
+        if (definition.code == "PSP31-04") {
+            // The current instruction count is not a verified stock of eligible beneficiaries at
+            // the reporting date. Do not turn a technically immutable snapshot into a false return.
+            throw ReturnDataUnavailableException("PSP31-04 requires a verified as-of beneficiary source")
+        }
+        val from = periodStart(period)
+        val to = period.endDate
+        val snapshot = sources.closedParticipants(companyId, from, to, sourceIdempotencyKey)
+        val values = when (definition.code) {
+            "PSP31-04" -> companyFlows(snapshot.aggregates)
+            "PSP40-01" -> corporateReturn(
+                definition.code,
+                companyId.toString(),
+                CORPORATE_RETURNS.getValue(definition.code),
+                from,
+                to,
+                snapshot.aggregates,
+            )
+            else -> error("validated return code")
+        }
+        return ReturnExtraction(
+            values,
+            ParticipantCloseLineage(
+                snapshotId = snapshot.receipt.snapshotId,
+                companyId = snapshot.receipt.companyId,
+                periodStart = snapshot.receipt.periodStart,
+                periodEnd = snapshot.receipt.periodEnd,
+                revision = snapshot.receipt.revision,
+                payloadSchemaVersion = snapshot.receipt.payloadSchemaVersion,
+                sha256 = snapshot.receipt.sha256,
+                cellPaths = PARTICIPANT_CELL_PATHS.getValue(definition.code),
+            ),
+        )
+    }
+
+    override suspend fun fetchClosedFund(
+        catalogue: ReturnCatalogue,
+        definition: ReturnDefinition,
+        fundId: UUID,
+        period: ReportingPeriod,
+        closeId: UUID,
+    ): FundReturnExtraction {
+        if (catalogue.id != CATALOGUE_ID || definition.scope != com.openbank.tax.domain.returns.ReturnScope.FUND) {
+            throw ReturnDataUnavailableException("No fund close mapping for ${definition.code}")
+        }
+        val extract = FUND_RETURNS[definition.code]
+            ?: throw ReturnDataUnavailableException("No fund close mapping for ${definition.code}")
+        val from = periodStart(period)
+        val to = period.endDate
+        val source = sources.closedFund(fundId, closeId)
+        val figures = source.figures
+        val scopeMatches = figures.fundId == fundId && figures.currency == "CZK"
+        val periodMatches = figures.periodStart == from &&
+            figures.periodEnd == to &&
+            figures.closingValuationDate == to
+        if (!scopeMatches || !periodMatches || figures.closingNavId == null) {
+            throw ReturnDataUnavailableException("Fund close scope, currency or reporting period disagrees")
+        }
+        val values = extract(definition.code, fundId.toString(), figures)
+        val paths = FUND_CELL_PATHS.getValue(definition.code)
+        if (paths.keys != values.keys ||
+            paths.any { (cell, path) ->
+                val raw = source.payload.at(path)
+                !raw.isNumber || raw.decimalValue().compareTo(values.getValue(cell)) != 0
+            }
+        ) {
+            throw ReturnDataUnavailableException("Fund close cell lineage does not match sealed payload")
+        }
+        return FundReturnExtraction(
+            values,
+            FundCloseLineage(
+                closeId, fundId, from, to, source.revision, figures.closingNavId,
+                figures.fingerprint, source.payloadSchemaVersion, source.sha256, paths,
+            ),
+        )
     }
 
     private fun companyFlows(a: ParticipantAggregatesDto): Map<String, BigDecimal> = mapOf(
@@ -113,6 +348,7 @@ class PensionReturnDataAdapter(
         needed: List<CorporateFact>,
         from: LocalDate,
         to: LocalDate,
+        closedParticipants: ParticipantAggregatesDto? = null,
     ): Map<String, BigDecimal> {
         val facts = corporate.effective(entityId, needed, from, to)
         val missing = needed.filter { it !in facts }
@@ -138,7 +374,7 @@ class PensionReturnDataAdapter(
             )
             "PSP40-01" -> {
                 // The year's flows come from pension-service, the dividend from the register.
-                val year = sources.participants(from, to)
+                val year = closedParticipants ?: sources.participants(companyUuid(entityId), from, to)
                 mapOf(
                     "dividend_paid_or_planned" to v(CorporateFact.DIVIDEND_PAID_OR_PLANNED),
                     "contributions_received_year" to year.contributionsYtd.total,
@@ -147,6 +383,12 @@ class PensionReturnDataAdapter(
             }
             else -> throw ReturnDataUnavailableException("$code: no corporate-register mapping")
         }
+    }
+
+    private fun companyUuid(entityId: String): UUID = try {
+        UUID.fromString(entityId)
+    } catch (e: IllegalArgumentException) {
+        throw ReturnDataUnavailableException("Declared company entity is not a pension provider UUID", e)
     }
 
     /** The company's own balance sheet and P&L, from its ledger's frozen closes (ADR-0337). */
@@ -267,6 +509,50 @@ class PensionReturnDataAdapter(
             },
         )
 
+        private val FUND_CELL_PATHS: Map<String, Map<String, String>> = mapOf(
+            "PSP10-12-FUND" to mapOf(
+                "total_assets" to "/balanceSheet/totalAssets",
+                "total_liabilities" to "/balanceSheet/totalLiabilities",
+                "total_equity" to "/balanceSheet/totalEquity",
+            ),
+            "PEF12-04-FUND" to mapOf(
+                "total_assets" to "/balanceSheet/totalAssets",
+                "total_liabilities" to "/balanceSheet/totalLiabilities",
+                "total_equity" to "/balanceSheet/totalEquity",
+            ),
+            "PSP20-12-FUND" to mapOf(
+                "revaluation_gains_ytd" to "/profitAndLossYtd/revaluationGains",
+                "revaluation_losses_ytd" to "/profitAndLossYtd/revaluationLosses",
+                "other_investment_result_ytd" to "/profitAndLossYtd/otherInvestmentResult",
+                "management_fees_ytd" to "/profitAndLossYtd/managementFees",
+                "profit_loss_ytd" to "/profitAndLossYtd/profitLoss",
+            ),
+            "PEF13-04" to mapOf("loans_outstanding" to "/portfolio/loansOutstanding"),
+            "PSP30-12" to mapOf(
+                "units_opening" to "/units/opening",
+                "units_issued" to "/units/issued",
+                "units_cancelled" to "/units/cancelled",
+                "units_closing" to "/units/closing",
+                "unit_value" to "/units/unitValue",
+                "unit_value_period_max" to "/units/unitValuePeriodMax",
+                "fund_equity" to "/balanceSheet/totalEquity",
+            ),
+            "PSP34-12-FUND" to mapOf(
+                "holdings_carrying_value" to "/portfolio/carryingValue",
+                "holdings_count" to "/portfolio/holdingsCount",
+            ),
+            "PEF14-04" to mapOf(
+                "pension_entitlements_opening" to "/entitlements/opening",
+                "entitlement_increase" to "/entitlements/increase",
+                "entitlement_decrease" to "/entitlements/decrease",
+                "pension_entitlements_closing" to "/entitlements/closing",
+            ),
+            "PEF15-01" to mapOf(
+                "participants_count" to "/participants/holders",
+                "participants_contributing_count" to "/participants/subscribing",
+            ),
+        )
+
         /**
          * Returns no service in this platform owns the figures for. The company's own balance
          * sheet and P&L come from its own ledger (ADR-0337) and its capital, organisation and
@@ -291,6 +577,22 @@ class PensionReturnDataAdapter(
                 CorporateFact.SUPERVISORY_BOARD_MEMBERS,
             ),
             "PSP40-01" to listOf(CorporateFact.DIVIDEND_PAID_OR_PLANNED),
+        )
+
+        private val PARTICIPANT_CELL_PATHS: Map<String, Map<String, String>> = mapOf(
+            "PSP31-04" to mapOf(
+                "contributions_participant_ytd" to "/contributionsYtd/participant",
+                "contributions_employer_ytd" to "/contributionsYtd/employer",
+                "contributions_state_ytd" to "/contributionsYtd/state",
+                "contributions_total_ytd" to "/contributionsYtd/total",
+                "payouts_total_ytd" to "/payoutsYtd/total",
+                "payout_cases_ytd" to "/payoutsYtd/cases",
+                "pensioners_count" to "/participants/pensioners",
+            ),
+            "PSP40-01" to mapOf(
+                "contributions_received_year" to "/contributionsYtd/total",
+                "payouts_paid_year" to "/payoutsYtd/total",
+            ),
         )
 
         /** First day of the period [period] closes; YTD figures are computed by the providers. */

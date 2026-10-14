@@ -7,13 +7,19 @@ package com.openbank.tax.application.usecase
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.tax.application.port.out.FundCloseDataPort
+import com.openbank.tax.application.port.out.FundReturnExtraction
+import com.openbank.tax.application.port.out.ParticipantCloseDataPort
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
+import com.openbank.tax.application.port.out.ReturnExtraction
 import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
+import com.openbank.tax.domain.returns.FundCloseLineage
+import com.openbank.tax.domain.returns.ParticipantCloseLineage
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
@@ -65,8 +71,16 @@ class StatutoryReturnServiceTest {
 
     private class InMemoryRepo : StatutoryReturnRepository {
         val rows = linkedMapOf<UUID, StatutoryReturn>()
+        var hideNextSourceLookup = false
         override suspend fun insert(statutoryReturn: StatutoryReturn) = statutoryReturn.also { rows[it.id] = it }
         override suspend fun findReturn(id: UUID) = rows[id]
+        override suspend fun findSourceAssembly(keyHash: String): StatutoryReturn? {
+            if (hideNextSourceLookup) {
+                hideNextSourceLookup = false
+                return null
+            }
+            return rows.values.firstOrNull { it.sourceAssemblyKeyHash == keyHash }
+        }
         override suspend fun latestRevision(
             catalogueId: String,
             returnCode: String,
@@ -87,18 +101,371 @@ class StatutoryReturnServiceTest {
         }
     }
 
-    private class FixedData(var values: Map<String, BigDecimal>?) : ReturnDataPort {
+    private class FixedData(var values: Map<String, BigDecimal>?) :
+        ReturnDataPort,
+        ParticipantCloseDataPort,
+        FundCloseDataPort {
         override val available = values != null
+        var closedFetches = 0
+        var closedExtraction: ReturnExtraction? = null
+        var fundExtraction: FundReturnExtraction? = null
+        var fundFetches = 0
         override suspend fun fetch(
             catalogue: ReturnCatalogue,
             definition: ReturnDefinition,
             entityId: String,
             period: ReportingPeriod,
         ) = values ?: throw ReturnDataUnavailableException("unbound")
+
+        override suspend fun fetchClosed(
+            catalogue: ReturnCatalogue,
+            definition: ReturnDefinition,
+            companyId: UUID,
+            period: ReportingPeriod,
+            sourceIdempotencyKey: String,
+        ): ReturnExtraction {
+            closedFetches++
+            return closedExtraction ?: throw ReturnDataUnavailableException("no closed participant source in this test")
+        }
+
+        override suspend fun fetchClosedFund(
+            catalogue: ReturnCatalogue,
+            definition: ReturnDefinition,
+            fundId: UUID,
+            period: ReportingPeriod,
+            closeId: UUID,
+        ): FundReturnExtraction {
+            fundFetches++
+            return fundExtraction ?: throw ReturnDataUnavailableException("no closed fund source in this test")
+        }
     }
 
     private val repo = InMemoryRepo()
     private val data = FixedData(mapOf("units" to BigDecimal("100")))
+
+    private val companyId = UUID.fromString("cae643b1-09b9-4ad7-ae55-310959d62156")
+    private val fundId = UUID.fromString("17ded338-5768-42d1-83f1-ea91734a5db6")
+    private val fundCloseId = UUID.fromString("d53c2305-0875-4e7a-a245-c24516ca0d75")
+    private val fundDefinition = ReturnDefinition(
+        code = "PEF13-04",
+        name = "fund loans",
+        scope = ReturnScope.FUND,
+        periodicity = Periodicity.YEAR,
+        deadlineDaysAfterPeriodEnd = 30,
+        datapoints = listOf("loans_outstanding"),
+        rules = emptyList(),
+        legalBasis = "test",
+    )
+    private val closedDefinition = ReturnDefinition(
+        code = "PSP40-01",
+        name = "company pension return",
+        scope = ReturnScope.COMPANY,
+        periodicity = Periodicity.YEAR,
+        deadlineDaysAfterPeriodEnd = 30,
+        datapoints = listOf("contributions_received_year", "payouts_paid_year"),
+        rules = emptyList(),
+        legalBasis = "test",
+    )
+
+    private fun closedService(
+        closed: FixedData,
+        source: ReturnCatalogueSource = object : ReturnCatalogueSource {
+            override fun catalogues() =
+                listOf(ReturnCatalogue("cz-pension-cnb", 1, "CZ", false, listOf(closedDefinition)))
+        },
+    ) = StatutoryReturnService(
+        catalogues = source,
+        data = closed,
+        closedData = closed,
+        fundClosedData = closed,
+        repository = repo,
+        entities = ReportingEntities(companyId.toString(), emptyList(), LocalDate.of(2025, 1, 1)),
+        accountingClock = AccountingClock.bank(Clock.fixed(Instant.parse("2027-01-25T09:00:00Z"), ZoneOffset.UTC)),
+        clock = clock,
+    )
+
+    private fun closedData() = FixedData(emptyMap()).also {
+        it.closedExtraction = ReturnExtraction(
+            values = mapOf("contributions_received_year" to BigDecimal("100"), "payouts_paid_year" to BigDecimal("10")),
+            participantCloseLineage = ParticipantCloseLineage(
+                snapshotId = UUID.fromString("d45ca8df-f9dc-4573-bb7b-513219f33a96"),
+                companyId = companyId,
+                periodStart = LocalDate.of(2026, 1, 1),
+                periodEnd = LocalDate.of(2026, 12, 31),
+                revision = 1,
+                payloadSchemaVersion = "participant-period-aggregates/2.0",
+                sha256 = "a".repeat(64),
+                cellPaths = mapOf(
+                    "contributions_received_year" to "/contributionsYtd/total",
+                    "payouts_paid_year" to "/payoutsYtd/total",
+                ),
+            ),
+        )
+    }
+
+    private fun fundService(
+        fund: FixedData,
+        source: ReturnCatalogueSource = object : ReturnCatalogueSource {
+            override fun catalogues() =
+                listOf(ReturnCatalogue("cz-pension-cnb", 1, "CZ", false, listOf(fundDefinition)))
+        },
+    ) = StatutoryReturnService(
+        catalogues = source,
+        data = fund,
+        closedData = fund,
+        fundClosedData = fund,
+        repository = repo,
+        entities = ReportingEntities(companyId.toString(), listOf(fundId.toString()), LocalDate.of(2025, 1, 1)),
+        accountingClock = AccountingClock.bank(Clock.fixed(Instant.parse("2027-01-25T09:00:00Z"), ZoneOffset.UTC)),
+        clock = clock,
+    )
+
+    private fun fundData() = FixedData(emptyMap()).also {
+        it.fundExtraction = FundReturnExtraction(
+            mapOf("loans_outstanding" to BigDecimal("3")),
+            FundCloseLineage(
+                closeId = fundCloseId, fundId = fundId,
+                periodStart = LocalDate.of(2026, 1, 1), periodEnd = LocalDate.of(2026, 12, 31),
+                revision = 1, closingNavId = UUID.fromString("8c16d486-14f1-48e4-aace-acf956cbf38b"),
+                sourceFingerprint = "a".repeat(64), payloadSchemaVersion = "1.3.0",
+                sha256 = "b".repeat(64), cellPaths = mapOf("loans_outstanding" to "/portfolio/loansOutstanding"),
+            ),
+        )
+    }
+
+    @Test
+    fun `fund source command binds explicit close and exact successful retry`(): Unit = runBlocking {
+        val fund = fundData()
+        val svc = fundService(fund)
+        val key = "fund-source-key-123456"
+        val first = svc.assembleFromFundClose(
+            "cz-pension-cnb",
+            "PEF13-04",
+            fundId.toString(),
+            "2026",
+            fundCloseId,
+            "maker",
+            "realm-1",
+            key,
+        )
+        fund.fundExtraction = null
+        val retry = svc.assembleFromFundClose(
+            "cz-pension-cnb",
+            "PEF13-04",
+            fundId.toString(),
+            "2026",
+            fundCloseId,
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(retry.id).isEqualTo(first.id)
+        assertThat(retry.contentHashVersion).isEqualTo(3)
+        assertThat(fund.fundFetches).isEqualTo(1)
+        assertThat(repo.rows).hasSize(1)
+        assertThatThrownBy {
+            runBlocking {
+                svc.assembleFromFundClose(
+                    "cz-pension-cnb",
+                    "PEF13-04",
+                    fundId.toString(),
+                    "2026",
+                    UUID.randomUUID(),
+                    "maker",
+                    "realm-1",
+                    key,
+                )
+            }
+        }.isInstanceOf(TaxConflictException::class.java)
+        assertThat(fund.fundFetches).isEqualTo(1)
+    }
+
+    @Test
+    fun `fund exact-key replay survives subsequent catalogue withdrawal`(): Unit = runBlocking {
+        val fund = fundData()
+        var available = true
+        val source = object : ReturnCatalogueSource {
+            override fun catalogues() = if (available) {
+                listOf(ReturnCatalogue("cz-pension-cnb", 1, "CZ", false, listOf(fundDefinition)))
+            } else {
+                emptyList()
+            }
+        }
+        val svc = fundService(fund, source)
+        val key = "fund-source-key-123456"
+        val first = svc.assembleFromFundClose(
+            "cz-pension-cnb",
+            "PEF13-04",
+            fundId.toString(),
+            "2026",
+            fundCloseId,
+            "maker",
+            "realm-1",
+            key,
+        )
+        available = false
+        val replay = svc.assembleFromFundClose(
+            "cz-pension-cnb",
+            "PEF13-04",
+            fundId.toString(),
+            "2026",
+            fundCloseId,
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(replay.id).isEqualTo(first.id)
+        assertThat(fund.fundFetches).isEqualTo(1)
+    }
+
+    @Test
+    fun `source command replays exact receipt before provider lookup and rejects changed intent`(): Unit = runBlocking {
+        val closed = closedData()
+        val svc = closedService(closed)
+        val key = "stable-source-key-123456"
+        val first = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        val retry = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(retry.id).isEqualTo(first.id)
+        assertThat(closed.closedFetches).isEqualTo(1)
+        assertThatThrownBy {
+            runBlocking {
+                svc.assembleFromParticipantClose(
+                    "cz-pension-cnb",
+                    "PSP40-01",
+                    companyId.toString(),
+                    "2025",
+                    "maker",
+                    "realm-1",
+                    key,
+                )
+            }
+        }.isInstanceOf(TaxConflictException::class.java)
+        assertThat(closed.closedFetches).isEqualTo(1)
+    }
+
+    @Test
+    fun `participant exact-key replay survives subsequent catalogue withdrawal`(): Unit = runBlocking {
+        var available = true
+        val source = object : ReturnCatalogueSource {
+            override fun catalogues() = if (available) {
+                listOf(ReturnCatalogue("cz-pension-cnb", 1, "CZ", false, listOf(closedDefinition)))
+            } else {
+                emptyList()
+            }
+        }
+        val closed = closedData()
+        val svc = closedService(closed, source)
+        val key = "stable-source-key-123456"
+        val first = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        available = false
+        val replay = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(replay.id).isEqualTo(first.id)
+        assertThat(closed.closedFetches).isEqualTo(1)
+    }
+
+    @Test
+    fun `same raw key from a different verified issuer or subject cannot replay another actor receipt`(): Unit =
+        runBlocking {
+            val closed = closedData()
+            val svc = closedService(closed)
+            val key = "stable-source-key-123456"
+            svc.assembleFromParticipantClose(
+                "cz-pension-cnb",
+                "PSP40-01",
+                companyId.toString(),
+                "2026",
+                "maker",
+                "realm-1",
+                key,
+            )
+            assertThatThrownBy {
+                runBlocking {
+                    svc.assembleFromParticipantClose(
+                        "cz-pension-cnb",
+                        "PSP40-01",
+                        companyId.toString(),
+                        "2026",
+                        "other",
+                        "realm-1",
+                        key,
+                    )
+                }
+            }.isInstanceOf(TaxConflictException::class.java).hasMessageContaining("revision 1")
+            assertThatThrownBy {
+                runBlocking {
+                    svc.assembleFromParticipantClose(
+                        "cz-pension-cnb",
+                        "PSP40-01",
+                        companyId.toString(),
+                        "2026",
+                        "maker",
+                        "realm-2",
+                        key,
+                    )
+                }
+            }.isInstanceOf(TaxConflictException::class.java).hasMessageContaining("revision 1")
+            assertThat(closed.closedFetches).isEqualTo(1)
+        }
+
+    @Test
+    fun `a same-key winner between receipt and revision lookups replays before provider access`(): Unit = runBlocking {
+        val closed = closedData()
+        val svc = closedService(closed)
+        val key = "stable-source-key-123456"
+        val first = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        repo.hideNextSourceLookup = true
+        val replay = svc.assembleFromParticipantClose(
+            "cz-pension-cnb",
+            "PSP40-01",
+            companyId.toString(),
+            "2026",
+            "maker",
+            "realm-1",
+            key,
+        )
+        assertThat(replay.id).isEqualTo(first.id)
+        assertThat(closed.closedFetches).isEqualTo(1)
+    }
 
     private fun service(
         start: LocalDate? = LocalDate.of(2026, 8, 1),
@@ -109,6 +476,8 @@ class StatutoryReturnServiceTest {
             override fun catalogues() = listOf(catalogue)
         },
         data = d,
+        closedData = data,
+        fundClosedData = data,
         repository = repo,
         entities = ReportingEntities("company", fundIds, start),
         accountingClock = AccountingClock.bank(clock),

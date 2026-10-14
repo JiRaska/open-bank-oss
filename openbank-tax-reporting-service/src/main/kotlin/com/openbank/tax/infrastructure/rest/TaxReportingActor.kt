@@ -29,6 +29,9 @@ import org.eclipse.microprofile.jwt.JsonWebToken
  */
 internal object TaxReportingActor {
     private const val PREFIX = "service-account-"
+    private const val AGENT_SUBJECT_PREFIX = "agent:"
+
+    data class VerifiedStaffActor(val issuer: String, val subject: String)
 
     fun isServiceAccount(identity: SecurityIdentity?): Boolean {
         val principal = identity?.principal ?: return false
@@ -47,24 +50,37 @@ internal object TaxReportingActor {
      */
     fun staffSubject(identity: SecurityIdentity, act: String): String {
         if (isServiceAccount(identity)) {
-            throw WebApplicationException(
-                Response.status(Response.Status.FORBIDDEN)
-                    .entity(
-                        mapOf(
-                            "error" to "A service account may not $act",
-                        ),
-                    )
-                    .type(MediaType.APPLICATION_JSON)
-                    .build(),
-            )
+            refuseStaffAction("A service account may not $act")
         }
         val principal = identity.principal
-        val subject = (principal as? JsonWebToken)?.subject ?: principal?.name
+        val jwt = principal as? JsonWebToken
+        if (jwt?.subject?.startsWith(AGENT_SUBJECT_PREFIX) == true) {
+            refuseStaffAction("An agent may not $act")
+        }
+        val subject = jwt?.subject ?: principal?.name
         if (subject.isNullOrBlank()) {
             throw WebApplicationException("Cannot resolve the acting principal", Response.Status.UNAUTHORIZED)
         }
         return subject
     }
+
+    /** Source-assembly keys are scoped to the validated token issuer and staff subject. */
+    fun verifiedStaffActor(identity: SecurityIdentity, act: String): VerifiedStaffActor {
+        staffSubject(identity, act) // Keep the existing machine-token refusal, never its display-name fallback.
+        val jwt = identity.principal as? JsonWebToken
+            ?: throw WebApplicationException("A validated staff token is required", Response.Status.UNAUTHORIZED)
+        return VerifiedStaffActor(requiredVerifiedClaim(jwt.issuer), requiredVerifiedClaim(jwt.subject))
+    }
+
+    private fun requiredVerifiedClaim(value: String?): String = value?.takeIf { it.isNotBlank() }
+        ?: throw WebApplicationException("Verified staff identity is incomplete", Response.Status.UNAUTHORIZED)
+
+    private fun refuseStaffAction(message: String): Nothing = throw WebApplicationException(
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(mapOf("error" to message))
+            .type(MediaType.APPLICATION_JSON)
+            .build(),
+    )
 
     private fun JsonWebToken.claimString(name: String): String? =
         (getClaim<Any?>(name))?.toString()?.trim('"')?.takeIf { it.isNotBlank() }

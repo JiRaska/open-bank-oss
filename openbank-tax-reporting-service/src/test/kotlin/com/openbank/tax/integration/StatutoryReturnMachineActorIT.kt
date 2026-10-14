@@ -36,7 +36,7 @@ class StatutoryReturnMachineActorIT {
     private val assembleBody = """{
         "catalogueId":"cz-pension-cnb",
         "returnCode":"PSP10-12-PS",
-        "entityId":"company",
+        "entityId":"${PensionProvidersStub.COMPANY}",
         "period":"2025-01"
     }"""
 
@@ -45,6 +45,14 @@ class StatutoryReturnMachineActorIT {
             contentType("application/json")
             body(assembleBody)
         } When { post("$path/assemble") } Then {
+            statusCode(403)
+            body("error", containsString("service account"))
+        }
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "machine-source-key-123456")
+            body(assembleBody)
+        } When { post("$path/source-assemblies") } Then {
             statusCode(403)
             body("error", containsString("service account"))
         }
@@ -111,6 +119,28 @@ class StatutoryReturnMachineActorIT {
     }
 
     @Test
+    @TestSecurity(user = "agent:tax-operator", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "iss", value = "tax-test-issuer"),
+            Claim(key = "sub", value = "agent:tax-operator"),
+            Claim(key = "preferred_username", value = "operator"),
+        ],
+    )
+    fun `an agent token with operator role cannot make or approve a return`() {
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "agent-source-key-123456")
+            body(assembleBody)
+        } When { post("$path/source-assemblies") } Then {
+            statusCode(403)
+        }
+        Given { contentType("application/json") } When { post("$path/$absentId/approve") } Then {
+            statusCode(403)
+        }
+    }
+
+    @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
@@ -127,6 +157,19 @@ class StatutoryReturnMachineActorIT {
         }
         Given { contentType("application/json") } When { post("$path/$absentId/approve") } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "display-only", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(claims = [Claim(key = "iss", value = "tax-test-issuer"), Claim(key = "sub", value = "")])
+    fun `source assembly refuses a token without a verified subject despite its display name`() {
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "missing-subject-key-123456")
+            body(assembleBody)
+        } When { post("$path/source-assemblies") } Then {
+            statusCode(401)
         }
     }
 }

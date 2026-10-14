@@ -7,7 +7,10 @@ package com.openbank.tax.infrastructure.returns.pension
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
+import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -15,6 +18,7 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import org.jboss.resteasy.reactive.RestResponse
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -40,6 +44,13 @@ interface PensionFundReportingClient {
         @QueryParam("periodStart") periodStart: LocalDate,
         @QueryParam("periodEnd") periodEnd: LocalDate,
     ): FundPeriodFiguresDto
+
+    @GET
+    @Path("/{fundId}/period-closes/{closeId}")
+    suspend fun sealedPeriod(
+        @PathParam("fundId") fundId: UUID,
+        @PathParam("closeId") closeId: UUID,
+    ): RestResponse<ByteArray>
 }
 
 /** pension-service's `GET /api/v2/pension/reporting/participant-aggregates` (its openapi.yaml). */
@@ -52,10 +63,42 @@ interface PensionReportingClient {
     @GET
     @Path("/participant-aggregates")
     suspend fun participantAggregates(
+        @QueryParam("companyId") companyId: UUID,
         @QueryParam("periodStart") periodStart: LocalDate,
         @QueryParam("periodEnd") periodEnd: LocalDate,
     ): ParticipantAggregatesDto
+
+    @POST
+    @Path("/participant-snapshots")
+    @Consumes(MediaType.APPLICATION_JSON)
+    suspend fun captureParticipantSnapshot(
+        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        request: ParticipantSnapshotRequest,
+    ): ParticipantSnapshotReceiptDto
+
+    @GET
+    @Path("/participant-snapshots/{snapshotId}")
+    suspend fun participantSnapshot(
+        @PathParam("snapshotId") snapshotId: UUID,
+        @QueryParam("companyId") companyId: UUID,
+    ): ParticipantSnapshotDto
 }
+
+data class ParticipantSnapshotRequest(val companyId: UUID, val periodStart: LocalDate, val periodEnd: LocalDate)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ParticipantSnapshotReceiptDto(
+    val snapshotId: UUID,
+    val companyId: UUID,
+    val periodStart: LocalDate,
+    val periodEnd: LocalDate,
+    val revision: Int,
+    val payloadSchemaVersion: String,
+    val sha256: String,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class ParticipantSnapshotDto(val receipt: ParticipantSnapshotReceiptDto, val payloadJson: String)
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class BalanceSheetDto(val totalAssets: BigDecimal, val totalLiabilities: BigDecimal, val totalEquity: BigDecimal)
@@ -116,6 +159,8 @@ data class FundPeriodFiguresDto(
     val entitlements: EntitlementsDto,
     val participants: FundParticipantsDto,
     val fingerprint: String,
+    val closingNavId: UUID? = null,
+    val basisNavIds: List<UUID>? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

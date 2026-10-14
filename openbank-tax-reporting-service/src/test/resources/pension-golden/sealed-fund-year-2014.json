@@ -1,0 +1,25 @@
+{
+  "fundId": "0f0f2425-0000-4000-8000-000000002025",
+  "currency": "CZK",
+  "periodStart": "2014-01-01",
+  "periodEnd": "2014-12-31",
+  "closingNavId": "8c16d486-14f1-48e4-aace-acf956cbf38b",
+  "closingValuationDate": "2014-12-31",
+  "balanceSheet": { "totalAssets": 3, "totalLiabilities": 0, "totalEquity": 3 },
+  "profitAndLossYtd": {
+    "revaluationGains": 0, "revaluationLosses": 0, "otherInvestmentResult": 3,
+    "managementFees": 0, "profitLoss": 3
+  },
+  "units": {
+    "opening": 0, "issued": 3, "cancelled": 0, "closing": 3,
+    "unitValue": 1, "unitValuePeriodMax": 1
+  },
+  "portfolio": {
+    "carryingValue": 3, "holdingsCount": 1, "cash": 0,
+    "loansOutstanding": 3, "unclassifiedCount": 0
+  },
+  "entitlements": { "opening": 0, "increase": 3, "decrease": 0, "closing": 3 },
+  "participants": { "holders": 1, "subscribing": 1 },
+  "basisNavIds": [ "8c16d486-14f1-48e4-aace-acf956cbf38b" ],
+  "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

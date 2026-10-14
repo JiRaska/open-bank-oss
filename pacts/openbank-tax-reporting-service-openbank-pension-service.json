@@ -14,6 +14,9 @@
         "method": "GET",
         "path": "/api/v2/pension/reporting/participant-aggregates",
         "query": {
+          "companyId": [
+            "00000000-0000-4000-8000-000000000001"
+          ],
           "periodEnd": [
             "2026-09-30"
           ],
@@ -21,6 +24,30 @@
             "2026-07-01"
           ]
         }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "participant source capture without a service token is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "companyId": "00000000-0000-4000-8000-000000000001",
+          "periodEnd": "2010-03-31",
+          "periodStart": "2010-03-01"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "tax-participant-close-pact-2010"
+        },
+        "method": "POST",
+        "path": "/api/v2/pension/reporting/participant-snapshots"
       },
       "response": {
         "status": 401
@@ -37,6 +64,9 @@
         "method": "GET",
         "path": "/api/v2/pension/reporting/participant-aggregates",
         "query": {
+          "companyId": [
+            "00000000-0000-4000-8000-000000000001"
+          ],
           "periodEnd": [
             "2026-09-30"
           ],
@@ -166,6 +196,143 @@
               "matchers": [
                 {
                   "match": "number"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "tax captures a March 2010 participant source under its own service token",
+      "providerStates": [
+        {
+          "name": "pension participant technical source capture is permitted for March 2010"
+        }
+      ],
+      "request": {
+        "body": {
+          "companyId": "00000000-0000-4000-8000-000000000001",
+          "periodEnd": "2010-03-31",
+          "periodStart": "2010-03-01"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "tax-participant-close-pact-2010"
+        },
+        "method": "POST",
+        "path": "/api/v2/pension/reporting/participant-snapshots"
+      },
+      "response": {
+        "body": {
+          "companyId": "00000000-0000-4000-8000-000000000001",
+          "payloadSchemaVersion": "participant-period-aggregates/2.0",
+          "periodEnd": "2010-03-31",
+          "periodStart": "2010-03-01",
+          "revision": 1,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "snapshotId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "generators": {
+          "body": {
+            "$.snapshotId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.revision": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.sha256": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
+                }
+              ]
+            },
+            "$.snapshotId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "tax reads the exact March 2009 immutable participant source by ID and company",
+      "providerStates": [
+        {
+          "name": "pension participant technical source snapshot exists for March 2009"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/pension/reporting/participant-snapshots/d45ca8df-f9dc-4573-bb7b-513219f33a96",
+        "query": {
+          "companyId": [
+            "00000000-0000-4000-8000-000000000001"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "payloadJson": "{\"periodStart\":\"2009-01-01\",\"periodEnd\":\"2009-03-31\",\"currency\":\"CZK\",\"participants\":{\"inForce\":0,\"contributing\":0,\"pensioners\":0},\"contributionsYtd\":{\"participant\":0,\"employer\":0,\"state\":0,\"transferIn\":0,\"total\":0},\"payoutsYtd\":{\"total\":0,\"cases\":0,\"taxWithheld\":0}}",
+          "receipt": {
+            "companyId": "00000000-0000-4000-8000-000000000001",
+            "payloadSchemaVersion": "participant-period-aggregates/2.0",
+            "periodEnd": "2009-03-31",
+            "periodStart": "2009-01-01",
+            "revision": 1,
+            "sha256": "04908c3b7b7e2a9df1ccea8cb29742d34ddfc5d2bf89603c0185837d8d0e0a1a",
+            "snapshotId": "d45ca8df-f9dc-4573-bb7b-513219f33a96"
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.payloadJson": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.receipt.revision": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.receipt.sha256": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{64}"
                 }
               ]
             }

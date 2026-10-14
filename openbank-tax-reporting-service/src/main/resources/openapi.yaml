@@ -3,8 +3,8 @@
 openapi: 3.1.0
 info:
   title: Tax Reporting Service API
-  # 1.2.0: additive (#12495) — corporate register routes feeding ČNB PSP 32-04, 50-04 and 40-01.
-  version: 1.2.0
+  # 2.0.0: v2 exposes selected immutable fund closes while v1 retains its original response enum.
+  version: 2.0.0
   description: >
     §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
     record for the monthly withholding-tax return (ADR-0180). Consumes
@@ -254,7 +254,7 @@ paths:
   /api/v1/statutory-returns/assemble:
     post:
       tags: [StatutoryReturn]
-      summary: Assemble and validate a return from sourced figures (→ ASSEMBLED); 503 while no data source is bound
+      summary: Legacy v1 assembly from sourced figures without immutable participant-close lineage
       operationId: assembleStatutoryReturn
       requestBody:
         required: true
@@ -278,6 +278,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ApiError' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v1/statutory-returns/source-assemblies:
+    post:
+      tags: [StatutoryReturn]
+      summary: Assemble PSP40-01 from a verified immutable participant close; PSP31-04 is unavailable pending a beneficiary stock source
+      operationId: assembleStatutoryReturnFromParticipantClose
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128, pattern: '^[A-Za-z0-9._:-]{16,128}$' }
+          description: Stable command key; a successful retry returns the original return revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssembleReturnRequest' }
+      responses:
+        '200':
+          description: The sourced revision, or the original revision on an exact-key retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503':
+          description: No verified participant close is available, including PSP31-04's missing as-of beneficiary stock
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
 
   /api/v1/statutory-returns/{id}/approve:
     post:
@@ -323,6 +357,209 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v2/statutory-returns:
+    get:
+      tags: [StatutoryReturn]
+      summary: List return revisions, newest period first
+      operationId: listStatutoryReturnsV2
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StatutoryReturnResponseV2' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v2/statutory-returns/catalogues:
+    get:
+      tags: [StatutoryReturn]
+      summary: Jurisdiction return catalogues this deployment reports under
+      operationId: listReturnCataloguesV2
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReturnCatalogueResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v2/statutory-returns/breaches:
+    get:
+      tags: [StatutoryReturn]
+      summary: Returns past their deadline without a submitted revision, including never-assembled ones
+      operationId: listStatutoryReturnBreachesV2
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReturnBreachResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503':
+          description: Reporting start or fund roster is unconfigured; deadline status is unavailable
+
+  /api/v2/statutory-returns/capability:
+    get:
+      tags: [StatutoryReturn]
+      summary: Whether a data source and a wire renderer are bound
+      operationId: getStatutoryReturnCapabilityV2
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReturnCapabilityResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v2/statutory-returns/{id}:
+    get:
+      tags: [StatutoryReturn]
+      summary: Get one return revision
+      operationId: getStatutoryReturnV2
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatutoryReturnResponseV2'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v2/statutory-returns/assemble:
+    post:
+      tags: [StatutoryReturn]
+      summary: Assemble sourced figures without immutable close lineage (compatibility route)
+      operationId: assembleStatutoryReturnV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AssembleReturnRequest' }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponseV2' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503':
+          description: No data source is bound for this return
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v2/statutory-returns/source-assemblies:
+    post:
+      tags: [StatutoryReturn]
+      summary: Assemble from a verified participant close or an explicitly selected sealed fund close
+      description: >
+        FUND returns require fundCloseId and read exactly that sealed close; no latest-close
+        selection or sealing occurs here. COMPANY returns reject fundCloseId. PSP31-04 remains
+        unavailable pending a verified as-of beneficiary stock source.
+      operationId: assembleStatutoryReturnFromSourceV2
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128, pattern: '^[A-Za-z0-9._:-]{16,128}$' }
+          description: Stable command key; a successful retry returns the original return revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SourceAssemblyRequest' }
+      responses:
+        '200':
+          description: The sourced revision, or the original revision on an exact-key retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponseV2' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503':
+          description: No verified immutable source close or required source cell is available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+
+  /api/v2/statutory-returns/{id}/approve:
+    post:
+      tags: [StatutoryReturn]
+      summary: Approve and attest the content hash (ASSEMBLED → APPROVED; the assembler may not approve)
+      operationId: approveStatutoryReturnV2
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponseV2' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
+  /api/v2/statutory-returns/{id}/submitted:
+    post:
+      tags: [StatutoryReturn]
+      summary: Record the regulator submission reference (APPROVED → SUBMITTED; refused if content differs from the attestation)
+      operationId: recordStatutoryReturnSubmissionV2
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordSubmissionRequest' }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponseV2' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -502,6 +739,18 @@ components:
         returnCode: { type: string, example: PSP10-12-FUND }
         entityId: { type: string }
         period: { type: string, description: 'YYYY-MM, YYYY-Qn or YYYY per the return periodicity' }
+    SourceAssemblyRequest:
+      type: object
+      required: [catalogueId, returnCode, entityId, period]
+      properties:
+        catalogueId: { type: string, example: cz-pension-cnb }
+        returnCode: { type: string, example: PEF15-01 }
+        entityId: { type: string }
+        period: { type: string, description: 'YYYY-MM, YYYY-Qn or YYYY per the return periodicity' }
+        fundCloseId:
+          type: [string, 'null']
+          format: uuid
+          description: Required for FUND, forbidden for COMPANY; selects one sealed fund close.
     RecordSubmissionRequest:
       type: object
       required: [reference]
@@ -546,7 +795,7 @@ components:
         returns: { type: array, items: { $ref: '#/components/schemas/ReturnDefinitionResponse' } }
     StatutoryReturnResponse:
       type: object
-      required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, dueDate, assembledBy, assembledAt]
+      required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, contentHashVersion, dueDate, assembledBy, assembledAt]
       properties:
         id: { type: string, format: uuid }
         catalogueId: { type: string }
@@ -559,6 +808,11 @@ components:
         status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED] }
         datapoints: { type: object, additionalProperties: { type: number } }
         contentHash: { type: string, description: SHA-256 of the canonical content }
+        contentHashVersion: { type: integer, enum: [1, 2], description: '1 preserves legacy hash bytes; 2 also binds the immutable participant close and cell paths' }
+        participantCloseLineage:
+          oneOf:
+            - $ref: '#/components/schemas/ParticipantCloseLineage'
+            - type: 'null'
         dueDate: { type: string, format: date }
         assembledBy: { type: string }
         assembledAt: { type: string, format: date-time }
@@ -568,6 +822,65 @@ components:
         submittedBy: { type: [string, 'null'] }
         submittedAt: { type: [string, 'null'], format: date-time }
         submissionReference: { type: [string, 'null'] }
+    StatutoryReturnResponseV2:
+      type: object
+      required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, contentHashVersion, dueDate, assembledBy, assembledAt]
+      properties:
+        id: { type: string, format: uuid }
+        catalogueId: { type: string }
+        catalogueVersion: { type: integer }
+        returnCode: { type: string }
+        entityId: { type: string }
+        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR] }
+        period: { type: string }
+        revision: { type: integer }
+        status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED] }
+        datapoints: { type: object, additionalProperties: { type: number } }
+        contentHash: { type: string, description: SHA-256 of the canonical content }
+        contentHashVersion: { type: integer, enum: [1, 2, 3], description: '1 preserves legacy hash bytes; 2 binds the participant close; 3 binds the selected sealed fund close and cell paths' }
+        participantCloseLineage:
+          oneOf:
+            - $ref: '#/components/schemas/ParticipantCloseLineage'
+            - type: 'null'
+        fundCloseLineage:
+          oneOf:
+            - $ref: '#/components/schemas/FundCloseLineage'
+            - type: 'null'
+        dueDate: { type: string, format: date }
+        assembledBy: { type: string }
+        assembledAt: { type: string, format: date-time }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        attestedHash: { type: [string, 'null'] }
+        submittedBy: { type: [string, 'null'] }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        submissionReference: { type: [string, 'null'] }
+    ParticipantCloseLineage:
+      type: object
+      required: [snapshotId, companyId, periodStart, periodEnd, revision, payloadSchemaVersion, sha256, cellPaths]
+      properties:
+        snapshotId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        revision: { type: integer }
+        payloadSchemaVersion: { type: string }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        cellPaths: { type: object, additionalProperties: { type: string }, description: 'Return datapoint to immutable participant-close JSON Pointer' }
+    FundCloseLineage:
+      type: object
+      required: [closeId, fundId, periodStart, periodEnd, revision, closingNavId, sourceFingerprint, payloadSchemaVersion, sha256, cellPaths]
+      properties:
+        closeId: { type: string, format: uuid }
+        fundId: { type: string, format: uuid }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        revision: { type: integer, minimum: 1 }
+        closingNavId: { type: string, format: uuid }
+        sourceFingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+        payloadSchemaVersion: { type: string, enum: ['1.3.0'] }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        cellPaths: { type: object, additionalProperties: { type: string }, description: 'Return datapoint to immutable sealed-fund JSON Pointer' }
     ApiError:
       type: object
       properties:

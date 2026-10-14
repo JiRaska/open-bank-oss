@@ -36,7 +36,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 @QuarkusTestResource(CompanyLedgerStub::class, restrictToAnnotatedClass = true)
 class CompanyBooksGoldenIT {
     private fun assemble(code: String, period: String) = given().contentType("application/json")
-        .body("""{"catalogueId":"cz-pension-cnb","returnCode":"$code","entityId":"company","period":"$period"}""")
+        .body(
+            """{"catalogueId":"cz-pension-cnb","returnCode":"$code","entityId":"${PensionProvidersStub.COMPANY}","period":"$period"}""",
+        )
         .post("/api/v1/statutory-returns/assemble")
 
     private fun datapoints(code: String, period: String): Map<String, BigDecimal> {
