@@ -82,13 +82,13 @@ tasks.named<Copy>("processResources") {
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: was a placebo minValue = 0
 // gate that could never fail). Measured 75.8% LINE coverage (1344/1772) at
-// introduction, no filter excludes; floor set at 70, raise-only from here.
+// introduction; re-measured 87.3% on 2026-10-14. Floor 87, raise-only from here.
 kover {
     reports {
         verify {
             rule {
                 bound {
-                    minValue = 83
+                    minValue = 87
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
