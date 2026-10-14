@@ -59,6 +59,10 @@ private class TemporalStubOriginationWorkflowPort : OriginationWorkflowPort {
  */
 class LendingAdapterBindingVerifierTest {
 
+    private companion object {
+        const val GC_ROUNDS = 5
+    }
+
     private fun verifier(
         ledger: LedgerPostingPort,
         credit: BorrowerCreditPort,
@@ -180,6 +184,9 @@ class LendingAdapterBindingVerifierTest {
     @Test
     fun `publishes a gauge naming which implementation is bound, per property`() {
         val meters = SimpleMeterRegistry()
+        // Micrometer holds a gauge's state object WEAKLY; the verifier owns the AtomicIntegers. In
+        // production ArC keeps the @ApplicationScoped verifier alive; here only this local does, so
+        // it must stay reachable until the last read or a GC turns every value into NaN (#12213).
         val bindingVerifier = verifier(
             ledger = RestStubLedgerPort(),
             credit = NoOpBorrowerCreditPort(),
@@ -188,23 +195,19 @@ class LendingAdapterBindingVerifierTest {
             creditBackend = "none",
             meters = meters,
         )
+        repeat(GC_ROUNDS) { System.gc() } // the CI failure, made deterministic
 
-        // Micrometer holds gauge values weakly; the CDI owner remains alive in production.
-        // Retain that same ownership until every assertion completes.
-        try {
-            val gauges = meters.find("openbank_lending_adapter_real_backend_bound").gauges()
-            assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
+        val gauges = meters.find("openbank_lending_adapter_real_backend_bound").gauges()
+        assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
 
-            val ledgerGauge = gauges.single { it.id.getTag("property") == "lending.ledger.backend" }
-            assertThat(ledgerGauge.value()).isEqualTo(1.0)
-            assertThat(ledgerGauge.id.getTag("implementation")).isEqualTo("RestStubLedgerPort")
+        val ledgerGauge = gauges.single { it.id.getTag("property") == "lending.ledger.backend" }
+        assertThat(ledgerGauge.value()).isEqualTo(1.0)
+        assertThat(ledgerGauge.id.getTag("implementation")).isEqualTo("RestStubLedgerPort")
 
-            val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
-            assertThat(creditGauge.value()).isEqualTo(0.0)
-            assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
-        } finally {
-            Reference.reachabilityFence(bindingVerifier)
-        }
+        val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
+        assertThat(creditGauge.value()).isEqualTo(0.0)
+        assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
+        Reference.reachabilityFence(bindingVerifier)
     }
 
     // --- #6085: the same mechanism on openbank.temporal.enabled ---------------------------------

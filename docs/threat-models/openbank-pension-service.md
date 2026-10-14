@@ -278,3 +278,12 @@ server configuration does not require client certificates. Client preparation do
 not establish server-side mTLS enforcement. Verify TLS readiness and independent
 OIDC/business authorization before the staged HTTPS URL cutover; require provider
 client authentication only with verified compatibility for its other callers.
+
+## Receiving-provider identity binding
+
+The transfer-out resource requires `ServiceAccountIdentity.isPrincipal`: a verified JWT
+with a nonblank subject, `azp` bound to the requested provider client and matching
+service-account `preferred_username`. A matching display principal alone grants nothing;
+foreign-client, missing-subject and non-JWT identities are rejected before transfer writes.
+Participant SCA consent remains required before funds can move. Rollback of this guard
+restores username-only authentication and must not precede an equivalent replacement.

@@ -168,6 +168,17 @@ this integration. Consumer contracts pin request/response shape; they do not pro
 or account entitlement. No live deployment verification is claimed by this documentation update.
 ## 2026-10-09 — Scoped mandate initiator: pension-service (ADR-0335 D6)
 
+**2026-10-11 identity hardening (#12448):** Positive pension and edge machine matches now use
+`ServiceAccountIdentity.isPrincipal`, requiring a Quarkus-verified JWT principal with nonblank
+subject, `azp` equal to `openbank-pension` or `openbank-edge`, respectively, and the matching
+`service-account-<azp>` preferred username. A matching principal name with another or absent
+`azp` cannot gain either scope; an unrecognised `service-account-` principal remains denied even
+with operator/admin roles. **STRIDE S/E:** this narrows the inbound mandate trust boundary;
+creditor scoping, ownership proof, OPA actions and ordinary staff handling are otherwise
+unchanged. Residual: compromise of a real authorised client credential still reaches its
+declared scope. Rolling this back would restore username-only impersonation and is not a safe
+fallback.
+
 - **Elevation of privilege / Spoofing:** `service-account-openbank-pension` may `sdd.create` and
   `sdd.delete`, and nothing else; OPA's `service-scoped-payment-initiator` reads
   `rules.yaml: scoped_payment_initiators`. On top of that, `ScopedMandateService` applies three
@@ -220,3 +231,14 @@ new port; this does not grant a client certificate or bypass application policy.
 Certificate issuance must precede workload rollout. Rollback removes the parallel
 listener preparation while existing HTTP callers remain unchanged; after caller
 cutover, revert caller URLs and policies before removing the listener.
+
+## Verified mandate initiator identity (#12448, PR #12538)
+
+- **Spoofing / Elevation of privilege:** `MandateInitiatorScopes` recognises the pension scoped
+  initiator and customer-edge only through `ServiceAccountIdentity.isPrincipal` (verified JWT,
+  `azp` = the client, `preferred_username` = `service-account-<azp>`), never the principal
+  name, which Quarkus takes from a username claim.
+- `ROLE_OPERATOR` / `ROLE_ADMIN` grant general mandate initiation only with a verified
+  interactive human token (`ServiceAccountIdentity.isHumanStaff`); any other caller, including a
+  machine token holding those roles, is `Denied`.
+- **Rollback:** reverting the class restores name-based matching; no schema or data change.
