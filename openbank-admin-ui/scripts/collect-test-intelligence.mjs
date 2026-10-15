@@ -685,6 +685,43 @@ function mutationComponents() {
   return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])
 }
 
+// Trace contracts (openbank-libs-testing TraceContract.verifiedAs) prove the observable
+// distributed-system contract and print a bounded marker into the JUnit XML system-out.
+// The CI run-envelope collector turns that marker into specialized trace evidence; this
+// scan is the local/operator-UI fallback so the matrix shows the same trace layer without
+// a CI envelope. Only the caller-chosen low-entropy contract id is read back — never
+// trace ids, attribute values or fixture data.
+const TRACE_CONTRACT_MARKER = /OPENBANK_TRACE_CONTRACT_V1:([a-z0-9][a-z0-9._-]{0,63})/g
+
+function traceContractComponents() {
+  const declared = new Set()
+  for (const component of fs.readdirSync(repo)) {
+    const source = path.join(repo, component, 'src')
+    if (!exists(source) || !component.startsWith('openbank-')) continue
+    if (allFiles(source, file => /TraceContractIT\.(kt|java)$/.test(file)).length > 0) declared.add(component)
+  }
+  return declared
+}
+
+function traceMarkerEvidence(component) {
+  const root = path.join(repo, component, 'build', 'test-results')
+  if (!exists(root)) return []
+  const observed = new Map()
+  for (const file of allFiles(root, candidate => candidate.endsWith('.xml'))) {
+    const text = readText(file)
+    for (const match of text.matchAll(TRACE_CONTRACT_MARKER)) {
+      const contractId = match[1]
+      const at = observedAt(file)
+      if (!observed.has(contractId) || (at && (!observed.get(contractId) || at > observed.get(contractId)))) {
+        observed.set(contractId, at)
+      }
+    }
+  }
+  return [...observed].map(([contractId, at]) => ({
+    kind: 'trace', state: 'passed', source: `trace-contract:${contractId}`, environment: 'ci', observedAt: at ?? null,
+  }))
+}
+
 function platformCapabilities() {
   const file = path.join(repo, 'openbank-libs', 'governance', 'test-intelligence-capabilities.yaml')
   try {
@@ -716,6 +753,7 @@ function platformCapabilities() {
 function requiredControls(components, contracts, mutations, performance, synthetics, runVersionByComponent = new Map()) {
   const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
   const mutationParticipants = mutationComponents()
+  const traceDeclared = traceContractComponents()
   const mutationByComponent = new Map(mutations.map(item => [item.component, item]))
   const performanceComponents = new Set(performance.map(item => item.component).filter(Boolean))
   const controls = []
@@ -749,6 +787,7 @@ function requiredControls(components, contracts, mutations, performance, synthet
           : 'A declared container topology requires an integration run.')
       }
       if (pactParticipants.has(component.component)) addEvidence(component, 'contract', 'The component participates in a governed Pact contract.')
+      if (traceDeclared.has(component.component)) addEvidence(component, 'trace', 'The component declares a trace contract suite and must publish its trace evidence.')
       if (performanceComponents.has(component.component)) addEvidence(component, 'performance', 'A governed k6 scenario exists for this component.')
       for (const resource of component.testInfrastructure.declared) {
         const rows = component.testInfrastructure.observed.filter(item => item.resource === resource)
@@ -1162,6 +1201,15 @@ async function main() {
         source: `Pact:${item.pactFile}`, environment: 'ci',
         detail: `${item.consumer} -> ${item.provider} (${item.interactions} interactions)`,
       })
+    }
+  }
+  // Trace contract markers from locally staged JUnit XML. CI envelopes already carry the
+  // same specialized evidence; rows already present (by source) win, so this only fills
+  // the gap where no envelope reached the deployment.
+  for (const component of components) {
+    const known = new Set(component.evidence.filter(item => item.kind === 'trace').map(item => item.source))
+    for (const row of traceMarkerEvidence(component.component)) {
+      if (!known.has(row.source)) component.evidence.push(row)
     }
   }
   const performanceEvidence = performance()
