@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "f54de440c0ad66e7"
+    openbank.tech/policy-checksum: "6dc51135847c2ff3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -770,6 +770,20 @@ data:
     		"party.create",
     		"party.mandate.grant",
     	}
+    }
+
+    # interest-service's OWN machine principal (client `openbank-interest`, ROLE_API only), ADR-0339 B:
+    #   party.amlProfile.read — the withholding policy's tax-profile resolution
+    #     (PartyTaxProfileProvider: account→party→AML-profile residency countries). GET /parties/{id}
+    #     itself carries no @Authorize and rides @RolesAllowed(ROLE_API); this rule covers the
+    #     profile read that does.
+    # Identity-gated, never a role: ROLE_API is held by every service account. The shared
+    # `service-account-openbank-services` is deliberately absent — interest's named client is its
+    # own principal, the same pattern as `service-kyb-party-m2m` above.
+    allowed_reasons contains "service-interest-party-m2m" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-interest"
+    	input.action == "party.amlProfile.read"
     }
 
     # #10486 batch 8: delegation-service's PartyMandateRestClient / PartyAuthorityRestClient read a grantor's mandates and acting-for relations to decide whether a delegation may be granted. It used to reach these reads on the shared
