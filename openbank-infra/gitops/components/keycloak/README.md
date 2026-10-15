@@ -130,6 +130,33 @@ Removing it from that list switches the canary back to real, which is the contai
 
 The five comments removed from `customers-realm-template.json`, by path.
 
+### `identityProviders[kubernetes]` (realm-template.json, ADR-0177 Phase 1)
+
+First identity provider in either template: the cluster's Kubernetes OIDC issuer,
+trusted so a pod's projected ServiceAccount token can be exchanged at Keycloak for a
+service token (RFC 8693, workload identity — see `docs/adr/0177-workload-identity-m2m-auth.md`).
+The import shape is verified against Keycloak 26.8.0 (`firstBrokerLoginFlowAlias`,
+not the `…FlowId` a realm export from older versions shows). `config.issuer` and
+`config.jwksUrl` carry `__KUBERNETES_OIDC_ISSUER__` — the cluster's
+`--service-account-issuer` URL, which is deployment-specific, so the owner supplies it
+at render time (it becomes one more required env var in
+`render-verify-keycloak-realm-import.sh` runs). `config.clientSecret` is a placeholder
+for the same reason; if the API server does not authenticate JWKS clients, any non-empty
+value works — Keycloak requires the key to exist, the cluster does not check it. The IdP
+is `enabled: true`: it is inert until a token exchange is attempted, and the projected
+token only exists on pods that mount it (pilot: agent-service).
+
+### `clients[openbank-agent].attributes[standard.token.exchange.enabled]` + `authorizationSettings` (realm-template.json, ADR-0177 Phase 1)
+
+Mints agent-service's workload-identity path: the standard-token-exchange switch plus a
+`token-exchange` scope permission on the client's own resource, granted to requester
+client `openbank-agent` — the same authorizationSettings shape `openbank-mcp-service`
+carries for the ADR-0224 OBO exchange (#2762, verified end-to-end on 26.6.3), here
+self-referential because agent-service exchanges its *own* externally-issued SA token for
+its own access token while keeping `__AGENT_CLIENT_SECRET__` as the client-credentials
+fallback. Import of this block against 26.8.0 is verified; the actual
+SA-token→token-exchange round trip is owner-verified live (Phase 1 pilot, non-prod).
+
 ### `clients[openbank-app].protocolMappers[sub]`
 
 This realm import defines explicit (non-default) client scopes, so Keycloak does NOT

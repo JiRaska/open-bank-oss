@@ -1291,4 +1291,101 @@ class AuthorizeInterceptorTest {
         assertThat(store.created).isEmpty()
         io.mockk.verify(exactly = 0) { ctx.proceed() }
     }
+
+    @Suppress("UnusedParameter")
+    fun plainMethod() = Unit
+
+    private val plainReflectedMethod: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod("plainMethod")
+
+    @Authorize(action = "ledger.post", attributes = ["idempotency-key"])
+    fun dummyMethodWithIdempotencyKey() = Unit
+
+    private val annotatedMethodWithIdempotencyKey: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithIdempotencyKey")
+
+    @Test
+    fun `a method without the Authorize annotation proceeds untouched`() {
+        // The @AroundInvoke fires for every intercepted bean method, annotated or not — the
+        // no-annotation fast path must hand straight to proceed() without touching the PDP.
+        val ctx = makeCtx(plainReflectedMethod)
+        assertThat(interceptor.authorize(ctx)).isEqualTo("ok")
+        io.mockk.verify(exactly = 1) { ctx.proceed() }
+    }
+
+    @Test
+    fun `the idempotency-key attribute resolves from its header`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
+        val fakeHeaders = mockk<HttpHeaders> {
+            every { getRequestHeader("Idempotency-Key") } returns listOf("idem-123")
+        }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns fakeHeaders
+        }
+        interceptor.authorize(makeCtx(annotatedMethodWithIdempotencyKey))
+        assertThat(captured.single().attributes["idempotency-key"]).isEqualTo("idem-123")
+    }
+
+    @Test
+    fun `the idempotency-key attribute drops out when the header is absent`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
+        val fakeHeaders = mockk<HttpHeaders> {
+            every { getRequestHeader("Idempotency-Key") } returns null
+        }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns fakeHeaders
+        }
+        interceptor.authorize(makeCtx(annotatedMethodWithIdempotencyKey))
+        assertThat(captured.single().attributes).isEmpty()
+    }
+
+    private fun failingPdp() = object : PolicyDecisionPoint {
+        override suspend fun allow(query: AuthzQuery): AuthzDecision =
+            throw PolicyDecisionException("opa sidecar unreachable")
+    }
+
+    @Test
+    fun `an unreachable PDP with enforce=true fails closed with 503, counted as pdp_unavailable`() {
+        every { identity.roles } returns emptySet()
+        wirePdp(failingPdp())
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(PolicyDecisionException::class.java)
+            .hasMessageContaining("policy decision point unavailable")
+        assertThat(counter("openbank.authz.decisions", "outcome", "pdp_unavailable")).isEqualTo(1.0)
+        // an outage must not read as a policy denial in the rollout signal
+        assertThat(counter("openbank.authz.decisions", "outcome", "deny")).isZero()
+    }
+
+    @Test
+    fun `an unreachable PDP with enforce=false proceeds advisory but is still counted`() {
+        interceptor.enforce = false
+        every { identity.roles } returns emptySet()
+        wirePdp(failingPdp())
+
+        assertThat(interceptor.authorize(makeCtx(annotatedMethod))).isEqualTo("ok")
+        assertThat(
+            counter("openbank.authz.decisions", "outcome", "pdp_unavailable", "enforced", "false"),
+        ).isEqualTo(1.0)
+    }
 }

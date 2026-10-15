@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.1.0...customer-edge-v1.2.0) (2026-10-14)
+
+
+### Features
+
+* **referral:** shareable referral link e2e + activate referral-service on sandbox ([#12813](https://github.com/JiRaska/open-bank-oss/issues/12813)) ([b2e006a](https://github.com/JiRaska/open-bank-oss/commit/b2e006aca9f2485e08599f5d782fbc86485a7270))
+
 ## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.0.0...customer-edge-v1.1.0) (2026-10-14)
 
 
