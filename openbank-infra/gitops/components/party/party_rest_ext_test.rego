@@ -12,6 +12,8 @@ import rego.v1
 
 kyb := {"type": "HUMAN", "id": "service-account-openbank-kyb", "roles": ["ROLE_API"]}
 
+interest := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
+
 other_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
 shared_api_only := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
@@ -96,4 +98,21 @@ test_b8deleg_other_api_identity_gets_nothing if {
 	every action in {"party.mandate.read"} {
 		not "service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-services"), "action": action}
 	}
+}
+
+# --- must-ALLOW / must-DENY: interest-service's own principal, exactly the one read (ADR-0339 B) ---
+
+test_interest_reads_aml_profile if {
+	allow.allow with input as {"principal": interest, "action": "party.amlProfile.read"}
+}
+
+test_interest_granted_no_other_party_action if {
+	every action in {"party.create", "party.update", "party.merge", "party.consent.update", "party.mandate.grant", "party.mandate.read", "party:resolve"} {
+		not allow.allow with input as {"principal": interest, "action": action}
+	}
+}
+
+test_interest_rule_is_identity_pinned if {
+	not allow.allow with input as {"principal": other_api_sa, "action": "party.amlProfile.read"}
+	not allow.allow with input as {"principal": shared_api_only, "action": "party.amlProfile.read"}
 }

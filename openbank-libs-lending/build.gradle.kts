@@ -37,6 +37,16 @@ dependencies {
     testImplementation(libs.assertj)
     // Property tests over random schedules (Amortization small-principal invariants).
     testImplementation("io.kotest:kotest-property:5.9.1")
+    // Property tests over the origination graph (ADR-0211 D1): random walks must never throw
+    // and every reached state must stay reachable per the policy. jqwik runs on the JUnit
+    // Platform, so the existing useJUnitPlatform() test task picks it up unchanged.
+    testImplementation("net.jqwik:jqwik:1.9.2")
+    // jqwik 1.9.2's Gradle module metadata drags JUnit 5.11.3 / Platform 1.11.3, one patch
+    // above the catalog line: its platform-commons `requires` pulls the 5.11.3 BOM in
+    // transitively and that BOM re-manages jupiter upward. Enforce the catalog BOM so this
+    // module's tests stay on the fleet-verified 5.11.0 line (jqwik is patch-compatible with
+    // Platform 1.11.0, and the BOM still supplies the opentest4j/apiguardian it wants).
+    testImplementation(enforcedPlatform(libs.junit.bom))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
