@@ -84,3 +84,14 @@ výchozí hodnoty se nemění. Demo nepotřebuje skutečnou identitu společnost
 schválení vlastnictví dat. Používá syntetická data a simulované externí služby. Neprokazuje
 izolaci současně běžících nasazení se skutečnými OIDC/OPA tokeny, skutečné vypořádání plateb
 ani kompletně propojený produkční tok peněz. Tyto schopnosti zůstávají v #12472 a #12479.
+
+## Provozní metriky
+
+Management endpoint metrik publikuje čítače přechodů a výsledků penzijních operací včetně
+spotřeby SCA, financování, státních příspěvků a změny výplatního účtu. Čítače popisují
+pozorované výsledky aplikace; nedokládají vypořádání na externí platební infrastruktuře.
+Stavové metriky ukazují stavy smluv a agregátů, velikosti front a stáří nejstarší položky.
+Úloha `pension-state-gauges` je ve výchozím nastavení obnovuje každých 60 sekund
+(`openbank.pension.state-gauges.every`). Nový pod nevystaví stavové série před prvním
+úspěšným snapshotem. Při chybě obnovy zůstávají předchozí hodnoty; před jejich použitím
+ověřte liveness úlohy. Štítky používají omezené kategorie, nikdy identifikátory stran či smluv.

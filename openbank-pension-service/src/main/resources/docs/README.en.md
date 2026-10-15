@@ -84,3 +84,15 @@ and runtime defaults remain unchanged. This demonstration needs no real provider
 production ownership approval. It uses synthetic data and simulated external collaborators.
 It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
 or a fully connected production money path. Those capabilities remain in #12472 and #12479.
+
+## Operational metrics
+
+The management metrics endpoint exposes pension transition and outcome counters, including
+SCA consumption, funding, state contributions and payout-account changes. Counters describe
+observed application outcomes; they are not evidence of settlement on an external rail.
+State gauges report contract and aggregate statuses, queue sizes and the oldest queued age.
+The `pension-state-gauges` job refreshes them every 60 seconds by default
+(`openbank.pension.state-gauges.every`). A new pod publishes no state series until its first
+successful snapshot. A failed refresh leaves the previous values in place; check workflow
+liveness before treating those values as current. Labels use bounded categories, never party
+or contract identifiers.
