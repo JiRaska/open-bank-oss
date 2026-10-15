@@ -35,6 +35,7 @@ dependabot-verification-metadata.yml|job:refresh-metadata|contents
 dependency-review.yml|job:dependency-review|pull-requests
 dependency-submission.yml|job:raise-issue|issues
 dependency-submission.yml|job:submit|contents
+deploy-code-lag-watch.yml|job:watch|issues
 deploy-drift-watch.yml|job:watch|issues
 deps-freshness.yml|job:freshness|issues
 external-feed-watch.yml|job:watch|issues
