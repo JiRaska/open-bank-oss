@@ -275,6 +275,226 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+  # ── Security abuse lane (ADR-0279 WS1 #4, #8590 #4) ────────────────────────────
+  # The other direction of a load test: every probe here is INVALID by construction
+  # (no token, garbage token, NUL byte, enumeration sweep, oversized header), so the
+  # subject under measurement is the rejection path. That needs an auth-ENABLED boot:
+  # against a dead OIDC issuer a garbage Bearer fails with a connection error (500),
+  # not the 401 the contract asserts — measured locally while wiring this leg. So
+  # unlike the perf job above, this leg boots the pinned Keycloak with the openbank
+  # realm alongside the throwaway postgres, then product-catalog with oidc ENABLED.
+  # Locally verified end-to-end (2026-10-15): all five probe classes answered inside
+  # the 400/401/403 contract, security_contract_breaches=0, exit 0.
+  security-abuse:
+    name: "k6 security abuse (product-catalog, auth on)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      POSTGRES_PASSWORD: "perf-ci-throwaway"
+      SERVICE: openbank-product-catalog
+      # Same derivation `prepare` uses from application.yaml (http.port + datasource
+      # database). A drift check below fails the leg loudly if the file moves.
+      PORT: 8104
+      DB: productcatalog
+      # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0 (same pin as the perf job).
+      K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
+      # Canonical build pin from openbank-infra/docker/keycloak/Dockerfile (KEYCLOAK_VERSION).
+      KEYCLOAK_IMAGE: quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+
+      - name: Fail loudly if the derived port/DB drifted from application.yaml
+        run: |
+          set -euo pipefail
+          python3 - "$SERVICE" "$PORT" "$DB" <<'PY'
+          import pathlib, re, sys
+          svc, port, db = sys.argv[1], sys.argv[2], sys.argv[3]
+          raw = pathlib.Path(svc, "src/main/resources/application.yaml").read_text()
+          actual_port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
+          actual_db = re.search(r"(?:jdbc:)?(?:vertx-reactive:)?postgresql://[^/]+/([A-Za-z0-9_]+)", raw)
+          if not actual_port or actual_port.group(1) != port or not actual_db or actual_db.group(1) != db:
+              print(f"::error::{svc}: derived PORT/DB ({port}/{db}) drifted from application.yaml "
+                    f"({actual_port and actual_port.group(1)}/{actual_db and actual_db.group(1)})")
+              raise SystemExit(1)
+          print(f"derived values confirmed: port={port} db={db}")
+          PY
+
+      - name: Resolve pinned runtimes
+        run: |
+          set -euo pipefail
+          docker pull "${K6_IMAGE}"
+          docker run --rm "${K6_IMAGE}" version
+          docker pull "${KEYCLOAK_IMAGE}"
+
+      - name: Boot postgres, Keycloak and product-catalog (auth on)
+        run: |
+          set -euo pipefail
+          mkdir -p perf-reports
+
+          echo "==> [keycloak] starting with openbank realm import"
+          docker rm -f perf-kc >/dev/null 2>&1 || true
+          docker run -d --name perf-kc -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USER=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$PWD/openbank-infra/docker/keycloak/realm/openbank-realm.json:/opt/keycloak/data/import/openbank-realm.json:ro" \
+            "${KEYCLOAK_IMAGE}" start-dev --import-realm >/dev/null
+
+          echo "==> [${SERVICE}] starting postgres db=${DB}"
+          docker rm -f perf-pg >/dev/null 2>&1 || true
+          docker run -d --name perf-pg -p 5432:5432 \
+            -e POSTGRES_USER=openbank \
+            -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+            -e POSTGRES_DB="${DB}" \
+            postgres:18.6-alpine >/dev/null
+
+          KC_UP=0
+          for _ in $(seq 1 60); do
+            curl -sf "http://localhost:8080/realms/openbank/.well-known/openid-configuration" >/dev/null 2>&1 && { KC_UP=1; break; }
+            docker exec perf-kc true >/dev/null 2>&1 || break
+            sleep 3
+          done
+          if [ "$KC_UP" != "1" ]; then
+            echo "::error::keycloak never served the openbank realm — see container log"
+            docker logs perf-kc 2>&1 | tail -30 || true
+            exit 1
+          fi
+
+          PG_UP=0
+          for _ in $(seq 1 30); do
+            docker exec perf-pg pg_isready -U openbank >/dev/null 2>&1 && { PG_UP=1; break; }
+            sleep 2
+          done
+          if [ "$PG_UP" != "1" ]; then
+            echo "::error::postgres never became ready"
+            exit 1
+          fi
+
+          echo "==> [${SERVICE}] starting quarkusDev on port ${PORT} with oidc ENABLED"
+          ./gradlew ":${SERVICE}:quarkusDev" \
+            -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.username=openbank \
+            -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
+            -Dquarkus.oidc.enabled=true \
+            -Dquarkus.management.enabled=false \
+            -Dquarkus.console.basic=true \
+            --console=plain --quiet \
+            > "perf-reports/${SERVICE}-boot.log" 2>&1 &
+          DEV_PID=$!
+
+          UP=0
+          for _ in $(seq 1 150); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health/ready" || true)"
+            if [ "$code" = "200" ]; then UP=1; break; fi
+            kill -0 "$DEV_PID" 2>/dev/null || break
+            sleep 2
+          done
+          if [ "$UP" != "1" ]; then
+            echo "::error::[${SERVICE}] failed to boot — see perf-reports/${SERVICE}-boot.log"
+            tail -50 "perf-reports/${SERVICE}-boot.log" || true
+            exit 1
+          fi
+
+          # A readiness probe is not proof the AUTH BOUNDARY is what k6 will measure: the
+          # whole lane is the rejection path, so a protected route answering anything but
+          # 401 without a token means the subject is wrong, not the lane.
+          challenge="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/api/v1/products" || true)"
+          if [ "$challenge" != "401" ]; then
+            echo "::error::/api/v1/products answered ${challenge} without a token, expected 401 — the auth boundary is not measurable"
+            exit 1
+          fi
+          echo "==> [${SERVICE}] protected route answers 401 — the rejection path is the subject"
+
+      - name: Run k6 security abuse lane
+        run: |
+          set -euo pipefail
+          # k6 0.54 has no --no-thresholds-fail (unlike the newer perf-baseline image pin):
+          # an exit-99 can be the HARD status contract (security_contract_breaches) or the
+          # ADVISORY enumeration_ms latency tripwire. Distinguish them from the summary
+          # export instead of guessing from the exit code.
+          set +e
+          docker run --rm \
+              --network host \
+              --user "$(id -u):$(id -g)" \
+              --env "BASE_URL=http://localhost:${PORT}" \
+              --env "ABUSE_PATH=/api/v1/products" \
+              --env "DETAIL_PATH_TEMPLATE=/api/v1/products/{id}" \
+              --volume "$PWD:/work" \
+              --workdir /work \
+              "${K6_IMAGE}" run \
+              --summary-export "perf-reports/security-abuse-summary.json" \
+              perf/k6/security-abuse-smoke.js | tee "perf-reports/security-abuse-k6.log"
+          K6_EXIT=$?
+          set -e
+
+          python3 - <<'PY'
+          import json
+          summary = json.load(open("perf-reports/security-abuse-summary.json"))
+          breaches = summary.get("metrics", {}).get("security_contract_breaches", {}).get("values", {}).get("count")
+          if breaches is None:
+              print("::error::security_contract_breaches missing from the k6 summary — the status contract did not run")
+              raise SystemExit(1)
+          if breaches > 0:
+              print(f"::error::{breaches} security contract breach(es): an invalid request was answered 200 or 5xx — that is a defect, not a regression")
+              raise SystemExit(1)
+          print("security_contract_breaches=0 — every invalid request was rejected inside the contract")
+          PY
+
+          if [ "${K6_EXIT}" != "0" ]; then
+            echo "::warning::k6 exited ${K6_EXIT} with zero contract breaches — the ADVISORY enumeration_ms latency tripwire breached; recorded as evidence, not failing this advisory gate"
+          fi
+
+      - name: Build security abuse Test Intelligence envelope
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service perf --component openbank-security-abuse \
+            --performance-summary "perf-reports/security-abuse-summary.json" \
+            --out "perf-reports/security-abuse-run.json"
+
+      - name: Upload security abuse reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-reports-security-abuse
+          path: |
+            perf-reports/security-abuse-k6.log
+            perf-reports/security-abuse-summary.json
+            perf-reports/security-abuse-run.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload immutable security abuse performance envelope
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-run-openbank-security-abuse-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: perf-reports/security-abuse-run.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Tear down booted stack
+        if: always()
+        run: |
+          pkill -f "quarkusDev" 2>/dev/null || true
+          docker rm -f perf-pg perf-kc >/dev/null 2>&1 || true
+
   # ── The alarm (ADR-0243 decision 2, issue #3768) ──────────────────────────────
   # ADR-0243 and this file's own header both promise that an advisory-phase threshold
   # breach "creates issues rather than blocking merges". Until now nothing did: a breach
@@ -288,7 +508,9 @@ jobs:
   # run: step makes the whole workflow silently unparseable (19000-char gate).
   raise-issue:
     name: Raise issue on perf-gate failure
-    needs: perf
+    # A security-abuse contract breach is a perf-gate failure too (ADR-0279 WS1 #4): it
+    # must reach the alarm, not just the run log. `failure()` covers the whole needs set.
+    needs: [perf, security-abuse]
     if: ${{ failure() && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
