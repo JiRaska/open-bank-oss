@@ -94,6 +94,28 @@ test_edge_denied_writeoff if {
 		with data.rules as rules_mock
 }
 
+# ADR-0211 explicit origination commands: denied to the edge on the desk actions (the
+# customer's own withdrawal rides the identity-scoped lending.intake rule instead).
+test_edge_denied_origination_commands if {
+	every action in ["lending.withdraw", "lending.submitDocuments", "lending.sign"] {
+		not rest.allow with input as {"principal": edge, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# The three desk roles reach the new origination commands, mirroring @RolesAllowed.
+test_desk_roles_run_origination_commands if {
+	every role in ["ROLE_LENDING_OFFICER", "ROLE_CREDIT_RISK", "ROLE_COMPLIANCE"] {
+		every action in ["lending.withdraw", "lending.submitDocuments", "lending.sign"] {
+			rest.allow with input as {
+				"principal": {"type": "HUMAN", "id": "u-desk", "roles": [role]},
+				"action": action,
+			}
+				with data.rules as rules_mock
+		}
+	}
+}
+
 # --- edge: non-matrix writes closed by the exclusion alone ---
 
 test_edge_denied_acceleration_execute if {

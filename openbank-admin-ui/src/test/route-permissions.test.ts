@@ -5,10 +5,10 @@
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { hasPermission, permissionForPath } from '@/lib/auth/roles'
+import { hasPermission, pathAllowedByRoles, permissionForPath } from '@/lib/auth/roles'
 
 const APP_ROOT = 'src/app'
-const PUBLIC_ROUTES = new Set(['/', '/auth/error', '/auth/forbidden', '/auth/login', '/privacy'])
+const PUBLIC_ROUTES = new Set(['/', '/auth/error', '/auth/forbidden', '/auth/login', '/privacy', '/r/sample'])
 
 function pageRoutes(dir: string, route = ''): string[] {
   return readdirSync(dir).flatMap(entry => {
@@ -49,5 +49,18 @@ describe('route permission projection (ADR-0229 D3)', () => {
     expect(permissionForPath('/cards/sample')).toBe('cards:view')
     expect(permissionForPath('/lending/compliance-packs')).toBe('lending:compliance:view')
     expect(permissionForPath('/system/config')).toBe('system:config')
+  })
+
+  it('admits the communication style editor to the maker OR the checker role (ADR-0285 D6)', () => {
+    // The editor hosts both permission-gated sections, so the route guard is an OR-set,
+    // not the maker permission alone — otherwise the checker could never reach the
+    // publish controls this page exists to give them.
+    expect(permissionForPath('/communication/edit/sample')).toEqual(['communication:style:propose', 'communication:style:decide'])
+    for (const role of ['ROLE_COMMS_EDITOR', 'ROLE_COMMS_APPROVER', 'ROLE_ADMIN']) {
+      expect(pathAllowedByRoles('/communication/edit/sample', [role])).toBe(true)
+    }
+    for (const role of ['ROLE_VIEWER', 'ROLE_COMPLIANCE', 'ROLE_OPERATOR']) {
+      expect(pathAllowedByRoles('/communication/edit/sample', [role])).toBe(false)
+    }
   })
 })
