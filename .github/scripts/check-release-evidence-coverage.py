@@ -160,6 +160,8 @@ REQUIRED_ASSET_SUFFIXES = (
     ".slsa.json.sig",
     ".vex.json",
     ".vex.json.sig",
+    ".audit-provenance.json",
+    ".audit-provenance.json.sig",
     ".evidence.json",
     ".evidence.json.sig",
 )
@@ -306,7 +308,7 @@ def self_test_release_assets() -> list[tuple[str, bool]]:
 
     unreadable = verify_released_assets(["openbank-fixture"], {"openbank-fixture--tag_name": tag}, "owner/repo", rate_limited_runner)
     return [
-        ("complete release passes with all nine assets", not complete),
+        ("complete release passes with every required asset", not complete),
         ("release missing a signature is rejected", any(f"{tag}.evidence.json.sig" in item for item in incomplete)),
         ("release with no assets is rejected", bool(empty) and len(expected) == len(REQUIRED_ASSET_SUFFIXES)),
         ("release with a zero-byte asset is rejected", any("empty release evidence assets" in item for item in zero_byte)),

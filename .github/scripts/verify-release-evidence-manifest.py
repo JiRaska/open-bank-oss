@@ -10,6 +10,29 @@ import sys
 from pathlib import Path
 
 
+def _claimed_statuses(manifest: dict) -> tuple[str | None, str | None]:
+    """Attestation statuses claimed by the manifest and its audit-provenance document.
+
+    Returns (anchor_status, ai_status); None when the declaring block is absent (an
+    old-shape bundle predating the D5 audit-provenance document declares nothing).
+    """
+    ai = manifest.get("ai_attribution")
+    runtime = ai.get("runtime_audit_attribution") if isinstance(ai, dict) else None
+    manifest_ai = runtime.get("status") if isinstance(runtime, dict) else None
+    return None, manifest_ai if manifest_ai in {"attested", "not_attested"} else None
+
+
+def _document_statuses(document: dict) -> tuple[str | None, str | None]:
+    anchor = document.get("audit_anchor_checkpoint")
+    anchor_status = anchor.get("status") if isinstance(anchor, dict) else None
+    ai = document.get("ai_attribution")
+    ai_status = ai.get("status") if isinstance(ai, dict) else None
+    return (
+        anchor_status if anchor_status in {"attested", "not_attested"} else None,
+        ai_status if ai_status in {"attested", "not_attested"} else None,
+    )
+
+
 def verify(tag: str, directory: Path) -> list[str]:
     errors: list[str] = []
     manifest_path = directory / f"{tag}.evidence.json"
@@ -51,6 +74,78 @@ def verify(tag: str, directory: Path) -> list[str]:
         actual = hashlib.sha256(document.read_bytes()).hexdigest()
         if actual != wanted:
             errors.append(f"manifest {key} digest does not match {expected}")
+
+    # ── D5 audit-provenance document (issue #12923 gaps #4/#5) ────────────────────
+    # The document is OPTIONAL for old-shape bundles (cut before it existed): absence is an
+    # honest negative only while the manifest does not claim attestation. A manifest that
+    # CLAIMS attested without binding the document, or binds a document whose attested
+    # sections lack the fields that make them mean anything, is LYING — fail it.
+    expected = f"{tag}.audit-provenance.json"
+    ref = manifest.get("audit_provenance")
+    _anchor_claimed, ai_claimed = _claimed_statuses(manifest)
+    if not isinstance(ref, dict):
+        if ai_claimed == "attested":
+            errors.append(
+                "manifest claims attested runtime AI attribution but has no audit_provenance "
+                f"document reference ({expected})"
+            )
+    else:
+        if ref.get("file") != expected or ref.get("signature") != f"{expected}.sig":
+            errors.append(
+                f"manifest audit_provenance reference must name {expected} and its signature"
+            )
+        else:
+            wanted = ref.get("sha256")
+            if not isinstance(wanted, str) or re.fullmatch(r"[0-9a-f]{64}", wanted) is None:
+                errors.append("manifest audit_provenance has no valid SHA-256 digest")
+            else:
+                document_path = directory / expected
+                signature_path = directory / f"{expected}.sig"
+                if not document_path.is_file() or not document_path.stat().st_size:
+                    errors.append(f"required evidence document {expected} is missing or empty")
+                else:
+                    if not signature_path.is_file() or not signature_path.stat().st_size:
+                        errors.append(
+                            f"required evidence signature {signature_path.name} is missing or empty"
+                        )
+                    actual = hashlib.sha256(document_path.read_bytes()).hexdigest()
+                    if actual != wanted:
+                        errors.append(f"manifest audit_provenance digest does not match {expected}")
+                    try:
+                        document = json.loads(document_path.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                        errors.append(f"cannot parse evidence document {expected}: {exc}")
+                    else:
+                        if not isinstance(document, dict):
+                            errors.append(f"evidence document {expected} is not a JSON object")
+                        else:
+                            doc_anchor, doc_ai = _document_statuses(document)
+                            ai_block = document.get("ai_attribution")
+                            if doc_ai == "attested" and not (
+                                isinstance(ai_block, dict)
+                                and isinstance(ai_block.get("latest_attested_run_window"), dict)
+                            ):
+                                errors.append(
+                                    f"{expected} claims attested AI attribution but has no "
+                                    "latest_attested_run_window"
+                                )
+                            anchor_block = document.get("audit_anchor_checkpoint")
+                            if doc_anchor == "attested" and not (
+                                isinstance(anchor_block, dict)
+                                and all(
+                                    isinstance(anchor_block.get(field), str) and anchor_block[field]
+                                    for field in ("digest", "keyId", "signedAt")
+                                )
+                            ):
+                                errors.append(
+                                    f"{expected} claims an attested anchor checkpoint but is "
+                                    "missing digest/keyId/signedAt"
+                                )
+                            if ai_claimed is not None and ai_claimed != doc_ai:
+                                errors.append(
+                                    f"manifest ai_attribution status '{ai_claimed}' contradicts "
+                                    f"{expected} status '{doc_ai}'"
+                                )
     return errors
 
 

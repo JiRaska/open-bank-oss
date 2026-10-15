@@ -542,7 +542,7 @@ jobs:
               || { echo "::error::evidence assembly failed for $tag"; exit 1; }
 
             assets="$sbom_out ${sbom_out}.sig"
-            for doc in "${tag}.slsa.json" "${tag}.vex.json" "${tag}.evidence.json"; do
+            for doc in "${tag}.slsa.json" "${tag}.vex.json" "${tag}.audit-provenance.json" "${tag}.evidence.json"; do
               [ -s "$doc" ] || { echo "::error::required evidence document $doc is missing or empty"; exit 1; }
               sign "$doc" || { echo "::error::cosign sign-blob failed for $doc"; exit 1; }
               assets="$assets $doc ${doc}.sig"

@@ -4,10 +4,14 @@
 # Realises rules.yaml: provenance.evidence_bundle. Given a just-cut release tag and its
 # already-generated CycloneDX SBOM, emit three JSON documents into the current directory:
 #
-#   <tag>.slsa.json      — SLSA v1.0 provenance statement (in-toto), subject = the SBOM file
-#   <tag>.vex.json       — OpenVEX 0.2.0 document (vuln inventory derived from `trivy sbom`,
-#                          status `under_investigation` — never an unfounded `not_affected`)
-#   <tag>.evidence.json  — the signed point-in-time audit object tying the bundle together
+#   <tag>.slsa.json             — SLSA v1.0 provenance statement (in-toto), subject = the SBOM file
+#   <tag>.vex.json              — OpenVEX 0.2.0 document (vuln inventory derived from `trivy sbom`,
+#                                 status `under_investigation` — never an unfounded `not_affected`)
+#   <tag>.audit-provenance.json — D5 audit anchor checkpoint + runtime AI attribution
+#                                 (issue #12923 gaps #4/#5, evidence-pipeline half; optional
+#                                 attestation inputs via EVIDENCE_ANCHOR_ATTESTATION_JSON /
+#                                 EVIDENCE_AI_ATTRIBUTION_JSON, honest not_attested otherwise)
+#   <tag>.evidence.json         — the signed point-in-time audit object tying the bundle together
 #
 # Signing (cosign KMS) and release upload are done by the caller (release-please.yml); this
 # script only assembles the documents so it is testable without AWS/cosign. Best-effort: a
@@ -157,6 +161,144 @@ ATTRIB="$( { git log "$RANGE" --pretty='%an <%ae>' -- "$MODULE_DIR" 2>/dev/null;
              git log "$RANGE" --pretty='%(trailers:key=Co-authored-by,valueonly)' -- "$MODULE_DIR" 2>/dev/null; } \
            | sed '/^$/d' | sort -u )"
 
+# ── D5 audit-provenance document (issue #12923 gaps #4/#5, evidence-pipeline half) ──
+#
+# Two OPTIONAL attestation inputs, each an env var pointing at a JSON file:
+#
+#   EVIDENCE_ANCHOR_ATTESTATION_JSON — the `verdict.json` published by the weekly audit-anchor
+#       live-attestation workflow (artifact `audit-anchor-attestation`). Consumed fields:
+#       `verdict` (VERIFIED|TAMPERED|UNVERIFIABLE|INPUT_ERROR) and `anchor_checkpoint`
+#       {digest, keyId, signedAt} — the latest KMS-signed anchor of the export (its
+#       `anchorDigest`/`keyId`/`signedAt`). `fetched_at`/`export_url`/`verifier_exit`/
+#       `generations_verified` pass through when present.
+#   EVIDENCE_AI_ATTRIBUTION_JSON — runtime AI-attestation output carrying
+#       `latest_attested_run_window` {…} and `observed_fields` (must cover the required
+#       model_id/prompt_hash/policy_decision).
+#
+# HONESTY RULE: an unset input yields an explicit not_attested block — never fabricated,
+# never silently dropped. A MALFORMED input (unparseable JSON, or missing the fields above)
+# fails the build loudly: a bundle that swallowed a bad attestation would read as "no
+# attestation", which is a lie about a control that tried to run.
+AP_OUT="${TAG}.audit-provenance.json"
+for var in EVIDENCE_ANCHOR_ATTESTATION_JSON EVIDENCE_AI_ATTRIBUTION_JSON; do
+  eval "path=\${$var:-}"
+  if [ -n "$path" ] && [ ! -f "$path" ]; then
+    echo "::error::$var points at '$path' which does not exist — refusing to cut a bundle that would silently drop the attestation input"
+    exit 1
+  fi
+done
+
+TS="$TS" COMPONENT="$COMPONENT" VERSION="$VERSION" TAG="$TAG" \
+EVIDENCE_ANCHOR_ATTESTATION_JSON="${EVIDENCE_ANCHOR_ATTESTATION_JSON:-}" \
+EVIDENCE_AI_ATTRIBUTION_JSON="${EVIDENCE_AI_ATTRIBUTION_JSON:-}" \
+python3 - > "$AP_OUT" <<'PY'
+import json, os, sys
+
+REQUIRED_FIELDS = ["model_id", "prompt_hash", "policy_decision"]
+VERDICTS = {"VERIFIED", "TAMPERED", "UNVERIFIABLE", "INPUT_ERROR"}
+
+
+def die(message: str) -> None:
+    print(f"::error::audit-provenance input malformed: {message}", file=sys.stderr)
+    sys.exit(3)
+
+
+def load_input(env_var: str):
+    path = os.environ.get(env_var) or ""
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        die(f"{env_var} ({path}) is not parseable JSON: {exc}")
+    if not isinstance(data, dict):
+        die(f"{env_var} ({path}) must be a JSON object, got {type(data).__name__}")
+    return data
+
+
+anchor_in = load_input("EVIDENCE_ANCHOR_ATTESTATION_JSON")
+ai_in = load_input("EVIDENCE_AI_ATTRIBUTION_JSON")
+
+# ── audit anchor checkpoint (#12923 gap #5): digest + keyId + signedAt + verification
+# status at cut time. `status: attested` ONLY for a VERIFIED input; any other verdict is
+# recorded verbatim (forensics) but stays not_attested — an unverified checkpoint must not
+# read as anchored.
+if anchor_in is None:
+    anchor_block = {
+        "status": "not_attested",
+        "reason": "no attestation input at cut time",
+    }
+else:
+    verdict = anchor_in.get("verdict")
+    if not isinstance(verdict, str) or verdict not in VERDICTS:
+        die(f"anchor attestation verdict must be one of {sorted(VERDICTS)}, got {verdict!r}")
+    checkpoint = anchor_in.get("anchor_checkpoint")
+    if not isinstance(checkpoint, dict):
+        die("anchor attestation has no 'anchor_checkpoint' object")
+    digest, key_id, signed_at = (
+        checkpoint.get("digest"), checkpoint.get("keyId"), checkpoint.get("signedAt"))
+    if not all(isinstance(v, str) and v for v in (digest, key_id, signed_at)):
+        die("anchor_checkpoint needs non-empty string digest, keyId and signedAt")
+    attested = verdict == "VERIFIED"
+    anchor_block = {
+        "status": "attested" if attested else "not_attested",
+        "digest": digest,
+        "keyId": key_id,
+        "signedAt": signed_at,
+        "verification_status": verdict,
+    }
+    for optional in ("fetched_at", "export_url", "verifier_exit", "generations_verified"):
+        if optional in anchor_in:
+            anchor_block[optional] = anchor_in[optional]
+    if not attested:
+        anchor_block["reason"] = (
+            f"attestation input at cut time reported verdict {verdict} — the checkpoint is "
+            "recorded for forensics but a non-VERIFIED anchor chain is not attested"
+        )
+
+# ── runtime AI attribution (#12923 gap #4): flip to attested ONLY when a real input
+# carries the required fields observed across a concrete run window.
+if ai_in is None:
+    ai_block = {
+        "status": "not_attested",
+        "required_fields": REQUIRED_FIELDS,
+        "latest_attested_run_window": None,
+        "reason": "no runtime AI-attestation input at cut time",
+    }
+else:
+    window = ai_in.get("latest_attested_run_window")
+    if not isinstance(window, dict) or not window:
+        die("AI-attestation input has no 'latest_attested_run_window' object")
+    observed = ai_in.get("observed_fields")
+    if (not isinstance(observed, list) or not all(isinstance(f, str) for f in observed)
+            or not set(REQUIRED_FIELDS).issubset(observed)):
+        die(f"AI-attestation observed_fields must cover {REQUIRED_FIELDS}, got {observed!r}")
+    ai_block = {
+        "status": "attested",
+        "required_fields": REQUIRED_FIELDS,
+        "latest_attested_run_window": window,
+        "observed_fields": observed,
+    }
+    for optional in ("attestation_source", "attested_at"):
+        if optional in ai_in:
+            ai_block[optional] = ai_in[optional]
+
+doc = {
+    "schema_version": 1,
+    "schema": "openbank.audit-provenance/v1",
+    "component": os.environ["COMPONENT"],
+    "version": os.environ["VERSION"],
+    "tag": os.environ["TAG"],
+    "generated_at": os.environ["TS"],
+    "audit_anchor_checkpoint": anchor_block,
+    "ai_attribution": ai_block,
+}
+print(json.dumps(doc, indent=2))
+PY
+[ -s "$AP_OUT" ] || { echo "::error::audit-provenance assembly produced no document for $TAG"; exit 1; }
+echo "wrote $AP_OUT"
+
 # ── Support period (#9881) ──────────────────────────────────────────────────────
 # Derived from SECURITY.md's rules against the RELEASE date — the tagged commit's date — never
 # from `built_at`: backfill-release-evidence.yml runs this months after a release, and deriving
@@ -172,12 +314,18 @@ TS="$TS" COMPONENT="$COMPONENT" VERSION="$VERSION" TAG="$TAG" SHA="$SHA" REPO="$
 SUPPORT_JSON="$SUPPORT_JSON" \
 SBOM_BASENAME="$(basename "$SBOM_FILE")" SBOM_SHA="$SBOM_SHA" \
 SLSA_OUT="$SLSA_OUT" VEX_OUT="$VEX_OUT" RUN_URL="$RUN_URL" \
+AP_OUT="$AP_OUT" \
 CHANGELOG_EXCERPT="$CHANGELOG_EXCERPT" ATTRIB="$ATTRIB" \
 python3 - > "$EV_OUT" <<'PY'
 import json, os, hashlib
 def sha(p):
     return hashlib.sha256(open(p, "rb").read()).hexdigest()
 attrib = [a for a in os.environ.get("ATTRIB", "").splitlines() if a.strip()]
+# The D5 audit-provenance document is the carrier for runtime attestation; the manifest
+# self-declaration below must AGREE with it — verify-release-evidence-manifest.py fails a
+# bundle whose manifest claims attested without the document, or contradicts it.
+audit_provenance = json.load(open(os.environ["AP_OUT"]))
+ai_status = audit_provenance["ai_attribution"]["status"]
 bundle = {
     "schema": "openbank.evidence/v1",
     "component": os.environ["COMPONENT"],
@@ -192,6 +340,9 @@ bundle = {
                         "signature": os.environ["SLSA_OUT"] + ".sig"},
     "vex": {"file": os.environ["VEX_OUT"], "format": "openvex/0.2.0",
             "sha256": sha(os.environ["VEX_OUT"]), "signature": os.environ["VEX_OUT"] + ".sig"},
+    "audit_provenance": {"file": os.environ["AP_OUT"], "format": "openbank.audit-provenance/v1",
+                         "sha256": sha(os.environ["AP_OUT"]),
+                         "signature": os.environ["AP_OUT"] + ".sig"},
     "changelog": os.environ.get("CHANGELOG_EXCERPT", "").strip(),
     # End-of-support as data (SECURITY.md; CRA Art. 13(8)). A beta release carries only the
     # determined floor and `open_ended: true` — its later bound depends on a future release.
@@ -200,10 +351,15 @@ bundle = {
         "contributors": attrib,
         "build_attribution_note": "authors + Co-Authored-By trailers since previous component tag (ADR-0029 D6)",
         "runtime_audit_attribution": {
-            "status": "not_attested",
+            "status": ai_status,
             "required_fields": ["model_id", "prompt_hash", "policy_decision"],
-            "reason": "a release build has no runtime audit-event sample; contributor trailers are not evidence of AI runtime attribution",
-            "promotion_eligible": False,
+            "document": os.environ["AP_OUT"],
+            "reason": (
+                "a release build has no runtime audit-event sample; contributor trailers are not evidence of AI runtime attribution"
+                if ai_status == "not_attested"
+                else "attested by the audit-provenance document bundled with this release"
+            ),
+            "promotion_eligible": ai_status == "attested",
         },
     },
     # Referenced, not embedded: these live on the CI run that produced them.

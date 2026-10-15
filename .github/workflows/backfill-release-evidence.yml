@@ -149,7 +149,7 @@ jobs:
             || echo "::warning::evidence assembly had issues for $TAG"
 
           assets="$sbom_out ${sbom_out}.sig"
-          for doc in "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json"; do
+          for doc in "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.audit-provenance.json" "${TAG}.evidence.json"; do
             [ -f "$doc" ] || continue
             sign "$doc" && assets="$assets $doc ${doc}.sig" || echo "::warning::sign failed for $doc"
           done
