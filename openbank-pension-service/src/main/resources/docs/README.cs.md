@@ -27,6 +27,7 @@ Dokumentaci služba publikuje na management endpointu `/q/openbank/docs` (Docs-a
 | `POST /api/v2/pension/simulations` | Ilustrativní projekce podle strategie (není poradenství) |
 | `PUT /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | Změna účtu pro výplatu se SCA, odkladem 3 dny a oznámením |
 | `GET /api/v2/pension/operator/payouts`, `GET /api/v2/pension/death-claims` | Fronty pro personál |
+| `GET /api/v2/pension/reporting/participant-aggregates` | Agregace za období pro výkazy ČNB: jen počty a součty, čte personál (#12425) |
 
 Aktivace probíhá jen onboardingovým workflow (podepsaná žádost, lhůta na odstoupení, první
 příspěvek nebo převod); ukončení je tok kotace a podpisu v `/exit`. Každý POST vyžaduje
@@ -40,6 +41,19 @@ Recovery sweep výplat při startu registruje workflow `pension-payout-schedule-
 
 Interval `off` nebo `disabled` vypíná plánování a nepublikuje heartbeat workflow.
 
+## Vykazování účastníků pro výkazy ČNB
+
+`GET /api/v2/pension/reporting/participant-aggregates` vrací agregace za jedno období pro výkazy
+ČNB (#12425, ADR-0336 D4). Vrací pouze počty a součty — žádný atribut smlouvy, strany ani
+účastníka. Počítá smlouvy v platnosti ke konci období podle produktové řady, věkového pásma a
+stavu a součtuje příspěvky (podle zdroje včetně státních příspěvků) a výplaty. Jde o personální
+reportovací čtení; nemění smlouvy a není to účastnický self-service endpoint.
+
+Součty výplat se měří dle persistovaného času přechodu do SETTLED: vypořádací záznam uchovává
+čas události `settledAt` přijatý z domestic-payment (migrace `V15__payout_settlement_time`).
+Během postupného nasazení zůstávají starší události SETTLED bez `settledAt` v DLQ konzumenta
+a nejsou tiše předatovány.
+
 ## Postupné nasazení interního TLS
 
 GitOps přidává TLS 1.3 na portu 8443 vedle stávajícího HTTP listeneru. Cert-manager
@@ -50,8 +64,11 @@ Nejprve nasaďte Certificate a serverový listener. Před přepnutím klienta ov
 Certificate Ready, DNS SAN služby, důvěryhodný TLS handshake a síťové politiky pro
 port 8443. HTTP zachovejte během souběhu verzí; jeho odstranění vyžaduje samostatnou
 inventuru klientů a nasazení. Při chybě nového listeneru ponechte původní klientskou
-URL a vraťte přidanou serverovou konfiguraci. Tato fáze ověřuje identitu serveru,
-neposkytuje vzájemné TLS.
+URL a vraťte přidanou serverovou konfiguraci. Produkční listener 8443 vyžaduje
+důvěryhodný klientský certifikát; API navíc nezávisle ověřuje bearer token.
+Tax-reporting používá vlastní klientský certifikát a trust store interní CA.
+`ListenerAuthParityIT` lokálně ověřuje certifikát i bearer autentizaci na obou
+listenerech; neprokazuje připravenost certifikátů ani kompatibilitu klientů v clusteru.
 
 `ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
