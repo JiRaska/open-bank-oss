@@ -315,3 +315,25 @@ service-account `preferred_username`. A matching display principal alone grants 
 foreign-client, missing-subject and non-JWT identities are rejected before transfer writes.
 Participant SCA consent remains required before funds can move. Rollback of this guard
 restores username-only authentication and must not precede an equivalent replacement.
+
+## Idempotency replay telemetry boundary — #12424
+
+The idempotency replay filter increments `openbank.pension.idempotency.replays` only after finding a
+stored response and accepting the existing request fingerprint. The metric's sole label is the HTTP
+method. The filter accepts only POST, PUT and PATCH in its existing replay scope, so the label has
+three values; principal, participant, path, key, fingerprint and request/response bodies are not
+metric labels or values.
+
+The existing scope still binds principal, customer-party header, method, path and key; a mismatching
+stored fingerprint is still rejected before a replay is counted. Counting an accepted replay does
+not repeat the business operation, alter authorization, weaken fingerprint checks, or add a new data
+destination beyond the existing metrics registry. The counter describes stored-response reuse, not
+successful new money movement. Existing concurrent-first-attempt limitations and lower-layer
+financial idempotency remain as described above.
+
+The observability adapter and service tests provide source evidence for the metric contract. This
+document does not establish deployed metric availability, scraper access control, cardinality
+measurements on running pods or successful hosted CI on a later documentation-only head. Rollback of
+this observation removes the counter call and metric wiring while retaining the replay scope and
+fingerprint checks. The separate pending staff-search assessment in #12943 is not part of this
+change; a future merge must preserve both independent threat-model additions.
