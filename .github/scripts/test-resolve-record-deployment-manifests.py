@@ -109,7 +109,7 @@ def init_repo(repo: pathlib.Path) -> str:
         f"{SERVICE}/src/test/LedgerTest.kt": "class LedgerTest\n",
         f"{SERVICE}/version.txt": "1.0.0\n",
         f"{SERVICE}/CHANGELOG.md": "release one\n",
-        "openbank-libs-runtime/build.gradle.kts": "plugins { kotlin(\"jvm\") }\n",
+        "openbank-libs-runtime/build.gradle.kts": 'plugins { kotlin("jvm") }\nimplementation(project(":openbank-contracts"))\n',
         "openbank-libs-runtime/src/main/Runtime.kt": "class RuntimeLib\n",
         "openbank-libs-runtime/src/main/resources/rules.yaml": "enabled: true\n",
         "openbank-libs-runtime/src/test/RuntimeTest.kt": "class RuntimeTest\n",
@@ -117,6 +117,9 @@ def init_repo(repo: pathlib.Path) -> str:
         "openbank-libs-domain/src/main/Domain.kt": "class DomainLib\n",
         "openbank-libs-iso20022/build.gradle.kts": "plugins { kotlin(\"jvm\") }\n",
         "openbank-libs-iso20022/src/main/Message.kt": "class MessageLib\n",
+        "openbank-contracts/build.gradle.kts": 'plugins { kotlin("jvm") }\n',
+        "openbank-contracts/src/main/Contract.kt": "class Contract\n",
+        "openbank-contracts/src/test/ContractTest.kt": "class ContractTest\n",
         "openbank-fx-service/build.gradle.kts": "plugins { kotlin(\"jvm\") }\n",
         "openbank-fx-service/src/main/Fx.kt": "class FxService\n",
         "gradle/libs.versions.toml": "kotlin = '2.0.0'\n",
@@ -190,13 +193,14 @@ def main() -> int:
         fixture_scripts(bin_dir)
         base = init_repo(repo)
         cases: list[tuple[str, str, str, str | None, bool, str]] = []
-        # 11 safe boundaries: exact, unchanged after an ignored change, release metadata,
+        # Safe boundaries: exact, unchanged after an ignored change, release metadata,
         # unrelated Gradle service, dependency tests, and reviewed irrelevant domains.
         safe_specs = [
             ("unchanged", "README.md", "unrelated docs/repo metadata", False),
             ("release-only", f"{SERVICE}/version.txt", "release metadata", False),
             ("unrelated-service", "openbank-fx-service/src/main/Fx.kt", "independent service", False),
             ("shared-tests-only", "openbank-libs-runtime/src/test/RuntimeTest.kt", "dependency tests", False),
+            ("ignored-top-dependency-tests", "openbank-contracts/src/test/ContractTest.kt", "dependency tests", False),
             ("docs", "docs/README.md", "docs", False),
             ("gitops", "openbank-infra/gitops/app.yaml", "gitops", False),
             ("root-markdown", "README.md", "root prose", False),
@@ -213,11 +217,13 @@ def main() -> int:
         # Identical commit is not equivalent because a missing broker record is inconsistent;
         # use an irrelevant root commit to model same recorded source at a distinct SHA.
 
-        # 10 policy negatives including unsupported or incomplete proof.
+        # Policy negatives including unsupported or incomplete proof.
         negative_specs = [
             ("own-source", f"{SERVICE}/src/main/Ledger.kt", "own production source", False),
             ("own-test", f"{SERVICE}/src/test/LedgerTest.kt", "own Pact test", False),
             ("shared-production", "openbank-libs-runtime/src/main/Runtime.kt", "dependency production", False),
+            ("ignored-top-transitive-production", "openbank-contracts/src/main/Contract.kt", "transitive dependency production", False),
+            ("ignored-top-transitive-build", "openbank-contracts/build.gradle.kts", "transitive dependency build", False),
             ("shared-resource", "openbank-libs-domain/src/main/Domain.kt", "shared module", False),
             ("undeclared-shared", "openbank-libs-iso20022/src/main/Message.kt", "undeclared shared lib", False),
             ("gradle-catalog", "gradle/libs.versions.toml", "catalog", False),

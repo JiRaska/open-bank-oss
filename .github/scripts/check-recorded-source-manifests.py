@@ -235,15 +235,13 @@ def classify(path: str, svc: str, modules: set[str], all_modules: set[str], excl
         return "irrelevant" if is_excluded(path, excludes) else "relevant"
     if path == ".github/workflows/Dockerfile.deploy":
         return "relevant"
-    if path == ".github" or path.startswith(".github/"):
-        return "irrelevant"  # includes the deliberate auto-deploy.yml exclusion
     if "/" not in path:
         return "relevant" if root_file_is_relevant(path) else "irrelevant"
     top, _rest = path.split("/", 1)
     if top in ("gradle", "config", "build-logic"):
         return "relevant"
-    if top in IGNORED_TOPS:
-        return "irrelevant"
+    # A declared dependency's production inputs take precedence over broad irrelevant-domain
+    # exclusions, matching the asking proof's scope comparison before ignored-path handling.
     if top in modules:
         rest = path[len(top) + 1:]
         if top == svc:
@@ -253,6 +251,10 @@ def classify(path: str, svc: str, modules: set[str], all_modules: set[str], excl
         if rest.startswith("gradle/") or rest == "gradle":
             return "relevant"
         return "irrelevant"  # dependency tests/docs/governance are outside asking scope
+    if top == ".github":
+        return "irrelevant"  # includes the deliberate auto-deploy.yml exclusion
+    if top in IGNORED_TOPS:
+        return "irrelevant"
     # A non-dependency Gradle module is deliberately known irrelevant. New non-module top-level
     # directories are not: fail closed until classified.
     if top in all_modules:
@@ -390,7 +392,7 @@ def self_test() -> int:
         complete = True
     check("omitted leaf cannot pass using unchanged root id", complete)
 
-    modules = {"openbank-ledger-service", "openbank-libs-runtime", "openbank-libs-domain"}
+    modules = {"openbank-ledger-service", "openbank-libs-runtime", "openbank-libs-domain", "openbank-contracts"}
     all_modules = modules | {"openbank-fx-service"}
     excludes = ["openbank-ledger-service/version.txt", "openbank-ledger-service/CHANGELOG.md"]
     expectations = {
@@ -400,6 +402,9 @@ def self_test() -> int:
         "transitive shared production": ("openbank-libs-runtime/src/main/Runtime.kt", "relevant"),
         "undeclared common lib production": ("openbank-libs-domain/src/main/Domain.kt", "relevant"),
         "dependency tests stay excluded": ("openbank-libs-runtime/src/test/RuntimeTest.kt", "irrelevant"),
+        "ignored-top dependency production counts": ("openbank-contracts/src/main/Contract.kt", "relevant"),
+        "ignored-top dependency build counts": ("openbank-contracts/build.gradle.kts", "relevant"),
+        "ignored-top dependency tests stay excluded": ("openbank-contracts/src/test/ContractTest.kt", "irrelevant"),
         "unrelated Gradle module stays excluded": ("openbank-fx-service/src/main/Fx.kt", "irrelevant"),
         "global Gradle catalog counts": ("gradle/libs.versions.toml", "relevant"),
         "build logic counts": ("build-logic/build.gradle.kts", "relevant"),
