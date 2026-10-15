@@ -109,3 +109,13 @@ Exact pinned versions are auto-generated from `libs.versions.toml` at build and 
 - `version.txt` is owned by **release-please** (per-service component); feature/fix PRs do not hand-edit it.
 - The OpenAPI contract version (`openapi.yaml:info.version`) is the separate API-contract axis (ADR-0048) and is verified by `AnaCreditContractTest`.
 - CD: ArgoCD picks up the new image tag from the gitops manifest bump.
+
+## Observability
+
+The service carries the `quarkus-opentelemetry` runtime like every other fleet module, so
+HTTP requests and Postgres writes emit OTLP spans into the shared Tempo pipeline. For a
+regulatory feed this is load-bearing evidence, not convenience: an exposure row written
+outside its registration request's trace answers 201 like a healthy one but has no
+observable cause. The trace contract (`AnaCreditTraceContractIT`) pins that the
+`POST /api/v1/anacredit/exposures` span and the `INSERT credit_exposures` span share one
+trace id on every run.
