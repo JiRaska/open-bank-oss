@@ -12,10 +12,15 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 
 /** Named so detekt's UseCheckOrError does not fire at the throw site inside a mockk `answers` block. */
 private class TransientStoreFailure : IllegalStateException("connection refused")
@@ -144,5 +149,48 @@ class PartyErasureConsumerTest {
 
         coVerify(exactly = 2) { conversationStore.deleteForParty(partyId.toString()) }
         verify(exactly = 1) { metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_ERASED) }
+    }
+
+    @Test
+    fun `malformed and partyId-less events are logged without any payload content`(): Unit = runBlocking {
+        val marker = "private-party-marker"
+        val records = captureLogs {
+            runBlocking {
+                consumer.consume("""{"eventType":"PARTY_ERASED","name":"$marker""")
+                consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$marker"}""")
+            }
+        }
+        assertThat(records).hasSize(2)
+        records.forEach { r ->
+            val text = (r.message ?: "") + " " + (r.parameters?.joinToString() ?: "") + " " +
+                (r.thrown?.toString() ?: "")
+            assertThat(text).doesNotContain(marker)
+            assertThat(r.thrown).isNull()
+        }
+    }
+
+    private fun captureLogs(block: () -> Unit): List<LogRecord> {
+        val logger = Logger.getLogger(PartyErasureConsumer::class.java.name)
+        val previousLevel = logger.level
+        val previousParent = logger.useParentHandlers
+        val records = mutableListOf<LogRecord>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                records += record
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        logger.level = Level.ALL
+        logger.useParentHandlers = false
+        logger.addHandler(handler)
+        try {
+            block()
+        } finally {
+            logger.removeHandler(handler)
+            logger.level = previousLevel
+            logger.useParentHandlers = previousParent
+        }
+        return records
     }
 }
