@@ -298,7 +298,8 @@ def self_test() -> int:
             prev = sha
         return prev, commits
 
-    def graph_api(commits: dict, update_code: int = 202, reads: list | None = None):
+    def graph_api(commits: dict, update_code: int = 202, reads: list | None = None,
+                  update_data: object = None):
         def fake(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
             if method == "GET" and "/commits/" in path:
                 sha = path.rsplit("/", 1)[1]
@@ -306,7 +307,7 @@ def self_test() -> int:
                     reads.append(sha)
                 return (200, commits[sha]) if sha in commits else (404, "Not Found")
             if method == "PUT" and path.endswith("/update-branch"):
-                return update_code, "denied" if update_code != 202 else {}
+                return update_code, update_data if update_data is not None else ("denied" if update_code != 202 else {})
             raise AssertionError(f"unexpected API call {method} {path}")
         return fake
 
@@ -347,10 +348,10 @@ def self_test() -> int:
             return {"commit": {"committer": {"date": old.isoformat()}}}
         raise AssertionError(f"unexpected API read {path}")
 
-    def run_fixture(commits: dict, update_code: int, **kw) -> tuple[int, str]:
+    def run_fixture(commits: dict, update_code: int, update_data: object = None, **kw) -> tuple[int, str]:
         with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                     "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
-                                    "api": graph_api(commits, update_code)}):
+                                    "api": graph_api(commits, update_code, update_data=update_data)}):
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 result = run("example/repo", "main", 5, 0, False, 20, **kw)
@@ -362,6 +363,21 @@ def self_test() -> int:
         ok = result == want and (("::error::FAILED" in out) == (status == 403))
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  320-commit PR, update-branch HTTP {status} -> exit {result}")
+    # GitHub reports the expected-head precondition race as 422, not only 409.
+    # Exercise the real response handler: no retry, changed SHA or generic 422 success.
+    for label, data, want in [
+        ("Unicode expected-head race", {"message": "expected head sha didn’t match current head ref."}, 0),
+        ("ASCII expected-head race", {"message": "expected head sha didn't match current head ref."}, 0),
+        ("generic validation", {"message": "Validation Failed"}, 1),
+        ("different precondition", {"message": "expected head sha is invalid"}, 1),
+        ("wrong schema", {"message": ["expected head sha didn’t match current head ref."]}, 1),
+        ("plain text", "expected head sha didn’t match current head ref.", 1),
+        ("no message", {"errors": ["head mismatch"]}, 1),
+    ]:
+        result, out = run_fixture(fresh, 422, update_data=data)
+        ok = result == want and (("::error::FAILED" in out) == bool(want))
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  HTTP 422 {label} -> exit {result}")
     fixture_head, spent = graph(3, 5)
     result, out = run_fixture(spent, 500)  # 500 would fail the run if update-branch were called
     ok = (result == 0 and "update budget exhausted (4/4" in out and "push to the branch" in out
@@ -650,8 +666,15 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
             updated += 1
             print(f"UPDATE #{n} {sha[:9]}: {why} "
                   f"(budget {used + 1}/{max_updates_per_pr})")
-        elif code == 409:
+        elif code == 409 or (
+            code == 422 and isinstance(data, dict) and isinstance(data.get("message"), str)
+            and data["message"] in (
+                "expected head sha didn’t match current head ref.",
+                "expected head sha didn't match current head ref.",
+            )
+        ):
             # A competing update changed the expected head. The next run re-reads it.
+            # Only this exact 422 response is a race; other validation failures remain red.
             print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
         else:
             failed_updates += 1
