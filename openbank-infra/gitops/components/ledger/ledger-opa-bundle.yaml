@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "ba3b4ca71bf84faa"
+    openbank.tech/policy-checksum: "b3c57e23bd8f5245"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -718,8 +718,9 @@ data:
     # (service-account-openbank-edge) was admitted to the book-of-record's writes — post/reverse
     # a journal, re-run an FX revaluation — via base matrix-allows, and to year-close attestation
     # via operator-year-close-attest (whose own comment says no SERVICE principal must EVER
-    # reach it). Fleet caller audit: no ledgerServiceUrl exists anywhere in customer-edge — the
-    # edge has NO ledger caller at all; the legitimate M2M writers (transaction/lending/
+    # reach it). Fleet caller audit: no ledger caller exists anywhere in customer-edge — the
+    # edge has NO ledger client or URL configuration at all (bearer-only mTLS removed the last
+    # such property); the legitimate M2M writers (transaction/lending/
     # settlement via the shared client) keep their identity-scoped service-ledger-post /
     # service-ledger-reverse rules below. The exclusion on the operator rules closes the
     # role-only path for ALL service accounts; the prohibition below vetoes the edge on every
@@ -767,11 +768,19 @@ data:
     # principal.id is deterministically "service-account-openbank-services" (Keycloak's
     # service-account-<clientId> convention). Gating on HUMAN + ROLE_OPERATOR alone would be
     # unsafe (real operator/admin staff also carry ROLE_OPERATOR); gate on identity instead.
+    #
+    # Scoped to the ledger.list / ledger.read actions explicitly (not "any verb ending in
+    # .read/.list"): every verified caller below reads the ledger, and base rest.rego's
+    # service-account exclusions (#3734 follow-ups — compliance-read-any, operator-read-any,
+    # pension-catalog M2M) rely on this shared identity being DENIED every other resource's
+    # read. A fleet-wide *.read grant for this principal would silently re-admit it to
+    # exactly those reads (measured: base rest_test.rego test_deny_service_account_compliance_*
+    # and test_pension_catalog_m2m_grant_* flip when this rule matches "x.y.read" /
+    # "catalog.read").
     allowed_reasons contains "service-ledger-read" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
-    	some verb in {"list", "read"}
-    	endswith(input.action, sprintf(".%v", [verb]))
+    	input.action in {"ledger.list", "ledger.read"}
     }
 
     # ── ledger.close.inspect: the frozen statutory trial balance (ADR-0337, #12496) ─────────────
