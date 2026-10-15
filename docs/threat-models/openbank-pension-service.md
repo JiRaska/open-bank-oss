@@ -315,3 +315,19 @@ service-account `preferred_username`. A matching display principal alone grants 
 foreign-client, missing-subject and non-JWT identities are rejected before transfer writes.
 Participant SCA consent remains required before funds can move. Rollback of this guard
 restores username-only authentication and must not precede an equivalent replacement.
+
+
+## Tax-reporting read-model ingress declaration
+
+The tax-reporting deployment declares this provider's HTTPS Service URL on port 8443.
+NetworkPolicy generation therefore adds the `tax-reporting` namespace to this provider's
+ingress allow-list. Namespace admission only permits transport: the caller still needs
+valid bearer authentication, the provider's OPA decision and existing business read
+permissions. It does not authorize filing, settlement or participant writes.
+
+The caller declares a read-only `tax-reporting-internal-tls` Secret mount and an
+`internal-authority` client TLS bucket with private-CA trust and hostname verification.
+These declarations do not establish issued certificates, a serving provider listener,
+client-certificate enforcement in the built image or a successful live handshake.
+Verify those prerequisites before deployment. Rollback removes the caller URL and
+regenerates ingress policy together; do not leave an unnecessary namespace grant.
