@@ -13,6 +13,7 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.it.PostgresTestResource
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
@@ -24,57 +25,72 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.security.Principal
 
 /**
- * Broker-sourced twin of [PensionFundPactFolderProviderVerificationTest]: runs on main-push (the PR
- * lane has no broker, ADR-0056) and publishes the verification result `can-i-deploy` reads (#7621).
- * Same states via [PensionFundPactStates]; the missing-identity interaction (recorded 401) runs with the test
- * identity cleared.
+ * Broker twin of [PensionFundPactFolderProviderVerificationTest]: runs on main-push only (gated on
+ * `pactbroker.url`, which the PR lane blanks — ADR-0056) and PUBLISHES the verification result
+ * `can-i-deploy` reads; the folder class cannot. The broker serves every consumer's pact, so every
+ * state the folder twin and the negative twin handle is handled here too, or the replay fails with
+ * MissingStateChangeMethod and publishes a failure that blocks pension-service deploys.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
+@TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
 @Provider("openbank-pension-fund-service")
-@PactBroker(enablePendingPacts = "true")
-@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
+@PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class PensionFundPactBrokerProviderVerificationTest {
 
-    @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
-    lateinit var testPort: String
+    @Inject
+    lateinit var vertx: Vertx
 
     @Inject
     lateinit var store: PensionFundStore
 
-    @Inject
-    lateinit var vertx: Vertx
+    @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
+    lateinit var testPort: String
 
     @Inject
     lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
-        if (context == null) return
-        context.target = HttpTestTarget("localhost", testPort.toInt())
-        context.addStateChangeHandlers(this)
+        context?.target = HttpTestTarget("localhost", testPort.toInt())
+        context?.addStateChangeHandlers(this)
     }
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        if (context != null &&
-            context.interaction.providerStates.any { it.name == PensionFundPactStates.NEGATIVE_AUTH_STATE }
-        ) {
+        // The missing-identity interactions expect 401; class-level @TestSecurity would otherwise
+        // authenticate them.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
         }
         context?.verifyInteraction()
     }
 
-    @State(PensionFundPactStates.FUND_STATE)
-    fun fundWithSeptemberNav() = PensionFundPactStates.fundWithSeptemberNav(vertx, store)
-
-    @State(PensionFundPactStates.NEGATIVE_AUTH_STATE)
-    fun noValidM2mIdentity() {
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
         // verifyPacts clears the authenticated test identity for this interaction.
     }
+
+    @State(TaxReportingPensionFundPactStates.FUND_STATE)
+    fun fundWithSeptemberNav() {
+        testIdentityAssociation.setTestIdentity(
+            QuarkusSecurityIdentity.builder()
+                .setPrincipal(Principal { "service-account-openbank-tax-reporting" })
+                .addRole("ROLE_API")
+                .build(),
+        )
+        TaxReportingPensionFundPactStates.fundWithSeptemberNav(vertx, store)
+    }
+
+    @State(PRICED_STATE)
+    fun pricedHoldings(): Unit = PensionFundPactStates.pricedHoldings()
+
+    @State(UNPUBLISHED_STATE)
+    fun unpublishedNavHoldings(): Unit = PensionFundPactStates.unpublishedNavHoldings()
 }

@@ -8,6 +8,7 @@ package com.openbank.govaudit.infrastructure.config
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
+import java.util.Optional
 
 @ConfigMapping(prefix = "openbank.governance-auditor")
 @ApplicationScoped
@@ -42,15 +43,29 @@ interface GovernanceAuditorConfig {
     @WithDefault("deepseek-ai/DeepSeek-V3.2")
     fun modelId(): String
 
-    // Mirrors rules.yaml `review.default_approvals` / `review.money_path_approvals` until the
-    // live-parsing follow-up lands (GovernanceRulesReadAdapter).
+    /**
+     * Live rules.yaml source, ADR-0164 (GovernanceRulesReadAdapter): a document mounted at this
+     * path wins over [rulesYamlUrl]; when neither source is reachable the config mirror below is
+     * used and the divergence is logged. Empty/absent disables the file source — an empty String
+     * is NOT an option here: SmallRye answers SRCFG00040 on an empty-string bind.
+     */
+    fun rulesYamlPath(): Optional<String>
+
+    /** Raw rules.yaml URL (e.g. raw.githubusercontent.com on main). Empty/absent disables HTTP. */
+    @WithDefault("https://raw.githubusercontent.com/JiRaska/open-bank-oss/main/openbank-libs/governance/rules.yaml")
+    fun rulesYamlUrl(): Optional<String>
+
+    // Fallback mirror of rules.yaml `review.default_approvals` / `review.money_path_approvals`,
+    // used only when neither live source above is reachable (GovernanceRulesReadAdapter logs the
+    // fallback and any divergence at WARN).
     @WithDefault("1")
     fun defaultApprovals(): Int
 
     @WithDefault("2")
     fun moneyPathApprovals(): Int
 
-    // Mirrors rules.yaml `money_path_services`, `openbank-` prefix included, comma-separated.
+    // Fallback mirror of rules.yaml `money_path_services`, `openbank-` prefix included,
+    // comma-separated — same fallback-and-divergence contract as the approvals above.
     @WithDefault(
         "openbank-ledger-service,openbank-transaction-service,openbank-account-service," +
             "openbank-balance-service,openbank-sepa-payment,openbank-sepa-instant," +

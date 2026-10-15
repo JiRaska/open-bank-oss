@@ -32,6 +32,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_vop}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_vop}
   hibernate-orm:
@@ -64,9 +67,13 @@ quarkus:
     # swap, so no environment ever ran a working pair — see payments-services.yaml.
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     party-service:
       url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S
@@ -109,6 +116,9 @@ quarkus:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_vop_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_vop_it
     management:
