@@ -180,7 +180,9 @@ jobs:
              agent-service to carry this PR's code; a 404 means deploy drift, not "no
              records".
 
-          This issue is closed automatically by the next clean run.
+          Keep this issue open until every referenced failed merge has been
+          backfilled and its merge record verified. A later successful run does
+          not repair an earlier gap.
           EOF
           existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
           if [ -n "$existing" ]; then
@@ -188,28 +190,4 @@ jobs:
           else
             gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/body.md" \
               --label governance
-          fi
-
-  close-issue:
-    name: Close the tracking issue on a clean run
-    needs: record
-    if: ${{ success() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-    steps:
-      - name: Close it if one is open
-        run: |
-          set -euo pipefail
-          TITLE="record-agent-merge failed — merge-record evidence gap (ADR-0031 phase 3)"
-          existing=$(gh issue list -R "${GITHUB_REPOSITORY}" --state open --search "$TITLE in:title" \
-            --json number --jq '.[0].number' || true)
-          if [ -n "$existing" ]; then
-            gh issue close "$existing" -R "${GITHUB_REPOSITORY}" \
-              --comment "record-agent-merge ran clean: ${RUN_URL}. The merge-record evidence chain is unbroken again."
           fi

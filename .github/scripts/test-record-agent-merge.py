@@ -380,16 +380,19 @@ class WorkflowWiringTest(unittest.TestCase):
         # accessTokenLifespan would kill it minutes after provisioning.
         self.assertNotIn('AGENT_MERGE_RECORDER_TOKEN', json.dumps(workflow))
 
-    def test_failure_opens_and_clean_run_closes_the_tracking_issue(self):
+    def test_failure_tracking_requires_verified_backfill_before_closure(self):
         workflow = yaml.safe_load(
             (Path(__file__).parents[1] / 'workflows/record-agent-merge.yml').read_text())
         raise_issue = workflow['jobs']['raise-issue']
         self.assertEqual(raise_issue['permissions']['issues'], 'write')
         self.assertIn('failure()', raise_issue['if'])
         self.assertIn('gh issue create', yaml.safe_dump(raise_issue))
-        close_issue = workflow['jobs']['close-issue']
-        self.assertIn('success()', close_issue['if'])
-        self.assertIn('gh issue close', yaml.safe_dump(close_issue))
+        self.assertEqual(raise_issue['env']['GH_REPO'], '${{ github.repository }}')
+        self.assertIn('gh issue comment', yaml.safe_dump(raise_issue))
+        self.assertNotIn('close-issue', workflow['jobs'])
+        self.assertNotIn('gh issue close', yaml.safe_dump(workflow['jobs']))
+        self.assertIn('backfilled and its merge record verified', yaml.safe_dump(raise_issue))
+
 
 
 if __name__ == '__main__':
