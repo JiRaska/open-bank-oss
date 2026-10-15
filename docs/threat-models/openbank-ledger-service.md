@@ -7,12 +7,17 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 STRIDE/DFD threat model for the general-ledger bounded context, per ADR-0030 D2.
 Money-path service. Reviewed in PR; referenced from ADR-0039.
 
-- **Status:** Draft (lightweight, first pass for Phase B)
-- **Last reviewed:** 2026-05-31
+- **Status:** Full — STRIDE/DFD (ADR-0030 D2), money-path
+- **Last reviewed:** 2026-10-15
 - **Owner:** ledger CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0017 (Vault), ADR-0018 (OPA authz),
-  ADR-0039 (ledger as golden source, balance as projection),
-  ADR-0050 (regulatory-grade outbox dispatch — N1–N5)
+  ADR-0030 (money-path controls), ADR-0031 (AI-agent governance — phase 4 full review),
+  ADR-0034 (OPA enforce mode), ADR-0039 (ledger as golden source, balance as projection),
+  ADR-0050 (regulatory-grade outbox dispatch — N1–N5),
+  ADR-0104 (shared M2M client), ADR-0155 (four-eyes), ADR-0207 (accounting-day authority),
+  ADR-0252 (synthetic taint), ADR-0281 (net-settlement ledger leg),
+  ADR-0314 (risk-engine reads), ADR-0315 (treasury journals),
+  ADR-0329 (outbox SENT retention), ADR-0337 (pension `close.inspect` audience)
 
 ## 1. Scope & assets
 
@@ -33,29 +38,157 @@ Assets protected, in priority order:
 6. **Frozen period evidence** — line-level statutory source for FINREP/COREP; V22 historical
    close hashes remain evidence anchors but do not contain reproducible lines.
 
-## 2. Data-flow diagram (textual)
+Balances everywhere else in the platform (balance-service, finrep, risk snapshots,
+customer views) are **projections** of this journal (ADR-0039) — they hold no independent
+write path into the book of record; every correction flows through `postJournal` /
+`reverseJournal` and the close-cycle controls below.
+
+
+## 2. Data flow (DFD)
 
 ```
-                     ┌────────────────────── trust boundary: ledger-service ─────────────────────┐
- [Operator / svc]    │                                                                            │
- ROLE_OPERATOR  ──1──┼─▶ REST (LedgerResource)  ──▶  LedgerService (use case)  ──▶  domain model  │
-   JWT (Keycloak)    │      @RolesAllowed             validateBalance()             JournalEntry   │
-                     │      (reads role-gated)        loadAndValidateGlAccounts()   .reverse()     │
-                     │           │                          │                                      │
- [Reader / svc] ──2──┼─▶ GET journals / trial-balance       ▼                                      │
-   JWT @RolesAllowed │                              PanacheJournalRepository ──▶ [Postgres]  ──3── │
-                     │                                       │                   journal_entries   │
-                     │                                       ▼                   journal_lines     │
-                     │            ledger_outbox (same tx) ──▶ dispatcher ──▶ [Kafka] ──4──         │
-                     │            key=aggregate_id, hdr ce-id/idempotency-key=event.id (ADR-0050)  │
-                     └────────────────────────────────────────────────────────────────────────────┘
-```
+                 ┌────────────────────────────────────────────────────────────────────────────┐
+                 │                                                                          │  
+ M2M writers     │                                                                          │  
+ (OIDC client-   │                                                                          │  
+  credentials    │                                                                          │  
+  JWT; mTLS on   │                                                                          │  
+  8443, plain    │                                                                          │  
+  8101 legacy):  │                                                                          │  
+ • transaction   own id: create+reverse      (8101/8443)                                    │  
+ • lending       own id: create; shared client: create (8101)                               │  
+ • settlement    own id: create+read; shared: create (8101)                                 │  
+ • interest      own id: create (8443)                                                      │  
+ • clearing      own id: create (8443, ADR-0281)                                            │  
+ • treasury      own id: create; own id: list+read (8443, ADR-0315)                         │  
+ • shared        balance/billing/finrep/risk reads; tx posts+reverses,                      │  
+   openbank-     lending/settlement posts (8101/8443)                                       │  
+   services      (ADR-0104 — OPA sees ONE principal for all shared callers)                 │  
+      │ ──(1)──  │                                                                          │  
+ Operator        │                                                                          │  
+ (Keycloak JWT,  │                                                                          │  
+  ROLE_OPERATOR/ │                                                                          │  
+  ADMIN/VIEWER/  │                                                                          │  
+  AUDITOR via    │                                                                          │  
+  admin-ui) ─────┼─▶ REST :8101 / :8443 ──▶ 7 resources (§3 matrix) ──▶ use cases            │ 
+                 │     @RolesAllowed + @Authorize ──▶ OPA sidecar :8181                     │  
+                 │     (AUTHZ_ENFORCE=true, deny-by-default, 403 deny / 503 outage)          │ 
+                 │                          │                                                │ 
+                 │                          ▼                                                │ 
+                 │   domain model (ADR-0002 — zero framework imports):                       │ 
+                 │   validateBalance · GL + deposit-control validation · period/day locks     │
+                 │                          │                                                │ 
+                 │                          ▼                                     ──(3)──   │  
+                 │   [Postgres] journal_entries / journal_lines (synthetic col, V24/V27),    │ 
+                 │   accounting_day, year_close, closed_period{,_trial_balance_lines},       │ 
+                 │   tie_out_runs, ledger_outbox, gl_account                                 │ 
+                 │      │                                              ▲                     │ 
+                 │      │ outbox row in the SAME tx as the posting     │ ClusterLock          │
+                 │      ▼                                              │ (Postgres advisory   │
+                 │   dispatcher: FOR UPDATE SKIP LOCKED claim,         │  lock, single pod)   │
+                 │   bounded retries → terminal DEAD + alert           │                      │
+                 │      │                                              │                      │
+                 │      ▼ ──(4)──                                     │                      │ 
+                 │   [Kafka] openbank.ledger.journal.posted            │                      │
+                 │   (mTLS + KafkaUser ACLs, key=aggregate_id,         │                      │
+                 │    ce-id=event.id, sourceService=ledger-service)    │                      │
+                 │      │──▶ audit / balance / context-service        │                      │ 
+                 │      ▼                                            │                      │  
+ Readers (GET,   │                                                                          │  
+ role-gated, §3):│                                                                          │  
+ finrep · risk · ┼─▶ trial-balance / journals / frozen routes / tie-out                     │  
+ balance · billing                                                                          │  
+                 │   [Redis approval:* TTL 86400s] ◀── GET/PATCH                            │  
+                 │        ▲ ──(5)── /api/v1/journals/approvals[/{id}]  NEW trust boundary   │  
+                 │        │    (§4a; in-namespace Redis, no AUTH)                            │ 
+                 │                                                                          │  
+                 │   schedulers (all `suspend fun`, ClusterLock-governed, posting as fixed    │
+                 │   SYSTEM_USER …005900 under the same day/period locks):                   │ 
+                 │   • accounting-day auto-open  0 */15 * * * ?                              │ 
+                 │   • FX revaluation            15:00 Europe/Prague                         │ 
+                 │   • tie-out                     06:00  + freshness watchdog               │ 
+                 │   • partition maintainer        24h                                     │   
+                 │   • outbox dispatcher           every 5s (replicas: 1, in-JVM SKIP)       │ 
+                 │   • SENT retention              nightly (ADR-0329)                        │ 
+                 │        │                                                                 │  
+                 │        ▼                                                                 │  
+                 │   [fx-service] ◀── OIDC client-credentials ──(6)── NEW outbound edge:     │ 
+                 │        CnbFixing(rate, validFrom); SyntheticTaintClientFilter propagates   │
+                 │        the taint (ADR-0252)                                                │
+                 └──────────────────────────────────────────────────────────────────────────┘  
+                 └────────────────────────────────────────────────────────────────────────────┘
 
-Trust boundaries crossed: (1) external caller → REST; (3) service → Postgres; (4) service → Kafka.
-Domain layer has **zero** framework imports (ADR-0002), so business invariants are unit-testable in
-isolation from transport/persistence.
+Trust boundaries crossed: **(1)** caller → REST — OIDC bearer JWT (Keycloak); on 8443 a
+private-CA client certificate is additionally required, but it is **transport-only**:
+`client-auth: required` is baked into the image at build time (#12511 correction) and
+`%prod` restricts `/api/*` to `auth-mechanism: bearer`, so a certificate alone never yields
+a `SecurityIdentity`. **(2)** REST → OPA sidecar (localhost:8181). **(3)** service →
+Postgres — credentials Vault-projected (ADR-0017), migrations forward-only Flyway.
+**(4)** service → Kafka — mTLS with KafkaUser ACLs on the per-service topic. **(5)**
+service → Redis — NEW (ADR-0155); in-namespace, no AUTH, holds only TTL-bounded approval
+records. **(6)** service → fx-service — OIDC client-credentials, cluster-internal; carries
+the synthetic taint. NetworkPolicy ingress (generated, `gen-network-policies.py`):
+same-namespace plus 11 caller namespaces (balances, billing, finrep, interest, lending,
+payments, platform, risk, security-scanner, treasury, admin-ui) on 8101/8443, and
+observability + security-scanner on 8085 (metrics). The only unauthenticated surface is
+`/q/health/ready` (cluster probe). The domain layer has **zero** framework imports
+(ADR-0002), so business invariants are unit-testable in isolation from
+transport/persistence.
 
-## 3. STRIDE analysis
+## 3. Authn/Authz
+
+**Authn.** Every `/api/*` route requires an OIDC bearer JWT (`quarkus-oidc`, Keycloak) — no
+endpoint is `@PermitAll` (locked by `LedgerSecurityContractTest`). The 8443 listener adds a
+required private-CA client certificate (TLS 1.3), transport-only per boundary (1) above.
+Schedulers carry no token: they act in-process as the fixed `SYSTEM_USER` principal under
+ClusterLock, and their writes pass the same day/period locks as any other posting.
+
+**Authz.** Two independent gates per endpoint: `@RolesAllowed` (RBAC, first) and `@Authorize`
+→ OPA sidecar (`data.openbank.rest.allow`, **deny-by-default**: 403 on deny, 503 fail-closed
+on sidecar outage). `AUTHZ_ENFORCE=true` in gitops (ADR-0034 Phase 5). Policy = base
+`rest.rego` (matrix-allows from `rules.yaml: authz.role_action_matrix` — service-accounts
+excluded since #11480; `operator-read-any`/`compliance-read-any` for staff) + per-service
+`ledger_rest_ext.rego`: identity-gated `service-*` grants (one action per rule, gated on
+`principal.id` because `principal.type == "SERVICE"` is structurally unreachable — PR #403),
+operator rules excluding every `service-account-*` (#3765), and a `prohibited` clause vetoing
+the customer-edge principal on all six write actions at the allow head. Four-eyes:
+`authz.four-eyes.enforce=false` — the ADR-0155 mechanism is wired but advisory (§4a).
+
+Read roles below = `ROLE_API, ROLE_AUDITOR, ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN`.
+"staff read rules" = base `operator-read-any` (OPERATOR/ADMIN) + `compliance-read-any`
+(COMPLIANCE) + `viewer-auditor-ledger-read` (VIEWER/AUDITOR) + `service-ledger-read` (shared
+client) — all HUMAN-type, `.read`/`.list` verbs only.
+
+| # | Resource | Endpoint | `@RolesAllowed` | OPA action | Allow reasons |
+|---|----------|----------|-----------------|------------|---------------|
+| AD1 | AccountingDayResource | `GET /api/v1/ledger/accounting-days/current` · `GET /` · `GET /{businessDate}` | read roles | `ledger.read` | staff read rules |
+| AD2 | | `POST /{businessDate}` (open day) | OPERATOR | `ledger.create` | `operator-ledger-write` |
+| AD3 | | `POST /{businessDate}/transitions/{to}` | OPERATOR | `ledger.approve` | `operator-year-close-attest` |
+| CP1 | ClosedPeriodResource | `GET /api/v1/ledger/periods` · `GET /{type}/{date}` · `…/trial-balance` · `…/closing-balance` · `…/frozen-closing-balance` · `…/frozen-year-to-date-trial-balance` · `…/year-to-date-trial-balance` · `…/verify` | read roles | `ledger.read` | staff read rules |
+| CP2 | | `GET /{type}/{date}/frozen-trial-balance` | read roles | `ledger.close.inspect` | `ledger-close-inspect-read`, `service-ledger-close-inspect` (ADR-0337) |
+| CP3 | | `POST /{type}/{date}` (close draft) | OPERATOR | `ledger.close.draft` | `operator-ledger-close-draft` |
+| CP4 | | `POST /{type}/{date}/freeze` | OPERATOR | `ledger.approve` | `operator-year-close-attest` |
+| YC1 | YearCloseResource | `GET /api/v1/ledger/close/trial-balance` · `GET /{fiscalYear}` · `GET /{fiscalYear}/verify` | read roles | `ledger.read` | staff read rules |
+| YC2 | | `POST /{fiscalYear}` (close draft) | OPERATOR | `ledger.close.draft` | `operator-ledger-close-draft` |
+| YC3 | | `POST /{fiscalYear}/attest` | OPERATOR | `ledger.approve` | `operator-year-close-attest` |
+| FX1 | FxRevaluationResource | `POST /api/v1/ledger/fx-revaluation` | OPERATOR | `ledger.trigger` | `operator-ledger-write` (+ base `matrix-allows`, staff-only since #11480 — E4) |
+| JR1 | LedgerResource | `GET /api/v1/journals` (`ledger.list`) · `GET /trial-balance` · `GET /accounts/{code}/balance` · `GET /sub-ledger-balances` · `GET /{journalId}` · `GET /transaction/{transactionId}` | read roles | `ledger.list` / `ledger.read` | staff read rules, `service-settlement-ledger-post` (read), `service-treasury-ledger-read` |
+| JR2 | | `POST /` (post journal) | API, OPERATOR | `ledger.create` | `operator-ledger-write` + `service-ledger-post` (shared) + `service-interest-ledger-post` + `service-lending-ledger-post` + `service-clearing-ledger-post` + `service-transaction-ledger-write` + `service-settlement-ledger-post` + `service-treasury-ledger-post` |
+| JR3 | | `POST /{journalId}/reverse` | API, OPERATOR | `ledger.reverse` | `operator-ledger-write` + `service-ledger-reverse` (shared) + `service-transaction-ledger-write` |
+| JR4 | | `POST /replay-booked-changes` | OPERATOR, ADMIN | `ledger.replay` | `operator-ledger-write` (+ base `matrix-allows`, staff-only since #11480 — E4) |
+| AP1 | ApprovalResource | `GET /api/v1/journals/approvals` | OPERATOR, ADMIN | `ledger.approval.read` | `operator-read-any` (staff) |
+| AP2 | | `PATCH /{id}` (checker decide) | OPERATOR, ADMIN | `ledger.approval.decide` | **none** — action missing from `role_action_matrix`; endpoint deny-by-defaults to 403 (§5) |
+| CA1 | ControlAccountResource | `GET /api/v1/control-accounts/{controlAccountId}/tie-out` | API, AUDITOR, OPERATOR, ADMIN (no VIEWER) | `ledger.read` | staff read rules (`viewer-auditor-ledger-read` admits AUDITOR) |
+
+RBAC/OPA overlap notes: `postJournal`/`reverseJournal` admit `ROLE_API` at the RBAC layer
+solely so the per-service machine identities (#10486) can reach OPA; for every other
+`ROLE_API` holder OPA is the whole control and identity-gated denies apply (each
+`service-*` rule is that principal's entire grant — measured with `opa test`, see change
+log 2026-09-21). `ledger.close.inspect` is deliberately not a read/list verb, so no base
+`*-read-any` rule reaches it and every holder is named (ADR-0337). The §4a approval rows are
+the four-eyes supplement; the matrix row AP2 gap is recorded in §5.
+
+## 4. STRIDE analysis
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
 |---|---------|-----------------|------------|----------|
@@ -69,12 +202,68 @@ isolation from transport/persistence.
 | D1 | Posting path | **DoS** — flood of postings / expensive trial-balance scans | Cursor pagination on journals; partial index on `(sub_account_id, base_currency)`; reactive non-blocking stack; per-service resource limits (k8s) | Rate-limiting at gateway — infra scope |
 | D2 | Outbox relay | **DoS** — a poison outbox row retried forever starves the dispatch batch | **Bounded retries → terminal `DEAD` + operator alert** (ADR-0050 N5); `concurrentExecution=SKIP`; sequential per-aggregate dispatch | `FOR UPDATE SKIP LOCKED` claim for multi-writer — *planned* |
 | E1 | Roles | **Elevation** — reader triggers a posting | Mutations gated by `ROLE_OPERATOR`; read roles exclude write capability; no posting logic on read endpoints; **OPA enforce mode is now ON (ADR-0034 Phase 5)** — a call with no matching `allowed_reasons` (e.g. a compliance/viewer role attempting `ledger.create`) is 403'd by `data.openbank.rest.allow`'s default-deny, in addition to the `@RolesAllowed` outer gate | Two independent gates (RBAC + OPA) both currently key off the SAME role set (`ROLE_OPERATOR`/`ROLE_ADMIN`) — OPA does not yet add attribute-based conditions (e.g. tenant/value-band) beyond role membership for ledger writes — *open* |
-| E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
+| E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4b) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
 | E3 | Close DRAFT / maker evidence | **Elevation** — an M2M journal writer creates the close DRAFT and is recorded as its maker | Close creation uses the dedicated `ledger.close.draft` action and `operator-ledger-close-draft` OPA reason, which requires operator/admin and excludes every `service-account-*` identity. Routine M2M posting remains narrowly allowed only on `ledger.create`; it cannot manufacture maker evidence. Regression tests cover both the shared service account denial and the staff operator allow decision | Low — RBAC plus the identity-aware OPA rule gate the maker action; freeze independently requires a distinct human checker |
 | T4 | Outbox/Kafka | **Tampering** — downstream consumes a non-emitted, reordered or duplicated event | Transactional outbox (single DB tx with the posting); dispatch runs on the Vert.x event loop so it actually drains (ADR-0050 N1, was `HR000068`); **deterministic Kafka key = `aggregate_id`** preserves per-account order (N2); **`event.id` carried as `ce-id`/`idempotency-key` header** for consumer dedup (N3); idempotency key on posting dedupes retries | Schema-compat on event change (advisory gate); signed event provenance — *planned* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — ledger's `OIDC_CLIENT_SECRET` is projected from the **shared** Vault key `account-service` (all services reuse the single `openbank-services` Keycloak confidential client, see `gitops/components/ledger/oidc-externalsecret.yaml`). Compromise of that one Vault key would let an attacker mint bearer tokens accepted by **both** account-service and the ledger money path — a single secret is a single point of forgery across services. | Secret is Vault-projected (never in git/state); ExternalSecret `deletionPolicy: Retain`; the Keycloak client is **confidential** (not public), so the secret alone is required and it is access-controlled in Vault; `reverseJournal` additionally requires `ROLE_OPERATOR` (S1/E1). **Since #10486 step 1 this is no longer true of `postJournal`**, which admits `ROLE_API` so a per-service identity can post; a forged shared-client token (`ROLE_API`) is then stopped only by OPA's identity rules, and `service-ledger-post` DOES admit the shared principal — so for `ledger.create` the operator-role claim is no longer a second control (it never was in the live realm, where the shared account holds `ROLE_OPERATOR`, #10486). | **Shared-credential blast radius is accepted for sandbox only.** Tightening = a dedicated Vault path + per-service Keycloak client for ledger (planned, §5). **Production go-live requires the second money-path approver to explicitly sign off this residual** (ADR-0030). — *open* |
+| S3 | 8443 mTLS listener | **Spoofing** — a fleet-CA client certificate presented as a login | `client-auth: required` is a **build-time** property baked into the image via `application.yaml` (the env-only declaration silently did nothing, #12511 correction); and `%prod` restricts `/api/*` to `auth-mechanism: bearer`, so the certificate authenticates the transport only — no `SecurityIdentity` from a cert alone (measured: 403-not-401 before the fix; `LedgerListenerAuthParityIT` + fleet gate `mtls-bearer-only`) | Low — cert≠identity by configuration, parity with the plain port verified by IT |
+| S4 | Schedulers (SYSTEM_USER) | **Spoofing** — a second pod (or a scale-out replica) double-runs a scheduled money action (FX revaluation, tie-out, accounting-day open) | All schedulers are `suspend fun` (proper Vert.x context, #2148) wrapped in `ClusterLock.tryRunExclusively` (Postgres transaction-scoped advisory lock) so exactly one pod executes per tick; scheduler journals post as the fixed `SYSTEM_USER` (UUID `…005900`) under the same day/period locks and balance validation as any other posting; cron expressions are config-driven so an IT drives the real trigger | Low — replicas: 1 is enforced anyway by the single-writer outbox invariant; ClusterLock is the multi-replica backstop, not the primary |
+| T5 | Frozen-period evidence | **Tampering** — UPDATE/DELETE of persisted `closed_period_trial_balance_lines` rewrites statutory evidence after the fact | V23 DB trigger `reject_closed_period_trial_balance_line_mutation` (`BEFORE UPDATE OR DELETE … RAISE EXCEPTION 'ledger_closed_period_trial_balance_line is immutable'`); FK `ON DELETE RESTRICT` on the parent `closed_period`; the freeze persists lines + FROZEN status flip + `PeriodFrozen` outbox row in one transaction; FROZEN reads serve those rows, never a mutable journal aggregate | Low — the evidence write is operator four-eyes-gated (§4c); the trigger holds against app and SQL access alike, a DB superuser excepted (§5 assumptions) |
+| T6 | Idempotency | **Tampering** — an idempotency key replayed with a **different body** returns the original posting (`findByIdempotencyKey` short-circuits without comparing bodies) | At-most-once per `(idempotencyKey, transactionId)` is guaranteed and replay is checked **before** the period lock (a replay of an open-year entry stays legal after attestation); the `Idempotent-Replayed: true` header (#10904) lets an honest caller distinguish a replay — the lending backfill (352 legs, 44 loans reported posted) is the documented harm case | **Open** — no request-fingerprint binding (cf. account-service `RequestFingerprints`/#10916); a caller that reuses its own key with a different body gets the original 201. Recorded in §5 |
+| T7 | Synthetic taint | **Tampering** — synthetic canary postings pollute regulatory aggregates, or a caller self-labels real money synthetic | `journal_entries.synthetic` column (V24/V27) set only from the server-side, filter-authenticated classification of `SyntheticTaintRequestFilter` (libs-runtime, **fail-closed** — a normal caller cannot label an event synthetic, and no header/JWT claim/MDC value is trusted); every aggregate (`trial-balance`, account-currency balance, frozen routes) defaults `scope=REAL_ONLY` (ADR-0252, `LedgerScope.parse`); the taint propagates over the fx-service edge via `SyntheticTaintClientFilter`; per-line filtering was rejected by design — excluding whole entries keeps debits=credits | Low — the default is the regulator-safe population; a wrong default would itself be a T-row and is pinned by tests |
+| T8 | FX revaluation posting | **Tampering** — a corrected ČNB fixing double-marks a position or loses a delta | Superseding-entry math is **carry-relative**: `movement = round(position × rate) − carryCzk`, where `carryCzk` is the counter-value account's cumulative trial balance to the business day — a correcting run reads its own predecessor and posts only the difference; the idempotency key carries a SHA-256 digest of the fixing set (`fx-reval-{date}-{digest}`), so a different fixing is a different key; the invariant "position after n postings equals the latest mark" is asserted arithmetically (25,145,000 + 355,000 = 25,500,000) | Low — no overwrite path exists (append-only, period lock); an interrupted run leaves the position stale, never marked at nothing; a fabricated fixing identity was rejected as worse than an honest inability |
+| R2 | Four-eyes evidence | **Repudiation** — approval records expire before they can serve as evidence | `PendingApproval` records live in Redis with **TTL 86400s** (ADR-0155): `decidedBy`/`decidedAt` are evidence for at most 24 h, not a permanent audit trail | **Open** — a durable-audit store would be needed for "who approved what, forever"; recorded in §5 |
+| I3 | Frozen trial balance | **Information disclosure** — attested statutory figures reach an unintended audience | `ledger.close.inspect` is its own action (ADR-0337): the audience is named explicitly in `ledger_rest_ext.rego` — staff with OPERATOR/ADMIN/VIEWER/AUDITOR (service-accounts excluded) plus the shared client (finrep); measured with `opa eval` on the regenerated bundle: ROLE_COMPLIANCE, settlement, treasury, edge and tax-reporting all DENY | Low — a filing service (pension deployment) can be granted exactly this action and no other read |
+| I4 | FX fixing age | **Information disclosure** — the age metric leaks position data | `openbank_fx_fixing_age_seconds{currency}` carries only an ISO-4217 currency label + age in seconds (ADR-0077 cardinality contract) — no amount, account or party; the metric's real job is detectability: nothing else compared a fixing's age to now, so a stale rate revalued silently within the date-blind `CNB_VALIDITY_DAYS = 3` bound (`FxFixingAgeAbsent` alert) | Low — within its 3-day validity a stale fixing still revalues silently; a correctness residual made visible, not closed, by the metric |
+| D3 | Accounting-day auto-open | **DoS** — the scheduler's day management wedges the posting calendar (a stuck CUTOFF day refuses postings once the lock enforces) | ADR-0207 shadow→enforce: `openbank.ledger.day-lock.mode` starts in **shadow**; flipping to `enforce` is a deliberate, evidence-backed step (stuck-CUTOFF visibility via tie-out verdicts + `AccountingDayScheduler` re-checks are a precondition of enforcement per the ADR's Consequences); the whole tick runs under ClusterLock; day-open is not-refusable for days predating the calendar so history cannot wedge | Residual — in enforce mode a stuck CUTOFF blocks postings **by design**; detection is the control, and it is what the shadow phase exists to prove |
+| D4 | Trial-balance reads | **DoS** — expensive aggregate scans (scope parameter, wide asOf) | `scope` adds a selective predicate rather than removing one; partial index on `(sub_account_id, base_currency)`; cursor pagination on journals; tie-out bounded to a single account by the `(account_id, entry_date)` index; reactive non-blocking stack; per-service k8s limits | Rate limiting at gateway — infra scope |
+| E4 | ledger.trigger / ledger.replay | **Elevation** — an M2M principal re-runs an FX revaluation or replays booked-change events | **Closed by #11480 (2026-09-29), kept as a regression-watch row.** Base `rest.rego`'s `matrix-allows` now excludes every `service-account-*` principal (verified in the generated `ledger-opa-bundle`), and `operator-ledger-write` excludes them too; no identity rule grants either action to any machine principal — both are staff-only, deny-by-default otherwise; the edge principal remains `prohibited` on both at the allow head. Pre-#11480 the shared client's realm `ROLE_OPERATOR` reached both actions via `matrix-allows` — that exposure is history, not mitigations | Low today; the watch is that the protection lives in the SHARED base policy — one base-policy edit re-opens it fleet-wide, and this service's own extension cannot veto base `matrix-allows` (monitor `rules.yaml`/rest.rego diffs) |
 
-## 4. Key invariants (must never regress)
+
+## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
+
+`POST /{journalId}/reverse` (`ledger.reverse`) is a money-path action OPA (`rest.rego`) can flag
+`four_eyes_required`. New endpoint `PATCH /api/v1/journals/approvals/{id}` lets a DIFFERENT
+operator decide the resulting `PendingApproval`; the maker retries `POST /{journalId}/reverse`
+with an `X-Approval-Id` header. **`authz.four-eyes.enforce` stays `false` in this PR** — the
+`ApprovalStore`/endpoint are wired (rollout tracked in issue #413, mirroring the sepa-payment
+pilot), but blocking is a deliberate follow-up flip, not bundled here (see ADR-0155).
+
+This is a NEW Redis dependency for ledger-service — previously ledger had no Redis surface at all
+(see §1/namespace note, now superseded). The `ApprovalStore` (`RedisApprovalStore`) is the only
+consumer; no Idempotency-Key dedup is added by this change.
+
+Note: ledger already has an independent, in-service four-eyes control on year-close attestation
+(`ledger.approve`, §4b Key invariants below — the attestor must differ from the draft author,
+enforced fail-closed in both the use case and the domain). The ADR-0155 mechanism here is a
+second, separate control specifically on **journal reversal** — a different action, gated through
+the shared `ApprovalStore`/`AuthorizeInterceptor` path (currently advisory, `enforce=false`).
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` + OPA `@Authorize(action="ledger.approval.decide")` on the decide endpoint |
+| **E**oP | The maker approves their own reversal request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
+| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different reversal | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **R**epudiation | No record of who approved a gated reversal | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see Residual risk below: not yet a permanent audit trail) |
+| **I**nfo disclosure | Approval id enumeration reveals journal/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
+| **D**oS | Flooding `POST /{journalId}/reverse` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/journals/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `Roles.OPERATOR`/`Roles.ADMIN` + `@Authorize(action = "ledger.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never journal line content or account balances, which stay behind the existing read-role gate (I1 above). Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
+
+**DFD update:** adds `Operator (checker) → GET /api/v1/journals/approvals → Redis (approval:*)`
+and `Operator (checker) → PATCH /api/v1/journals/approvals/{id} → Redis (approval:*)` alongside
+the existing `POST /{journalId}/reverse` edge; the maker's retry reuses the existing DFD edge.
+**Risk class:** integrity (segregation of duties, reversal) + confidentiality (approval record scope).
+**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
+change any existing request's outcome until explicitly flipped.
+
+**Residual risk:** four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent
+audit trail (ADR-0155) — a durable-audit requirement for "who approved what, forever" would need
+an additional store; not implemented in this PR. Also open (unchanged by this PR): S1 above (the
+`openbank-services` shared-credential blast radius) and E1 (RBAC + OPA both key off the same role
+set) apply equally to the new `ledger.approval.decide` action.
+
+
+## 4b. Key invariants (must never regress)
 
 - A `JournalEntry` cannot reach `POSTED` unless balanced per base currency.
 - `subAccountId` is permitted **only** on deposit-control legs (2100–2103).
@@ -118,8 +307,48 @@ isolation from transport/persistence.
   Capital is never plugged as assets minus liabilities; each movement is a balanced, attributable
   journal subject to normal posting, idempotency, period-lock and frozen-evidence controls.
 
-## 5. Open items / follow-ups
 
+## 4c. Close-cycle / frozen-period evidence — STRIDE supplement
+
+The close cycle (accounting-day transitions, period/fiscal-year DRAFT → ATTESTED/FROZEN) is
+where the ledger's integrity becomes *statutory*: the rows below cover what §4b states as
+invariants, from the attacker side. (Formerly: the §6 tie-out table of the draft, re-keyed
+CC6–CC9 so the IDs stay unique against §4.)
+
+| # | Threat (STRIDE) | Vector | Mitigation |
+|---|-----------------|--------|------------|
+| CC1 | **Tampering** | Frozen trial-balance lines rewritten after the freeze | T5: V23 trigger rejects UPDATE/DELETE; `ON DELETE RESTRICT`; freeze persists lines + FROZEN flip + `PeriodFrozen` outbox row in one transaction; FROZEN reads never touch a mutable aggregate |
+| CC2 | **Elevation** | Maker self-attests the statutory close (or a machine principal manufactures maker evidence) | Four-eyes **fail-closed in both layers** — `YearCloseService.attest` (409) and the domain `YearCloseRecord.attest` (defense-in-depth check); a **null** `draftedBy` (pre-four-eyes DRAFT) can never be attested — 409 "refresh it", never a silent bypass; close DRAFT creation is human-only (`operator-ledger-close-draft` excludes `service-account-*`, E3), and `ledger.approve` has no M2M grant at all |
+| CC3 | **Repudiation** | Attested content silently drifts after attestation | Period lock (#869): `requireOpenPeriod` refuses any posting/reversal into an ATTESTED year (409, reversal `entryDate` derived from the original it preserves); the read-only re-verify endpoint (`GET /close/{year}/verify`, and `…/periods/{type}/{date}/verify`) recomputes and hash-compares **without flipping state** — the detective control; legitimate idempotent replays stay legal because replay is checked before the period lock |
+| CC4 | **Information disclosure** | FINREP/COREP source computed from mutable data, or out of the intended window | FINREP F02.00 uses January→reporting month only; the frozen route requires every intervening monthly `LINES_V1` close, verifies each hash and reconciles gross legs against the calendar year's journal range — missing January fails even with no January postings; a mid-month frozen request is rejected before month normalization; the mutable January-to-date route is working-preview only and prior fiscal years cannot enter the submission source; COREP reads only explicit 6000–6060 EQUITY accounts — capital is never an assets-minus-liabilities plug (I3 governs the audience) |
+
+| # | Threat | Control |
+|---|--------|---------|
+| CC6 | **Information disclosure** — tie-out response contains per-currency GL aggregates | Endpoint requires `SERVICE`, `AUDITOR`, `OPERATOR`, or `ADMIN` role (no `VIEWER`, no unauthenticated). Role enforcement locked by `LedgerSecurityContractTest`. |
+| CC7 | **Enumeration** — caller probes UUIDs for non-existent control accounts | Empty list returned for unknown `controlAccountId`; no 404 distinguishable from zero-activity account — timing-safe. |
+| CC8 | **Denial of service via large `asOf` range** — `asOf` is a single date; the query is bounded to `entry_date <= :asOf` over a single control account | Query always scans a single account; index on `(account_id, entry_date)` (V7 migration) keeps cost proportional to account volume, not total ledger size. |
+| CC9 | **TieOutScheduler silent failure** — exception in one currency skips remaining currencies | Per-currency `try/catch` logs `ERROR` and continues; `openbank.subledger.tieout.break` is a counter (non-zero = alert), not suppressed by exceptions. |
+
+Tie-out endpoint (`GET /api/v1/control-accounts/{id}/tie-out`) — added in Phase B to
+make the scheduler's daily invariant queryable by auditors and ops; rows CC6–CC9 carried
+over verbatim from the draft's §6 (IDs re-keyed).
+
+## 5. Residual risks / assumptions
+
+- **`ledger.approval.decide` has no OPA allow reason (found by this full review,
+  2026-10-15):** the `PATCH /api/v1/journals/approvals/{id}` checker endpoint carries
+  `@Authorize("ledger.approval.decide")`, but that action is **absent from
+  `rules.yaml: authz.role_action_matrix`** — every sibling `*.approval.decide` (account,
+  balance, billing, clearingBatch, party, sanctions, sctInstPayment, sepaPayment, swift)
+  IS listed — and no identity rule in `ledger_rest_ext.rego` grants it, so in an
+  `AUTHZ_ENFORCE=true` environment the endpoint deny-by-defaults to **403 for every
+  operator**. Same shape as the sepa-instant gap documented and fixed on 2026-08-19
+  (`sctInstPayment.approval.decide`, issue #5679). **Fails closed** — no control is
+  bypassed (a denied checker halts the ceremony, never approves it) — and with
+  `authz.four-eyes.enforce=false` no request outcome depends on the endpoint today, so the
+  practical impact is that the §4a mechanism cannot complete under enforcement until the
+  matrix grant lands. Fix = add the matrix entry (restamps the fleet) + regenerate bundles;
+  tracked as a #12885 follow-up, deliberately not fixed in this docs-only PR.
 - ~~Read endpoints `@PermitAll`~~ — **closed (K7 / ADR-0018):** reads role-gated; declarative contract
   locked by `LedgerSecurityContractTest`.
 - ~~OPA fine-grained authz advisory-only~~ — **closed (ADR-0034 Phase 5, issue #266):** sidecar deployed,
@@ -136,13 +365,12 @@ isolation from transport/persistence.
   **Correction (#3765):** "no M2M grant" did not mean "not reachable by an M2M caller", and for
   `ledger.approve` it was measurably false — the role-only `operator-year-close-attest` rule
   admitted the shared and edge service-accounts, which carry `ROLE_OPERATOR` and are classified
-  `HUMAN`. That rule now excludes `service-account-*`. `ledger.trigger` and `ledger.replay` are
-  **still reachable** by any caller holding a `ROLE_OPERATOR` token, by TWO independent paths —
-  `operator-ledger-write` and base `rest.rego`'s `matrix-allows`, since `rules.yaml:
-  authz.role_action_matrix` grants both to `ROLE_OPERATOR`. Excluding service-accounts from
-  `operator-ledger-write` alone would close neither, because `matrix-allows` lives in base
-  `rest.rego` and no per-service extension can veto it. Tracked as the fleet decision on #3765,
-  not fixable here. Residual: OPA cannot
+  `HUMAN`. That rule now excludes `service-account-*`. `ledger.trigger` and `ledger.replay` were **reachable** by any caller holding a
+  `ROLE_OPERATOR` token, by TWO independent paths — `operator-ledger-write` and base
+  `rest.rego`'s `matrix-allows` — because no per-service extension can veto a base rule.
+  **Closed fleet-wide by #11480 (2026-09-29):** base `matrix-allows` now excludes every
+  `service-account-*` principal, so both actions are staff-only (verified against the
+  generated bundle; E4 above keeps the row as a regression watch). Residual: OPA cannot
   name WHICH of the four services sharing the `openbank-services` client is calling
   (fleet-wide principal-model limitation, not ledger-specific) — see PR body "Residual risk"
   for the accepted scope. Four-eyes
@@ -193,60 +421,27 @@ isolation from transport/persistence.
   same mechanism V10/V11/V12 already used).
 - Phase C: emit `AccountBookedChangedEvent` from ledger as the projection trigger (ADR-0039).
 
-## 6. Tie-out endpoint (`GET /api/v1/control-accounts/{id}/tie-out`)
+**Assumptions** (relied on as controls; outside the service's own scope):
 
-Added in Phase B to make the scheduler's daily invariant queryable by auditors and ops.
+- **Keycloak realm integrity** — role assignments and client classification are correct
+  (M2M tokens classify as HUMAN, PR #403; no realm client gains `ROLE_OPERATOR` unnoticed).
+  A realm granting `ROLE_OPERATOR` to a machine client would re-open the S1/E4 shapes no
+  in-service code can see.
+- **OPA bundle provenance** — the deployed bundle is generated from `rules.yaml` + the
+  checked-in rego sources (`gen-ledger-opa-bundle.sh`) and matches git; `opa test`/
+  `opa eval` evidence in this file is against the generated artifact.
+- **Vault (ADR-0017)** — DB credentials and the OIDC client secret are projected,
+  access-controlled and rotated out of band; `deletionPolicy: Retain` avoids disappearance,
+  not disclosure.
+- **Postgres admin/DBA** — T3: a database superuser bypasses every application control, and
+  the T5 trigger survives only until someone with DDL rights drops it; infra controls apply.
+- **Network policies as generated** — `gen-network-policies.py` output matches the deployed
+  caller set; a new caller namespace that is not regenerated is invisible to the allow-list
+  (fails closed at the network layer).
+- **fx-service / ČNB feed correctness** — the fixing (rate + `validFrom`) this service marks
+  positions from is accepted as published reference data; I4 records the residual.
 
-| # | Threat | Control |
-|---|--------|---------|
-| T5 | **Information disclosure** — tie-out response contains per-currency GL aggregates | Endpoint requires `SERVICE`, `AUDITOR`, `OPERATOR`, or `ADMIN` role (no `VIEWER`, no unauthenticated). Role enforcement locked by `LedgerSecurityContractTest`. |
-| T6 | **Enumeration** — caller probes UUIDs for non-existent control accounts | Empty list returned for unknown `controlAccountId`; no 404 distinguishable from zero-activity account — timing-safe. |
-| T7 | **Denial of service via large `asOf` range** — `asOf` is a single date; the query is bounded to `entry_date <= :asOf` over a single control account | Query always scans a single account; index on `(account_id, entry_date)` (V7 migration) keeps cost proportional to account volume, not total ledger size. |
-| T8 | **TieOutScheduler silent failure** — exception in one currency skips remaining currencies | Per-currency `try/catch` logs `ERROR` and continues; `openbank.subledger.tieout.break` is a counter (non-zero = alert), not suppressed by exceptions. |
-
-## 7. Four-eyes approval (ADR-0155) — STRIDE supplement
-
-`POST /{journalId}/reverse` (`ledger.reverse`) is a money-path action OPA (`rest.rego`) can flag
-`four_eyes_required`. New endpoint `PATCH /api/v1/journals/approvals/{id}` lets a DIFFERENT
-operator decide the resulting `PendingApproval`; the maker retries `POST /{journalId}/reverse`
-with an `X-Approval-Id` header. **`authz.four-eyes.enforce` stays `false` in this PR** — the
-`ApprovalStore`/endpoint are wired (rollout tracked in issue #413, mirroring the sepa-payment
-pilot), but blocking is a deliberate follow-up flip, not bundled here (see ADR-0155).
-
-This is a NEW Redis dependency for ledger-service — previously ledger had no Redis surface at all
-(see §1/namespace note, now superseded). The `ApprovalStore` (`RedisApprovalStore`) is the only
-consumer; no Idempotency-Key dedup is added by this change.
-
-Note: ledger already has an independent, in-service four-eyes control on year-close attestation
-(`ledger.approve`, §4 Key invariants above — the attestor must differ from the draft author,
-enforced fail-closed in both the use case and the domain). The ADR-0155 mechanism here is a
-second, separate control specifically on **journal reversal** — a different action, gated through
-the shared `ApprovalStore`/`AuthorizeInterceptor` path (currently advisory, `enforce=false`).
-
-| STRIDE | Threat | Mitigation |
-|---|---|---|
-| **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` + OPA `@Authorize(action="ledger.approval.decide")` on the decide endpoint |
-| **E**oP | The maker approves their own reversal request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
-| **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different reversal | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
-| **R**epudiation | No record of who approved a gated reversal | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see Residual risk below: not yet a permanent audit trail) |
-| **I**nfo disclosure | Approval id enumeration reveals journal/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
-| **D**oS | Flooding `POST /{journalId}/reverse` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
-| **I**nfo disclosure | (issue #5679) `GET /api/v1/journals/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `Roles.OPERATOR`/`Roles.ADMIN` + `@Authorize(action = "ledger.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never journal line content or account balances, which stay behind the existing read-role gate (I1 above). Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
-
-**DFD update:** adds `Operator (checker) → GET /api/v1/journals/approvals → Redis (approval:*)`
-and `Operator (checker) → PATCH /api/v1/journals/approvals/{id} → Redis (approval:*)` alongside
-the existing `POST /{journalId}/reverse` edge; the maker's retry reuses the existing DFD edge.
-**Risk class:** integrity (segregation of duties, reversal) + confidentiality (approval record scope).
-**Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
-change any existing request's outcome until explicitly flipped.
-
-**Residual risk:** four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent
-audit trail (ADR-0155) — a durable-audit requirement for "who approved what, forever" would need
-an additional store; not implemented in this PR. Also open (unchanged by this PR): S1 above (the
-`openbank-services` shared-credential blast radius) and E1 (RBAC + OPA both key off the same role
-set) apply equally to the new `ledger.approval.decide` action.
-
-## 8. Change log
+## 6. Change log
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `ledger_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
@@ -633,3 +828,25 @@ set) apply equally to the new `ledger.approval.decide` action.
   already sends its own bearer. Proven by `LedgerListenerAuthParityIT` (production listener shape, real
   HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
   Rollback: revert the commit (re-opens the path).
+
+- **2026-10-15** — **Draft → full STRIDE/DFD review (issue #12885, ADR-0031 phase 4
+  prerequisite).** Status flipped from "Draft (lightweight, first pass for Phase B)" to
+  **Full — STRIDE/DFD (ADR-0030 D2), money-path**; last-reviewed advanced to 2026-10-15.
+  Structure aligned to the fleet skeleton: §2 DFD redrawn with every current node
+  (per-service M2M identities alongside the shared client, the 8443 mTLS listener, the OPA
+  sidecar, the Redis approval boundary as a new trust boundary, the fx-service outbound
+  edge, ClusterLock-governed schedulers, the generated NetworkPolicy allow-list); new §3
+  Authn/Authz endpoint × role × OPA-action matrix (34 endpoints across 7 resources, verified
+  against source and the generated bundle); §4 STRIDE extended with S3–S4, T5–T8, R2, I3–I4,
+  D3–D4 and E4; the four-eyes supplement and key invariants are preserved verbatim as §4a/§4b
+  (re-keyed section references only); close-cycle/frozen-period evidence promoted to its own
+  STRIDE table (§4c, absorbing the draft's §6 tie-out table as CC6–CC9); open items rewritten
+  as §5 residual risks + explicit assumptions. Every prior change-log entry is preserved
+  unchanged above. **Finding recorded, not fixed (docs-only PR):** `ledger.approval.decide`
+  has no OPA allow reason — missing from `role_action_matrix`, no identity rule — so the
+  four-eyes decide endpoint fails closed (403) under `AUTHZ_ENFORCE=true`; same shape as the
+  sepa-instant 2026-08-19 fix; see §5. **Correction recorded:** the draft's §5 described
+  `ledger.trigger`/`ledger.replay` as still reachable via base `matrix-allows`; that hole was
+  closed fleet-wide by #11480 (2026-09-29) — §4 E4 and §5 now describe the closed state with
+  a regression watch. No code, policy, schema, privilege or trust-boundary change; rollback =
+  revert this commit.
