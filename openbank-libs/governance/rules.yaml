@@ -3940,7 +3940,8 @@ autonomous_agent_prs:
   # affects the CI-machinery / governance / authz / trust-chain clauses, which stay
   # unconditional. Per-ACCOUNT on purpose: a blanket branch-prefix allowance would put
   # every agent on the money path. No account carries an allowance today — the first
-  # (the fraud pilot agent) is gated on ADR-0340 two-person review merging first (#12885).
+  # (the fraud pilot agent) is gated on the recorded-two-person-review ADR merging
+  # first (branch agent/adr-0340-two-person-review, #12885).
   agent_accounts:
     - openbank-agent-bot[bot]
   # Deterministic automation. These legitimately touch money-path paths and their content is

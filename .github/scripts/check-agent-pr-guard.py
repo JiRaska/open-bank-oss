@@ -74,7 +74,8 @@
 #   it never touches the CI-machinery, governance, authz, or trust-chain clauses, which
 #   stay unconditional; a prefix-scoped PR whose author is not a declared account keeps
 #   today's fail-closed behavior on every protected path. This is phase-4 groundwork
-#   (#12885): no account carries an allowance until ADR-0340 two-person review merges.
+#   (#12885): no account carries an allowance until the recorded-two-person-review ADR
+#   (branch agent/adr-0340-two-person-review) merges.
 #
 # FALSIFIABILITY
 #   --self-test drives the classifier over fixtures with no network: every block reason must
