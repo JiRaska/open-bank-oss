@@ -14,6 +14,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 | [04 — Data](./04-data.md) | Data, analytika, DBA | Schéma, migrace, retence, PII pole |
 | [05 — Provoz](./05-operations.md) | DevOps, SRE, release inženýři | Build, deploy, runbooky, SLO |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | Mapování AMLD, GDPR, EBA, DORA |
+| [07 — Screeningu triggery](./07-screening-triggers.md) | Inženýři, DevOps, compliance | ADR-0256 událostmi řízená re-screening smyčka, trigger tabulka, kontrakt coordinatoru, rollout |
 
 ## TL;DR
 

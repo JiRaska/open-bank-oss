@@ -185,7 +185,7 @@ Topic: `openbank.domestic.payment.events` (Kafka, JSON, kanál `events-out`).
 | Typ události | Spouštěč | Payload (klíčová pole) |
 |---|---|---|
 | `domestic.payment.created` | `POST /domestic-payments` | paymentId, idempotencyKey, status, debtorAccountId, účet+banka plátce/příjemce, amount, currency, priority, endToEndId, occurredAt |
-| `domestic.payment.status-changed` | jakýkoliv perzistovaný přechod | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt |
+| `domestic.payment.status-changed` | jakýkoliv perzistovaný přechod | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt, settledAt (perzistovaný čas přechodu do SETTLED, do zúčtování null; není to čas vzniku události) |
 
 Události jsou **append-only**; opravy se dělají novou status-changed událostí, ne přepsáním.
 

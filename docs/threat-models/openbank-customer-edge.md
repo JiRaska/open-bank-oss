@@ -321,3 +321,9 @@ separate reviewed GitOps change may then set `BUSINESS_PAYMENT_BATCHES_ENABLED=t
 verify the enabled HTTP contract, company isolation, 404 for foreign IDs, and the app's business
 entry. Production enablement requires its own reviewed config change and observed rollout. On
 failure, set the flag back to false; retain stored drafts for reconciliation and retention review.
+
+### Audit upstream client identity
+
+The edge reaches audit-service on its required-mTLS 8443 listener. A dedicated `customer-edge-upstream-client-tls` Certificate has client-auth usage and is mounted read-only. The JDK upstream client obtains the named Quarkus `upstream` TLS context, verifies the private-CA server chain and retains normal hostname verification. It rejects trust-all configuration. The client certificate is transport identity; the request still carries the edge client-credentials bearer, and `audit.customerRead` remains restricted to `service-account-openbank-edge`.
+
+The named TLS bucket reloads certificate material hourly. A matching `CertificateUpdatedEvent` invalidates the captured JDK client context and gracefully shuts down the previous client; unrelated bucket events are ignored. Application shutdown also closes the transport. Real HTTPS tests require a client certificate, preserve the bearer token and verify that renewal cannot keep using a previously valid client identity when the new context lacks one.

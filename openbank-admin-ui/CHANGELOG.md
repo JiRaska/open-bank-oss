@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.0.0...admin-ui-v3.1.0) (2026-10-14)
+
+
+### Features
+
+* **campaign:** pin published MGM programme versions ([#12820](https://github.com/JiRaska/open-bank-oss/issues/12820)) ([b7d7d76](https://github.com/JiRaska/open-bank-oss/commit/b7d7d7614769915158e01febec715cfdbc8621c6))
+* **referral:** shareable referral link e2e + activate referral-service on sandbox ([#12813](https://github.com/JiRaska/open-bank-oss/issues/12813)) ([b2e006a](https://github.com/JiRaska/open-bank-oss/commit/b2e006aca9f2485e08599f5d782fbc86485a7270))
+
+## [3.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v2.0.0...admin-ui-v3.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
 ## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v1.0.0...admin-ui-v2.0.0) (2026-10-14)
 
 

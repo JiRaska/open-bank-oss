@@ -8,7 +8,12 @@ import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.libs.web.MDC_SYNTHETIC
 import io.opentelemetry.api.baggage.Baggage
 import io.quarkus.logging.Log
+import io.quarkus.tls.CertificateUpdatedEvent
+import io.quarkus.tls.TlsConfigurationRegistry
+import jakarta.annotation.PreDestroy
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
+import jakarta.inject.Inject
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -31,8 +36,8 @@ import javax.net.ssl.TrustManagerFactory
 /**
  * Singleton upstream proxy client (ADR-0065).
  *
- * One [HttpClient] instance shared for the application lifetime — shared connection
- * pool, no per-request thread/fd leak (review B1 fix). Explicit timeouts are set at
+ * A cached [HttpClient] shares its connection pool between requests. Certificate renewal
+ * replaces its TLS context and shuts down the old transport. Explicit timeouts are set at
  * the request level (B3 fix): connect timeout on the builder, per-request timeout
  * on [HttpRequest.Builder.timeout].
  *
@@ -78,12 +83,18 @@ class UpstreamClient {
     var clientSecret: String = ""
 
     /**
-     * Optional PEM CA certificate for the private HTTPS campaign validator. The edge currently
-     * uses HTTP for its other in-cluster calls, so an empty value keeps development fixtures on
-     * the platform default while GitOps mounts the private CA only in the deployed edge.
+     * Optional PEM CA certificate for trust-only development fixtures. Production selects
+     * the named upstream TLS bucket, which includes both the private CA and client identity.
+     * An empty fixture value retains the platform defaults.
      */
     @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file")
     lateinit var tlsTrustCertificateFile: Optional<String>
+
+    @ConfigProperty(name = "openbank.upstream.tls-configuration-name")
+    lateinit var tlsConfigurationName: Optional<String>
+
+    @Inject
+    lateinit var tlsRegistry: TlsConfigurationRegistry
 
     /**
      * Rejects [url] unless it targets Kubernetes Service DNS or loopback. The allowlist is a
@@ -131,18 +142,46 @@ class UpstreamClient {
     // token fetch and every upstream POST threw — surfacing to the app as 502
     // "upstream unavailable". HTTP/1.1 matches what the services actually speak.
     // Lazy so the (field-injected) connect timeout is available when it is first built.
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .connectTimeout(Duration.ofMillis(connectTimeoutMs))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .apply {
-                tlsTrustCertificateFile
-                    .filter { it.isNotBlank() }
+    @Volatile private var cachedHttp: HttpClient? = null
+
+    private val http: HttpClient
+        get() = cachedHttp ?: synchronized(this) {
+            cachedHttp ?: newHttpClient().also { cachedHttp = it }
+        }
+
+    /** Renewed named TLS material must also replace the JDK client's captured SSLContext. */
+    fun certificateUpdated(@Observes event: CertificateUpdatedEvent) {
+        if (tlsConfigurationName.orElse(null) != event.name()) return
+        closeTransport()
+    }
+
+    @PreDestroy
+    fun closeTransport() {
+        synchronized(this) {
+            val previous = cachedHttp
+            cachedHttp = null
+            previous?.shutdown()
+        }
+    }
+
+    private fun newHttpClient(): HttpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
+        .connectTimeout(Duration.ofMillis(connectTimeoutMs))
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .apply {
+            val name = tlsConfigurationName.filter { it.isNotBlank() }.orElse(null)
+            if (name != null) {
+                val configuration = tlsRegistry.get(name).orElseThrow {
+                    IllegalStateException("upstream TLS configuration is missing")
+                }
+                check(!configuration.isTrustAll) { "upstream TLS must verify the server certificate" }
+                sslContext(configuration.createSSLContext())
+            } else {
+                tlsTrustCertificateFile.filter { it.isNotBlank() }
                     .ifPresent { sslContext(trustContext(Path.of(it))) }
             }
-            .build()
-    }
+        }
+        .build()
 
     private fun trustContext(certificatePath: Path): SSLContext {
         val certificates = Files.newInputStream(certificatePath).use { input ->

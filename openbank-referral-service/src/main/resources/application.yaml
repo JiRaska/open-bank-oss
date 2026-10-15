@@ -14,6 +14,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_referral}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_referral}
   hibernate-orm:
@@ -45,6 +48,12 @@ openbank:
     dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s
+  referral:
+    # Base URL the shareable referral link is composed from (base + token) at invite issuance.
+    # Optional at the service: injected as Optional<String> with an in-code fallback to
+    # https://app.open-bank.tech/r/ — a ${VAR:} empty default would make it REQUIRED (SmallRye
+    # SRCFG00014), so the default is spelled out here and in ReferralService.
+    link-base-url: "https://app.open-bank.tech/r/"
 
 mp:
   messaging:
@@ -97,6 +106,9 @@ mp:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_referral_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_referral_it
     devservices:
