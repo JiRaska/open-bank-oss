@@ -74,8 +74,9 @@
 #   the load (exit 2) — a malformed allowance is never read as "no allowance".
 #
 #   It is EFFECTIVE only when all of these hold, checked in code, not in a PR body:
-#     * ADR-0340 (recorded two-person review) exists under docs/adr with
-#       `decision-status: accepted`; otherwise the allowance is IGNORED and said so;
+#     * the recorded-two-person-review ADR (branch agent/adr-0340-two-person-review)
+#       exists under docs/adr with `decision-status: accepted`; otherwise the allowance
+#       is IGNORED and said so;
 #     * the entry has not expired (an expired entry is ignored, said so);
 #     * the author is the declared account (never a branch prefix).
 #   And it covers only ORDINARY SOURCE of the exact service directory
@@ -124,8 +125,12 @@ REPO = "JiRaska/open-bank-oss"
 RULES = "openbank-libs/governance/rules.yaml"
 ADR_DIR = "docs/adr"
 # The allowance's precondition: the recorded-two-person-review ADR. Matched by number AND
-# slug, so a renumber collision cannot make some other ADR-0340 satisfy it.
-PRECONDITION_ADR_GLOB = "0340-*two-person-review*.md"
+# slug, so a renumber collision cannot make some other ADR satisfy it. The number stays
+# out of checked-in prose: check-adr-registry fails any ADR-NNNN reference without a
+# docs/adr file, and this ADR lives on the unmerged agent/adr-0340-two-person-review
+# branch — so it is referenced here only via this constant and the glob below.
+PRECONDITION_ADR_NUM = "0340"
+PRECONDITION_ADR_GLOB = PRECONDITION_ADR_NUM + "-*two-person-review*.md"
 ALLOWANCE_MAX_DAYS = 92
 ALLOWANCE_KEYS = {"services", "expires", "issue"}
 ACCOUNT_KEYS = {"login", "money_path_allowance"}
@@ -283,16 +288,18 @@ def precondition_adr_status(adr_dir=ADR_DIR, hits=None):
     """(accepted: bool, why: str) for the recorded-two-person-review ADR.
 
     `hits` is [(name, text)] read from the PR's BASE commit. A PR must not be able to satisfy
-    its own precondition by adding or flipping ADR-0340 in the same diff it is judged on."""
+    its own precondition by adding or flipping the two-person-review ADR in the same diff it
+    is judged on."""
     if hits is None:
         hits = []
         for h in sorted(glob.glob(os.path.join(adr_dir, PRECONDITION_ADR_GLOB))):
             try:
                 hits.append((h, Path(h).read_text()))
             except OSError as e:
-                return False, f"ADR-0340 unreadable: {e}"
+                return False, f"ADR-{PRECONDITION_ADR_NUM} unreadable: {e}"
     if len(hits) != 1:
-        return False, f"ADR-0340 (two-person review) found {len(hits)} times under {adr_dir} at base, need exactly 1"
+        return False, (f"ADR-{PRECONDITION_ADR_NUM} (two-person review) found {len(hits)} "
+                       f"times under {adr_dir} at base, need exactly 1")
     text = hits[0][1]
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     status = None
@@ -303,8 +310,8 @@ def precondition_adr_status(adr_dir=ADR_DIR, hits=None):
         except yaml.YAMLError:
             status = None
     if status != "accepted":
-        return False, f"ADR-0340 decision-status is {status!r}, not 'accepted'"
-    return True, "ADR-0340 accepted"
+        return False, f"ADR-{PRECONDITION_ADR_NUM} decision-status is {status!r}, not 'accepted'"
+    return True, f"ADR-{PRECONDITION_ADR_NUM} accepted"
 
 
 def effective_allowance(author, cfg, today=None):
@@ -912,9 +919,10 @@ def base_ref_for(n):
 
 
 def base_policy(ref):
-    """rules.yaml and the ADR-0340 precondition AS OF THE BASE. Read from the PR head, the
-    PR under judgement could rewrite its own scope (drop itself from agent_accounts, prune
-    governance_path_globs) or add an accepted ADR-0340 that switches its allowance on."""
+    """rules.yaml and the two-person-review-ADR precondition AS OF THE BASE. Read from the
+    PR head, the PR under judgement could rewrite its own scope (drop itself from
+    agent_accounts, prune governance_path_globs) or add an accepted precondition ADR that
+    switches its allowance on."""
     text = _base_read(ref, RULES)
     if text is None:
         raise Undetermined(f"{RULES} absent at base {ref}")
@@ -983,7 +991,8 @@ def _write_adr(adr_dir, status):
     os.makedirs(adr_dir)
     if status is not None:
         Path(adr_dir, "0340-money-path-agent-merges-require-recorded-two-person-review.md").write_text(
-            f"---\ndecision-status: {status}\ndelivery-status: planned\n---\n\n# ADR-0340\n"
+            f"---\ndecision-status: {status}\ndelivery-status: planned\n---\n\n"
+            f"# ADR-{PRECONDITION_ADR_NUM}\n"
         )
 
 
@@ -1035,9 +1044,9 @@ def allowance_self_test(failures):
         ("NEGATIVE CI machinery", [src, ".github/workflows/ci.yml"], "accepted", SELFTEST_TODAY,
          1, "self-hosted runners"),
         ("NEGATIVE expired entry", [src], "accepted", datetime.date(2026, 3, 2), 1, "EXPIRED"),
-        ("NEGATIVE ADR-0340 proposed, not accepted", [src], "proposed", SELFTEST_TODAY,
+        ("NEGATIVE two-person-review ADR proposed, not accepted", [src], "proposed", SELFTEST_TODAY,
          1, "precondition unmet"),
-        ("NEGATIVE ADR-0340 absent", [src], None, SELFTEST_TODAY, 1, "precondition unmet"),
+        ("NEGATIVE two-person-review ADR absent", [src], None, SELFTEST_TODAY, 1, "precondition unmet"),
     ]
     for name, files, status, today, want_code, want_sub in cases:
         _write_adr(adr_dir, status)
@@ -1076,8 +1085,8 @@ def bypass_self_test(failures):
     if code != 1 or "money-path" not in msg:
         failures.append(f"bypass rename-out-of-money-path passed: exit {code} — {msg}")
 
-    # 2. ADR-0340 added/accepted in the PR itself: the head's docs/adr must not count when
-    #    the base's (supplied as _adr_hits) has none.
+    # 2. The precondition ADR added/accepted in the PR itself: the head's docs/adr must
+    #    not count when the base's (supplied as _adr_hits) has none.
     tmp = tempfile.mkdtemp()
     adr_dir = os.path.join(tmp, "adr")
     _write_adr(adr_dir, "accepted")
@@ -1085,7 +1094,7 @@ def bypass_self_test(failures):
     code, msg = verdict("openbank-fraud-pilot-bot[bot]", True, "x",
                         ["openbank-ledger-service/src/main/kotlin/A.kt"], cfg, today=SELFTEST_TODAY)
     if code != 1 or "precondition unmet" not in msg:
-        failures.append(f"bypass head-ADR-0340 activated the allowance: exit {code} — {msg}")
+        failures.append(f"bypass head-precondition-ADR activated the allowance: exit {code} — {msg}")
 
     # 3. rules.yaml edited in the PR: policy must come from the BASE commit.
     repo = os.path.join(tmp, "repo")

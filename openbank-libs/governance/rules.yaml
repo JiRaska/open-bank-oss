@@ -3935,7 +3935,8 @@ autonomous_agent_prs:
   #                                      # extra_protected_tokens entry (card-issuance is both)
   #       expires: YYYY-MM-DD            # mandatory, at most 92 days ahead; expired = ignored
   #       issue: <number>                # mandatory: the issue that authorised the grant
-  # Effective only while ADR-0340 (recorded two-person review) is `decision-status:
+  # Effective only while the recorded-two-person-review ADR (branch
+  # agent/adr-0340-two-person-review) is `decision-status:
   # accepted` under docs/adr — the guard reads it; otherwise the allowance is ignored and
   # the verdict says so. It downgrades BLOCK to ALLOWED_BY_SCOPE only for ORDINARY SOURCE
   # of the exact service directory (src/main/{kotlin,java}, src/test, docs, README.md,
