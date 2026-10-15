@@ -18,7 +18,8 @@ import jakarta.inject.Inject
  * `openbank_fraud_scores_total{verdict,rail,service="fraud"}` — a cumulative counter of scoring
  * decisions by outcome. With the engine inert in Phase 1 every increment is ALLOW; once the surfaces
  * call the scorer in shadow mode this is the series that proves the rollout is safe before any
- * verdict is enforced.
+ * verdict is enforced. `rail` is the allow-listed scoring-rail vocabulary with `rail="unknown"` for
+ * anything else — the caller-controlled request string never reaches a tag (#12920, ADR-0077).
  *
  * Service-local `MeterRegistry`, null-safe via [Instance] exactly like libs `DomainMetrics`: a
  * fraud-verdict counter is fraud-specific, so adding it to the shared libs facade would force a
@@ -40,7 +41,7 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
             Counter.builder("openbank.fraud.scores")
                 .tag("service", SERVICE)
                 .tag("verdict", verdict.name)
-                .tag("rail", rail)
+                .tag("rail", railTag(rail))
                 .register(r)
                 .increment()
         }
@@ -76,5 +77,23 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
 
     companion object {
         private const val SERVICE = "fraud"
+
+        /** Bucket for any rail outside [ALLOWED_RAILS] — the caller's raw string never reaches a tag. */
+        private const val RAIL_UNKNOWN = "unknown"
+
+        /**
+         * The rails the scoring callers actually send (ADR-0077 Tier-C bounded tag, #12920):
+         * sepa-payment (`SepaPaymentActivitiesImpl`, `rail = "SEPA"`),
+         * domestic-payment (`DomesticPaymentActivitiesImpl`, `rail = "DOMESTIC"`),
+         * sepa-instant (`SctInstPaymentService`, `rail = "SCT_INST"`),
+         * fx (`FxService`/`FxActivitiesImpl`, `rail = "FX"`), card-processing
+         * (`FraudScoringAdapter.RAIL_CARD = "CARD"`). The fraud scorer's wire vocabulary is NOT the
+         * libs `PaymentRail` enum (`SEPA`, `SCT_INST`, `FX` are not enum values — the #8699 shape),
+         * so this set is derived from the producers' literals, and anything else buckets to
+         * [RAIL_UNKNOWN] exactly like mcp's `method="unknown"`.
+         */
+        private val ALLOWED_RAILS = setOf("SEPA", "DOMESTIC", "SCT_INST", "FX", "CARD")
+
+        private fun railTag(rail: String): String = if (rail in ALLOWED_RAILS) rail else RAIL_UNKNOWN
     }
 }
