@@ -328,7 +328,7 @@ jobs:
     name: Admin UI
     needs: [changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - name: Check build result
@@ -620,7 +620,7 @@ jobs:
     name: Validate manifests
     needs: [agent-admission, gates, ui]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - name: Verify agent PR admission
