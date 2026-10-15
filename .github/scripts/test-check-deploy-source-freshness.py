@@ -101,6 +101,47 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.git("checkout", "--detach", base)
         self.assertEqual([], CHECKER.verify(self.root, base, head))
 
+    def test_freshness_is_cached_per_image_tag_only_within_one_verification(self) -> None:
+        image = "openbank/openbank-example-service"
+        tag = f"sandbox-{self.source[:8]}"
+        base = self.git("rev-parse", "HEAD")
+        self.write("openbank-infra/gitops/components/example/deployment.yaml",
+                   f"image: ghcr.io/{image}:{tag}\n")
+        head = self.commit("replace image pin")
+        self.git("checkout", "--detach", base)
+
+        checked: list[tuple[str, str]] = []
+
+        def fresh(checked_image: str, checked_tag: str) -> bool:
+            checked.append((checked_image, checked_tag))
+            return True
+
+        self.assertEqual([], CHECKER.verify(self.root, base, head, fresh))
+        self.assertEqual([(image, tag)], checked)
+
+        # A subsequent verification gets a fresh cache and asks its callback again.
+        self.assertEqual([], CHECKER.verify(self.root, base, head, fresh))
+        self.assertEqual([(image, tag), (image, tag)], checked)
+
+    def test_freshness_cache_keeps_distinct_tags_separate(self) -> None:
+        image = "openbank/openbank-example-service"
+        tag_a, tag_b = f"sandbox-{self.source[:8]}", "sandbox-11111111"
+        base = self.git("rev-parse", "HEAD")
+        self.write("openbank-infra/gitops/components/example/deployment.yaml",
+                   f"image: ghcr.io/{image}:{tag_a}\n")
+        self.write("openbank-infra/gitops/components/example/second-pin.yaml",
+                   f"image: ghcr.io/{image}:{tag_b}\n")
+        head = self.commit("replace and add image pins")
+        self.git("checkout", "--detach", base)
+
+        checked: list[tuple[str, str]] = []
+        failures = CHECKER.verify(
+            self.root, base, head,
+            lambda checked_image, checked_tag: checked.append((checked_image, checked_tag)) or True,
+        )
+        self.assertEqual([], failures)
+        self.assertCountEqual([(image, tag_a), (image, tag_b)], checked)
+
     def test_stale_new_pin_is_checked_alongside_fresh_replacement(self) -> None:
         self.write("openbank-other-service/src/main/Other.kt", "class Other { fun changed() = true }\n")
         self.commit("other service source changed after image build")

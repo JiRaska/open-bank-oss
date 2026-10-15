@@ -64,7 +64,17 @@ def verify(root: Path, base: str, head: str,
 
     patch = _git(root, "diff", "--no-ext-diff", "--no-color", base, head,
                  "--", GITOPS_ROOT).stdout
-    check_fresh = fresh or (lambda image, tag: image_source_is_current(str(root), image, tag))
+    source_is_current = fresh or (
+        lambda image, tag: image_source_is_current(str(root), image, tag)
+    )
+    freshness_by_pin: dict[tuple[str, str], bool] = {}
+
+    def check_fresh(image: str, tag: str) -> bool:
+        key = (image, tag)
+        if key not in freshness_by_pin:
+            freshness_by_pin[key] = source_is_current(image, tag)
+        return freshness_by_pin[key]
+
     added_pins = [match.group("image", "tag") for line in patch.splitlines()
                   if line.startswith("+") and not line.startswith("+++")
                   for match in PIN_RE.finditer(line)]
