@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_sepa_instant
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_sepa_instant
   flyway:
@@ -71,18 +74,28 @@ quarkus:
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     aml-service:
       url: ${AML_SERVICE_URL:http://localhost:8117}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     fraud-service:
       url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     clearing-simulator:
       url: ${CLEARING_SIMULATOR_URL:http://localhost:8139}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379

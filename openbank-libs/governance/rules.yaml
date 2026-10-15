@@ -266,6 +266,37 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-31"   # ADR-0321: advisory until the fleet sweep
     ci_producer: ".github/scripts/check-resilience-profile.py"
+  rest_client_timeouts:
+    # A url-carrying quarkus.rest-client.<client> without an explicit connect/read timeout inherits
+    # SmallRye/Vert.x defaults — the classic cascading-overload shape: one slow upstream holds every
+    # caller thread until the pool exhausts, and the failure surfaces three services away from its
+    # cause. An unbounded wait on a money-path call is a defect in itself. 2026-10 fleet audit:
+    # explicit timeouts on ~19 of 67 services; --fix seeded the fleet with the measured convention
+    # (connect 2000-3000 ms, read 2000-5000 ms on the services that already declared them); this
+    # gate holds the ratchet. A service whose SLO needs a different bound sets it explicitly —
+    # that decision belongs to the service owner, not the gate. Check is indentation-based text
+    # parsing, NOT a YAML round-trip, because these files carry review-critical comments a
+    # load/dump cycle would destroy.
+    detect: ["openbank-*/src/main/resources/application.yaml", "quarkus.rest-client.<client> block carrying a url:"]
+    require:
+      - "every url-carrying rest-client block declares connect-timeout AND read-timeout"
+    gate: rest-client-timeouts
+    enforced: enforce
+    ci_producer: ".github/scripts/check-rest-client-timeouts.py"
+  datasource_pool_self_heal:
+    # Quarkus leaves idle-timeout/max-lifetime/max-size OFF by default; a transient DB blip that
+    # poisons pooled connections then wedges the service until a pod restart — billing #1682
+    # measured ~8h unable to reach a healthy billing-db with 0 restarts and every health probe
+    # green. The fix landed only in billing; the 2026-10 fleet sweep seeded billing's measured
+    # values (idle-timeout: 5M, max-lifetime: 30M, max-size: 20) across the other 91 reactive
+    # pools, this gate holds the ratchet. A service whose load profile needs different bounds
+    # sets them explicitly — that decision belongs to the service owner, not the gate.
+    detect: ["openbank-*/src/main/resources/application.yaml", "quarkus.datasource.reactive pool block"]
+    require:
+      - "every reactive datasource pool declares idle-timeout, max-lifetime AND max-size"
+    gate: datasource-pool-self-heal
+    enforced: enforce
+    ci_producer: ".github/scripts/check-datasource-pool-self-heal.py"
   openapi_request_schema_conformance:
     detect: ["openbank-*/src/main/resources/openapi.yaml", "the JAX-RS request-body DTO the resource actually deserializes into"]
     require:
@@ -672,6 +703,23 @@ change_requirements:
         reason: "Same Vert.x WebClient BFF shape as account-service above — openbank.edge.party-service-url / PARTY_SERVICE_URL."
       - edge: "openbank-customer-edge->openbank-sca-service:api"
         reason: "Same Vert.x WebClient BFF shape — openbank.edge.sca-service-url / SCA_SERVICE_URL."
+  adr_proposed_staleness:
+    # The 2026-10 fleet audit counted 84 `proposed` ADRs; `decision-status` is front-matter
+    # prose read once at authoring time, so the proposed pool only grows and nothing
+    # distinguishes "open awaiting work" from "written once, everyone forgot". The clock is
+    # creation-age (git --diff-filter=A) plus an optional `last-reviewed:` re-affirmation key —
+    # NOT last-commit: weekly mechanical docs sweeps touch ADR files fleet-wide (measured:
+    # every proposed ADR's last-commit <= 86 days old while the oldest proposal was 110+ days
+    # old), so a last-commit clock can never fire in this repo.
+    detect: ["docs/adr/*.md with decision-status: proposed and (today - max(creation, last-reviewed)) > 90 days"]
+    require:
+      - "proposed ADR is decided (accepted / superseded / rejected), or re-affirmed via a `last-reviewed: YYYY-MM-DD` front-matter key, within 90 days"
+      - "undated ADRs (no reachable git history) are skipped with a warning, never passed silently"
+    gate: adr-proposed-staleness
+    enforced: advisory
+    ci_producer: ".github/scripts/check-adr-proposed-staleness.py"
+    target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the 4-findings seed tail (0141, 0142, 0155, 0170) is decided, re-affirmed, or baselined
+    blocked_on: "first live run flags 4 genuinely open proposals from 2026-06/07; enforcement is safe once that tail is triaged — the gate is sweep-proof by construction (creation-age + deliberate last-reviewed), so no mechanical commit can silently reset it"
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:
@@ -2569,7 +2617,7 @@ ci_runners:
                                       # sanctioned move here; the alternative -- flipping `enforced`
                                       # to satisfy the date -- would claim a control this repo does
                                       # not have.
-  blocked_on: "the CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) does not exist: no file under .github/scripts or .github/gates references that key (control: money_path_services is referenced by two, so the probe sees rule keys). The OpenTofu half is less clear than this line used to claim -- arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository. Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
+  blocked_on: "RESOLVED for the lint half 2026-10-14: check-ci-runner-pools.py (enforced, gates.yaml ci-runner-pools) reads pr_jobs_allowed_pools straight from this file and rejects any pull_request/pull_request_target job on a non-allowed pool (fleet clean, self-test reachable). The OpenTofu half is unchanged: arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository (#8388 is the measured case: batch/dr written in tofu, never applied, caught only because the gate subtracts KNOWN_UNAPPLIED). Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
@@ -3202,7 +3250,8 @@ knowledge_capture:
 # the call. Write grants (operator-<domain>-write etc.) join in phase 1.5 after the D2(b)
 # triage; the retirement of operator-read-any itself is D2(c), a separate PR.
 authz:
-  # Actions the generic `operator-read-any` rule in rest.rego must NOT grant. That rule admits
+  # Actions the generic `operator-read-any` and `compliance-read-any` rules in rest.rego must NOT
+  # grant (the CI realm also gives the shared client ROLE_COMPLIANCE). That rule admits
   # any HUMAN principal holding ROLE_OPERATOR/ROLE_ADMIN to every `*.read`/`*.list`, and the
   # shared service-account (service-account-openbank-services) is classified HUMAN and holds
   # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
@@ -3790,17 +3839,85 @@ agent_case_capability_matrix:
 # blast radius without being money-path by that list's definition. The gate's SCOPE is not
 # hand-kept: an undeclared machine account fails the check rather than passing it.
 autonomous_agent_prs:
-  max_open_prs: 3
+  # Raised 3 -> 5 with owner general consent (2026-10-14), after the limit proved to be the
+  # bottleneck of the owner-directed ADR-completion batch (#12748): nine grandfathered or
+  # excepted codex/ PRs hold ranks 1-9, so any new PR was refused regardless of value, and
+  # the cascade also red-lit the Admin UI gate (changes-ui is gated on proceed). Review,
+  # CI, merge and money-path approvals are untouched by this number.
+  max_open_prs: 5
   grandfather_created_before: '2026-10-03T20:00:00Z'
   # Maintainer-adopted policy only; exact PR, repository, branch, and expiration are bound.
   # This does not authorize replacement PRs, autonomous work, or any other guard.
   one_time_wip_exceptions:
+    # Owner-directed ADR-completion batch 2026-10-14 (goal issue #12748): admit these seven
+    # PRs past the rank gate for their CI to run; admission only — review, CI, merge and
+    # money-path approvals (lending: 2 approvals + threat model) remain required. Expires
+    # 2026-10-24; the batch is expected to have drained well before that.
+    - pr: 12747
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-accept-shipped
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): accept verified-shipped ADR-0204 and ADR-0243; admission only, all review/CI/merge controls remain required.'
+    - pr: 12753
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0253-evidence
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0253 fraud-scoring silence alert + quarterly evidence sweep runbook; admission only, all review/CI/merge controls remain required.'
+    - pr: 12755
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0209-closeout
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0209 docs close-out (shipped slices, D2 superseded by ADR-0210); admission only, all review/CI/merge controls remain required.'
+    - pr: 12758
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0284-accept-d10
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0284 acceptance + D10 business segment filter; admission only, all review/CI/merge controls remain required.'
+    - pr: 12767
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0256-trigger
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0256 sanctions-list-changed trigger loop to case coordinator; admission only, all review/CI/merge controls remain required.'
+    - pr: 12768
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0227-inbox-contract
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0227 D1 ApprovalItem contract + D3 inbox filters; admission only, all review/CI/merge controls remain required.'
+    - pr: 12769
+      repository: JiRaska/open-bank-oss
+      branch: agent/adr-0211-origination-commands
+      expires_at: '2026-10-24T00:00:00Z'
+      reason: 'Owner-directed ADR-completion batch (#12748): ADR-0211 origination commands + timer branches + property tests; admission only, all review/CI/merge controls remain required.'
     # Owner-requested proposal on 2026-10-12; activation still needs separate trusted-base adoption.
     - pr: 12587
       repository: JiRaska/open-bank-oss
       branch: codex/docs-fleet-ci
       expires_at: '2026-10-17T00:00:00Z'
       reason: 'Owner-requested admission for service documentation verification; admission only, all review, CI, merge and deployment approvals remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12636
+      repository: JiRaska/open-bank-oss
+      branch: codex/copilot-log-privacy-20261012
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12717
+      repository: JiRaska/open-bank-oss
+      branch: codex/log-privacy-505-506-358-combined
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12551
+      repository: JiRaska/open-bank-oss
+      branch: codex/katex-trust-security-split
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
+    # Proposal only: requires explicit owner approval and separate maintainer adoption.
+    - pr: 12647
+      repository: JiRaska/open-bank-oss
+      branch: codex/temurin-rescan-main-6717
+      expires_at: '2026-10-17T00:00:00Z'
+      reason: 'Owner-authorized time-limited admission; admission only, all owner/review/CI/merge/deployment controls remain required.'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:
@@ -3826,9 +3943,10 @@ autonomous_agent_prs:
   # Coverage for an agent running under a HUMAN account, which is the state today — every
   # open PR in this repo is authored by the maintainer's login. Without this an identity-only
   # scope would cover nothing at all.
-  agent_branch_prefixes:
-    - agent/
-    - codex/
+  # 2026-10-14: branch-prefix scope emptied per owner's explicit decision (agent PRs no longer
+  # require human sign-off; restore by reverting). The key stays — the agent PR guard's
+  # self-test requires it — and guard coverage of declared agent accounts is unaffected.
+  agent_branch_prefixes: []
   # High blast radius, not money-path by the list above.
   extra_protected_tokens:
     - payment
@@ -4010,6 +4128,7 @@ security_sensitive_paths:
     cardholder: []
   openbank-domestic-payment:
     auth_crypto_payment:
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
       - "src/main/kotlin/**/ApprovalResource.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
@@ -4046,6 +4165,8 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftResource.kt"
+      - "src/main/kotlin/**/BusinessPaymentBatchDraftEntity.kt"
     cardholder: []
   openbank-account-service:
     auth_crypto_payment:

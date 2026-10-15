@@ -49,6 +49,9 @@ def main() -> None:
         valid = json.loads(envelope_path.read_text(encoding="utf-8"))
         valid["schemaVersion"] = 2
         envelope_path.write_text(json.dumps(valid), encoding="utf-8")
+        assert check(envelope_path) == 0
+        valid["schemaVersion"] = 3
+        envelope_path.write_text(json.dumps(valid), encoding="utf-8")
         assert check(envelope_path) == 1
         envelope_path.write_text("{incomplete", encoding="utf-8")
         assert check(envelope_path) == 1

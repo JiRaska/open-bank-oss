@@ -114,6 +114,9 @@ class AuthorizeInterceptorTest {
     @Authorize(action = "payment.create", attributes = ["time-of-day", "client-ip"])
     fun dummyMethodWithAttrs() = Unit
 
+    @Authorize(action = "catalog.pensionApproval.read", attributes = ["azp", "subject", "preferred_username"])
+    fun dummyMethodWithServiceTokenAttrs() = Unit
+
     data class DummyRequest(val granteeId: String, val scopes: List<String>)
 
     data class DummyRequestWithNullableField(val granteeId: String?)
@@ -162,6 +165,9 @@ class AuthorizeInterceptorTest {
 
     private val annotatedMethodWithAttrs: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithAttrs")
+
+    private val annotatedMethodWithServiceTokenAttrs: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithServiceTokenAttrs")
 
     private val annotatedMethodWithDottedResource: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod(
@@ -567,6 +573,105 @@ class AuthorizeInterceptorTest {
         assertThat(capturedQuery[0].principal.id).isEqualTo("anonymous")
     }
 
+    private fun capturePrincipalFor(claims: Map<String, String>, name: String): Principal {
+        every { sc.userPrincipal } returns JavaPrincipal { name }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "5f0c2a8e"
+            every { getClaim<Any?>(any<String>()) } answers { claims[firstArg<String>()] }
+        }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        return captured.single().principal
+    }
+
+    @Test
+    fun `a client_id-only machine token whose name is not service-account- is flagged service_account`() {
+        val p = capturePrincipalFor(mapOf("client_id" to "openbank-batch", "azp" to "openbank-batch"), "batch-bot")
+        assertThat(p.id).isEqualTo("batch-bot")
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a renamed service-account is flagged service_account`() {
+        val p = capturePrincipalFor(
+            mapOf("client_id" to "openbank-edge", "azp" to "openbank-edge", "preferred_username" to "alice"),
+            "alice",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a conventional service account binds its client without the optional client_id note`() {
+        val p = capturePrincipalFor(
+            mapOf("azp" to "openbank-edge", "preferred_username" to "service-account-openbank-edge"),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isEqualTo("openbank-edge")
+    }
+
+    @Test
+    fun `a client_id note cannot impersonate a different azp service account`() {
+        val p = capturePrincipalFor(
+            mapOf(
+                "client_id" to "openbank-edge",
+                "azp" to "openbank-unrelated",
+                "preferred_username" to "service-account-openbank-edge",
+            ),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a service-account name without preferred_username cannot claim a named client`() {
+        val p = capturePrincipalFor(
+            mapOf("client_id" to "openbank-edge", "azp" to "openbank-edge"),
+            "service-account-openbank-edge",
+        )
+        assertThat(p.serviceAccount).isTrue()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a human staff token is not flagged service_account`() {
+        val p = capturePrincipalFor(mapOf("azp" to "openbank-admin-ui", "preferred_username" to "alice"), "alice")
+        assertThat(p.serviceAccount).isFalse()
+        assertThat(p.clientId).isNull()
+    }
+
+    @Test
+    fun `a non-JWT identity is sent as a machine (fail closed)`() {
+        every { sc.userPrincipal } returns JavaPrincipal { "alice" }
+        every { identity.principal } returns JavaPrincipal { "alice" }
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            }
+        }
+        interceptor.authorize(makeCtx(annotatedMethod))
+        assertThat(captured.single().principal.serviceAccount).isTrue()
+    }
+
     @Test
     fun `principal type AI_AGENT when sub starts with agent colon`() {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:onboarding" }
@@ -639,6 +744,40 @@ class AuthorizeInterceptorTest {
         val attrs = capturedQuery[0].attributes
         assertThat(attrs).containsOnlyKeys("time-of-day")
         assertThat(attrs).doesNotContainKey("client-ip")
+    }
+
+    @Test
+    fun `service token claims reach only explicitly requested policy attributes`() {
+        every { identity.roles } returns setOf("ROLE_API")
+        every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-pension" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "service-subject"
+            every { getClaim<String>("azp") } returns "openbank-pension"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-pension"
+        }
+        val captured = mutableListOf<AuthzQuery>()
+        val pdp = object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                captured += query
+                return AuthzDecision(allow = true)
+            }
+        }
+        interceptor.pdp = mockk {
+            every { isResolvable } returns true
+            every { get() } returns pdp
+        }
+        interceptor.authorize(makeCtx(annotatedMethodWithServiceTokenAttrs))
+        assertThat(captured.single().attributes).containsExactlyInAnyOrderEntriesOf(
+            mapOf(
+                "azp" to "openbank-pension",
+                "subject" to "service-subject",
+                "preferred_username" to "service-account-openbank-pension",
+            ),
+        )
+        captured.clear()
+        every { sc.userPrincipal } returns JavaPrincipal { "human-reviewer" }
+        interceptor.authorize(makeCtx(annotatedMethodWithServiceTokenAttrs))
+        assertThat(captured.single().attributes).isEmpty()
     }
 
     // ---------------------------------------------------------------------------------------
@@ -1151,5 +1290,102 @@ class AuthorizeInterceptorTest {
             .hasMessageContaining("summary")
         assertThat(store.created).isEmpty()
         io.mockk.verify(exactly = 0) { ctx.proceed() }
+    }
+
+    @Suppress("UnusedParameter")
+    fun plainMethod() = Unit
+
+    private val plainReflectedMethod: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod("plainMethod")
+
+    @Authorize(action = "ledger.post", attributes = ["idempotency-key"])
+    fun dummyMethodWithIdempotencyKey() = Unit
+
+    private val annotatedMethodWithIdempotencyKey: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethodWithIdempotencyKey")
+
+    @Test
+    fun `a method without the Authorize annotation proceeds untouched`() {
+        // The @AroundInvoke fires for every intercepted bean method, annotated or not — the
+        // no-annotation fast path must hand straight to proceed() without touching the PDP.
+        val ctx = makeCtx(plainReflectedMethod)
+        assertThat(interceptor.authorize(ctx)).isEqualTo("ok")
+        io.mockk.verify(exactly = 1) { ctx.proceed() }
+    }
+
+    @Test
+    fun `the idempotency-key attribute resolves from its header`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
+        val fakeHeaders = mockk<HttpHeaders> {
+            every { getRequestHeader("Idempotency-Key") } returns listOf("idem-123")
+        }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns fakeHeaders
+        }
+        interceptor.authorize(makeCtx(annotatedMethodWithIdempotencyKey))
+        assertThat(captured.single().attributes["idempotency-key"]).isEqualTo("idem-123")
+    }
+
+    @Test
+    fun `the idempotency-key attribute drops out when the header is absent`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val captured = mutableListOf<AuthzQuery>()
+        wirePdp(
+            object : PolicyDecisionPoint {
+                override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                    captured += query
+                    return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+                }
+            },
+        )
+        val fakeHeaders = mockk<HttpHeaders> {
+            every { getRequestHeader("Idempotency-Key") } returns null
+        }
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns fakeHeaders
+        }
+        interceptor.authorize(makeCtx(annotatedMethodWithIdempotencyKey))
+        assertThat(captured.single().attributes).isEmpty()
+    }
+
+    private fun failingPdp() = object : PolicyDecisionPoint {
+        override suspend fun allow(query: AuthzQuery): AuthzDecision =
+            throw PolicyDecisionException("opa sidecar unreachable")
+    }
+
+    @Test
+    fun `an unreachable PDP with enforce=true fails closed with 503, counted as pdp_unavailable`() {
+        every { identity.roles } returns emptySet()
+        wirePdp(failingPdp())
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(PolicyDecisionException::class.java)
+            .hasMessageContaining("policy decision point unavailable")
+        assertThat(counter("openbank.authz.decisions", "outcome", "pdp_unavailable")).isEqualTo(1.0)
+        // an outage must not read as a policy denial in the rollout signal
+        assertThat(counter("openbank.authz.decisions", "outcome", "deny")).isZero()
+    }
+
+    @Test
+    fun `an unreachable PDP with enforce=false proceeds advisory but is still counted`() {
+        interceptor.enforce = false
+        every { identity.roles } returns emptySet()
+        wirePdp(failingPdp())
+
+        assertThat(interceptor.authorize(makeCtx(annotatedMethod))).isEqualTo("ok")
+        assertThat(
+            counter("openbank.authz.decisions", "outcome", "pdp_unavailable", "enforced", "false"),
+        ).isEqualTo(1.0)
     }
 }

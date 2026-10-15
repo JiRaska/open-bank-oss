@@ -18,6 +18,9 @@ import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.RescheduleRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.domain.identifiers.CollateralId
 import com.openbank.libs.domain.identifiers.LoanApplicationId
@@ -30,6 +33,7 @@ import java.util.UUID
  * Origination: intake + four-eyes decision. [proposedBy] and [decidedBy] are the **trusted** acting
  * principals (the authenticated JWT subject), passed in by the adapter — not read from the request body.
  */
+@Suppress("TooManyFunctions") // one use-case method per origination operation (hexagonal, ADR-0211 D1 commands)
 interface ApplyForLoanUseCase {
     fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication>
     fun decide(id: LoanApplicationId, decision: DecisionRequest, decidedBy: String): Uni<LoanApplication>
@@ -51,6 +55,39 @@ interface ApplyForLoanUseCase {
 
     /** Like [expireIfInState], but drives one forward advance when still in [expectedState]. */
     fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String): Uni<LoanApplication>
+
+    /**
+     * Explicit pre-disbursement withdrawal (ADR-0211 D1): any non-terminal state the graph
+     * permits (DRAFT … AWAITING_SIGNATURE) → WITHDRAWN, through the machine + claim + evidence
+     * chain. The caller's identity is trusted (JWT subject or the vouched customer-edge party);
+     * [withdrawnBy] is never read from the request body.
+     */
+    fun withdraw(id: LoanApplicationId, request: WithdrawApplicationRequest, withdrawnBy: String): Uni<LoanApplication>
+
+    /**
+     * Explicit document submission (ADR-0211 D2): DOCS_REQUIRED → ASSESSMENT, through the same
+     * machine + claim + evidence chain as every other transition.
+     */
+    fun submitDocuments(
+        id: LoanApplicationId,
+        request: SubmitDocumentsRequest,
+        submittedBy: String,
+    ): Uni<LoanApplication>
+
+    /**
+     * Explicit customer signature (ADR-0211 D1, ADR-0214): AWAITING_SIGNATURE → SIGNED, persisting
+     * the signature artefact hash in the same conditional claim as the transition (V27). The
+     * machine rejects a SYSTEM actor here — a signature is always a human act.
+     */
+    fun sign(id: LoanApplicationId, request: SignApplicationRequest, signedBy: String): Uni<LoanApplication>
+
+    /**
+     * Timer-driven four-eyes SLA escalation (ADR-0211 D2): when the application is STILL in
+     * FOUR_EYES after the SLA elapsed, record the escalation evidence and return true (the
+     * activity increments its metric); when a decision already moved the row on, return false.
+     * Never decides anything — escalation informs an operator, it does not approve.
+     */
+    fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String): Uni<Boolean>
 
     /** Backoffice queue (ADR-0230 D1): newest applications fleet-wide, optionally one status. */
     fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>>

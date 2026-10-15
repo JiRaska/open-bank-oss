@@ -99,3 +99,87 @@ delivered (`CompanyBooksCalculator`, golden IT), the instance is not — hence `
 
 - ADR-0334 §2, ADR-0336, ADR-0096 D1, ADR-0097, ADR-0152
 - `openbank-ledger-service/src/main/resources/db/migration/V1__init_ledger.sql`, `V22__closed_period.sql`
+
+## Amendment 2026-10-10: PSP 34-12 PS needs a holdings source, and treasury is not one yet
+
+The Consequences above leave PSP 34-12 PS (the company's own portfolio: instrument class, ISIN,
+quantity, valuation at period end) unsourced. We evaluated the obvious candidate, a second
+deployment of `openbank-treasury-service` (ADR-0315) for the pension company, the same pattern
+this ADR applies to the ledger. At the 2026-10-10 evaluation, its deal model could not derive the return:
+
+- **No securities product.** `ProductType` is `MM_PLACEMENT`, `MM_BORROWING`,
+  `CNB_DEPOSIT_FACILITY`, `CNB_LOMBARD`, `FX_SPOT`. ADR-0315 D2 plans `BOND_PURCHASE` /
+  `BOND_SALE` but neither exists, and no equity or fund-unit product is planned.
+- **No instrument identity or quantity.** A `Deal` carries `principal` and `rate` (ACT/360
+  money-market terms). No migration V1–V14 has an ISIN, an instrument class or a unit count.
+- **No GL accounts to post securities to.** The posting map (`Postings.kt`) knows nostro,
+  placement, ČNB facility, borrowing, accruals and FX position. ADR-0315 D5's "bonds by IFRS 9
+  category" accounts were never added to the ledger.
+- **No valuation source anywhere in the fleet.** Treasury's only market input is the risk
+  engine's curve set (rates, not security prices). `openbank-wealth-service` fetches no prices
+  (customer-declared figures only), and `openbank-pension-fund-service` holds the funds' own ISIN
+  and NAV, not the instruments the funds or the company invest in.
+
+Making treasury derive holdings from deals therefore needs, in order: securities products on the
+`Deal` aggregate (ISIN, instrument class, quantity, clean price), the ledger GL accounts and
+posting rules for them in each entity's ledger, and a price source. That is a money-path feature
+of ADR-0315, not a read model.
+
+### Decision (amended)
+
+1. **The holdings source of record for PSP 34-12 PS is the depositary's period-end statement of
+   holdings** (ISO 20022 `semt.002`). The pension company's own investments sit with a custodian,
+   and the custodian's statement already carries ISIN, quantity and a valuation at the statement
+   date. A `treasury-pension-co` deployment ingests it the way treasury already ingests nostro
+   `camt.053` statements (ADR-0315 D7): idempotent uploads and immutable correction versions
+   scoped by entity, safekeeping account and statement date. Every configured account contributes
+   its current statement; uploading or correcting one account must not retire another.
+2. **The read contract stays as agreed with tax-reporting:**
+   `GET /api/v1/treasury/portfolio/period-end?date=YYYY-MM-DD` answers the snapshot for exactly
+   that date (`asOf`, `entity`, `currency`, `sourceStatements` identifying each account's statement
+   UUID, optional custodian statement ID and version, and positions of `instrumentClass`, `isin`,
+   `cfi`, `quantity`, `quantityBasis`, `valuation`, `valuationCurrency`, decimals as strings).
+   OPA action `treasury.portfolio.inspect` is granted to the exact tax-reporting service-account
+   identity and excluded from broad operator/compliance read grants. The consumer requires the
+   configured company identity. If any configured account lacks that date's statement, the read
+   answers **409**; a complete recorded-empty account remains valid evidence. Matching ISINs can
+   aggregate only with consistent classification, currency and explicit quantity dimension
+   (`UNIT`, `FACE_AMOUNT`, `AMORTISED_VALUE`). Unknown legacy or unlike dimensions refuse the
+   complete report rather than guessing a sum. A verified source correction supplies missing
+   dimensions; identical-byte replay preserves the original version.
+3. **Instrument class is mapped, not guessed.** `semt.002` carries a CFI code per ISIN (ISO
+   10962); the ČNB class is a declared CFI-prefix mapping in configuration, and an unmapped CFI
+   refuses the snapshot at ingestion.
+4. **Deals-derived holdings come later and must reconcile to the statement.** When ADR-0315 gains
+   securities products, holdings derived from settled deals become a second view, reconciled per
+   ISIN and quantity against the custodian snapshot like nostro breaks. The statement stays the
+   source of record for the return.
+5. **The `treasury-pension-co` instance runs no bank automation**, as Decision 4 requires of the
+   ledger: simulated market, interest accrual, nostro break sweep and outbox dispatch to the
+   bank's topics are off. Statement ingestion posts nothing; a later posting feature must use
+   the company's isolated ledger and its own controls, never the bank's ledger.
+
+### Alternatives considered (amendment)
+
+- **Build securities deals in treasury first, then derive holdings.** The correct end state for
+  the deal lifecycle and GL, but it adds three missing pieces (products, GL accounts, prices)
+  before the return gets any answer, and still needs a price source that does not exist.
+- **Store the portfolio in pension-fund-service.** Rejected: that service administers the
+  participants' funds. Putting the company's own assets there breaks the segregation ADR-0334
+  §1 and this ADR's Decision 1 rely on.
+- **Hand-entered positions in tax-reporting.** Rejected: the return would be its own source
+  system with no evidence behind it.
+
+### Delivery check (amendment)
+
+The ADR is implemented separately: #12504 carries the consumer, #12506 now contains the draft
+statement-ingestion provider and committed populated/missing-account/anonymous Pact interactions,
+and #12508 declares the draft company-instance TLS and network configuration. Their existence is
+not evidence of deployment, populated custody accounts or regulator acceptance. Required CI and
+reviews remain mandatory before merging those implementations; live rollout still requires owner
+identity/account configuration, trusted certificates, backup prerequisites and explicit approval.
+
+Until the configured company source supplies complete snapshots for the requested date,
+PSP 34-12 PS must remain unavailable. Files or routes matching a grep are discovery evidence only;
+readiness requires real authenticated provider/consumer verification and source completeness. No
+regulator transmission or acceptance is claimed by this ADR.
