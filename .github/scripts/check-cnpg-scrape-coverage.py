@@ -237,10 +237,15 @@ def _selects(cluster_ns: str, cluster: str, pm_ns: str, spec: dict) -> bool:
     Deliberately narrow: same namespace (an explicit namespaceSelector is not modelled, so a
     cross-namespace monitor reads as NOT scraping -- the safe direction), a matchLabels selector
     naming the cluster, no podRole other than `instance`, and a `metrics` port endpoint.
+    Nonempty matchExpressions are unsupported coverage proof: reject them rather than
+    claiming their potentially narrower selector necessarily selects the instance pods.
     """
     if pm_ns != cluster_ns or spec.get("namespaceSelector"):
         return False
-    labels = ((spec.get("selector") or {}).get("matchLabels")) or {}
+    selector = spec.get("selector") or {}
+    if selector.get("matchExpressions"):
+        return False
+    labels = selector.get("matchLabels") or {}
     if labels.get("cnpg.io/cluster") != cluster:
         return False
     if labels.get("cnpg.io/podRole", "instance") != "instance":
@@ -762,12 +767,18 @@ def self_test() -> int:
                           "  name: z\n  namespace: st\nspec:\n  selector:\n    matchLabels:\n"
                           "      cnpg.io/cluster: good-db-2\n  podMetricsEndpoints:\n    - port: metrics\n",
         }
+        # A contradictory expression makes the otherwise matching selector select no pods.
+        decoys["expression.yaml"] = good.replace("good-db", "expression-db").replace(
+            "  podMetricsEndpoints:",
+            "    matchExpressions:\n      - key: cnpg.io/cluster\n"
+            "        operator: DoesNotExist\n  podMetricsEndpoints:",
+        )
         for fn, body in decoys.items():
             (d / fn).write_text(body)
         gatelib.clear()
         _, errors = build()
         for want in ("st/flag-db: no PodMonitor", "Cluster/flag-db sets spec.monitoring.enablePodMonitor",
-                     "st/other-db: no PodMonitor"):
+                     "st/other-db: no PodMonitor", "st/expression-db: no PodMonitor"):
             if not any(want in e for e in errors):
                 print(f"SELF-TEST FAIL: expected a finding containing {want!r}"); ok = False
         for fn in decoys:
