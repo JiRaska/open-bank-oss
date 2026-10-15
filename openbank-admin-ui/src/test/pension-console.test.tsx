@@ -65,7 +65,7 @@ const renderPage = async (node: React.ReactNode) => {
 }
 
 let calls: { url: string; init?: RequestInit }[] = []
-let router: (url: string, init?: RequestInit) => Response
+let router: (url: string, init?: RequestInit) => Response | Promise<Response>
 
 beforeEach(() => {
   calls = []
@@ -122,6 +122,26 @@ describe('pension model', () => {
 })
 
 describe('contract search', () => {
+  it.each(['success', 'failure'])('keeps the latest search when an older %s finishes last', async (outcome) => {
+    let finishOlder!: (response: Response) => void
+    const latestId = '99999999-9999-4999-8999-999999999999'
+    router = (url) => {
+      const q = new URL(url, 'http://localhost').searchParams.get('q')
+      if (q === 'older') return new Promise<Response>(resolve => { finishOlder = resolve })
+      if (q === 'latest') return json([{ ...contract('ACTIVE'), contractId: latestId }])
+      return json([])
+    }
+    await renderPage(<PensionContractsPage />)
+    await act(async () => { fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: 'older' } }) })
+    await act(async () => { fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: 'latest' } }) })
+    expect(screen.getByRole('link', { name: latestId })).toBeTruthy()
+    await act(async () => {
+      finishOlder(outcome === 'success' ? json([contract('ACTIVE')]) : new Response('', { status: 503 }))
+    })
+    expect(screen.getByRole('link', { name: latestId })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: CONTRACT_ID })).toBeNull()
+  })
+
   it('opens a bare UUID directly without a list call', async () => {
     router = () => json([])
     await renderPage(<PensionContractsPage />)

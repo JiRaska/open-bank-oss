@@ -10,7 +10,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { PiggyBank } from 'lucide-react'
@@ -41,20 +41,28 @@ function ContractSearch() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [shown, setShown] = useState(PAGE_SIZE)
 
+  const latestRequest = useRef(0)
+
   const load = useCallback(async () => {
+    const request = ++latestRequest.current
     const q = query.trim()
     const params: Record<string, string> = { status, limit: String(PAGE_SIZE * 4) }
     // Live search while typing; a bare UUID opens the contract instead of searching (see open()).
     // Under two characters the query would match nearly everything, so it is not sent.
     if (q.length >= 2 && !isUuid(q)) params.q = q
     const res = await getJson(pensionUrl('/contracts', params), pensionContractListSchema)
+    if (request !== latestRequest.current) return
     if (!res.ok) { setUnavailable({ kind: res.kind }); setRows(null); return }
     setUnavailable(null)
     setRows(res.data)
     setShown(PAGE_SIZE)
   }, [status, query])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const requests = latestRequest
+    void load()
+    return () => { requests.current++ }
+  }, [load])
 
   const open = (e: FormEvent) => {
     e.preventDefault()
