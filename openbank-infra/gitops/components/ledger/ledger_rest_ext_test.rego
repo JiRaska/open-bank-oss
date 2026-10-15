@@ -406,3 +406,72 @@ test_close_inspect_grant_reaches_no_write if {
 			with data.rules as rules_mock
 	}
 }
+
+# --- #12906: four-eyes approval queue read + checker decide (AP2 gap) ---
+# The grant is staff-only and the veto closes every machine path (operator-read-any and
+# service-ledger-read both admit the shared client to a ".read" action otherwise).
+
+admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+
+test_operator_may_read_and_decide_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		decision := rest.allow with input as {"principal": operator, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"operator-ledger-approval" in rest.allowed_reasons with input as {"principal": operator, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_admin_may_read_and_decide_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		decision := rest.allow with input as {"principal": admin, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"operator-ledger-approval" in rest.allowed_reasons with input as {"principal": admin, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+# The veto must beat the live base paths that would otherwise admit a machine principal:
+# operator-read-any (no service-account exclusion) matches the ".read" action for the
+# ROLE_OPERATOR-carrying shared client, and service-ledger-read names that same principal.
+# Asserting the FINAL decision, not the absence of a reason — same discipline as the #3734
+# edge cases above.
+test_every_service_account_denied_on_the_approval_family if {
+	every p in [edge, services_m2m, interest_m2m, lending_m2m, clearing_m2m, transaction_m2m, settlement_m2m, treasury_m2m] {
+		every action in {"ledger.approval.read", "ledger.approval.decide"} {
+			rest.allow == false with input as {"principal": p, "action": action}
+				with data.rules as rules_mock
+			rest.prohibited with input as {"principal": p, "action": action}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+# decide is granted by operator-ledger-approval alone: every non-operator/admin role,
+# human or machine, stays denied. For read, ROLE_VIEWER/ROLE_AUDITOR keep their
+# pre-existing viewer-auditor-ledger-read grant on every ".read" verb and ROLE_COMPLIANCE
+# keeps its base compliance-read-any — both predate this change, and the endpoint's own
+# @RolesAllowed(OPERATOR, ADMIN) is the layer that keeps those roles out. The only human
+# role with no read path at all is ROLE_API.
+test_wrong_role_denied_on_approval_decide if {
+	every role in ["ROLE_VIEWER", "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_API"] {
+		rest.allow == false with input as {"principal": {"type": "HUMAN", "id": "u-wrong", "roles": [role]}, "action": "ledger.approval.decide"}
+			with data.rules as rules_mock
+	}
+}
+
+test_role_without_read_path_denied_on_approval_read if {
+	rest.allow == false with input as {"principal": {"type": "HUMAN", "id": "u-wrong", "roles": ["ROLE_API"]}, "action": "ledger.approval.read"}
+		with data.rules as rules_mock
+}
+
+# The narrowing is one-directional: the approval grant reaches no other ledger action,
+# and the approval verbs grant no other ledger capability.
+test_ledger_approval_grant_reaches_no_other_action if {
+	every action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"} {
+		not "operator-ledger-approval" in rest.allowed_reasons with input as {"principal": operator, "action": action}
+			with data.rules as rules_mock
+	}
+}

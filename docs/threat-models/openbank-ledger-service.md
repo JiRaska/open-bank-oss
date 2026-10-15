@@ -176,8 +176,8 @@ client) — all HUMAN-type, `.read`/`.list` verbs only.
 | JR2 | | `POST /` (post journal) | API, OPERATOR | `ledger.create` | `operator-ledger-write` + `service-ledger-post` (shared) + `service-interest-ledger-post` + `service-lending-ledger-post` + `service-clearing-ledger-post` + `service-transaction-ledger-write` + `service-settlement-ledger-post` + `service-treasury-ledger-post` |
 | JR3 | | `POST /{journalId}/reverse` | API, OPERATOR | `ledger.reverse` | `operator-ledger-write` + `service-ledger-reverse` (shared) + `service-transaction-ledger-write` |
 | JR4 | | `POST /replay-booked-changes` | OPERATOR, ADMIN | `ledger.replay` | `operator-ledger-write` (+ base `matrix-allows`, staff-only since #11480 — E4) |
-| AP1 | ApprovalResource | `GET /api/v1/journals/approvals` | OPERATOR, ADMIN | `ledger.approval.read` | `operator-read-any` (staff) |
-| AP2 | | `PATCH /{id}` (checker decide) | OPERATOR, ADMIN | `ledger.approval.decide` | **none** — action missing from `role_action_matrix`; endpoint deny-by-defaults to 403 (§5) |
+| AP1 | ApprovalResource | `GET /api/v1/journals/approvals` | OPERATOR, ADMIN | `ledger.approval.read` | `operator-ledger-approval` + `operator-read-any` (staff-only; service accounts vetoed at the allow head — #12906) |
+| AP2 | | `PATCH /{id}` (checker decide) | OPERATOR, ADMIN | `ledger.approval.decide` | `operator-ledger-approval` (staff-only; fixed 2026-10-15, #12906 — was the AP2 deny-by-default gap, §5) |
 | CA1 | ControlAccountResource | `GET /api/v1/control-accounts/{controlAccountId}/tie-out` | API, AUDITOR, OPERATOR, ADMIN (no VIEWER) | `ledger.read` | staff read rules (`viewer-auditor-ledger-read` admits AUDITOR) |
 
 RBAC/OPA overlap notes: `postJournal`/`reverseJournal` admit `ROLE_API` at the RBAC layer
@@ -186,7 +186,7 @@ solely so the per-service machine identities (#10486) can reach OPA; for every o
 `service-*` rule is that principal's entire grant — measured with `opa test`, see change
 log 2026-09-21). `ledger.close.inspect` is deliberately not a read/list verb, so no base
 `*-read-any` rule reaches it and every holder is named (ADR-0337). The §4a approval rows are
-the four-eyes supplement; the matrix row AP2 gap is recorded in §5.
+the four-eyes supplement; the former AP2 gap is recorded as fixed in §5.
 
 ## 4. STRIDE analysis
 
@@ -335,20 +335,23 @@ over verbatim from the draft's §6 (IDs re-keyed).
 
 ## 5. Residual risks / assumptions
 
-- **`ledger.approval.decide` has no OPA allow reason (found by this full review,
+- ~~**`ledger.approval.decide` has no OPA allow reason (found by this full review,
   2026-10-15):** the `PATCH /api/v1/journals/approvals/{id}` checker endpoint carries
   `@Authorize("ledger.approval.decide")`, but that action is **absent from
   `rules.yaml: authz.role_action_matrix`** — every sibling `*.approval.decide` (account,
   balance, billing, clearingBatch, party, sanctions, sctInstPayment, sepaPayment, swift)
   IS listed — and no identity rule in `ledger_rest_ext.rego` grants it, so in an
   `AUTHZ_ENFORCE=true` environment the endpoint deny-by-defaults to **403 for every
-  operator**. Same shape as the sepa-instant gap documented and fixed on 2026-08-19
-  (`sctInstPayment.approval.decide`, issue #5679). **Fails closed** — no control is
-  bypassed (a denied checker halts the ceremony, never approves it) — and with
-  `authz.four-eyes.enforce=false` no request outcome depends on the endpoint today, so the
-  practical impact is that the §4a mechanism cannot complete under enforcement until the
-  matrix grant lands. Fix = add the matrix entry (restamps the fleet) + regenerate bundles;
-  tracked as a #12885 follow-up, deliberately not fixed in this docs-only PR.
+  operator**.~~ **FIXED 2026-10-15 (#12906):** `ledger_rest_ext.rego` gained
+  `operator-ledger-approval` (HUMAN + `ROLE_OPERATOR`/`ROLE_ADMIN` +
+  `not service-account-*`, on both `ledger.approval.read` and
+  `ledger.approval.decide`) plus a service-account `prohibited` veto on the whole
+  `ledger.approval.` family — without the veto the shared backend identity (HUMAN-classified,
+  `ROLE_OPERATOR`) kept reaching the read queue via base `operator-read-any`, and
+  `service-ledger-read` admitted it by name. Implemented as a per-service ext rule
+  (delegation's `operator-delegation-approval` shape) rather than a matrix entry: the grant
+  stays in this service's policy file, `decision_reason` names it per call, and no other
+  service's bundle checksum moves. The endpoint no longer deny-by-defaults for operators.
 - ~~Read endpoints `@PermitAll`~~ — **closed (K7 / ADR-0018):** reads role-gated; declarative contract
   locked by `LedgerSecurityContractTest`.
 - ~~OPA fine-grained authz advisory-only~~ — **closed (ADR-0034 Phase 5, issue #266):** sidecar deployed,
@@ -443,6 +446,28 @@ over verbatim from the draft's §6 (IDs re-keyed).
 
 ## 6. Change log
 
+- **2026-10-15** — **Granted `ledger.approval.read` / `ledger.approval.decide` to staff
+  operators and admins** (issue #12906, closes the AP2 gap found by this full review). The
+  checker endpoint `PATCH /api/v1/journals/approvals/{id}` deny-by-defaulted to 403 for
+  every operator under `AUTHZ_ENFORCE=true` because no OPA allow reason covered
+  `ledger.approval.decide`. `ledger_rest_ext.rego` gains `operator-ledger-approval`
+  (HUMAN + `ROLE_OPERATOR`/`ROLE_ADMIN` + `not service-account-*`, both approval actions —
+  the delegation ext's approval shape) and a service-account `prohibited` veto on the whole
+  `ledger.approval.` family. **STRIDE-E:** the veto closes three machine paths to the
+  approval queue — base `operator-read-any` (no service-account exclusion; the shared
+  backend client is HUMAN-classified and holds `ROLE_OPERATOR`), `service-ledger-read`
+  (names that same principal on any `.read` verb), and any future matrix edit re-opening
+  `matrix-allows`. No verified M2M caller exists (fleet audit: no service holds a
+  RestClient against `/api/v1/journals/approvals*`), so nothing legitimate is lost; the
+  queue payload — maker, action and resource id of every pending four-eyes decision —
+  stays staff-only, matching billing's `billing.approval.read` veto. Deliberately an ext
+  rule, not a `rules.yaml` matrix entry: no other service's bundle checksum moves and
+  `decision_reason` telemetry names the grant per call. Bundle regenerated
+  (`ledger-opa-bundle.yaml` + the Rollout `policy-checksum` annotation);
+  `ledger_rest_ext_test.rego` asserts operator/admin allow, every service-account deny
+  (veto beats the live base paths), wrong-role deny, and that the grant reaches no other
+  action (45/45 `opa test`). No new endpoint, caller, trust boundary or RBAC change.
+  Rollback: revert the commit — both verbs return to deny-by-default (fail-closed).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `ledger_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR

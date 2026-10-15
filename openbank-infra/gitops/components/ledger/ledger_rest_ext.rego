@@ -23,6 +23,11 @@
 #   ledger.reverse  — reverse a posted journal entry (#journalId)
 #   ledger.approve  — attest a DRAFT year-close (#fiscalYear) — a statutory close,
 #                      not a routine posting; kept operator-only, no M2M path.
+#   ledger.approval.read   — list pending four-eyes approvals (ApprovalResource,
+#                      GET /api/v1/journals/approvals; issue #5679).
+#   ledger.approval.decide — checker decides a paused four-eyes reversal
+#                      (ApprovalResource, PATCH /api/v1/journals/approvals/{id},
+#                      ADR-0155; granted by operator-ledger-approval below — #12906).
 #   ledger.trigger  — run the daily FX revaluation (ops/backfill only)
 #   ledger.replay   — re-emit historical AccountBookedChanged for a window (ops recovery,
 #                      #860); posts no journal, re-drives the book of record's own events.
@@ -182,6 +187,41 @@ allowed_reasons contains "service-ledger-post" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
 	input.action == "ledger.create"
+}
+
+# ── #12906 (2026-10-15): four-eyes approval queue read + checker decide ─────────────
+# ApprovalResource is operator-facing (its @RolesAllowed admits OPERATOR/ADMIN only) and has
+# NO in-repo M2M caller — no service anywhere holds a RestClient method against
+# /api/v1/journals/approvals*. ledger.approval.decide was missing from every grant
+# (deny-by-default 403 on the checker endpoint under AUTHZ_ENFORCE=true — the AP2 gap in
+# docs/threat-models/openbank-ledger-service.md §5); ledger.approval.read was reachable
+# only through base operator-read-any. Same shape as the delegation ext's
+# operator-delegation-approval (HUMAN + operator/admin role + service-account exclusion +
+# enumerated actions) rather than a rules.yaml matrix entry: the grant stays in this
+# service's own policy file, decision_reason telemetry names it per-call, and no other
+# service's bundle checksum moves.
+allowed_reasons contains "operator-ledger-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {"ledger.approval.read", "ledger.approval.decide"}
+}
+
+# Veto the whole approval family for every service account at the allow head. Without
+# this, THREE base/ext paths would still admit a machine principal to the queue:
+#   - operator-read-any has no service-account exclusion, and the shared backend client
+#     (service-account-openbank-services, HUMAN-classified, ROLE_OPERATOR) matches it;
+#   - service-ledger-read names that same principal and matches any action ending
+#     ".read", so it admits ledger.approval.read verbatim;
+#   - a future rules.yaml matrix edit granting ROLE_OPERATOR ledger.approval.* would
+#     re-open matrix-allows regardless of this file's exclusions.
+# The queue payload carries every pending four-eyes decision's maker, action and resource
+# id — bank-side operational metadata no machine caller is verified to need (fleet caller
+# audit: no approvals* caller exists). Same idiom as delegation's approval veto.
+prohibited if {
+	startswith(input.principal.id, "service-account-")
+	startswith(input.action, "ledger.approval.")
 }
 
 # #10486 step 1 — interest-service's OWN machine identity. Its capitalization journal (DEBIT
