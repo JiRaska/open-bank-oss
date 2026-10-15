@@ -153,6 +153,13 @@ data class LoanApplication(
     val decidedEngineAt: OffsetDateTime? = null,
     val decisionDsti: BigDecimal? = null,
     val decisionDti: BigDecimal? = null,
+    /**
+     * ADR-0211 D1/D6 + ADR-0214: the signature artefact's hash, recorded by the explicit sign
+     * command (AWAITING_SIGNATURE → SIGNED). Null on every row that never passed that gate — the
+     * column is additive and nullable (V27), and the evidence event of the transition carries the
+     * same hash, so the audit chain can corroborate the stored value.
+     */
+    val signatureArtefactHash: String? = null,
     val catalogSnapshot: CatalogLoanSnapshot? = null,
 )
 
@@ -263,6 +270,48 @@ data class LoanApplicationRequest(
  * authenticated JWT subject server-side, so the four-eyes separation cannot be spoofed (ADR-0028 D5).
  */
 data class DecisionRequest(val approve: Boolean, val reason: String? = null)
+
+/**
+ * Pre-disbursement withdrawal (ADR-0211 D1: any pre-DISBURSED state the graph permits → WITHDRAWN).
+ * A statutory cooling-off withdrawal from a *concluded* contract is a different thing entirely — it
+ * runs post-disbursement on the live loan (ADR-0215), never through this request.
+ */
+data class WithdrawApplicationRequest(val reason: String) {
+    init {
+        require(reason.length >= MIN_REASON_LENGTH) {
+            "withdrawal reason must be at least $MIN_REASON_LENGTH characters"
+        }
+    }
+
+    companion object {
+        const val MIN_REASON_LENGTH = 10
+    }
+}
+
+/**
+ * Document submission for an application sitting in DOCS_REQUIRED (ADR-0211 D2): drives
+ * DOCS_REQUIRED → ASSESSMENT through the same machine + claim + evidence chain as every other
+ * transition, so a document-arrival is an auditable origination step, not a silent row update.
+ */
+data class SubmitDocumentsRequest(val reason: String? = null)
+
+/**
+ * Customer signature on the offered contract (ADR-0211 D1: AWAITING_SIGNATURE → SIGNED). The
+ * [artefactHash] is the ADR-0214 evidence anchor of the signature artefact (rendered contract,
+ * SCA reference) and is persisted on the application row (V27) — never a validate-and-discard.
+ */
+data class SignApplicationRequest(val artefactHash: String) {
+    init {
+        require(artefactHash.isNotBlank()) { "Signature artefact hash is required" }
+        require(artefactHash.length <= MAX_ARTEFACT_HASH_LENGTH) {
+            "Signature artefact hash must be at most $MAX_ARTEFACT_HASH_LENGTH characters"
+        }
+    }
+
+    companion object {
+        const val MAX_ARTEFACT_HASH_LENGTH = 64
+    }
+}
 
 /**
  * Collateral registration intake. Note there is **no `registeredBy`**: the maker's identity is taken
