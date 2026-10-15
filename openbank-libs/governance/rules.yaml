@@ -1834,6 +1834,7 @@ dependencies:
         - openbank-docs-truth-agent/
         - openbank-authz-policy-auditor/
         - openbank-flaky-test-hunter/
+        - openbank-agent-policy/
         - openbank-ap2-service/
         - openbank-mcp-service/
         - openbank-communication-service/
@@ -1860,12 +1861,13 @@ dependencies:
         - openbank-docs-truth-agent
         - openbank-authz-policy-auditor
         - openbank-flaky-test-hunter
+        - openbank-agent-policy               # ADR-0031 D9 phase 4 -- shared AGPL policy-gate lib for the agent plane
         - openbank-ap2-service              # ADR-0193 -- same agent plane as mcp-service
         - openbank-mcp-service              # ADR-0181 -- explicitly inside the ADR-0136 boundary
         - openbank-communication-service    # ADR-0285 D5 -- explicit, not a reasoning/acting agent
                                              # itself, but the ADR's own binding decision places it
                                              # "under ADR-0197 like the rest of that plane"
-      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
+      rule: "no Apache-2.0 module may declare project(':openbank-agent-service'|':openbank-case-coordinator-agent'|':openbank-copilot-service'|':openbank-devops-agent'|':openbank-finops-agent'|':openbank-control-liveness-sentinel'|':openbank-governance-auditor'|':openbank-release-steward'|':openbank-docs-truth-agent'|':openbank-authz-policy-auditor'|':openbank-flaky-test-hunter'|':openbank-agent-policy'|':openbank-ap2-service'|':openbank-mcp-service'|':openbank-communication-service') as a dependency"
       license: "AGPL-3.0-only"
       adr: ADR-0136
   block_on_cve_severity: [CRITICAL, HIGH]

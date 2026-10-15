@@ -1,0 +1,30 @@
+# Test fixture: a money-path agent's charter — the phase-4 generalisation target. A different
+# agent id, a different tier (money_path_write instead of write_proposal) and a different
+# resource namespace (payment-instruction instead of github-pr) must grant exactly the same way
+# flaky-test-hunter's phase-3 binding does (ADR-0031 D9 phase 4).
+agents:
+  - id: money-path-fixture-agent
+    enabled: true
+    tools:
+      allow:
+        - tier: money_path_write
+          resources:
+            - payment-instruction
+      deny:
+        - tier: money_path_execute
+          resources:
+            - '*'
+  - id: flaky-test-hunter
+    enabled: true
+    tools:
+      allow:
+        - tier: write_proposal
+          resources:
+            - github-pr
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'

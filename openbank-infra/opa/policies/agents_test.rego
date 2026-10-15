@@ -395,6 +395,18 @@ tier_charters := {
 				],
 			},
 		},
+		{
+			"id": "money-path-fixture-agent",
+			"plane": "money-path",
+			"tools": {
+				"allow": [
+					{"tier": "money_path_write", "resources": ["payment-instruction"]},
+				],
+				"deny": [
+					{"tier": "money_path_execute", "resources": ["*"]},
+				],
+			},
+		},
 	],
 	"tool_tiers": {"deny": ["money.transfer", "money.post.ledger", "gh.pr.merge", "gh.pr.approve", "secrets.read.raw"]},
 }
@@ -445,4 +457,32 @@ test_deny_flaky_test_hunter_tier_denied if {
 			"tool_tiers": {"deny": []},
 		}
 		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+}
+
+# ---------------------------------------------------------------------------------------
+# Phase 4: the tier/resource grant is agent-agnostic — a money-path agent's own namespace
+# grants through the same tier_resource_charter_* rules, and denies everywhere else.
+# ---------------------------------------------------------------------------------------
+
+# The money-path agent's chartered money_path_write grant allows acting on payment-instruction.
+test_allow_money_path_agent_tier_grant if {
+	agents.allow with data.agents as tier_charters
+		with input as {"agent": "money-path-fixture-agent", "tool": "money.repair.propose", "resource": "payment-instruction", "tier": "money_path_write"}
+	agents.decision.reason == "allowed by charter" with data.agents as tier_charters
+		with input as {"agent": "money-path-fixture-agent", "tool": "money.repair.propose", "resource": "payment-instruction", "tier": "money_path_write"}
+}
+
+# Another agent's resource is outside the grant — deny-by-default on the resource axis.
+test_deny_money_path_agent_wrong_resource if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "money-path-fixture-agent", "tool": "money.repair.propose", "resource": "github-pr", "tier": "money_path_write"}
+	agents.decision.reason == "no matching allow rule" with data.agents as tier_charters
+		with input as {"agent": "money-path-fixture-agent", "tool": "money.repair.propose", "resource": "github-pr", "tier": "money_path_write"}
+}
+
+# The agent's own hard-denied tier denies even on its own chartered resource (a tool outside
+# tool_tiers.deny, so the charter tier deny — not the hard tier deny — is the reason).
+test_deny_money_path_agent_hard_denied_tier if {
+	agents.decision.reason == "denied by charter tier/resource grant" with data.agents as tier_charters
+		with input as {"agent": "money-path-fixture-agent", "tool": "money.repair.execute", "resource": "payment-instruction", "tier": "money_path_execute"}
 }

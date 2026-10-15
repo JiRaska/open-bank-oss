@@ -3,15 +3,12 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.flakytest.infrastructure.policy
+package com.openbank.agentpolicy
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
-import io.mockk.every
-import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -22,11 +19,11 @@ import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 /**
- * ADR-0031 D9 phase 3, layer 2: [OpaAgentDecisionClient] round-tripped against a real in-JVM
- * OPA stub (com.sun HttpServer — the fleet's established idiom, see GitHubProposalAdapterTest)
- * so the actual `/v1/data/openbank/agents/decision` contract is exercised. Policy-driven denies
- * are data ([OpaAgentDecision.Denied]); everything else — non-2xx, unparseable body, missing
- * result, connection refused — is an [OpaGateException] that the gate maps to `pdp_unreachable`.
+ * ADR-0031 D9 phase 4, layer 2: [OpaAgentDecisionClient] round-tripped against a real in-JVM
+ * OPA stub (com.sun HttpServer — the fleet's established idiom) so the actual
+ * `/v1/data/openbank/agents/decision` contract is exercised. Policy-driven denies are data
+ * ([OpaAgentDecision.Denied]); everything else — non-2xx, unparseable body, missing result,
+ * connection refused — is an [OpaGateException] that the gate maps to `pdp_unreachable`.
  */
 class OpaAgentDecisionClientTest {
 
@@ -56,16 +53,11 @@ class OpaAgentDecisionClientTest {
         ex.responseBody.use { it.write(bytes) }
     }
 
-    private fun clientFor(baseUrl: String): OpaAgentDecisionClient {
-        val gateConfig = mockk<FlakyTestHunterConfig.PolicyGate> {
-            every { opaUrl() } returns baseUrl
-            every { timeout() } returns Duration.ofSeconds(2)
-        }
-        val config = mockk<FlakyTestHunterConfig> {
-            every { policyGate() } returns gateConfig
-        }
-        return OpaAgentDecisionClient(config)
-    }
+    private fun clientFor(
+        baseUrl: String,
+        config: AgentPolicyConfig = AgentPolicyConfig.flakyTestHunter(),
+    ): OpaAgentDecisionClient =
+        OpaAgentDecisionClient(opaBaseUrl = baseUrl, timeout = Duration.ofSeconds(2), config = config)
 
     @Test
     fun `an allowed decision parses and the input names agent, tool, resource and tier`() {
@@ -76,7 +68,7 @@ class OpaAgentDecisionClientTest {
         )
         val client = clientFor(baseUrl)
 
-        val decision = runBlocking { client.queryPrOpenDecision() }
+        val decision = runBlocking { client.queryDecision() }
 
         assertThat(decision).isEqualTo(OpaAgentDecision.Allowed)
         val input = lastInput!!.path("input")
@@ -84,6 +76,30 @@ class OpaAgentDecisionClientTest {
         assertThat(input.path("tool").asText()).isEqualTo("gh.pr.open")
         assertThat(input.path("resource").asText()).isEqualTo("github-pr")
         assertThat(input.path("tier").asText()).isEqualTo("write_proposal")
+    }
+
+    @Test
+    fun `a money-path agents input carries its own agent id and resource namespace`() {
+        val baseUrl = startOpaStub(
+            200,
+            """{"result":{"allow":true,"reason":"allowed by charter"}}""",
+        )
+        val config = AgentPolicyConfig(
+            agentId = "money-path-fixture-agent",
+            resourceId = "payment-instruction",
+            tier = "money_path_write",
+            tool = "money.repair.propose",
+        )
+        val client = clientFor(baseUrl, config)
+
+        val decision = runBlocking { client.queryDecision() }
+
+        assertThat(decision).isEqualTo(OpaAgentDecision.Allowed)
+        val input = lastInput!!.path("input")
+        assertThat(input.path("agent").asText()).isEqualTo("money-path-fixture-agent")
+        assertThat(input.path("tool").asText()).isEqualTo("money.repair.propose")
+        assertThat(input.path("resource").asText()).isEqualTo("payment-instruction")
+        assertThat(input.path("tier").asText()).isEqualTo("money_path_write")
     }
 
     @Test
@@ -95,7 +111,7 @@ class OpaAgentDecisionClientTest {
         )
         val client = clientFor(baseUrl)
 
-        val decision = runBlocking { client.queryPrOpenDecision() }
+        val decision = runBlocking { client.queryDecision() }
 
         assertThat(decision).isEqualTo(OpaAgentDecision.Denied("no matching allow rule"))
     }
@@ -105,7 +121,7 @@ class OpaAgentDecisionClientTest {
         val baseUrl = startOpaStub(500, "{}")
         val client = clientFor(baseUrl)
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryDecision() } }
             .isInstanceOf(OpaGateException::class.java)
             .hasMessageContaining("HTTP 500")
     }
@@ -115,7 +131,7 @@ class OpaAgentDecisionClientTest {
         val baseUrl = startOpaStub(200, "this is not json")
         val client = clientFor(baseUrl)
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryDecision() } }
             .isInstanceOf(OpaGateException::class.java)
     }
 
@@ -124,7 +140,7 @@ class OpaAgentDecisionClientTest {
         val baseUrl = startOpaStub(200, "{}")
         val client = clientFor(baseUrl)
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryDecision() } }
             .isInstanceOf(OpaGateException::class.java)
             .hasMessageContaining("no result object")
     }
@@ -133,7 +149,7 @@ class OpaAgentDecisionClientTest {
     fun `a connection-refused sidecar is an OPA gate exception`() {
         val client = clientFor("http://127.0.0.1:1")
 
-        assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+        assertThatThrownBy { runBlocking { client.queryDecision() } }
             .isInstanceOf(OpaGateException::class.java)
     }
 }
