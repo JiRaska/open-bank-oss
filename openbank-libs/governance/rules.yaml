@@ -3927,6 +3927,20 @@ autonomous_agent_prs:
   ci_producer: .github/scripts/check-agent-pr-guard.py
   # Autonomous coding agents. Adding a login here is a governance-path change, which this
   # very guard blocks an agent from making.
+  #
+  # Entry form: a bare login, or a mapping:
+  #   - login: <account>
+  #     allowed_money_path_services: [<token>, ...]   # optional; default is none
+  # The allowance names service TOKENS (strip `openbank-` / `-service` — the same
+  # derivation the guard uses) drawn ONLY from money_path_services above. For that one
+  # account, and only for the money-path derivation, paths under exactly those tokens
+  # downgrade from BLOCK to ALLOWED_BY_SCOPE. It can NEVER name extra_protected_tokens
+  # (payment, kyc, party, card-issuance, aml, tax, dispute — a token money_path_services
+  # does not yield fails the check loudly, it can never be read as clean), and it never
+  # affects the CI-machinery / governance / authz / trust-chain clauses, which stay
+  # unconditional. Per-ACCOUNT on purpose: a blanket branch-prefix allowance would put
+  # every agent on the money path. No account carries an allowance today — the first
+  # (the fraud pilot agent) is gated on ADR-0340 two-person review merging first (#12885).
   agent_accounts:
     - openbank-agent-bot[bot]
   # Deterministic automation. These legitimately touch money-path paths and their content is
