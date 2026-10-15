@@ -1,0 +1,68 @@
+# Arm Dependabot auto-merge with an App identity so its eventual main push runs
+# normal CI and the path-scoped Pact drift check (#12161). This workflow runs from
+# the default branch and has Actions secrets; the preceding pull_request run does
+# not. Never check out PR code, restore its cache, or read its artifacts here.
+name: Arm Dependabot auto-merge
+
+on:
+  workflow_run:
+    workflows: ["Dependabot auto-merge"]
+    types: [completed]
+    branches: ["dependabot/**"]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+jobs:
+  arm:
+    name: Arm eligible patch after trusted checks
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      # workflow_run's github.sha is the trusted default-branch commit, never the
+      # triggering PR's head. Pin the verifier to that SHA and persist no token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test trusted verifier
+        run: python3 .github/scripts/test-verify-dependabot-auto-merge.py
+
+      - name: Verify source run and live PR
+        id: verify
+        run: python3 .github/scripts/verify-dependabot-auto-merge.py
+
+      - name: Mint repository-scoped GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Enable native auto-merge for the classified head
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR_NUMBER: ${{ steps.verify.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          # --match-head-commit is an atomic guard against a PR update between
+          # verification and arming. Branch protection still gates the merge on
+          # every required check; this step never approves or bypasses review.
+          gh pr merge --repo "$GH_REPO" --auto --squash \
+            --match-head-commit "$HEAD_SHA" "$PR_NUMBER"

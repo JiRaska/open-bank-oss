@@ -26,3 +26,11 @@ production log format reintroduces a raw `token=` / `tokenId=` field.
 
 Note: nothing in `src/main` issues a proposal token today (#5900), so these lines appear only in
 tests until the confirm path is wired.
+
+Operational proposal and policy diagnostic logs contain outcomes and the hashed token reference, never customer subjects, tool names, policy reasons or deserialisation payloads. Attributed audit events remain a separate record: they retain actor/resource attribution and the audit payload fields required to explain the decision. Exception messages and stack traces are omitted from these diagnostic paths because they can contain request data. HTTP status, token TTL and generated action ids remain available for diagnosis.
+
+The same rule covers the model/tool degradation path and the `party-events-in`
+consumer: a failed model or tool call logs only the exception class (its message
+can echo tool-call arguments or model output), and an unparseable or invalid
+party event logs only its length and the exception class — never the payload,
+and never the Jackson exception itself, whose message embeds a payload excerpt.

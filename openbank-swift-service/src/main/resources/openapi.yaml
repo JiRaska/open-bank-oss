@@ -16,7 +16,8 @@ info:
   # `ErrorResponse { error, message }` (and 422 as `ValidationError { error, violations }`), and the
   # service has never sent an `error` member. They now reference ProblemDetail, the body libs-runtime
   # actually renders. Spec-only: the served contract is unchanged (check-api-contract: correction).
-  version: "1.7.0"
+  # 1.7 -> 1.8 (#11588): additive verified makerActorKind on approval responses.
+  version: "1.8.0"
   description: |
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
@@ -619,6 +620,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           description: >-

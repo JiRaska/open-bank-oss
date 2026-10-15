@@ -4,6 +4,14 @@ The REST contract is formalized in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.
 
 Base path: `/api/v1/lending`. All endpoints require a Keycloak bearer JWT (`bearerAuth`).
 
+In production, `/api/*` uses the bearer authentication mechanism on both the plain HTTP and
+the 8443 mTLS listeners. The 8443 listener still requires a trusted client certificate for the
+TLS handshake, but that certificate alone does not log a caller in to the API: a request with a
+certificate and no bearer receives 401. A valid bearer supplies the API identity. Route role
+checks remain mandatory; an OPA deny decision blocks a request only when `AUTHZ_ENFORCE=true`
+(`authz.enforce` defaults to `false`). This keeps transport authentication separate from API
+identity without changing the existing authorization settings.
+
 ## Authorization
 
 The resource class is role-gated; the **acting principal is always the authenticated JWT subject** (`SecurityIdentity.principal.name`), never a client-supplied field. Class-level roles: `ROLE_LENDING_OFFICER`, `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN`. Per-endpoint overrides tighten this:
@@ -79,3 +87,7 @@ their bodies contain no proposer, checker or disburser identity. Status mapping 
 ## Versioning
 
 `/api/v1/...` URL path; `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The OpenAPI contract version (`info.version`) is the API-contract axis (ADR-0048), independent of the release `version.txt`.
+
+## Customer-edge caller identity
+
+Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.

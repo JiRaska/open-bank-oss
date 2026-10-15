@@ -9,6 +9,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.MatcherAssert.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 
@@ -34,6 +36,10 @@ class AuthzPolicyAuditorBootSmokeIT {
 
     @Test
     fun `application boots and reports ready against a live database`() {
+        assertThat(
+            ConfigProvider.getConfig().getValue("quarkus.kafka.devservices.enabled", String::class.java),
+            equalTo("false"),
+        )
         given()
             .`when`().get("/q/health/ready")
             .then()

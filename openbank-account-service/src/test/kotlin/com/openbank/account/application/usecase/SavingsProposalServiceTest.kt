@@ -21,6 +21,7 @@ import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.domain.identifiers.Ids
 import io.mockk.coEvery
@@ -84,6 +85,7 @@ class SavingsProposalServiceTest {
         action = "savings.withdraw.execute",
         resourceId = null,
         makerId = maker.toString(),
+        makerActorKind = MakerActorKind.CUSTOMER_PARTY,
         status = ApprovalStatus.PENDING,
         createdAt = now,
     )
@@ -93,7 +95,7 @@ class SavingsProposalServiceTest {
         coEvery { savingsGuard.authorization(accountId, delegate, any()) } returns null
         assertThatThrownBy { runBlocking { service.propose(command()) } }
             .isInstanceOf(ProposalForbiddenException::class.java)
-        coVerify(exactly = 0) { approvalStore.create(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { approvalStore.create(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -102,7 +104,9 @@ class SavingsProposalServiceTest {
             SavingsGoalDelegationGuard.Authorization(owner, null)
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             emptyList()
-        coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
+        coEvery {
+            approvalStore.create(any(), any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+        } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
         val created = service.propose(command())
@@ -111,7 +115,12 @@ class SavingsProposalServiceTest {
         assertThat(created.proposal.status).isEqualTo(WithdrawalProposalStatus.PENDING)
         assertThat(created.proposal.approvalId).isEqualTo("approval-1")
         coVerify {
-            approvalStore.create("savings.withdraw.execute", created.proposal.id.toString(), delegate.toString())
+            approvalStore.create(
+                "savings.withdraw.execute",
+                created.proposal.id.toString(),
+                delegate.toString(),
+                makerActorKind = MakerActorKind.CUSTOMER_PARTY,
+            )
         }
     }
 
@@ -139,7 +148,7 @@ class SavingsProposalServiceTest {
             assertThat(created.proposal).isEqualTo(original)
             assertThat(created.approvalId).isEqualTo("approval-orig")
             // No second approval record, no second row.
-            coVerify(exactly = 0) { approvalStore.create(any(), any(), any(), any()) }
+            coVerify(exactly = 0) { approvalStore.create(any(), any(), any(), any(), any()) }
             coVerify(exactly = 0) { proposalRepository.save(any<WithdrawalProposal>()) }
         }
 
@@ -161,7 +170,9 @@ class SavingsProposalServiceTest {
         // The sweep may not have flipped it yet — it is still PENDING but expired.
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             listOf(expired)
-        coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
+        coEvery {
+            approvalStore.create(any(), any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+        } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
         val created = service.propose(command())
@@ -199,7 +210,9 @@ class SavingsProposalServiceTest {
         )
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             emptyList()
-        coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
+        coEvery {
+            approvalStore.create(any(), any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+        } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
         val proposal = service.propose(command()).proposal

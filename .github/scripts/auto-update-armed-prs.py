@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
 """Keep ARMED pull requests up to date with `main`, and only those.
 
 WHY THIS EXISTS
 ---------------
-`main-protection` sets `strict_required_status_checks_policy: true` (measured 2026-09-30 via
-`gh api repos/JiRaska/open-bank-oss/rules/branches/main`), so a PR must be up to date with
-`main` to merge. `main` moves every few minutes and CI takes 30-40 minutes, so a PR whose
+When `main-protection` sets `strict_required_status_checks_policy: true`, a PR must be up to date with
+`main` to merge. The script exits before PR enumeration when strict mode is off. `main` moves
+every few minutes and CI takes 30-40 minutes, so a PR whose
 auto-merge is armed and whose required checks are all green goes `mergeable_state: behind` and
 then sits forever: auto-merge never updates a branch. The only remedy used to be a human
 noticing and pressing "Update branch". GitHub's merge queue would solve this, but it needs an
@@ -13,18 +12,24 @@ organisation-owned repository.
 
 WHAT IT DOES
 ------------
-For every open, non-draft, same-repository PR with auto-merge armed, whose `mergeable_state` is
-`behind` and whose REQUIRED contexts (read live from the branch rules, never hard-coded) have all
-completed successfully on the current head, it calls
+For every open, non-draft, same-repository PR with auto-merge armed — plus deploy-bot PRs
+(`chore/gitops-auto-deploy-*` / `chore/admin-ui-deploy-*` opened by the gitops bot), which ship
+user-visible features and are updated the same way even when nobody armed auto-merge on them —
+whose `mergeable_state` is `behind`, it calls
 `PUT /repos/{o}/{r}/pulls/{n}/update-branch` with `expected_head_sha`. Everything else is left
 alone, with one log line per decision:
 
-  * required checks pending/failed/missing -> skip (updating would discard a verdict in flight,
+  * required checks pending/failed -> skip (updating would discard a verdict in flight,
     or refresh a PR that cannot merge anyway);
+  * required check missing or cancelled -> UPDATE: under the strict up-to-date policy the PR is
+    stranded either way, and a branch update is exactly what re-registers the context. #12928
+    rotted behind main for hours because security checks cancelled at creation read as
+    "missing" and the old code kept skipping — the chicken-and-egg case this rule exists for;
   * `dirty` (conflicts)                    -> skip, a human has to resolve those;
   * not armed                              -> skip, the author has not asked for a merge;
   * head committed < --debounce-minutes ago -> skip, so CI is not restarted repeatedly;
-  * more than --max-updates in this run    -> skip, capped.
+  * more than --max-updates in this run    -> skip, capped;
+  * branch-update budget exhausted         -> skip until the author pushes; listed in the summary.
 
 FULL-FLEET SERIALIZATION
 ------------------------
@@ -53,6 +58,15 @@ would wedge on the required checks instead of on `behind`. The merge commit `upd
 creates is made server-side (committer `GitHub`) and GitHub signs it, which `required_signatures`
 needs: see the PR that introduced this script for the measured evidence.
 
+HARD COST BUDGET
+----------------
+`--max-updates` limits one workflow run only. `--max-updates-per-pr` caps CONSECUTIVE
+server-side base merges at the tip of the head (walked along first parents, at most cap + 1
+commit reads), across workflow runs. Any non-updater commit — the author pushing, or merging or
+rebasing main themselves — resets it. At the cap the PR is skipped with the exact unblock action,
+and listed in the job summary. An unreadable budget skips THAT PR (fail closed) without failing
+the run; only a refused update-branch call fails the workflow.
+
 MODES
 -----
   --self-test           exercise the pure decision function (no network)
@@ -75,13 +89,27 @@ WORKFLOW = pathlib.Path(".github/workflows/auto-update-armed-prs.yml")
 OK_CONCLUSIONS = {"success", "neutral", "skipped"}
 
 
+# Deploy-bot PRs ship user-facing features but nobody arms auto-merge on them; they are
+# updated exactly like armed PRs. Author AND prefix are both required so a human branch can
+# never qualify — feature PRs are never touched.
+BOT_DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
+BOT_AUTHOR = "app/openbank-gitops-bot"
+
+
+def is_bot_deploy_pr(p: dict) -> bool:
+    return (p.get("user", {}).get("login") == BOT_AUTHOR
+            and any((p.get("head", {}).get("ref") or "").startswith(pre) for pre in BOT_DEPLOY_PREFIXES))
+
+
 # --------------------------------------------------------------------------- pure decision
 def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt.datetime,
            head_committed_at: dt.datetime | None, debounce_minutes: int) -> tuple[bool, str]:
     """Return (update?, reason). `checks` maps context -> conclusion (None = not completed)."""
     if pr.get("draft"):
         return False, "draft"
-    if not pr.get("auto_merge"):
+    armed = bool(pr.get("auto_merge"))
+    bot = bool(pr.get("bot_deploy"))
+    if not armed and not bot:
         return False, "auto-merge not armed"
     if not pr.get("same_repo"):
         return False, "head is a fork"
@@ -92,20 +120,30 @@ def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt
         return False, f"mergeable_state={state}, not behind"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
-    missing = [c for c in required if c not in checks]
-    if missing:
-        return False, f"required context(s) not reported: {', '.join(missing)}"
-    pending = [c for c in required if checks[c] is None]
+    actor = "armed" if armed else "bot deploy PR (not armed)"
+    # A context is "unregistered" when it is absent from `checks` (workflow path-filtered out
+    # or never registered — e.g. security checks cancelled when the PR was created, so the
+    # context never reports on the current head) or present with a `cancelled` conclusion.
+    # Under the strict up-to-date policy such a PR is stranded either way, and a branch update
+    # is exactly what re-registers the contexts. A verdict in flight (pending) or a real
+    # failure always wins, though: updating would discard the one or churn a PR that cannot
+    # merge anyway.
+    pending = [c for c in required if c in checks and checks[c] is None]
     if pending:
         return False, f"required context(s) pending: {', '.join(pending)}"
-    failed = [c for c in required if checks[c] not in OK_CONCLUSIONS]
+    failed = [c for c in required
+              if c in checks and checks[c] not in OK_CONCLUSIONS and checks[c] != "cancelled"]
     if failed:
         return False, "required context(s) not green: " + ", ".join(f"{c}={checks[c]}" for c in failed)
     if head_committed_at is not None:
         age = (now - head_committed_at).total_seconds() / 60
         if age < debounce_minutes:
             return False, f"debounced — head committed {age:.0f} min ago (< {debounce_minutes})"
-    return True, "behind + armed + all required contexts green"
+    unregistered = [c for c in required if c not in checks or checks[c] == "cancelled"]
+    if unregistered:
+        return True, (f"behind + {actor} + required context(s) unregistered: "
+                      f"{', '.join(unregistered)} — update re-registers them")
+    return True, f"behind + {actor} + all required contexts green"
 
 
 BUILD_PREFIX = "build (openbank-"
@@ -146,6 +184,23 @@ def plan(entries: list[dict], max_updates: int) -> list[tuple[int, bool, str]]:
     return out
 
 
+def resolve_state(state: str | None, mergeable: bool | None, behind_by: int | None) -> str | None:
+    """Settle a `mergeable_state` GitHub has not computed yet.
+
+    GitHub computes it lazily, so a read can answer `unknown` (or null) for hours on a PR
+    nobody opens. Read as "not behind", that strands every armed PR nobody is looking at.
+    `mergeable: false` already means conflicts; otherwise the compare API's `behind_by`
+    decides behind-ness directly. Anything still undecided stays as it was (a skip).
+    """
+    if state not in (None, "unknown"):
+        return state
+    if mergeable is False:
+        return "dirty"
+    if behind_by:
+        return "behind"
+    return state
+
+
 def self_test() -> int:
     now = dt.datetime(2026, 9, 30, 12, 0, tzinfo=dt.timezone.utc)
     old = now - dt.timedelta(hours=2)
@@ -153,13 +208,24 @@ def self_test() -> int:
     green = {"Validate manifests": "success", "Gitleaks": "success"}
     base = {"draft": False, "auto_merge": {"merge_method": "squash"}, "same_repo": True,
             "mergeable_state": "behind"}
+    bot_deploy = {**base, "auto_merge": None, "bot_deploy": True}
     cases = [
         ("behind+green+armed -> update", base, green, old, True),
         ("behind+pending -> skip", base, {**green, "Gitleaks": None}, old, False),
         ("behind+failed -> skip", base, {**green, "Gitleaks": "failure"}, old, False),
-        ("behind+missing context -> skip", base, {"Validate manifests": "success"}, old, False),
+        ("behind+missing context -> update (re-registers)",
+         base, {"Validate manifests": "success"}, old, True),
+        ("behind+missing+pending -> skip (verdict in flight wins)",
+         base, {"Validate manifests": "success", "Gitleaks": None}, old, False),
+        ("behind+failed+missing -> skip (failure wins)",
+         base, {"Validate manifests": "failure"}, old, False),
+        ("behind+cancelled -> update (re-registers)",
+         base, {**green, "Gitleaks": "cancelled"}, old, True),
+        ("behind+green+bot deploy PR (not armed) -> update", bot_deploy, green, old, True),
+        ("behind+unregistered+bot deploy PR (not armed) -> update",
+         bot_deploy, {"Validate manifests": "success"}, old, True),
+        ("not armed human PR -> skip", {**base, "auto_merge": None}, green, old, False),
         ("dirty -> skip", {**base, "mergeable_state": "dirty"}, green, old, False),
-        ("not armed -> skip", {**base, "auto_merge": None}, green, old, False),
         ("draft -> skip", {**base, "draft": True}, green, old, False),
         ("fork -> skip", {**base, "same_repo": False}, green, old, False),
         ("clean (not behind) -> skip", {**base, "mergeable_state": "clean"}, green, old, False),
@@ -171,10 +237,167 @@ def self_test() -> int:
         ok = got == want
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: update={got} ({why})")
+    # Recovery of unregistered contexts must obey the same debounce as a green head.
+    # Cover both supported actors and real missing/cancelled states; a pending or failed
+    # sibling still wins so recovery never discards a verdict in flight.
+    for actor, pr in [("armed", base), ("bot deploy", bot_deploy)]:
+        for state, checks in [
+            ("missing", {"Validate manifests": "success"}),
+            ("cancelled", {**green, "Gitleaks": "cancelled"}),
+        ]:
+            for age, want in [(0, False), (44, False), (45, True), (120, True)]:
+                got, why = decide(pr, req, checks, now, now - dt.timedelta(minutes=age), 45)
+                ok = got == want
+                failures += not ok
+                print(f"{'PASS' if ok else 'FAIL'}  {actor}+{state}+age={age}: {why}")
+        for state, checks, reason in [
+            ("pending+missing", {"Validate manifests": None}, "pending"),
+            ("failed+missing", {"Validate manifests": "failure"}, "not green"),
+        ]:
+            got, why = decide(pr, req, checks, now, now, 45)
+            ok = not got and reason in why
+            failures += not ok
+            print(f"{'PASS' if ok else 'FAIL'}  {actor}+fresh+{state}: {why}")
+    for name, args, want in [
+        ("unknown + behind_by>0 -> behind", ("unknown", None, 3), "behind"),
+        ("null + behind_by>0 -> behind", (None, None, 1), "behind"),
+        ("unknown + mergeable=false -> dirty", ("unknown", False, 3), "dirty"),
+        ("unknown + behind_by=0 -> unknown", ("unknown", None, 0), "unknown"),
+        ("unknown + compare unread -> unknown", ("unknown", None, None), "unknown"),
+        ("clean is never overridden", ("clean", None, 5), "clean"),
+    ]:
+        got = resolve_state(*args)
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  resolve {name}: {got}")
     # An empty required set must never read as "all green" (vacuous pass).
     got, why = decide(base, [], {}, now, old, 20)
     failures += got
     print(f"{'FAIL' if got else 'PASS'}  empty required set -> skip ({why})")
+    # A permission denial must fail the workflow; the old implementation printed a
+    # warning and returned zero, so a permanently stranded armed PR looked healthy.
+    import contextlib
+    import io
+    from unittest.mock import patch
+
+    def graph(authored: int, updates: int, renamed_at: int | None = None) -> tuple[str, dict]:
+        """A first-parent chain: `authored` author commits, then `updates` updater merges."""
+        commits: dict[str, dict] = {}
+        prev = None
+        for i in range(authored + updates):
+            sha = f"{i:040x}"
+            parents = [{"sha": prev}] if prev else [{"sha": "f" * 40}]
+            if i >= authored:
+                into = "codex/renamed" if i == renamed_at else "agent/example"
+                commits[sha] = {"commit": {"message": f"Merge branch 'main' into {into}\n\nbody",
+                                           "committer": {"name": "GitHub"}},
+                                "parents": parents + [{"sha": "e" * 40}]}
+            else:
+                commits[sha] = {"commit": {"message": f"feat: work {i}",
+                                           "committer": {"name": "Author"}}, "parents": parents}
+            prev = sha
+        return prev, commits
+
+    def graph_api(commits: dict, update_code: int = 202, reads: list | None = None,
+                  update_data: object = None):
+        def fake(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
+            if method == "GET" and "/commits/" in path:
+                sha = path.rsplit("/", 1)[1]
+                if reads is not None:
+                    reads.append(sha)
+                return (200, commits[sha]) if sha in commits else (404, "Not Found")
+            if method == "PUT" and path.endswith("/update-branch"):
+                return update_code, update_data if update_data is not None else ("denied" if update_code != 202 else {})
+            raise AssertionError(f"unexpected API call {method} {path}")
+        return fake
+
+    # 320 author commits + 2 updater merges: >250, the size GitHub's PR-commits list truncates.
+    head, commits = graph(320, 2, renamed_at=320)
+    reads: list = []
+    with patch.dict(globals(), {"api": graph_api(commits, reads=reads)}):
+        used = branch_update_count("example/repo", head, "main", 4)
+    ok = used == 2 and len(reads) == 3
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  322-commit PR readable: budget {used}, {len(reads)} reads")
+    # An author push on top of earlier updates resets the budget.
+    _, base_commits = graph(5, 3)
+    tip = "a" * 40
+    base_commits[tip] = {"commit": {"message": "fix: author push", "committer": {"name": "Author"}},
+                         "parents": [{"sha": f"{7:040x}"}]}
+    with patch.dict(globals(), {"api": graph_api(base_commits)}):
+        used = branch_update_count("example/repo", tip, "main", 4)
+    failures += used != 0
+    print(f"{'PASS' if used == 0 else 'FAIL'}  author push resets the budget: {used}")
+    with patch.dict(globals(), {"api": graph_api({})}):
+        try:
+            branch_update_count("example/repo", "d" * 40, "main", 4)
+        except BudgetUnreadable:
+            print("PASS  unreadable head fails closed (BudgetUnreadable)")
+        else:
+            failures += 1
+            print("FAIL  unreadable head passed")
+
+    def fixture_get(path: str) -> object:
+        if "/pulls?" in path:
+            return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
+        if path.endswith("/pulls/42"):
+            return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+                    "head": {"sha": fixture_head, "ref": "agent/example",
+                             "repo": {"full_name": "example/repo"}}}
+        if "/commits/" in path:
+            return {"commit": {"committer": {"date": old.isoformat()}}}
+        raise AssertionError(f"unexpected API read {path}")
+
+    def run_fixture(commits: dict, update_code: int, update_data: object = None, **kw) -> tuple[int, str]:
+        with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                    "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
+                                    "api": graph_api(commits, update_code, update_data=update_data)}):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run("example/repo", "main", 5, 0, False, 20, **kw)
+        return result, output.getvalue()
+
+    fixture_head, fresh = graph(320, 0)
+    for status, want in ((403, 1), (409, 0), (202, 0)):
+        result, out = run_fixture(fresh, status)
+        ok = result == want and (("::error::FAILED" in out) == (status == 403))
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  320-commit PR, update-branch HTTP {status} -> exit {result}")
+    # GitHub reports the expected-head precondition race as 422, not only 409.
+    # Exercise the real response handler: no retry, changed SHA or generic 422 success.
+    for label, data, want in [
+        ("Unicode expected-head race", {"message": "expected head sha didn’t match current head ref."}, 0),
+        ("ASCII expected-head race", {"message": "expected head sha didn't match current head ref."}, 0),
+        ("generic validation", {"message": "Validation Failed"}, 1),
+        ("different precondition", {"message": "expected head sha is invalid"}, 1),
+        ("wrong schema", {"message": ["expected head sha didn’t match current head ref."]}, 1),
+        ("plain text", "expected head sha didn’t match current head ref.", 1),
+        ("no message", {"errors": ["head mismatch"]}, 1),
+    ]:
+        result, out = run_fixture(fresh, 422, update_data=data)
+        ok = result == want and (("::error::FAILED" in out) == bool(want))
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  HTTP 422 {label} -> exit {result}")
+    fixture_head, spent = graph(3, 5)
+    result, out = run_fixture(spent, 500)  # 500 would fail the run if update-branch were called
+    ok = (result == 0 and "update budget exhausted (4/4" in out and "push to the branch" in out
+          and "::error::" not in out)
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  exhausted budget skips with unblock action, exit {result}")
+    fixture_head = "d" * 40
+    result, out = run_fixture({}, 500)
+    ok = result == 0 and "update budget unreadable" in out and "::error::" not in out
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  unreadable budget skips that PR, exit {result}")
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], False),
+                                "get": lambda *_: (_ for _ in ()).throw(
+                                    AssertionError("non-strict mode enumerated PRs"))}):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = run("example/repo", "main", 5, 0, False, 20)
+        ok = result == 0 and "strict up-to-date checks disabled" in output.getvalue()
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  non-strict mode exits before PR enumeration")
     # Full-fleet serialization (plan()).
     t0 = "2026-09-01T00:00:00Z"
     def E(n, kind, ok=True, building=False, since=t0):
@@ -188,6 +411,8 @@ def self_test() -> int:
          [E(30, "full-fleet"), E(20, "full-fleet")], 5, {30: False, 20: True}),
         ("one full-fleet in flight -> other full-fleet skipped",
          [E(1, "full-fleet", ok=False, building=True), E(2, "full-fleet")], 5, {1: False, 2: False}),
+        ("exhausted full-fleet PR does not starve next candidate",
+         [E(1, "full-fleet", ok=False), E(2, "full-fleet")], 5, {1: False, 2: True}),
         ("small PRs unaffected by in-flight full-fleet",
          [E(1, "full-fleet", ok=False, building=True), E(3, "small"), E(4, "small")], 5,
          {1: False, 3: True, 4: True}),
@@ -227,6 +452,7 @@ DECLARATION = [
     ("schedule fallback", "cron:"),
     ("concurrency cancels in progress", "cancel-in-progress: true"),
     ("ambient token read-only", "contents: read"),
+    ("persistent per-PR budget wired", "--max-updates-per-pr 4"),
 ]
 
 
@@ -276,13 +502,16 @@ def get(path: str) -> object:
     return data
 
 
-def required_contexts(repo: str, branch: str) -> list[str]:
+def required_policy(repo: str, branch: str) -> tuple[list[str], bool]:
     rules = get(f"/repos/{repo}/rules/branches/{branch}")
     ctx: list[str] = []
+    strict = False
     for r in rules:
         if r.get("type") == "required_status_checks":
-            ctx += [c["context"] for c in r["parameters"]["required_status_checks"]]
-    return sorted(set(ctx))
+            parameters = r["parameters"]
+            ctx += [c["context"] for c in parameters["required_status_checks"]]
+            strict |= parameters.get("strict_required_status_checks_policy") is True
+    return sorted(set(ctx)), strict
 
 
 def head_checks(repo: str, sha: str) -> dict[str, str | None]:
@@ -306,30 +535,88 @@ def parse_ts(s: str) -> dt.datetime:
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+class BudgetUnreadable(Exception):
+    """The update budget could not be established; that one PR is skipped, fail closed."""
+
+
+def is_updater_merge(commit: dict, branch: str) -> bool:
+    """A server-side `update-branch` merge: GitHub-committed, two parents, base merged in."""
+    body = commit.get("commit", {})
+    return (body.get("message", "").partition("\n")[0].startswith(f"Merge branch '{branch}' into ")
+            and body.get("committer", {}).get("name") == "GitHub"
+            and len(commit.get("parents", [])) == 2)
+
+
+def branch_update_count(repo: str, head_sha: str, branch: str, cap: int) -> int:
+    """Count the CONSECUTIVE base merges at the tip of the head, along first parents.
+
+    The budget is "CI restarts we caused since the author last pushed", read from the commit
+    graph itself (so a new workflow run cannot reset it) and bounded by construction: at most
+    cap + 1 commit reads, whatever the PR's size. The previous design listed
+    `pulls/{n}/commits`, which GitHub truncates (100 per page, 250 in total), so every long-lived
+    PR became permanently unreadable and failed the whole run. A commit that is not an updater
+    merge (the author pushed, or merged/rebased main themselves) ends the walk and so resets the
+    budget: that push is a deliberate human act, not an automated restart loop. Human presses of
+    "Update branch" produce the same server-side merge and count too.
+    """
+    used, sha = 0, head_sha
+    while used < cap:
+        code, commit = api("GET", f"/repos/{repo}/commits/{sha}")
+        if code != 200 or not isinstance(commit, dict) or not commit.get("parents"):
+            raise BudgetUnreadable(f"commit {sha[:9]} unreadable ({code})")
+        if not is_updater_merge(commit, branch):
+            break
+        used += 1
+        sha = commit["parents"][0]["sha"]
+    return used
+
+
+def write_summary(lines: list[str]) -> None:
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path or not lines:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("### Armed PRs the updater will not touch\n\n" + "\n".join(lines) + "\n")
+
+
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
-        fleet_threshold: int) -> int:
-    required = required_contexts(repo, branch)
-    print(f"required contexts on {branch} (live): {required}")
+        fleet_threshold: int, max_updates_per_pr: int = 4) -> int:
+    required, strict = required_policy(repo, branch)
+    print(f"required contexts on {branch} (live): {required}; strict={strict}")
     if not required:
         print("::error::no required contexts resolved — refusing to act on an empty set")
         return 1
+    if not strict:
+        print("strict up-to-date checks disabled; no branch update is needed")
+        return 0
     now = dt.datetime.now(dt.timezone.utc)
     pulls = get(f"/repos/{repo}/pulls?state=open&base={branch}&per_page=100")
-    armed = [p for p in pulls if p.get("auto_merge") and not p.get("draft")]
-    print(f"{len(pulls)} open PR(s) against {branch}, {len(armed)} armed and non-draft")
-    entries, shas = [], {}
-    for p in armed:
+    candidates = [p for p in pulls
+                  if not p.get("draft") and (p.get("auto_merge") or is_bot_deploy_pr(p))]
+    print(f"{len(pulls)} open PR(s) against {branch}, "
+          f"{len(candidates)} armed-or-bot-deploy and non-draft")
+    failed_updates = 0
+    stuck: list[str] = []
+    entries, shas, budgets = [], {}, {}
+    for p in candidates:
         n = p["number"]
         full = get(f"/repos/{repo}/pulls/{n}")
         sha = shas[n] = full["head"]["sha"]
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
+              "bot_deploy": is_bot_deploy_pr(full),
               "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
               "mergeable_state": full.get("mergeable_state")}
+        if pr["same_repo"] and pr["mergeable_state"] in (None, "unknown"):
+            behind_by = (get(f"/repos/{repo}/compare/{branch}...{sha}") or {}).get("behind_by")
+            settled = resolve_state(pr["mergeable_state"], full.get("mergeable"), behind_by)
+            print(f"STATE  #{n} {sha[:9]}: mergeable_state={pr['mergeable_state']}, "
+                  f"behind_by={behind_by} -> {settled}")
+            pr["mergeable_state"] = settled
         kind, building = "unknown", False
         if not pr["same_repo"]:
             ok, why = decide(pr, required, {}, now, None, debounce)
         else:
-            # Checks are read for every armed PR, behind or not: an up-to-date full-fleet PR
+            # Checks are read for every candidate, behind or not: an up-to-date full-fleet PR
             # whose build is running is exactly the "in flight" one that blocks the others.
             checks = head_checks(repo, sha)
             kind, building = classify(checks, fleet_threshold)
@@ -339,6 +626,24 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                 commit = get(f"/repos/{repo}/commits/{sha}")
                 committed = parse_ts(commit["commit"]["committer"]["date"])
                 ok, why = decide(pr, required, checks, now, committed, debounce)
+        if ok:
+            try:
+                used = branch_update_count(repo, sha, branch, max_updates_per_pr)
+            except BudgetUnreadable as error:
+                # Fail closed for THIS PR only; the others are still served and the run stays green.
+                ok, why = False, f"update budget unreadable ({error}); skipped, retried next run"
+                print(f"::warning::#{n}: {why}")
+                stuck.append(f"- #{n}: {why}")
+            else:
+                budgets[n] = used
+                if used >= max_updates_per_pr:
+                    ok, why = False, (
+                        f"update budget exhausted ({used}/{max_updates_per_pr} consecutive base "
+                        "merges since the last author push); to unblock, push to the branch "
+                        "(merge or rebase main locally) or press 'Update branch' once by hand "
+                        "after checking why CI keeps losing the race")
+                    print(f"::warning::#{n}: {why}")
+                    stuck.append(f"- #{n}: {why}")
         since = (full["auto_merge"] or {}).get("enabled_at") or full.get("created_at") or ""
         print(f"CLASS  #{n} {sha[:9]}: {kind}{' (no build-matrix check runs: none selected or not started -> small)' if kind == 'unknown' else ''}"
               f"{', build in flight' if building else ''}, armed since {since or '?'}")
@@ -350,18 +655,34 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         if not ok:
             print(f"SKIP   #{n} {sha[:9]}: {why}")
             continue
+        used = budgets[n]
         if dry_run:
-            print(f"DRY    #{n} {sha[:9]}: would update — {why}")
+            print(f"DRY    #{n} {sha[:9]}: would update — {why} "
+                  f"(budget {used}/{max_updates_per_pr})")
             updated += 1
             continue
         code, data = api("PUT", f"/repos/{repo}/pulls/{n}/update-branch", {"expected_head_sha": sha})
         if code == 202:
             updated += 1
-            print(f"UPDATE #{n} {sha[:9]}: {why}")
+            print(f"UPDATE #{n} {sha[:9]}: {why} "
+                  f"(budget {used + 1}/{max_updates_per_pr})")
+        elif code == 409 or (
+            code == 422 and isinstance(data, dict) and isinstance(data.get("message"), str)
+            and data["message"] in (
+                "expected head sha didn’t match current head ref.",
+                "expected head sha didn't match current head ref.",
+            )
+        ):
+            # A competing update changed the expected head. The next run re-reads it.
+            # Only this exact 422 response is a race; other validation failures remain red.
+            print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
         else:
-            print(f"::warning::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
-    print(f"done: {updated} update(s)")
-    return 0
+            failed_updates += 1
+            print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
+    write_summary(stuck)
+    print(f"done: {updated} update(s), {failed_updates} failed update(s), "
+          f"{len(stuck)} PR(s) held by the budget")
+    return 1 if failed_updates else 0
 
 
 def main() -> int:
@@ -371,6 +692,8 @@ def main() -> int:
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
     ap.add_argument("--max-updates", type=int, default=5)
+    ap.add_argument("--max-updates-per-pr", type=int, default=4,
+                    help="hard lifetime cap from server-side merge commits on the PR")
     ap.add_argument("--debounce-minutes", type=int, default=20)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--full-fleet-threshold", type=int, default=20,
@@ -383,8 +706,11 @@ def main() -> int:
     if not a.repo or not os.environ.get("GH_TOKEN"):
         print("::error::--repo (or GITHUB_REPOSITORY) and GH_TOKEN are required")
         return 1
+    if a.max_updates < 0 or a.max_updates_per_pr < 0:
+        print("::error::update caps must be nonnegative")
+        return 1
     return run(a.repo, a.branch, a.max_updates, a.debounce_minutes, a.dry_run,
-               a.full_fleet_threshold)
+               a.full_fleet_threshold, a.max_updates_per_pr)
 
 
 if __name__ == "__main__":

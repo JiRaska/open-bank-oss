@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.12.2...clearing-service-v0.12.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.12.1...clearing-service-v0.12.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.12.0...clearing-service-v0.12.1) (2026-10-04)
 
 

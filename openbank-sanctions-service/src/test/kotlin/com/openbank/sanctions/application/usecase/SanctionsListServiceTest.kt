@@ -7,9 +7,11 @@ package com.openbank.sanctions.application.usecase
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -442,7 +444,7 @@ class SanctionsListServiceTest {
     }
 
     @Test
-    fun `a failed import still publishes previously committed changes`(): Unit = runBlocking {
+    fun `a failed import never publishes its partial journal`(): Unit = runBlocking {
         val list = sampleList(lastEntryCount = 10)
         coEvery { repo.findByListType(list.listType) } returns list
         coEvery { importer.importList(any(), any()) } returns ListImportResult.failedKeptExisting("fixture failure")
@@ -450,7 +452,83 @@ class SanctionsListServiceTest {
 
         service.refresh(list.listType)
 
-        coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+        coVerify(exactly = 0) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+    }
+
+    @Test
+    fun `refresh persists metadata before releasing its publication fence`(): Unit = runBlocking {
+        val list = sampleList(lastEntryCount = 10)
+        val fence = mockk<SanctionsImportPublicationFence>()
+        var insideFence = false
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
+            insideFence = true
+            try {
+                secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                    SanctionsPublicationPermit(SanctionsListType.OFAC_SDN),
+                )
+            } finally {
+                insideFence = false
+            }
+        }
+        coEvery { repo.findByListType(list.listType) } returns list
+        coEvery { importer.importList(any(), any(), any()) } returns ListImportResult.imported(42)
+        coEvery { publisher.publishFenced(list.id, SanctionsListType.OFAC_SDN, any()) } returns
+            SanctionsPublicationOutcome.PUBLISHED
+        coEvery { repo.markUpdatedFenced(list.listType, 42, any()) } coAnswers {
+            assertThat(insideFence).isTrue()
+            list.copy(lastEntryCount = 42)
+        }
+
+        val result = SanctionsListService(repo, importer, clock, publisher, fence).refresh(list.listType)
+
+        assertThat(result.lastEntryCount).isEqualTo(42)
+        assertThat(insideFence).isFalse()
+    }
+
+    @Test
+    fun `queued failed refresh retains the count written by its predecessor`(): Unit = runBlocking {
+        val older = sampleList(lastEntryCount = 10)
+        val current = older.copy(lastEntryCount = 42)
+        val fence = mockk<SanctionsImportPublicationFence>()
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
+            secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                SanctionsPublicationPermit(SanctionsListType.OFAC_SDN),
+            )
+        }
+        coEvery { repo.findByListType(older.listType) } returnsMany listOf(older, current)
+        coEvery { importer.importList(any(), any(), any()) } returns ListImportResult.failedKeptExisting("fixture")
+        coEvery { repo.markRetryPendingFenced(older.listType, any()) } returns current
+
+        val result = SanctionsListService(repo, importer, clock, publisher, fence).refresh(older.listType)
+
+        assertThat(result.lastEntryCount).isEqualTo(42)
+        coVerify(exactly = 1) { repo.markRetryPendingFenced(older.listType, any()) }
+        coVerify(exactly = 0) { publisher.publishFenced(current.id, SanctionsListType.OFAC_SDN, any()) }
+    }
+
+    @Test
+    fun `non importing outcomes cannot complete an inherited partial refresh`(): Unit = runBlocking {
+        for ((type, outcome) in listOf(
+            SanctionsListType.EU_CONSOLIDATED to ListImportResult.seedFallback("sample entries"),
+            SanctionsListType.FATF_HIGH_RISK to ListImportResult.skippedNotEntityBased("country risk"),
+        )) {
+            val list = sampleList(listType = type.name, lastEntryCount = 12)
+            val fence = mockk<SanctionsImportPublicationFence>()
+            coEvery { fence.duringRefresh<SanctionsList>(type, any()) } coAnswers {
+                secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                    SanctionsPublicationPermit(type, inheritedIncomplete = true),
+                )
+            }
+            coEvery { repo.findByListType(list.listType) } returns list
+            coEvery { importer.importList(type, list.sourceUrl, any()) } returns outcome
+            coEvery { repo.markRetryPendingFenced(list.listType, any()) } returns list
+
+            SanctionsListService(repo, importer, clock, publisher, fence).refresh(list.listType)
+
+            coVerify(exactly = 1) { repo.markRetryPendingFenced(list.listType, any()) }
+            coVerify(exactly = 0) { publisher.publishFenced(list.id, type, any()) }
+            coVerify(exactly = 0) { repo.markUpdatedFenced(list.listType, any(), any()) }
+        }
     }
 
     @Test

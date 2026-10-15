@@ -151,12 +151,64 @@ done
 [ "$(jq length <<< "$T0")" = 12 ] && [ "$(jq length <<< "$T1")" = 12 ] \
   || fail "fair cap keeps the cap" "12 per tick" "tick41=$T0 tick42=$T1"
 
+# PRIORITY known-positive (2026-10-15 MGM strand): a service whose OWN source moved since
+# its pin outranks a marker-only lagger of the SAME age when the cap forces a choice.
+# release-svc and stale-svc are both pinned at c0, so pure oldest-first falls to the
+# alphabetical tiebreak and would pick release-svc — but release-svc lags only through
+# version.txt (class 1, marker drift) while stale-svc lags through src/main (class 0,
+# own-source drift). Code that is running nowhere must not wait behind a version string.
+mkdir -p "$WORK/prio"
+cat > "$WORK/prio/deploy.yaml" <<EOF
+image: repo/openbank-release-svc:sandbox-${C0}
+image: repo/openbank-stale-svc:sandbox-${C0}
+image: repo/openbank-lib-svc:sandbox-${C3}
+EOF
+GOT_PRIO="$(RECONCILE_TICK=0 RECONCILE_MAX=1 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/prio" 2>/dev/null)"
+if [ "$(echo "$GOT_PRIO" | jq -c .)" != '["openbank-stale-svc"]' ]; then
+  echo "FAIL: own-source drift must outrank older marker drift under the cap (MGM strand)"
+  echo "  want: [\"openbank-stale-svc\"]"; echo "  got:  $GOT_PRIO"; exit 1
+fi
+
+# CLASS-SPLIT FAIRNESS: with class 0 below the cap, the remaining slots rotate across the
+# marker class — marker lag still drains every tick and can never crowd out code drift.
+# cap 2, one code lagger (stale-svc), two markers (release-svc@C0 oldest, lib-svc@C3): class 0
+# takes one slot every tick; the marker window covers both markers across two consecutive ticks.
+PT0="$(RECONCILE_TICK=0 RECONCILE_MAX=2 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/prio" 2>/dev/null)"
+PT1="$(RECONCILE_TICK=1 RECONCILE_MAX=2 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/prio" 2>/dev/null)"
+for want in openbank-stale-svc openbank-release-svc openbank-lib-svc; do
+  jq -se --arg w "$want" 'add | index($w)' <<< "$PT0 $PT1" >/dev/null \
+    || fail "class-split cap: ${want} must be selected within 2 ticks" "contains ${want}" "tick0=$PT0 tick1=$PT1"
+done
+jq -e 'index("openbank-stale-svc")' <<< "$PT0" >/dev/null \
+  && jq -e 'index("openbank-stale-svc")' <<< "$PT1" >/dev/null \
+  || fail "class 0 fills its slot every tick" "stale-svc in both ticks" "tick0=$PT0 tick1=$PT1"
+[ "$(jq length <<< "$PT0")" = 2 ] && [ "$(jq length <<< "$PT1")" = 2 ] \
+  || fail "class-split cap keeps the cap" "2 per tick" "tick0=$PT0 tick1=$PT1"
+
 # An allowlist (auto-deploy's ALL_SERVICES) drops manifest services the build path cannot
 # build — foreign-svc is stale but absent from the list.
 WANT_AL='["openbank-placeholder-svc","openbank-stale-svc"]'
 GOT_AL="$(RECONCILE_SERVICES='openbank-stale-svc openbank-placeholder-svc openbank-current-svc' \
             bash "$PROBE" "$WORK/gitops")"
 [ "$(sorted "$GOT_AL")" = "$(sorted "$WANT_AL")" ] || fail "allowlist filter" "$WANT_AL" "$GOT_AL"
+
+# A held placeholder would rank first. It must be removed BEFORE the one-service
+# cap so the healthy stale service gets this tick. Once the hold is removed, the
+# still-stale placeholder is offered again without any special recovery action.
+# Pin the rotation tick: with two candidates and cap 1, wall-clock parity otherwise
+# alternates the winner and makes this assertion fail every other three-hour bucket.
+GOT_HELD="$(RECONCILE_SERVICES='openbank-placeholder-svc openbank-stale-svc' \
+  RECONCILE_HOLDS='openbank-placeholder-svc' RECONCILE_MAX=1 RECONCILE_TICK=0 bash "$PROBE" "$WORK/gitops")"
+if [ "$(echo "$GOT_HELD" | jq -c .)" != '["openbank-stale-svc"]' ]; then
+  echo "FAIL: held service consumed the reconcile cap: $GOT_HELD"
+  exit 1
+fi
+GOT_RELEASED="$(RECONCILE_SERVICES='openbank-placeholder-svc openbank-stale-svc' \
+  RECONCILE_HOLDS='' RECONCILE_MAX=1 RECONCILE_TICK=0 bash "$PROBE" "$WORK/gitops")"
+if [ "$(echo "$GOT_RELEASED" | jq -c .)" != '["openbank-placeholder-svc"]' ]; then
+  echo "FAIL: released service was not re-offered: $GOT_RELEASED"
+  exit 1
+fi
 
 # With every pin at TIP, nothing lags (loop-stability guarantee).
 cat > gitops/deploy.yaml <<EOF

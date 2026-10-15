@@ -68,6 +68,7 @@ class AuthorizeInterceptorSuspendDispatchTest {
         every { sc.userPrincipal } returns JavaPrincipal { "maker-1" }
         val securityIdentity = mockk<SecurityIdentity>()
         every { securityIdentity.roles } returns emptySet()
+        every { securityIdentity.principal } returns JavaPrincipal { "maker-1" }
         return AuthorizeInterceptor().apply {
             this.pdp = mockk {
                 every { isResolvable } returns true

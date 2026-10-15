@@ -131,11 +131,14 @@ openbank:
   edge:
     account-service-url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
     balance-service-url: ${BALANCE_SERVICE_URL:http://balance-service.balances.svc:8103}
-    audit-service-url: ${AUDIT_SERVICE_URL:http://audit-service.audit.svc:8113}
+    audit-service-url: ${AUDIT_SERVICE_URL:https://audit-service.audit.svc:8443}
     interest-service-url: ${INTEREST_SERVICE_URL:http://interest-service.interest.svc:8125}
     kyc-service-url: ${KYC_SERVICE_URL:http://kyc-service.kyc.svc:8114}
     lending-service-url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
     wealth-service-url: ${WEALTH_SERVICE_URL:http://wealth-service.wealth.svc:8154}
+    # Pension lifecycle (ADR-0334 S6): participant side and unit register. Caller edges are
+    # declared in the GitOps workload env; provider rollout remains gated by #12350.
+    pension-service-url: ${PENSION_SERVICE_URL:https://pension-service.pension.svc:8443}
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}
@@ -175,6 +178,7 @@ openbank:
     keycloak-admin-url: ${KEYCLOAK_ADMIN_URL:http://keycloak.iam.svc:8080}
     keycloak-admin-realm: ${KEYCLOAK_ADMIN_REALM:openbank-customers}
     keycloak-admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:customer-edge-admin}
+    communication-service-url: ${COMMUNICATION_SERVICE_URL:}
     notification-service-url: ${NOTIFICATION_SERVICE_URL:http://notification-service.notifications.svc:8112}
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
     campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}
@@ -254,3 +258,22 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+
+# Named TLS material for the production JDK upstream client. Test/dev fixtures retain their
+# optional trust-only configuration. Missing production key material fails startup.
+"%prod":
+  quarkus:
+    tls:
+      upstream:
+        reload-period: 1h
+        trust-store:
+          pem:
+            certs: ${OPENBANK_UPSTREAM_TLS_TRUST_CERTIFICATE_FILE}
+        key-store:
+          pem:
+            edge:
+              cert: ${OPENBANK_UPSTREAM_TLS_CLIENT_CERTIFICATE_FILE}
+              key: ${OPENBANK_UPSTREAM_TLS_CLIENT_KEY_FILE}
+  openbank:
+    upstream:
+      tls-configuration-name: upstream

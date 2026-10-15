@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.0.0...document-service-v1.0.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.17.1...document-service-v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **pension:** final integration of follow-ups F1-F7 (ADR-0334 final integration) ([#12435](https://github.com/JiRaska/open-bank-oss/issues/12435)) ([1a7bd7e](https://github.com/JiRaska/open-bank-oss/commit/1a7bd7e31b28ed2c938abbb95cf4a73757c26eed))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.17.0...document-service-v0.17.1) (2026-10-12)
+
+
+### Security
+
+* **document:** authenticate the API by bearer only on the mTLS listener ([#12530](https://github.com/JiRaska/open-bank-oss/issues/12530)) ([8a1108c](https://github.com/JiRaska/open-bank-oss/commit/8a1108c3c3a74d38a7616fa8e97db11cd656a454))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.16.1...document-service-v0.17.0) (2026-10-11)
+
+
+### Features
+
+* **document:** pension document templates and notification support ([#12409](https://github.com/JiRaska/open-bank-oss/issues/12409)) ([8f93df5](https://github.com/JiRaska/open-bank-oss/commit/8f93df589241c531e2bf8d4a91f54bed51b4994e))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.16.0...document-service-v0.16.1) (2026-10-03)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.2...finrep-service-v0.17.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.1...finrep-service-v0.17.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **finrep:** report balances, not one month's movements ([#12505](https://github.com/JiRaska/open-bank-oss/issues/12505)) ([272ea30](https://github.com/JiRaska/open-bank-oss/commit/272ea303dade99fc0f3a743ebf0aee9aedfdffe5))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.0...finrep-service-v0.17.1) (2026-10-04)
 
 

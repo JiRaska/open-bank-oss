@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.1.0...customer-edge-v1.2.0) (2026-10-14)
+
+
+### Features
+
+* **referral:** shareable referral link e2e + activate referral-service on sandbox ([#12813](https://github.com/JiRaska/open-bank-oss/issues/12813)) ([b2e006a](https://github.com/JiRaska/open-bank-oss/commit/b2e006aca9f2485e08599f5d782fbc86485a7270))
+
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.0.0...customer-edge-v1.1.0) (2026-10-14)
+
+
+### Features
+
+* **customer-edge:** filter products and offers by business eligibility segment under X-Acting-For (ADR-0284 D10) ([#12758](https://github.com/JiRaska/open-bank-oss/issues/12758)) ([69dffb4](https://github.com/JiRaska/open-bank-oss/commit/69dffb49e5d72fa14ec018fd1a6d9aad7eb0c6be))
+
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.2...customer-edge-v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
+## [0.90.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.1...customer-edge-v0.90.2) (2026-10-12)
+
+
+### Security
+
+* **customer-edge:** build upstream URL segments only from closed value types ([#12614](https://github.com/JiRaska/open-bank-oss/issues/12614)) ([183f69b](https://github.com/JiRaska/open-bank-oss/commit/183f69b64eddb40c69f9d41f42e701fb0d8b2777))
+
+## [0.90.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.0...customer-edge-v0.90.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** refuse non-CZK domestic payments before SCA ([#12306](https://github.com/JiRaska/open-bank-oss/issues/12306)) ([4bd1032](https://github.com/JiRaska/open-bank-oss/commit/4bd1032ba04f1d65d543314349209c530e8769f7))
+
+## [0.90.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.89.0...customer-edge-v0.90.0) (2026-10-08)
+
+
+### Features
+
+* **communication:** publish editable app copy catalog ([#12276](https://github.com/JiRaska/open-bank-oss/issues/12276)) ([93a6479](https://github.com/JiRaska/open-bank-oss/commit/93a6479d28b56c57efb381b3f550e5c10aa92958))
+
+## [0.89.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.88.0...customer-edge-v0.89.0) (2026-10-08)
+
+
+### Features
+
+* **customer-edge:** unify authorized notification feeds ([#12261](https://github.com/JiRaska/open-bank-oss/issues/12261)) ([711b72a](https://github.com/JiRaska/open-bank-oss/commit/711b72a3fe365bbb21396f6876ff774bd496cb12))
+
+## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.87.0...customer-edge-v0.88.0) (2026-10-07)
+
+
+### Features
+
+* **notification-service:** page party history with exact unread count ([#12217](https://github.com/JiRaska/open-bank-oss/issues/12217)) ([04834e0](https://github.com/JiRaska/open-bank-oss/commit/04834e04dacbc8b6ec7737f4b3fea7e6c4b22335))
+
 ## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.86.0...customer-edge-v0.87.0) (2026-10-04)
 
 

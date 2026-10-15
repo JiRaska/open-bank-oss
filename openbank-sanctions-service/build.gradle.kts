@@ -44,6 +44,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
 
     // Pact provider verification (issue #2255, C3): fx-service is a consumer of
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.

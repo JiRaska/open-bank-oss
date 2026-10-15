@@ -321,6 +321,11 @@ val providerPactTest =
         group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
         testClassesDirs = providerPactTestSourceSet.output.classesDirs
         classpath = providerPactTestSourceSet.runtimeClasspath
+        // Broker publication is a side effect outside Gradle's output snapshot. Re-run this
+        // Test task on every invocation, while retaining cached compilation and app-model tasks.
+        // A workflow-wide --rerun-tasks invalidates those expensive prerequisites as well.
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
         // Independent of `check`/`test` — a service with no provider-verification classes at all
         // (the include filter above matches nothing) still gets the task registered, and it
         // reports 0 tests rather than failing; JUnit5's default `failOnNoTests` behaviour on an
@@ -362,6 +367,11 @@ kover {
     currentProject {
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
+            // Kover otherwise wires every Test task into koverVerify. The ordinary `test`
+            // task already executes these provider classes, so letting coverage pull in
+            // providerPactTest repeats verification and can publish to the broker during
+            // every build. Keep that task explicit for the contract lane only.
+            disabledForTestTasks.add("providerPactTest")
         }
     }
 }

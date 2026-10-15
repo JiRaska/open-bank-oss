@@ -8,7 +8,12 @@ import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.libs.web.MDC_SYNTHETIC
 import io.opentelemetry.api.baggage.Baggage
 import io.quarkus.logging.Log
+import io.quarkus.tls.CertificateUpdatedEvent
+import io.quarkus.tls.TlsConfigurationRegistry
+import jakarta.annotation.PreDestroy
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
+import jakarta.inject.Inject
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -23,14 +28,16 @@ import java.security.KeyStore
 import java.time.Duration
 import java.util.Optional
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 
 /**
  * Singleton upstream proxy client (ADR-0065).
  *
- * One [HttpClient] instance shared for the application lifetime — shared connection
- * pool, no per-request thread/fd leak (review B1 fix). Explicit timeouts are set at
+ * A cached [HttpClient] shares its connection pool between requests. Certificate renewal
+ * replaces its TLS context and shuts down the old transport. Explicit timeouts are set at
  * the request level (B3 fix): connect timeout on the builder, per-request timeout
  * on [HttpRequest.Builder.timeout].
  *
@@ -76,12 +83,18 @@ class UpstreamClient {
     var clientSecret: String = ""
 
     /**
-     * Optional PEM CA certificate for the private HTTPS campaign validator. The edge currently
-     * uses HTTP for its other in-cluster calls, so an empty value keeps development fixtures on
-     * the platform default while GitOps mounts the private CA only in the deployed edge.
+     * Optional PEM CA certificate for trust-only development fixtures. Production selects
+     * the named upstream TLS bucket, which includes both the private CA and client identity.
+     * An empty fixture value retains the platform defaults.
      */
     @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file")
     lateinit var tlsTrustCertificateFile: Optional<String>
+
+    @ConfigProperty(name = "openbank.upstream.tls-configuration-name")
+    lateinit var tlsConfigurationName: Optional<String>
+
+    @Inject
+    lateinit var tlsRegistry: TlsConfigurationRegistry
 
     /**
      * Rejects [url] unless it targets Kubernetes Service DNS or loopback. The allowlist is a
@@ -129,18 +142,46 @@ class UpstreamClient {
     // token fetch and every upstream POST threw — surfacing to the app as 502
     // "upstream unavailable". HTTP/1.1 matches what the services actually speak.
     // Lazy so the (field-injected) connect timeout is available when it is first built.
-    private val http: HttpClient by lazy {
-        HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .connectTimeout(Duration.ofMillis(connectTimeoutMs))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .apply {
-                tlsTrustCertificateFile
-                    .filter { it.isNotBlank() }
+    @Volatile private var cachedHttp: HttpClient? = null
+
+    private val http: HttpClient
+        get() = cachedHttp ?: synchronized(this) {
+            cachedHttp ?: newHttpClient().also { cachedHttp = it }
+        }
+
+    /** Renewed named TLS material must also replace the JDK client's captured SSLContext. */
+    fun certificateUpdated(@Observes event: CertificateUpdatedEvent) {
+        if (tlsConfigurationName.orElse(null) != event.name()) return
+        closeTransport()
+    }
+
+    @PreDestroy
+    fun closeTransport() {
+        synchronized(this) {
+            val previous = cachedHttp
+            cachedHttp = null
+            previous?.shutdown()
+        }
+    }
+
+    private fun newHttpClient(): HttpClient = HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
+        .connectTimeout(Duration.ofMillis(connectTimeoutMs))
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .apply {
+            val name = tlsConfigurationName.filter { it.isNotBlank() }.orElse(null)
+            if (name != null) {
+                val configuration = tlsRegistry.get(name).orElseThrow {
+                    IllegalStateException("upstream TLS configuration is missing")
+                }
+                check(!configuration.isTrustAll) { "upstream TLS must verify the server certificate" }
+                sslContext(configuration.createSSLContext())
+            } else {
+                tlsTrustCertificateFile.filter { it.isNotBlank() }
                     .ifPresent { sslContext(trustContext(Path.of(it))) }
             }
-            .build()
-    }
+        }
+        .build()
 
     private fun trustContext(certificatePath: Path): SSLContext {
         val certificates = Files.newInputStream(certificatePath).use { input ->
@@ -161,24 +202,39 @@ class UpstreamClient {
 
     @Volatile private var tokenExpiresAt: Long = 0L
 
-    @Synchronized
-    private fun serviceToken(): String {
-        val now = System.currentTimeMillis() / 1000L
-        val cached = cachedToken
-        if (cached != null && tokenExpiresAt - now > TOKEN_REFRESH_BUFFER_SECONDS) return cached
-        return fetchToken().also { (token, expiry) ->
-            cachedToken = token
-            tokenExpiresAt = now + expiry
-        }.first
+    private val tokenLock = ReentrantLock()
+
+    private fun serviceToken(deadlineNanos: Long? = null): String {
+        if (deadlineNanos == null) {
+            tokenLock.lock()
+        } else {
+            check(tokenLock.tryLock(remainingNanos(deadlineNanos), TimeUnit.NANOSECONDS)) {
+                "Upstream request deadline exceeded waiting for service token"
+            }
+        }
+        return try {
+            val now = System.currentTimeMillis() / 1000L
+            val cached = cachedToken
+            if (cached != null && tokenExpiresAt - now > TOKEN_REFRESH_BUFFER_SECONDS) {
+                cached
+            } else {
+                fetchToken(deadlineNanos?.let(::remainingMillis) ?: requestTimeoutMs).also { (token, expiry) ->
+                    cachedToken = token
+                    tokenExpiresAt = now + expiry
+                }.first
+            }
+        } finally {
+            tokenLock.unlock()
+        }
     }
 
-    private fun fetchToken(): Pair<String, Long> {
+    private fun fetchToken(timeoutMs: Long): Pair<String, Long> {
         val tokenUrl = "$tokenEndpointBase/protocol/openid-connect/token"
         val body = "grant_type=client_credentials&client_id=$clientId&client_secret=$clientSecret"
         val request = HttpRequest.newBuilder() // token endpoint: never tainted, see upstreamRequest()
             .uri(URI.create(tokenUrl))
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .timeout(Duration.ofMillis(timeoutMs.coerceIn(1, requestTimeoutMs)))
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
         val response = http.send(request, HttpResponse.BodyHandlers.ofString())
@@ -191,6 +247,14 @@ class UpstreamClient {
             ?: error("Token endpoint response missing access_token")
         val expiresIn = tree.get("expires_in")?.asLong() ?: 300L
         return token to expiresIn
+    }
+
+    private fun remainingNanos(deadlineNanos: Long): Long = (deadlineNanos - System.nanoTime()).coerceAtLeast(0)
+
+    private fun remainingMillis(deadlineNanos: Long): Long {
+        val nanos = remainingNanos(deadlineNanos)
+        check(nanos > 0) { "Upstream request deadline exceeded" }
+        return TimeUnit.NANOSECONDS.toMillis(nanos).coerceAtLeast(1)
     }
 
     /**
@@ -224,13 +288,17 @@ class UpstreamClient {
         return builder.build()
     }
 
-    fun get(url: String, partyId: String): Response = try {
+    fun get(url: String, partyId: String? = null): Response = get(url, partyId, requestTimeoutMs)
+
+    /** Cap a single call by the caller's remaining aggregate budget. */
+    fun get(url: String, partyId: String?, timeoutMs: Long): Response = try {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
             .uri(validatedUri(url))
-            .header("Authorization", "Bearer ${serviceToken()}")
-            .header(PARTY_HEADER, partyId)
+            .header("Authorization", "Bearer ${serviceToken(deadline)}")
+            .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
-            .timeout(Duration.ofMillis(requestTimeoutMs))
+            .timeout(Duration.ofMillis(remainingMillis(deadline)))
             .GET().build()
         val r = http.send(request, HttpResponse.BodyHandlers.ofString())
         Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()

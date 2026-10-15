@@ -1,0 +1,10 @@
+# OpenBank Status
+> Public service status based on named external and internal checks. An operational check does not prove a completed banking transaction.
+
+- [Live status](https://status.open-bank.tech/): Current checks, observed website availability and incident history.
+- [Current status API](https://status.open-bank.tech/api/v1/health): Machine-readable current status; HTTP 503 indicates impact or stale data.
+- [Freshness API](https://status.open-bank.tech/api/v1/freshness): Age and freshness of published status data.
+- [History API](https://status.open-bank.tech/api/v1/history): Observed check history.
+- [Incident API](https://status.open-bank.tech/api/v1/incidents): Public incident timeline.
+- [API contract](https://status.open-bank.tech/openapi.yaml): OpenAPI 3.1 specification.
+- [Source](https://github.com/JiRaska/open-bank-oss): Public implementation and documented limits.

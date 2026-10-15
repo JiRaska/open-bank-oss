@@ -1,0 +1,83 @@
+# FRAUD-scoring alert rules (ADR-0253). Fed by FraudMetricsAdapter in
+# openbank-fraud-service, which emits openbank_fraud_scores_total{verdict,rail,service="fraud"}
+# — a cumulative counter of scoring decisions by outcome, incremented on every scoring
+# decision FraudScoringService records (verdict ALLOW/REVIEW/DENY x rail). Picked up
+# automatically (ruleSelectorNilUsesHelmValues=false), same as the other rule files here.
+#
+# WHAT THIS CAN AND CANNOT SAY. A score is a scoring DECISION, not a caught fraud: with
+# the engine inert in Phase 1 every increment is verdict="ALLOW", and the counter's job is
+# to prove the scorer is carrying traffic (ADR-0253 obligation 1: name the artifact), not
+# to measure fraud volume. It cannot say a verdict was enforced — enforcement is a
+# different surface with its own readers.
+#
+# THE DEFECT THIS EXISTS FOR PRODUCED NO ERRORS (#4221, one of ADR-0253's founding five):
+# the fraud adapter was healthy, shadow verdicts were logged, and fraud_scores held ZERO
+# ROWS — no workload set FRAUD_SERVICE_URL, and the enforcement flag had no reader in any
+# Kotlin source. Every conventional signal was green; the only fact that disagreed was an
+# empty table. A counter nobody reads is the same defect one level down, which is why
+# this file exists: the artifact (openbank_fraud_scores_total) needs a reader that fails
+# when the count stops moving (ADR-0253 obligation 3: make zero fail).
+#
+# EXPECTED-ZERO DECLARATION (ADR-0253 consequences): environments that genuinely never
+# score — sandbox lanes with no workload wired to FRAUD_SERVICE_URL — are an EXPECTED
+# ZERO, not a defect, and this rule is deliberately incapable of firing there. An
+# environment that has scored at least once has declared, with data, that scoring is live
+# in it; from that moment a 6h silence is news. Whether an env belongs in the
+# "scores" class is a configuration declaration (FRAUD_SERVICE_URL set + surfaces calling
+# the scorer), reviewable per the ADR — not something a PromQL rule can infer.
+#
+# THE LAZY-REGISTRATION TRAP (same trap the push/email rules document): Micrometer
+# registers a counter lazily, on its first increment, so a series that has never
+# incremented DOES NOT EXIST. That is why this is NOT
+# `absent_over_time(openbank_fraud_scores_total[6h])`: that form fires continuously in
+# any env that has never scored — measured on push, 22 days of warning naming a problem
+# where there was no traffic (prometheus-rules-push.yaml, PushChannelSilent comments).
+# It is also NOT `sum(increase(...[6h])) == 0 or vector(...)`: forcing the absent side
+# to zero makes the never-scored env alert forever, which is exactly the expected-zero
+# case above. The `unless` form below has the property the other two lack: left side
+# empty (never scored) -> nothing to alert on; left side present, right side zero
+# (scored before, silent now) -> fires.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-fraud-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.fraud
+      rules:
+        # Silence after declared activity. Left side: the counter exists, i.e. this
+        # environment has scored at least once since the pod started. Right side: it
+        # incremented in the last 6h. `unless` keeps the left only where the right is
+        # empty, so the rule fires exactly on "has scored, has now stopped". 6h is
+        # deliberately long: a quiet night is not an outage; a scorer with a steady
+        # stream of rails going silent for a working day is.
+        #
+        # Coverage gap, stated honestly: between a pod restart and the first score the
+        # series does not exist and this rule cannot fire — the same blind window the
+        # ScaApprovalPushUndeliverable comments measure. An env whose scoring is wired
+        # but has never fired once is caught by the declaration side (FRAUD_SERVICE_URL
+        # set but no series within N hours of deploy), which is the workflow-liveness /
+        # ADR-0288 reality-check lane's job, not a standing PromQL rule.
+        - alert: FraudScoringSilent
+          expr: |
+            sum(openbank_fraud_scores_total)
+              unless
+            sum(increase(openbank_fraud_scores_total[6h])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "Fraud scoring has gone silent after scoring activity"
+            description: >-
+              openbank_fraud_scores_total exists — this environment has scored at least
+              once — but has recorded no scoring decision in the last 6h. Check, in order:
+              is the scoring engine pod running and Ready; do the calling surfaces still
+              set FRAUD_SERVICE_URL (the #4221 shape: everything healthy, zero rows); is
+              the scorer in shadow mode and has shadow traffic stopped; is the inbound
+              rail (payments/sepa-instant/...) still producing scoreable events. verdict
+              breakdown via sum by (verdict, rail) (increase(openbank_fraud_scores_total[6h]))
+              shows which outcome class went quiet.

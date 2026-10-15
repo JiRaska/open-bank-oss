@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -189,6 +190,16 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
 
     def test_unknown_pr_head_is_not_a_pass(self):
         self.assertEqual(2, self.gate("--head", "missing-ref").returncode)
+
+    def test_workflow_skips_documentation_gate_after_admission_refusal(self):
+        workflow = (Path(__file__).parents[1] / "workflows/services-ci.yml").read_text()
+        step = re.search(
+            r"(?m)^      - name: Require service documentation with production changes\n"
+            r"        if: (.+)$",
+            workflow,
+        )
+        self.assertIsNotNone(step)
+        self.assertIn("steps.admit.outputs.proceed == 'true'", step.group(1))
 
 
 if __name__ == "__main__":

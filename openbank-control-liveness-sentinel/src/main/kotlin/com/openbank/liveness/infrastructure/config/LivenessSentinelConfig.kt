@@ -8,6 +8,7 @@ package com.openbank.liveness.infrastructure.config
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
+import java.util.Optional
 
 @ConfigMapping(prefix = "openbank.liveness-sentinel")
 @ApplicationScoped
@@ -63,6 +64,20 @@ interface LivenessSentinelConfig {
 
     @WithDefault("docs/liveness-sentinel-proposals")
     fun githubProposalDir(): String
+
+    /**
+     * Live rules.yaml source (GovernanceReadAdapter): a document mounted at this path wins over
+     * [rulesYamlUrl]; when neither source is reachable the allowlists resolve EMPTY — the ADR-0163
+     * fail-open direction (every producer-only topic / unverified edge is still surfaced, just
+     * without the "already tracked" distinction), never a silent suppression. Empty/absent disables
+     * the file source — an empty String is NOT an option here: SmallRye answers SRCFG00040 on an
+     * empty-string bind.
+     */
+    fun rulesYamlPath(): Optional<String>
+
+    /** Raw rules.yaml URL (e.g. raw.githubusercontent.com on main). Empty/absent disables HTTP. */
+    @WithDefault("https://raw.githubusercontent.com/JiRaska/open-bank-oss/main/openbank-libs/governance/rules.yaml")
+    fun rulesYamlUrl(): Optional<String>
 
     // Matches ADR-0160 mechanism 3's own Alertmanager paging threshold (2x expected interval) —
     // this agent's CRITICAL finding and the underlying page can never silently disagree.

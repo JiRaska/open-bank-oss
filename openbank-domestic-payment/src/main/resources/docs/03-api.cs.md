@@ -19,6 +19,8 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`, RS256
 | `GET /domestic-payments` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`, `ROLE_API` |
 | `PATCH /domestic-payments/{paymentId}/status` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS` + `@Authorize(action="domesticPayment.transitionStatus")` (OPA, ADR-0034) |
 
+Při vytvoření platby následuje po kontrole role a OPA kontrola rozsahu iniciátora (ADR-0335 D5). Účet služby penzijního klienta se rozpozná pouze z ověřeného JWT s neprázdným subjektem, `azp` odpovídajícím tomuto klientovi a `preferred_username` odpovídajícím `service-account-<azp>`; smí odepisovat jen z nakonfigurovaného penzijního účtu. Účet služby edge klienta potřebuje pro obecný rozsah také `ROLE_OPERATOR`. Zaměstnanecký token získá obecný rozsah jen s povolenou rolí a ověřenými údaji interaktivního uživatele. Samotná role, uživatelské jméno podobné účtu služby ani neznámý strojový klient obecné vytvoření platby nepovolují.
+
 OIDC je vypnuté pouze v profilech `%dev` a `%test`.
 
 ## Idempotence
@@ -138,6 +140,7 @@ Chyby používají `ApiError` z `openbank-libs` (`{ correlationId, status, code,
 |---|---|---|
 | 400 | (validace) | chybějící `Idempotency-Key`, vadné tělo / enum |
 | 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | `amount` + `currency` nelze sestavit jako kernel `Money` (více desetinných míst, než měna dovoluje, např. `100.005 CZK`; není kód ISO 4217 s dílčí jednotkou; chybí nebo je mimo rozsah), nebo je částka nulová či záporná (#11604). Odmítnuto před vyhledáním `Idempotency-Key`: nic se neuloží a opravený požadavek se stejným klíčem projde |
+| 400 | `CURRENCY_NOT_ALLOWED` | Platná měna jiná než CZK je na tuzemské platební cestě odmítnuta (#12059), včetně převodů na technický účet. Kontrola proběhne před navázáním `Idempotency-Key`; nic se neuloží a opravený požadavek v CZK se stejným klíčem projde. `violations[]` uvádí `currency` bez opakování hodnoty. |
 | 401 | unauthorized | chybějící / neplatný token |
 | 403 | forbidden | chybí role pro endpoint (nebo OPA deny v enforce módu) |
 | 404 | `NOT_FOUND` | id platby neexistuje (`DomesticPaymentNotFoundException`) |
@@ -151,6 +154,15 @@ měny. Odpovědi, události `domestic.payment.*` i potvrzení platby proto nesou
 ukazovaly škálu sloupce (`100.500000`) nebo zápis z požadavku (`100.5`). Hodnoty jsou číselně shodné;
 mění se jen textová podoba.
 
+## Ověření identity penzijního iniciátora platby (#12448)
+
+Penzijní volající získá oprávnění k vymezenému účtu plátce jen tehdy, když ověřený JWT patří
+servisnímu účtu klienta `openbank-pension`: obsahuje `sub`, jeho `azp` označuje tohoto klienta
+a `preferred_username` odpovídá `service-account-openbank-pension`. JWT předtím ověřuje
+Quarkus OIDC. Samotná shoda jména principalu toto oprávnění nezakládá. Chybějící nebo neplatná
+konfigurace účtu nepovolí žádnou platbu v tomto vymezeném rozsahu. Dosavadní rozhodování podle
+rolí personálu zůstává oddělené; běžný volající s `ROLE_API` tento rozsah nezíská.
+
 ## Události
 
 Topic: `openbank.domestic.payment.events` (Kafka, JSON, kanál `events-out`).
@@ -158,7 +170,7 @@ Topic: `openbank.domestic.payment.events` (Kafka, JSON, kanál `events-out`).
 | Typ události | Spouštěč | Payload (klíčová pole) |
 |---|---|---|
 | `domestic.payment.created` | `POST /domestic-payments` | paymentId, idempotencyKey, status, debtorAccountId, účet+banka plátce/příjemce, amount, currency, priority, endToEndId, occurredAt |
-| `domestic.payment.status-changed` | jakýkoliv perzistovaný přechod | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt |
+| `domestic.payment.status-changed` | jakýkoliv perzistovaný přechod | paymentId, previousStatus, newStatus, rejectReason, rejectDetail, occurredAt, settledAt (perzistovaný čas přechodu do SETTLED, do zúčtování null; není to čas vzniku události) |
 
 Události jsou **append-only**; opravy se dělají novou status-changed událostí, ne přepsáním.
 

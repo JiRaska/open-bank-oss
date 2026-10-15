@@ -17,13 +17,45 @@ spec:
         # blast radius (login is broken) and the right remediation, and excluding it keeps
         # one outage from paging twice under two alertnames.
         - alert: SyntheticProbeDown
-          expr: probe_success{job!="synthetic-oidc-discovery"} == 0
+          expr: probe_success{job!~"synthetic-oidc-discovery|synthetic-public-site|synthetic-public-dns"} == 0
           for: 3m
           labels:
             severity: critical
           annotations:
             summary: "Synthetic probe failing: {{ $labels.instance }}"
             description: "Blackbox probe to {{ $labels.instance }} has failed for >3m — the public endpoint is down or unreachable from in-cluster."
+        - alert: PublicSiteUnavailable
+          expr: probe_success{job="synthetic-public-site"} == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Public website unavailable: {{ $labels.instance }}"
+            description: "The public landing page has failed its strict HTTP and content check for >3m. Check DNS, TLS, CloudFront and the S3 origin."
+        - alert: PublicSiteDNSFailure
+          expr: probe_success{job="synthetic-public-dns"} == 0
+          for: 3m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Public website DNS lookup failed via {{ $labels.instance }}"
+            description: "The resolver cannot return an A record for open-bank.tech. Check the domain delegation, Route 53 records and resolver response."
+        - alert: PublicSiteProbeMissing
+          expr: absent(probe_success{job="synthetic-public-site"}) or absent(probe_success{job="synthetic-public-dns"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Public website monitoring is missing"
+            description: "At least one public website probe job is not producing metrics. Check the Probe resources, Prometheus scrape targets and blackbox exporter."
+        - alert: PublicStatusProbeMissing
+          expr: absent(probe_success{job="synthetic-status-page"}) or absent(probe_success{job="synthetic-status-api"}) or absent(probe_success{job="synthetic-status-freshness"}) or absent(probe_success{job="synthetic-status-dns"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Public status monitoring is missing"
+            description: "A public status page, API, freshness or DNS probe is not producing metrics. Check the Probe resources and blackbox exporter."
         # The login alert (probes-synthetic.yaml: synthetic-oidc-discovery). Fires when a
         # Keycloak realm stops serving its OIDC discovery document — i.e. nobody can log
         # in. This is deliberately its own alert because no other signal sees it: the

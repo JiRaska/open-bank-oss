@@ -39,6 +39,9 @@ A dedicated **management interface** is enabled on port **8085** (`quarkus.manag
 | `OIDC_CLIENT_SECRET` | `CHANGE_ME_LOCAL_DEV_ONLY` | Keycloak client secret |
 | `SLACK_WEBHOOK_ENABLED` | `false` | enable oversight webhook (ADR-0059) |
 | `SLACK_WEBHOOK_URL` | (unset) | Slack incoming-webhook URL — injected from Vault, never in git |
+| `OPENBANK_NOTIFICATION_WEBHOOK_TEAMS_ENABLED` | `false` | enable Teams oversight webhook |
+| `OPENBANK_NOTIFICATION_WEBHOOK_TEAMS_URL` | (unset) | Teams webhook URL — inject from Vault, never in git |
+| `OPENBANK_NOTIFICATION_EGRESS_ALLOWED_HOSTS` | `hooks.slack.com,oauth2.googleapis.com,fcm.googleapis.com` | exact comma-separated hosts allowed for Slack, Teams, and FCM egress; add the specific Teams tenant host before enabling Teams |
 | `FCM_ENABLED` | `false` | enable FCM push adapter |
 | `FCM_SERVICE_ACCOUNT_JSON` | (unset) | FCM service-account JSON (Vault) |
 | `FCM_PROJECT_ID` | (unset) | optional, falls back to JSON |
@@ -48,7 +51,7 @@ A dedicated **management interface** is enabled on port **8085** (`quarkus.manag
 | `APNS_SANDBOX` | `false` | true → APNs sandbox host |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata in `/api/v1/info` |
 
-Push adapters and the oversight webhook are **off by default**; a disabled adapter records a successful no-op (no egress). Credentials are injected at runtime from Vault via ExternalSecret — never committed.
+Push adapters and oversight webhooks are **off by default**. A disabled push adapter returns `SKIPPED` with no egress; it is not an accepted send. A disabled webhook returns false. Credentials are injected at runtime from Vault via ExternalSecret — never committed. Configure the exact Teams tenant host in the egress allow-list before enabling its webhook; an unlisted host is refused without sending a request.
 
 ## Health checks
 

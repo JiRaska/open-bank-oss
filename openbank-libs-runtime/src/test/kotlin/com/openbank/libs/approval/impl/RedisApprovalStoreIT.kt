@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.ApprovalStoreContractTest
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import io.mockk.every
 import io.mockk.mockk
@@ -132,6 +133,24 @@ class RedisApprovalStoreIT : ApprovalStoreContractTest() {
     }
 
     @Test
+    fun `verified maker kind survives the hash and decision transitions`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create(
+            "agent.propose",
+            "case-1",
+            "agent:reviewer",
+            makerActorKind = MakerActorKind.AI_AGENT,
+        )
+
+        assertThat(cmd("HGET", "approval-v2:svc-a:${pending.id}", "actorKind")).isEqualTo("AI_AGENT")
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        assertThat(store.findPending(100).single().makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        assertThat(store.decide(pending.id, "checker-1", approve = true)?.makerActorKind)
+            .isEqualTo(MakerActorKind.AI_AGENT)
+        assertThat(store.markExecuted(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+    }
+
+    @Test
     fun `a record in the previous layout is found, decided and consumed by id, without a binding`(): Unit =
         runBlocking {
             val store = newStore()
@@ -139,11 +158,13 @@ class RedisApprovalStoreIT : ApprovalStoreContractTest() {
             cmd("SET", "approval:$id", "savings.withdraw.execute|p-1|maker-1|PENDING|2026-10-01T09:00Z||", "EX", "3600")
 
             assertThat(store.find(id)?.status).isEqualTo(ApprovalStatus.PENDING)
+            assertThat(store.find(id)?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
             assertThat(store.findPending(100)).`as`("previous-layout records are not listed").isEmpty()
 
             val decided = store.decide(id, "checker-1", approve = true)
             assertThat(decided?.status).isEqualTo(ApprovalStatus.APPROVED)
             assertThat(decided?.requestFingerprint).isNull()
+            assertThat(decided?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
             assertThat(cmd("EXISTS", "approval:$id")).isEqualTo("0")
             assertThat(cmd("TTL", "approval-v2:svc-a:$id")!!.toLong()).isPositive()
 

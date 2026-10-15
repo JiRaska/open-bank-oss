@@ -26,3 +26,5 @@ formát logu znovu zavede surové pole `token=` / `tokenId=`.
 
 Pozn.: v `src/main` dnes nic proposal token nevydává (#5900), takže se tyto řádky objevují jen v
 testech, dokud nebude cesta potvrzení zapojena.
+
+Provozní diagnostické logy návrhů a rozhodnutí politik obsahují výsledek a hashovanou referenci tokenu, nikdy identitu zákazníka, názvy nástrojů, důvody rozhodnutí ani deserializovaný obsah. Atribuované auditní události zůstávají samostatným záznamem: zachovávají identitu aktéra, zdroj i pole auditního payloadu potřebná k vysvětlení rozhodnutí. Zprávy výjimek a stack trace se v těchto diagnostických cestách nezapisují, protože mohou obsahovat data požadavku. Pro diagnostiku zůstávají HTTP status, TTL tokenu a vygenerované identifikátory akcí.

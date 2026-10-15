@@ -23,7 +23,7 @@ For dispatch-control, the **actor identity is taken from the authenticated JWT s
 
 List notifications, paginated. Query params: `partyId` (uuid, optional), `page` (default 0), `size` (default 20, clamped 1..100). The OpenAPI spec also documents `status` and `offset`/`limit`; the implementation uses `page`/`size` and filters by `partyId`.
 
-Returns `{ items: [...], total, page, size }`. Each item: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
+Returns `{ items: [...], total, unreadCount, page, size }`. `total` and `unreadCount` cover the selected party's full history, independent of the returned page. Created-time and ID ordering remains stable when timestamps match. Each item: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
 
 ### `GET /api/v1/notifications/{id}`
 

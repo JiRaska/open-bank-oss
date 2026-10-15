@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_sanctions
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_sanctions
   flyway:
@@ -97,6 +100,13 @@ quarkus:
   # Same override, same reason, as openbank-aml-service's %test profile.
   authz:
     enforce: "false"
+  # The tests assert transactional outbox rows, not broker delivery. Avoid a producer that
+  # retries localhost:29092 for the whole suite when no Kafka broker is present.
+  mp:
+    messaging:
+      outgoing:
+        sanctions-events-out:
+          connector: smallrye-in-memory
 
 kafka:
   bootstrap:

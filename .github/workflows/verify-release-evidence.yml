@@ -44,11 +44,12 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      # The same fleet inventory powers the advisory PR gate and this cryptographic
-      # consumer. A missing component/release/asset or a too-young latest release is
-      # never substituted with an older tag and never counted as a clean observation.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      # The inventory and verifier use the trusted workflow revision together.
+      # Pending or unresolved latest releases cannot count as clean observations.
       - name: Resolve release tags
         env:
           REQUESTED: ${{ inputs.tag }}
