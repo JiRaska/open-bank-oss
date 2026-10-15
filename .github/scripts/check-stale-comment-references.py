@@ -154,6 +154,9 @@ def _line_comments(text: str, marker: str) -> list[tuple[int, str]]:
     return out
 
 
+_C_SCAN_SPECIAL = re.compile(r"[\"'/\n]")
+
+
 def c_comments(text: str) -> list[tuple[int, str]]:
     # Kotlin BLOCK COMMENTS NEST — a KDoc containing `/*` does not close at the first `*/`.
     # Depth-counting mirrors that; a naive find("*/") would truncate the block and hide
@@ -213,7 +216,10 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             buf = []
             i += 2
             continue
-        i += 1
+        # Skip ordinary code in one regex search; delimiters that can change scanner
+        # state and newlines remain visible to the existing state machine above.
+        match = _C_SCAN_SPECIAL.search(text, i + 1)
+        i = n if match is None else match.start()
     return out
 
 
