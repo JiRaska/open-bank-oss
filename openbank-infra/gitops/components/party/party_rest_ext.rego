@@ -100,6 +100,20 @@ allowed_reasons contains "service-kyb-party-m2m" if {
 	}
 }
 
+# interest-service's OWN machine principal (client `openbank-interest`, ROLE_API only), ADR-0339 B:
+#   party.amlProfile.read — the withholding policy's tax-profile resolution
+#     (PartyTaxProfileProvider: account→party→AML-profile residency countries). GET /parties/{id}
+#     itself carries no @Authorize and rides @RolesAllowed(ROLE_API); this rule covers the
+#     profile read that does.
+# Identity-gated, never a role: ROLE_API is held by every service account. The shared
+# `service-account-openbank-services` is deliberately absent — interest's named client is its
+# own principal, the same pattern as `service-kyb-party-m2m` above.
+allowed_reasons contains "service-interest-party-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-interest"
+	input.action == "party.amlProfile.read"
+}
+
 # #10486 batch 8: delegation-service's PartyMandateRestClient / PartyAuthorityRestClient read a grantor's mandates and acting-for relations to decide whether a delegation may be granted. It used to reach these reads on the shared
 # service-account-openbank-services principal's ROLE_OPERATOR; it now presents its own identity
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
