@@ -34,3 +34,17 @@ Configured values:
 - `max-size: 20`
 
 
+
+## Test JVM heap bound
+
+The forked test JVM runs this module's `@QuarkusTest` suite and, since the trace-contract IT
+landed, a second full Quarkus boot (OTel SDK + Testcontainers) in the same process. Sibling
+modules where that second boot landed on the Gradle default ~512m heap died with
+`java.lang.OutOfMemoryError` and `QuarkusTestExtension` then hung until the 10-minute
+hang-detection timeout killed the executor (measured 2026-10-15 on interest, sepa-payment and
+account).
+
+`tasks.withType<Test> { maxHeapSize = "2g" }` in `build.gradle.kts` bounds it pre-emptively.
+Deliberately per-module rather than a fleet default: nothing measures test heap anywhere, so a
+global bump would be an unmeasured ratchet across ~50 modules to fix one. A second module OOMing
+is the signal to raise the bound in build-logic and count Quarkus boots per module.
