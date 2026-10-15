@@ -190,27 +190,30 @@ spec:
           args:
             - run
             - --server
-            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
-            # /health. The image is scratch (no shell), so an exec probe isn't possible.
-            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
-            - --addr=0.0.0.0:8181
+            # Keep decision and management APIs inside this pod. The namespace allows
+            # peer pods; NetworkPolicy alone does not isolate the OPA control plane.
+            - --addr=127.0.0.1:8181
+            # Kubelet probes use a separate read-only health/metrics listener.
+            - --diagnostic-addr=0.0.0.0:8282
             - --log-level=info
             - --bundle
             - /bundle
           ports:
             - name: opa
               containerPort: 8181
+            - name: opa-diagnostics
+              containerPort: 8282
           readinessProbe:
             httpGet:
               path: /health?bundles=true
-              port: 8181
+              port: opa-diagnostics
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
-              port: 8181
+              port: opa-diagnostics
             periodSeconds: 15
             failureThreshold: 3
           volumeMounts:

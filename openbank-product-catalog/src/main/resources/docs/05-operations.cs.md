@@ -81,6 +81,8 @@ spouští sidecar s politikou `product-catalog-opa-bundle`. `AUTHZ_ENFORCE` je v
 `false` (advisory): zamítnuté nebo nedostupné rozhodnutí se zaloguje na WARN a požadavek
 pokračuje. Požadavek odmítne až `AUTHZ_ENFORCE=true`.
 
+Rozhodovací a řídicí API naslouchá pouze na loopbacku podu (`127.0.0.1:8181`). Kubelet sondy používají samostatný diagnostický listener na portu 8282, který poskytuje pouze health/metrics, nikoli API politik a dat. Přístup ze stejného namespace rozhodovací listener nezpřístupňuje.
+
 ## Health checky
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC běží.

@@ -79,6 +79,8 @@ runs the sidecar with the `product-catalog-opa-bundle` policy. `AUTHZ_ENFORCE` d
 `false` (advisory): a denied or unreachable decision is logged at WARN and the request proceeds.
 Only with `AUTHZ_ENFORCE=true` does a deny reject the request.
 
+The decision and management API listens only on pod loopback (`127.0.0.1:8181`). Kubelet probes use the separate read-only diagnostic listener on port 8282; that listener exposes health/metrics, not policy or data APIs. Same-namespace network access does not expose the decision listener.
+
 ## Health checks
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC up.
