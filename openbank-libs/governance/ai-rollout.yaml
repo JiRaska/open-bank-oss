@@ -16,9 +16,9 @@
 adrRef: ADR-0031
 adrStatus: Accepted
 phase:
-  current: 2
+  current: 3
   total: 5
-  label: Governed oversight active — HITL queue live; HolmesGPT shadow evidence + copilot deployed (no autonomous business action)
+  label: One non-money development agent live — policy-gated PR path with recorded human merge (no autonomous business action)
   agentsActing: 0
   # This is the governance-approved roadmap, not a live runtime attestation. A phase may move
   # only after its listed criteria are independently checked; the UI never treats a charter or
@@ -29,13 +29,13 @@ phase:
       title: Safety foundations
       outcome: Deny-by-default charters, policy gate, identity binding and audit are enforced.
     - number: 2
-      status: active
+      status: complete
       title: Read-only oversight and human queue
       outcome: Agents prepare evidence and proposals; a human makes every disposition.
     - number: 3
-      status: blocked
+      status: active
       title: One non-money development agent
-      outcome: Needs a deployed development agent with a real, policy-gated PR path and recorded human merge.
+      outcome: flaky-test-hunter ships code through a policy-gated PR path; every merge is recorded human disposition with deployment attestation.
     - number: 4
       status: blocked
       title: Expanded development, including money-path work
@@ -50,15 +50,16 @@ phase:
 # change state. Keeping both numbers visible prevents the usual false choice between
 # "the platform is only at 2/5" and "agents may autonomously act".
 controlMaturity:
-  current: 4
+  current: 5
   total: 5
-  label: Four core governance control families are built; independently verifiable provenance remains partial.
+  label: All five governance control families are built; independently verifiable provenance remains partial until D5 hardening completes.
   achieved:
     - D1
     - D2
     - D3
     - D4
-  remaining: D5 still needs asymmetric, third-party-verifiable audit anchors and AI-attribution in release evidence.
+    - D8
+  remaining: D5 still needs asymmetric, third-party-verifiable audit anchors and AI-attribution in release evidence; D6–D7 and D9 remain partial.
 
 decisions:
   - id: D1
@@ -144,16 +145,21 @@ decisions:
       operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW
       case, but it never remediates or changes banking state. The customer-facing copilot
       (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes
-      autonomous business action. Phases 3–5 (dev agent → money-path → tamper-evidence) follow.
-      Phase-3 mechanism (built, evidence pending): flaky-test-hunter's GitHub PR path is now
-      policy-gated — an in-process charter check (deny-by-default, packaged agents.yaml) plus an
-      OPA sidecar query fail CLOSED on any PDP outage before any branch or PR is created
-      (write path: advisory degradation is not acceptable there; every decision is audited as
-      agent.github.pr_open with policy_decision). The recorded-human-merge pipeline is live:
-      record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record
-      (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry).
-      Phase stays 2/5 until the criteria are independently verified: a first real merge
-      recorded through this pipeline plus deployment attestation.
+      autonomous business action. Phases 4–5 (money-path development, then independently
+      verifiable provenance) follow.
+      Phase-3 mechanism (built and evidenced): flaky-test-hunter ships code through a
+      policy-gated PR path — an in-process charter check (deny-by-default, packaged
+      agents.yaml) plus an OPA sidecar query fail CLOSED on any PDP outage before any branch
+      or PR is created (write path: advisory degradation is not acceptable there; every
+      decision is audited as agent.github.pr_open with policy_decision). The recorded-human-merge
+      pipeline is live: record-agent-merge workflow → POST /api/v1/agent-merge-records →
+      agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent
+      telemetry). Phase 3 exit criteria, independently verified before this change: (1) the
+      first real agent PR merge recorded through that pipeline (row + audit evidence), and
+      (2) deployment attestation — a green fleet-attestation run (cosign/KMS-verified image
+      attestations) covering the deployed agent-service and flaky-test-hunter images pinned by
+      gitops to the merge commit, cross-checked against the Pact Broker deployed-version
+      record. Phase.current moves to 3 only with both on file.
 
 compliance:
   - framework: PCI DSS
