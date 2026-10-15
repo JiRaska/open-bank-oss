@@ -25,6 +25,9 @@ spec:
       labels:
         app.kubernetes.io/name: flaky-test-hunter
         app.kubernetes.io/part-of: flaky-test-hunter
+      annotations:
+        # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
+        openbank.tech/policy-checksum: "f7f0f01ea6db0a93"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -111,6 +114,72 @@ spec:
               port: management
             initialDelaySeconds: 20
             periodSeconds: 30
+        # The PR-path gate queries this pod's agents-only policy bundle over localhost:8181.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Keep decision and management APIs inside this pod; probes use the diagnostic listener.
+            - --addr=127.0.0.1:8181
+            - --diagnostic-addr=0.0.0.0:8282
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+            - name: opa-diagnostics
+              containerPort: 8282
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: opa-diagnostics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: opa-diagnostics
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: flaky-test-hunter-opa-bundle
 ---
 apiVersion: v1
 kind: Service
