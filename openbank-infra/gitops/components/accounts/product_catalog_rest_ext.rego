@@ -36,7 +36,8 @@ allowed_reasons contains "catalog-read-api-or-viewer" if {
 
 # The synthetic catalog-read journey holds only the catalog:read scope (CATALOG_SCOPE_READ).
 # The scope alone is deliberately not a general grant (see the pension-catalog-* reasons), so
-# only this named caller is admitted on it.
+# only this named caller is admitted on it. Its client issues the profile scope, so the token
+# carries preferred_username and principal.id resolves to the service-account name.
 allowed_reasons contains "catalog-read-synthetic-journey" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-synthetic-catalog-read"
@@ -46,14 +47,14 @@ allowed_reasons contains "catalog-read-synthetic-journey" if {
 
 # Authoring and publishing are staff actions. A service-account that happens to carry
 # ROLE_OPERATOR (the edge client does in the deployed realm) is never a catalog author.
-allowed_reasons contains "catalog-author-staff" if {
+allowed_reasons contains "operator-catalog-author-write" if {
 	catalog_staff
 	input.action in catalog_author_actions
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "CATALOG_SCOPE_AUTHOR"}
 	role in input.principal.roles
 }
 
-allowed_reasons contains "catalog-publish-staff" if {
+allowed_reasons contains "operator-catalog-publish-write" if {
 	catalog_staff
 	input.action == "catalog.publish"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "CATALOG_SCOPE_PUBLISH"}
