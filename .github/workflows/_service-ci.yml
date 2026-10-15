@@ -243,7 +243,7 @@ jobs:
           # the first Gradle task; tests and build outputs are never replayed.
           bash .github/scripts/retry-testcontainers-ebusy.sh -- \
             bash .github/scripts/retry-gradle-verification-cache.sh -- \
-            ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+            ./gradlew --configure-on-demand :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
@@ -284,7 +284,7 @@ jobs:
         # Account's real Testcontainers suite needs more than the old three-minute limit:
         # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
         # Test execution belongs to the enforcing build above; this step only renders it.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{ inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:koverXmlReport --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{ inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
@@ -301,7 +301,7 @@ jobs:
       - name: Retain immutable Test Intelligence run envelope
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: ${{ inputs.service }}/build/test-intelligence/run.json
@@ -334,7 +334,7 @@ jobs:
           echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
           echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: consumer-pacts-${{ inputs.service }}
           path: pact-handoff/
@@ -353,7 +353,7 @@ jobs:
       - name: Upload test reports
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # `-a${{ github.run_attempt }}` is not cosmetic — an artifact name must be unique
           # WITHIN A RUN, and re-running a failed job is a new attempt of the SAME run.
@@ -368,7 +368,7 @@ jobs:
       - name: Upload quality evidence (every run)
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: quality-evidence-${{ inputs.service }}-a${{ github.run_attempt }}
           path: |
@@ -404,7 +404,7 @@ jobs:
       - name: Upload Test Intelligence evidence
         if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-${{ inputs.service }}
           path: |
@@ -730,7 +730,7 @@ jobs:
       # service's actual consumer-pact set would be silently wrong. No continue-on-error, no
       # if: always() — a failure here fails the job.
       - name: Download build's consumer-pact artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v6.2.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: consumer-pacts-${{ inputs.service }}
           path: pact-handoff
@@ -892,7 +892,7 @@ jobs:
       - name: Upload test reports
         if: failure()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: contract-test-reports-${{ inputs.service }}-a${{ github.run_attempt }}
           path: ${{ inputs.service }}/build/reports/tests/providerPactTest
@@ -902,7 +902,7 @@ jobs:
       - name: Upload JUnit XML (every run — flake accounting)
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: contract-junit-xml-${{ inputs.service }}-a${{ github.run_attempt }}
           path: ${{ inputs.service }}/build/test-results/providerPactTest/**/*.xml

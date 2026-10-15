@@ -274,7 +274,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
           # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
@@ -504,17 +504,10 @@ jobs:
               # retains the latest per-service execution evidence across action
               # layout changes rather than silently falling back to stale JUnit.
               RUN_JSON="$(find "${TMPDIR_ART}" -type f \( -name 'run.json' -o -path '*/test-intelligence/run.json' \) -print -quit)"
-              if [ -z "${RUN_JSON}" ] || ! python3 -c '
-          import json, sys
-          with open(sys.argv[1], encoding="utf-8") as source:
-              envelope = json.load(source)
-          valid = (envelope.get("schemaVersion") == 1
-                   and envelope.get("component") == sys.argv[2]
-                   and isinstance(envelope.get("suites"), list)
-                   and isinstance(envelope.get("run"), dict)
-                   and envelope["run"].get("branch") == "main")
-          sys.exit(0 if valid else 1)
-          ' "${RUN_JSON}" "${svc}"; then
+              # The shared extractor validates complete v1/v2 envelopes and
+              # main provenance before this service-specific identity check.
+              if [ -z "${RUN_JSON}" ] || ! python3 .github/scripts/extract-test-intelligence-envelope.py \
+                  --validate-component "${RUN_JSON}" "${svc}"; then
                 echo "  ${svc}: run envelope is missing or invalid; refusing incomplete Test Intelligence image" >&2
                 exit 1
               fi
@@ -1032,7 +1025,7 @@ jobs:
           echo "Pushed tag: ${TAG}"
 
       - name: Retain immutable Test Intelligence snapshot
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
           path: openbank-admin-ui/test-intelligence.json

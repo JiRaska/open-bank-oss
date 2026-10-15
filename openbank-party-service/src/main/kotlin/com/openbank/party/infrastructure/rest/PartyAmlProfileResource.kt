@@ -9,6 +9,7 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.party.application.port.`in`.DeclareAmlProfileCommand
 import com.openbank.party.application.port.`in`.PartyAmlProfileUseCase
 import com.openbank.party.domain.model.AccountPurpose
@@ -39,12 +40,12 @@ import java.util.UUID
  * The personal AML profile (AML Act 253/2008 §9 + FATCA/CRS self-certification). A separate
  * resource from [PartyResource] (already `LargeClass`), on the same base path.
  *
- * Readers: the customer edge and staff. Writer: ONLY the customer edge (or a `ROLE_API` M2M
- * caller) acting for the customer — the declaration is the customer's own statement, so a staff
- * session holding `ROLE_OPERATOR` is refused here even though `@RolesAllowed` admits the role
- * (the edge's service account carries `ROLE_OPERATOR`, and a role alone cannot tell the two
- * apart; the identity match is the load-bearing half, as in [PartyResource]'s GDPR routes). The
- * edge takes the party id from the customer's token, never from the request.
+ * Readers: the customer edge and staff. Writer: ONLY the verified customer-edge service account
+ * acting for the customer. The declaration is the customer's own statement, so a staff session
+ * holding `ROLE_OPERATOR` and an unrelated M2M caller holding `ROLE_API` are both refused here.
+ * `@RolesAllowed` admits those roles at the outer gate, but [callerMayDeclare] checks the edge's
+ * client-bound JWT identity before writing. The edge takes the party id from the customer's token,
+ * never from the request.
  */
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)
@@ -112,8 +113,7 @@ class PartyAmlProfileResource {
     /** Decided from the authenticated principal and configuration only — never from request data. */
     private fun callerMayDeclare(): Boolean {
         val edge = if (this::customerEdgePrincipal.isInitialized) customerEdgePrincipal else ""
-        return securityIdentity.hasRole("ROLE_API") ||
-            (edge.isNotBlank() && securityIdentity.principal?.name == edge)
+        return ServiceAccountIdentity.isPrincipal(securityIdentity, edge)
     }
 }
 

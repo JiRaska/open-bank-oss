@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_audit
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_audit
   flyway:
@@ -317,3 +320,24 @@ opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS (#11900): the 8443 listener must VALIDATE the caller's certificate.
+      # `quarkus.http.ssl.client-auth` is BUILD TIME, so it lives here (baked into the image by
+      # quarkusBuild under `prod`), not in the container env. Under `%prod` only: with no
+      # certificate configured, `test`/`dev` would refuse to start. Same shape as consent-service.
+      ssl:
+        client-auth: required
+      # Keep plain HTTP/8113 for existing callers and the probes: with client-auth REQUIRED Quarkus
+      # otherwise defaults insecure-requests to `disabled` and drops that listener (#10441).
+      insecure-requests: enabled
+      # A trusted workload certificate is transport identity, not an API login (#12511).
+      # Keep route-level role and OPA checks; select bearer as their caller identity.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer

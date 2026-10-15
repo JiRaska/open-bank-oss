@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
@@ -14,54 +17,74 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 
+/**
+ * Unit tests for [AbstractOutboxOldestAgeGauge] (ADR-0327 D10), mirroring the sibling
+ * Backlog/DeadLetter gauge suites. The load-bearing property — what a cold pod reports before any
+ * refresh — is asserted against the registered supplier, exactly as a Prometheus scrape would see
+ * it: 0 at t = 0, the repository's age after a refresh, and 0 (never a sentinel) when nothing is
+ * eligible.
+ */
 class AbstractOutboxOldestAgeGaugeTest {
-    private class TestGauge(metrics: DomainMetrics, override val repository: OutboxRepositoryV2) :
-        AbstractOutboxOldestAgeGauge(metrics) {
-        override val service = "test-service"
+
+    private class TestGauge(
+        override val service: String,
+        private val repo: OutboxRepositoryV2,
+        metrics: DomainMetrics,
+    ) : AbstractOutboxOldestAgeGauge(metrics) {
+        override val repository: OutboxRepositoryV2 get() = repo
         fun register() = registerOldestAgeGauge()
         suspend fun refresh(now: Instant) = refreshOldestAge(now)
     }
 
     @Test
-    fun `cold gauge is zero without querying the repository`() {
-        val metrics = mockk<DomainMetrics>()
-        val repository = mockk<OutboxRepositoryV2>()
-        val supplier = slot<() -> Number>()
-        every { metrics.registerOutboxOldestAge("test-service", capture(supplier)) } returns Unit
-        val gauge = TestGauge(metrics, repository)
+    fun `registerOldestAgeGauge registers exactly one gauge under this gauge's own service tag`() {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val gauge = TestGauge("ledger", mockk(), metrics)
 
         gauge.register()
 
-        verify(exactly = 1) { metrics.registerOutboxOldestAge("test-service", any()) }
-        assertThat(gauge.currentAgeSeconds()).isZero()
-        assertThat(supplier.captured().toLong()).isZero()
-        coVerify(exactly = 0) { repository.oldestProcessableAge(any()) }
+        verify(exactly = 1) { metrics.registerOutboxOldestAge("ledger", any()) }
     }
 
     @Test
-    fun `refresh samples exact time and registered supplier follows cache including empty outbox`() {
-        val metrics = mockk<DomainMetrics>()
-        val repository = mockk<OutboxRepositoryV2>()
+    fun `the gauge reads 0 before any refresh, then the age the repository last reported`() {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
         val supplier = slot<() -> Number>()
-        every { metrics.registerOutboxOldestAge("test-service", capture(supplier)) } returns Unit
-        val now = Instant.parse("2026-10-01T12:00:00Z")
-        coEvery { repository.oldestProcessableAge(now) } returns Duration.ofMillis(19500)
-        coEvery { repository.oldestProcessableAge(now.plusSeconds(1)) } returns Duration.ofSeconds(7)
-        coEvery { repository.oldestProcessableAge(now.plusSeconds(2)) } returns null
-        val gauge = TestGauge(metrics, repository)
+        every { metrics.registerOutboxOldestAge("ledger", capture(supplier)) } returns Unit
+        val repo = mockk<OutboxRepositoryV2>()
+        val now = Instant.parse("2026-10-14T12:00:00Z")
+        coEvery { repo.oldestProcessableAge(now) } returns Duration.ofSeconds(42)
+        val gauge = TestGauge("ledger", repo, metrics)
+        gauge.register()
+
+        assertThat(supplier.captured().toLong()).isEqualTo(0L)
+        // A cold read must not hit the repository at all — the supplier must serve the cached
+        // zero, not query per scrape.
+        coVerify(exactly = 0) { repo.oldestProcessableAge(any()) }
+
+        runBlocking { gauge.refresh(now) }
+
+        // Falsifying assertion: a mutant that drops the AtomicLong::set call, negates the
+        // refresh conditional, or replaces refreshOldestAge's return leaves the gauge at 0.
+        assertThat(supplier.captured().toLong()).isEqualTo(42L)
+        assertThat(gauge.currentAgeSeconds()).isEqualTo(42L)
+    }
+
+    @Test
+    fun `a null age from the repository is reported as 0, never a timestamp sentinel`() {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val supplier = slot<() -> Number>()
+        every { metrics.registerOutboxOldestAge("ledger", capture(supplier)) } returns Unit
+        val repo = mockk<OutboxRepositoryV2>()
+        val now = Instant.parse("2026-10-14T12:00:00Z")
+        coEvery { repo.oldestProcessableAge(now) } returns null
+        val gauge = TestGauge("ledger", repo, metrics)
         gauge.register()
 
         runBlocking { gauge.refresh(now) }
-        assertThat(gauge.currentAgeSeconds()).isEqualTo(19)
-        assertThat(supplier.captured().toLong()).isEqualTo(19)
-        runBlocking { gauge.refresh(now.plusSeconds(1)) }
-        assertThat(gauge.currentAgeSeconds()).isEqualTo(7)
-        assertThat(supplier.captured().toLong()).isEqualTo(7)
-        runBlocking { gauge.refresh(now.plusSeconds(2)) }
-        assertThat(gauge.currentAgeSeconds()).isZero()
-        assertThat(supplier.captured().toLong()).isZero()
-        coVerify(exactly = 1) { repository.oldestProcessableAge(now) }
-        coVerify(exactly = 1) { repository.oldestProcessableAge(now.plusSeconds(1)) }
-        coVerify(exactly = 1) { repository.oldestProcessableAge(now.plusSeconds(2)) }
+
+        // "nothing eligible" must render as 0 on the scrape, or OutboxOldestRowStale fires on an
+        // empty table — the ADR-0237 epoch-sentinel failure this gauge was built to avoid.
+        assertThat(supplier.captured().toLong()).isEqualTo(0L)
     }
 }

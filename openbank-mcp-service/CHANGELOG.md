@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.5](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.4...mcp-service-v0.17.5) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.3...mcp-service-v0.17.4) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.2...mcp-service-v0.17.3) (2026-09-29)
 
 

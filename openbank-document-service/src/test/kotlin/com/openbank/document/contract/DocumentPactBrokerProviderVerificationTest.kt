@@ -20,6 +20,7 @@ import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
@@ -59,6 +60,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
+@QuarkusTestResource(PdfRendererStubResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-document-service")
 @PactBroker(enablePendingPacts = "true")
@@ -80,6 +82,9 @@ class DocumentPactBrokerProviderVerificationTest {
 
     @Inject
     lateinit var vertx: Vertx
+
+    @Inject
+    lateinit var sessionFactory: Mutiny.SessionFactory
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -112,6 +117,9 @@ class DocumentPactBrokerProviderVerificationTest {
     fun stateTemplatesSeeded() {
         // Intentionally empty — see the KDoc above.
     }
+
+    @State(PensionPublishedPactState.STATE)
+    fun statePensionKidPublished() = PensionPublishedPactState.publishInTestDatabase(sessionFactory)
 
     /**
      * `previewTemplate` is stateless and non-persisting by design (ADR-0248 #3): it merges a

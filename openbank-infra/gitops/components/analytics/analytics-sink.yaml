@@ -69,7 +69,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: analytics-sink
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-analytics-sink:sandbox-f05874a7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-analytics-sink:sandbox-8b2932e8
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

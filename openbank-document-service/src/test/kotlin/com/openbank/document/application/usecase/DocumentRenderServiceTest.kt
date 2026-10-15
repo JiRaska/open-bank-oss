@@ -137,6 +137,26 @@ class DocumentRenderServiceTest {
             .isInstanceOf(IllegalStateException::class.java)
     }
 
+    @Test
+    fun `previously published legal drafts cannot render even when caller suppresses the banner`(): Unit = runBlocking {
+        val draft = publishedTemplate().copy(bodyHtml = "<!-- LEGAL-REVIEW-REQUIRED -->{{name}}")
+        coEvery { templateRepo.findPublished(any(), any()) } returns draft
+        coEvery { templateRepo.findLatestPublished(any()) } returns draft
+
+        for (version in listOf("1.0.0", null)) {
+            for (data in listOf(mapOf("name" to "Alice"), mapOf("legalReviewRequired" to false))) {
+                assertThatThrownBy { runBlocking { service.render(command(version).copy(data = data)) } }
+                    .isInstanceOf(IllegalStateException::class.java)
+                    .hasMessageContaining("requires legal review")
+            }
+        }
+
+        coVerify(exactly = 0) { renderPort.renderHtml(any(), any()) }
+        coVerify(exactly = 0) { pdfPort.htmlToPdf(any()) }
+        coVerify(exactly = 0) { objectStore.put(any(), any(), any()) }
+        coVerify(exactly = 0) { documentRepo.saveWithOutbox(any(), any()) }
+    }
+
     private fun command(templateVersion: String? = "1.0.0") = RenderDocumentCommand(
         templateCode = "LOAN_AGREEMENT",
         templateVersion = templateVersion,

@@ -45,5 +45,26 @@
     "allowed": true,
     "deadlineDays": 30,
     "carriesIncentiveHistory": true
+  },
+  "exit": {
+    "termination": { "noticePeriodDays": 30, "quoteValidityDays": 7, "feeRate": 0, "fixedFee": 0 },
+    "tax": {
+      "byForm": {
+        "LUMP_SUM": { "base": "NONE" },
+        "PHASED_WITHDRAWAL": { "base": "NONE" }
+      },
+      "deductionRecapture": { "rate": 0.15, "years": 10 },
+      "employerExemptRecapture": { "rate": 0.15, "years": 10 }
+    },
+    "phasedWithdrawal": { "minMonths": 12, "maxMonths": 360 },
+    "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } }
+  },
+  "contributionLimits": {
+    "minMonthly": 1,
+    "allowedFrequencies": ["MONTHLY", "QUARTERLY", "ANNUALLY"],
+    "minDayOfMonth": 1,
+    "maxDayOfMonth": 28,
+    "changeNoticeDays": 3,
+    "maxStartAheadDays": 366
   }
 }
