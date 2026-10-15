@@ -1128,8 +1128,8 @@ agents:
   # update on any money-path or trust-boundary change.
   #
   # `enabled: false` ON PURPOSE — this is the PILOT CHARTER ONLY, prepared ahead of any
-  # runtime. Activation requires, in order: (1) the planned ADR-0340 (recorded two-person
-  # review of the activation decision) accepted, (2) the phase-3 branch merged, and (3) the
+  # runtime. Activation requires, in order: (1) the planned recorded-two-person-review ADR
+  # (branch agent/adr-0340-two-person-review) accepted, (2) the phase-3 branch merged, and (3) the
   # ADR-0031 phase bump landed. Until all three hold, no runtime may authenticate as this
   # principal. Data stays repo-local: synthetic fixtures only (ADR-0175 — no production data
   # reaches the agent, and nothing is sent to a hosted provider).

@@ -396,8 +396,8 @@ tier_charters := {
 			},
 		},
 		# Mirrors agents.yaml: fraud-dev-engineer — the phase-4 money-path development pilot
-		# (ADR-0031, issue #12885; pilot charter, enabled: false until ADR-0340 + the phase
-		# bump land). write_proposal is scoped to the OWNED repo only; write/execute tiers are
+		# (ADR-0031, issue #12885; pilot charter, enabled: false until the recorded-two-person-
+		# review ADR + the phase bump land). write_proposal is scoped to the OWNED repo only; write/execute tiers are
 		# denied explicitly, not by omission.
 		{
 			"id": "fraud-dev-engineer",

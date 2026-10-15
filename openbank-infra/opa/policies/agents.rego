@@ -50,8 +50,8 @@ charter_denied if {
 # customer-copilot). The standalone background/control-plane agents (finops-agent, devops-agent,
 # control-liveness-sentinel, governance-auditor, release-steward, docs-truth-agent,
 # authz-policy-auditor, flaky-test-hunter) and the phase-4 money-path dev pilot
-# (fraud-dev-engineer, ADR-0031 / issue #12885, enabled: false until ADR-0340 + the phase
-# bump land) instead declare tools.allow as a list of
+# (fraud-dev-engineer, ADR-0031 / issue #12885, enabled: false until the recorded-two-person-
+# review ADR + the phase bump land) instead declare tools.allow as a list of
 # `{tier, resources}` objects -- `some pattern in a.tools.allow` binds `pattern` to the whole
 # object for those charters, which glob_match can never match against a string tool name, so
 # charter_allowed is always false for them here. This is intentionally NOT a security gap
