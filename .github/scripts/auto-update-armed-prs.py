@@ -135,14 +135,14 @@ def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt
               if c in checks and checks[c] not in OK_CONCLUSIONS and checks[c] != "cancelled"]
     if failed:
         return False, "required context(s) not green: " + ", ".join(f"{c}={checks[c]}" for c in failed)
-    unregistered = [c for c in required if c not in checks or checks[c] == "cancelled"]
-    if unregistered:
-        return True, (f"behind + {actor} + required context(s) unregistered: "
-                      f"{', '.join(unregistered)} — update re-registers them")
     if head_committed_at is not None:
         age = (now - head_committed_at).total_seconds() / 60
         if age < debounce_minutes:
             return False, f"debounced — head committed {age:.0f} min ago (< {debounce_minutes})"
+    unregistered = [c for c in required if c not in checks or checks[c] == "cancelled"]
+    if unregistered:
+        return True, (f"behind + {actor} + required context(s) unregistered: "
+                      f"{', '.join(unregistered)} — update re-registers them")
     return True, f"behind + {actor} + all required contexts green"
 
 
@@ -237,6 +237,27 @@ def self_test() -> int:
         ok = got == want
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: update={got} ({why})")
+    # Recovery of unregistered contexts must obey the same debounce as a green head.
+    # Cover both supported actors and real missing/cancelled states; a pending or failed
+    # sibling still wins so recovery never discards a verdict in flight.
+    for actor, pr in [("armed", base), ("bot deploy", bot_deploy)]:
+        for state, checks in [
+            ("missing", {"Validate manifests": "success"}),
+            ("cancelled", {**green, "Gitleaks": "cancelled"}),
+        ]:
+            for age, want in [(0, False), (44, False), (45, True), (120, True)]:
+                got, why = decide(pr, req, checks, now, now - dt.timedelta(minutes=age), 45)
+                ok = got == want
+                failures += not ok
+                print(f"{'PASS' if ok else 'FAIL'}  {actor}+{state}+age={age}: {why}")
+        for state, checks, reason in [
+            ("pending+missing", {"Validate manifests": None}, "pending"),
+            ("failed+missing", {"Validate manifests": "failure"}, "not green"),
+        ]:
+            got, why = decide(pr, req, checks, now, now, 45)
+            ok = not got and reason in why
+            failures += not ok
+            print(f"{'PASS' if ok else 'FAIL'}  {actor}+fresh+{state}: {why}")
     for name, args, want in [
         ("unknown + behind_by>0 -> behind", ("unknown", None, 3), "behind"),
         ("null + behind_by>0 -> behind", (None, None, 1), "behind"),
