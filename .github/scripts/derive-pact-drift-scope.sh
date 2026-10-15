@@ -92,7 +92,24 @@ zeta-provider.json')"
     echo "ERROR: disjoint JVM/PactJS ownership produced a false collision" >&2
     exit 1
   }
-  echo "selftest OK: cross-runtime Pact ownership collisions are detected exactly"
+  # Exceed a pipe buffer, with the match first: grep -q exits before a pipeline
+  # producer finishes. Under pipefail that used to turn a real match into exit 141.
+  large_haystack="$(awk 'BEGIN { print "first.[x]"; for (i = 0; i < 30000; i++) printf "fixture-%06d.json\n", i }')"
+  for attempt in 1 2 3; do
+    contains 'first.[x]' "$large_haystack" || {
+      echo "ERROR: large-input exact membership failed under pipefail (attempt $attempt)" >&2
+      exit 1
+    }
+  done
+  if contains 'first' "$large_haystack" || contains 'firstax' "$large_haystack"; then
+    echo "ERROR: membership must remain exact-line and fixed-string" >&2
+    exit 1
+  fi
+  contains 'fixture-029999.json' "$large_haystack" || {
+    echo "ERROR: membership missed the last large-input line" >&2
+    exit 1
+  }
+  echo "selftest OK: cross-runtime Pact ownership collisions are detected exactly; large-input membership stays SIGPIPE-safe"
   exit 0
 fi
 
