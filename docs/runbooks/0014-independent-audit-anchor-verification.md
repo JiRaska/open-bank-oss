@@ -173,3 +173,37 @@ rejects everything), seven distinct tamperings that must be rejected with a nami
 two absence cases that must produce `UNVERIFIABLE` rather than either other verdict. Enforced in
 CI as gate `audit-anchor-offline-verifier-unit-test` with a `min_subjects: 10` floor, so a suite
 that quietly stopped constructing cases cannot read as a pass on the ones left.
+
+## 8. CI attestation — the verifier against a LIVE export
+
+`.github/workflows/audit-anchor-attestation.yml` (weekly, Wednesday 07:23 UTC, plus
+`workflow_dispatch`) closes the loop this runbook leaves open for humans: it exports the anchors
+and the recorded KMS verification keys **from the live sandbox audit-service**, runs
+`verify-audit-anchors.py` against the real export, and uploads the whole bundle (raw export,
+PEMs, per-generation verifier output, `verdict.json`) as the `audit-anchor-attestation`
+artifact (30-day retention).
+
+Access follows the same pattern as the other no-public-ingress services: the job runs on the
+in-cluster ARC runner (`openbank-build`) and reaches the service over cluster DNS, with the URL
+and a client-credentials OIDC pair (`ROLE_AUDITOR`/`ROLE_COMPLIANCE`) supplied through
+`vars.AUDIT_SERVICE_BASE_URL`, `vars.AUDIT_ANCHOR_ATTESTATION_ISSUER` and the
+`AUDIT_ANCHOR_ATTESTATION_CLIENT_{ID,SECRET}` secrets. All four are required — the workflow
+fails closed when any is absent; an unconfigured control reads as broken, never as green.
+
+What a green weekly run proves: every **KMS-signed** anchor in the export recomputes to its
+stored digest, verifies under the public key recorded on it, and the per-generation sequence is
+sound. Pre-cutover HMAC anchors (`keyId=local-hmac-sha256`) are excluded from the claim — a
+shared secret is not third-party verifiable, and including them would make every run
+`UNVERIFIABLE` (see §5a). The independently attested window therefore starts at the KMS cutover.
+
+What even a green run does **not** prove — unchanged from §6, and restated in the artifact's
+`verdict.json` so a reader of the bundle alone cannot over-claim:
+
+1. An anchor **missing** for a period is still not detectable — cross-check the
+   `audit-anchor-capture` cadence separately (§6.1).
+2. `signedAt` is the producer's own claim; nothing external timestamps it (§6.2).
+3. The entry **log** is not cross-checked against the attested heads — the workflow does not
+   pass `--entries`, so signature authenticity is proven, not log-custody (§6.3).
+
+A non-VERIFIED scheduled run opens or refreshes one tracking issue and a clean run closes it;
+`workflow_dispatch` failures simply fail red.

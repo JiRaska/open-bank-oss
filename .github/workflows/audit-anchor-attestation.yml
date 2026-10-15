@@ -1,0 +1,356 @@
+# Weekly LIVE attestation of the KMS-signed audit anchors (ADR-0031 D5, issue #12923 gap 2).
+#
+# verify-audit-anchors.py is the INDEPENDENT half of D5 — code that does not run inside the
+# bank — but until now CI only ever ran its --self-test against synthetic fixtures. A tool
+# whose only observed behaviour is against data it wrote itself is decoration, not a control
+# (same lesson as verify-release-evidence.yml's zero-dispatch years, #4026). This workflow
+# closes that gap: once a week it exports the anchors (and the recorded KMS verification
+# keys) from the LIVE sandbox audit-service and runs the offline verifier against them for
+# real.
+#
+# ACCESS PATTERN (reused, not invented): audit-service has no public ingress; it is reached
+# from the in-cluster ARC runner over cluster DNS — exactly the lane schema-registry-apply.yml
+# (Apicurio) and the Pact Broker publish step in _service-ci.yml use (`runs-on: openbank-build`,
+# URL from vars.*). A GitHub-hosted runner could not resolve the service name even with the
+# URL set, so this job does not branch on the URL for runs-on — it always requests the pool.
+#
+# AUTH: the export endpoints require a bearer token with an audit-reading role (openapi.yaml
+# bearerAuth; ROLE_AUDITOR per runbook 0014 §3). The token is a client_credentials grant from
+# the sandbox Keycloak realm, minted from a CI-only client. The client does not plausibly
+# exist yet: the vars/secrets below are referenced by conventional name and the workflow
+# FAILS CLOSED (red, before any export is attempted) when any of them is absent. An
+# unconfigured control must read as broken, never as green (AGENTS.md; the ALERTMANAGER_*
+# lesson in gates.yaml).
+#
+# WHAT A GREEN RUN PROVES — AND WHAT IT CANNOT (runbook 0014 §6 still applies):
+#   * Every KMS-signed anchor in the export recomputes to its stored digest, verifies under
+#     the public key recorded on it, and the sequence is sound (per key generation).
+#   * Pre-cutover HMAC anchors (keyId=local-hmac-sha256) are EXCLUDED from the claim: a shared
+#     secret is not third-party verifiable, and mixing them in would make every run
+#     UNVERIFIABLE. The attested window starts at the KMS cutover.
+#   * It does NOT prove an anchor exists for every hour (absence of an anchor cannot be
+#     rejected — check capture cadence separately, runbook §6.1), nor prove WHEN an anchor
+#     was signed (signedAt is the producer's claim, §6.2), nor that the log still matches the
+#     attested heads (no --entries export over cluster DNS; §6.3).
+name: Audit anchor live attestation
+
+on:
+  schedule:
+    # Weekly Wednesday 07:23 UTC — off-peak minute (never :00/:30); after the Monday
+    # verify-release-evidence cron, ahead of the mid-morning deploy window.
+    - cron: "23 7 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-anchor-attestation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Cluster-DNS base URL of the sandbox audit-service, e.g.
+  # http://audit-service.audit.svc:8113 (Service audit/audit-service, port http).
+  AUDIT_SERVICE_BASE_URL: ${{ vars.AUDIT_SERVICE_BASE_URL }}
+  # OIDC issuer of the sandbox realm, e.g. http://keycloak.iam.svc:8080/realms/openbank —
+  # the standard /protocol/openid-connect/token path is appended by the mint step.
+  AUDIT_ANCHOR_ATTESTATION_ISSUER: ${{ vars.AUDIT_ANCHOR_ATTESTATION_ISSUER }}
+  # CI-only client_credentials pair; the client carries an audit-reading role (ROLE_AUDITOR
+  # or ROLE_COMPLIANCE). Referenced by conventional name; ABSENT MUST FAIL CLOSED, never skip.
+  AUDIT_ANCHOR_ATTESTATION_CLIENT_ID: ${{ secrets.AUDIT_ANCHOR_ATTESTATION_CLIENT_ID }}
+  AUDIT_ANCHOR_ATTESTATION_CLIENT_SECRET: ${{ secrets.AUDIT_ANCHOR_ATTESTATION_CLIENT_SECRET }}
+
+jobs:
+  attest:
+    name: Export and independently verify live audit anchors
+    # Same lane as schema-registry-apply.yml (Apicurio) and _service-ci.yml's Pact Broker
+    # publish: only the in-cluster ARC runner resolves the audit-service cluster-DNS name.
+    runs-on: openbank-build
+    timeout-minutes: 15
+    outputs:
+      # VERIFIED | TAMPERED | UNVERIFIABLE | INPUT_ERROR | "" (job died before a verdict —
+      # the raise-issue body distinguishes "could not verify" from "verified tamper-free").
+      verdict: ${{ steps.verify.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # FAIL CLOSED, before anything else: an absent var/secret is a misconfigured control,
+      # and a misconfigured control must read as broken, not skip green. Every consumer of
+      # these names below can then assume they are non-empty.
+      - name: Fail closed on missing configuration
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${AUDIT_SERVICE_BASE_URL:-}" ] || missing+=("vars.AUDIT_SERVICE_BASE_URL")
+          [ -n "${AUDIT_ANCHOR_ATTESTATION_ISSUER:-}" ] || missing+=("vars.AUDIT_ANCHOR_ATTESTATION_ISSUER")
+          [ -n "${AUDIT_ANCHOR_ATTESTATION_CLIENT_ID:-}" ] || missing+=("secrets.AUDIT_ANCHOR_ATTESTATION_CLIENT_ID")
+          [ -n "${AUDIT_ANCHOR_ATTESTATION_CLIENT_SECRET:-}" ] || missing+=("secrets.AUDIT_ANCHOR_ATTESTATION_CLIENT_SECRET")
+          if ((${#missing[@]})); then
+            echo "::error::Audit anchor attestation is UNCONFIGURED — missing: ${missing[*]}. This control cannot run and its absence must NOT read as a pass. Provision the sandbox CI client (client_credentials, audit-reading role) and set the vars above; see docs/runbooks/0014-independent-audit-anchor-verification.md §8."
+            exit 1
+          fi
+          echo "::notice::attestation configuration present (URLs + client credentials)"
+
+      # The verifier needs python 'cryptography', which the runner image does not bake in.
+      # Hashed pins only (repo convention, --require-hashes); the venv probe falls back to a
+      # --user install when python3-venv is absent from the runner image, and the final import
+      # check fails the step loudly if neither path yielded an importable package.
+      - name: Provision the verifier environment
+        run: |
+          set -euo pipefail
+          REQ=".github/workflows/requirements/audit-anchor-verifier.txt"
+          if python3 -m venv "${RUNNER_TEMP}/anchor-verify-venv" 2>/dev/null; then
+            "${RUNNER_TEMP}/anchor-verify-venv/bin/python" -m pip install --quiet --require-hashes -r "$REQ"
+            PY="${RUNNER_TEMP}/anchor-verify-venv/bin/python"
+          else
+            echo "::warning::python3 -m venv unavailable on this runner image; falling back to pip --user"
+            python3 -m pip install --user --quiet --require-hashes -r "$REQ"
+            PY="python3"
+          fi
+          "$PY" -c 'import cryptography'
+          echo "PY=${PY}" >> "$GITHUB_ENV"
+
+      # Falsify the tool BEFORE it judges live data: ten synthetic cases (one acceptance,
+      # seven named rejections, two absence cases). A verifier that cannot reject a known
+      # forgery must not be trusted with a real export.
+      - name: Self-test the verifier
+        run: |
+          set -euo pipefail
+          "$PY" .github/scripts/verify-audit-anchors.py --self-test
+
+      - name: Mint OIDC token (client_credentials)
+        env:
+          TOKEN_FILE: ${{ runner.temp }}/anchor-oidc-token
+        # The token lands in a 0600 header file under the runner temp dir and is passed via
+        # --header @file, so it never appears in the log or a process argv. A non-2xx from
+        # the token endpoint fails the step: an attestation that cannot authenticate must
+        # read as an infrastructure failure, not silently skip.
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          curl -sf --retry 3 --retry-delay 2 --max-time 15 \
+            -u "${AUDIT_ANCHOR_ATTESTATION_CLIENT_ID}:${AUDIT_ANCHOR_ATTESTATION_CLIENT_SECRET}" \
+            -d grant_type=client_credentials \
+            "${AUDIT_ANCHOR_ATTESTATION_ISSUER}/protocol/openid-connect/token" -o "$tmp" \
+            || { echo "::error::token endpoint did not return 2xx — refusing to read an unauthenticated run as any verdict"; exit 1; }
+          tok="$(jq -r '.access_token // empty' "$tmp")"
+          [ -n "$tok" ] || { echo "::error::token response carried no access_token"; exit 1; }
+          umask 077
+          printf 'Authorization: Bearer %s' "$tok" > "$TOKEN_FILE"
+
+      - name: Export anchors and the recorded verification keys
+        env:
+          OUT_DIR: ${{ runner.temp }}/anchor-attestation
+          TOKEN_FILE: ${{ runner.temp }}/anchor-oidc-token
+        # Runbook 0014 §3: the anchor export is the evidence under test; the verification key
+        # endpoint serves the KMS-held PEM for the key id RECORDED ON an anchor. Anchors are
+        # most-recent-first, clamped at limit=200 (~8 days of hourly captures). The raw
+        # export is kept in the artifact untouched — the thing that failed verification, if
+        # it fails, is preserved exactly as served.
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUT_DIR"
+          auth=(--header "@${TOKEN_FILE}")
+          curl -sf --retry 3 --retry-delay 2 --max-time 30 \
+            "${auth[@]}" "${AUDIT_SERVICE_BASE_URL}/api/v1/audit/anchors?limit=200" \
+            -o "$OUT_DIR/anchors-export.json" \
+            || { echo "::error::anchor export failed — the audit service was unreachable or refused the caller; UNVERIFIABLE, not green"; exit 1; }
+          jq -e 'type == "array"' "$OUT_DIR/anchors-export.json" >/dev/null \
+            || { echo "::error::anchor export was not a JSON array — refusing to verify a malformed export"; exit 1; }
+          total="$(jq length "$OUT_DIR/anchors-export.json")"
+          hmac_count="$(jq '[.[] | select(.keyId == "local-hmac-sha256")] | length' "$OUT_DIR/anchors-export.json")"
+          unsigned_count="$(jq '[.[] | select(.signature == null)] | length' "$OUT_DIR/anchors-export.json")"
+          echo "exported ${total} anchors (${hmac_count} pre-cutover HMAC, not third-party verifiable; ${unsigned_count} unsigned)"
+          if [ "$unsigned_count" -gt 0 ]; then
+            echo "::warning::the export contains ${unsigned_count} UNSIGNED anchor(s); they are excluded from attestation — AUDIT_ANCHOR_SIGNING_REQUIRED=true should make these impossible, investigate the capture path"
+          fi
+          # One PEM per distinct KMS key generation recorded in the export. Ids are URL-
+          # encoded with jq @uri (they are KMS ARNs, full of ':' and '/'), and sanitized for
+          # the artifact filename.
+          jq -r '[.[] | select(.keyId != "local-hmac-sha256" and .signature != null) | .keyId] | unique | .[]' \
+            "$OUT_DIR/anchors-export.json" > "$OUT_DIR/kms-key-ids.txt"
+          while IFS= read -r key_id; do
+            [ -n "$key_id" ] || continue
+            enc="$(jq -rn --arg k "$key_id" '$k | @uri')"
+            safe="$(printf '%s' "$key_id" | tr -c 'A-Za-z0-9._-' '_')"
+            curl -sf --retry 3 --retry-delay 2 --max-time 30 \
+              "${auth[@]}" "${AUDIT_SERVICE_BASE_URL}/api/v1/audit/anchors/verification-key?keyId=${enc}" \
+              -o "$OUT_DIR/verification-key-${safe}.json" \
+              || { echo "::error::verification-key fetch failed for ${key_id} — UNVERIFIABLE, not green"; exit 1; }
+            jq -r '.publicKeyPem // empty' "$OUT_DIR/verification-key-${safe}.json" | grep -q . \
+              || { echo "::error::verification-key response for ${key_id} carried no publicKeyPem"; exit 1; }
+            jq -r '.publicKeyPem' "$OUT_DIR/verification-key-${safe}.json" > "$OUT_DIR/verification-key-${safe}.pem"
+            echo "fetched verification key for generation ${key_id}"
+          done < "$OUT_DIR/kms-key-ids.txt"
+          echo "OUT_DIR=${OUT_DIR}" >> "$GITHUB_ENV"
+
+      # The verifier's own exit codes are preserved end-to-end: 0 VERIFIED / 2 TAMPERED /
+      # 3 UNVERIFIABLE / 4 INPUT_ERROR. Multiple KMS generations (post-rotation overlap)
+      # are each verified against their own key; the overall verdict is the WORST of the
+      # per-generation verdicts — one tampered generation is a tampered run even if every
+      # other generation verifies. An export with NO KMS anchors at all is run through the
+      # verifier as an empty set, which it must reject with NO ANCHORS / UNVERIFIABLE: an
+      # anchor-less export is never a pass.
+      - name: Verify the live export
+        id: verify
+        run: |
+          set -uo pipefail
+          : > "${OUT_DIR}/verify.log"
+          rank() { case "$1" in 2) echo 3 ;; 3) echo 2 ;; 4) echo 1 ;; *) echo 0 ;; esac; }
+          worst=0
+          ran=0
+          while IFS= read -r key_id; do
+            [ -n "$key_id" ] || continue
+            safe="$(printf '%s' "$key_id" | tr -c 'A-Za-z0-9._-' '_')"
+            jq --arg k "$key_id" '[.[] | select(.keyId == $k)]' \
+              "${OUT_DIR}/anchors-export.json" > "${OUT_DIR}/anchors-${safe}.json"
+            n="$(jq length "${OUT_DIR}/anchors-${safe}.json")"
+            {
+              echo "== generation ${key_id}: ${n} anchors =="
+            } >> "${OUT_DIR}/verify.log"
+            set +e
+            "$PY" .github/scripts/verify-audit-anchors.py \
+              --anchors "${OUT_DIR}/anchors-${safe}.json" \
+              --public-key "${OUT_DIR}/verification-key-${safe}.pem" \
+              --public-key-id "$key_id" >> "${OUT_DIR}/verify.log" 2>&1
+            code=$?
+            set -e
+            ran=$((ran + 1))
+            echo "verifier exit ${code} for generation ${key_id}" >> "${OUT_DIR}/verify.log"
+            if [ "$(rank "$code")" -gt "$(rank "$worst")" ]; then worst=$code; fi
+          done < "${OUT_DIR}/kms-key-ids.txt"
+          if [ "$ran" -eq 0 ]; then
+            echo "no KMS-signed anchors in the export — verifying the empty set explicitly" >> "${OUT_DIR}/verify.log"
+            set +e
+            "$PY" .github/scripts/verify-audit-anchors.py \
+              --anchors /dev/stdin --public-key /dev/null <<<'[]' >> "${OUT_DIR}/verify.log" 2>&1
+            code=$?
+            set -e
+            echo "verifier exit ${code} on the empty export" >> "${OUT_DIR}/verify.log"
+            worst=$code
+          fi
+          verdict="$(jq -rn --argjson c "$worst" \
+            '{"0":"VERIFIED","2":"TAMPERED","3":"UNVERIFIABLE","4":"INPUT_ERROR"}[$c | tostring] // "INPUT_ERROR"')"
+          jq -n --arg verdict "$verdict" --argjson code "$worst" --argjson ran "$ran" \
+            --arg url "$AUDIT_SERVICE_BASE_URL" --arg fetched_at "$(date -u +%FT%TZ)" \
+            '{verdict: $verdict, verifier_exit: $code, generations_verified: $ran,
+              export_url: ($url + "/api/v1/audit/anchors?limit=200"), fetched_at: $fetched_at,
+              claim: "every KMS-signed anchor in the export recomputes, verifies under its recorded key, and the sequence is sound",
+              not_claimed: ["anchors missing for a period are not detectable (runbook 0014 §6.1)",
+                            "signedAt is the producer claim, not externally timestamped (§6.2)",
+                            "the log itself was not checked against the attested heads (no --entries, §6.3)"]}' \
+            > "${OUT_DIR}/verdict.json"
+          cat "${OUT_DIR}/verify.log"
+          {
+            echo "## Audit anchor live attestation"
+            echo
+            echo "**Verdict: ${verdict}** (verifier exit ${worst}; ${ran} KMS generation(s) checked)"
+            echo
+            echo '```'
+            tail -60 "${OUT_DIR}/verify.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "verdict=${verdict}" >> "$GITHUB_OUTPUT"
+          exit "$worst"
+
+      - name: Upload attestation bundle
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: audit-anchor-attestation
+          path: ${{ runner.temp }}/anchor-attestation
+          if-no-files-found: error
+          retention-days: 30
+
+  # A red scheduled run addressed to nobody is how controls decay (this repo's own
+  # sbom-drift-scanner lesson, quoted in fleet-attestation.yml). Scheduled failures file or
+  # refresh ONE tracking issue; a clean scheduled run closes it. workflow_dispatch failures
+  # are already visible to the dispatching operator and intentionally create no issue.
+  raise-issue:
+    name: Raise issue on non-VERIFIED attestation
+    needs: attest
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          VERDICT: ${{ needs.attest.outputs.verdict }}
+        # Body written to a file, never passed via --body: backticks inside a double-quoted
+        # string are command substitution, and the failure is silent in the published text
+        # (same comment as fleet-attestation.yml's raise-probe-issue).
+        run: |
+          set -euo pipefail
+          TITLE="Audit anchor live attestation did not verify (weekly KMS anchor check)"
+          case "${VERDICT:-}" in
+            TAMPERED)
+              MEANING="The verifier REJECTED the live export: an anchor digest, signature, or the sequence failed. Under the D5 threat model this is a potential tampering signal — triage per docs/runbooks/0014 §5 before anything else."
+              ;;
+            UNVERIFIABLE)
+              MEANING="The verifier reached NO positive verdict (e.g. no KMS anchors in the export, or a key generation it has no public key for). The audit log is UNCHECKED — this says nothing about whether it is intact."
+              ;;
+            "")
+              MEANING="The job died before reaching a verdict (missing vars/secrets, token endpoint, export fetch, or runner issue). The weekly control did not run — the log is UNCHECKED this week, and an unrun control must not read as a pass."
+              ;;
+            *)
+              MEANING="Verifier reported ${VERDICT}. The weekly control did not reach a VERIFIED verdict; the log is UNCHECKED."
+              ;;
+          esac
+          cat > "${RUNNER_TEMP}/body.md" <<EOF
+          The weekly audit-anchor live attestation FAILED to reach VERIFIED.
+
+          **Verdict as reported by the job: \`${VERDICT:-<none — the job died before a verdict>}\`.**
+
+          ${MEANING}
+
+          What a green run WOULD prove, and what even a green run does NOT (runbook 0014 §6):
+          absence of an anchor for a period is still not detectable; \`signedAt\` is the
+          producer's own claim; the entry log itself was not cross-checked (no \`--entries\`
+          export).
+
+          Run: ${RUN_URL} — the \`audit-anchor-attestation\` artifact holds the exact export,
+          the KMS public keys, the per-generation verifier output and \`verdict.json\`.
+
+          Triage: re-run the workflow; if it recurs, follow runbook 0014 §5 and check the
+          anchor-capture cadence (\`audit-anchor-capture\` workflow liveness) before
+          suspecting tampering. This issue is closed automatically by the next clean
+          scheduled run.
+          EOF
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP}/body.md"
+          else
+            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/body.md" \
+              --label security --label "severity:high"
+          fi
+
+  close-issue:
+    name: Close the tracking issue on a clean run
+    needs: attest
+    if: ${{ success() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Close it if one is open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Audit anchor live attestation did not verify (weekly KMS anchor check)"
+          existing=$(gh issue list -R "${GITHUB_REPOSITORY}" --state open --search "$TITLE in:title" \
+            --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" -R "${GITHUB_REPOSITORY}" \
+              --comment "The weekly attestation ran VERIFIED: ${RUN_URL}. The KMS-signed anchor window verifies independently again."
+          fi
