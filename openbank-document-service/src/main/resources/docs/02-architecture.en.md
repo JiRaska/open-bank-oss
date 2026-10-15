@@ -66,8 +66,10 @@ extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created
 
 ## Seeded pension templates
 
-`DocumentTemplateSeed` also seeds the eight `pension-*` templates (DPS key information, DIP KID, tax
-certificate, annual statement; cs and en) as `PUBLISHED` `1.0.0`, because `render` resolves published
-rows only. Their wording is a draft: each body keeps the `LEGAL-REVIEW-REQUIRED` marker and renders a
-DRAFT banner while the caller sends `legalReviewRequired=true`. Reviewed wording ships as a new seed
-version.
+`DocumentTemplateSeed` seeds all eight `pension-*` templates at `1.0.0` as `DRAFT`.
+Legal review of their wording is required before publication (#12392). Live rendering resolves
+only published rows, so neither omitting nor changing `legalReviewRequired` makes a draft usable.
+Drafts remain available for authoring review and preview. Seeding a draft preserves any existing
+published version of the same code; publish reviewed wording through the existing reviewed process.
+
+Live rendering also refuses any previously published template containing `LEGAL-REVIEW-REQUIRED`, before creating or storing a PDF. Existing fixed-ID seed rows are not rewritten; caller data cannot bypass this guard.

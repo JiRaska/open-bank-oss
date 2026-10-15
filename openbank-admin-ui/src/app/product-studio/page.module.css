@@ -47,6 +47,8 @@
 .panelBody { padding: 15px 17px 17px; }
 .smallLabel { display: block; margin: 11px 0 5px; color: var(--text-secondary); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .schemaHint { margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--surface-2); color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.pensionApprovalRow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--border); font-size: 11px; }
+.pensionApprovalRow small { color: var(--text-secondary); overflow-wrap: anywhere; }
 .marketContext { margin-top: 10px; padding: 11px; border: 1px solid var(--border); border-radius: 11px; background: linear-gradient(135deg, var(--surface), var(--surface-2)); }
 .marketTitle { display: flex; align-items: center; gap: 6px; color: var(--accent-text); font-size: 11px; font-weight: 800; }
 .marketContext p { margin: 5px 0 9px; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }

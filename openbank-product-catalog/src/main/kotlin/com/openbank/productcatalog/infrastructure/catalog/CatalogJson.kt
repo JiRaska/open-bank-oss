@@ -16,6 +16,7 @@ import com.openbank.productcatalog.domain.catalog.OfferingRelationship
 import com.openbank.productcatalog.domain.catalog.PriceCadence
 import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.PriceKind
+import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.RelationshipKind
 import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.TaxTreatment
@@ -56,6 +57,20 @@ class CatalogJson(private val mapper: ObjectMapper) {
     fun sha256(node: JsonNode): String = MessageDigest.getInstance("SHA-256")
         .digest(canonicalBytes(node))
         .joinToString("") { "%02x".format(it) }
+
+    /** Approval binds the complete authored revision, including its schema and effective interval. */
+    fun approvalDigest(revision: ProductRevision): String = sha256(
+        mapper.createObjectNode().apply {
+            put("offeringId", revision.offeringId.toString())
+            put("revisionId", revision.id.toString())
+            put("revisionNumber", revision.revision)
+            put("schemaId", revision.schemaRef.id)
+            put("schemaVersion", revision.schemaRef.version)
+            put("effectiveFrom", revision.effectiveFrom?.toString())
+            put("effectiveTo", revision.effectiveTo?.toString())
+            set<JsonNode>("content", toContentNode(revision.content))
+        },
+    )
 
     fun toContentNode(content: RevisionContent): ObjectNode = mapper.createObjectNode().apply {
         set<JsonNode>("name", mapper.valueToTree(content.name.values))

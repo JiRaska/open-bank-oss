@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pension-service-internal-tls
+  namespace: pension
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: pension-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  dnsNames:
+    - pension-service.pension.svc
+    - pension-service.pension.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

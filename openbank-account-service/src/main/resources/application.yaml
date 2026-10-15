@@ -34,6 +34,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_accounts
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Declaring only the reactive URL leaves
     # it unconfigured, and `migrate-at-start` then kills the boot with "Unable to find datasource
     # '<default>' … Bean is not active: SYNTHETIC bean [class=AgroalDataSource]" — so the service
@@ -95,8 +98,12 @@ quarkus:
       read-timeout: 2000
     balance-service:
       url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+      connect-timeout: 2000
+      read-timeout: 5000
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
     "sanctions-service":
       # Was :8110 — that's sca-service's port, not sanctions-service's (QUARKUS_HTTP_PORT
       # 8123 in docker-compose.yml). Never caught because no local docker-compose run had
@@ -289,6 +296,9 @@ mp:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_accounts_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_accounts_it
     redis:

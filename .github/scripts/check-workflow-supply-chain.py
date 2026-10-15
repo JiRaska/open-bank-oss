@@ -134,8 +134,10 @@ def findings(name, doc):
 def steward_scope_findings(prompt, rules, workflow):
     errors = []
     prefixes = ((rules or {}).get('autonomous_agent_prs') or {}).get('agent_branch_prefixes')
-    if not isinstance(prefixes, list) or not prefixes:
-        errors.append('authoritative autonomous branch prefixes must be readable and non-empty')
+    # 2026-10-14 (owner decision): the live scope may legitimately be empty — the guard then
+    # covers agent PRs via declared agent accounts only. Missing or mistyped is still a defect.
+    if not isinstance(prefixes, list):
+        errors.append('authoritative autonomous branch prefixes must be readable')
     required = ('openbank-libs/governance/rules.yaml', 'agent_branch_prefixes',
                 'never fall back to a hard-coded branch prefix')
     if any(text not in prompt for text in required):
