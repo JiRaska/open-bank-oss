@@ -47,10 +47,12 @@ info:
   # 1.79.1 -> 1.80.0 (#12350): additive — /pension/*, the customer pension lifecycle (ADR-0334 S6),
   # following pension-service API 1.2.0 and docs/ux/pension-client-flows.md (questionnaire, schedule,
   # beneficiaries, mandates, statements, annuity).
-  # 1.80.0 -> 1.81.0: additive — providerEntityId is no longer required on PensionApplicationRequest;
+  # 1.80.0 -> 1.81.0: additive — `referralLink` (the persisted shareable invite link) on POST
+  # /referrals/invites 201 and on the ReferralInviteSummary list item; referral-service API 1.4.0.
+  # 1.81.0 -> 1.82.0: additive — providerEntityId is no longer required on PensionApplicationRequest;
   # the edge supplies the deployment's configured provider (no customer route discloses it), and a
   # value sent by the app is ignored. 503 PENSION_PROVIDER_NOT_CONFIGURED when none is configured.
-  version: 1.81.0
+  version: 1.82.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -6599,9 +6601,10 @@ paths:
       tags: [Referral]
       summary: The caller's own invites, newest first
       description: >-
-        Never carries the referee's party id or name, nor the invite token. An ISSUED invite whose
-        expiresAt has passed is returned as EXPIRED. createdAt is null when the issue instant was
-        not recorded.
+        Never carries the referee's party id or name, nor the invite token as a field. An ISSUED
+        invite whose expiresAt has passed is returned as EXPIRED. createdAt is null when the issue
+        instant was not recorded. referralLink is the persisted shareable link — the token embedded
+        in it is the referrer's own capability, re-readable here by design.
       operationId: listReferralInvites
       security:
         - customerOidc: [referrals:read]
@@ -7435,6 +7438,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         token: {type: string, description: Shown once; share it with the invitee}
+        referralLink: {type: string, description: The persisted shareable link (base URL + token); re-readable from GET /referrals/invites}
         expiresAt: {type: string, format: date-time}
         status: {type: string, enum: [ISSUED]}
     ReferralInviteSummary:
@@ -7446,6 +7450,10 @@ components:
         createdAt: {type: string, format: date-time, nullable: true}
         expiresAt: {type: string, format: date-time}
         attributedAt: {type: string, format: date-time, nullable: true}
+        referralLink:
+          type: string
+          nullable: true
+          description: The persisted shareable link; null for invites issued before it existed
         reward:
           nullable: true
           allOf: [{$ref: '#/components/schemas/ReferralRewardSummary'}]

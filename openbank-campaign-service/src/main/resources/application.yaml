@@ -88,6 +88,13 @@ quarkus:
       url: ${LENDING_SERVICE_URL:http://lending-service.lending.svc:8126}
       connect-timeout: 2000
       read-timeout: 3000
+    # MGM programme pinning (#7203): validates a campaign's referral-program reference against
+    # openbank-referral-service. Same discipline as the clients above — the URL lives under
+    # `quarkus.rest-client.<configKey>.url`, never as a bare top-level key.
+    referral-service:
+      url: ${REFERRAL_SERVICE_URL:http://localhost:8155}
+      connect-timeout: 2000
+      read-timeout: 3000
 
   # Health probes and the Prometheus scrape live on the management interface, not the
   # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
@@ -131,6 +138,17 @@ quarkus:
       incentive-outcome-projection:
         ready: true
 
+"%prod":
+  quarkus:
+    tls:
+      referral-service:
+        trust-store:
+          pem:
+            certs: ${REFERRAL_TLS_CA_CERT:/mnt/campaign-tls/ca.crt}
+    rest-client:
+      referral-service:
+        tls-configuration-name: referral-service
+
 
 openbank:
   temporal:
@@ -151,6 +169,12 @@ openbank:
     quiet-hours-start: ${CAMPAIGN_QUIET_HOURS_START:21}
     quiet-hours-end: ${CAMPAIGN_QUIET_HOURS_END:8}
     consent-grantee: party-service:marketing-comms
+
+consent-service:
+  url: http://localhost:8106
+
+incentive-service:
+  url: ${INCENTIVE_SERVICE_URL:http://localhost:8156}
 
 analytics:
   clickhouse-url: ${CLICKHOUSE_URL:http://localhost:8123}

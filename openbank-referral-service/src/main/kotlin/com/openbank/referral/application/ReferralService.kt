@@ -25,6 +25,7 @@ import com.openbank.referral.domain.ReferrerInviteView
 import com.openbank.referral.domain.ReferrerRewardView
 import com.openbank.referral.domain.RewardStatus
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -33,10 +34,14 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
+import java.util.Optional
 import java.util.UUID
 
 private const val TOKEN_BYTES = 32
 private const val DEFAULT_WINDOW_DAYS = 30L
+
+/** Fallback when `openbank.referral.link-base-url` is not configured (e.g. tests). */
+internal const val DEFAULT_LINK_BASE_URL = "https://app.open-bank.tech/r/"
 
 @ApplicationScoped
 // One use-case class mirrors the referral surface. The published-programme read added for the
@@ -51,8 +56,16 @@ class ReferralService(
     private val audit: ReferralAuditRepository,
     private val clock: Clock,
     private val objectMapper: ObjectMapper,
+    // Optional<String>, not a plain String: an unset property throws SRCFG00040 at boot on a plain
+    // injection point, and an empty-string defaultValue does NOT rescue it (SmallRye still treats
+    // the property as required). The default lives in orElse below.
+    @ConfigProperty(name = "openbank.referral.link-base-url") linkBaseUrl: Optional<String>,
 ) {
     private val random = SecureRandom()
+
+    /** Base URL for referral links, normalised to end with exactly one '/'. */
+    private val normalizedLinkBase: String = linkBaseUrl.orElse(DEFAULT_LINK_BASE_URL)
+        .trimEnd('/') + "/"
 
     suspend fun listPublishedPrograms(): List<ReferralProgram> = programs.listPublished()
 
@@ -84,6 +97,7 @@ class ReferralService(
                 reward = latestReward[invite.id]?.let {
                     ReferrerRewardView(it.status, it.amount, it.currency, it.requestedAt, it.rewardedAt)
                 },
+                referralLink = invite.referralLink,
             )
         }.sortedWith(
             compareByDescending<ReferrerInviteView, Instant?>(nullsFirst()) { it.createdAt }
@@ -174,6 +188,7 @@ class ReferralService(
             expiresAt = program.attributionWindowEndsAt,
             idempotencyKey = idempotencyKey,
             attributedAt = null,
+            referralLink = normalizedLinkBase + token,
         )
         val created = invites.create(invite)
         audit.append("INVITE_ISSUED", created.id, actor, "token_hash=${hash(token)}", now)
