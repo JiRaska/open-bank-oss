@@ -25,14 +25,14 @@ AGENT_ACCOUNTS = {'openbank-agent-bot'}
 
 
 def pull(number=12747, branch='agent/adr-0031-phase3-gated-pr-path', author='JiRaska',
-         merged_by='JiRaska', **extra):
+         merged_by='JiRaska', merged_by_type='User', **extra):
     item = {
         'number': number,
         'html_url': f'https://github.com/JiRaska/open-bank-oss/pull/{number}',
         'title': 'feat(docs): ADR-0031 phase 3 evidence',
         'head': {'ref': branch},
         'user': {'login': author},
-        'merged_by': {'login': merged_by},
+        'merged_by': {'login': merged_by, 'type': merged_by_type},
         'merged_at': '2026-10-14T12:00:00Z',
         'body': '',
     }
@@ -178,6 +178,36 @@ class MainTest(unittest.TestCase):
         result = self.run_main(event)
         self.assertEqual(result.returncode, 1)
         self.assertIn('::error::', result.stderr)
+
+    def test_bot_merger_is_not_recorded_as_human(self):
+        for login, actor_type in (('dependabot[bot]', 'Bot'), ('openbank-agent-bot[bot]', 'User'),
+                                  ('app/openbank-agent-bot', 'User'),
+                                  ('openbank-agent-bot', 'User'),
+                                  ('OPENBANK-AGENT-BOT', 'User')):
+            with self.subTest(login=login, actor_type=actor_type):
+                result = self.run_main(self.closed_event(merged_by=login,
+                                                        merged_by_type=actor_type))
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('merged_by', result.stderr)
+
+    def test_missing_or_non_user_merger_type_fails_closed(self):
+        for actor_type in (None, 'Bot', 'Organization'):
+            with self.subTest(actor_type=actor_type):
+                event = self.closed_event(merged_by_type=actor_type)
+                if actor_type is None:
+                    del event['pull_request']['merged_by']['type']
+                result = self.run_main(event)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('merged_by', result.stderr)
+
+    def test_malformed_merger_object_fails_closed(self):
+        for merger in ('JiRaska', ['JiRaska'], 7):
+            with self.subTest(merger=merger):
+                event = self.closed_event()
+                event['pull_request']['merged_by'] = merger
+                result = self.run_main(event)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('merged_by', result.stderr)
 
     def test_happy_path_posts_expected_record(self):
         received = {}

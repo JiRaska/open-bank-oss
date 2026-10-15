@@ -128,6 +128,23 @@ def decide_agent_id(branch, author, agent_accounts):
     return None
 
 
+def human_merger(pull, agent_accounts):
+    """Return an eligible GitHub User login (event data cannot prove who held credentials)."""
+    merger = pull.get("merged_by")
+    if not isinstance(merger, dict):
+        return None
+    login = merger.get("login")
+    if merger.get("type") != "User" or not isinstance(login, str) or not login.strip():
+        return None
+    login = login.strip()
+    login_key = login.casefold()
+    declared_agents = {norm_login(account).casefold() for account in agent_accounts}
+    if login_key.startswith("app/") or login_key.endswith("[bot]") or \
+            norm_login(login).casefold() in declared_agents:
+        return None
+    return login
+
+
 def build_payload(pull, agent_id, proposal_id=None):
     """The exact JSON shape of POST /api/v1/agent-merge-records."""
     payload = {
@@ -238,11 +255,12 @@ def main(argv=None):
               f"'{author}') is not agent-authored — nothing to record.")
         return 0
 
-    merged_by = (pull.get("merged_by") or {}).get("login")
+    merged_by = human_merger(pull, agent_accounts)
     if not merged_by:
         print(f"::error::record-agent-merge: PR #{pull.get('number')} merged but merged_by "
-              "login is absent — a merge record without a human identity is worthless "
-              "evidence; investigate the event shape instead of recording a stub",
+              "does not identify an eligible GitHub User account — a merge record without "
+              "a human identity is worthless evidence; investigate the event shape instead "
+              "of recording a stub",
               file=sys.stderr)
         return 1
 
