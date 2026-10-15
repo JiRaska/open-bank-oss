@@ -249,6 +249,40 @@ class ReportTest(unittest.TestCase):
             self.assertEqual(len(report['subjects']), 3)
             self.assertEqual(tags_path.read_text(), '')
 
+    def test_local_only_reports_full_unresolved_denominator_without_api(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            InventoryTest().fixture(root)
+            report_path, tags_path = root / 'report.json', root / 'tags.txt'
+            (root / '.github/workflows').mkdir(parents=True)
+            (root / '.github/workflows/verify-release-evidence.yml').write_text('unused')
+            tags_path.write_text('stale-v1.0.0\n')
+            output = io.StringIO()
+            with (mock.patch.object(fleet, 'ROOT', root),
+                  mock.patch.object(fleet, 'fetch_releases') as fetch,
+                  mock.patch.object(fleet, 'workflow_findings', return_value=[]),
+                  mock.patch('sys.argv', [str(SCRIPT), '--local-only',
+                                          '--report-output', str(report_path),
+                                          '--tags-output', str(tags_path)]),
+                  contextlib.redirect_stdout(output)):
+                self.assertEqual(fleet.main(), 2)
+            fetch.assert_not_called()
+            self.assertIn('SUBJECTS=3', output.getvalue())
+            self.assertIn('live release metadata not fetched in local-only mode', output.getvalue())
+            self.assertEqual(tags_path.read_text(), '')
+            report = json.loads(report_path.read_text())
+            self.assertEqual(report['expectedSubjects'], 3)
+            self.assertEqual(report['status'], 'UNRESOLVED')
+            rows = {row['package']: row for row in report['subjects']}
+            self.assertEqual(set(rows), {'openbank-known', 'openbank-unmapped', 'openbank-admin-ui'})
+            self.assertEqual(rows['openbank-admin-ui']['status'], 'EXEMPT')
+            for package in ('openbank-known', 'openbank-unmapped'):
+                self.assertEqual(rows[package]['status'], 'UNRESOLVED')
+                self.assertTrue(any(
+                    'live release metadata not fetched in local-only mode' in finding
+                    for finding in rows[package]['findings']
+                ), rows[package])
+
     def test_unknown_local_denominator_is_never_zero_clean(self):
         report = fleet.inventory_report(None, {}, [], [], ['UNRESOLVED missing inventory'], unresolved=True)
         self.assertIsNone(report['expectedSubjects'])

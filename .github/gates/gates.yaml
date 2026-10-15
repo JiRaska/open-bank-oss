@@ -4057,7 +4057,14 @@ gates:
       python3 .github/scripts/test-verify-release-evidence-manifest.py
       python3 -m unittest discover -s .github/scripts/tests -p test_release_identity_workflow.py
     run: |
-      python3 .github/scripts/check-fleet-release-evidence.py
+      # Live remote state is observed on main and by the scheduled verifier. A PR
+      # checks its local denominator but must not claim that remote releases passed.
+      case "${GITHUB_EVENT_NAME:-}" in
+        push|schedule|workflow_dispatch)
+          python3 .github/scripts/check-fleet-release-evidence.py ;;
+        *)
+          python3 .github/scripts/check-fleet-release-evidence.py --local-only ;;
+      esac
 
   # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
   # from release-please-config.json's per-package `component` field; a package with a version.txt

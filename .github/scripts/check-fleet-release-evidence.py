@@ -410,6 +410,11 @@ def inventory_report(subjects: set[str] | None, components: dict[str, str], tags
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--local-only",
+        action="store_true",
+        help="discover the local subject denominator without fetching live release metadata",
+    )
     parser.add_argument("--tags-output", type=Path)
     parser.add_argument("--report-output", type=Path)
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss"))
@@ -433,9 +438,16 @@ def main() -> int:
             print(f"EXEMPT {package}: current graduation criterion excludes admin-ui")
         workflow = (ROOT / ".github/workflows/verify-release-evidence.yml").read_text()
         findings.extend(workflow_findings(workflow))
-        releases = fetch_releases(args.repository, os.environ.get("GH_TOKEN", ""))
-        tags, release_findings = check_fleet(components, releases)
-        findings.extend(release_findings)
+        if args.local_only:
+            findings.extend(
+                f"UNRESOLVED {package}: live release metadata not fetched in local-only mode"
+                for package in sorted(subjects - EXCLUDED)
+            )
+            unresolved = True
+        else:
+            releases = fetch_releases(args.repository, os.environ.get("GH_TOKEN", ""))
+            tags, release_findings = check_fleet(components, releases)
+            findings.extend(release_findings)
     except (OSError, ValueError, TypeError, KeyError, urllib.error.URLError) as exc:
         if subjects is None:
             print("SUBJECTS=UNRESOLVED  # release inventory configuration unreadable")

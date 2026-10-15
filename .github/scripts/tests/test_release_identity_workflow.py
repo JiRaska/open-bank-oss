@@ -113,6 +113,25 @@ class ReleaseIdentityWorkflowTest(unittest.TestCase):
         env_lines = self.github_env.read_text(encoding="utf-8").splitlines()
         return result, "\n".join(tsv), env_lines
 
+    def test_provenance_gate_defers_pr_api_reads_without_claiming_success(self) -> None:
+        gates = yaml.safe_load((WORKFLOW.parents[1] / "gates/gates.yaml").read_text())
+        entries = gates["gates"] if isinstance(gates, dict) else gates
+        source = next(gate["run"] for gate in entries if gate["id"] == "provenance")
+        python = self.bin / "python3"
+        python.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\n' \"$*\" > \"$RUNNER_TEMP/python-call\"\n"
+            "case \"$*\" in *--local-only*) exit 2 ;; *) exit 0 ;; esac\n"
+        )
+        python.chmod(0o755)
+        for event in ("pull_request", "pull_request_review", "unknown", "push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.env["GITHUB_EVENT_NAME"] = event
+                result = self.run_bash(source, check=False)
+                local = event not in {"push", "schedule", "workflow_dispatch"}
+                self.assertEqual(result.returncode, 2 if local else 0)
+                self.assertEqual("--local-only" in (self.root / "python-call").read_text(), local)
+
     def test_valid_tag_resolves_to_strict_full_commit(self) -> None:
         result, identities, env_lines = self.resolve([TAG])
         self.assertEqual(result.returncode, 0, result.stderr)
