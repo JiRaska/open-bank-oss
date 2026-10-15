@@ -73,16 +73,40 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Gradle's single-use daemon can finish a late write after the wrapper exits.
-        # Retry only that directory-removal race; all other cleanup errors still fail.
+        stop_error = None
+        try:
+            # This fixture class owns this Gradle home. Stop only its reusable daemon;
+            # never run --stop against the runner's normal Gradle home.
+            env = dict(os.environ, GRADLE_USER_HOME=str(cls.gradle_home))
+            result = subprocess.run(
+                [str(ROOT / 'gradlew'), '--stop', '--offline'], cwd=ROOT, env=env,
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f'Gradle daemon stop failed ({result.returncode}): {result.stdout}{result.stderr}'
+                )
+        except Exception as error:
+            stop_error = error
+
+        cleanup_error = None
         for attempt in range(5):
             try:
                 cls._home.cleanup()
-                return
+                break
             except OSError as error:
                 if error.errno != errno.ENOTEMPTY or attempt == 4:
-                    raise
+                    cleanup_error = error
+                    break
                 time.sleep(0.1 * (attempt + 1))
+        if stop_error is not None and cleanup_error is not None:
+            raise RuntimeError(
+                f'Gradle daemon stop failed ({stop_error}); temporary Gradle home cleanup also failed ({cleanup_error})'
+            ) from stop_error
+        if stop_error is not None:
+            raise RuntimeError(f'Gradle daemon stop failed: {stop_error}') from stop_error
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def run_case(self, version, resolver=False):
         with tempfile.TemporaryDirectory() as directory:
@@ -104,10 +128,9 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
             task = ('OpenBankResolveDependencyGraph'
                     if resolver else 'VerifyBuildscriptFreeMarker')
             env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
-            # A daemon can keep writing into the temporary Gradle home after this
-            # process exits, racing tearDownClass cleanup.
             command = [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                       '--no-daemon', '--offline', task, *(['--dry-run'] if resolver else [])]
+                       '--offline', '-Dorg.gradle.daemon.idletimeout=60000', task,
+                       *(['--dry-run'] if resolver else [])]
             for attempt in range(3):
                 result = subprocess.run(command, env=env, capture_output=True, text=True,
                                         timeout=120, check=False)
@@ -148,14 +171,38 @@ class GradleHomeCleanupTests(unittest.TestCase):
     def test_late_daemon_write_is_retried(self):
         home = mock.Mock()
         home.cleanup.side_effect = [OSError(errno.ENOTEMPTY, 'Directory not empty'), None]
-        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), mock.patch('time.sleep'):
+        owned_home = Path('/fixture/gradle-home')
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 0, '', '')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', owned_home, create=True), \
+                mock.patch('subprocess.run', return_value=stopped) as run, \
+                mock.patch('time.sleep'):
             BuildscriptFreeMarkerTests.tearDownClass()
         self.assertEqual(home.cleanup.call_count, 2)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], [str(ROOT / 'gradlew'), '--stop', '--offline'])
+        self.assertEqual(kwargs['env']['GRADLE_USER_HOME'], str(owned_home))
+        self.assertEqual(kwargs['cwd'], ROOT)
+
+    def test_daemon_stop_failure_still_cleans_owned_home_and_fails(self):
+        home = mock.Mock()
+        owned_home = Path('/fixture/gradle-home')
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 1, '', 'stop failed')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', owned_home, create=True), \
+                mock.patch('subprocess.run', return_value=stopped) as run:
+            with self.assertRaisesRegex(RuntimeError, 'Gradle daemon stop failed'):
+                BuildscriptFreeMarkerTests.tearDownClass()
+        home.cleanup.assert_called_once()
+        self.assertEqual(run.call_args.kwargs['env']['GRADLE_USER_HOME'], str(owned_home))
 
     def test_unrelated_cleanup_error_still_fails(self):
         home = mock.Mock()
         home.cleanup.side_effect = OSError(errno.EACCES, 'Permission denied')
-        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), mock.patch('time.sleep'):
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 0, '', '')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', Path('/fixture/gradle-home'), create=True), \
+                mock.patch('subprocess.run', return_value=stopped), mock.patch('time.sleep'):
             with self.assertRaises(OSError) as error:
                 BuildscriptFreeMarkerTests.tearDownClass()
         self.assertEqual(error.exception.errno, errno.EACCES)
@@ -164,7 +211,10 @@ class GradleHomeCleanupTests(unittest.TestCase):
     def test_persistent_late_writes_still_fail(self):
         home = mock.Mock()
         home.cleanup.side_effect = OSError(errno.ENOTEMPTY, 'Directory not empty')
-        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), mock.patch('time.sleep'):
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 0, '', '')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', Path('/fixture/gradle-home'), create=True), \
+                mock.patch('subprocess.run', return_value=stopped), mock.patch('time.sleep'):
             with self.assertRaises(OSError) as error:
                 BuildscriptFreeMarkerTests.tearDownClass()
         self.assertEqual(error.exception.errno, errno.ENOTEMPTY)
