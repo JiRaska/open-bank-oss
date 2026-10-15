@@ -84,6 +84,15 @@ kover {
     }
 }
 
+// Test-JVM heap: CI died with java.lang.OutOfMemoryError inside QuarkusTestExtension once the
+// trace-contract IT added its own Quarkus boot (with the OTel SDK + Testcontainers) to a fork
+// already running the service's @QuarkusTest suite — 59 tests sharing the default ~512m heap.
+// Same measured failure account-service recorded when its second @QuarkusTestProfile landed
+// (see its maxHeapSize comment): per-module on purpose, not a fleet default.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 // Pact: write generated consumer contracts to pacts/ and forward broker config for provider
 // verification (ADR-0063 P2). pactbroker.* props are injected by CI with -D.
 // Pact rootDir + Pact Broker property forwarding centralised into
