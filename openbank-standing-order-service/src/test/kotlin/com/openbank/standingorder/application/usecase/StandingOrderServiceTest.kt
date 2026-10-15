@@ -146,7 +146,7 @@ class StandingOrderServiceTest {
     }
 
     @Test
-    fun `confirmExecution() is a no-op when failureCount is already 0`(): Unit = runBlocking {
+    fun `confirmExecution() is a no-op when failureCount is already 0 on a recurring order`(): Unit = runBlocking {
         val id = UUID.fromString("00000000-0000-0000-0000-000000000504")
         val order = standingOrder(id = id, status = StandingOrderStatus.ACTIVE, failureCount = 0)
         coEvery { repo.findById(id) } returns order
@@ -155,6 +155,50 @@ class StandingOrderServiceTest {
 
         assertThat(result.failureCount).isEqualTo(0)
         coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    @Test
+    fun `confirmExecution() completes a ONCE order even when failureCount is 0`(): Unit = runBlocking {
+        // #12839: the failureCount == 0 fast-path returned before the domain's ONCE-completion,
+        // so a ONCE order that succeeded on its first execution stayed ACTIVE forever and was
+        // re-picked by every daily sweep (executionCount inflating, duplicate due events).
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000505")
+        val order = standingOrder(
+            id = id,
+            status = StandingOrderStatus.ACTIVE,
+            failureCount = 0,
+            frequency = Frequency.ONCE,
+        )
+        coEvery { repo.findById(id) } returns order
+        val saved = slot<StandingOrder>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        val result = service.confirmExecution(id)
+
+        assertThat(result.status).isEqualTo(StandingOrderStatus.COMPLETED)
+        assertThat(result.failureCount).isEqualTo(0)
+        coVerify(exactly = 1) { repo.save(any()) }
+    }
+
+    @Test
+    fun `confirmExecution() completes a ONCE order that failed before succeeding on retry`(): Unit = runBlocking {
+        // A ONCE order declines twice, then its replayed execution confirms: confirmExecution
+        // must both reset the failure counter AND complete the order — one domain call does both.
+        val id = UUID.fromString("00000000-0000-0000-0000-000000000506")
+        val order = standingOrder(
+            id = id,
+            status = StandingOrderStatus.ACTIVE,
+            failureCount = 2,
+            frequency = Frequency.ONCE,
+        )
+        coEvery { repo.findById(id) } returns order
+        val saved = slot<StandingOrder>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        val result = service.confirmExecution(id)
+
+        assertThat(result.status).isEqualTo(StandingOrderStatus.COMPLETED)
+        assertThat(result.failureCount).isEqualTo(0)
     }
 
     @Test
@@ -200,6 +244,7 @@ class StandingOrderServiceTest {
         status: StandingOrderStatus = StandingOrderStatus.ACTIVE,
         nextExecutionDate: LocalDate = LocalDate.of(2026, 2, 1),
         failureCount: Int = 0,
+        frequency: Frequency = Frequency.MONTHLY,
     ) = StandingOrder(
         id = id,
         idempotencyKey = "idem-existing",
@@ -212,7 +257,7 @@ class StandingOrderServiceTest {
         creditorBic = "DEUTDEFF",
         amountMinorUnits = 2500L,
         currency = "EUR",
-        frequency = Frequency.MONTHLY,
+        frequency = frequency,
         paymentType = PaymentType.SEPA_CREDIT,
         remittanceInfo = "Rent",
         startDate = LocalDate.of(2026, 2, 1),
