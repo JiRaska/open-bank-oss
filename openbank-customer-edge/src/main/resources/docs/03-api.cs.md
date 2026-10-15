@@ -175,3 +175,11 @@ Jde o implementované routy, nikoli důkaz nasazení upstream služeb. Předpokl
 ## Validace hodnot v URL upstream služeb
 
 Kód měny tvoří tři velká ASCII písmena; kód země dvě ASCII písmena se zachováním velikosti. Identifikátor uloženého příjemce přijímá 1–34 ASCII písmen nebo číslic bez kontroly kontrolního součtu, aby bylo možné odstranit i dříve uložené hodnoty. Edge sestaví přijaté hodnoty z vlastní abecedy před vytvořením URL upstream služby. Neplatné hodnoty vrací HTTP 400 a do URL upstream služby se nedostanou.
+
+### Rozpracované odpovědi penzijního dotazníku
+
+Tělo obsahuje objekt `answers` s nejvýše 100 dvojicemi otázka/volba. Identifikátor
+otázky i kód volby mají 1–64 ASCII písmen, číslic, podtržítek, teček nebo pomlček;
+hodnota volby musí být řetězec. Volný text, pole a číselné odpovědi se odmítnou
+místo předání ke skórování. Edge sestaví odchozí tělo z přijatých polí a zachová
+pořadí zadaných odpovědí.

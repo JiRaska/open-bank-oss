@@ -178,3 +178,11 @@ These are implemented routes, not evidence that the upstream services are deploy
 ## Upstream URL path validation
 
 Currency codes must contain three uppercase ASCII letters; country codes contain two ASCII letters with case preserved. Saved-payee identifiers accept 1–34 ASCII letters or digits without a checksum requirement, so existing saved values remain removable. The edge reconstructs accepted values from its own alphabet before building upstream URLs. Invalid values return HTTP 400 and are never included in an upstream URL.
+
+### Pension questionnaire drafts
+
+The draft body contains an `answers` object with at most 100 question/option pairs.
+Question ids and option codes must each contain 1–64 ASCII letters, digits, underscores,
+periods or hyphens; option values must be strings. Free text, arrays and numeric
+answers are rejected rather than forwarded as scored answers. The edge rebuilds
+the outgoing body from the accepted fields and preserves the submitted answer order.
