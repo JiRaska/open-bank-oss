@@ -186,7 +186,7 @@ jobs:
             gh issue comment "$existing" --body-file "${RUNNER_TEMP}/body.md"
           else
             gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/body.md" \
-              --label ai-governance
+              --label governance
           fi
 
   close-issue:
