@@ -30,33 +30,45 @@
 #   codex/<anything>   -> "external-coding-agent" (constant)
 #   prefix-less branch with a declared-agent author -> the author login, verbatim
 #
-# FAIL-SOFT, ALWAYS
-#   Merge recording must never block a merge. Any local defect (malformed event, missing
-#   config) and any remote failure (unreachable endpoint, non-2xx) prints a `::warning::`
-#   and exits 0. The one exception is a malformed pull_request event, which is a CI bug
-#   and fails loud (exit 1) — a silent skip there would look exactly like "no agent PRs
-#   merged", the un-falsifiable state.
+# FAIL CLOSED ON PURPOSE
+#   This producer runs on pull_request CLOSED — the merge has ALREADY happened, so a
+#   red exit here cannot block or un-do anything. The earlier fail-soft design (::warning::
+#   + exit 0 on every failure) therefore protected nothing and cost everything: a green
+#   check with a missing record reads exactly like "no agent PRs merged", the
+#   un-falsifiable state phase 3 exists to eliminate. Every path where a record SHOULD
+#   exist but does not (unreadable rules, absent merged_by, missing config, unreachable
+#   endpoint, non-2xx) now exits 1 with a `::error::`, and the workflow opens one
+#   tracking issue on top. The only exit-0 outcomes are "recorded" and "legitimately
+#   nothing to record" (the PR is not agent-authored).
 #
 # USAGE
-#   python3 .github/scripts/record-agent-merge.py [--event PATH] [--rules PATH] [--dry-run]
+#   python3 .github/scripts/record-agent-merge.py [--event PATH] [--rules PATH]
+#                                                 [--token-file PATH | --dry-run]
 #
-#   --event   pull_request closed event JSON (default: $GITHUB_EVENT_PATH)
-#   --rules   governance rules.yaml (default: openbank-libs/governance/rules.yaml)
-#   --dry-run build and print the payload, never POST (for humans inspecting a run)
+#   --event       pull_request closed event JSON (default: $GITHUB_EVENT_PATH)
+#   --rules       governance rules.yaml (default: openbank-libs/governance/rules.yaml)
+#   --token-file  0600 file holding `Authorization: Bearer <token>` (the workflow mints a
+#                 client_credentials token per run — realm accessTokenLifespan is 300 s,
+#                 so a static JWT would be dead on arrival). Wins over the env fallback.
+#   --dry-run     build and print the payload, never POST (for humans inspecting a run)
 #
 # ENV
 #   AGENT_SERVICE_URL            base URL of openbank-agent-service; the record is POSTed to
 #                                $AGENT_SERVICE_URL/api/v1/agent-merge-records. Sourced from
 #                                the repo variable of the same name in the workflow.
-#   AGENT_MERGE_RECORDER_TOKEN   bearer token for the ROLE_ADMIN endpoint; sourced from the
-#                                repo secret of the same name (workflow header comment).
+#   AGENT_MERGE_RECORDER_TOKEN   bearer token fallback used only when --token-file is
+#                                absent — for tests and local dry inspection. The workflow
+#                                deliberately does NOT source it from a repo secret: a
+#                                statically provisioned JWT dies with the realm's 300-second
+#                                accessTokenLifespan (see workflow header).
 #   AGENT_MERGE_PROPOSAL_ID      optional override for the optional proposalId field; when
 #                                unset the script looks for a `Proposal-Id: <id>` line in the
 #                                PR body and otherwise omits the field.
 #
 # EXIT CODES
-#   0  recorded, or nothing to record, or fail-soft warning emitted
-#   1  malformed pull_request event (a CI bug, not a merge-recording outcome)
+#   0  recorded, or legitimately nothing to record (PR not agent-authored), or --dry-run
+#   1  anything else: malformed event, unreadable rules, absent merged_by, missing
+#      config/token, or the POST did not succeed — a record that should exist but does not
 import argparse
 import json
 import os
@@ -91,7 +103,10 @@ def load_agent_accounts(path=RULES):
     """Declared autonomous agent accounts from rules.yaml — never a hard-kept list here."""
     import yaml
 
-    doc = yaml.safe_load(Path(path).read_text())
+    try:
+        doc = yaml.safe_load(Path(path).read_text())
+    except yaml.YAMLError as error:
+        raise ValueError(f"{path}: invalid YAML: {error}") from error
     cfg = (doc or {}).get("autonomous_agent_prs")
     accounts = cfg.get("agent_accounts") if isinstance(cfg, dict) else None
     if not isinstance(accounts, list) or any(not isinstance(a, str) or not a for a in accounts):
@@ -142,6 +157,27 @@ def extract_proposal_id(pull, env=None):
     return match.group(1) if match else None
 
 
+def resolve_token(token_file):
+    """Bearer token from the mint step's 0600 header file (--token-file), with the env
+    fallback for tests/local runs. Returns (token, error-reason-or-None)."""
+    if token_file:
+        try:
+            content = Path(token_file).read_text().strip()
+        except OSError as error:
+            return None, f"cannot read token file '{token_file}': {error}"
+        # The mint step writes an HTTP header line; accept a bare token too.
+        match = re.match(r"^Authorization:\s*Bearer\s+(\S+)\s*$", content)
+        token = match.group(1) if match else content
+        if not token:
+            return None, f"token file '{token_file}' is empty"
+        return token, None
+    token = (os.environ.get("AGENT_MERGE_RECORDER_TOKEN") or "").strip()
+    if token:
+        return token, None
+    return None, ("AGENT_MERGE_RECORDER_TOKEN is not set and --token-file was not given "
+                  "(the workflow mints a client_credentials token per run — see header)")
+
+
 def post_record(base_url, token, payload, timeout=10):
     """POST the record; returns None on success or a human-readable failure reason."""
     url = base_url.rstrip("/") + ENDPOINT_PATH
@@ -169,6 +205,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="record a human merge of an agent PR")
     parser.add_argument("--event", help="pull_request closed event JSON (default: $GITHUB_EVENT_PATH)")
     parser.add_argument("--rules", default=RULES, help="governance rules.yaml")
+    parser.add_argument("--token-file", help="0600 file holding 'Authorization: Bearer <token>' "
+                                             "(workflow-minted client_credentials token)")
     parser.add_argument("--dry-run", action="store_true", help="print the payload, never POST")
     args = parser.parse_args(argv)
 
@@ -187,9 +225,10 @@ def main(argv=None):
     try:
         agent_accounts = load_agent_accounts(args.rules)
     except (OSError, ValueError) as error:
-        print(f"::warning::record-agent-merge: cannot read declared agent accounts: {error}; "
-              "recording nothing rather than guessing scope")
-        return 0
+        print(f"::error::record-agent-merge: cannot read declared agent accounts from "
+              f"{args.rules}: {error} — the agent-authorship scope is undecidable, and an "
+              "undecidable scope must not read as 'nothing to record'", file=sys.stderr)
+        return 1
 
     branch = (pull.get("head") or {}).get("ref") or ""
     author = ((pull.get("user") or {}).get("login")) or ""
@@ -201,9 +240,11 @@ def main(argv=None):
 
     merged_by = (pull.get("merged_by") or {}).get("login")
     if not merged_by:
-        print(f"::warning::record-agent-merge: PR #{pull.get('number')} merged but merged_by "
-              "login is absent; recording nothing rather than a record with no human identity")
-        return 0
+        print(f"::error::record-agent-merge: PR #{pull.get('number')} merged but merged_by "
+              "login is absent — a merge record without a human identity is worthless "
+              "evidence; investigate the event shape instead of recording a stub",
+              file=sys.stderr)
+        return 1
 
     payload = build_payload(pull, agent_id)
     proposal_id = extract_proposal_id(pull)
@@ -216,23 +257,25 @@ def main(argv=None):
 
     base_url = (os.environ.get("AGENT_SERVICE_URL") or "").strip()
     if not base_url:
-        print("::warning::record-agent-merge: AGENT_SERVICE_URL is not set (repo variable "
-              f"'AGENT_SERVICE_URL' unset?) — agent merge of PR #{payload['prNumber']} NOT recorded")
-        return 0
-    token = (os.environ.get("AGENT_MERGE_RECORDER_TOKEN") or "").strip()
-    if not token:
-        print("::warning::record-agent-merge: AGENT_MERGE_RECORDER_TOKEN is not set (repo secret "
-              "'AGENT_MERGE_RECORDER_TOKEN' must be provisioned) — agent merge of PR "
-              f"#{payload['prNumber']} NOT recorded")
-        return 0
+        print("::error::record-agent-merge: AGENT_SERVICE_URL is not set (repo variable "
+              f"'AGENT_SERVICE_URL' unset?) — agent merge of PR #{payload['prNumber']} NOT "
+              "recorded", file=sys.stderr)
+        return 1
+    token, token_error = resolve_token(args.token_file)
+    if token is None:
+        print(f"::error::record-agent-merge: no bearer token: {token_error} — agent merge "
+              f"of PR #{payload['prNumber']} NOT recorded", file=sys.stderr)
+        return 1
 
     failure = post_record(base_url, token, payload)
     if failure:
-        # Fail-soft on purpose: merge recording must never block or un-do a merge.
-        print(f"::warning::record-agent-merge: {failure}; merge of agent PR "
-              f"#{payload['prNumber']} happened but was NOT recorded — investigate, do not re-run "
-              "the merge")
-        return 0
+        # Fail closed on purpose: the merge already happened (pull_request closed), so red
+        # here blocks nothing — but a green check with a missing record is the
+        # un-falsifiable state this evidence exists to eliminate.
+        print(f"::error::record-agent-merge: {failure}; merge of agent PR "
+              f"#{payload['prNumber']} happened but was NOT recorded — investigate, do not "
+              "re-run the merge", file=sys.stderr)
+        return 1
     print(f"record-agent-merge: agent PR #{payload['prNumber']} ({agent_id}) merged by "
           f"{merged_by} — recorded at {base_url.rstrip('/')}{ENDPOINT_PATH}")
     return 0
