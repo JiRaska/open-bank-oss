@@ -11,6 +11,7 @@ import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
+import com.openbank.psd2.application.usecase.DomesticCzCurrency
 import com.openbank.psd2.application.usecase.Psd2RequestFormatException
 import com.openbank.psd2.domain.model.DomesticCzPayment
 import com.openbank.psd2.domain.model.PaymentInitiation
@@ -111,13 +112,18 @@ class PisResource(
         val tppId = ctx.getProperty("tppId") as? String ?: return tppMissing()
         if (consentId.isNullOrBlank()) throw Psd2RequestFormatException("Consent-ID header is required")
         if (idempotencyKey.isNullOrBlank()) throw Psd2RequestFormatException("Idempotency-Key header is required")
+        val normalizedPayment = if (product == PaymentProduct.DOMESTIC_CZ) {
+            DomesticCzCurrency.normalize(payment as DomesticCzPayment)
+        } else {
+            payment
+        }
 
         val cacheKey = paymentCreateKey(tppId, product, idempotencyKey)
         val requestHash = RequestFingerprints.of(
             objectMapper,
             "POST",
             "/open-banking/v2/payments/${BerlinXs2aMappers.productSegment(product)}",
-            mapOf("consentId" to consentId, "payment" to payment),
+            mapOf("consentId" to consentId, "payment" to normalizedPayment),
         )
         return Psd2Idempotency.execute(
             idempotencyStore,
@@ -127,7 +133,7 @@ class PisResource(
             conflict = Psd2Idempotency::conflictResponse,
         ) {
             val result = pis.initiatePayment(
-                InitiatePaymentCommand(tppId, consentId, product, payment, idempotencyKey),
+                InitiatePaymentCommand(tppId, consentId, product, normalizedPayment, idempotencyKey),
             )
             Psd2Idempotency.Completed(
                 Response.status(201).entity(result).build(),

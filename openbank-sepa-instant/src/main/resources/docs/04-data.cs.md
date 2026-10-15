@@ -41,15 +41,15 @@ Platební agregát. Jeden řádek na SCT Inst příkaz.
 
 Indexy: `idx_sct_inst_status(status)`, `idx_sct_inst_debtor(debtor_account_id)`, `idx_sct_inst_created(created_at DESC)` a parciální `idx_sct_inst_timeout(execution_timeout_at) WHERE status = 'PROCESSING'` (pohání watchdog provedení / `findTimedOut`).
 
-### `sct_inst_outbox` — ODSTRANĚNO (V2 vytvořeno, V4 zrušeno)
+### `sct_inst_outbox` — obnovena ve zdrojovém kandidátu #12181 (V5)
 
-Transakční outbox pro at-least-once publikování událostí byl vytvořen ve V2, ale nikdy nebyl
-napojen na žádné reálné volání — publikace událostí vždy šla přímo přes synchronní
-`KafkaSctInstEventPublisher` (issue #1034). PR #1364 odstranil mrtvý kód
-`SctInstOutboxPort`/`SctInstOutboxDispatcher`; samotná tabulka (0 řádků) a její sekvence
-`sct_inst_outbox_seq` (přidaná ve V3 kvůli konvenci alokace id Hibernate Reactive/Panache) byly
-zrušeny ve V4 (issue #5127). Ponecháno zde jen jako poznámka k historii schématu — na této službě
-už žádná živá outbox tabulka není.
+Nepoužívaná outbox tabulka a sekvence z V2 byly zrušeny ve V4 (issue #5127). Aditivní migrace V5
+je pro transakční cestu událostí v kandidátu znovu vytváří. Přechody platby s událostí vkládají
+řádek `PENDING` ve stejné transakci jako změnu platby; relay jej vyzvedne, opakuje neúspěšné
+odeslání a označí `SENT` nebo nakonec `DEAD`. Řádek uchovává dosavadní čtyřpolový Kafka payload
+a stav doručování (`event_id`, `aggregate_id`, stav, pokusy, časové údaje a chybu). Přítomnost
+migrace V5 v této větvi neprokazuje její spuštění v nasazené databázi. Před spoléháním na tabulku
+ověř nasazenou revizi a historii Flyway.
 
 ## Flyway migrace
 
@@ -59,6 +59,7 @@ už žádná živá outbox tabulka není.
 | V2 | `V2__create_sct_inst_outbox.sql` | tabulka outbox + 2 indexy (odstraněno, viz V4) | `DROP TABLE sct_inst_outbox;` |
 | V3 | `V3__hibernate_sequences.sql` | `sct_inst_outbox_seq` (odstraněno, viz V4) | `DROP SEQUENCE sct_inst_outbox_seq;` (uvedeno v migraci) |
 | V4 | `V4__drop_sct_inst_outbox.sql` | zrušení vestigiální tabulky `sct_inst_outbox` + sekvence `sct_inst_outbox_seq` ponechané po PR #1364 | znovuvytvoří tabulku + sekvenci z V2/V3 (uvedeno v migraci) |
+| V5 | `V5__restore_sct_inst_outbox_v2.sql` | obnoví tabulku trvalých událostí, sekvenci a indexy pro claim | zastav zapisující procesy; ponech kompatibilní relay a schéma, dokud obnovitelné řádky nemají schválené vypořádání (poznámka v migraci) |
 
 `flyway.migrate-at-start = true` s 10 connect retries (interval 2 s). **Nikdy nepřepisuj migraci poté, co byla aplikována na živou DB** (checksum mismatch → pád startu; gotcha repa).
 

@@ -63,3 +63,13 @@ concurrent decisions on the same ceremony conflict loudly (422) instead of lost-
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
 `HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
+
+## Seeded pension templates
+
+`DocumentTemplateSeed` seeds all eight `pension-*` templates at `1.0.0` as `DRAFT`.
+Legal review of their wording is required before publication (#12392). Live rendering resolves
+only published rows, so neither omitting nor changing `legalReviewRequired` makes a draft usable.
+Drafts remain available for authoring review and preview. Seeding a draft preserves any existing
+published version of the same code; publish reviewed wording through the existing reviewed process.
+
+Live rendering also refuses any previously published template containing `LEGAL-REVIEW-REQUIRED`, before creating or storing a PDF. Existing fixed-ID seed rows are not rewritten; caller data cannot bypass this guard.

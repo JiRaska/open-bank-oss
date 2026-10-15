@@ -12,6 +12,8 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (`info.versi
 
 All endpoints require a **Keycloak Bearer token** (realm `openbank`). Per-endpoint roles (`@RolesAllowed`):
 
+In production, `/api/*` selects the bearer authentication mechanism on both the HTTP and mTLS listeners. A trusted client certificate is required to establish the TLS connection on port 8443, but it does not identify an API caller by itself: a certificate without a bearer receives 401. A client needs both its certificate and a valid bearer on that listener; the existing HTTP listener still requires the bearer. This prevents a workload holding a trusted transport certificate from gaining an API identity without a token (#12511). `PartyListenerAuthParityIT` checks both listeners using real HTTP requests. This mechanism selection does not change the OPA advisory setting or the per-endpoint role checks below.
+
 | Endpoint | Roles |
 |---|---|
 | `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
@@ -155,3 +157,7 @@ Incoming topics consumed (group `openbank-party-service`, `auto.offset.reset=ear
 - **API version in URL** (`/api/v1/...`); `openbank.api.version=1`. Breaking changes ⇒ `/api/v2`.
 - **OpenAPI contract axis** is independent of the release `version.txt` (ADR-0048).
 - **Events** are additive-only on `openbank.party.events`; breaking changes would use a new topic.
+
+## Party caller identity
+
+Party creation admits the named KYB and customer-edge service accounts through a verified JWT client id, subject and matching Keycloak service-account username; staff roles require a verified interactive user session. The customer AML declaration accepts only the configured customer-edge service account. A generic `ROLE_API` token, even when granted to another workload, cannot submit a declaration for a customer.

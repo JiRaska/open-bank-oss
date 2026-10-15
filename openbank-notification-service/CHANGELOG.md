@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.0...notification-service-v0.37.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.36.0...notification-service-v0.37.0) (2026-10-11)
+
+
+### Features
+
+* **document:** pension document templates and notification support ([#12409](https://github.com/JiRaska/open-bank-oss/issues/12409)) ([8f93df5](https://github.com/JiRaska/open-bank-oss/commit/8f93df589241c531e2bf8d4a91f54bed51b4994e))
+
 ## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.35.3...notification-service-v0.36.0) (2026-10-07)
 
 

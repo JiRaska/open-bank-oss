@@ -16,7 +16,9 @@
 #
 #   So the rule moves to where it runs regardless of who is driving: a required check.
 #   A red required check cannot be cleared by the agent that tripped it, cannot be cleared
-#   by `--auto`. Protected changes require an explicit owner decision on the current head.
+#   by `--auto`. Protected changes require an explicit owner decision on the current head, or on
+#   an earlier head followed ONLY by base-branch merges that leave the PR's net patch
+#   byte-identical (otherwise strict up-to-date checks void every approval forever).
 #   Trust-chain changes remain blocked and require separate maintainer adoption.
 #
 # WHAT IT IS AND IS NOT
@@ -71,6 +73,7 @@
 #   python3 .github/scripts/check-agent-pr-guard.py             # PR number from the environment
 #   python3 .github/scripts/check-agent-pr-guard.py --pr 6410   # explicit
 #   python3 .github/scripts/check-agent-pr-guard.py --self-test
+#   (the gate is read-only: it only GETs from the API and never posts)
 #
 # EXIT CODES
 #   0  out of scope, or in scope and touching nothing protected
@@ -369,13 +372,114 @@ def owner_decision_allows(comments, owner, n, head, head_created_at):
     return bool(decisions) and max(decisions)[1] == "approve"
 
 
+def latest_owner_decision(comments, owner, n):
+    """(action, sha, created_at) of the owner's LAST `/agent-pr` command for PR n, any SHA.
+
+    Latest-wins across SHAs: a revoke naming ANY commit of this PR, posted after an approval,
+    withdraws it. That is stricter than the exact-head rule needs, on purpose — an approval
+    that is carried forward across commits must be withdrawable without guessing which SHA
+    the owner meant."""
+    latest = None
+    for comment in comments:
+        user = comment.get("user") or {}
+        if user.get("login", "").lower() != owner.lower() or user.get("type") != "User":
+            continue
+        match = OWNER_DECISION.fullmatch((comment.get("body") or "").strip())
+        if not match or int(match.group(2)) != n:
+            continue
+        key = comment["id"]
+        if latest is None or key > latest[0]:
+            latest = (key, match.group(1), match.group(3), comment.get("created_at") or "")
+    return None if latest is None else latest[1:]
+
+
+# GitHub's compare API returns at most 300 files and then silently stops. A patch set that
+# was cut off cannot be compared, so it is undetermined rather than "equal".
+COMPARE_FILE_CAP = 300
+# Upper bound on base-merge commits walked between an approval and the head. Exceeding it is
+# undetermined, never "no content change".
+MAX_CARRY_OVER_COMMITS = 50
+
+
+def _is_sha(value):
+    return bool(re.fullmatch(r"[0-9a-f]{40}", value or ""))
+
+
+def net_patch(base_sha, sha):
+    """The PR's own change as of `sha`: the diff from merge-base(base, sha) to sha, per file.
+
+    Require both rendered patch text and the complete Git blob identity. GitHub does not
+    attest that a rendered per-file patch is complete; equal rendered prefixes alone cannot
+    prove equal content. A base merge that changes unrelated lines in a PR-touched file may
+    now require re-approval even when the rendered patch is equal. That conservative denial
+    is preferable to carrying approval across an unverified content change."""
+    data = _gh(["api", f"repos/{REPO}/compare/{base_sha}...{sha}"])
+    if data.get("status") not in {"ahead", "diverged"}:
+        raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} is `{data.get('status')}` — no PR change to compare")
+    files = data.get("files")
+    if not isinstance(files, list) or not files:
+        raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} returned no file list")
+    if len(files) >= COMPARE_FILE_CAP:
+        raise Undetermined(f"compare {base_sha[:10]}...{sha[:10]} hit the {COMPARE_FILE_CAP}-file cap — possibly truncated")
+    out = []
+    for f in files:
+        if "patch" not in f or f.get("filename") is None or not _is_sha(f.get("sha")):
+            # Binary file, or a patch GitHub declined to render: its content cannot be compared.
+            raise Undetermined(f"compare {sha[:10]}: incomplete file identity for `{f.get('filename')}`")
+        out.append((f["filename"], f.get("status"), f.get("previous_filename"), f["patch"], f["sha"]))
+    return sorted(out, key=lambda t: t[0])
+
+
+def only_base_merges_since(approved, head, base_sha):
+    """Return base-merge SHAs in chronological order if walking FIRST parents from head
+    reaches `approved`; otherwise return None.
+
+    Every walked commit must be a two-parent merge whose SECOND parent is contained in the
+    base branch. Commits pulled in through those second parents are main's own commits.
+    Anything else — a normal commit, octopus, merge of another branch, or force-push —
+    returns None."""
+    cur = head
+    merges = []
+    for _ in range(MAX_CARRY_OVER_COMMITS):
+        if cur == approved:
+            return list(reversed(merges))
+        commit = _gh(["api", f"repos/{REPO}/commits/{cur}"])
+        parents = [p.get("sha") for p in (commit.get("parents") or [])]
+        if len(parents) != 2 or not all(_is_sha(p) for p in parents):
+            return None
+        reach = _gh(["api", f"repos/{REPO}/compare/{base_sha}...{parents[1]}"])
+        if reach.get("status") not in {"behind", "identical"}:
+            return None
+        merges.append(cur)
+        cur = parents[0]
+    if cur == approved:
+        return list(reversed(merges))
+    raise Undetermined(f"more than {MAX_CARRY_OVER_COMMITS} commits between approval and head")
+
+
+def content_unchanged_since(approved, head, base_sha):
+    """Approval at `approved` carries to `head` iff only base merges happened in between AND
+    the PR's net patch and blob identity remain equal after EVERY merge. Checking only the
+    endpoints would allow an evil merge that changes the PR followed by one that restores it."""
+    if not (_is_sha(approved) and _is_sha(head) and _is_sha(base_sha)):
+        raise Undetermined("malformed SHA in carry-over evaluation")
+    merges = only_base_merges_since(approved, head, base_sha)
+    if merges is None:
+        return False
+    approved_patch = net_patch(base_sha, approved)
+    for merge in merges:
+        if net_patch(base_sha, merge) != approved_patch:
+            return False
+    return True
+
+
 def owner_approval_allows(n, files):
     # This route cannot introduce or amend its own authorization code.
     if any(f in REVIEW_POLICY_PATHS for f in files):
         return False
     pr = _gh(["api", f"repos/{REPO}/pulls/{n}"])
     head = pr["head"]["sha"]
-    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+    if not _is_sha(head):
         raise Undetermined("missing or malformed current PR head SHA")
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if event_path:
@@ -394,7 +498,27 @@ def owner_approval_allows(n, files):
     head_created_at = commits["commit"]["committer"]["date"]
     pages = _gh(["api", f"repos/{REPO}/issues/{n}/comments?per_page=100",
                  "--paginate", "--slurp"])
-    if not owner_decision_allows([c for page in pages for c in page], owner, n, head, head_created_at):
+    comments = [c for page in pages for c in page]
+    latest = latest_owner_decision(comments, owner, n)
+    if latest is None or latest[0] != "approve":
+        return False
+    if owner_decision_allows(comments, owner, n, head, head_created_at):
+        allowed = True
+    elif latest[1] != head:
+        # Carry-over: the owner approved an EARLIER commit; base merges since then must not
+        # void it, any change to the PR's own content must (see content_unchanged_since).
+        approved = latest[1]
+        approved_at = _gh(["api", f"repos/{REPO}/commits/{approved}"])["commit"]["committer"]["date"]
+        if latest[2] < approved_at:
+            return False
+        base_ref = (pr.get("base") or {}).get("ref") or ""
+        if not base_ref:
+            raise Undetermined("PR base branch is unavailable")
+        base_sha = _gh(["api", f"repos/{REPO}/commits/{base_ref}"]).get("sha", "")
+        allowed = content_unchanged_since(approved, head, base_sha)
+    else:
+        allowed = False
+    if not allowed:
         return False
     current = _gh(["api", f"repos/{REPO}/pulls/{n}"])
     if current["head"]["sha"] != head or current.get("state") != "open":
@@ -794,7 +918,8 @@ def main():
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
         if code == 1 and owner_approval_allows(n, files):
-            code, msg = 0, "protected changes explicitly approved by repository owner on current head"
+            code, msg = 0, ("protected changes explicitly approved by repository owner on the "
+                            "current head, or on an earlier head followed only by content-neutral base merges")
     except Undetermined as e:
         # Third state: the verdict could not be computed. The floor must not then convert an
         # unreachable API into a lost-corpus red one layer up.

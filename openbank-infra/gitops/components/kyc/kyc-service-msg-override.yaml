@@ -50,3 +50,14 @@ data:
     config_ordinal=500
     mp.messaging.incoming.party-events-in.group.id=kyc-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
+    # NOT here yet: sanctions-list-changes-in (ADR-0256). A new Kafka channel is TWO deploys,
+    # not one (.github/CLAUDE.md, #8877/#8882): Argo applies this ConfigMap BEFORE auto-deploy
+    # bumps the image, and SmallRye treats a declared channel with no connector in the running
+    # image as a HARD BOOT FAILURE (SRMSG00071). The connector ships in this PR's image; these
+    # two lines move to a follow-up, to be added once an image carrying the channel is deployed.
+    # In between, the consumer runs on the fallback group id (quarkus.application.name =
+    # openbank-kyc-service), which kafka-kyc-mtls.yaml therefore grants Read on as well —
+    # without that grant every poll answers GroupAuthorizationException, which looks exactly
+    # like a topic with nothing on it.
+    # mp.messaging.incoming.sanctions-list-changes-in.group.id=kyc-service-sanctions-list
+    # mp.messaging.incoming.sanctions-list-changes-in.auto.offset.reset=earliest

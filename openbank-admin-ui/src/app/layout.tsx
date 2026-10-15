@@ -10,8 +10,9 @@ import { LANG_COOKIE, parseLanguage } from '@/lib/i18n/language'
 import { THEME_COOKIE_KEY, parseTheme } from '@/lib/theme/theme'
 
 export const metadata: Metadata = {
-  title: 'OpenBank Admin',
-  description: 'OpenBank Operations Portal',
+  title: 'OpenBank Admin · Secure operations portal',
+  description: 'Sign in to the OpenBank operator workspace with your assigned access.',
+  robots: { index: false, follow: false },
 }
 
 // The operator console uses the platform font stack. The remote font loader fetches at build time,

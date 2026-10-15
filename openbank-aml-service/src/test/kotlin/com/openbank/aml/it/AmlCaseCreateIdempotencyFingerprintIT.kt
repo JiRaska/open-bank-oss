@@ -18,6 +18,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -52,6 +54,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `same key and same body replays the first case and opens no second one`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
@@ -74,6 +83,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `same key with a different body is refused 409 and opens no case`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
@@ -94,6 +110,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `same body with different key order and whitespace still replays`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
@@ -120,6 +143,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `an explicit null field fingerprints the same as an absent one`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
@@ -135,6 +165,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `a failed create releases the key so the same request can be retried`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
@@ -160,6 +197,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `a release failure does not mask the original create failure`() {
         // Without withContext(NonCancellable) { runCatching { ... } } around the release call, an
         // exception thrown by release() would propagate from the `finally` block and REPLACE the
@@ -184,6 +228,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `after the Redis record is gone a different body under the same key is still refused by the database`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"
@@ -198,6 +249,13 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
     fun `after the Redis record is gone the same body under the same key returns the existing case`() {
         val party = UUID.randomUUID()
         val key = "idem-${UUID.randomUUID()}"

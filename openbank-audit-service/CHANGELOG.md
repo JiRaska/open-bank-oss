@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.27.0...audit-service-v0.27.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.26.1...audit-service-v0.27.0) (2026-10-13)
+
+
+### Features
+
+* **lending:** read the loan evidence bundle from the audit chain and let lending_outbox purge ([#11962](https://github.com/JiRaska/open-bank-oss/issues/11962)) ([08bf6d9](https://github.com/JiRaska/open-bank-oss/commit/08bf6d910755fc16f9d3b8ce8e02eb39b6805d7f))
+
+## [0.26.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.26.0...audit-service-v0.26.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **audit:** deduplicate SEPA Instant events by stable ce-id ([#12323](https://github.com/JiRaska/open-bank-oss/issues/12323)) ([301cbb4](https://github.com/JiRaska/open-bank-oss/commit/301cbb421ee9d3389a2b22d54f3c0a6c69d28104))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.25.0...audit-service-v0.26.0) (2026-10-05)
 
 

@@ -85,6 +85,12 @@ FLEET_ATTEST_JSON="${FLEET_ATTEST_JSON:-}"
 # into a supply-chain finding (#1915).
 classify_failure() {
   local err="$1"
+  # Cosign can wrap transport failures in "no matching attestations". Such a
+  # probe has no verdict and must retain bounded retries instead of accusing the image.
+  if grep -qiE 'connection reset by peer|connection refused|i/o timeout|TLS handshake timeout|no such host|TOOMANYREQUESTS|unexpected status code 5[0-9][0-9]' <<< "$err"; then
+    printf 'UNKNOWN\n'
+    return 0
+  fi
   if printf '%s' "$err" | grep -qE 'NAME_UNKNOWN|MANIFEST_UNKNOWN|does not exist|not found|404'; then
     printf 'ABSENT\n'
     return 0
@@ -145,6 +151,11 @@ selftest() {
 main.go:74: error during command execution: no matching attestations:'
   check_case "invalid signature" UNATTESTED 'Error: invalid signature when validating ASN.1 encoded signature'
 
+  check_case "cosign wraps a connection reset in its verdict prefix" UNKNOWN \
+    'Error: no matching attestations: read tcp: read: connection reset by peer'
+  check_case "cosign wraps registry throttling in its verdict prefix" UNKNOWN \
+    'Error: no matching attestations: TOOMANYREQUESTS: Rate exceeded'
+
   # UNKNOWN — the probe could not run. Each of these used to be published as UNATTESTED.
   check_case "ECR throttle" UNKNOWN \
     'Error: GET https://...amazonaws.com/v2/: TOOMANYREQUESTS: Rate exceeded'
@@ -179,6 +190,7 @@ case "$img" in
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
   *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
+  *fixture-reset*) echo "Error: no matching attestations: read tcp: read: connection reset by peer" >&2; exit 1 ;;
   *fixture-flaky*)  echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
   # The ARC runner repository, keyed by digest: one attested, one carrying a predicate the
   # policies require and it does not — the September shape.
@@ -369,6 +381,14 @@ STUB
   run_fixture "probe failure only -> exit 2 (not 1)" 2 \
     "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-flaky:t"
+  run_fixture "wrapped connection reset remains a probe failure -> exit 2" 2 \
+    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "openbank-fixture-reset:t"
+  if ! grep -q '  retry ' <<< "$LAST_OUT"; then
+    printf '  FAIL: wrapped connection reset did not receive bounded retry\n'
+    failures=$((failures + 1))
+  fi
+
   # A REAL gap alongside a probe failure must still be 1 — "could not run" never masks a
   # verdict that was reached, or an unlucky throttle would downgrade a live outage.
   run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \

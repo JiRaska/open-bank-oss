@@ -48,8 +48,12 @@ retention/erasure enforcement is a tracked follow-up (see the threat model resid
   completing `@Authorize` coverage across the remaining endpoints is a tracked follow-up.
 
 ## Security controls
-- ✅ AuthN: Keycloak OIDC bearer (realm `openbank`).
-- ✅ AuthZ: OPA sidecar (`@Authorize`); every endpoint role-gated (reflection guard test).
+- ✅ API authentication: Keycloak OIDC bearer (realm `openbank`). On the production HTTPS listener,
+  a trusted client certificate establishes transport identity but is not sufficient to authenticate
+  `/api/*`: the Quarkus permission selects the bearer mechanism on both HTTP and HTTPS listeners.
+  `DocumentListenerAuthParityIT` exercises a certificate without a bearer and a bearer on both ports.
+- ✅ Authorization: OPA sidecar (`@Authorize`) on the annotated operations described above; this
+  listener change does not extend OPA coverage to other endpoints.
 - ✅ Content integrity: SHA-256 content addressing; WORM object store planned (ADR-0161).
 - ✅ SSTI/XSS mitigation: logic-less renderer + HTML-escaping of substituted values.
 - ✅ Transactional outbox with at-least-once delivery + resilience stack.

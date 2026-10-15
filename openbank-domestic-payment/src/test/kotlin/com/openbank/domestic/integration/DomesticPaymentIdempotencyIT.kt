@@ -10,6 +10,8 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import jakarta.inject.Inject
@@ -54,6 +56,13 @@ class DomesticPaymentIdempotencyIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `exact replay returns one durable payment while a changed command fails with problem 409`() {
         val key = "idempotency-it-exact-${UUID.randomUUID()}"
         val debtorAccountId = UUID.randomUUID()
@@ -80,6 +89,13 @@ class DomesticPaymentIdempotencyIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `a forged legacy Redis response cannot short-circuit Postgres creation`() {
         val key = "idempotency-it-redis-${UUID.randomUUID()}"
         redis.value(String::class.java)
@@ -99,6 +115,13 @@ class DomesticPaymentIdempotencyIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `legacy row with no request fingerprint fails closed`() {
         val key = "idempotency-it-legacy-${UUID.randomUUID()}"
         val debtorAccountId = UUID.randomUUID()
@@ -114,6 +137,13 @@ class DomesticPaymentIdempotencyIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = ACTOR_ID),
+            Claim(key = "preferred_username", value = ACTOR_ID),
+        ],
+    )
     fun `concurrent duplicates converge on one payment and one outbox event`() {
         val key = "idempotency-it-race-${UUID.randomUUID()}"
         val request = requestBody(UUID.randomUUID(), BigDecimal("99.95"))

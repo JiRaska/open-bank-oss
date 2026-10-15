@@ -195,6 +195,8 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `delegation_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-27** — **Party-eligibility client resilience values now sourced from the shared
   `READ` profile** (ADR-0321, PR #11072). `ResilientPartyEligibilityClient.eligibilityOf` is
   annotated `@ResilienceProfile(READ)` and its `@Timeout`/`@Retry`/`@CircuitBreaker` arguments
@@ -367,3 +369,7 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
   or its revision/threshold differs from the one pinned on the grant (T40). Risk class: elevation
   of privilege / tampering. Rollback: flip the flag off first (new offers refused, existing
   proposals keep their snapshots), then revert; migrations V29–V32 are additive.
+
+## Machine-caller identity binding (#12448)
+
+Recertification confirmation (`POST /recertifications/{id}/confirm`) admits only customer-edge, recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT with `azp` = `openbank-edge` and `preferred_username` = `service-account-openbank-edge`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying that username but issued to another client is refused with 403.

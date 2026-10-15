@@ -115,6 +115,17 @@ dependencies {
     // above) purely for readability; force() would win over any version requested here anyway.
     testImplementation("org.postgresql:postgresql:42.7.12")
 
+    // Listener-auth parity kit (#12511): QuarkusTestProfile and the SmallRye YAML source that reads
+    // the service's own %prod keys. compileOnly — every consuming service already carries
+    // quarkus-junit5 and quarkus-config-yaml under its Quarkus BOM, which picks the runtime version.
+    // The BOM is applied to these two configurations only, so they resolve the versions the
+    // services do (and that verification-metadata already pins) without imposing it on `api`.
+    compileOnly(enforcedPlatform(libs.quarkus.bom))
+    compileOnly(libs.quarkus.junit5)
+    compileOnly("io.smallrye.config:smallrye-config-source-yaml")
+    testImplementation(enforcedPlatform(libs.quarkus.bom))
+    testImplementation("io.smallrye.config:smallrye-config-source-yaml")
+
     testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
@@ -141,6 +152,14 @@ kover {
         filters {
             excludes {
                 classes("com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT*")
+                // Same reason (#12511): the listener-auth parity kit boots a service with its own
+                // %prod listener shape over real TLS; only an adopter's @QuarkusTest can run it.
+                // ProductionListenerKeys, the part that runs without Quarkus, stays measured.
+                classes(
+                    "com.openbank.libs.testing.mtls.ListenerAuthParityConformance*",
+                    "com.openbank.libs.testing.mtls.ListenerMaterial*",
+                    "com.openbank.libs.testing.mtls.ProductionListenerProfile*",
+                )
             }
         }
         verify {
