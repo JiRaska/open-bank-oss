@@ -232,10 +232,19 @@ jobs:
           fi
           verdict="$(jq -rn --argjson c "$worst" \
             '{"0":"VERIFIED","2":"TAMPERED","3":"UNVERIFIABLE","4":"INPUT_ERROR"}[$c | tostring] // "INPUT_ERROR"')"
+          # Release-evidence bridge (agent/release-evidence-audit-provenance consumes this
+          # verdict.json): the newest KMS-signed anchor as the checkpoint reference. Export
+          # is most-recent-first; the first generation file's head is the latest anchor.
+          first_safe="$(head -1 "${OUT_DIR}/kms-key-ids.txt" | tr -c 'A-Za-z0-9._-' '_')"
+          checkpoint="$(jq -c 'if length > 0 then .[0] | {digest: .anchorDigest, keyId, signedAt}
+                        else null end' "${OUT_DIR}/anchors-${first_safe}.json" 2>/dev/null || echo null)"
+          [ -n "$checkpoint" ] || checkpoint=null
           jq -n --arg verdict "$verdict" --argjson code "$worst" --argjson ran "$ran" \
             --arg url "$AUDIT_SERVICE_BASE_URL" --arg fetched_at "$(date -u +%FT%TZ)" \
+            --argjson checkpoint "$checkpoint" \
             '{verdict: $verdict, verifier_exit: $code, generations_verified: $ran,
               export_url: ($url + "/api/v1/audit/anchors?limit=200"), fetched_at: $fetched_at,
+              anchor_checkpoint: $checkpoint,
               claim: "every KMS-signed anchor in the export recomputes, verifies under its recorded key, and the sequence is sound",
               not_claimed: ["anchors missing for a period are not detectable (runbook 0014 §6.1)",
                             "signedAt is the producer claim, not externally timestamped (§6.2)",
