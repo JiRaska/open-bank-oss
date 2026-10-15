@@ -52,7 +52,7 @@ scenarios:
     execution_mode: planned-read-only-sandbox
     safety_boundary: Read-only by construction — every request is a GET against openbank-ledger-service; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
     target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-ledger-service target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    blocker: Needs a booted openbank-ledger-service target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_LEDGER_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
     assertions: Exercises journal list, trial balance, current accounting day. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: transaction-read-baseline
@@ -84,7 +84,7 @@ scenarios:
     execution_mode: planned-read-only-sandbox
     safety_boundary: Read-only by construction — every request is a GET against openbank-domestic-payment; nothing is created, mutated or deleted, so the lane is safe against a shared sandbox.
     target_schedule: "0 5 * * *"
-    blocker: Needs a booted openbank-domestic-payment target and a least-privilege read identity (PERF_READ_TOKEN) wired into the perf gate; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
+    blocker: Needs a booted openbank-domestic-payment target and a least-privilege read identity (PERF_READ_TOKEN); the scenario is wired into the perf-baseline.yml module-read-baselines matrix and runs whenever PERF_DOMESTIC_PAYMENT_URL plus PERF_READ_TOKEN are set; a 401 is rejection evidence, not a handler baseline. Seeded read fixtures (party/account ids) are required for the id-scoped probes.
     assertions: Exercises domestic payment list (offset-paginated) and the pending-approval queue. Advisory p95 tripwires per route plus http_req_failed rate<0.01 and checks rate==1.0 — a route that did not answer 200 invalidates the percentile.
 
   - id: fx-read-baseline

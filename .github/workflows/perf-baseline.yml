@@ -147,10 +147,18 @@ jobs:
             component: openbank-consent-service
             definition: openbank-consent-service/src/test/k6/consent-read-baseline.js
             url: "${{ vars.PERF_CONSENT_URL }}"
+          - id: domestic-payment
+            component: openbank-domestic-payment
+            definition: openbank-domestic-payment/src/test/k6/domestic-payment-read-baseline.js
+            url: "${{ vars.PERF_DOMESTIC_PAYMENT_URL }}"
           - id: fx
             component: openbank-fx-service
             definition: openbank-fx-service/src/test/k6/fx-read-baseline.js
             url: "${{ vars.PERF_FX_URL }}"
+          - id: ledger
+            component: openbank-ledger-service
+            definition: openbank-ledger-service/src/test/k6/ledger-read-baseline.js
+            url: "${{ vars.PERF_LEDGER_URL }}"
           - id: sca
             component: openbank-sca-service
             definition: openbank-sca-service/src/test/k6/sca-read-baseline.js
