@@ -113,6 +113,10 @@ metadata:
     app.kubernetes.io/part-of: observability
     app.kubernetes.io/component: journey
     openbank.tech/journey: fx-rates-read
+  annotations:
+    # Same budget as journey-product-catalog-read (#7324): */10 schedule, alert after
+    # six consecutive missed windows (CronJobSuccessStale reads this annotation).
+    openbank.tech/max-success-age-seconds: "3600"
 spec:
   schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid
