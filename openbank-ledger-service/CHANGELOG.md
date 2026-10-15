@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.34.3](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.34.2...ledger-service-v1.34.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [1.34.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.34.1...ledger-service-v1.34.2) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
+## [1.34.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.34.0...ledger-service-v1.34.1) (2026-10-12)
+
+
+### Security
+
+* **ledger:** authenticate the API by bearer only on the mTLS listener ([#12531](https://github.com/JiRaska/open-bank-oss/issues/12531)) ([1fad45c](https://github.com/JiRaska/open-bank-oss/commit/1fad45c5692b2cc342189ddc611d36c4edb7b223))
+
 ## [1.34.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.33.1...ledger-service-v1.34.0) (2026-10-11)
 
 

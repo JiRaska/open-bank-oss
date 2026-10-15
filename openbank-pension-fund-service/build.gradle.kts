@@ -24,6 +24,7 @@ dependencies {
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
+    implementation(libs.quarkus.scheduler)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
@@ -42,6 +43,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
+
+    // Provider replay of pension-service's consumer pact (#12350): FundAdministrationPort's calls.
     // #12425: the provider replay of tax-reporting-service's consumer pact lands with that pact
     // (stacked tax-reporting PR): check-pact-provider-replay.py rejects a replay class with no pact.
     testImplementation(libs.pact.provider)

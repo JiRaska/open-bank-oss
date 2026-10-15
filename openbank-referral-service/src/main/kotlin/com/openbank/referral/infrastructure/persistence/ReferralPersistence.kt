@@ -58,6 +58,15 @@ class ReferralInviteEntity : PanacheEntityBase() {
     lateinit var expiresAt: Instant
     lateinit var idempotencyKey: String
     var attributedAt: Instant? = null
+
+    /**
+     * The shareable link (base URL + token) composed at issue time. Persisted even though the token
+     * is stored only as a hash: the link is a shareable capability the referrer must be able to
+     * re-read from "my invites", and it cannot be recomposed from the hash. Deliberate tradeoff —
+     * like a password-reset link, anyone holding it can self-attribute; it is never exposed to
+     * anyone but the referrer. NULL for invites issued before this column existed (V7).
+     */
+    var referralLink: String? = null
 }
 
 @Entity
@@ -101,7 +110,7 @@ private fun ReferralInviteEntity.toDomain(token: String) = ReferralInvite(
     InviteStatus.valueOf(
         status,
     ),
-    expiresAt, idempotencyKey, attributedAt,
+    expiresAt, idempotencyKey, attributedAt, referralLink,
 )
 private fun ReferralRewardEntity.toDomain() = ReferralReward(
     id, inviteId, programId, referrerPartyId, refereePartyId, qualificationEventId, rewardReference, amount, currency,
@@ -172,6 +181,7 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
                     i.status.name
                 expiresAt = i.expiresAt
                 idempotencyKey = i.idempotencyKey
+                referralLink = i.referralLink
             },
         )
     }.awaitSuspending().let { i }

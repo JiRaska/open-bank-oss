@@ -3,6 +3,7 @@
   "productLine": "DPS",
   "version": 1,
   "effectiveFrom": "2024-07-01",
+  "effectiveTo": "2025-12-31",
   "currency": "CZK",
   "legalReview": {
     "status": "REQUIRES_LEGAL_REVIEW",
@@ -27,6 +28,7 @@
       "minContribution": 500,
       "amountCap": 340,
       "claimChannel": "STATE_AGENCY_BATCH",
+      "claimFormat": "agency-monthly-batch-v0",
       "clawback": { "mode": "RETURN_ALL" }
     },
     {
@@ -50,7 +52,7 @@
   "payout": {
     "minAge": 60,
     "minDurationMonths": 120,
-    "allowedForms": ["LUMP_SUM", "ANNUITY", "PHASED_WITHDRAWAL", "EARLY_WITHDRAWAL", "SURRENDER"],
+    "allowedForms": ["LUMP_SUM", "ANNUITY", "PHASED_WITHDRAWAL", "FIXED_PERIOD_PENSION", "EARLY_WITHDRAWAL", "SURRENDER"],
     "earlyWithdrawalAllowed": true
   },
   "transfer": {
@@ -59,5 +61,39 @@
     "maxFee": 800,
     "deadlineDays": 30,
     "carriesIncentiveHistory": true
+  },
+  "exit": {
+    "termination": { "noticePeriodDays": 30, "quoteValidityDays": 7, "feeRate": 0, "fixedFee": 0 },
+    "tax": {
+      "byForm": {
+        "LUMP_SUM": { "base": "GAINS", "withholdingRate": 0.15 },
+        "PHASED_WITHDRAWAL": { "base": "GAINS", "withholdingRate": 0.15 },
+        "EARLY_WITHDRAWAL": { "base": "GAINS", "withholdingRate": 0.15 },
+        "ANNUITY": { "base": "NONE" },
+        "FIXED_PERIOD_PENSION": { "base": "NONE" }
+      },
+      "deductionRecapture": { "rate": 0.15, "years": 10 },
+      "employerExemptRecapture": { "rate": 0.15, "years": 10 }
+    },
+    "partialWithdrawal": {
+      "allowed": true, "requiresPayoutConditions": true, "minAmount": 1000,
+      "maxShareOfValue": 0.5, "maxPerCalendarYear": 1
+    },
+    "phasedWithdrawal": { "minMonths": 12, "maxMonths": 360 },
+    "fixedPeriodPension": { "minMonths": 120, "maxMonths": 360 },
+    "death": { "estateWhenNoBeneficiary": true, "clawbackOnDeath": false, "beneficiaryTax": { "base": "NONE" } },
+    "annuity": {
+      "permittedTypes": ["LIFELONG", "FIXED_TERM", "GUARANTEE_PERIOD", "JOINT_LIFE", "INDEXED"],
+      "refusedPremiumDestination": "CONTRACT",
+      "quoteValidityMinHours": 24
+    }
+  },
+  "contributionLimits": {
+    "minMonthly": 100,
+    "allowedFrequencies": ["MONTHLY", "QUARTERLY", "ANNUALLY"],
+    "minDayOfMonth": 1,
+    "maxDayOfMonth": 28,
+    "changeNoticeDays": 3,
+    "maxStartAheadDays": 366
   }
 }
