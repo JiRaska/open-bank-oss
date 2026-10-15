@@ -49,6 +49,14 @@ interface AccountServiceClient {
     @GET
     @Path("/{accountId}/balance")
     fun getBalance(@PathParam("accountId") accountId: UUID): Uni<AccountBalanceClientResponse>
+
+    /**
+     * One account's detail — read for `partyId` by the tax-profile resolution
+     * (PartyTaxProfileProvider, ADR-0339 B); the daily accrual run does not use it.
+     */
+    @GET
+    @Path("/{accountId}")
+    fun getAccount(@PathParam("accountId") accountId: UUID): Uni<AccountDetailClientResponse>
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -69,3 +77,7 @@ data class AccountBalanceClientResponse(
     val currentBalance: BigDecimal? = null,
     val currencyCode: String? = null,
 )
+
+/** `GET /api/v1/accounts/{id}` (AccountResponse) — the tax-profile resolution reads partyId. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class AccountDetailClientResponse(val id: UUID? = null, val partyId: UUID? = null, val status: String? = null)
