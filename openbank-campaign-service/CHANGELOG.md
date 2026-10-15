@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/v0.40.4...v0.41.0) (2026-10-14)
+
+
+### Features
+
+* **campaign:** pin published MGM programme versions ([#12820](https://github.com/JiRaska/open-bank-oss/issues/12820)) ([b7d7d76](https://github.com/JiRaska/open-bank-oss/commit/b7d7d7614769915158e01febec715cfdbc8621c6))
+
 ## [0.40.4](https://github.com/JiRaska/open-bank-oss/compare/v0.40.3...v0.40.4) (2026-10-14)
 
 
