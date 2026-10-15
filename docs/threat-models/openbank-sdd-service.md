@@ -148,7 +148,36 @@ instruction, but the irreversible debit lives downstream.
   1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch. Rollback: revert the commit; the
   additive column and indexes are inert under the v1 repository.
 
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension mandate registration and cancellation.** This integration adds the `pension` namespace to `sdd-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/sdd/mandates and POST /api/v1/sdd/mandates/{id}/cancel`.
+
+**Threat and required controls.** Registration or cancellation affects collection authority. The provider must verify the debtor party owns the stated account and must not let the caller cancel another party's mandate merely by knowing its id. Preserve mandate idempotency and lifecycle validation.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
 ## 2026-10-09 — Scoped mandate initiator: pension-service (ADR-0335 D6)
+
+**2026-10-11 identity hardening (#12448):** Positive pension and edge machine matches now use
+`ServiceAccountIdentity.isPrincipal`, requiring a Quarkus-verified JWT principal with nonblank
+subject, `azp` equal to `openbank-pension` or `openbank-edge`, respectively, and the matching
+`service-account-<azp>` preferred username. A matching principal name with another or absent
+`azp` cannot gain either scope; an unrecognised `service-account-` principal remains denied even
+with operator/admin roles. **STRIDE S/E:** this narrows the inbound mandate trust boundary;
+creditor scoping, ownership proof, OPA actions and ordinary staff handling are otherwise
+unchanged. Residual: compromise of a real authorised client credential still reaches its
+declared scope. Rolling this back would restore username-only impersonation and is not a safe
+fallback.
 
 - **Elevation of privilege / Spoofing:** `service-account-openbank-pension` may `sdd.create` and
   `sdd.delete`, and nothing else; OPA's `service-scoped-payment-initiator` reads
@@ -187,3 +216,29 @@ during rollout. First publish a compatible signed provider image, then configure
 private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
 OIDC and policy checks continue to authorize business operations independently of TLS trust.
 Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Parallel private-CA listener preparation
+
+The GitOps workload prepares an additional TLS 1.3 listener on port 8443 using a
+separate server-auth Certificate signed by `openbank-ca`, DNS SANs matching the
+Service name, and a read-only certificate/key/CA mount. Client certificates are
+required; existing OIDC and business authorization remain required independently.
+The HTTP listener remains for existing callers. Pension's HTTP URL is retained
+until the reviewed listener rollout and client configuration are verified, after
+which its HTTPS cutover must regenerate the port-scoped network policies. Current
+policy generation also admits the admin BFF (and the SDD KEDA interceptor) on the
+new port; this does not grant a client certificate or bypass application policy.
+Certificate issuance must precede workload rollout. Rollback removes the parallel
+listener preparation while existing HTTP callers remain unchanged; after caller
+cutover, revert caller URLs and policies before removing the listener.
+
+## Verified mandate initiator identity (#12448, PR #12538)
+
+- **Spoofing / Elevation of privilege:** `MandateInitiatorScopes` recognises the pension scoped
+  initiator and customer-edge only through `ServiceAccountIdentity.isPrincipal` (verified JWT,
+  `azp` = the client, `preferred_username` = `service-account-<azp>`), never the principal
+  name, which Quarkus takes from a username claim.
+- `ROLE_OPERATOR` / `ROLE_ADMIN` grant general mandate initiation only with a verified
+  interactive human token (`ServiceAccountIdentity.isHumanStaff`); any other caller, including a
+  machine token holding those roles, is `Denied`.
+- **Rollback:** reverting the class restores name-based matching; no schema or data change.

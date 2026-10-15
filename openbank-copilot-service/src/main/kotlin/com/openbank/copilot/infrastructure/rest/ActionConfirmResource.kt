@@ -90,10 +90,8 @@ class ActionConfirmResource {
 
         if (token.customerId != customerId) {
             log.warnf(
-                "ActionConfirmResource: ownership mismatch token_ref=%s jwt_sub=%s token_customer=%s",
+                "ActionConfirmResource: ownership mismatch token_ref=%s",
                 ProposalToken.logRef(tokenId),
-                customerId,
-                token.customerId,
             )
             return@runBlocking Response.status(Response.Status.FORBIDDEN)
                 .entity(mapOf("error" to "PROPOSAL_NOT_FOUND"))
@@ -112,10 +110,8 @@ class ActionConfirmResource {
 
         val actionId = UUID.randomUUID()
         log.infof(
-            "ActionConfirmResource: confirmed token_ref=%s tool=%s customer=%s actionId=%s",
+            "ActionConfirmResource: confirmed token_ref=%s actionId=%s",
             ProposalToken.logRef(tokenId),
-            token.toolName,
-            customerId,
             actionId,
         )
         tokenStore.delete(tokenId)
@@ -130,11 +126,8 @@ class ActionConfirmResource {
         val decision = opaGate.authorize(toolName, customerId, null)
         if (decision.allow) return null
         log.warnf(
-            "ActionConfirmResource: OPA denied confirm for token_ref=%s tool=%s customer=%s reason=%s",
+            "ActionConfirmResource: OPA denied confirm for token_ref=%s",
             ProposalToken.logRef(tokenId),
-            toolName,
-            customerId,
-            decision.reason,
         )
         return Response.status(Response.Status.FORBIDDEN).entity(mapOf("error" to "ACTION_DENIED")).build()
     }

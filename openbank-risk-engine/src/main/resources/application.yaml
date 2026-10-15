@@ -28,6 +28,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_risk
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # A LITERAL jdbc url, not only an env expression: Flyway migrates the DEFAULT (Agroal/JDBC)
     # datasource, and a service that boots only because the environment supplied one cannot start
     # from this repo alone (check-flyway-default-datasource.py, #3080).
@@ -62,10 +65,14 @@ quarkus:
       # gitops Deployment env, where gen-network-policies.py can see the edge; a cluster URL
       # baked in here would be an edge that generator cannot see (network-policy-code-edges).
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
     # ADR-0314 D4: lending's loan-book read. Local default only, as for ledger above; the gitops
     # Deployment points it at lending's private-CA mTLS listener (8443, #10732).
     lending-service:
       url: ${LENDING_SERVICE_URL:http://localhost:8126}
+      connect-timeout: 2000
+      read-timeout: 5000
 
   smallrye-reactive-messaging:
     kafka:

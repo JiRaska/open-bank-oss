@@ -79,9 +79,9 @@ kover {
         verify {
             rule {
                 bound {
-                    // Ratchet floor (ADR-0020): initial coverage from the domain-model test only;
-                    // raise-only from here as adapters/activities gain tests.
-                    minValue = 5
+                    // Ratchet floor (ADR-0020): measured 91.4% LINE coverage
+                    // (2026-10-14, kover report); raise-only from here.
+                    minValue = 91
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
