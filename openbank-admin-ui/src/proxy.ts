@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
-import { hasPermission, permissionForPath } from "@/lib/auth/roles"
+import { pathAllowedByRoles, permissionForPath } from "@/lib/auth/roles"
 import { isPublicSurface } from "@/lib/auth/publicSurface"
 import { scriptSourceDirective } from "@/lib/security/contentSecurityPolicy"
 
@@ -89,7 +89,7 @@ export default auth((req) => {
   // of seven hand-maintained role lists. The route map shares the UI permission matrix, so nav,
   // deep links and the initial response cannot disagree about a destination's visibility.
   const permission = permissionForPath(pathname)
-  if (permission && !hasPermission(roles, permission)) {
+  if (permission && !pathAllowedByRoles(pathname, roles)) {
     // Fetch callers get a JSON 403 rather than an HTML redirect they would try to parse.
     if (pathname.startsWith("/api/")) {
       return withCsp(NextResponse.json({ error: "forbidden" }, { status: 403 }))
