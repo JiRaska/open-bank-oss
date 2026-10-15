@@ -192,9 +192,25 @@ matrix_grants(action, role) if {
 }
 
 # Operators and admins may list or read any resource on behalf of any party (support-desk
-# and onboarding cockpit paths, ADR-0068).
+# and onboarding cockpit paths, ADR-0068). STAFF ONLY — the same exclusion
+# compliance-read-any carries (#12488): a Keycloak client_credentials token is classified
+# HUMAN (rules.yaml: authz_policy.principal_type_service_unreachable), and the realm grants
+# ROLE_OPERATOR to M2M clients, so without the `service-account-` exclusion any machine
+# identity read every `*.list`/`*.read` fleet-wide — including fraud-service's analyst
+# review queue (fraud.review.read, #12921; the write side was closed in #3734, the read
+# side stayed open). Measured before this line was added: in the deployed realm
+# (realm-template.json) only service-account-openbank-edge holds ROLE_OPERATOR among
+# service accounts, and every edge read surface is already covered by an identity-scoped
+# rule (edge-service-consent, edge-service-engagement, edge-service-audit-customer,
+# edge-service-notification); party-service's GDPR aggregation no longer rides this grant
+# either (the kyc hop has no @Authorize, the card hop uses the named openbank-party
+# client, #10486). The CI realm's shared service-account-openbank-services holds
+# ROLE_OPERATOR, but every CI workflow using that realm runs with authz.enforce=false.
+# A machine that needs a read gets a rule naming its `service-account-<client>` id in the
+# target service's rest_ext.
 allowed_reasons contains "operator-read-any" if {
 	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	some verb in {"list", "read"}
@@ -604,10 +620,10 @@ prohibited if {
 # Here it cannot be bypassed by adding a new reason.
 #
 # What this does NOT block, by design:
-#  - READS. `operator-read-any` is how real M2M callers fetch cross-service data today
-#    (party-service's GDPR Art. 15 aggregation against kyc-service and card-issuance-service
-#    depends on exactly that), so it is untouched here. `compliance-read-any` excludes every
-#    `service-account-*` principal on its own rule (see there).
+#  - READS. Both generic read grants now exclude every `service-account-*` principal on
+#    their own rules (compliance-read-any since #12488, operator-read-any since #12921),
+#    so a machine identity can no longer fetch cross-service data through a role-only
+#    read reason; the named-caller carve-outs above are writes only.
 #  - Writes granted by a reason that names the caller. A rule that identifies a specific
 #    verified caller by `input.principal.id` and scopes the action set — e.g.
 #    `service-consent-m2m-marketing`, `m2m-sanctions-screening`,

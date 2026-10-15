@@ -160,6 +160,22 @@ allowed_reasons contains "service-balance-m2m" if {
 	}
 }
 
+# The customer-edge proxying the app's balance read (ADR-0223 D2(c), #12921): the edge calls
+# GET /api/v1/balances/{accountId} with its OWN client_credentials token
+# (service-account-openbank-edge) at three call sites in CustomerEdgeResource.kt. balance-service
+# scopes by accountId only (it does not consume the party header), so ownership is enforced AT
+# THE EDGE (mayReadAccount IDOR guard) before this call is ever made — this grant cannot read
+# another party's balance. Needed because base operator-read-any no longer admits service
+# accounts (#12921, the same retirement as compliance-read-any #12488): this identity-scoped
+# rule is the sanctioned replacement, exactly the edge-service-consent shape in base rest.rego.
+# balance.read only — the edge performs no other balance action, and the write veto below is
+# unaffected.
+allowed_reasons contains "service-edge-balance-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action == "balance.read"
+}
+
 # Fail-closed veto for the customer-edge M2M identity on every balance write (#3734). The
 # service-account exclusion on the rules above is NOT sufficient by itself: rules.yaml's
 # role_action_matrix grants balance.credit/debit/hold/holdRelease/initialize/reconciliation.run

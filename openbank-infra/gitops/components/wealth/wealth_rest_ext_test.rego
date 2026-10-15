@@ -45,17 +45,16 @@ test_operator_may_not_withdraw if {
 	}
 }
 
-# MEASURED, not assumed. The shared backend service-account CAN read a holding today, and this
-# service cannot prevent it: `operator-read-any` is a base rest.rego rule (line 171) granting any
-# ROLE_OPERATOR principal read on every action, and `allowed_reasons` is a UNION — a per-service
-# extension can add a reason but can never veto one. ADR-0223 is the retirement of that rule; until
-# it lands, this is the honest statement of the grant rather than a test asserting a denial the
-# policy does not make.
-#
-# `opa eval` against the real bundle is what settles this; reading the rego cannot tell you which
-# of several reasons actually fires (#3765/#3734).
-test_shared_service_account_can_read_via_the_base_operator_rule if {
-	rest.allow with input as {
+# CLOSED by #12921 (ADR-0223 D2(c)). The shared backend service-account used to read a
+# holding through base `operator-read-any` — that rule is a base rest.rego grant any
+# ROLE_OPERATOR principal read on every action, and `allowed_reasons` is a UNION, so this
+# service could not veto it. #12921 added the repo-standard `service-account-` exclusion
+# to that base rule (the retirement compliance-read-any already went through in #12488),
+# so the shared account is denied now — this test pins the closure. The falsification is
+# real: remove the exclusion from rest.rego's operator-read-any and this test goes green
+# in the wrong direction.
+test_shared_service_account_cannot_read_via_the_base_operator_rule if {
+	not rest.allow with input as {
 		"principal": {
 			"type": "HUMAN",
 			"id": "service-account-openbank-services",

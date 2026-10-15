@@ -143,12 +143,18 @@ test_edge_may_read if {
 	decision := rest.allow with input as {"principal": edge, "action": "balance.read"}
 		with data.rules as rules_mock
 	decision.allow == true
+	# Since #12921 the base operator-read-any no longer admits service accounts; the edge's
+	# balance read rides the identity-scoped rule in this ext (ownership is enforced at the
+	# edge, mayReadAccount, before this call).
+	"service-edge-balance-read" in rest.allowed_reasons with input as {"principal": edge, "action": "balance.read"}
+		with data.rules as rules_mock
 }
 
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-balance-write is the EXTENSION's reason, so its presence
-# proves the ext; matrix-allows proving the base+data wiring comes from test_edge_may_read above
-# (the edge holds no balance grant outside the matrix mock).
+# proves the ext; matrix-allows proving the base+data wiring comes from the write vetoes above
+# (for the edge principal a matrix reason still FIRES on balance.credit/debit — only the
+# prohibition vetoes it).
 test_extension_is_loaded if {
 	"operator-balance-write" in rest.allowed_reasons with input as {"principal": operator, "action": "balance.hold"}
 		with data.rules as rules_mock

@@ -85,3 +85,44 @@ test_extension_is_loaded if {
 	"operator-fraud-write" in rest.allowed_reasons with input as {"principal": operator, "action": "fraud.score"}
 		with data.rules as rules_mock
 }
+
+# --- #12921 read side: the analyst review queue is staff-only ---
+
+# The exact over-grant this file's header documented: GET /api/v1/fraud/review-queue is
+# @Authorize(action = "fraud.review.read"), admitted by base operator-read-any's *.read
+# suffix. Both M2M clients hold ROLE_OPERATOR in the realm (the deployed realm gives it to
+# openbank-edge; the CI realm's shared openbank-services carries it), and
+# AuthorizeInterceptor classifies every client_credentials token as HUMAN — so before the
+# `service-account-` exclusion on base operator-read-any, any shared-client holder read the
+# analyst queue through the role-only reason. #3734 closed only the WRITE side;
+# #12921 closes the read side at the same base rule. Assert the final decision AND that
+# the role-only reason no longer fires for the machine principal.
+test_m2m_denied_review_queue_read if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "fraud.review.read"}
+		with data.rules as rules_mock
+	not "operator-read-any" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "fraud.review.read"}
+		with data.rules as rules_mock
+}
+
+# Same denial for the edge identity — the deployed realm's ROLE_OPERATOR service account.
+# (fraud.score stays reachable for the shared client via service-fraud-scoring; the edge
+# stays vetoed from fraud.score by the prohibition above — those #3734 tests pin it.)
+test_edge_denied_review_queue_read if {
+	rest.allow == false with input as {"principal": edge, "action": "fraud.review.read"}
+		with data.rules as rules_mock
+	not "operator-read-any" in rest.allowed_reasons with input as {"principal": edge, "action": "fraud.review.read"}
+		with data.rules as rules_mock
+}
+
+# The human analyst keeps the queue: the exclusion keys on the `service-account-` identity
+# prefix, which no staff session can hold (sessions authenticate through a different client).
+# The extension's operator-fraud-write ALSO fires for fraud.review.read (any fraud.* action),
+# so the audited decision.reason is the lexicographically smaller "operator-fraud-write" —
+# assert the final decision plus operator-read-any's membership in the firing reasons.
+test_human_operator_allowed_review_queue_read if {
+	decision := rest.allow with input as {"principal": operator, "action": "fraud.review.read"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"operator-read-any" in rest.allowed_reasons with input as {"principal": operator, "action": "fraud.review.read"}
+		with data.rules as rules_mock
+}

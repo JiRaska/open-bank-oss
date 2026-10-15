@@ -3247,10 +3247,10 @@ knowledge_capture:
 # triage; the retirement of operator-read-any itself is D2(c), a separate PR.
 authz:
   # Actions the generic `operator-read-any` and `compliance-read-any` rules in rest.rego must NOT
-  # grant (the CI realm also gives the shared client ROLE_COMPLIANCE). That rule admits
-  # any HUMAN principal holding ROLE_OPERATOR/ROLE_ADMIN to every `*.read`/`*.list`, and the
-  # shared service-account (service-account-openbank-services) is classified HUMAN and holds
-  # ROLE_OPERATOR, so without an entry here the action is readable by every backend service.
+  # grant. That rule admits any HUMAN principal holding ROLE_OPERATOR/ROLE_ADMIN to every
+  # `*.read`/`*.list`; machine identities are already out — both base rules exclude every
+  # `service-account-*` principal (#12488, #12921) — so this register now withholds the listed
+  # reads from STAFF too, forcing them onto identity-scoped service rules.
   # An action listed here is served ONLY by its service's identity-scoped rules (staff, and the
   # one named machine caller). Tested must-deny/must-allow in that service's rest_ext test.
   #
@@ -3259,8 +3259,8 @@ authz:
   # `.inspect` so neither generic read grant can ever admit them.
   # Keep the old tax.filing.read excluded while previously published tax-service images may still
   # emit it during the image/OPA-bundle rollout. The tax extension grants that legacy verb to
-  # named staff roles only; removing this entry first would reopen it to every ROLE_OPERATOR
-  # service-account through operator-read-any (#12547). Retire it only after old images are gone.
+  # named staff roles only; removing this entry would reopen it to generic staff reads
+  # through operator-read-any (#12547). Retire it only after old images are gone.
   operator_read_any_excluded_actions:
     - tax.filing.read
   role_action_matrix:

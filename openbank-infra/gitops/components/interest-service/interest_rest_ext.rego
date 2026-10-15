@@ -33,7 +33,9 @@
 #   1. the allow rule below excludes every service account outright (delegation idiom), and
 #   2. the prohibition vetoes the write actions for ANY service account at the allow head —
 #      unreachable via matrix-allows or any future reason.
-# Reads are untouched: the edge legitimately serves customer interest views.
+# Reads: base operator-read-any/compliance-read-any still carry staff, but both exclude
+# service-account principals now (#12488, #12921), so the edge's customer interest views need
+# the identity-scoped service-edge-interest-read rule below.
 
 package openbank.rest
 
@@ -84,6 +86,23 @@ allowed_reasons contains "interest-oversight-read" if {
 	some role in {"ROLE_VIEWER", "ROLE_AUDITOR"}
 	role in input.principal.roles
 	input.action in {"interest.read", "interest.list"}
+}
+
+# The customer-edge proxying the app's interest view (ADR-0223 D2(c), #12921): the edge calls
+# GET /api/v1/interest/accruals/{accountId}/summary and
+# GET /api/v1/interest/accounts/{accountId}/effective-rate — both @Authorize(action =
+# "interest.read") — with its OWN client_credentials token (service-account-openbank-edge).
+# interest-service scopes by accountId only, so ownership is enforced AT THE EDGE
+# (fetchAccount + owner-party equality in CustomerEdgeResource.getAccountInterest) before
+# forwarding. Needed because base operator-read-any no longer admits service accounts (#12921,
+# the same retirement as compliance-read-any #12488): this identity-scoped rule is the
+# sanctioned replacement, the edge-service-consent shape. interest.read ONLY, and interest.list
+# is deliberately NOT granted — no edge route lists accruals or rate configs, so the list
+# stays staff-only now that the base grant excludes machines.
+allowed_reasons contains "service-edge-interest-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action == "interest.read"
 }
 
 # No M2M caller of interest writes exists (fleet audit above), so this loses no legitimate

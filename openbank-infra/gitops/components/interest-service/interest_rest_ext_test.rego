@@ -85,12 +85,20 @@ test_edge_may_read if {
 	decision := rest.allow with input as {"principal": edge, "action": "interest.read"}
 		with data.rules as rules_mock
 	decision.allow == true
+	# Since #12921 the base operator-read-any no longer admits service accounts; the edge's
+	# interest read rides the identity-scoped rule in this ext (ownership is enforced at the
+	# edge — fetchAccount + owner-party equality — before this call).
+	"service-edge-interest-read" in rest.allowed_reasons with input as {"principal": edge, "action": "interest.read"}
+		with data.rules as rules_mock
 }
 
-test_edge_may_list if {
-	decision := rest.allow with input as {"principal": edge, "action": "interest.list"}
+# No edge route lists accruals or rate configs: CustomerEdgeResource calls only the
+# account-scoped summary and effective-rate endpoints (both interest.read). The list was
+# reachable for the edge only through base operator-read-any's over-grant, which #12921
+# closed — so the list is now denied, deliberately.
+test_edge_may_not_list if {
+	rest.allow == false with input as {"principal": edge, "action": "interest.list"}
 		with data.rules as rules_mock
-	decision.allow == true
 }
 
 # --- interest-oversight-read (#3679): the console read regression #3695 shipped ---

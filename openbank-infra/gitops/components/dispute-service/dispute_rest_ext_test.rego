@@ -152,18 +152,26 @@ test_anonymous_denied_writes if {
 	count(allowed_reasons) == 0 with input as {"principal": anon, "action": "complaint.update"}
 }
 
-# --- reads ride on base rest.rego; the extension deliberately does not restate them ---
+# --- reads: staff ride base rest.rego; the edge's account-scoped list is identity-scoped here ---
 #
-# These assert the caller-audit claim that no read rule is NEEDED here. They fire on
-# rest.rego's operator-read-any, which is why the base policy must be loaded alongside.
+# Staff reads fire on rest.rego's operator-read-any, which is why the base policy must be
+# loaded alongside. The edge M2M identity no longer rides that base grant (#12921 excluded
+# service accounts), so its one read (GET /disputes/account/{accountId}) is granted by the
+# service-edge-dispute-list rule in this ext.
 
 test_staff_read_covered_by_base_rule if {
 	"operator-read-any" in allowed_reasons with input as {"principal": operator, "action": "dispute.read"}
 	"operator-read-any" in allowed_reasons with input as {"principal": admin, "action": "complaint.read"}
 }
 
-test_edge_m2m_account_scoped_list_covered_by_base_rule if {
-	"operator-read-any" in allowed_reasons with input as {
+test_edge_m2m_account_scoped_list_covered_by_edge_rule if {
+	"service-edge-dispute-list" in allowed_reasons with input as {
+		"principal": edge_m2m,
+		"action": "dispute.list",
+		"resource": {"type": "dispute", "id": "a-1"},
+	}
+	# And only that: the base role-only read reason must NOT fire for the machine principal.
+	not "operator-read-any" in allowed_reasons with input as {
 		"principal": edge_m2m,
 		"action": "dispute.list",
 		"resource": {"type": "dispute", "id": "a-1"},

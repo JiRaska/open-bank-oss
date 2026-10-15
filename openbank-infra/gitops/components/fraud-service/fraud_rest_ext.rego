@@ -10,9 +10,11 @@
 #   fraud.review.read — GET /api/v1/fraud/review-queue: analyst work queue. Covered
 #                       by base operator-read-any / compliance-read-any (*.read
 #                       suffix) — no rule needed here. NOTE (#3734): that base rule
-#                       also admits the M2M identities to this read, the same
-#                       pre-existing fleet-wide read over-grant tracked separately;
-#                       this PR tightens WRITES only.
+#                       also ADMITTED the M2M identities to this read — the read side
+#                       of the same over-grant; #3734 closed only the write side.
+#                       The read side is now closed by the `service-account-`
+#                       exclusion on base operator-read-any itself (#12921), so this
+#                       endpoint needs no fraud-local rule.
 #
 # Base rest.rego contributes nothing to fraud.score (a non-read action with no
 # resource path parameter), so BOTH write allow paths live in this extension.

@@ -482,9 +482,14 @@ test_tax_reporting_reaches_no_participant_route if {
 	}
 }
 
-# Why the verb is not `.read`: under that name the generic rule hands it to the shared account.
-test_a_read_verb_would_have_reached_the_shared_account if {
-	rest.allow with input as {
+# Why the verb is not `.read`: under that name the generic rule USED to hand it to the
+# shared account. #12921 closed that over-grant (operator-read-any now excludes every
+# `service-account-*` principal, as compliance-read-any already did in #12488), so the
+# hypothetical read verb is denied now — this test pins the closure. The verb stays
+# `.aggregate` regardless: a non-read verb is defense-in-depth neither generic read grant
+# can ever admit.
+test_a_read_verb_no_longer_reaches_the_shared_account if {
+	not rest.allow with input as {
 		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.reporting.read",
 	}
@@ -598,14 +603,18 @@ test_edge_relays_customer_scoped_reads_only if {
 	}
 }
 
-# Generic operator reads remain a positive control for the inspect-verb tests above.
-# Compliance reads separately exclude machines in the base policy; real staff still pass.
+# Base identity policy as of #12488/#12921: BOTH generic read grants exclude machines —
+# the shared account with ROLE_OPERATOR is denied (the over-grant #12921 closed), the
+# shared account with ROLE_COMPLIANCE stays denied, and real staff still pass. Positive
+# control for the inspect-verb tests above.
 test_read_controls_match_base_identity_policy if {
-	rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR"]), "action": "pension.onboarding.read"}
+	not rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_OPERATOR"]), "action": "pension.onboarding.read"}
 		with data.rules as no_exclusions
 	not rest.allow with input as {"principal": pension_principal("service-account-openbank-services", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
 		with data.rules as no_exclusions
 	rest.allow with input as {"principal": pension_principal("alice", ["ROLE_COMPLIANCE"]), "action": "pension.contract.read"}
+		with data.rules as no_exclusions
+	rest.allow with input as {"principal": pension_principal("alice", ["ROLE_OPERATOR"]), "action": "pension.onboarding.read"}
 		with data.rules as no_exclusions
 }
 

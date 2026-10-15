@@ -1239,9 +1239,12 @@ test_deny_shared_m2m_write_via_role_only_reason if {
 		with rest.allowed_reasons as {"operator-ledger-write"}
 }
 
-# READS must be untouched: party-service's GDPR Art. 15 aggregation calls kyc-service and
-# card-issuance-service with exactly this identity and relies on operator-read-any.
-test_allow_shared_m2m_read_still_works if {
+# The guard vetoes only role-only WRITE reasons: a service-account READ is now denied by
+# operator-read-any's own `service-account-` exclusion (#12921), not by this guard — the
+# reasons here are mocked so this case isolates the guard, and card.list from
+# party-service today rides the identity-scoped service-party-card-list rule (named
+# openbank-party client, #10486), never this grant.
+test_allow_shared_m2m_read_role_only_write_guard_unaffected if {
 	decision := rest.allow with input as {
 		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "card.list",
@@ -1718,16 +1721,20 @@ test_allow_human_admin_generic_read if {
 	decision.reason == "operator-read-any"
 }
 
-# NOT YET CLOSED, pinned so the change is deliberate: operator-read-any still admits a
-# service-account holding ROLE_OPERATOR/ROLE_ADMIN. The deployed realm gives
-# service-account-openbank-edge ROLE_OPERATOR and customer-edge reads ~20 services through it,
-# several with no edge-named rule — retiring this grant for machines needs that inventory first
-# (ADR-0223 D2(b–c)). When it is retired, flip this to a deny.
-test_operator_read_any_still_admits_service_account_pending_edge_inventory if {
+# CLOSED by #12921: base operator-read-any now excludes every `service-account-*` principal,
+# mirroring compliance-read-any (#12488) — the review-queue M2M read over-grant (#3734's open
+# read side). The edge-inventory retirement waited on: in the deployed realm only
+# service-account-openbank-edge holds ROLE_OPERATOR among service accounts, and every edge
+# read surface is already identity-scoped (edge-service-consent, edge-service-engagement,
+# edge-service-audit-customer, edge-service-notification); the GDPR-aggregation reads no
+# longer ride this grant either (kyc hop has no @Authorize, card hop uses the named
+# openbank-party client, #10486). A machine that needs a read gets an identity-scoped rule
+# in the target service's rest_ext naming its `service-account-<client>` id.
+test_operator_read_any_denies_service_account if {
 	reasons := rest.allowed_reasons with input as {
 		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
 		"action": "x.y.read",
 		"resource": {"type": "y", "id": "y-1"},
 	}
-	"operator-read-any" in reasons
+	not "operator-read-any" in reasons
 }

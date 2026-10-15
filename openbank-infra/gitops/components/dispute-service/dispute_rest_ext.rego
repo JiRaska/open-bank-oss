@@ -40,9 +40,13 @@
 #    Keycloak client_credentials token is classified **HUMAN** by AuthorizeInterceptor —
 #    never "SERVICE" (see the note at the bottom of this file). So it arrives as
 #        {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
-#    and base rest.rego's `operator-read-any` (HUMAN + ROLE_OPERATOR/ADMIN + verb in
-#    {list, read}) ALREADY grants it. Deliberately NOT restated here — least privilege says
-#    do not re-grant what the base policy already covers.
+#    and it used to be admitted by base rest.rego's `operator-read-any` (HUMAN +
+#    ROLE_OPERATOR/ADMIN + verb in {list, read}). #12921 excluded service accounts from that
+#    base rule (the retirement compliance-read-any already went through in #12488), so the
+#    edge's list is now granted by the identity-scoped service-edge-dispute-list rule at the
+#    bottom of this file — same least-privilege shape as base edge-service-consent. The party
+#    scoping is unchanged: the edge ownership-checks accountId (ownsAccount IDOR guard) before
+#    this call, and dispute-service scopes the list by that account.
 #    The edge's other two dispute calls — POST /api/v1/disputes (open) and POST
 #    /api/v1/complaints (file) — carry NO @Authorize and never consult the PDP.
 #
@@ -105,7 +109,8 @@
 #     GET  /                        dispute.list    → operator-read-any (base)  [admin-ui staff]
 #     GET  /{id}                    dispute.read    → operator-read-any (base)
 #     GET  /reference/{ref}         dispute.read    → operator-read-any (base)
-#     GET  /account/{accountId}     dispute.list    → operator-read-any (base)  [customer-edge M2M]
+#     GET  /account/{accountId}     dispute.list    → service-edge-dispute-list (THIS FILE, edge M2M)
+#                                                  → operator-read-any (base, staff)
 #     GET  /{id}/timeline           dispute.read    → operator-read-any (base)
 #     GET  /{id}/evidence           dispute.read    → operator-read-any (base)
 #     GET  /{id}/evidence/verify    dispute.read    → operator-read-any (base)
@@ -119,9 +124,12 @@
 #     POST /{id}/resolve            complaint.update → dispute-staff-write  (THIS FILE)
 #     POST /{id}/close              complaint.update → dispute-staff-write  (THIS FILE)
 #
-#   Net: the nine read/list methods need NO rule here — base rest.rego already grants every
-#   real caller. This file adds exactly one rule, for the write plane, which base grants to
-#   nobody.
+#   Net: the nine read/list methods need no STAFF rule here — base rest.rego already grants
+#   every human caller (operator-read-any / compliance-read-any still carry staff; they now
+#   exclude service accounts, #12488/#12921). The one machine caller (customer-edge, item 1)
+#   is granted dispute.list by the identity-scoped rule at the bottom of this file. This file
+#   therefore adds two rules: the write plane, which base grants to nobody, and the edge's
+#   account-scoped list.
 # =======================================================================================
 
 package openbank.rest
@@ -179,4 +187,22 @@ allowed_reasons contains "service-agent-dispute-read" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-agent"
 	input.action in {"dispute.list", "dispute.read"}
+}
+
+# The customer-edge listing the disputes the caller filed on one of their OWN accounts
+# (ADR-0223 D2(c), #12921): GET /api/v1/disputes?accountId=… forwards to
+# GET /api/v1/disputes/account/{accountId}, @Authorize(action = "dispute.list",
+# resource = "#accountId"), with the edge's OWN client_credentials token
+# (service-account-openbank-edge). The edge ownership-checks accountId against the caller's
+# JWT party (ownsAccount IDOR guard, CustomerEdgeResource.listDisputes) before forwarding, and
+# dispute-service scopes the list by that account — this grant cannot list another party's
+# disputes. Needed because base operator-read-any no longer admits service accounts (#12921,
+# the same retirement as compliance-read-any #12488): this identity-scoped rule is the
+# sanctioned replacement, the edge-service-consent shape. dispute.list ONLY — the edge exposes
+# no complaint-listing route (the ext header documents that as a deliberate follow-up), and
+# dispute.read (by id) is not proxied either.
+allowed_reasons contains "service-edge-dispute-list" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action == "dispute.list"
 }
