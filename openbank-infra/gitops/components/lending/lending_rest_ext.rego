@@ -6,6 +6,10 @@
 # Actions gated (LendingResource):
 #   lending.create              — submit a loan application (maker)
 #   lending.approve             — approve/reject an application (checker; four-eyes in the handler)
+#   lending.withdraw            — pre-disbursement application withdrawal (desk leg; the customer
+#                                 leg rides lending.intake, owner-scoped in the resource, ADR-0211)
+#   lending.submitDocuments     — DOCS_REQUIRED → ASSESSMENT document submission (ADR-0211)
+#   lending.sign                — AWAITING_SIGNATURE → SIGNED customer signature (ADR-0211)
 #   lending.intake              — customer self-service application via customer-edge (ADR-0211)
 #   lending.compliance.propose  — propose a jurisdictional compliance pack (maker, ADR-0212 D4)
 #   lending.compliance.decide   — approve/reject a pack activation (checker, must differ from maker)
@@ -53,7 +57,9 @@ allowed_reasons contains "operator-lending-write" if {
 # Lending officers originate and service loans: apply (maker), disburse, record
 # repayments, register collateral (maker), read/list the book. NOT approve or
 # collateralDecide (the checker for both is credit-risk/admin per @RolesAllowed) and
-# NOT writeoff.
+# NOT writeoff. The ADR-0211 explicit origination commands (withdraw / submitDocuments /
+# sign) are desk operations the same four class-level roles reach; maker != checker on
+# the decision leg stays in the application service.
 allowed_reasons contains "lending-officer-desk" if {
 	input.principal.type == "HUMAN"
 	"ROLE_LENDING_OFFICER" in input.principal.roles
@@ -65,6 +71,10 @@ allowed_reasons contains "lending-officer-desk" if {
 		"lending.disburse",
 		"lending.collateralRegister",
 		"lending.approval.read",
+		# ADR-0211 explicit origination commands (desk leg; #12748 slice).
+		"lending.withdraw",
+		"lending.submitDocuments",
+		"lending.sign",
 	}
 }
 
@@ -88,6 +98,10 @@ allowed_reasons contains "credit-risk-desk" if {
 		"lending.book.read",
 		"lending.approval.read",
 		"lending.approval.decide",
+		# ADR-0211 explicit origination commands (desk leg; #12748 slice).
+		"lending.withdraw",
+		"lending.submitDocuments",
+		"lending.sign",
 	}
 }
 
@@ -118,6 +132,10 @@ allowed_reasons contains "compliance-lending-desk" if {
 		"lending.compliance.propose",
 		"lending.compliance.decide",
 		"lending.compliance.read",
+		# ADR-0211 explicit origination commands (desk leg; #12748 slice).
+		"lending.withdraw",
+		"lending.submitDocuments",
+		"lending.sign",
 	}
 }
 
@@ -195,6 +213,12 @@ prohibited if {
 		"lending.repay",
 		"lending.reschedule",
 		"lending.writeoff",
+		# ADR-0211 explicit origination commands: the edge's customer withdrawal rides the
+		# action-scoped `lending.intake` identity rule (owner-scoped in the resource), never
+		# the desk actions — the same stance as lending.create above.
+		"lending.withdraw",
+		"lending.submitDocuments",
+		"lending.sign",
 		# Not a write, but the whole book with party references: the customer-facing proxy has
 		# no business reading it, and base operator-read-any would otherwise admit its
 		# ROLE_OPERATOR to any `*.read` (ADR-0314 D4).

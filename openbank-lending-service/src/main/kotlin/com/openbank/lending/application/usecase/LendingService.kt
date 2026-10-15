@@ -47,6 +47,9 @@ import com.openbank.lending.domain.model.LoanStatus
 import com.openbank.lending.domain.model.ProvisioningRunOutcome
 import com.openbank.lending.domain.model.ProvisioningSnapshot
 import com.openbank.lending.domain.model.RescheduleRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.lending.infrastructure.compliance.OriginationConfig
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -645,6 +648,179 @@ class LendingService @Inject constructor(
                 }
             }
         }
+
+    // --- Explicit origination commands (ADR-0211 D1/D2) ---------------------------------------------
+
+    /**
+     * Pre-disbursement withdrawal. The policy graph is the authority on which states may still be
+     * abandoned: every pre-SIGNED state carries a WITHDRAWN edge, SIGNED and later do not (a
+     * signed contract unwinds through the ADR-0215 exit paths, not by deleting the application),
+     * so the machine's refusal IS the state check — there is deliberately no duplicated
+     * state-list here to drift out of sync with the graph.
+     */
+    override fun withdraw(
+        id: LoanApplicationId,
+        request: WithdrawApplicationRequest,
+        withdrawnBy: String,
+    ): Uni<LoanApplication> = applications.findById(id).flatMap { existing ->
+        when {
+            existing == null ->
+                Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+            withdrawnBy.isBlank() ->
+                Uni.createFrom().failure(IllegalArgumentException("Withdrawer identity is required"))
+            else -> when (
+                val result = machine.apply(
+                    transition(existing, existing.status, OriginationState.WITHDRAWN, withdrawnBy)
+                        .copy(reason = request.reason),
+                )
+            ) {
+                is OriginationTransitionResult.Rejected ->
+                    Uni.createFrom().failure(IllegalStateException(result.reason))
+                is OriginationTransitionResult.Applied ->
+                    claimTransition(existing.status, existing.copy(status = result.newState))
+                        .signalWorkflow()
+                        .emitEvidence(
+                            existing.status.name,
+                            withdrawnBy,
+                            OriginationActorKind.HUMAN,
+                            request.reason,
+                        )
+            }
+        }
+    }
+
+    override fun submitDocuments(
+        id: LoanApplicationId,
+        request: SubmitDocumentsRequest,
+        submittedBy: String,
+    ): Uni<LoanApplication> = applications.findById(id).flatMap { existing ->
+        when {
+            existing == null ->
+                Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+            existing.status != OriginationState.DOCS_REQUIRED ->
+                Uni.createFrom().failure(
+                    IllegalStateException("Application is not awaiting document submission: ${existing.status}"),
+                )
+            submittedBy.isBlank() ->
+                Uni.createFrom().failure(IllegalArgumentException("Submitter identity is required"))
+            else -> when (
+                val result = machine.apply(
+                    transition(existing, existing.status, OriginationState.ASSESSMENT, submittedBy)
+                        .copy(reason = request.reason ?: "customer documents submitted"),
+                )
+            ) {
+                is OriginationTransitionResult.Rejected ->
+                    Uni.createFrom().failure(IllegalStateException(result.reason))
+                is OriginationTransitionResult.Applied ->
+                    claimTransition(existing.status, existing.copy(status = result.newState))
+                        .signalWorkflow()
+                        .emitEvidence(
+                            existing.status.name,
+                            submittedBy,
+                            OriginationActorKind.HUMAN,
+                            request.reason ?: "customer documents submitted",
+                        )
+            }
+        }
+    }
+
+    override fun sign(id: LoanApplicationId, request: SignApplicationRequest, signedBy: String): Uni<LoanApplication> =
+        applications.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                existing.status != OriginationState.AWAITING_SIGNATURE ->
+                    Uni.createFrom().failure(
+                        IllegalStateException("Application is not awaiting signature: ${existing.status}"),
+                    )
+                signedBy.isBlank() ->
+                    Uni.createFrom().failure(IllegalArgumentException("Signer identity is required"))
+                // Fail closed, same rule as disburse: a post-decision state reached without a
+                // recorded decider was never decided and must not advance.
+                lacksDecision(existing) ->
+                    refuse(existing, "SIGN", signedBy, decisionMissing(existing))
+                else -> when (
+                    val result = machine.apply(
+                        transition(existing, existing.status, OriginationState.SIGNED, signedBy)
+                            .copy(reason = "customer signature received"),
+                    )
+                ) {
+                    is OriginationTransitionResult.Rejected ->
+                        Uni.createFrom().failure(IllegalStateException(result.reason))
+                    // The artefact hash rides the SAME conditional statement as the transition —
+                    // see LoanApplicationRepository.compareAndSetSignature for why a second write
+                    // would re-open the split-write window #3850 closed.
+                    is OriginationTransitionResult.Applied ->
+                        applications.compareAndSetSignature(
+                            existing.copy(status = result.newState, signatureArtefactHash = request.artefactHash),
+                            existing.status,
+                        ).flatMap { claimed ->
+                            if (claimed == 0) {
+                                Uni.createFrom().failure(
+                                    IllegalStateException(
+                                        "Concurrent modification: application ${existing.id} is no longer " +
+                                            "in ${existing.status}",
+                                    ),
+                                )
+                            } else {
+                                Uni.createFrom().item(existing.copy(status = result.newState))
+                            }
+                        }
+                            .signalWorkflow()
+                            .emitEvidence(
+                                existing.status.name,
+                                signedBy,
+                                OriginationActorKind.HUMAN,
+                                "customer signature received (artefact ${request.artefactHash})",
+                            )
+                }
+            }
+        }
+
+    override fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String): Uni<Boolean> =
+        applications.findById(id).flatMap { existing ->
+            when {
+                existing == null ->
+                    Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
+                // A decision already moved the row on: nothing to escalate. Returning false (not
+                // failing) is what makes the activity idempotent — a duplicated fire after a
+                // Temporal retry observes the decided state and reports "no escalation needed".
+                existing.status != OriginationState.FOUR_EYES -> Uni.createFrom().item(false)
+                else -> events.emit(fourEyesEscalationEvidence(existing, actor)).map { true }
+            }
+        }
+
+    /**
+     * The escalation's evidence record (ADR-0214): same PII-minimised envelope as a transition,
+     * own event type — an escalation moved nothing, and a lifecycle reader must not see it as a
+     * step. Serialised with Jackson (not string-built) because the payload carries no caller
+     * strings beyond the fixed machine actor, and the refusal envelope already proves this shape.
+     */
+    private fun fourEyesEscalationEvidence(application: LoanApplication, actor: String): LendingOutboxMessage {
+        val id = application.id.value
+        val payload = REFUSAL_JSON.writeValueAsString(
+            linkedMapOf(
+                "eventType" to FOUR_EYES_ESCALATION_EVENT_TYPE,
+                "aggregateType" to "LOAN_APPLICATION",
+                "aggregateId" to id.toString(),
+                "loanApplicationId" to id.toString(),
+                "partyId" to application.partyId.toString(),
+                "state" to application.status.name,
+                "actorId" to actor,
+                "actorKind" to OriginationActorKind.SYSTEM.name,
+                "reason" to "four-eyes SLA elapsed without a decision (ADR-0211 D2); no auto-approval",
+                "packVersion" to application.packVersion,
+                "occurredAt" to clock.instant().toString(),
+                "correlationId" to id.toString(),
+                "sourceService" to "lending",
+            ),
+        )
+        return LendingOutboxMessage(
+            aggregateId = id,
+            eventType = FOUR_EYES_ESCALATION_EVENT_TYPE,
+            payload = payload,
+        )
+    }
 
     override fun getApplication(id: LoanApplicationId): Uni<LoanApplication?> = applications.findById(id)
 
@@ -1672,6 +1848,7 @@ class LendingService @Inject constructor(
 
     private companion object {
         const val REFUSED_EVENT_TYPE = "credit.application.transition.refused"
+        const val FOUR_EYES_ESCALATION_EVENT_TYPE = "credit.application.four_eyes_sla_escalation"
         val REFUSAL_JSON: com.fasterxml.jackson.databind.ObjectMapper = com.fasterxml.jackson.databind.ObjectMapper()
         const val MAX_LIST_LIMIT = 100
         const val MONTHS_PER_YEAR = 12

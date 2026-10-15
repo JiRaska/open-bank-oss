@@ -2,6 +2,13 @@
 
 All notable changes to this service are documented here.
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.5.3...referral-service-v0.6.0) (2026-10-14)
+
+
+### Features
+
+* **referral:** shareable referral link e2e + activate referral-service on sandbox ([#12813](https://github.com/JiRaska/open-bank-oss/issues/12813)) ([b2e006a](https://github.com/JiRaska/open-bank-oss/commit/b2e006aca9f2485e08599f5d782fbc86485a7270))
+
 ## [0.5.3](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.5.2...referral-service-v0.5.3) (2026-10-14)
 
 
