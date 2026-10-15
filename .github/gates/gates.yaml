@@ -1824,6 +1824,10 @@ gates:
     name: "deployed-code-lag report unit test"
     group: supplychain
     mode: enforced
+    min_subjects: 5   # lag + fresh + marker + current + pending fixture services
+    rationale: "The hours-scale code-lag report is the only input the deploy-code-lag-watch escalation consumes; without a unit test pinning which drift shapes it reports, an innocent 'improvement' to the report could silently move aged own-source drift out of the watch's lane, and the first signal of a deploy-pipeline stall would be user-visible lag rather than a red watch."
+    review_after: "2027-04-15"
+    budget_seconds: 10
     run: |
       bash .github/scripts/test-deploy-code-lag-report.sh
 
