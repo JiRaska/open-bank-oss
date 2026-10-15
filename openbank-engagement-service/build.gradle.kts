@@ -68,3 +68,11 @@ kover {
         }
     }
 }
+
+// The additional trace profile boots alongside other Quarkus profiles in one
+// coverage-instrumented test worker. The full suite exhausted the default 512m
+// heap (measured at 99.6% with Kover data retained), causing HTTP timeout and OOM.
+// Keep coverage and request assertions intact; use the account/lending allowance.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}

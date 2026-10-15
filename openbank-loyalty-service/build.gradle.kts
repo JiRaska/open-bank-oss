@@ -53,3 +53,11 @@ kover {
         }
     }
 }
+
+// Each Quarkus test profile boots in the same coverage-instrumented worker. The trace
+// profile makes the full suite exceed Gradle's default 512m heap (measured at 99%
+// usage with retained Kover line data), surfacing as HTTP timeouts and then OOM.
+// Match the measured per-service allowance used by account and lending tests.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
