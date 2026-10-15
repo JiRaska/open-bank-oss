@@ -7,7 +7,6 @@ import com.openbank.context.application.ContextDisclosure
 import com.openbank.context.application.ContextQueryService
 import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
-import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
@@ -51,7 +50,7 @@ class AmlCaseEvidenceResource(
         require(effective <= now && (known == null || known <= now)) { "AML evidence cannot establish future activity" }
         require(caseId == id.toString()) { "caseId must identify the assigned AML case" }
         require(purpose == PURPOSE) { "AML_INVESTIGATION is required" }
-        val actor = Investigator(identity.principal.name, identity.roles.sorted())
+        val actor = identity.investigator()
         return try {
             queries.amlCaseEvidence(id.toString(), actor, InvestigationContext(caseId, purpose, effective, known)) {
                 if (!source.isOpen(id)) throw ContextAccessDenied()
@@ -121,7 +120,7 @@ class AmlCaseEvidenceResource(
         return try {
             queries.amlCaseEvidence(
                 id.toString(),
-                Investigator(identity.principal.name, identity.roles.sorted()),
+                identity.investigator(),
                 InvestigationContext(caseId, purpose, effective, known),
             ) {
                 // The owning service is authoritative for the current case state. A delayed
