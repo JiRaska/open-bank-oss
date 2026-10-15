@@ -88,6 +88,7 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 | T3 | `fraud_scores` rows | **Tampering** — direct DB mutation of the audit trail | App-only write path; reactive Panache; forward-only Flyway; rows are append-only (no update/delete in the adapter); DB creds via Vault (ADR-0017) in deployed env | DB-admin insider — infra scope |
 | R1 | Scoring decision | **Repudiation** — dispute over what verdict was returned for a payment | Every decision persisted immutably (`fraud_scores`: request context + verdict + `score` + `reasons` + `rule_version` + `created_at`) | Wire signed audit / evidence bundle (ADR-0029) — *planned* |
 | I1 | Verdict reasons | **Information disclosure** — reason codes / score leak the rule logic to an attacker probing the boundary | Reason strings are coarse, non-PII (`baseline-allow`); endpoint role-gated to service/operator/admin, never customer-facing; customer-safe decline reason mapping is a surface concern | Reason-code taxonomy reviewed as Phase-2 rules land — *open* |
+| I2 | Analyst review queue | **Information disclosure** — automated callers read staff investigation material | The fraud-specific policy prohibits machine principals on `fraud.review.read`, using the verified service-account marker and the legacy principal-name exclusion during rollout. Human operator, administrator and compliance access remains subject to existing staff grants. Scoring and other services' read policies are unchanged | Policy source and generated bundle are covered by allow/deny regressions; deployment and runtime enforcement require separate verification |
 | I2 | Metrics / persisted columns | **Information disclosure** — high-cardinality labels or audit columns enable per-customer inference / leak PII | DomainMetrics deferred (Phase 1) — when added (#850 follow-up), `openbank_fraud_scores_total` is tagged **only** by `verdict` (a closed 4-value set), never account/party/amount (ADR-0077 cardinality contract). `account_id`/`counterparty_id` live in row columns (access-controlled), not metric labels. `/q/metrics` is cluster-internal | Low — verdict tag is bounded |
 | D1 | Scoring path | **DoS** — flood of `/score` calls, or a slow rule set, starves the payment hot path | Reactive non-blocking stack; per-service k8s limits; latency budget p99 ≤ 150 ms (ADR-0084); **fail-open** flag bounds caller blast radius if the scorer is slow/unavailable | Gateway rate-limiting — infra scope; load test before enforce phase |
 | E1 | Roles | **Elevation** — a read/operator role obtains a privileged action | Single endpoint, no privilege tiers within it yet; deny-by-default once OPA enforce is on (ADR-0034) | OPA still advisory — *open* |
@@ -138,6 +139,14 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-10-15** — Scope the analyst review queue to staff callers in the fraud policy.
+  The action-specific prohibition applies to verified machine principals and legacy
+  service-account names, including when an independent role grant matches. Existing
+  human operator, administrator and compliance grants remain intact; the named scoring
+  grant and unrelated service reads are unchanged. The bundle and pod policy checksum
+  are generated from source. Local policy tests establish the decision contract only;
+  they do not establish deployed enforcement or replace required review. Rollback:
+  revert the source change and regenerate the fraud bundle and checksum.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `fraud_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
