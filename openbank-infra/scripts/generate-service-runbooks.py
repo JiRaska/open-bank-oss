@@ -801,16 +801,11 @@ def self_test() -> int:
     case("a deployed service gets no deployment banner",
          all(deployment_status(x) == "" for x in deployed[:5]))
     # A zero-replica Deployment is a deliberate activation gate, not an operational workload.
-    # Referral is the real staged instance in this repository; using it keeps the guard coupled to
-    # the manifest that must not regress into an accidental manual-scale playbook.
-    if "referral" in deployed:
-        t = render("referral")
-        case("a zero-replica workload is rendered as staged rather than operational",
-             says(t, "WORKLOAD STAGED", "ACTIVATION PENDING", "Runtime operations — DEFERRED"))
-        case("a zero-replica workload never offers a manual scale bypass",
-             "kubectl scale" not in t)
-        case("a staged workload names its declared management health port",
-             "GET :8086/q/health/ready" in t and "GET :8155/q/health/ready" not in t)
+    # These cases run against a synthetic zero-replica fixture inside the hermetic gitops block
+    # below, never a named real service: referral WAS the real staged instance, and the sandbox
+    # auto-deploy stream activated it (replicas 0 -> 1), silently breaking this self-test on
+    # every run while the rendered runbooks themselves were correct. Live rollout state can
+    # never again decide whether the zero-replica guard is falsified.
     # `application_automated()` itself, falsified against a SYNTHETIC fixture rather than a named
     # real service: which service (if any) is manual-sync is a live rollout fact that drifts —
     # `incentive` was this fixture until #10783 activated its automated sync, which silently
@@ -892,6 +887,30 @@ def self_test() -> int:
             "              containerPort: 8090\n",
             encoding="utf-8",
         )
+        # A zero-replica staged workload: the third fixture state. Carries its own readiness
+        # probe on the named management port so the rendered health line is asserted against
+        # the fixture, not a live service (see the zero-replica cases in the try block below).
+        (fixture_gitops / "components" / "staged-fixture").mkdir(parents=True)
+        (fixture_gitops / "components" / "staged-fixture" / "staged-fixture-service.yaml").write_text(
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "metadata:\n"
+            "  name: staged-fixture-service\n"
+            "  namespace: staged-fixture\n"
+            "spec:\n"
+            "  replicas: 0\n"
+            "  template:\n"
+            "    spec:\n"
+            "      containers:\n"
+            "        - name: staged-fixture-service\n"
+            "          image: registry.example/openbank-staged-fixture-service:v1\n"
+            "          ports:\n"
+            "            - name: management\n"
+            "              containerPort: 8086\n"
+            "          readinessProbe:\n"
+            "            httpGet: {port: management, path: /q/health/ready}\n",
+            encoding="utf-8",
+        )
         global GITOPS
         real_gitops = GITOPS
         GITOPS = fixture_gitops
@@ -927,6 +946,16 @@ def self_test() -> int:
                 and "scraped by the fleet PodMonitor" in automatic_runtime
                 and "live scrape status is unverified" not in automatic_runtime,
             )
+
+            staged = render("staged-fixture")
+            case("a zero-replica workload is rendered as staged rather than operational",
+                 says(staged, "WORKLOAD STAGED", "ACTIVATION PENDING",
+                      "Runtime operations — DEFERRED"))
+            case("a zero-replica workload never offers a manual scale bypass",
+                 "kubectl scale" not in staged)
+            case("a staged workload names its declared management health port",
+                 "GET :8086/q/health/ready" in staged
+                 and "GET :8155/q/health/ready" not in staged)
         finally:
             GITOPS = real_gitops
 
