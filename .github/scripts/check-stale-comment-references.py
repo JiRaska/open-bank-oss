@@ -94,6 +94,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # --------------------------------------------------------------------------- waiver
@@ -287,6 +288,7 @@ REPO_SLUG = re.compile(r"\bJiRaska/([A-Za-z0-9._-]+)\b")
 # both reported as notices and never as findings — see resolve_repo for why 404 cannot
 # mean "deleted" under a repo-scoped CI token.
 FLAGGED = ("archived",)
+REPO_LOOKUP_WORKERS = 4
 
 
 def resolve_repo(slug: str) -> tuple[str, str]:
@@ -332,6 +334,18 @@ def resolve_repo(slug: str) -> tuple[str, str]:
     except json.JSONDecodeError:
         return "unknown", "unparseable gh output"
     return ("archived", "repository is ARCHIVED") if archived else ("ok", "")
+
+
+def resolve_repos(slugs: set[str], want_network: bool) -> dict[str, tuple[str, str]]:
+    """Resolve distinct repository slugs with bounded concurrency and stable keys."""
+    ordered = sorted(slugs)
+    if not want_network:
+        return {slug: ("unknown", "network skipped") for slug in ordered}
+    if not ordered:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(REPO_LOOKUP_WORKERS, len(ordered))) as executor:
+        results = executor.map(resolve_repo, ordered)
+        return dict(zip(ordered, results))
 
 
 # --------------------------------------------------------------------------- scanning
@@ -445,9 +459,7 @@ def run(root: Path, want_network: bool) -> list[Finding]:
     findings = [x for x in raw if not (x.rule == "path" and x.ref in ignored)]
 
     # R2: resolve each distinct slug ONCE, then attribute.
-    state: dict[str, tuple[str, str]] = {}
-    for slug in sorted(slugs):
-        state[slug] = resolve_repo(slug) if want_network else ("unknown", "network skipped")
+    state = resolve_repos(slugs, want_network)
     # `invisible` is surfaced too, not silently dropped: a reader who sees only "OK" would
     # reasonably assume every slug was checked, and one of them was not.
     unknown = [s for s, (st, _) in state.items() if st in ("unknown", "invisible")]
