@@ -39,7 +39,7 @@ const FUND_B = '22222222-2222-4222-8222-222222222222'
 const STRATEGY = '33333333-3333-4333-8333-333333333333'
 
 const contract = (status: string) => ({
-  contractId: CONTRACT_ID, participantPartyId: '55555555-5555-4555-8555-555555555555', productLine: 'DPS', jurisdiction: 'CZ',
+  contractId: CONTRACT_ID, participantPartyId: '55555555-5555-4555-8555-555555555555', participantBirthDate: '1985-05-05', productLine: 'DPS', jurisdiction: 'CZ',
   packVersion: 1, providerEntityId: '66666666-6666-4666-8666-666666666666', providerType: 'PENSION_COMPANY', status,
   schedule: { amount: 1000, currency: 'CZK', frequency: 'MONTHLY' },
   currentStrategy: { strategyCode: 'BALANCED', effectiveFrom: '2026-01-01', electedAt: '2026-01-01T10:00:00Z' },
@@ -122,13 +122,33 @@ describe('pension model', () => {
 })
 
 describe('contract search', () => {
-  it('rejects a non-UUID contract id without navigating', async () => {
+  it('opens a bare UUID directly without a list call', async () => {
     router = () => json([])
     await renderPage(<PensionContractsPage />)
-    fireEvent.change(screen.getByLabelText('Contract id'), { target: { value: 'not-an-id' } })
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open' })) })
+    fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: CONTRACT_ID } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Search' })) })
+    expect(push).toHaveBeenCalledWith(`/pension/contracts/${CONTRACT_ID}`)
+    expect(calls.filter(c => c.url.includes('q='))).toHaveLength(0)
+  })
+
+  it('searches a non-UUID term through the staff q parameter without navigating', async () => {
+    router = () => json([contract('ACTIVE')])
+    await renderPage(<PensionContractsPage />)
+    fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: '850505' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Search' })) })
     expect(push).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert').textContent).toMatch(/UUID/)
+    expect(calls.some(c => c.url.includes('q=850505'))).toBe(true)
+    expect(document.body.textContent).toContain('1985-05-05')
+  })
+
+  it('refuses a one-character search without calling the list route', async () => {
+    router = () => json([])
+    await renderPage(<PensionContractsPage />)
+    fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: '8' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Search' })) })
+    expect(push).not.toHaveBeenCalled()
+    expect(calls.filter(c => c.url.includes('q='))).toHaveLength(0)
+    expect(screen.getByRole('alert').textContent).toMatch(/2 characters/)
   })
 
   it('caps the list request and degrades when the list route is not deployed', async () => {

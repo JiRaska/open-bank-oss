@@ -2,9 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-// Pension contracts (ADR-0334): open a contract by id, or list contracts by status. The id is
-// validated as a UUID before any call (search rule #2). The list is pension-service's staff route
-// GET /contracts?status= (API 1.1.0), newest first.
+// Pension contracts (ADR-0334): open a contract by id, or list contracts by status. A bare UUID
+// opens the contract directly; any other text is a staff free-text search (q): a fragment of the
+// contract or participant party id, the participant birth date (ISO or bare digits, e.g. 1985-04
+// or 850425), the product line, or the contract payment reference (VS). The list is
+// pension-service's staff route GET /contracts?status=&q= (API 1.1.0), newest first.
 
 'use client'
 
@@ -40,20 +42,34 @@ function ContractSearch() {
   const [shown, setShown] = useState(PAGE_SIZE)
 
   const load = useCallback(async () => {
-    const res = await getJson(pensionUrl('/contracts', { status, limit: String(PAGE_SIZE * 4) }), pensionContractListSchema)
+    const q = query.trim()
+    const params: Record<string, string> = { status, limit: String(PAGE_SIZE * 4) }
+    // Live search while typing; a bare UUID opens the contract instead of searching (see open()).
+    // Under two characters the query would match nearly everything, so it is not sent.
+    if (q.length >= 2 && !isUuid(q)) params.q = q
+    const res = await getJson(pensionUrl('/contracts', params), pensionContractListSchema)
     if (!res.ok) { setUnavailable({ kind: res.kind }); setRows(null); return }
     setUnavailable(null)
     setRows(res.data)
     setShown(PAGE_SIZE)
-  }, [status])
+  }, [status, query])
 
   useEffect(() => { void load() }, [load])
 
   const open = (e: FormEvent) => {
     e.preventDefault()
-    if (!isUuid(query)) { setHint(t('Zadejte ID smlouvy ve formátu UUID.', 'Enter the contract id as a UUID.')); return }
+    const q = query.trim()
+    if (isUuid(q)) {
+      setHint(null)
+      router.push(`/pension/contracts/${encodeURIComponent(q)}`)
+      return
+    }
+    if (q.length < 2) {
+      setHint(t('Zadejte alespoň 2 znaky: datum narození, reference (VS), produkt nebo UUID.', 'Enter at least 2 characters: birth date, payment reference, product, or UUID.'))
+      return
+    }
     setHint(null)
-    router.push(`/pension/contracts/${encodeURIComponent(query.trim())}`)
+    void load()
   }
 
   return (
@@ -70,13 +86,13 @@ function ContractSearch() {
             className="input"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder={t('ID smlouvy (UUID)', 'Contract id (UUID)')}
-            aria-label={t('ID smlouvy', 'Contract id')}
+            placeholder={t('Datum narození, reference (VS), produkt nebo UUID', 'Birth date, payment reference, product, or UUID')}
+            aria-label={t('Hledat smlouvy', 'Search contracts')}
             style={{ width: '100%' }}
           />
           {hint && <div role="alert" style={{ fontSize: 12, color: 'var(--danger-text)', marginTop: 4 }}>{hint}</div>}
         </div>
-        <button type="submit" className="btn btn-primary btn-sm">{t('Otevřít', 'Open')}</button>
+        <button type="submit" className="btn btn-primary btn-sm">{t('Hledat', 'Search')}</button>
       </form>
 
       <div className="card" style={{ overflowX: 'auto' }}>
@@ -96,6 +112,7 @@ function ContractSearch() {
               <thead>
                 <tr>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Smlouva', 'Contract')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Narození', 'Born')}</th>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Produkt', 'Product')}</th>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Strategie', 'Strategy')}</th>
@@ -106,6 +123,7 @@ function ContractSearch() {
                 {rows.slice(0, shown).map(c => (
                   <tr key={c.contractId}>
                     <td><Link href={`/pension/contracts/${encodeURIComponent(c.contractId)}`}>{c.contractId}</Link></td>
+                    <td>{c.participantBirthDate ?? '—'}</td>
                     <td>{`${c.productLine} · ${c.jurisdiction}`}</td>
                     <td>{statusLabel(c.status, t)}</td>
                     <td>{c.currentStrategy?.strategyCode ?? '—'}</td>

@@ -105,6 +105,9 @@ class PensionContractApiIT {
     @Inject
     lateinit var contracts: PensionContractRepository
 
+    @Inject
+    lateinit var references: com.openbank.pension.application.port.out.ContractReferenceRepository
+
     private fun <T> onVertx(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
@@ -170,6 +173,32 @@ class PensionContractApiIT {
         post("$base/$id/activate").statusCode(404)
         post("$base/$id/early-termination", """{"currentValue":5000,"confirm":true}""").statusCode(404)
         read(id, party).statusCode(200).body("status", equalTo("PENDING_ACTIVATION"))
+    }
+
+    @Test
+    @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
+    fun `staff free-text search finds a contract by birth date, id fragment, product and reference`() {
+        val id = create()
+        val reference = onVertx { references.referenceFor(UUID.fromString(id)) }
+        // Bare digits of the birth date (rodné číslo style) and the ISO month both match.
+        given().queryParam("q", "850505").`when`().get(base).then().statusCode(200)
+            .body("contractId", hasItem(id))
+            .body("participantBirthDate", hasItem("1985-05-05"))
+        given().queryParam("q", "1985-05").`when`().get(base).then().statusCode(200)
+            .body("contractId", hasItem(id))
+        // A fragment of the contract id, the product line, and the payment reference (VS).
+        given().queryParam("q", id.take(8)).`when`().get(base).then().statusCode(200)
+            .body("contractId", hasItem(id))
+        val byProduct = given().queryParam("q", "dps").`when`().get(base)
+        assertThat(byProduct.statusCode).`as`(byProduct.body.asString()).isEqualTo(200)
+        byProduct.then().body("contractId", hasItem(id))
+        // (the reference query doubles as the diagnostic: any non-200 prints the service's body)
+        val byReference = given().queryParam("q", reference).`when`().get(base)
+        assertThat(byReference.statusCode).`as`(byReference.body.asString()).isEqualTo(200)
+        byReference.then().body("contractId", hasItem(id))
+        // The status filter narrows the search, never widens it.
+        given().queryParam("q", "850505").queryParam("status", "CLOSED").`when`().get(base).then().statusCode(200)
+            .body("contractId", not(hasItem(id)))
     }
 
     @Test
