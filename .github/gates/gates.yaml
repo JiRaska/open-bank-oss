@@ -1815,6 +1815,30 @@ gates:
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
 
+  # Deploy-PR branch updater unit test (2026-10-15 MGM deploy postmortem). Guards the
+  # script that keeps bot deploy PR branches up to date with main so armed auto-merge
+  # can complete under the strict required-status-checks policy. The test stubs gh with
+  # a fixture binary and asserts the never-touch-feature-PRs boundary above all.
+  - id: deploy-pr-updater-unit-test
+    selftest_exempt: "is-a-test-suite"
+    name: "deploy PR updater unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-update-deploy-pr-branches.sh
+
+  # Deployed-code-lag report unit test (2026-10-15 MGM deploy postmortem). Guards the
+  # hours-scale "code on main is not running in sandbox" report that feeds the
+  # deploy-code-lag-watch escalation — aged own-source drift is reported, marker-only
+  # drift stays in deploy-drift-watch's lane.
+  - id: deploy-code-lag-report-unit-test
+    selftest_exempt: "is-a-test-suite"
+    name: "deployed-code-lag report unit test"
+    group: supplychain
+    mode: enforced
+    run: |
+      bash .github/scripts/test-deploy-code-lag-report.sh
+
   # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
   # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
   # machine, to decide whether OpenBank's audit log was tampered with. Nothing in CI can
