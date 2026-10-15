@@ -1653,11 +1653,7 @@ gates:
   - id: stale-comment-references
     name: "stale comment references — prose naming a missing file or dead repo (enforced)"
     group: supplychain
-    # 2026-10-15: raised 52 -> 75 after a 52.4s kill on PR #12822 (run 38657105770). Self-test
-    # 25/25 and the gate itself reported OK — the kill was the budget, and the gate's own
-    # message sanctions a deliberate raise. The PR adds a large workflow header comment to the
-    # scanned corpus; the margin was 0.4s, i.e. variance, not a profile-visible regression.
-    budget_seconds: 75
+    budget_seconds: 52
     mode: enforced
     selftest_inputs: [".github/scripts/check-stale-comment-references.py"]
     selftest: |
