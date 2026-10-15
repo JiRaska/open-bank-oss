@@ -23,7 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 /**
  * Replays authenticated reporting interactions over real HTTP and the migrated database.
  * The same consumer pact's 401 interaction runs without an identity in
- * [PensionReportingNegativeAuthProviderVerificationTest]; this class filters it out because
+ * [PensionNegativeAuthProviderVerificationTest]; this class filters it out because
  * its @TestSecurity identity would otherwise authenticate the anonymous request.
  */
 @QuarkusTest
@@ -31,7 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
 @Provider("openbank-pension-service")
 @PactFolder("../pacts")
-@PactFilter("^(?!no valid M2M identity is presented\$).*\$")
+@PactFilter(PARTICIPANT_REPORTING_STATE)
 class PensionReportingPactFolderProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -48,8 +48,8 @@ class PensionReportingPactFolderProviderVerificationTest {
         checkNotNull(context).verifyInteraction()
     }
 
-    @State("pension participant activity may exist for the third quarter of 2026")
-    fun configureState() {
-        // Fresh Flyway database represents the allowed empty period; SQL aggregation still runs.
-    }
+    @State(PARTICIPANT_REPORTING_STATE)
+    fun configureState() = PactContractSeed.reset()
 }
+
+internal const val PARTICIPANT_REPORTING_STATE = "pension participant activity may exist for the third quarter of 2026"

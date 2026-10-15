@@ -8,6 +8,10 @@ kind: Deployment
 metadata:
   name: pension-service
   namespace: pension
+  # Admit each declared caller only on the port its URL names: customer-edge reaches the
+  # participant API over internal TLS 8443 and never over cleartext 8171.
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
@@ -48,7 +52,7 @@ spec:
         - name: pension-service
           # First build lands via auto-deploy on the merge that adds openbank-pension-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-3a8493a7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-fcfac031
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8171 and management 8090 — both read off the service's own application.yaml

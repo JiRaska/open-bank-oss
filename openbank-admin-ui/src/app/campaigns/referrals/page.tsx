@@ -4,6 +4,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { ArrowRight, Gift, ShieldCheck, Users } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -14,16 +15,10 @@ interface ReferralProgram {
   id: string
   name: string
   version: number
-  rewardAmount: number
-  currency: string
-  qualifyingEvent: string
-  attributionWindowEndsAt: string
-  status: 'PUBLISHED'
-  checker: string
 }
 
 export default function ReferralProgramsPage() {
-  const { t, language } = useLanguage()
+  const { t } = useLanguage()
   const [items, setItems] = useState<ReferralProgram[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
@@ -41,10 +36,6 @@ export default function ReferralProgramsPage() {
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
   }, [])
-
-  const money = (program: ReferralProgram) => new Intl.NumberFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', {
-    style: 'currency', currency: program.currency,
-  }).format(program.rewardAmount)
 
   return <AuthGuard permission="campaign:view">
     <div className="space-y-6">
@@ -66,9 +57,9 @@ export default function ReferralProgramsPage() {
 
       {!loading && !unavailable && items.length > 0 && <section className="grid gap-4 xl:grid-cols-2" aria-label={t('Katalog MGM programů', 'MGM program catalogue')}>
         {items.map(program => <article key={program.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900" data-referral-program={`${program.name}@${program.version}`}>
-          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.12em] text-emerald-700 dark:text-emerald-300">{t('Publikováno', 'Published')} · v{program.version}</p><h2 className="mt-1 text-lg font-semibold">{program.name}</h2></div><span className="rounded-xl bg-amber-50 px-3 py-2 text-lg font-bold text-amber-800">{money(program)}</span></div>
-          <dl className="mt-5 grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><div><dt className="text-xs text-slate-500">{t('Kvalifikace', 'Qualification')}</dt><dd className="mt-1 font-medium">{program.qualifyingEvent}</dd></div><div><dt className="text-xs text-slate-500">{t('Platí do', 'Window ends')}</dt><dd className="mt-1 font-medium">{new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'medium' }).format(new Date(program.attributionWindowEndsAt))}</dd></div></dl>
-          <p className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-violet-700 dark:text-violet-300">{t('Další krok: připnout tuto verzi ke kampani', 'Next: pin this version to a campaign')} <ArrowRight className="h-4 w-4" /></p>
+          <div><p className="text-xs font-bold uppercase tracking-[.12em] text-emerald-700 dark:text-emerald-300">{t('Publikováno', 'Published')} · v{program.version}</p><h2 className="mt-1 text-lg font-semibold">{program.name}</h2></div>
+          <p className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-300">{t('Katalog zveřejňuje pouze neměnnou referenci. Odměnu, kvalifikaci a schvalování spravuje Referral Service.', 'The catalogue publishes only the immutable reference. Referral Service owns reward, qualification, and approval.')}</p>
+          <Link href={`/campaigns/new?referralProgram=${encodeURIComponent(program.id)}`} className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-violet-700 dark:text-violet-300" data-use-referral-program={program.id}>{t('Použít v nové kampani', 'Use in a new campaign')} <ArrowRight className="h-4 w-4" /></Link>
         </article>)}
       </section>}
     </div>
