@@ -188,6 +188,37 @@ class PartyTaxProfileProviderTest {
         assertThat(failSafeCount()).isEqualTo(1.0)
     }
 
+    @Test
+    fun `a missing or unrecognised party type fails safe to withholding, never to legal entity`() {
+        for (type in listOf(null, "", "PARTNERSHIP")) {
+            clearMocks(accountClient, partyClient)
+            registry.clear()
+            stubAccount(partyId)
+            every { partyClient.getParty(partyId) } returns Uni.createFrom().item(
+                PartyDetailClientResponse(id = partyId, partyType = type),
+            )
+
+            val profile = provider.resolve(accountId).await().indefinitely()
+
+            assertThat(profile).describedAs("partyType=%s", type).isEqualTo(TaxProfile.FAIL_SAFE_DEFAULT)
+            assertThat(failSafeCount()).isEqualTo(1.0)
+        }
+    }
+
+    @Test
+    fun `a resolution that never answers fails safe within the deadline instead of propagating`() {
+        stubAccount(partyId)
+        stubParty("INDIVIDUAL")
+        every { partyClient.getAmlProfile(partyId) } returns Uni.createFrom().nothing()
+
+        val profile = assertDoesNotThrow {
+            provider.resolve(accountId).await().atMost(java.time.Duration.ofSeconds(10))
+        }
+
+        assertThat(profile).isEqualTo(TaxProfile.FAIL_SAFE_DEFAULT)
+        assertThat(failSafeCount()).isEqualTo(1.0)
+    }
+
     // --- Helpers ---------------------------------------------------------------------------------
 
     private fun stubAccount(partyId: UUID?) {

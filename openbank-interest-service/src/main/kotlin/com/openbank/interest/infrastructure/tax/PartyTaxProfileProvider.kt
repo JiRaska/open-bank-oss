@@ -17,9 +17,9 @@ import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
-import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -59,9 +59,13 @@ class PartyTaxProfileProvider @Inject constructor(
 
     private val log: Logger = Logger.getLogger(PartyTaxProfileProvider::class.java)
 
-    @Timeout(RESOLVE_TIMEOUT_MS)
-    override fun resolve(accountId: UUID): Uni<TaxProfile> =
-        resolveProfile(accountId).onFailure().recoverWithItem { failure ->
+    // The deadline is applied INSIDE the recovery, not as a fault-tolerance @Timeout: an
+    // interceptor-level timeout fails the Uni the method RETURNS, downstream of
+    // recoverWithItem, so a slow chain (three sequential calls, 5 s read timeout each) would
+    // propagate a TimeoutException to the withholding path the port promises never to fail.
+    override fun resolve(accountId: UUID): Uni<TaxProfile> = resolveProfile(accountId)
+        .ifNoItem().after(Duration.ofMillis(RESOLVE_TIMEOUT_MS)).fail()
+        .onFailure().recoverWithItem { failure ->
             log.warnf(
                 "tax profile for account %s unresolved (%s); failing safe to the " +
                     "CZ-resident-individual default (ADR-0033 §C)",
@@ -83,12 +87,19 @@ class PartyTaxProfileProvider @Inject constructor(
 
     private fun profileFor(partyId: UUID, party: PartyDetailClientResponse): Uni<TaxProfile> {
         // NOT the AML profile's job: it is person-only and would 422. The party record decides.
-        if (!party.partyType.equals(PartyType.INDIVIDUAL.name, ignoreCase = true)) {
-            return Uni.createFrom().item(
-                TaxProfile(TaxpayerType.LEGAL_ENTITY, TaxResidency.RESIDENT),
+        // LEGAL_ENTITY is the NOT_WITHHELD path, so it is granted only for a party type known to
+        // be one. A missing or unrecognised type is a resolution failure and fails safe to
+        // withholding: defaulting it to LEGAL_ENTITY would under-withhold, the bank's liability.
+        val type = party.partyType?.uppercase()
+        return when (type) {
+            PartyType.INDIVIDUAL.name ->
+                partyClient.getAmlProfile(partyId).map { profile -> individualProfile(profile) }
+            in LEGAL_ENTITY_TYPES ->
+                Uni.createFrom().item(TaxProfile(TaxpayerType.LEGAL_ENTITY, TaxResidency.RESIDENT))
+            else -> Uni.createFrom().failure(
+                IllegalStateException("party $partyId has unrecognised partyType '${party.partyType}'"),
             )
         }
-        return partyClient.getAmlProfile(partyId).map { profile -> individualProfile(profile) }
     }
 
     private fun individualProfile(profile: PartyAmlProfileClientResponse): TaxProfile {
@@ -112,9 +123,10 @@ class PartyTaxProfileProvider @Inject constructor(
          *  account is being withheld at the conservative default. */
         const val FAIL_SAFE_COUNTER = "openbank.interest.tax_profile_resolution.fail_safe.total"
 
-        /** Mirrors party-service `PartyType` — kept as strings-over-the-wire, not an enum, so a
-         *  new party type fails the INDIVIDUAL check (→ LEGAL_ENTITY, the no-withholding path)
-         *  rather than throwing. */
-        enum class PartyType { INDIVIDUAL, }
+        /** Mirrors party-service `PartyType`. Read as a string over the wire; a type not listed
+         *  here (or an absent one) fails safe to withholding, never to LEGAL_ENTITY. */
+        enum class PartyType { INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST }
+
+        val LEGAL_ENTITY_TYPES = setOf(PartyType.SOLE_TRADER.name, PartyType.COMPANY.name, PartyType.TRUST.name)
     }
 }
