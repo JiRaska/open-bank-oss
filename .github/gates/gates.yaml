@@ -3193,23 +3193,27 @@ gates:
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
   - id: agent-merge-recorder-selftest
-    name: "agent-merge recorder maps agent PRs to merge evidence and fails soft (ADR-0031 phase 3, enforced)"
+    name: "agent-merge recorder maps agent PRs to merge evidence and fails closed (ADR-0031 phase 3, enforced)"
     group: registry
     mode: enforced
     selftest_exempt: >-
-      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 16-case unittest suite
+      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 22-case unittest suite
       covering the agent/ and codex/ branch mappings, declared-agent author mapping, non-agent
-      no-op exit 0, payload shape, unreachable endpoint -> exit 0 with ::warning::, and the
-      workflow wiring (SHA pin, read-only permissions, concurrency). Its red is reachable by
-      construction: every case drives the real script against stub events/servers.
+      no-op exit 0, payload shape, token-file resolution (minted header wins over env fallback,
+      missing/empty file fails closed), and the workflow wiring (ARC runner, SHA pin, read-only
+      permissions, mint step, no static JWT anywhere, failure tracking issue). Its red is
+      reachable by construction: every case drives the real script against stub events/servers.
     budget_seconds: 60   # local HTTP stubs only, no network; ~2s observed
     rationale: >-
       ADR-0031 phase 3's "recorded human merge" evidence is produced by this CI-side recorder;
       an untested mapping silently attributes merges to the wrong agent (or records nothing),
-      which is worse than no record — it is false provenance in an audit store.
+      which is worse than no record — it is false provenance in an audit store. The recorder
+      deliberately FAILS CLOSED: it runs after the merge (pull_request closed), so red blocks
+      nothing, while the previous fail-soft design let a missing record hide behind a green
+      check — the un-falsifiable state this evidence exists to eliminate.
     review_after: "2027-10-14"
     # Subjects are test cases, not files: the floor drops the day someone deletes a case.
-    min_subjects: 16
+    min_subjects: 22
     run: |
       python3 .github/scripts/test-record-agent-merge.py
 

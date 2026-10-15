@@ -194,12 +194,21 @@ spec:
             # The CI producer (.github/workflows/record-agent-merge.yml) POSTs merge records to
             # POST /api/v1/agent-merge-records on this service (ROLE_ADMIN-protected). It consumes:
             #   * repo variable AGENT_SERVICE_URL — base URL of this service as reachable from the
-            #     CI runner (in-cluster runners can use http://agent-service.platform.svc:8109;
-            #     the admin-ui pod already consumes the same name for its MCP route);
-            #   * repo secret AGENT_MERGE_RECORDER_TOKEN — bearer token accepted by the
-            #     ROLE_ADMIN-protected endpoint.
-            # Both are GitHub repo settings, NOT workload env; they are documented here so the
-            # endpoint's credential/URL contract lives next to the service that enforces it.
+            #     CI runner; the job runs on the in-cluster ARC runner (runs-on: openbank-build),
+            #     so cluster DNS (http://agent-service.platform.svc:8109) resolves — a GitHub-hosted
+            #     runner cannot reach this name at all;
+            #   * repo variable AGENT_MERGE_RECORDER_ISSUER + repo secrets
+            #     AGENT_MERGE_RECORDER_CLIENT_ID/AGENT_MERGE_RECORDER_CLIENT_SECRET — a CI-only
+            #     Keycloak client_credentials pair (client carries ROLE_ADMIN) from which the
+            #     workflow MINTS a fresh bearer token per run. A static JWT is unusable here:
+            #     the realm template's accessTokenLifespan is 300 s, so a provisioned token dies
+            #     minutes after it is created.
+            # The recorder FAILS CLOSED: it fires on pull_request closed (the merge has already
+            # happened, so red blocks nothing), and any missing config / mint / POST failure is
+            # red + one tracking issue — a green run with a missing record would read exactly
+            # like "no agent PRs merged", the un-falsifiable state phase 3 exists to eliminate.
+            # All of these are GitHub repo settings, NOT workload env; they are documented here so
+            # the endpoint's credential/URL contract lives next to the service that enforces it.
             # Observability stack (anonymous in-cluster read) — query.observability.readonly tools.
             - name: QUARKUS_REST_CLIENT_PROMETHEUS_URL
               value: http://kube-prometheus-stack-prometheus.observability.svc:9090
