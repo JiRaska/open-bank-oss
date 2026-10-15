@@ -178,6 +178,10 @@ class LoanApplicationEntity : PanacheEntityBase() {
 
     @Column(name = "decided_at")
     var decidedAt: OffsetDateTime? = null
+
+    /** ADR-0211/0214: set once by the explicit sign command (V27); null on unsigned rows. */
+    @Column(name = "signature_artefact_hash", length = 64)
+    var signatureArtefactHash: String? = null
 }
 
 @Entity
