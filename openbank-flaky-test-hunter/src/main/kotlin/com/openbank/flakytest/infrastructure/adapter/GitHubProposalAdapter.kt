@@ -111,7 +111,9 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
         if (response.status !in OK_RANGE) return null
         val body = objectMapper.readTree(response.bodyAsString())
         val sha = body.path("sha").asText()
-        val encoded = body.path("content").asText().replace("\\n", "")
+        // GitHub's JSON parser returns actual line breaks from its line-wrapped Base64 content.
+        // Strip only those separators; the strict decoder must still reject other whitespace or junk.
+        val encoded = body.path("content").asText().replace("\r", "").replace("\n", "")
         if (sha.isBlank() || encoded.isBlank()) return null
         return SourceFile(
             content = String(Base64.getDecoder().decode(encoded)),
