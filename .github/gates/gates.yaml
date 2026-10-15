@@ -4037,6 +4037,7 @@ gates:
   # so an empty inventory cannot look like an observed clean window.
   - id: provenance
     name: "latest release evidence across the fleet (issue #11685, advisory)"
+    verified: "2026-10-16 — inventory and identity negative controls pass; hosted cryptographic fleet observation remains required before enforcement."
     group: supplychain
     mode: advisory
     rationale: "Graduation requires every deployable component's latest release to carry a complete, independently verified evidence bundle; a single newest-tag check cannot prove fleet coverage."

@@ -1711,6 +1711,7 @@ provenance:
   #   b) multi-stage Dockerfile: cyclonedxBom in the JDK build stage → COPY --from=build bom.json into runtime stage
   # Non-compliant: any `RUN ./gradlew` or `RUN cyclonedxBom` in the RUNTIME (non-build) stage.
   gate: provenance
+  ci_producer: ".github/scripts/check-fleet-release-evidence.py"
   # Rollout state of the deploy-time provenance gate (ADR-0030 D4), staged like the OPA-authz
   # (ADR-0034) and image-signature gates: ADVISORY now — per-release evidence bundles
   # (SBOM+SLSA+VEX+manifest) are produced, KMS-cosign-signed and independently verifiable
