@@ -12,9 +12,8 @@ Služba dodržuje hexagonální architekturu (porty a adaptéry) předepsanou [A
         │       │                   │                                    │
         │       │                   ├─► SanctionsScreeningPort ─────────►│──► sanctions-service
         │       │                   ├─► AmlCasePort ────────────────────►│──► aml-service
-        │       │                   ├─► SctInstPaymentRepository ───────►│──► PostgreSQL
-        │       │                   └─► SctInstEventPublisher ──────────►│──► openbank.sepa.instant.events
-        │       │                       (přímý Kafka emitter, bez outboxu)│
+        │       │                   ├─► platba + outbox ─────────────────►│──► PostgreSQL
+        │       │                   └─► outbox relay ────────────────────►│──► Kafka události
         └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,7 +34,7 @@ Služba dodržuje hexagonální architekturu (porty a adaptéry) předepsanou [A
 Use-cases a porty.
 
 - **Vstupní porty** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Výstupní porty** (`port/out`): `SctInstPaymentRepository`, `SctInstEventPublisher`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
+- **Výstupní porty** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
 - `usecase/SctInstPaymentService` — orchestruje sankční bránu (viz tok níže).
 
 ### Adaptéry (`infrastructure/`)
@@ -43,8 +42,9 @@ Use-cases a porty.
 - `rest/ExceptionMappers` — `NotFoundException → 404`, `BadRequestException → 400`.
 - `client/SanctionsScreeningAdapter` + `SanctionsServiceClient` — REST klient k sanctions-service; mapuje vzdálený stav na lokální `ScreeningMatchStatus`, při nedostupnosti vyhodí `ScreeningUnavailableException`.
 - `client/AmlCaseAdapter` + `AmlServiceClient` — REST klient k case store aml-service.
-- `persistence/` — `SctInstPaymentEntity`, Panache reaktivní repozitář, `SctInstMapper`.
-- `kafka/` — `KafkaSctInstEventPublisher`.
+- `persistence/` — entity platby a outboxu, reaktivní repozitáře, `SctInstMapper`.
+- `outbox/` — `SctInstOutboxDispatcher` vyzvedává a opakuje doručení uložených událostí.
+- `kafka/` — `KafkaSctInstEventPublisher` odesílá uložený čtyřpolový payload.
 - `authz/AuthzProducer` — zapojuje libs authz klienta (ADR-0034).
 
 ## Tok sankční brány (ADR-0032, adaptace na okamžitou linku)
@@ -55,16 +55,26 @@ Při `submit(command)`:
 2. Sestaví se základní platba (`status = PENDING`, `submittedAt = now`).
 3. **Prověrka jména plátce, pak příjemce** synchronně přes `SanctionsScreeningPort`.
 4. `ScreeningPolicy.decide(results)`:
-   - **CLEAR → proceed**: `status = PROCESSING`, nastaví `executionTimeoutAt = now + execution-timeout-seconds (10s)`, uloží, publikuje `SctInstPaymentSubmitted`.
+   - **CLEAR → proceed**: `status = PROCESSING`, nastaví `executionTimeoutAt = now + execution-timeout-seconds (10s)`, uloží platbu a outbox řádek `SctInstPaymentSubmitted` společně.
    - **REVIEW → hold**: uloží `PENDING`, otevře **HIGH** AML případ (`AML_HOLD`); nikdy nezúčtuje.
-   - **BLOCK → reject**: uloží `REJECTED` (`reason = SANCTIONS_HIT`), otevře **CRITICAL** AML případ, publikuje `SctInstPaymentRejected`.
+   - **BLOCK → reject**: uloží `REJECTED` (`reason = SANCTIONS_HIT`) a jeho událost společně; otevře **CRITICAL** AML případ.
 5. **Výpadek prověrky** (`ScreeningUnavailableException`) → **fail closed**: podrží `PENDING`, otevře **MEDIUM** AML případ (`SCREENING_UNAVAILABLE`). Platba se nikdy neuvolní neprověřená (ADR-0032 §C).
 
 Otevření AML případu je **best-effort** (`openCaseQuietly`): výpadek case store zaloguje chybu, ale nikdy nesmí překlopit již vynesený sankční verdikt.
 
 ## Publikování do Kafky
 
-Události životního cyklu (`SctInstPaymentSubmitted`/`Settled`/`Rejected`/…) publikuje `SctInstPaymentService` přímo při každém přechodu přes `SctInstEventPublisher` → `KafkaSctInstEventPublisher`, který je odesílá do kanálu `sct-inst-events-out` (Kafka topic `openbank.sepa.instant.events`). Jde o přímý, synchronní emitter — ne o transakční outbox — takže doručení není atomické s DB zápisem. Dřívější transakční outbox pipeline (`SctInstOutboxPort`/`SctInstOutboxDispatcher`) byla postavená, ale nikdy napojená na žádné reálné volání, a byla odstraněna (issue #1034); reálně používaná pipeline byla vždy `KafkaSctInstEventPublisher`.
+Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její outbox řádek v jedné PostgreSQL transakci. `SctInstOutboxDispatcher` pak řádek vyzvedne a opakuje doručení přes `KafkaSctInstEventPublisher` do `openbank.sepa.instant.events`. Doručení je at-least-once: potvrzení brokerem následované selháním před `markSent` může stejnou událost zopakovat. Dosavadní čtyřpolový Kafka payload se nemění; záznam je nově klíčován id platby (pořadí v rámci platby) a standardní outbox hlavičky nesou trvalé `ce-id` při každém pokusu. Audit-service použije toto ID před Kafka offsetem, pokud tělo nemá `eventId`, a proto musí být auditní konzument nasazen před producentem. Jde o popis zdrojového kódu, nikoli o důkaz schválení, merge či nasazení kandidáta.
+
+| Přechod platby | Dosavadní doménová událost | Záruka v kandidátu |
+| --- | --- | --- |
+| Nová platba do `PROCESSING` | `SctInstPaymentSubmitted` | Platba a řádek události se potvrdí spolu; relay opakuje odeslání až do úspěchu nebo viditelného `DEAD`. |
+| Nová platba do `REJECTED` (screening nebo schéma) | `SctInstPaymentRejected` | Platba a řádek události se potvrdí spolu; stejná politika opakování. |
+| `PROCESSING` do `SETTLED` | `SctInstPaymentSettled` | Stav a událost se potvrdí spolu pod zámkem platby; stejná politika opakování. |
+| `SETTLED` do `RECALLED` | `SctInstPaymentRecalled` | Stav a událost se potvrdí spolu pod zámkem platby; stejná politika opakování. |
+| Nová platba zadržená ve `PENDING` | V dosavadním schématu není doménová událost platby | Řádek platby je trvalý, založení samostatného AML případu zůstává best effort. Doručení události platby zde není slíbeno. |
+
+Idempotentní opakování existujícího podání vrátí uloženou platbu bez druhé události. Tato migrace zpětně nevytváří historické přechody; případná chybějící auditní fakta vyžadují samostatnou schválenou rekonciliaci.
 
 ## Odolnost a rate limiting
 

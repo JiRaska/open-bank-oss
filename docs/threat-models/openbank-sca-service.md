@@ -48,6 +48,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
 | **T**ampering | A co-signature on one business approval spent on another approval, or on an edited payload (#10281 item 2) | `APPROVAL` purpose: the device signs the canonical `id|decision|APPROVAL|approvalRequestId|payloadSha256[|amount|currency|creditorIban]` (amount `0.00` form, currency and IBAN upper-case and compact); initiate refuses an `APPROVAL` challenge without both (400); consume compares both, so a mismatch is 409 and does not burn the challenge |
 | **R**epudiation | A decision record that names only a credential cannot answer "who approved" once the transient decision expires (#10281 item 3) | The resolved challenge row carries `decided_by_party_id` + `decided_by_credential_id` (from the enrolled device) and `on_behalf_of_party_id` (the entity as context); both are returned by consume |
 | **T**ampering | An `Idempotency-Key` reused with a different initiate body is answered with the first challenge, so the caller acts on a challenge minted for another purpose or redirect (#10946) | The key is claimed atomically in Redis (`reserve`) together with a SHA-256 fingerprint of method, path and the canonical request body (libs `RequestFingerprints`: sorted keys, null == absent) BEFORE any challenge is minted. A different body under the key is 409 `IDEMPOTENCY_KEY_REUSED`, a concurrent duplicate is 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`; neither mints anything. A failed initiate releases its marker. Residual: records stored before the fingerprint existed replay without a check until their 300 s TTL lapses; there is no DB-level check, so the binding lasts only as long as the Redis record |
+| **E**oP | A stolen pension-service credential (`service-account-openbank-pension`) spends a customer's payment, card or document approval, or another consumer spends a customer's pension signature (ADR-0335 D1) | OPA admits that identity to `scaChallenge.consume` only (`service-sca-scoped-consumer`, reading the structured `rules.yaml: scoped_sca_consumers` declaration); every other SCA action is denied to it. The domain then resolves a `ConsumerScope` from the authenticated principal, never from the body: pension may spend only an `APPROVAL` challenge whose **stored, device-signed** `approvalRequestId` matches `pension-<operation>:<ref>`, and every other consumer may spend anything except that namespace. A refusal is 403 and happens before the compare-and-consume, so the challenge is not burned. The party, binding and single-use checks are unchanged. Each consume is audited with the consuming principal as actor and the customer as subject, and a scope refusal is audited as `DENIED`. |
 
 ## 5. Residual risks / assumptions
 
@@ -61,6 +62,10 @@ is the **authentication assurance gate** for payments and consent — defeating 
   attested in production (sandbox: enrollment is open, behind the customer-edge auth of ADR-0065).
 
 ## 6. Change log
+
+- **2026-10-09** — **pension-service is a scoped SCA consumer** (ADR-0335 D1, #12385). New caller `service-account-openbank-pension` (ROLE_API), which holds `scaChallenge.consume` and nothing else, and is exempt from four-eyes under ADR-0280's bar. The domain confines it to device-signed `pension-` APPROVAL challenges and reserves that namespace to it. Spoofing/EoP: a stolen pension credential cannot spend a payment, card or document approval, and pension cannot initiate, read, decide or verify a challenge. The remaining exposure is a pension challenge the customer has already approved, which pension could spend on the exact operation it binds, for the right party, once. Repudiation: consumes now emit an `AuditEvent` (actor = principal, resource = party). Tests: `ConsumerScopeTest`, `ConsumerScopesTest`, `ScaServiceTest` (scope cases), `ScaResourceConsumeAuditTest`, `ScaPensionScopedConsumeIT`, `sca_rest_ext_test.rego`.
+
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sca_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. For this service the payloads at stake are `DEVICE_ENROLLED` (party id, credential id) and `SCA_DEVICE_DECIDED` with the signed payment payload (creditor IBAN). This closes the residual the durable-decision entry below records: the outbox copy no longer outlives the 1 826-day retention of `sca_device_decisions`. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-10-06** — SCA approval GET and pending-list responses expose `makerActorKind` from
   the durable approval record (#11588). The `ROLE_OPERATOR`/`ROLE_ADMIN` and
@@ -346,3 +351,33 @@ is the **authentication assurance gate** for payments and consent — defeating 
   PENDING approval can never be decided or claimed, so it ages out on the same clock. A still-live
   approval never matches, because the cutoff lies in the past. The outbox events are not touched. A legal hold is `openbank.sca.approval-purge.enabled=false`. **Rollback:** revert
   the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.
+- **2026-10-11** — **The 8443 listener no longer accepts a client certificate as a login (#12511).**
+  `client-auth: required` (2026-09-20 entries above) also registers Quarkus's mTLS authentication
+  mechanism, which turned any certificate the private CA had signed into an authenticated
+  `SecurityIdentity`: a workload holding a fleet-CA certificate and NO bearer reached `/api/*` as a
+  logged-in principal (measured: 403 from authz instead of 401). `%prod` now restricts `/api/*` to
+  `auth-mechanism: bearer` (the #12506 pattern), so the certificate is transport authentication only and
+  the OIDC bearer is the only identity a route or OPA sees, identically on 8443 and the plain port.
+  **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every 8443 caller
+  already sends its own bearer. Proven by `ScaListenerAuthParityIT` (production listener shape, real
+  HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
+  Rollback: revert the commit (re-opens the path).
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension challenge consumption.** This integration adds the `pension` namespace to `sca-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/sca/challenges/{id}/consume`.
+
+**Threat and required controls.** Challenge consumption is an authorization boundary. Knowledge of the challenge id does not establish the party, operation or payload binding. A machine caller must not create a staff-role shortcut or bypass dynamic linking and single-use consumption.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.

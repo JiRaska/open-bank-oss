@@ -50,6 +50,8 @@ data class StyleVersion(
     val publishedAt: Instant?,
     val retiredAt: Instant?,
     val uiMessages: Map<String, String> = emptyMap(),
+    /** Zero means no published version was observed; null marks a legacy draft with unknown base. */
+    val basePublishedVersion: Int? = null,
 )
 
 /** The composed, published style a consumer fetches and caches (D5's `GET .../published`). */

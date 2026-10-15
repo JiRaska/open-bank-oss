@@ -78,6 +78,16 @@ We follow [coordinated disclosure](https://en.wikipedia.org/wiki/Coordinated_vul
 
 Reporters are credited in release notes and the security advisory unless anonymity is requested.
 
+### Safe harbour for good-faith research
+
+We will not pursue or support legal action against anyone who reports a vulnerability in good faith and stays within this policy. Good faith means that you:
+
+- test only against a deployment of OpenBank that you run yourself;
+- stop and report as soon as you can show the issue exists, without reading, changing or keeping data beyond what that proof needs;
+- do not use the finding for anything other than reporting it, and give us the coordinated-disclosure window above before publishing.
+
+This commitment covers the project's own code and the infrastructure its maintainers operate. It cannot bind third parties: a deployment run by someone else is theirs to authorise (see "Out of Scope"), and nothing here permits social engineering, physical access or volumetric denial of service. If you are unsure whether something is in bounds, ask first through the channels above.
+
 ## Cyber Resilience Act (EU) 2024/2847 Readiness
 
 OpenBank is open-source software in beta and is **not yet placed on the market** as a product with digital elements, so CRA manufacturer duties do not yet bind us. We nevertheless track readiness deliberately — see [ADR-0278](docs/adr/0278-cyber-resilience-act-readiness-secure-sdlc-sbom-and-vulnerability-reporting-duties.md) — and this policy already provides the CRA-shaped surface:

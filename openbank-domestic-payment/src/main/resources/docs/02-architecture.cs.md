@@ -181,3 +181,11 @@ sequenceDiagram
 3. **Fail closed** — výpadek sanctions-service drží platbu v `RECEIVED`; nikdy se automaticky neuvolní.
 4. **Žádné vzdálené volání uvnitř perzistenční transakce** — screening a volání AML případu probíhají mezi transakcemi.
 5. **Trvalá idempotence svázaná s aktérem** — `Idempotency-Key` je povinný; Postgres uloží otisk normalizovaného požadavku atomicky s platbou/outboxem, přesný replay vrátí tento řádek a odlišný požadavek skončí 409.
+
+## Omezení iniciátoři plateb (ADR-0335 D5)
+
+`rules.yaml: scoped_payment_initiators` deklaruje pension-service pro `domestic-payment.create`.
+Doména odvodí z principálu `InitiatorScope`: pension smí platit jen z jednoho nakonfigurovaného
+debetního účtu (`OPENBANK_DOMESTIC_PAYMENT_SCOPED_INITIATORS_PENSION_DEBTOR_ACCOUNT_ID`), nenastavená
+hodnota nepovolí nic a každý jiný stroj jen s ROLE_API je `Undeclared` a nesmí platit z žádného účtu.
+Rozsah se kontroluje před uplatněním `Idempotency-Key`.

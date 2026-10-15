@@ -119,6 +119,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `domestic_payment_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
   folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
   a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
@@ -621,8 +623,11 @@ not change any existing request's outcome until explicitly flipped.
   the replay fingerprint, pinned byte-identical to the pre-Money digest; the settlement amount, which
   is now the Money amount itself (the removed `LEDGER_POSTING` rescale was a no-op for every amount
   Money can hold). Reads, events and the confirmation document serialise at the currency scale
-  (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
-  any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.
+  (`100.50`, not `100.500000`), numerically equal. **Follow-up #12059:**
+  `DomesticSchemeRules.requireSchemeCurrency` now refuses every valid non-CZK amount before the
+  Idempotency-Key is bound, including technical-account submissions. The rejected currency is not
+  echoed to the caller; a corrected CZK retry remains possible. Rollback: revert the rule and its
+  documented API contract together.
 
 ## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
 
@@ -655,3 +660,96 @@ its Ingress and NetworkPolicy peer remain until Phase 5.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension payout initiation.** This integration adds the `pension` namespace to `domestic-payment-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/domestic-payments`.
+
+**Threat and required controls.** A compromised caller can attempt beneficiary or amount substitution and duplicate payout initiation. Preserve provider-side account ownership and payment validation, and the Idempotency-Key replay/conflict rules; network admission is not payout approval.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.
+## 2026-10-09 — Scoped payment initiator: pension-service (ADR-0335 D5)
+
+**2026-10-11 identity hardening (#12448):** The scoped pension branch no longer trusts
+`SecurityIdentity.principal.name` by itself. `ServiceAccountIdentity.isPrincipal` requires a
+Quarkus-verified JWT principal with nonblank subject, `azp=openbank-pension`, and
+`preferred_username=service-account-openbank-pension`; a forged matching username with a
+different or absent `azp` cannot select the pension debtor account. **STRIDE S/E:** this narrows
+the inbound caller trust boundary without changing the configured account, OPA action or
+downstream payment checks. Existing staff-role handling is separate. Residual: compromise of
+the actual pension client credential still permits the scoped payout path; account restriction,
+screening and idempotency remain necessary. Rollback of this hardening would reintroduce the
+username-only impersonation path and is not a safe operational fallback.
+
+`POST /api/v1/domestic-payments` now admits `ROLE_API` in `@RolesAllowed`. That change on its own
+would let any machine holding `ROLE_API` reach the money path, so the domain confines every
+ROLE_API-only caller:
+
+- **Elevation of privilege / Tampering:** `service-account-openbank-pension`, declared in
+  `rules.yaml: scoped_payment_initiators`, may pay only **from** the account configured under
+  `openbank.domestic-payment.scoped-initiators.pension.debtor-account-id`, the pension payout
+  account. An unset value permits nothing. Any other ROLE_API-only principal is `Undeclared` and
+  may pay from no account. Both refusals are a 403 raised before the idempotency lookup or any
+  persistence (`DomesticPaymentServiceTest`). OPA, through `service-scoped-payment-initiator`
+  reading the same register, admits pension to `domestic-payment.create` only. Staff and the
+  operator-role edge are unchanged.
+- **Residual:** a stolen pension credential can still pay **out of the pension payout account**
+  to any CZK creditor. That is the account's purpose. Sanctions screening, fraud scoring, the
+  scheme rules and per-step idempotency still apply to every such payment. Payout limits, or a
+  creditor allow-list from pension's own records, would narrow it further and belong to
+  pension-service.
+
+### Scoped debtor coordinate binding
+
+A scoped initiator must supply its configured debtor account identifier. Before any
+idempotency lookup, persistence or workflow start, the normalized account number and
+bank code are resolved through the existing account lookup and must match that identifier.
+Missing or mismatched resolution fails closed. General initiators retain their existing flow.
+
+### Provider TLS build and rollout
+
+The production build requires client certificates for an HTTPS listener when its server
+key material is configured. This property is fixed at build time; setting only a runtime
+environment variable cannot upgrade an image built without it. Preserve the HTTP listener
+during rollout. First publish a compatible signed provider image, then configure the
+private-CA listener and certificate rotation, and finally switch pension callers to HTTPS.
+OIDC and policy checks continue to authorize business operations independently of TLS trust.
+Roll back caller URLs before removing the provider listener or reverting its image.
+
+## Parallel private-CA listener preparation
+
+The GitOps workload prepares an additional TLS 1.3 listener on port 8443 using a
+separate server-auth Certificate signed by `openbank-ca`, DNS SANs matching the
+Service name, and a read-only certificate/key/CA mount. Client certificates are
+required; existing OIDC and business authorization remain required independently.
+The HTTP listener remains for existing callers. Pension's HTTP URL is retained
+until the reviewed listener rollout and client configuration are verified, after
+which its HTTPS cutover must regenerate the port-scoped network policies. Current
+policy generation also admits the admin BFF on the
+new port; this does not grant a client certificate or bypass application policy.
+Certificate issuance must precede workload rollout. Rollback removes the parallel
+listener preparation while existing HTTP callers remain unchanged; after caller
+cutover, revert caller URLs and policies before removing the listener.
+
+## Verified initiator identity (#12448, PR #12538)
+
+- **Spoofing / Elevation of privilege:** `InitiatorScopes` no longer trusts the principal NAME,
+  which Quarkus derives from a username claim. The pension scoped initiator is recognised only
+  through `ServiceAccountIdentity.isPrincipal` (verified JWT, `azp` = the client,
+  `preferred_username` = `service-account-<azp>`); customer-edge's general initiation is
+  admitted only for that verified edge service-account with `ROLE_OPERATOR`.
+- Staff roles (`ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_PAYMENTS`) grant general initiation only
+  with a verified interactive human token (`ServiceAccountIdentity.isHumanStaff`). A machine
+  token that holds a staff role in some realm resolves to `Undeclared` and fails closed.
+- **Rollback:** reverting the class restores name-based matching; no schema or data change.

@@ -293,6 +293,10 @@ V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:181: plai
 # agent exposes only HTTP :8146 and there is no HTTPS listener to target instead. Retires with
 # the fleet-wide mesh-mTLS work (Layer 1; see #10486).
 V9.1 openbank-infra/gitops/components/case-coordinator/pilot-case-injector.yaml:173: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
+# kyc -> case-coordinator rest client (ADR-0256 trigger loop): the same genuinely NEW plaintext
+# edge as pilot-case-injector above — the agent exposes only HTTP :8146 and there is no HTTPS
+# listener to target instead. Retires with the fleet-wide mesh-mTLS work (Layer 1; see #10486).
+V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:138: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:117: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:126: plaintext http:// env value http://document-service.documents.svc:8143
 # Tempo OTLP endpoint for the Deployments that had none and exported to localhost:4317.
@@ -326,3 +330,6 @@ V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:285: plaintext http
 V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:287: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:85: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:97: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/pension/pension-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/pension-fund/pension-fund-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/tax-reporting/tax-reporting-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317

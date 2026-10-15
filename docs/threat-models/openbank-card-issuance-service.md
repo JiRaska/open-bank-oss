@@ -184,6 +184,8 @@ retiring the corresponding KEK version in Transit, not after.
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `card_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
@@ -263,3 +265,7 @@ revisioned delegation producer.
   `openbank-libs-domain`, identical in behavior to the copy it replaces. **Risk class:** none — the
   admin resource's authorization checks and outbox-replay logic are unchanged; only the log-sanitizer
   helper's defining class moves. Rollback: restore the service-local `sanitizeForLog` copy.
+
+## Machine-caller identity binding (#12448)
+
+The ROLE_API card reads (`card.read` for delegation, `card.list` for party) name their machine callers. `requireNamedCardReader` recognises each one through `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the caller's client and whose `preferred_username` is `service-account-<azp>`. It never uses the principal name, which Quarkus takes from a username claim, so a token whose username matches a listed service account but was issued to another client is refused.

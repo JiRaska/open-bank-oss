@@ -6,6 +6,9 @@ package com.openbank.security.infrastructure.persistence.repository
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.security.application.port.out.IctIncidentOutboxRepository
 import com.openbank.security.infrastructure.persistence.entity.IctIncidentOutboxEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -20,6 +23,7 @@ import java.util.UUID
 @ApplicationScoped
 class IctIncidentOutboxRepositoryImpl(private val clock: Clock) :
     IctIncidentOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("ict_incident_outbox")),
     PanacheRepository<IctIncidentOutboxEntity> {
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {

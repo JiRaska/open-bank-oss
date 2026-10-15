@@ -21,6 +21,9 @@ import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.domain.model.WriteOffRequest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.CollateralId
@@ -70,7 +73,7 @@ class LendingResource(
     private val collateral: CollateralUseCase,
     private val provisioning: ProvisioningUseCase,
     private val terminate: com.openbank.lending.application.port.`in`.TerminateLoanUseCase,
-    private val outbox: com.openbank.lending.application.port.out.LendingOutboxRepository,
+    private val evidence: com.openbank.lending.application.port.out.LoanEvidencePort,
     private val identity: SecurityIdentity,
     private val clock: Clock,
     private val idempotencyStore: IdempotencyStore,
@@ -233,18 +236,35 @@ class LendingResource(
     @Authorize(action = "lending.evidence.read", resource = "#id")
     @Operation(summary = "Ordered evidence bundle for one loan application (ADR-0214)")
     suspend fun evidence(@PathParam("id") id: UUID): Response {
-        val events = outbox.findByAggregateId(id).map { entry ->
+        // ADR-0214 D3 / #11900: the bundle comes from the tamper-evident audit chain, read with the
+        // caller's own token. No fallback to lending_outbox — that table is a delivery buffer and
+        // is purged once delivered; a bundle silently assembled from whatever it still holds would
+        // read as complete when it is not.
+        val bundle = try {
+            evidence.bundleFor(id.toString())
+        } catch (e: com.openbank.lending.application.port.out.LoanEvidenceUnavailable) {
+            val status = when (e.status) {
+                HTTP_UNAUTHORIZED, HTTP_FORBIDDEN -> e.status
+                else -> HTTP_SERVICE_UNAVAILABLE
+            }
+            return Response.status(status).entity(mapOf("error" to "evidence trail unavailable: ${e.message}")).build()
+        }
+        val events = bundle.events.map { event ->
             mapOf(
-                "eventId" to entry.eventId.toString(),
-                "eventType" to entry.eventType,
-                "occurredAt" to entry.createdAt.toString(),
-                "payload" to entry.payload,
+                "eventId" to event.eventId,
+                "eventType" to event.eventType,
+                "sourceService" to event.sourceService,
+                "occurredAt" to event.occurredAt.toString(),
+                "payload" to event.payload,
+                "hashStatus" to event.hashStatus,
             )
         }
         return Response.ok(
             mapOf(
                 "applicationId" to id.toString(),
-                "attestation" to "local-outbox",
+                "attestation" to bundle.attestation,
+                "tampered" to bundle.tampered,
+                "truncated" to bundle.truncated,
                 "eventCount" to events.size,
                 "events" to events,
                 "requestedBy" to actor(),
@@ -277,6 +297,119 @@ class LendingResource(
             .onFailure(OriginationRefusedException::class.java)
             .recoverWithItem { e -> refused(e as OriginationRefusedException) }
             .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
+
+    @POST
+    @Path("/applications/{id}/withdraw")
+    @Operation(
+        summary = "Withdraw an application before disbursement (operator; the customer withdraws " +
+            "through the customer-edge intake route)",
+    )
+    @Authorize(action = "lending.withdraw", resource = "#id")
+    suspend fun withdrawApplication(
+        @PathParam("id") id: UUID,
+        request: WithdrawApplicationRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        // #8351 money-path POST: the replay key is REQUIRED; libs-runtime maps the
+        // IllegalArgumentException to 400, and the reserve below makes a retry replay the stored
+        // outcome instead of re-running a transition the machine would now refuse.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", "$APPLICATIONS_PATH/$id/withdraw", request)
+        return idempotencyStore.submitOnce(
+            originationCommandKey("withdraw", id, idempotencyKey),
+            requestHash,
+            ORIGINATION_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val withdrawn = apply.withdraw(LoanApplicationId(id), request, actor()).awaitSuspending()
+                jsonResponse(withdrawn)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OriginationRefusedException) {
+                refused(e)
+            } catch (e: IllegalArgumentException) {
+                Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            } catch (e: IllegalStateException) {
+                // The policy graph is the authority on which states may still be abandoned: the
+                // machine's refusal (e.g. SIGNED or later, or a terminal state) answers 422.
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+        }
+    }
+
+    @POST
+    @Path("/applications/{id}/submit-documents")
+    @Operation(summary = "Record document submission for an application in DOCS_REQUIRED")
+    @Authorize(action = "lending.submitDocuments", resource = "#id")
+    suspend fun submitDocuments(
+        @PathParam("id") id: UUID,
+        request: SubmitDocumentsRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "$APPLICATIONS_PATH/$id/submit-documents",
+            request,
+        )
+        return idempotencyStore.submitOnce(
+            originationCommandKey("submitDocuments", id, idempotencyKey),
+            requestHash,
+            ORIGINATION_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val updated = apply.submitDocuments(LoanApplicationId(id), request, actor()).awaitSuspending()
+                jsonResponse(updated)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OriginationRefusedException) {
+                refused(e)
+            } catch (e: IllegalArgumentException) {
+                Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            } catch (e: IllegalStateException) {
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+        }
+    }
+
+    @POST
+    @Path("/applications/{id}/sign")
+    @Operation(
+        summary = "Record the customer's signature on the offered contract; persists the artefact hash",
+    )
+    @Authorize(action = "lending.sign", resource = "#id")
+    suspend fun sign(
+        @PathParam("id") id: UUID,
+        request: SignApplicationRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", "$APPLICATIONS_PATH/$id/sign", request)
+        return idempotencyStore.submitOnce(
+            originationCommandKey("sign", id, idempotencyKey),
+            requestHash,
+            ORIGINATION_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val signed = apply.sign(LoanApplicationId(id), request, actor()).awaitSuspending()
+                jsonResponse(signed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OriginationRefusedException) {
+                refused(e)
+            } catch (e: IllegalArgumentException) {
+                Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build()
+            } catch (e: IllegalStateException) {
+                Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build()
+            }
+        }
+    }
+
+    /** The success body of an origination command: 200 with a JSON entity the store can replay. */
+    private fun jsonResponse(body: Any): Response =
+        Response.status(HTTP_OK).entity(objectMapper.writeValueAsString(body))
+            .type(MediaType.APPLICATION_JSON).build()
 
     @GET
     @Path("/applications/{id}")
@@ -494,13 +627,27 @@ class LendingResource(
 
     private fun applyIdempotencyKey(partyId: UUID, requestKey: String) = "lending:apply:$partyId:$requestKey"
 
+    /**
+     * The per-command replay key for the ADR-0211 origination commands (#8351): scoped to the
+     * application, the command, and the acting principal, so the same caller-supplied key under a
+     * different body is caught by the request fingerprint (409 IDEMPOTENCY_KEY_REUSED), and another
+     * principal's key is a different key entirely.
+     */
+    private fun originationCommandKey(command: String, id: UUID, requestKey: String) =
+        "lending:$command:$id:${actor()}:$requestKey"
+
     private companion object {
+        const val HTTP_OK = 200
         const val HTTP_CREATED = 201
         const val APPLY_KEY_TTL_SECONDS = 300L
+        const val ORIGINATION_KEY_TTL_SECONDS = 300L
         const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
         const val HTTP_CONFLICT = 409
+        const val HTTP_UNAUTHORIZED = 401
+        const val HTTP_FORBIDDEN = 403
+        const val HTTP_SERVICE_UNAVAILABLE = 503
         const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }

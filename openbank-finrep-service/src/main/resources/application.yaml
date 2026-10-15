@@ -43,6 +43,8 @@ quarkus:
   rest-client:
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://ledger-service.ledger.svc:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
     # ADR-0313 D6: the risk engine's Pillar 1 result for COREP C 02.00 (read-only). Used only while
     # openbank.finrep.risk-engine.enabled is on; until then C 02.00 renders as a flagged data gap.
     # Local default only: the deployed URL (https, 8443 mTLS) comes from RISK_ENGINE_URL in the
@@ -50,6 +52,8 @@ quarkus:
     # generator reads it.
     risk-engine:
       url: ${RISK_ENGINE_URL:http://localhost:8159}
+      connect-timeout: 2000
+      read-timeout: 5000
 
   log:
     level: INFO

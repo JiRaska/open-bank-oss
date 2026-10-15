@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.money.Money
 import com.openbank.sepainstant.application.port.out.SettlementUnavailableException
 import com.openbank.sepainstant.domain.model.SctInstPayment
@@ -34,6 +35,7 @@ class SettlementAdapterTest {
             // ADR-0100: settle() formats the value date via LocalDate.now(clock); a fixed
             // clock keeps it deterministic (the assertions don't depend on the date).
             clock = Clock.fixed(Instant.parse("2026-01-01T10:00:00Z"), ZoneOffset.UTC)
+            objectMapper = ObjectMapper()
         }
     }
 
@@ -63,10 +65,25 @@ class SettlementAdapterTest {
         updatedAt = fixedNow,
     )
 
+    private fun completedBody(
+        id: UUID,
+        status: String = "COMPLETED",
+        amount: String = "99.50",
+        valueDate: String = "2026-01-01",
+    ): String = """
+        {
+          "id":"$id","status":"$status","type":"DEBIT",
+          "sourceAccountId":"00000000-0000-0000-0000-000000000001",
+          "amount":$amount,"currencyCode":"EUR","rail":"SEPA_INST",
+          "instructionType":"ONE_OFF","valueDate":"$valueDate"
+        }
+    """.trimIndent()
+
     @Test
-    fun `HTTP 201 with Location header returns settled=true and parsed transactionId`() {
+    fun `HTTP 201 with matching COMPLETED body returns settled=true`() {
         val txId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-        val response = Response.created(URI.create("/api/v1/transactions/$txId")).build()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId)).build()
         every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
 
         val outcome = adapter.settle(payment()).await().indefinitely()
@@ -76,24 +93,67 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `HTTP 201 without parseable Location returns settled=true with null transactionId`() {
-        val response = Response.created(URI.create("/api/v1/transactions/not-a-uuid")).build()
+    fun `HTTP 201 uses matching entity id even without parseable Location`() {
+        val txId = UUID.randomUUID()
+        val response = Response.created(URI.create("/api/v1/transactions/not-a-uuid"))
+            .entity(completedBody(txId)).build()
         every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
 
         val outcome = adapter.settle(payment()).await().indefinitely()
 
         assertThat(outcome.settled).isTrue()
-        assertThat(outcome.transactionId).isNull()
+        assertThat(outcome.transactionId).isEqualTo(txId)
     }
 
     @Test
-    fun `HTTP 409 conflict is treated as idempotent settled=true`() {
+    fun `provider-adjusted value date does not hide a completed booking`() {
+        val txId = UUID.randomUUID()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId, valueDate = "2026-01-05")).build()
+        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+
+        assertThat(adapter.settle(payment()).await().indefinitely().settled).isTrue()
+    }
+
+    @Test
+    fun `HTTP 409 conflict is not proof of booking`() {
         val response = Response.status(Response.Status.CONFLICT).build()
         every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
 
-        val outcome = adapter.settle(payment()).await().indefinitely()
+        assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
 
-        assertThat(outcome.settled).isTrue()
+    @Test
+    fun `HTTP 201 with a pending transaction keeps payment processing`() {
+        val txId = UUID.randomUUID()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId, status = "PENDING")).build()
+        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+
+        assertThat(adapter.settle(payment()).await().indefinitely().settled).isFalse()
+    }
+
+    @Test
+    fun `HTTP 201 with failed transaction is not proof of booking`() {
+        val txId = UUID.randomUUID()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId, status = "FAILED")).build()
+        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+
+        assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `HTTP 201 with mismatched amount is not proof of this payment booking`() {
+        val txId = UUID.randomUUID()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId, amount = "100.00")).build()
+        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+
+        assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
+            .isInstanceOf(SettlementUnavailableException::class.java)
     }
 
     @Test
@@ -117,7 +177,8 @@ class SettlementAdapterTest {
     @Test
     fun `idempotency key is prefixed with sct-inst-settlement and uses payment id`() {
         val txId = UUID.randomUUID()
-        val response = Response.created(URI.create("/api/v1/transactions/$txId")).build()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId)).build()
         val capturedKey = mutableListOf<String>()
         every { client.initiateTransaction(capture(capturedKey), any()) } returns Uni.createFrom().item(response)
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.8](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.7...flaky-test-hunter-v0.14.8) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.14.7](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.6...flaky-test-hunter-v0.14.7) (2026-10-12)
+
+
+### Bug Fixes
+
+* **egress:** allow-list third-party hosts and bound in-cluster HTTP responses ([#11740](https://github.com/JiRaska/open-bank-oss/issues/11740)) ([d81d1d8](https://github.com/JiRaska/open-bank-oss/commit/d81d1d8e362f49be4883bfca884f967c742de5d0))
+
 ## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.5...flaky-test-hunter-v0.14.6) (2026-10-04)
 
 

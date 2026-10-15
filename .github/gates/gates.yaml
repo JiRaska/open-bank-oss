@@ -236,6 +236,21 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  # Phase 1 must keep the ancestry and consumer-derivation probe executable on every PR.
+  # The actual desired/live rollout check remains a Phase 2 precondition: it is expected
+  # to fail until every libs-runtime consumer has been rebuilt and deployed.
+  - id: pdp-flag-rollout-probe-self-test
+    name: "PDP service-account rollout probe stays executable (#12448, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 1
+    rationale: "A broken rollout probe could falsely declare all PEP images current and let Phase 2 policy read a field that old PEPs never send. Its fixtures test current, stale and unresolved pins before deployment."
+    review_after: "2027-04-11"
+    selftest_exempt: "is-a-test-suite — the run is check-pdp-flag-rollout.sh --self-test"
+    run: |
+      bash .github/scripts/check-pdp-flag-rollout.sh --self-test
+
   # Critical-alert RCA ledger guards (ADR-0241 D1/D3, #5869 / #5875). These self-tests
   # were written and wired ONLY as steps inside the scheduled workflows that use them —
   # `alert-rca-weekly.yml` (Mondays) and `standing-critical-digest.yml` (daily). Both
@@ -394,6 +409,33 @@ gates:
     run: |
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
+  # A proposed ADR is an open promise; nothing distinguished "open awaiting work" from "open
+  # because everyone forgot" (84 proposed ADRs at the 2026-10 fleet audit). The clock is
+  # creation-age + an optional `last-reviewed:` re-affirmation key, NOT last-commit: measured
+  # at authoring time, weekly mechanical docs sweeps touch ADR files fleet-wide (every proposed
+  # ADR's last-commit was <= 86 days old while the oldest proposal was 110+ days old), so a
+  # last-commit clock can never fire here. Advisory first (ADR-0144): first live run flags 4
+  # ADRs (0141, 0142, 0155, 0170); each then gets decided, re-affirmed, or baselined.
+  - id: adr-proposed-staleness
+    name: "proposed ADRs must not sit undecided for more than 90 days (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 90  # real git history walk; measured 9s locally
+    verified: "2026-10-14 — 4 findings (0141, 0142, 0155, 0170) confirmed as genuinely open proposals from 2026-06/07; clock semantics validated against real sweep history"
+    rationale: >-
+      decision-status is front-matter prose read once at authoring time; without a clock the
+      proposed pool only grows. Re-affirmation is a deliberate `last-reviewed:` front-matter
+      key that mechanical sweeps do not touch — same pattern as check-advisory-finding-staleness
+      .py's `verified:` field.
+    review_after: "2027-04-14"
+    min_subjects: 1   # 4 stale proposed ADRs at authoring time (2026-10-14)
+    selftest_inputs: [".github/scripts/check-adr-proposed-staleness.py"]
+    selftest: |
+      python3 .github/scripts/check-adr-proposed-staleness.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-adr-proposed-staleness.py --root . --today "$(date -u +%F)"
+
   # ==== gitops =========================================================
   - id: deploy-hold-image-pins
     name: "held services cannot change GitOps image pins (issue #11503)"
@@ -551,6 +593,22 @@ gates:
       # 8 self-test cases, both directions, including prose-in-a-comment near-misses.
       python3 .github/scripts/check-untrusted-pg-extension.py --enforce
 
+  - id: tofu-image-pull-through
+    name: "a tofu-managed image ref is already the ECR pull-through path (else Kyverno makes it a perpetual plan diff)"
+    group: gitops
+    budget_seconds: 10
+    mode: enforced
+    min_subjects: 30   # 72 .tf files under openbank-infra on origin/main today
+    rationale: "Kyverno's ecr-pull-through-rewrite-cel rewrites origin image refs on Pods and (autogen) pod controllers at admission; a tofu-owned controller writing the origin ref shows an in-place update on every plan and is rewritten back on every apply (kubernetes_cron_job_v1.arc_reaper did). Writing the pull-through path makes the policy a no-op."
+    review_after: "2027-04-10"
+    selftest: python3 .github/scripts/check-tofu-image-pull-through.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-tofu-image-pull-through.py"]
+    run: |
+      # Falsified both ways: 4 findings / exit 1 on origin/main before the fix (arc_reaper's
+      # alpine + three unmarked ARC helm values), 0 / exit 0 after. 8 self-test cases.
+      python3 .github/scripts/check-tofu-image-pull-through.py --enforce
+
   - id: eso-crd-api-version
     name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
     group: gitops
@@ -669,6 +727,32 @@ gates:
       python3 .github/scripts/check-single-replica-rollout-strategy.py --enforce \
         --baseline .github/single-replica-rollout-strategy-baseline.txt \
         --canary-baseline .github/canary-rollout-realisable-baseline.txt
+
+  - id: public-workload-ha
+    name: "publicly routed workloads run >= 2 replicas, a PDB and a node spread (enforced, baseline-ratcheted)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      customer-edge, the public entry point, ran one replica, so the 2026-10-03 04:40Z pod rotation
+      failed the journey-public-edge probe, and so does every rollout, eviction or spot move. The
+      scope is derived from Ingress/HTTPRoute backends, so a new public workload is checked without
+      anyone adding it to a list; a backend Service no gitops manifest declares is a finding
+      ("cannot check"), never a silent pass.
+    review_after: "2027-04-01"
+    verified: >-
+      2026-10-04 -- 16 publicly routed workloads, 50 findings on origin/main (customer-edge: one
+      replica, no PDB, no spread); 47 after the customer-edge fix, all baselined. Setting
+      customer-edge back to replicas 1 in the real manifest fails the gate with exactly that one NEW
+      finding. The self-test covers a compliant workload, each missing control on its own, an HPA
+      floor standing in for replicas, and an undeclared backend Service.
+    min_subjects: 10   # 16 publicly routed workloads today (2026-10-04)
+    selftest: python3 .github/scripts/check-public-workload-ha.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-public-workload-ha.py"]
+    run: |
+      python3 .github/scripts/check-public-workload-ha.py --enforce \
+        --baseline .github/public-workload-ha-baseline.txt
 
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
@@ -2818,6 +2902,53 @@ gates:
     run: |
       python3 .github/scripts/check-configproperty-supplied.py --enforce
 
+  # A url-carrying quarkus.rest-client.<client> without an explicit connect/read timeout inherits
+  # SmallRye/Vert.x defaults — the classic source of a cascading overload, where one slow upstream
+  # holds every caller thread until the pool exhausts and the failure surfaces three services away
+  # from its cause. 2026-10 fleet audit: explicit timeouts on ~19 of 67 services; --fix seeded the
+  # fleet with the measured convention (connect 2000-3000 ms, read 2000-5000 ms on the 19 services
+  # that already declared them), this gate then holds the ratchet. A service whose SLO needs a
+  # different bound sets it explicitly — that decision belongs to the service owner, not the gate.
+  - id: rest-client-timeouts
+    name: "every url-carrying rest-client declares connect/read timeouts (enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 30  # indentation parse over ~30 yaml files; measured 0.2s locally
+    rationale: >-
+      An unbounded wait on a money-path call is a defect in itself, whatever the upstream does.
+      The check is indentation-based text parsing, NOT a YAML round-trip, because these files
+      carry review-critical comments a load/dump cycle would destroy.
+    review_after: "2027-04-14"
+    min_subjects: 100   # 100 clients seeded across 30 services (2026-10-14)
+    selftest_inputs: [".github/scripts/check-rest-client-timeouts.py"]
+    selftest: |
+      python3 .github/scripts/check-rest-client-timeouts.py --self-test
+    run: |
+      python3 .github/scripts/check-rest-client-timeouts.py --root . --enforce
+
+  # Quarkus leaves idle-timeout/max-lifetime/max-size OFF by default; a transient DB blip that
+  # poisons pooled connections then wedges the service until a pod restart (billing #1682: ~8h
+  # unable to reach a healthy DB, 0 restarts, every health probe green). The fix landed only in
+  # billing; the 2026-10 fleet sweep seeded billing's measured values (5M/30M/20) across the other
+  # 91 reactive pools, this gate holds the ratchet.
+  - id: datasource-pool-self-heal
+    name: "every reactive datasource pool declares idle-timeout/max-lifetime/max-size (enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 30  # indentation parse over ~30 yaml files; measured 0.1s locally
+    rationale: >-
+      Three distinct jobs (billing's own comment): idle-timeout evicts a dead idle connection
+      within the cleaner period; max-lifetime is the hard ceiling on how long any wedge can
+      survive; max-size bounds a reconnect storm. Indentation-based text parsing, NOT a YAML
+      round-trip — these files carry review-critical comments.
+    review_after: "2027-04-14"
+    min_subjects: 50   # 92 reactive pools across the fleet (2026-10-14)
+    selftest_inputs: [".github/scripts/check-datasource-pool-self-heal.py"]
+    selftest: |
+      python3 .github/scripts/check-datasource-pool-self-heal.py --self-test
+    run: |
+      python3 .github/scripts/check-datasource-pool-self-heal.py --root . --enforce
+
   # Negative control: delete `insecure-requests: enabled` from ledger-service's %prod block
   # and it exits 1 naming the file and profile; restore it and it exits 0 (66 subjects).
   - id: mtls-keeps-http-port
@@ -2837,6 +2968,28 @@ gates:
       python3 .github/scripts/check-mtls-keeps-http-port.py --self-test
     run: |
       python3 .github/scripts/check-mtls-keeps-http-port.py --enforce
+
+  # Negative controls: drop a module from mtls-bearer-only-baseline.txt and it exits 1 naming it
+  # (NEW); add a compliant module to the baseline and it exits 1 (STALE). Each service's
+  # *ListenerAuthParityIT (openbank-libs-testing ListenerAuthParityConformance) proves the behaviour.
+  - id: mtls-bearer-only
+    name: "a client-auth listener authenticates the API by bearer only (enforced, baseline-ratcheted)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      With quarkus.http.ssl.client-auth on, Quarkus also registers its mTLS authentication mechanism,
+      so any certificate the trust store accepts becomes an authenticated identity on 8443. A workload
+      holding a fleet-CA certificate and no bearer was "logged in" (treasury measured 403 where 401 was
+      due, #12506). Every profile with client-auth must restrict its resource roots to
+      auth-mechanism: bearer. First run: 11 services, baselined against #12511, fixed one PR each.
+    review_after: '2027-04-10'
+    min_subjects: 40
+    budget_seconds: 15
+    selftest_inputs: [".github/scripts/check-mtls-bearer-only.py"]
+    selftest: |
+      python3 .github/scripts/check-mtls-bearer-only.py --self-test
+    run: |
+      python3 .github/scripts/check-mtls-bearer-only.py --enforce
 
   - id: restclient-url-supplied
     name: "a localhost rest-client URL fallback is supplied by the service's gitops env (enforced, baseline-ratcheted)"
@@ -3229,6 +3382,31 @@ gates:
     run: |
       python3 .github/scripts/check-xml-factory-hardened.py --root .
 
+  # #12448: a caller guard must not decide "this is service X" from the principal NAME. Quarkus
+  # takes that name from upn/preferred_username (a username claim), so `principal?.name in CALLERS`
+  # or `== "service-account-…"` trusts a username, not the client the token was issued to. The one
+  # sanctioned test is libs-runtime's ServiceAccountIdentity (verified JWT, sub, azp, and
+  # preferred_username == service-account-<azp>). Flags a principal-name accessor (or a local alias
+  # of one) used in ==, !=, in, !in or .equals in any src/main Kotlin file. KNOWN_PENDING in the
+  # script holds two sites tied to their own issue/PR (#12447, #12457) and reports itself stale.
+  - id: principal-name-trust
+    name: "caller guards bind to client identity (azp), never the principal name (#12448, enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      Thirteen caller guards across eight services admitted a "trusted service" by comparing the
+      principal name, which any token whose username matched could satisfy. They were migrated to
+      one tested helper in the same change; this keeps a fourteenth from being hand-rolled.
+    review_after: "2027-04-10"
+    verified: "2026-10-10 — self-test covers literal ==, !in allow-list, == configured principal, the two-step alias, userPrincipal, and the clean helper/attribution/startsWith/comment/src-test/opt-out cases; run against the tree before the service migration it reported all 13 sites and exited 1, after it 0"
+    budget_seconds: 30
+    min_subjects: 1400   # 2832 src/main Kotlin files measured 2026-10-10; half
+    selftest: python3 .github/scripts/check-principal-name-trust.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-principal-name-trust.py"]
+    run: |
+      python3 .github/scripts/check-principal-name-trust.py --root .
+
   # ADR-0318: rounding belongs in libs' RoundingPolicy registry, not in a money-path service's
   # inline setScale(n, RoundingMode.X). Per-service token counts measured 2026-09-26 are
   # baselined in the script; a new site OR a stale (now lower) baseline is a finding.
@@ -3276,6 +3454,26 @@ gates:
     selftest_inputs: [".github/scripts/check-outbox-conformance-it.py"]
     run: |
       python3 .github/scripts/check-outbox-conformance-it.py --root .
+
+  - id: outbox-sent-retention
+    name: "outbox dispatcher owners opt into SENT-row retention (ADR-0329)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      The libs-runtime OutboxSentRetentionJob purges only beans of type SentOutboxRetention; an
+      outbox whose repository is not one keeps every SENT payload (IBANs, names, device decisions)
+      forever, and nothing at runtime distinguishes that from a quiet night. purgeSent had no caller
+      at all until this gate's PR, so every outbox in the fleet was in that state. Exemptions are
+      by module with a reason and may only shrink.
+    review_after: "2027-04-30"
+    verified: "2026-10-03 — self-test flags an import/comment/string/method-name-only mention, a stale exemption both ways and a reasonless one; on the real tree, removing sca-service's opt-in was flagged, and the first run caught case-coordinator's body-less class header before the parser was fixed"
+    budget_seconds: 30
+    min_subjects: 20   # 40 dispatcher owners measured 2026-10-03; half
+    selftest: python3 .github/scripts/check-outbox-sent-retention.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-sent-retention.py"]
+    run: |
+      python3 .github/scripts/check-outbox-sent-retention.py --root .
 
   # ADR-0327 D11: a hand-rolled `FOR UPDATE SKIP LOCKED` in any openbank-*/src/main outside
   # openbank-libs-runtime is a finding unless baselined. Comments are stripped first — a raw

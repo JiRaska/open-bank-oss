@@ -1,0 +1,14 @@
+{{!-- SPDX-License-Identifier: Apache-2.0 --}}
+{{!-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0. --}}
+<!-- LEGAL-REVIEW-REQUIRED: draft wording, not approved by legal (ADR-0334, #12379) -->
+{{#if legalReviewRequired}}<p class="draft">NÁVRH – text vyžaduje právní kontrolu a nesmí být použit vůči klientům.</p>{{/if}}
+<h1>Potvrzení o zaplacených příspěvcích pro účely daně z příjmů za rok {{taxYear}}</h1>
+<p>Smlouva: {{contractReference}}</p>
+<table>
+<tr><td>Příspěvky účastníka</td><td>{{participantContributions}} {{currency}}</td></tr>
+<tr><td>Z toho odečitatelná částka</td><td>{{deductibleAmount}} {{currency}}</td></tr>
+<tr><td>Příspěvky zaměstnavatele</td><td>{{employerContributions}} {{currency}}</td></tr>
+<tr><td>– osvobozené</td><td>{{employerExempt}} {{currency}}</td></tr>
+<tr><td>– zdanitelné</td><td>{{employerTaxable}} {{currency}}</td></tr>
+<tr><td>Státní příspěvky</td><td>{{stateIncentives}} {{currency}}</td></tr>
+</table>
