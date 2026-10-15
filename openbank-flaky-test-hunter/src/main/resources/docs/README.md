@@ -27,7 +27,7 @@ Config (`flaky-test-hunter.policy-gate`):
 | `opa-url` | `http://localhost:8181` | OPA sidecar base URL |
 | `timeout` | `PT0.5S` | per-call connect + request timeout; exceeding it fails closed (`pdp_unreachable`) |
 
-Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — operations `flaky-test-hunter.github.pr_opened` / `flaky-test-hunter.github.ticket_opened` — carrying `policy_decision` (ALLOW only when the gate allowed **and** the PR was actually opened), `policy_blocked`, `policy_denial_reason`, and the evaluated `tool`/`resource`/`pr_branch`. A refusal is exactly as auditable as an opened PR; a blocked mechanical fix (`policy_blocked: true`) is distinguishable from a finding that had no fix at all.
+Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent.github.pr_open` for every attempted PR path, including denials, and `flaky-test-hunter.github.ticket_opened` when no fix enters the PR path. The event carries `policy_decision` (ALLOW only when the gate allowed **and** the PR was actually opened), `policy_blocked`, `policy_denial_reason`, the evaluated `tool`/`resource`/`pr_branch`, `pr_url` for an opened PR, and `proposal_url` for the selected PR or ticket. A refusal is as auditable as an opened PR; a blocked mechanical fix (`policy_blocked: true`) is distinguishable from a finding that had no fix at all.
 
 ## Build identity
 

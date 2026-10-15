@@ -100,7 +100,7 @@ class DiagnoseAndProposeActivityImplTest {
         val event = captured.captured
         assertThat(event.actorType).isEqualTo("AI_AGENT")
         assertThat(event.actorId).isEqualTo("flaky-test-hunter")
-        assertThat(event.operation).isEqualTo("flaky-test-hunter.github.pr_opened")
+        assertThat(event.operation).isEqualTo("agent.github.pr_open")
         assertThat(event.resourceType).isEqualTo("flaky_test_finding")
         assertThat(event.resourceId).isEqualTo("finding-1")
         assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
@@ -112,27 +112,32 @@ class DiagnoseAndProposeActivityImplTest {
         assertThat(event.payload["pr_branch"]).isEqualTo("flaky-test-hunter/unit-return-finding-")
         assertThat(event.payload["model_id"]).isEqualTo("deepseek-ai/DeepSeek-V3.2")
         assertThat(event.payload["proposal_url"]).isEqualTo("https://github.com/JiRaska/open-bank-oss/pull/9001")
+        assertThat(event.payload["pr_url"]).isEqualTo("https://github.com/JiRaska/open-bank-oss/pull/9001")
     }
 
     @Test
     fun `no mechanical fix falls back to the ticket path and records a DENY policy decision`() {
         val finding = aFinding()
         coEvery { llm.proposeFixDiff(finding, finding.rootCause!!) } returns null
-        coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns null
+        coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns
+            "https://github.com/JiRaska/open-bank-oss/issues/9001"
         coEvery { findingRepository.update(any()) } answers { firstArg() }
 
         val result = activity.propose(finding)
 
-        assertThat(result.proposalUrl).isNull()
+        assertThat(result.proposalUrl).isEqualTo("https://github.com/JiRaska/open-bank-oss/issues/9001")
         val captured = slot<AuditEvent>()
         coVerify(exactly = 1) { auditPublisher.publish(capture(captured)) }
         val event = captured.captured
         assertThat(event.operation).isEqualTo("flaky-test-hunter.github.ticket_opened")
-        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.result).isEqualTo(AuditResult.SUCCESS)
         assertThat(event.payload["policy_decision"]).isEqualTo("DENY")
         assertThat(event.payload["policy_blocked"]).isEqualTo(false)
         assertThat(event.payload["tool"]).isNull()
-        assertThat(event.payload["proposal_url"]).isNull()
+        assertThat(event.payload["proposal_url"]).isEqualTo(
+            "https://github.com/JiRaska/open-bank-oss/issues/9001",
+        )
+        assertThat(event.payload["pr_url"]).isNull()
         // No PR path was considered at all — the gate is never consulted.
         coVerify { prPathGate wasNot Called }
         coVerify(exactly = 0) { githubProposal.openProposalPr(any(), any()) }
@@ -146,16 +151,23 @@ class DiagnoseAndProposeActivityImplTest {
         // Fail-closed adapter refusal (no token, ineligible finding, or a failed GitHub call) — null,
         // never an exception and never a fabricated URL.
         coEvery { githubProposal.openProposalPr(finding, "add-explicit-unit-return-type") } returns null
-        coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns null
+        coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns
+            "https://github.com/JiRaska/open-bank-oss/issues/9002"
         coEvery { findingRepository.update(any()) } answers { firstArg() }
 
         activity.propose(finding)
 
         val captured = slot<AuditEvent>()
         coVerify(exactly = 1) { auditPublisher.publish(capture(captured)) }
-        assertThat(captured.captured.payload["policy_decision"]).isEqualTo("DENY")
-        assertThat(captured.captured.payload["policy_blocked"]).isEqualTo(false)
-        assertThat(captured.captured.result).isEqualTo(AuditResult.DENIED)
+        val event = captured.captured
+        assertThat(event.operation).isEqualTo("agent.github.pr_open")
+        assertThat(event.payload["policy_decision"]).isEqualTo("DENY")
+        assertThat(event.payload["policy_blocked"]).isEqualTo(false)
+        assertThat(event.result).isEqualTo(AuditResult.DENIED)
+        assertThat(event.payload["proposal_url"]).isEqualTo(
+            "https://github.com/JiRaska/open-bank-oss/issues/9002",
+        )
+        assertThat(event.payload["pr_url"]).isNull()
     }
 
     @Test
@@ -173,7 +185,8 @@ class DiagnoseAndProposeActivityImplTest {
         coEvery { llm.proposeFixDiff(finding, finding.rootCause!!) } returns "add-explicit-unit-return-type"
         coEvery { prPathGate.decide(finding) } returns
             PrPathDecision.Denied(reason)
-        coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns null
+        coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns
+            "https://github.com/JiRaska/open-bank-oss/issues/9003"
         coEvery { findingRepository.update(any()) } answers { firstArg() }
 
         val result = activity.propose(finding)
@@ -186,7 +199,7 @@ class DiagnoseAndProposeActivityImplTest {
         val captured = slot<AuditEvent>()
         coVerify(exactly = 1) { auditPublisher.publish(capture(captured)) }
         val event = captured.captured
-        assertThat(event.operation).isEqualTo("flaky-test-hunter.github.ticket_opened")
+        assertThat(event.operation).isEqualTo("agent.github.pr_open")
         assertThat(event.result).isEqualTo(AuditResult.DENIED)
         assertThat(event.payload["policy_decision"]).isEqualTo("DENY")
         assertThat(event.payload["policy_blocked"]).isEqualTo(true)
@@ -194,6 +207,9 @@ class DiagnoseAndProposeActivityImplTest {
         assertThat(event.payload["tool"]).isEqualTo("gh.pr.open")
         assertThat(event.payload["resource"]).isEqualTo("github-pr")
         assertThat(event.payload["pr_branch"]).isEqualTo("flaky-test-hunter/unit-return-finding-")
-        assertThat(event.payload["proposal_url"]).isNull()
+        assertThat(event.payload["proposal_url"]).isEqualTo(
+            "https://github.com/JiRaska/open-bank-oss/issues/9003",
+        )
+        assertThat(event.payload["pr_url"]).isNull()
     }
 }

@@ -103,7 +103,7 @@ open class DiagnoseAndProposeActivityImpl(
                 proposedAt = Instant.now(),
             )
         }
-        auditProposal(finding, fixDiff, proposed.proposalUrl, gateDecision)
+        auditProposal(finding, fixDiff, prUrl, proposed.proposalUrl, gateDecision)
         findingRepository.update(proposed)
     }
 
@@ -111,11 +111,13 @@ open class DiagnoseAndProposeActivityImpl(
      * One AI-attributed [AuditEvent] per disposition, regardless of outcome — a refusal is exactly
      * as auditable as an opened PR (D5, ADR-0031). `policy_decision` is `ALLOW` only when the
      * policy gate ALLOWED the PR path and the fail-closed write path
-     * ([GitHubProposalPort.openProposalPr]) actually produced a PR; every other outcome — no
-     * mechanical fix, a gate denial (`policy_blocked: true` with `policy_denial_reason`, e.g.
-     * `pdp_unreachable`), a missing/invalid token, an ineligible finding, or a GitHub API
-     * failure — is `DENY` and falls back to the ticket-only path. The policy payload names the
-     * exact tool, resource, and branch the gate evaluated, so the audit trail answers "what
+     * ([GitHubProposalPort.openProposalPr]) actually produced a PR. A gate denial
+     * (`policy_blocked: true` with `policy_denial_reason`, e.g. `pdp_unreachable`), a missing or
+     * invalid token, an ineligible finding, or a GitHub API failure is `DENY` and falls back to the
+     * ticket-only path. With no mechanical fix there is no PR path to evaluate, so the disposition
+     * is also ticket-only. The canonical `agent.github.pr_open` operation names every attempted PR
+     * path, including denials; a ticket-only disposition keeps its separate operation. The policy
+     * payload names the exact tool, resource, and branch the gate evaluated, so the audit trail answers "what
      * would this ALLOW have touched" without a second lookup. No human approver is known yet at
      * proposal time (that is [FindingStatus.APPROVED], recorded separately once a human disposes
      * the finding through the HITL queue).
@@ -123,19 +125,26 @@ open class DiagnoseAndProposeActivityImpl(
     private suspend fun auditProposal(
         finding: FlakyTestFinding,
         fixDiff: String?,
+        prUrl: String?,
         proposalUrl: String?,
         gateDecision: PrPathDecision?,
     ) {
-        val prOpened = fixDiff != null && proposalUrl != null
+        val prPathAttempted = fixDiff != null
+        val prOpened = prUrl != null
         val gateDenied = gateDecision is PrPathDecision.Denied
         auditPublisher.publish(
             AuditEvent(
                 actorId = AGENT_ID,
                 actorType = "AI_AGENT",
-                operation = if (prOpened) "$AGENT_ID.github.pr_opened" else "$AGENT_ID.github.ticket_opened",
+                operation = if (prPathAttempted) PR_OPEN_OPERATION else "$AGENT_ID.github.ticket_opened",
                 resourceType = "flaky_test_finding",
                 resourceId = finding.id,
-                result = if (proposalUrl != null) AuditResult.SUCCESS else AuditResult.DENIED,
+                result = when {
+                    prPathAttempted && prOpened -> AuditResult.SUCCESS
+                    prPathAttempted -> AuditResult.DENIED
+                    proposalUrl != null -> AuditResult.SUCCESS
+                    else -> AuditResult.DENIED
+                },
                 payload = mapOf(
                     "model_id" to config.modelId(),
                     "flaky_test_check_type_impacted" to finding.checkType.name,
@@ -145,6 +154,7 @@ open class DiagnoseAndProposeActivityImpl(
                     "tool" to if (fixDiff != null) PrPathGateVocabulary.TOOL_GH_PR_OPEN else null,
                     "resource" to if (fixDiff != null) PrPathGateVocabulary.RESOURCE_GITHUB_PR else null,
                     "pr_branch" to if (fixDiff != null) GitHubProposalPort.prBranchFor(finding.id) else null,
+                    "pr_url" to prUrl,
                     "proposal_url" to proposalUrl,
                     "human_approved_by" to null,
                 ),
@@ -159,5 +169,6 @@ open class DiagnoseAndProposeActivityImpl(
 
     private companion object {
         const val AGENT_ID = "flaky-test-hunter"
+        const val PR_OPEN_OPERATION = "agent.github.pr_open"
     }
 }
