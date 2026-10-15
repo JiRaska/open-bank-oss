@@ -32,7 +32,9 @@ info:
   # so MINOR is the required class.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.38.0
+  # 1.39.0: re-bump — 1.38.0 was taken on main by #12769 (ADR-0211) after this branch
+  # was cut; the api-contract gate requires a fresh MINOR on live main.
+  version: 1.39.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
