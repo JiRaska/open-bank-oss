@@ -330,8 +330,13 @@ export function hasPermission(roles: string[], permission: Permission): boolean 
  * immediately changes every matching page consistently, while the backend/OPA remains the
  * enforcement authority for data and mutations. Longest prefixes win, so `/system/config` can
  * be stricter than `/system` without an exception in a page component.
+ *
+ * A prefix maps to one permission, or to an OR-set admitting the route with ANY member:
+ * /communication/edit hosts two permission-gated sections (ADR-0285 D6 — the maker drafts,
+ * the checker publishes from the SAME page), so requiring only communication:style:propose
+ * would wall the checker out of the publish controls this page exists to give them.
  */
-const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = [
+const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[], readonly string[]]> = [
   ['dashboard:view', ['/dashboard']],
   ['system:config', ['/system/config']],
   ['catalog:read', ['/product-studio']],
@@ -394,15 +399,15 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   // startsWith match (no wildcards) — a dynamic segment can only differentiate a permission
   // when it comes AFTER the differentiating literal, which is why the editor lives at
   // /communication/edit/[personaKey], not /communication/[personaId]/edit.
-  ['communication:style:propose', ['/communication/edit']],
+  [['communication:style:propose', 'communication:style:decide'], ['/communication/edit']],
   ['communication:templates:manage', ['/communication/notification-templates']],
   ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
 ]
 
-export function permissionForPath(pathname: string): Permission | undefined {
-  let match: { permission: Permission; length: number } | undefined
+export function permissionForPath(pathname: string): Permission | readonly Permission[] | undefined {
+  let match: { permission: Permission | readonly Permission[]; length: number } | undefined
   for (const [permission, prefixes] of ROUTE_PREFIXES) {
     for (const prefix of prefixes) {
       if ((pathname === prefix || pathname.startsWith(`${prefix}/`)) && (!match || prefix.length > match.length)) {
@@ -411,6 +416,14 @@ export function permissionForPath(pathname: string): Permission | undefined {
     }
   }
   return match?.permission
+}
+
+/** True when the route guard admits at least one of the route's required permissions. */
+export function pathAllowedByRoles(pathname: string, roles: string[]): boolean {
+  const permission = permissionForPath(pathname)
+  if (!permission) return true
+  const required = Array.isArray(permission) ? permission : [permission]
+  return required.some(p => hasPermission(roles, p))
 }
 
 export function hasRole(roles: string[], role: Role): boolean {
