@@ -85,13 +85,26 @@ WORKFLOW = pathlib.Path(".github/workflows/auto-update-armed-prs.yml")
 OK_CONCLUSIONS = {"success", "neutral", "skipped"}
 
 
+# Deploy-bot PRs are updated under the same readiness and cost controls as armed PRs.
+BOT_DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
+BOT_AUTHOR = "app/openbank-gitops-bot"
+
+
+def is_bot_deploy_pr(p: dict) -> bool:
+    return (p.get("user", {}).get("login") == BOT_AUTHOR
+            and any((p.get("head", {}).get("ref") or "").startswith(pre)
+                    for pre in BOT_DEPLOY_PREFIXES))
+
+
 # --------------------------------------------------------------------------- pure decision
 def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt.datetime,
            head_committed_at: dt.datetime | None, debounce_minutes: int) -> tuple[bool, str]:
     """Return (update?, reason). `checks` maps context -> conclusion (None = not completed)."""
     if pr.get("draft"):
         return False, "draft"
-    if not pr.get("auto_merge"):
+    armed = bool(pr.get("auto_merge"))
+    bot = bool(pr.get("bot_deploy"))
+    if not armed and not bot:
         return False, "auto-merge not armed"
     if not pr.get("same_repo"):
         return False, "head is a fork"
@@ -102,20 +115,23 @@ def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt
         return False, f"mergeable_state={state}, not behind"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
-    missing = [c for c in required if c not in checks]
-    if missing:
-        return False, f"required context(s) not reported: {', '.join(missing)}"
-    pending = [c for c in required if checks[c] is None]
+    pending = [c for c in required if c in checks and checks[c] is None]
     if pending:
         return False, f"required context(s) pending: {', '.join(pending)}"
-    failed = [c for c in required if checks[c] not in OK_CONCLUSIONS]
+    failed = [c for c in required
+              if c in checks and checks[c] not in OK_CONCLUSIONS and checks[c] != "cancelled"]
     if failed:
         return False, "required context(s) not green: " + ", ".join(f"{c}={checks[c]}" for c in failed)
     if head_committed_at is not None:
         age = (now - head_committed_at).total_seconds() / 60
         if age < debounce_minutes:
             return False, f"debounced — head committed {age:.0f} min ago (< {debounce_minutes})"
-    return True, "behind + armed + all required contexts green"
+    actor = "armed" if armed else "bot deploy PR (not armed)"
+    unregistered = [c for c in required if c not in checks or checks[c] == "cancelled"]
+    if unregistered:
+        return True, (f"behind + {actor} + required context(s) unregistered: "
+                      f"{', '.join(unregistered)} — update re-registers them")
+    return True, f"behind + {actor} + all required contexts green"
 
 
 BUILD_PREFIX = "build (openbank-"
@@ -186,7 +202,7 @@ def self_test() -> int:
         ("behind+green+armed -> update", base, green, old, True),
         ("behind+pending -> skip", base, {**green, "Gitleaks": None}, old, False),
         ("behind+failed -> skip", base, {**green, "Gitleaks": "failure"}, old, False),
-        ("behind+missing context -> skip", base, {"Validate manifests": "success"}, old, False),
+        ("behind+missing context re-registers", base, {"Validate manifests": "success"}, old, True),
         ("dirty -> skip", {**base, "mergeable_state": "dirty"}, green, old, False),
         ("not armed -> skip", {**base, "auto_merge": None}, green, old, False),
         ("draft -> skip", {**base, "draft": True}, green, old, False),
@@ -200,6 +216,57 @@ def self_test() -> int:
         ok = got == want
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: update={got} ({why})")
+    bot_deploy = {**base, "auto_merge": None, "bot_deploy": True}
+    for name, pr, checks, want in [
+        ("bot deploy without auto-merge can update", bot_deploy, green, True),
+        ("bot deploy pending check waits", bot_deploy, {**green, "Gitleaks": None}, False),
+        ("bot deploy failed check waits", bot_deploy, {**green, "Gitleaks": "failure"}, False),
+        ("human unarmed PR still waits", {**base, "auto_merge": None}, green, False),
+    ]:
+        got, why = decide(pr, req, checks, now, old, 20)
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {got} ({why})")
+    for name, user, ref, want in [
+        ("bot deployment prefix", BOT_AUTHOR, "chore/gitops-auto-deploy-42", True),
+        ("admin UI bot prefix", BOT_AUTHOR, "chore/admin-ui-deploy-42", True),
+        ("human with bot-like branch", "human", "chore/gitops-auto-deploy-42", False),
+        ("bot with ordinary branch", BOT_AUTHOR, "feat/payment", False),
+    ]:
+        got = is_bot_deploy_pr({"user": {"login": user}, "head": {"ref": ref}})
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {got}")
+    for name, checks, want in [
+        ("missing required context re-registers", {"Validate manifests": "success"}, True),
+        ("cancelled context re-registers", {**green, "Gitleaks": "cancelled"}, True),
+        ("pending sibling prevents context recovery", {"Gitleaks": None}, False),
+        ("failed sibling prevents context recovery", {"Gitleaks": "failure"}, False),
+    ]:
+        got, why = decide(base, req, checks, now, old, 20)
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {got} ({why})")
+    # Context recovery must obey the full debounce for both actor classes.
+    for actor, pr in [("armed", base), ("bot deploy", bot_deploy)]:
+        for state, checks in [
+            ("missing", {"Validate manifests": "success"}),
+            ("cancelled", {**green, "Gitleaks": "cancelled"}),
+        ]:
+            for age, want in [(0, False), (44, False), (45, True), (120, True)]:
+                got, why = decide(pr, req, checks, now,
+                                  now - dt.timedelta(minutes=age), 45)
+                ok = got == want
+                failures += not ok
+                print(f"{'PASS' if ok else 'FAIL'}  {actor}+{state}+age={age}: {why}")
+        for state, checks, reason in [
+            ("pending+missing", {"Validate manifests": None}, "pending"),
+            ("failed+missing", {"Validate manifests": "failure"}, "not green"),
+        ]:
+            got, why = decide(pr, req, checks, now, now, 45)
+            ok = not got and reason in why
+            failures += not ok
+            print(f"{'PASS' if ok else 'FAIL'}  {actor}+fresh+{state}: {why}")
     for name, args, want in [
         ("unknown + behind_by>0 -> behind", ("unknown", None, 3), "behind"),
         ("null + behind_by>0 -> behind", (None, None, 1), "behind"),
@@ -251,6 +318,34 @@ def self_test() -> int:
         ok = used == want and len(calls) == want_reads and all("/pulls/" not in c for c in calls)
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: {used}, {len(calls)} bounded reads")
+    # More than GitHub's 250-entry PR-commit cap: the first-parent walk still counts
+    # only valid signed updater merges, then stops at the author commit.
+    def long_graph(authored: int, updates: int) -> tuple[str, dict]:
+        commits: dict[str, dict] = {}
+        prev = None
+        for i in range(authored + updates):
+            current = f"{i:040x}"
+            merge = i >= authored
+            parents = ([{"sha": prev}, {"sha": sha(1000 + i)}] if merge else
+                       ([{"sha": prev}] if prev else [{"sha": sha(999)}]))
+            commits[current] = {"sha": current, "commit": {
+                "message": "Merge branch 'main' into codex/long" if merge else "feat: work",
+                "committer": {"name": "GitHub" if merge else "Author",
+                              "email": "noreply@github.com" if merge else "author@example.com"},
+                "verification": {"verified": True}}, "parents": parents}
+            prev = current
+        return prev, commits
+    head, long_commits = long_graph(320, 2)
+    long_reads: list[str] = []
+    def long_api(_method: str, path: str, _body: dict | None = None):
+        commit_sha = path.rsplit("/", 1)[1]
+        long_reads.append(commit_sha)
+        return (200, long_commits[commit_sha]) if commit_sha in long_commits else (404, "Not Found")
+    with patch.dict(globals(), {"api": long_api}):
+        used = branch_update_count("example/repo", 42, "main", 4, head)
+    ok = used == 2 and len(long_reads) == 3
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  322-commit history bounded: {used}, {len(long_reads)} reads")
     chain[sha(8)] = commit(8, False, 7)
     with patch.dict(globals(), {"api": commit_api}):
         used = branch_update_count("example/repo", 42, "main", 4, sha(8))
@@ -317,17 +412,19 @@ def self_test() -> int:
                 failures += not ok
                 print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
-                                "get": fixture_get, "head_checks": lambda *_: {}}):
+                                "get": fixture_get, "head_checks": lambda *_: {},
+                                "branch_update_count": lambda *_: 0,
+                                "api": lambda *_args, **_kwargs: (409, "race")}):
         report = {"targets": []}
         with contextlib.redirect_stdout(io.StringIO()):
             result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
         ok = result == 0 and report["targets"] == [{
-            "pr": 42, "head_sha": "a" * 40, "budget_validated": False,
-            "update_count": None, "history_error": False,
+            "pr": 42, "head_sha": "a" * 40, "budget_validated": True,
+            "update_count": 0, "history_error": False,
             "updated": False, "updated_head_sha": None,
         }]
         failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  missing context has no target-history evidence")
+        print(f"{'PASS' if ok else 'FAIL'}  missing context recovery still validates target history")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                 "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
                                 "branch_update_count": lambda *_: 0,
@@ -396,26 +493,29 @@ def self_test() -> int:
               and report["targets"][0]["updated_head_sha"] is None)
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  rejected update {status} cannot recover target")
-    for label, response, expected in (
-        ("changed", (200, {"head": {"sha": "b" * 40}}), 0),
-        ("unchanged", (200, {"head": {"sha": "a" * 40}}), 1),
-        ("malformed", (200, {"head": {"sha": "bad"}}), 1),
-        ("unreadable", (503, {}), 1),
+    for label, data, expected in (
+        ("Unicode expected-head race", {"message": "expected head sha didn’t match current head ref."}, 0),
+        ("ASCII expected-head race", {"message": "expected head sha didn't match current head ref."}, 0),
+        ("generic validation", {"message": "Validation Failed"}, 1),
+        ("different precondition", {"message": "expected head sha is invalid"}, 1),
+        ("wrong schema", {"message": ["expected head sha didn’t match current head ref."]}, 1),
+        ("plain text", "expected head sha didn’t match current head ref.", 1),
+        ("no message", {"errors": ["head mismatch"]}, 1),
     ):
         calls = []
-        def racing_api(method, path, body=None, calls=calls, response=response):
+        def racing_api(method, path, body=None, calls=calls, data=data):
             calls.append(method)
-            return (422, {"message": "expected head sha didn’t match current head ref."}) if method == "PUT" else response
+            return (422, data) if method == "PUT" else (200, {"head": {"sha": "b" * 40}})
         report = {"targets": []}
         with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                     "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"},
                                     "branch_update_count": lambda *_: 0, "api": racing_api}), \
                 contextlib.redirect_stdout(io.StringIO()):
             result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
-        ok = (result == expected and calls == ["PUT", "GET"]
+        ok = (result == expected and calls == ["PUT"]
               and report["targets"][0]["updated"] is False)
         failures += not ok
-        print(f"{'PASS' if ok else 'FAIL'}  HTTP 422 with {label} head preserves recovery and error semantics")
+        print(f"{'PASS' if ok else 'FAIL'}  HTTP 422 {label} preserves recovery and error semantics")
     def unreadable_count(*_args):
         raise ValueError("unreadable test history")
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
@@ -803,16 +903,19 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         return 0
     now = dt.datetime.now(dt.timezone.utc)
     pulls = get(f"/repos/{repo}/pulls?state=open&base={branch}&per_page=100")
-    armed = [p for p in pulls if p.get("auto_merge") and not p.get("draft")]
-    print(f"{len(pulls)} open PR(s) against {branch}, {len(armed)} armed and non-draft")
+    candidates = [p for p in pulls
+                  if not p.get("draft") and (p.get("auto_merge") or is_bot_deploy_pr(p))]
+    print(f"{len(pulls)} open PR(s) against {branch}, "
+          f"{len(candidates)} armed-or-bot-deploy and non-draft")
     failed_updates = 0
     entries, shas, budgets, budget_holds = [], {}, {}, []
-    for p in armed:
+    for p in candidates:
         n = p["number"]
         budget_error = False
         full = get(f"/repos/{repo}/pulls/{n}")
         sha = shas[n] = full["head"]["sha"]
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
+              "bot_deploy": is_bot_deploy_pr(full),
               "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
               "mergeable_state": full.get("mergeable_state")}
         if pr["same_repo"] and pr["mergeable_state"] in (None, "unknown"):
@@ -886,7 +989,14 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
                     print(f"::warning::#{n}: update accepted but target head transition unverified")
             print(f"UPDATE #{n} {sha[:9]}: {why} "
                   f"(budget {used + 1}/{max_updates_per_pr})")
-        elif code == 409 or (code == 422 and head_changed_since(repo, n, sha)):
+        elif code == 409 or (
+            code == 422 and isinstance(data, dict) and isinstance(data.get("message"), str)
+            and data["message"] in (
+                "expected head sha didn’t match current head ref.",
+                "expected head sha didn't match current head ref.",
+            )
+        ):
+            # Only the known expected-head precondition race is benign; all other 422s fail.
             # Never retry against the new head: the next run must recheck CI and budget.
             print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
         else:
