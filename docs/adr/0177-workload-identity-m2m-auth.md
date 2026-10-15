@@ -1,11 +1,12 @@
 ---
 date: 2026-07-19
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
+followup: "#12748 — Phase 1 pilot config is committed (realm IdP + token-exchange permission, agent SA projection, rotator seed script) but the live realm application is owner-gated (runbook 0009 vault write + live kcadm/token-exchange verification); Phase 2 fleet rollout and Phase 3 secret retirement are unbuilt"
 tags: [authn, secrets, kubernetes]
 summary: "Services prove identity to peers with their platform-attested Kubernetes ServiceAccount token, exchanged at Keycloak per RFC 8693, retiring per-service static client secrets and the rotator; OPA authorization is unchanged."
 ---
@@ -100,13 +101,55 @@ end state once a mesh exists.
 **Rollout (per-service, behind a flag, never big-bang):**
 - Phase 0 (done): `keycloak/admin` seeded → rotator no longer crashes and skips
   all rotation → nothing breaks. **Do not** seed per-service `client_id` into
-  `openbank/keycloak/<svc>` — that is the dangerous half-fix.
+  `openbank/keycloak/<svc>` — that is the dangerous half-fix. The seed script is
+  `openbank-infra/scripts/seed-secret-rotator-keycloak-admin.sh` (idempotent; reads
+  the out-of-band `keycloak-bootstrap` secret and copies the admin credentials to
+  OpenBao KV `openbank/keycloak/admin` — it does not invent a password the live
+  Keycloak would not accept).
 - Phase 1: stand up the Keycloak↔cluster-issuer trust + token-exchange config in
   a non-prod realm; migrate 1–2 pilot services, keeping the `oidc-client` secret
   path as a fallback.
 - Phase 2: roll across the fleet service-by-service.
 - Phase 3: delete the static OIDC secrets, the `<svc>-oidc` ExternalSecrets, and
   the `secret-rotator`.
+
+### Phase 1 delivery note (pilot: openbank-agent-service, 2026-10-14)
+
+What is committed (this repo, no owner credentials needed):
+
+- `openbank-infra/gitops/components/keycloak/realm-template.json`: the realm's
+  first identity provider — alias `kubernetes` (OIDC), `__KUBERNETES_OIDC_ISSUER__`
+  placeholder for the cluster's `--service-account-issuer`, and on the
+  `openbank-agent` client the `standard.token.exchange.enabled` attribute plus a
+  `token-exchange` scope permission granted to requester client `openbank-agent`
+  (the `authorizationSettings` shape `openbank-mcp-service` carries for the
+  ADR-0224 OBO exchange, self-referential here). Template import verified against
+  `quay.io/keycloak/keycloak:26.8.0` with zero ERROR lines.
+- `openbank-infra/gitops/components/agent/`: ServiceAccount `openbank-agent` and a
+  projected `serviceAccountToken` volume (audience `keycloak`, ~1h TTL) mounted at
+  `/var/run/secrets/tokens/sa-token` in the agent-service Deployment. The
+  `oidc-client` secret path is untouched as the fallback; nothing consumes the
+  token file yet — this is the pilot wiring.
+
+What remains owner-gated (needs cluster/credentials only the owner holds):
+
+1. **Render + write the realm import** per runbook 0009
+   (`docs/runbooks/0009-keycloak-realm-import-reconcile.md`): substitute all
+   `__PLACEHOLDER__` tokens (including the two new `KUBERNETES_OIDC_*` ones),
+   verify with `render-verify-keycloak-realm-import.sh openbank` (the boot test
+   alone is not sufficient per the runbook — mint a token and inspect the JWT),
+   then `vault kv put openbank/keycloak-realm-import`. Because `--import-realm`
+   runs on **cold start only**, the live realm additionally needs the IdP and the
+   `openbank-agent` token-exchange permission applied to the *running* Keycloak
+   (kcadm or admin console) — a template write alone does not touch it.
+2. **Verify the exchange end-to-end in the non-prod realm**: project a token from
+   an agent-service pod, exchange it at
+   `{issuer}/protocol/openid-connect/token` with grant
+   `urn:ietf:params:oauth:grant-type:token-exchange` (subject_token =
+   SA JWT, subject_issuer = `kubernetes`, requested_token_type =
+   `urn:ietf:params:oauth:token-type:access_token`), confirm the returned token
+   carries `openbank-agent`'s roles, and confirm a client without the permission
+   is denied. Only then wire the service code to prefer the exchanged token.
 
 ## Alternatives considered
 
