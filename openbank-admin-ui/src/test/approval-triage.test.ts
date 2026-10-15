@@ -69,6 +69,20 @@ describe('approval inbox triage', () => {
       .toEqual(['balance-old'])
   })
 
+  it.each([
+    ['99999.99', '10k-100k'],
+    ['100000', '10k-100k'],
+    ['100000.01', 'gt100k'],
+  ] as const)('places %s in exactly the %s amount band', (amount, expected) => {
+    const bands = ['lt1k', '1k-10k', '10k-100k', 'gt100k'] as const
+    for (const currency of ['CZK', 'EUR']) {
+      const item: DomainApprovalItem = { ...rows[0], amount, currency }
+      const matched = bands.filter(amountBand =>
+        filterAndSortDomainApprovals([item], 'all', 'oldest', '', { amountBand }).length === 1)
+      expect(matched).toEqual([expected])
+    }
+  })
+
   it('filters by request age against an injectable clock, with untimestamped items outside every band', () => {
     const now = new Date('2026-08-31T12:00:00Z')
     const aged: DomainApprovalItem[] = [

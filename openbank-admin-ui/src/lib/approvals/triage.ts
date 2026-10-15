@@ -81,7 +81,7 @@ function amountInBand(amount: string, band: ApprovalAmountBand): boolean {
   const upper = AMOUNT_BAND_UPPER[band]
   // 'lt1k' has no lower bound; the other two start at their naming floor.
   const lower = band === 'lt1k' ? Number.NEGATIVE_INFINITY : upper / 10
-  return value >= lower && value < upper
+  return value >= lower && (band === '10k-100k' ? value <= upper : value < upper)
 }
 
 function ageInBand(proposedAt: string, band: ApprovalAgeBand, nowMs: number): boolean {
