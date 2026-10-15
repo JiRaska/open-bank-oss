@@ -143,8 +143,10 @@ class SupplyChainTest(unittest.TestCase):
         events['pull_request']['paths'].remove('.github/agent-prompts/pr-steward.md')
         self.assertTrue(guard.steward_scope_findings(prompt, rules, bad_workflow))
 
+        # An emptied prefix scope is valid policy (owner decision 2026-10-14): this rules
+        # document still fails closed, but only because max_open_prs is missing below.
         bad_rules = copy.deepcopy(rules)
-        bad_rules['autonomous_agent_prs']['agent_branch_prefixes'] = []
+        bad_rules['autonomous_agent_prs']['agent_branch_prefixes'] = 'agent/'
         self.assertTrue(guard.steward_scope_findings(prompt, bad_rules, workflow))
 
     def test_platform_image_tag_follows_scan_and_attestation(self):

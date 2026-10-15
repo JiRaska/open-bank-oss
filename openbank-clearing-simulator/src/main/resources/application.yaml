@@ -38,6 +38,8 @@ quarkus:
   rest-client:
     sepa-payment-service:
       url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8108}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   shutdown:
     timeout: 30S

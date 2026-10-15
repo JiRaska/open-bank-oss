@@ -27,6 +27,7 @@ This documentation is published by the service at the management endpoint `/q/op
 | `POST /api/v2/pension/simulations` | Illustrative projection per strategy (not advice) |
 | `PUT /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | SCA-bound, held (3 days), notified payout-account change |
 | `GET /api/v2/pension/operator/payouts`, `GET /api/v2/pension/death-claims` | Staff queues |
+| `GET /api/v2/pension/reporting/participant-aggregates` | Period aggregates for the ČNB returns: counts and sums only, staff-reported (#12425) |
 
 Activation happens only through the onboarding workflow (signed application, cooling-off, first
 contribution or transfer-in); termination is the S5 quote/sign flow under `/exit`. Every POST
@@ -39,6 +40,19 @@ The payout recovery sweep registers workflow `pension-payout-schedule-sweep` at 
 `openbank_workflow_success_recorded` distinguishes a registered workflow that has not completed from a successful run. `openbank_workflow_last_success_age_seconds` is seeded at registration, so its startup value alone is not proof that a sweep ran. The existing overdue-installment gauge measures workload; the heartbeat measures execution.
 
 An `off` or `disabled` interval disables the schedule and publishes no workflow heartbeat.
+
+## Participant reporting for the ČNB returns
+
+`GET /api/v2/pension/reporting/participant-aggregates` serves one period's aggregates for the
+ČNB returns (#12425, ADR-0336 D4). It returns counts and sums only — no contract, party or
+participant attribute. It counts contracts in force at period end by product line, age band and
+status, and totals contributions (by source, including state contributions) and payouts. It is a
+staff reporting read; it does not mutate contracts and is not a participant self-service endpoint.
+
+Payout totals are measured by the persisted SETTLED transition time: the settlement record stores
+the `settledAt` event time received from domestic-payment (migration `V15__payout_settlement_time`).
+During a rolling deployment, older SETTLED events without `settledAt` remain in the consumer's DLQ
+and are not silently re-dated.
 
 ### Additive internal TLS rollout
 
