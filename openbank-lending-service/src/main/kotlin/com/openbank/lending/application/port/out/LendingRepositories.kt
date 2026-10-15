@@ -21,6 +21,7 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
+@Suppress("TooManyFunctions") // one query/persistence concern per origination step (hexagonal)
 interface LoanApplicationRepository {
     /**
      * Serializes an origination step with its local writes in one transaction (#11626): the
@@ -83,6 +84,18 @@ interface LoanApplicationRepository {
         decisionReason: String?,
         decidedAt: OffsetDateTime?,
     ): Uni<Int>
+
+    /**
+     * The sign leg's claim (ADR-0211 D1/D6): the conditional AWAITING_SIGNATURE → SIGNED
+     * transition AND the signature artefact hash, in one statement. A separate
+     * [compareAndSetStatus]-then-update pair could leave a SIGNED row whose artefact hash never
+     * arrived (or carry a hash on a row the transition lost to a concurrent caller) — the same
+     * split-write defect [compareAndSetDecision] exists to close for the ASSESSMENT leg.
+     *
+     * Returns rows claimed, `0` meaning another actor moved the row on first — same contract,
+     * same caller obligation: no evidence event and no workflow signal on a refusal (#3850).
+     */
+    fun compareAndSetSignature(application: LoanApplication, from: OriginationState): Uni<Int>
 }
 
 /**

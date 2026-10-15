@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { hasPermission, permissionForPath } from '@/lib/auth/roles'
 
 const APP_ROOT = 'src/app'
-const PUBLIC_ROUTES = new Set(['/', '/auth/error', '/auth/forbidden', '/auth/login', '/privacy'])
+const PUBLIC_ROUTES = new Set(['/', '/auth/error', '/auth/forbidden', '/auth/login', '/privacy', '/r/sample'])
 
 function pageRoutes(dir: string, route = ''): string[] {
   return readdirSync(dir).flatMap(entry => {

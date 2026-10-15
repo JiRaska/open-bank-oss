@@ -14,6 +14,7 @@ This documentation is published directly by the service at the management endpoi
 | [04 — Data](./04-data.md) | Data, analytics, DBA | What it persists (almost nothing), audit/prompt-hash, PII posture |
 | [05 — Operations](./05-operations.md) | DevOps, SRE, release engineers | Build, deploy, FinOps tier, runbooks, SLO |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | DORA, GDPR, AI Act, PSD2/AML read-surface mapping |
+| [08 — Workload identity](./08-workload-identity.md) | Engineering, SRE | ADR-0177 Phase 1 pilot: projected SA token, Keycloak token exchange, secret fallback |
 
 ## TL;DR
 
