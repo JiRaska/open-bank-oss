@@ -118,3 +118,15 @@ Versions are resolved from the shared `libs.versions.toml` / `openbank.quarkus-s
 - **Release axis:** release-please owns `version.txt` (currently `0.2.0`). A feature/fix PR must **not** hand-edit `version.txt`; merging to `main` opens a per-service Release PR which bumps it, writes the changelog and tags `standing-order-service-v<version>`.
 - **API contract axis:** `openapi.yaml info.version` (`1.0.0`) is bumped independently from the OpenAPI diff (ADR-0048), not from the commit type.
 - **CI:** path-scoped per-service pipeline; integration tests use per-job Testcontainers (no shared compose stack).
+
+## ONCE-order completion (#12839)
+
+A `Frequency.ONCE` order's ONLY path to `COMPLETED` is `confirmExecution` — `recordExecution`
+deliberately does not complete it (a ONCE order that failed its single execution must stay
+ACTIVE so it can be retried), and `calculateNextDate` never advances its `nextExecutionDate`.
+So `confirmExecution` must complete a confirmed ONCE order even when `failureCount == 0`: the
+fast-path that skipped the domain call on the happy path left a successfully-paid ONCE order
+`ACTIVE` forever, and `findDueForExecution` (`nextExecutionDate <= asOf AND status = 'ACTIVE'`)
+re-picked it on every daily sweep — `executionCount` inflating and a duplicate
+`standing-order.due.v1` outbox row emitted per sweep. Regression proof:
+`StandingOrderOnceCompletionIT` (sweep → confirm → second sweep schedules nothing).
