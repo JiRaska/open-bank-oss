@@ -23,6 +23,8 @@ money-path service, not adjacent.
 [Scheduler / Admin-UI] --HTTPS/internal--> [openbank-interest-service]
                                                 |
                      account lookup        ---|---> [account-service] (AccountDirectoryAdapter)
+                     account detail (party) ---|---> [account-service] (AccountServiceClient.getAccount)
+                     party record + AML     ---|---> [party-service] (PartyServiceClient, PartyTaxProfileProvider)
                      published rate snapshot ---|---> [product-catalog] (immutable revision lookup)
                      capitalization journal ---|---> [ledger-service] (RestLedgerPostingAdapter, CapitalizationJournalFactory)
                      debit remittance       ---|---> [transaction-service] (TransactionServiceClient)
@@ -31,7 +33,7 @@ money-path service, not adjacent.
 ```
 
 - **External entities:** scheduler (internal trigger, no external caller), admin-UI (ROLE_OPERATOR/ADMIN for read/ops endpoints).
-- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → product-catalog (OIDC, immutable published-revision lookup only); service → Kafka (mTLS, consumer/producer ACLs).
+- **Trust boundaries:** service → ledger-service (mTLS + OIDC, fail-closed via `LedgerCallGuard`); service → transaction-service (mTLS + OIDC); service → product-catalog (OIDC, immutable published-revision lookup only); service → account-service (OIDC M2M, read-only account detail for tax-profile resolution); service → party-service (private-CA mTLS 8443 + OIDC M2M, read-only: party record + declared residency countries, `party.amlProfile.read` only, identity-pinned in `party_rest_ext.rego`); service → Kafka (mTLS, consumer/producer ACLs).
 - **Assets:** accrued/capitalized interest amounts, withholding tax rate and remittance amounts, account balances (indirectly, via the ledger postings this service issues).
 
 ## 3. Authn/Authz
@@ -55,6 +57,7 @@ money-path service, not adjacent.
 | **D**oS | Flood the manual capitalization/remittance trigger, or replay settlement events | `@RolesAllowed` gate on manual triggers; idempotency key on both the ledger posting and the transaction-service debit guards duplicate runs |
 | **E**oP | Use the withholding remittance path to move funds unrelated to actual accrued tax | Remittance amount computed solely from `WithholdingRemittancePolicy` against the service's own accrual ledger, not from caller-supplied input; downstream `transaction-service` is the authoritative amount boundary |
 | **T**ampering | A catalog change makes historical or future accruals use an unintended rate | Consume only a maker-checker-published immutable revision; persist its content hash, effective interval and source revision locally; never resolve the latest catalog document during accrual; reject unsupported tiered profiles until their calculation is explicitly implemented |
+| **T**ampering / **I**nfo disclosure | A forged or eavesdropped tax-profile resolution steers withholding to a wrong rate, or residency/TIN data leaks beyond its purpose | The profile is resolved server-side (`PartyTaxProfileProvider`) over OIDC M2M from party-service read-only endpoints — never from caller input; the consumer DTO has no `tin` field, so TINs on the wire are never deserialized or persisted (GDPR minimization, ADR-0339 A); any resolution failure (party-service down, undeclared profile) fails safe to the statutory default with a metric, never to a zero or guessed rate; the claim-time snapshot (V13) replays on retry, so a mid-flight profile change cannot diverge the withholding row from the replayed GL journal |
 
 ## 5. Residual risks / assumptions
 
@@ -63,6 +66,24 @@ money-path service, not adjacent.
 - **Settlement ack consumer** (`WithholdingRemittanceSettlementConsumer`) trusts the Kafka topic's mTLS/ACL boundary as its authentication; no additional payload-level signature.
 
 ## 6. Change log
+
+- **2026-10-14** — **Tax-profile resolution now reads party attributes** (ADR-0339 B, #12811). The
+  constant-only tax-profile stub is replaced by `PartyTaxProfileProvider`: account
+  detail → owning party → taxpayer type (`INDIVIDUAL` vs legal entities) → declared residency
+  countries, over two new read-only OIDC M2M edges (`AccountServiceClient.getAccount`,
+  `PartyServiceClient` against party-service, granted `party.amlProfile.read` only by an
+  identity-pinned rule in `party_rest_ext.rego`). This moves a trust boundary (new outbound
+  edges + `application.yaml` client keys), so it lands here. Mitigations: resolution input is
+  never caller-supplied; the consumer DTO carries no `tin` field (the wire has TINs, the service
+  never sees them — contract-pinned in the party pact); legal entities resolve without the
+  person-only AML-profile call; every failure mode (party-service unreachable, account without
+  party, undeclared profile) fails safe to `TaxProfile.FAIL_SAFE_DEFAULT` with a warn log and
+  the `openbank.interest.tax_profile_resolution.fail_safe.total` counter — withholding degrades
+  to the statutory rate, never blocks an accrual, and never invents a rate. The 2026-07-24
+  claim-time snapshot (V13) stops being dormant: a retry now replays the frozen profile instead
+  of re-resolving against live party data. treatyRate/nonCooperatingState/exemptCode remain at
+  the statutory default until a treaty/exemption source exists. Rollback: revert the commit
+  (restores the constant stub; the V13 snapshot columns stay and simply freeze a constant).
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `interest_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
@@ -169,9 +190,10 @@ money-path service, not adjacent.
   every attempt, including retries. The ledger idempotency key is amount-blind, so a retry after a
   crashed post replays the ORIGINAL journal (P1's amounts) while the withholding row was recomputed from
   a freshly-resolved profile (P2 if the account's tax attributes changed in between) — a row-vs-GL
-  divergence on the **tax** axis (the same class #1316 fixed for gross). Dormant today only because
-  `DefaultTaxProfileProvider` returns a constant; the account→party tax-attribute fast-follow would make
-  it reachable. Fix: the resolved profile is now snapshotted with the claim (V13, five nullable columns
+  divergence on the **tax** axis (the same class #1316 fixed for gross). Dormant while the old
+  provider returned a constant for every account; made reachable by the 2026-10-14 party-attribute
+  resolution above, which is why the snapshot replay is the load-bearing mitigation and the new
+  provider resolves once per claim. Fix: the resolved profile is now snapshotted with the claim (V13, five nullable columns
   on `interest_accruals`) and a retry replays it instead of re-resolving; a claim already in flight at
   deploy carries no snapshot and safely falls back to a fresh resolve while resolution is constant. No
   new trust boundary or external caller — an internal correctness hardening of an existing money path;
