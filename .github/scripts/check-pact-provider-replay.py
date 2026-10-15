@@ -48,12 +48,6 @@ PACTS = ROOT / "pacts"
 # into every service's OPA bundle checksum, so a line added or removed would restamp ~44 generated
 # files. The list belongs next to the code that reads it.
 KNOWN_UNCOVERED: set[str] = {
-    # #12425: pension-service's reporting route (and the @PactFolder replay + negative-auth twin of
-    # this pact) live on feat/pension-reporting-aggregates, which stacks on the final pension
-    # integration (#12435); that line has not reached main, so main's pension-service cannot serve
-    # this pact yet. Verified green against that branch's provider locally. Remove this entry in the
-    # change that brings the replay classes onto main — the check fails on it from then on.
-    "pacts/openbank-tax-reporting-service-openbank-pension-service.json",
     # ADR-0337 / PSP 34-12 PS: treasury-service's portfolio route, its @PactFolder replay and
     # negative-auth twin are not present on this branch yet; remove when provider replay lands.
     "pacts/openbank-tax-reporting-service-openbank-treasury-service.json",
@@ -65,8 +59,6 @@ KNOWN_UNCOVERED: set[str] = {
 # here is a deploy that can never be proven safe, and the checks below fail on a stale entry in
 # either direction, so it cannot outlive the problem.
 KNOWN_NO_BROKER_PUBLICATION: set[str] = {
-    # #12425: same debt as the KNOWN_UNCOVERED entry above — the broker twin lands with the replay.
-    "openbank-pension-service",
     # ADR-0337 / PSP 34-12 PS: the Treasury provider has no PactBroker replay yet.
     "openbank-treasury-service",
 }
