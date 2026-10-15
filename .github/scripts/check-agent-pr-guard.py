@@ -147,12 +147,16 @@ class Undetermined(Exception):
 # --------------------------------------------------------------------------- rules
 
 
-def load_rules(path=RULES):
+def load_rules(path=RULES, text=None):
+    """Parse the rule set. `text` is the content read from the PR's BASE commit (see
+    base_policy); `path` is read from the working tree only for --paths and self-tests."""
     import yaml
 
     try:
-        with open(path) as fh:
-            doc = yaml.safe_load(fh)
+        if text is None:
+            with open(path) as fh:
+                text = fh.read()
+        doc = yaml.safe_load(text)
     except (OSError, yaml.YAMLError) as e:
         raise Undetermined(f"could not read {path}: {e}") from e
     cfg = (doc or {}).get("autonomous_agent_prs")
@@ -275,15 +279,21 @@ def agent_allowances(cfg, today=None):
     return allowed
 
 
-def precondition_adr_status(adr_dir=ADR_DIR):
-    """(accepted: bool, why: str) for the recorded-two-person-review ADR."""
-    hits = sorted(glob.glob(os.path.join(adr_dir, PRECONDITION_ADR_GLOB)))
+def precondition_adr_status(adr_dir=ADR_DIR, hits=None):
+    """(accepted: bool, why: str) for the recorded-two-person-review ADR.
+
+    `hits` is [(name, text)] read from the PR's BASE commit. A PR must not be able to satisfy
+    its own precondition by adding or flipping ADR-0340 in the same diff it is judged on."""
+    if hits is None:
+        hits = []
+        for h in sorted(glob.glob(os.path.join(adr_dir, PRECONDITION_ADR_GLOB))):
+            try:
+                hits.append((h, Path(h).read_text()))
+            except OSError as e:
+                return False, f"ADR-0340 unreadable: {e}"
     if len(hits) != 1:
-        return False, f"ADR-0340 (two-person review) found {len(hits)} times under {adr_dir}, need exactly 1"
-    try:
-        text = Path(hits[0]).read_text()
-    except OSError as e:
-        return False, f"ADR-0340 unreadable: {e}"
+        return False, f"ADR-0340 (two-person review) found {len(hits)} times under {adr_dir} at base, need exactly 1"
+    text = hits[0][1]
     m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
     status = None
     if m:
@@ -305,7 +315,7 @@ def effective_allowance(author, cfg, today=None):
         return frozenset(), ""
     if al["expires"] < today:
         return frozenset(), f"scope allowance for `{author}` (#{al['issue']}) EXPIRED {al['expires']} — ignored"
-    ok, why = precondition_adr_status(cfg.get("_adr_dir", ADR_DIR))
+    ok, why = precondition_adr_status(cfg.get("_adr_dir", ADR_DIR), cfg.get("_adr_hits"))
     if not ok:
         return frozenset(), f"scope allowance for `{author}` (#{al['issue']}) IGNORED — precondition unmet: {why}"
     return al["services"], (
@@ -790,6 +800,12 @@ def parse_name_status_z(raw):
         paths = fields[index:index + width]
         index += width
         path = paths[-1]
+        # A rename has two sides and BOTH are changed: the old path loses its content. Taking
+        # only the destination let an agent move a protected file (e.g. a money-path
+        # migration) out to an ordinary path and pass. A rename destination is also new.
+        if status.startswith("R"):
+            files.append(paths[0])
+            added.add(path)
         files.append(path)
         if status == "A":
             added.add(path)
@@ -839,9 +855,73 @@ def fetch_pr(n):
         raise Undetermined(f"PR #{n}: could not read author/headRefName")
     pages = _gh(["api", f"repos/{REPO}/pulls/{n}/files?per_page=100", "--paginate", "--slurp"])
     flat = [f for page in pages for f in page]
+    # The files API stops at 3000 entries with no error; unseen files are unjudged files.
+    expected = _gh(["api", f"repos/{REPO}/pulls/{n}"]).get("changed_files")
+    if not isinstance(expected, int) or len(flat) != expected or len(flat) >= FILES_API_CAP:
+        raise Undetermined(f"PR #{n}: files API listed {len(flat)} of {expected} changed files — possibly truncated")
     files = [f["filename"] for f in flat]
-    added = frozenset(f["filename"] for f in flat if f.get("status") == "added")
+    files += [f["previous_filename"] for f in flat if f.get("previous_filename")]
+    added = frozenset(f["filename"] for f in flat if f.get("status") in {"added", "renamed"})
     return author, is_bot, branch, files, added
+
+
+FILES_API_CAP = 3000
+
+
+def _base_read(ref, path):
+    """Content of `path` at `ref`, or None if absent. git first (CI checks out history);
+    the contents API otherwise. Anything else is Undetermined, never 'absent'."""
+    proc = subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], capture_output=True)
+    if proc.returncode == 0:
+        proc = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout
+        ls = subprocess.run(["git", "ls-tree", "--name-only", ref, "--", path], capture_output=True, text=True)
+        if ls.returncode == 0 and not ls.stdout.strip():
+            return None
+        raise Undetermined(f"git show {ref}:{path} failed: {proc.stderr.strip()}")
+    import base64
+    data = _gh(["api", f"repos/{REPO}/contents/{path}?ref={ref}"])
+    if not isinstance(data, dict) or "content" not in data:
+        raise Undetermined(f"contents {path}@{ref} unreadable")
+    return base64.b64decode(data["content"]).decode()
+
+
+def _base_list(ref, directory):
+    proc = subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], capture_output=True)
+    if proc.returncode == 0:
+        ls = subprocess.run(["git", "ls-tree", "--name-only", f"{ref}:{directory}"], capture_output=True, text=True)
+        if ls.returncode != 0:
+            raise Undetermined(f"git ls-tree {ref}:{directory} failed: {ls.stderr.strip()}")
+        return ls.stdout.split()
+    data = _gh(["api", f"repos/{REPO}/contents/{directory}?ref={ref}&per_page=1000"])
+    if not isinstance(data, list):
+        raise Undetermined(f"contents {directory}@{ref} is not a directory listing")
+    return [d["name"] for d in data]
+
+
+def base_ref_for(n):
+    """The commit whose policy judges PR n: PR_DIFF_BASE in CI, else the PR's base SHA."""
+    base = os.environ.get("PR_DIFF_BASE", "").strip()
+    if base:
+        return base
+    sha = ((_gh(["api", f"repos/{REPO}/pulls/{n}"]).get("base") or {}).get("sha") or "")
+    if not _is_sha(sha):
+        raise Undetermined(f"PR #{n}: base SHA unavailable — cannot read policy from the base")
+    return sha
+
+
+def base_policy(ref):
+    """rules.yaml and the ADR-0340 precondition AS OF THE BASE. Read from the PR head, the
+    PR under judgement could rewrite its own scope (drop itself from agent_accounts, prune
+    governance_path_globs) or add an accepted ADR-0340 that switches its allowance on."""
+    text = _base_read(ref, RULES)
+    if text is None:
+        raise Undetermined(f"{RULES} absent at base {ref}")
+    cfg = load_rules(RULES, text=text)
+    names = [x for x in _base_list(ref, ADR_DIR) if fnmatch.fnmatch(x, PRECONDITION_ADR_GLOB)]
+    cfg["_adr_hits"] = [(x, _base_read(ref, f"{ADR_DIR}/{x}") or "") for x in names]
+    return cfg
 
 
 def resolve_pr_number(explicit):
@@ -982,6 +1062,66 @@ def allowance_self_test(failures):
     return len(cases) + 1
 
 
+def bypass_self_test(failures):
+    """Regression cases for three authorization bypasses (PR #12914 review). Each must
+    BLOCK (exit 1) or be Undetermined — never exit 0."""
+    import shutil
+    import tempfile
+
+    bot = "openbank-agent-bot[bot]"
+    # 1. Rename OUT of a protected path: only the destination used to be judged.
+    files, added = parse_name_status_z(
+        "R100\0openbank-ledger-service/src/main/resources/db/migration/V1__x.sql\0docs/V1__x.sql\0")
+    code, msg = verdict(bot, True, "x", files, dict(FIXTURE), added)
+    if code != 1 or "money-path" not in msg:
+        failures.append(f"bypass rename-out-of-money-path passed: exit {code} — {msg}")
+
+    # 2. ADR-0340 added/accepted in the PR itself: the head's docs/adr must not count when
+    #    the base's (supplied as _adr_hits) has none.
+    tmp = tempfile.mkdtemp()
+    adr_dir = os.path.join(tmp, "adr")
+    _write_adr(adr_dir, "accepted")
+    cfg = dict(FIXTURE, _adr_dir=adr_dir, _adr_hits=[])
+    code, msg = verdict("openbank-fraud-pilot-bot[bot]", True, "x",
+                        ["openbank-ledger-service/src/main/kotlin/A.kt"], cfg, today=SELFTEST_TODAY)
+    if code != 1 or "precondition unmet" not in msg:
+        failures.append(f"bypass head-ADR-0340 activated the allowance: exit {code} — {msg}")
+
+    # 3. rules.yaml edited in the PR: policy must come from the BASE commit.
+    repo = os.path.join(tmp, "repo")
+    os.makedirs(os.path.join(repo, os.path.dirname(RULES)))
+    os.makedirs(os.path.join(repo, ADR_DIR))
+    Path(repo, ADR_DIR, "0001-x.md").write_text("x\n")
+    base_rules = (
+        "money_path_services: [openbank-ledger-service]\n"
+        "autonomous_agent_prs:\n  agent_accounts: ['openbank-agent-bot[bot]']\n"
+        "  automation_accounts: []\n  governance_path_globs: [openbank-libs/governance/*]\n"
+    )
+    Path(repo, RULES).write_text(base_rules)
+    cwd = os.getcwd()
+    try:
+        os.chdir(repo)
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-qm", "base"], check=True)
+        base = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        Path(repo, RULES).write_text(base_rules.replace(
+            "agent_accounts: ['openbank-agent-bot[bot]']", "agent_accounts: []").replace(
+            "automation_accounts: []", "automation_accounts: ['openbank-agent-bot[bot]']"))
+        subprocess.run(git + ["commit", "-qam", "head"], check=True)
+        bcfg = base_policy(base)
+        code, msg = verdict(bot, True, "x", ["openbank-ledger-service/src/main/kotlin/A.kt"], bcfg)
+        if code != 1:
+            failures.append(f"bypass head-rules.yaml descoped the agent: exit {code} — {msg}")
+    except (Undetermined, subprocess.CalledProcessError) as e:
+        failures.append(f"bypass head-rules.yaml case could not run: {e}")
+    finally:
+        os.chdir(cwd)
+        shutil.rmtree(tmp, ignore_errors=True)
+    return 3
+
+
 def self_test():
     cases = [
         # (name, author, is_bot, branch, files, expect_code, expect_substring)
@@ -1103,6 +1243,7 @@ def self_test():
 
     failures = []
     n_allowance = allowance_self_test(failures)
+    n_bypass = bypass_self_test(failures)
     for case in cases:
         name, author, is_bot, branch, files, want_code, want_sub = case[:7]
         added = frozenset(case[7]) if len(case) > 7 else frozenset()
@@ -1215,9 +1356,10 @@ def self_test():
         parsed_files, parsed_added = parse_name_status_z(
             "M\0plain.kt\0A\0new file.kt\0R100\0old.kt\0renamed.kt\0C090\0source.kt\0copy.kt\0"
         )
-        if parsed_files != ["plain.kt", "new file.kt", "renamed.kt", "copy.kt"]:
+        # A rename contributes BOTH sides (old path first); its destination counts as added.
+        if parsed_files != ["plain.kt", "new file.kt", "old.kt", "renamed.kt", "copy.kt"]:
             failures.append(f"name-status parser returned wrong paths: {parsed_files}")
-        if parsed_added != frozenset({"new file.kt"}):
+        if parsed_added != frozenset({"new file.kt", "renamed.kt"}):
             failures.append(f"name-status parser returned wrong added paths: {parsed_added}")
         try:
             parse_name_status_z("R100\0only-old.kt\0")
@@ -1233,7 +1375,7 @@ def self_test():
             print(f"  x {f}")
         return 1
     print(
-        f"self-test OK — {len(cases)} classifier cases + {n_allowance} allowance cases + "
+        f"self-test OK — {len(cases)} classifier cases + {n_allowance} allowance cases + {n_bypass} bypass regressions + "
         f"{4 + len(malformed_allowances)} undetermined cases + diff parser, "
         f"every block clause independently reached"
     )
@@ -1285,7 +1427,11 @@ def main():
         return 1
 
     try:
-        cfg = load_rules()
+        n = resolve_pr_number(args.pr)
+        if n is None:
+            print("agent-pr-guard: no pull request in context — nothing to judge")
+            return 0
+        cfg = base_policy(base_ref_for(n))
         # The SUBJECT corpus is the RULE SET, not the PR. A PR-scoped gate examines one PR by
         # definition, so counting PRs could never distinguish a working gate from a broken
         # one. What CAN silently collapse is the derivation: if money_path_services stops
@@ -1294,10 +1440,6 @@ def main():
         # `min_subjects:` exists for, so the floor is placed on the derived rules.
         n_rules = len(protected_tokens(cfg)) + len(cfg.get("governance_path_globs") or [])
         gatelib.subjects(n_rules, "protected service tokens + governance globs")
-        n = resolve_pr_number(args.pr)
-        if n is None:
-            print("agent-pr-guard: no pull request in context — nothing to judge")
-            return 0
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
         if code == 1 and owner_approval_allows(n, files):
