@@ -41,7 +41,7 @@ graph TB
     persist[Persistence<br/>*RepositoryImpl<br/>Hibernate Reactive / Panache]
     outbox["Outbox<br/>InterestOutboxDispatcher<br/>@Scheduled každých 5s"]
     kafka[Kafka publisher<br/>KafkaInterestOutboxEventPublisher<br/>+ fault tolerance]
-    tax[TaxProfilePort<br/>DefaultTaxProfileProvider]
+    tax[TaxProfilePort<br/>PartyTaxProfileProvider]
   end
 
   rest --> uc
@@ -78,7 +78,7 @@ com.openbank.interest/
     ├── persistence/                 *Entity (Panache), *RepositoryImpl, InterestMapper
     ├── outbox/                      InterestOutboxDispatcher (@Scheduled)
     ├── kafka/                       KafkaInterestOutboxEventPublisher
-    └── tax/                         DefaultTaxProfileProvider
+    └── tax/                         PartyTaxProfileProvider
 ```
 
 **Pravidlo závislostí:** `domain` ← `application` ← `infrastructure`. Obě daňové policy (`WithholdingTaxPolicy`, `WithholdingRemittancePolicy`) jsou čisté objekty bez frameworkových importů, takže zákonná pravidla a jejich zaokrouhlování žijí na jednom testovaném místě a nemohou driftovat mezi místy volání.
