@@ -14,6 +14,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 | [04 — Data](./04-data.md) | Data, analytika, DBA | Co ukládá (téměř nic), audit/prompt-hash, PII postoj |
 | [05 — Provoz](./05-operations.md) | DevOps, SRE, release inženýři | Build, deploy, FinOps tier, runbooky, SLO |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | DORA, GDPR, AI Act, mapování PSD2/AML read-surface |
+| [08 — Workload identity](./08-workload-identity.md) | Inženýři, SRE | Pilot ADR-0177 fáze 1: projektovaný SA token, Keycloak token exchange, secret fallback |
 
 ## TL;DR
 
