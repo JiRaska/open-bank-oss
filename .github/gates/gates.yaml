@@ -1815,7 +1815,7 @@ gates:
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
 
-  # Deployed-code-lag report unit test (2026-10-15 MGM deploy postmortem). Guards the
+  # Deployed-code-lag report unit test. Guards the
   # hours-scale "code on main is not running in sandbox" report that feeds the
   # deploy-code-lag-watch escalation — aged own-source drift is reported, marker-only
   # drift stays in deploy-drift-watch's lane.
@@ -1824,8 +1824,9 @@ gates:
     name: "deployed-code-lag report unit test"
     group: supplychain
     mode: enforced
-    rationale: "Guards the hours-scale deployed-code-lag report (2026-10-15 MGM deploy postmortem): aged own-source drift feeds the deploy-code-lag-watch escalation, marker-only drift stays in deploy-drift-watch's lane — a silently wrong report either misses real lag or cries wolf on every marker."
+    rationale: "Guards the hours-scale deployed-code-lag report: aged own-source drift feeds the deploy-code-lag-watch escalation, marker-only drift stays in deploy-drift-watch's lane — a silently wrong report either misses real lag or cries wolf on every marker."
     review_after: "2027-04-01"
+    budget_seconds: 30
     run: |
       bash .github/scripts/test-deploy-code-lag-report.sh
 
