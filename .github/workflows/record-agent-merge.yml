@@ -148,6 +148,7 @@ jobs:
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       PR_URL: ${{ github.event.pull_request.html_url }}
     steps:
