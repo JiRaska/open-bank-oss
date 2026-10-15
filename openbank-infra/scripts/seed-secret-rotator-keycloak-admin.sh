@@ -68,11 +68,16 @@ if [[ -z "$KC_ADMIN_USER" || -z "$KC_ADMIN_PASS_B64" ]]; then
 fi
 
 echo "==> zapisuji do OpenBao ($KV_PATH) — hodnoty se nevypisují"
-# Heslo posíláme base64 z secretu přes stdin environmální proměnné, aby neprošlo
-# argument listem (kv put -field hodnotu z argv by `ps` ukázal).
-kubectl -n "$NS_VAULT" exec -i openbao-0 -- env "BAO_TOKEN=$VAULT_TOKEN" \
-  "KC_ADMIN_PASS_B64=$KC_ADMIN_PASS_B64" sh -c \
-  'bao kv put "'"$KV_PATH"'" username="'"$KC_ADMIN_USER"'" password="$(echo "$KC_ADMIN_PASS_B64" | base64 -d)"' \
+# Tajné hodnoty (OpenBao token a heslo, base64 kvůli newline-bezpečnosti) jdou do podu
+# přes STDIN, ne přes argv: argument list `kubectl exec` vidí lokální `ps` a argv
+# procesu `bao` by viděl `ps` uvnitř podu. Proto `password=-` (bao čte hodnotu ze stdin).
+# Username a KV path jsou poziční argumenty `sh -c '...' _ path user`, nikdy se
+# nevkládají do textu skriptu (žádné shell-injection přes obsah secretu).
+# shellcheck disable=SC2016 # $1/$2/$t/$p expand inside the pod shell, by design
+printf '%s\n%s\n' "$VAULT_TOKEN" "$KC_ADMIN_PASS_B64" \
+  | kubectl -n "$NS_VAULT" exec -i openbao-0 -- sh -c \
+    'IFS= read -r t && IFS= read -r p && printf %s "$p" | base64 -d | BAO_TOKEN="$t" bao kv put "$1" username="$2" password=-' \
+    _ "$KV_PATH" "$KC_ADMIN_USER" \
   >/dev/null
 unset KC_ADMIN_PASS_B64
 
