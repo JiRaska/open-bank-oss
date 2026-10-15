@@ -34,6 +34,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_kyb
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_kyb
 
@@ -272,6 +275,9 @@ authz:
     datasource:
       reactive:
         url: vertx-reactive:postgresql://localhost:5433/openbank_kyb_test
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
     management:
       enabled: false
     oidc:

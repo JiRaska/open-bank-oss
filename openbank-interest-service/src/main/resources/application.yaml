@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_interest
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_interest
   flyway:
@@ -74,6 +77,8 @@ quarkus:
   rest-client:
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # ADR-0033 §D: the capitalization credit leg (DEBIT interest expense / CREDIT the customer's
     # deposit-control pocket / CREDIT withholding-tax payable). The default resolves only on
@@ -82,18 +87,24 @@ quarkus:
     # nothing is withheld, so the period simply retries).
     ledger-service:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # Fleet-directory read for the daily accrual run: discovers ACTIVE accounts
     # (GET /accounts/active, ADR-0143) and their booked balance (GET /accounts/{id}/balance).
     # Same openbank-services M2M principal as the ledger/transaction clients above.
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # Immutable catalog revision and durable event cursor used only by the reference-data
     # snapshotter. Accrual reads its own PostgreSQL snapshot/config rows and never resolves the
     # mutable "latest" catalog representation on the money path.
     product-catalog:
       url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
@@ -160,6 +171,9 @@ authz:
       password: openbank_secret
       reactive:
         url: postgresql://localhost:5432/openbank_interest_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_interest_it
     devservices:

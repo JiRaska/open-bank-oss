@@ -35,6 +35,9 @@ quarkus:
     # Reactive client for the app (Panache); JDBC URL is for Flyway migrations only.
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_govaudit}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_govaudit}
   hibernate-orm:
@@ -112,7 +115,12 @@ openbank:
     github-api-url: ${GITHUB_API_URL:https://api.github.com}
     github-repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
-    # Mirrors rules.yaml review.default_approvals / review.money_path_approvals (ADR-0164) until
-    # GovernanceRulesReadAdapter parses the mounted rules.yaml live.
+    # Live rules.yaml source (ADR-0164): a file mounted at $RULES_YAML_PATH wins over the URL;
+    # when neither is reachable the mirror values below are the fallback and the divergence is
+    # logged at WARN. (rules-yaml-path is intentionally NOT defined here: an empty value would
+    # fail the config mapping at boot with SRCFG00040 — absence is the "disabled" state.)
+    rules-yaml-url: ${RULES_YAML_URL:https://raw.githubusercontent.com/JiRaska/open-bank-oss/main/openbank-libs/governance/rules.yaml}
+    # Fallback mirrors of rules.yaml review.default_approvals / review.money_path_approvals, used
+    # only when no live source is reachable (GovernanceRulesReadAdapter).
     default-approvals: ${GOVERNANCE_DEFAULT_APPROVALS:1}
     money-path-approvals: ${GOVERNANCE_MONEY_PATH_APPROVALS:2}
