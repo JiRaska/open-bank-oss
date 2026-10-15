@@ -158,8 +158,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'removed by #4221; `application.yaml:174` records the removal in a comment',
     'openbank-fraud-service|6. Change log|fraudServiceUrl':
         'occurs only inside a comment in `fraud_rest_ext.rego`; not a policy input',
-    'openbank-ledger-service|8. Change log|ledgerServiceUrl':
-        'occurs only inside a comment in `ledger_rest_ext.rego`; not a policy input',
     'openbank-lending-service|3. Controls in place (this slice)|lending.origination.worker.enabled':
         'renamed to the `openbank.` convention; `rules.yaml:1544` records the rename',
     'openbank-mcp-service|8. Change log|StubProposalPort':

@@ -596,8 +596,9 @@ over verbatim from the draft's §6 (IDs re-keyed).
   the **book of record's** writes — post/reverse a journal, re-run an FX revaluation — via base
   `matrix-allows`, and to `ledger.approve` via the attest rule, whose own comment has always
   said no SERVICE principal must ever reach it. This is the single most sensitive row in the
-  #3734 matrix. Fleet caller audit: **no `ledgerServiceUrl` exists anywhere in customer-edge** —
-  no edge ledger caller at all; the legitimate M2M writers (transaction/lending/settlement via
+  #3734 matrix. Fleet caller audit: **no ledger caller exists anywhere in customer-edge** — no
+  edge ledger client or URL configuration at all (the bearer-only mTLS commit `1fad45c569`
+  removed the last such property); the legitimate M2M writers (transaction/lending/settlement via
   the shared client) keep their identity-scoped `service-ledger-post` / `service-ledger-reverse`
   rules. Tightening is two-layered: both operator rules now exclude every `service-account-*`
   principal (also closing `ledger.trigger`/`replay` to the shared client, which the ext already
