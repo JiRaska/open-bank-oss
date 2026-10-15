@@ -49,7 +49,9 @@ charter_denied if {
 # STRINGS (compliance-officer, ledger-domain-engineer, ui-assistant, rca-investigator,
 # customer-copilot). The standalone background/control-plane agents (finops-agent, devops-agent,
 # control-liveness-sentinel, governance-auditor, release-steward, docs-truth-agent,
-# authz-policy-auditor, flaky-test-hunter) instead declare tools.allow as a list of
+# authz-policy-auditor, flaky-test-hunter) and the phase-4 money-path dev pilot
+# (fraud-dev-engineer, ADR-0031 / issue #12885, enabled: false until ADR-0340 + the phase
+# bump land) instead declare tools.allow as a list of
 # `{tier, resources}` objects -- `some pattern in a.tools.allow` binds `pattern` to the whole
 # object for those charters, which glob_match can never match against a string tool name, so
 # charter_allowed is always false for them here. This is intentionally NOT a security gap
@@ -78,7 +80,8 @@ charter_allowed if {
 }
 
 # ADR-0031 D9 phase 3: object-shaped charter grants ({tier, resources}). The background/
-# control-plane agents (flaky-test-hunter, finops-agent, ...) declare tools.allow / tools.deny
+# control-plane agents (flaky-test-hunter, finops-agent, ...) and the phase-4 money-path dev
+# pilot (fraud-dev-engineer) declare tools.allow / tools.deny
 # this way, which the string-pattern rules above can never match (see the schema note on
 # allowed_or_denied_patterns). Those agents are not fronted by the MCP gateway, but
 # flaky-test-hunter's GitHub PR path queries THIS package directly as its PDP. The caller
@@ -86,6 +89,11 @@ charter_allowed if {
 # tool -> tier before querying, so this rule re-validates only the (tier, resource) grant
 # against the served charter data). No input.tier, no grant: deny-by-default is preserved,
 # and the MCP / REST paths above are unchanged because they never send input.tier.
+# The rules below are deliberately GENERIC: a grant is (agent charter x tier x resource)
+# data from agents.yaml, never a hard-coded agent_id clause -- fraud-dev-engineer's
+# write_proposal grant on openbank-fraud-service lives entirely in its charter data, so
+# deny-by-default for every other (agent, tier, resource) triple and the explicit write /
+# execute deny entries are all data-driven, test-covered in agents_test.rego.
 charter_allowed if tier_resource_charter_allowed
 
 charter_denied if tier_resource_charter_denied

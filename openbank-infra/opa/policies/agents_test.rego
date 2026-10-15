@@ -395,6 +395,25 @@ tier_charters := {
 				],
 			},
 		},
+		# Mirrors agents.yaml: fraud-dev-engineer — the phase-4 money-path development pilot
+		# (ADR-0031, issue #12885; pilot charter, enabled: false until ADR-0340 + the phase
+		# bump land). write_proposal is scoped to the OWNED repo only; write/execute tiers are
+		# denied explicitly, not by omission.
+		{
+			"id": "fraud-dev-engineer",
+			"plane": "development",
+			"skills": ["ship-check", "bump", "open-pr"],
+			"tools": {
+				"allow": [
+					{"tier": "read", "resources": ["openbank-fraud-service", "governance"]},
+					{"tier": "write_proposal", "resources": ["openbank-fraud-service"]},
+				],
+				"deny": [
+					{"tier": "write", "resources": ["*"]},
+					{"tier": "execute", "resources": ["*"]},
+				],
+			},
+		},
 	],
 	"tool_tiers": {"deny": ["money.transfer", "money.post.ledger", "gh.pr.merge", "gh.pr.approve", "secrets.read.raw"]},
 }
@@ -445,4 +464,54 @@ test_deny_flaky_test_hunter_tier_denied if {
 			"tool_tiers": {"deny": []},
 		}
 		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+}
+
+# ---------------------------------------------------------------------------------------
+# fraud-dev-engineer — phase-4 money-path development pilot (ADR-0031, issue #12885).
+# Shadow-only scoring service owner: the write_proposal grant is scoped to the OWNED repo
+# (openbank-fraud-service) only, write/execute tiers are explicitly denied, and merge stays
+# in the fleet-wide hard-denied tier. Mirrors the pilot charter in agents.yaml.
+# ---------------------------------------------------------------------------------------
+
+# The chartered write_proposal grant allows a PR proposal on the OWNED repo only.
+test_allow_fraud_dev_engineer_pr_open_tier_grant if {
+	agents.allow with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.pr.open", "resource": "openbank-fraud-service", "tier": "write_proposal"}
+	agents.decision.reason == "allowed by charter" with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.pr.open", "resource": "openbank-fraud-service", "tier": "write_proposal"}
+}
+
+# Same agent and tier, but ANOTHER service's repo — deny-by-default on the resource axis
+# (scoped ownership: the grant never leaves openbank-fraud-service).
+test_deny_fraud_dev_engineer_pr_open_foreign_service if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.pr.open", "resource": "openbank-ledger-service", "tier": "write_proposal"}
+	agents.decision.reason == "no matching allow rule" with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.pr.open", "resource": "openbank-ledger-service", "tier": "write_proposal"}
+}
+
+# The explicit object-shaped deny beats everything: the execute tier is denied EVEN on the
+# owned repo (the deny is explicit, not an absence of a grant).
+test_deny_fraud_dev_engineer_execute_tier if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.run.workflow", "resource": "openbank-fraud-service", "tier": "execute"}
+	agents.decision.reason == "denied by charter tier/resource grant" with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.run.workflow", "resource": "openbank-fraud-service", "tier": "execute"}
+}
+
+# Grants are per-agent: a DIFFERENT chartered agent gets nothing on fraud-service's repo.
+test_deny_fraud_dev_engineer_grant_not_portable_across_agents if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "openbank-fraud-service", "tier": "write_proposal"}
+	agents.decision.reason == "no matching allow rule" with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "openbank-fraud-service", "tier": "write_proposal"}
+}
+
+# Segregation of duties on the pilot too: merge stays hard-denied for every agent, the
+# owned-repo scope of the write_proposal grant notwithstanding.
+test_deny_fraud_dev_engineer_pr_merge_hard_tier if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.pr.merge", "resource": "openbank-fraud-service", "tier": "write_proposal"}
+	agents.decision.reason == "hard-denied tool tier" with data.agents as tier_charters
+		with input as {"agent": "fraud-dev-engineer", "tool": "gh.pr.merge", "resource": "openbank-fraud-service", "tier": "write_proposal"}
 }

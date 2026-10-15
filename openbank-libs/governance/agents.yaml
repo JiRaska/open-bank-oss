@@ -1108,6 +1108,82 @@ agents:
       eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; proposal-only, not Annex III high-risk"
       dora: "Art. 9 ICT risk detection; Art. 5 ICT risk management framework — fleet-wide static verification that a test suite's reported green state reflects tests that actually ran"
 
+  # ── Phase-4 money-path development pilot (ADR-0031, issue #12885) ───────────────────────
+  #
+  # WHY FRAUD-SERVICE FIRST: of every money_path service (rules.yaml), openbank-fraud-service
+  # has the lowest blast radius — the v4 rule engine is live but scoring is SHADOW-ONLY on
+  # every wired rail (#4403, ADR-0084's 2026-08-09 correction): the rails call
+  # POST /fraud/score and LOG the result, and no fraud verdict changes any payment outcome
+  # today. A wrong agent proposal here cannot move money — that is the property that makes it
+  # the right first money-path dev pilot. Its measured line-coverage ratchet sits at 92.4%
+  # (openbank-fraud-service/build.gradle.kts) and its ADR-0030 threat model
+  # (docs/threat-models/openbank-fraud-service.md) is in place, so the human-review gates this
+  # charter demands have something real to review against.
+  #
+  # WHY IT IS PROPOSAL-ONLY: the same segregation-of-duties argument as every sibling charter
+  # — agent proposes, governance disposes. write_proposal is scoped to the OWNED repo ONLY
+  # (openbank-fraud-service — a proposal against any other service falls to deny-by-default),
+  # the write and execute tiers are denied EXPLICITLY rather than by omission, and merge is
+  # human-always with the money_path 2-approval bar (rules.yaml: review) plus a threat-model
+  # update on any money-path or trust-boundary change.
+  #
+  # `enabled: false` ON PURPOSE — this is the PILOT CHARTER ONLY, prepared ahead of any
+  # runtime. Activation requires, in order: (1) the planned ADR-0340 (recorded two-person
+  # review of the activation decision) accepted, (2) the phase-3 branch merged, and (3) the
+  # ADR-0031 phase bump landed. Until all three hold, no runtime may authenticate as this
+  # principal. Data stays repo-local: synthetic fixtures only (ADR-0175 — no production data
+  # reaches the agent, and nothing is sent to a hosted provider).
+  - id: fraud-dev-engineer
+    plane: development
+    model: unknown                    # no runtime yet; set with the prompt when enabled
+    charter: "ADR-0031"
+    description: >
+      First money-path development-plane pilot (phase 4, issue #12885). Maintains its owned
+      service — openbank-fraud-service, the shadow-only scoring service — via the standard dev
+      skills (ship-check, bump, open-pr): branch, signed commits, PR proposals scoped to the
+      owned repo. It never merges, never approves, never executes; every proposal is a HITL
+      artifact a human disposes.
+    enabled: false                     # pilot charter — activation gate in the comment above
+    enforcement: block
+    owns: [openbank-fraud-service]     # a money_path service (rules.yaml) -> stricter HITL
+    skills: [ship-check, bump, open-pr]
+    data_scope:
+      read:
+        - openbank-fraud-service       # repo checkout of the owned service only
+        - read.governance              # rules.yaml / ADRs / threat models — grounding for the skills
+      pii: none                        # repo source only; synthetic fixtures per ADR-0175 —
+                                       # no production data, nothing sent to a hosted provider
+    tools:
+      allow:
+        - tier: read
+          resources: [openbank-fraud-service, governance]
+        - tier: write_proposal
+          resources: [openbank-fraud-service]   # PR proposals scoped to the owned repo ONLY
+      deny:
+        - tier: write
+          resources: ["*"]            # explicit: no direct write to any repo file or service ever
+        - tier: execute
+          resources: ["*"]            # explicit: no build/test/deploy execution ever
+    requires_human:
+      - merge: always                          # money_path (rules.yaml): 2 human approvals
+      - threat_model_when: money_path_or_trust_boundary_change   # rules.yaml change_requirements
+      - every: proposal                        # agent proposes, human disposes
+    limits:
+      tokens_per_run: 50000
+      runs_per_day: 8                 # same envelope as flaky-test-hunter (development plane)
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - proposal_target
+        - human_approved_by
+    compliance:
+      eu_ai_act: "Art. 9 — risk management; Art. 13 — transparency; Art. 14 — human oversight; proposal-only, not Annex III high-risk (shadow-only scoring changes no customer outcome)"
+      dora: "Art. 8–10 ICT change management — bounded to repo-scoped proposals on a shadow-only money-path service; merge and execution remain human-only"
+
   - id: case-coordinator
     plane: control
     charter: "ADR-0244"
