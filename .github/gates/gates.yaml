@@ -4045,10 +4045,17 @@ gates:
     min_subjects: 60
     selftest_inputs:
       - ".github/scripts/check-fleet-release-evidence.py"
+      - ".github/scripts/test-fleet-release-evidence.py"
+      - ".github/scripts/release_evidence_assets.py"
+      - ".github/scripts/verify-release-evidence-manifest.py"
+      - ".github/scripts/test-verify-release-evidence-manifest.py"
+      - ".github/scripts/tests/test_release_identity_workflow.py"
       - ".github/workflows/verify-release-evidence.yml"
       - "release-please-config.json"
     selftest: |
       python3 .github/scripts/check-fleet-release-evidence.py --self-test
+      python3 .github/scripts/test-verify-release-evidence-manifest.py
+      python3 -m unittest discover -s .github/scripts/tests -p test_release_identity_workflow.py
     run: |
       python3 .github/scripts/check-fleet-release-evidence.py
 
@@ -4079,6 +4086,7 @@ gates:
     min_subjects: 60
     selftest_inputs:
       - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/scripts/release_evidence_assets.py"
       - ".github/scripts/test-release-evidence-upload.py"
       - ".github/scripts/verify-release-evidence-manifest.py"
       - ".github/scripts/test-verify-release-evidence-manifest.py"
