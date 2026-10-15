@@ -24,7 +24,7 @@ def pr(number, branch='agent/fix', **extra):
 
 class AdmissionTest(unittest.TestCase):
     prefixes = ('agent/', 'codex/')
-    limit = 3
+    limit = 5
     cutoff = '2026-10-03T19:00:00Z'
 
     def test_exception_is_identity_bound_expiring_and_does_not_create_capacity(self):
@@ -47,32 +47,41 @@ class AdmissionTest(unittest.TestCase):
     def test_proposed_exceptions_are_isolated_and_keep_queue_capacity(self):
         from datetime import datetime, timezone
         entries = admission.load_exceptions()
-        self.assertEqual({entry['pr'] for entry in entries}, {12587})
+        self.assertEqual({entry['pr'] for entry in entries},
+                         {12587, 12551, 12636, 12647, 12717, 12747, 12753, 12755, 12758, 12767, 12768, 12769})
         targets = [pr(entry['pr'], entry['branch'], head={
             'ref': entry['branch'], 'repo': {'full_name': entry['repository']}
         }) for entry in entries]
         pages = [[pr(1), pr(2), pr(3), *targets, pr(12588, 'codex/other')]]
         now = datetime(2026, 10, 12, tzinfo=timezone.utc)
-        expired = datetime(2026, 10, 17, tzinfo=timezone.utc)
-        self.assertEqual(admission.admit(pages, self.prefixes, self.limit), (False, 5))
+        # Past every entry's expiry: the five 2026-10-17 proposals AND the seven 2026-10-24
+        # owner-directed batch entries must ALL stop admitting when expired.
+        expired = datetime(2026, 10, 25, tzinfo=timezone.utc)
+        self.assertEqual(admission.admit(pages, self.prefixes, self.limit), (False, 16))
         for target in targets:
             number = target['number']
             rank = sum(item['number'] <= number for item in pages[0])
             with self.subTest(number=number):
                 self.assertEqual(admission.admit_current_pr(
                     pages, self.prefixes, self.limit, number, self.cutoff, entries, now), (True, rank))
+                # Refusal without one's OWN exception only binds past the rank limit: at
+                # rank <= limit the PR self-admits regardless of policy (the exception is
+                # load-bearing only for rank > limit).
+                refused = (False, rank) if rank > self.limit else (True, rank)
                 for policy in ([], [entry for entry in entries if entry['pr'] != number]):
                     self.assertEqual(admission.admit_current_pr(
-                        pages, self.prefixes, self.limit, number, self.cutoff, policy, now), (False, rank))
+                        pages, self.prefixes, self.limit, number, self.cutoff, policy, now), refused)
+                # An expired exception likewise only refuses past the rank limit.
                 self.assertEqual(admission.admit_current_pr(
-                    pages, self.prefixes, self.limit, number, self.cutoff, entries, expired), (False, rank))
+                    pages, self.prefixes, self.limit, number, self.cutoff, entries, expired), refused)
                 for field, value in [('branch', 'codex/other'), ('repository', 'fork/open-bank-oss')]:
                     wrong = [dict(entry, **{field: value}) if entry['pr'] == number else entry for entry in entries]
                     self.assertEqual(admission.admit_current_pr(
-                        pages, self.prefixes, self.limit, number, self.cutoff, wrong, now), (False, rank))
-        for number, rank in ((12509, 4), (12588, 5)):
-            # The support PR and unrelated later work cannot borrow this exception.
-            candidate_pages = [[pr(1), pr(2), pr(3), pr(number, 'codex/other')]] if number == 12509 else pages
+                        pages, self.prefixes, self.limit, number, self.cutoff, wrong, now), refused)
+        for number, rank in ((12509, 6), (12588, 6)):
+            # The support PR and unrelated later work cannot borrow this exception — at rank
+            # > limit only the identity-bound exception admits.
+            candidate_pages = [[pr(1), pr(2), pr(3), pr(4), pr(5), pr(number, 'codex/other')]] if number == 12509 else pages
             self.assertEqual(admission.admit_current_pr(
                 candidate_pages, self.prefixes, self.limit, number, self.cutoff, entries, now), (False, rank))
 
@@ -110,12 +119,14 @@ class AdmissionTest(unittest.TestCase):
         self.assertEqual(admission.admit([[]], self.prefixes, self.limit), (True, 0))
 
     def test_capacity_boundary(self):
-        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix')]], self.prefixes, self.limit), (True, 2))
-        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix'), pr(3)]], self.prefixes, self.limit), (False, 3))
+        # Mechanics pinned at the previous limit (3): the policy value is asserted in
+        # test_rules_are_the_prefix_authority, not here.
+        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix')]], self.prefixes, 3), (True, 2))
+        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix'), pr(3)]], self.prefixes, 3), (False, 3))
 
     def test_pagination_drafts_and_other_branches(self):
         self.assertEqual(admission.admit([[pr(1, draft=True), pr(2, 'codex/fix')],
-                                          [pr(3), pr(4, 'fix/human')]], self.prefixes, self.limit), (False, 3))
+                                          [pr(3), pr(4, 'fix/human')]], self.prefixes, 3), (False, 3))
 
     def test_invalid_snapshot_fails_closed(self):
         for pages in (None, {}, [], [None], [[{}]], [[pr(1), pr(1)]],
@@ -124,10 +135,12 @@ class AdmissionTest(unittest.TestCase):
                 admission.admit(pages, self.prefixes, self.limit)
 
     def test_rules_are_the_prefix_authority(self):
+        # 2026-10-14 (owner decision): the live branch-prefix scope is deliberately empty —
+        # no branch counts against the WIP ceiling anymore. The admission mechanics pinned in
+        # test_capacity_boundary still hold for whatever scope rules.yaml declares.
         prefixes, limit, cutoff = admission.load_policy()
-        self.assertIn('agent/', prefixes)
-        self.assertIn('codex/', prefixes)
-        self.assertEqual(limit, 3)
+        self.assertEqual(prefixes, ())
+        self.assertEqual(limit, 5)
         self.assertEqual(cutoff, '2026-10-03T20:00:00Z')
 
     def test_invalid_rules_fail_closed(self):
@@ -158,8 +171,8 @@ class AdmissionTest(unittest.TestCase):
 
     def test_current_pr_first_three_win_even_with_concurrent_openings(self):
         pages = [[pr(10, draft=True), pr(11, 'codex/fix')], [pr(12), pr(13)]]
-        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 12, self.cutoff), (True, 3))
-        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 13, self.cutoff), (False, 4))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 12, self.cutoff), (True, 3))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 13, self.cutoff), (False, 4))
 
     def test_current_pr_can_proceed_after_an_older_pr_closes(self):
         pages = [[pr(10), pr(11, 'codex/fix'), pr(13)]]
@@ -168,7 +181,7 @@ class AdmissionTest(unittest.TestCase):
     def test_grandfathered_pr_does_not_deadlock_the_existing_queue(self):
         pages = [[pr(1, created_at='2026-10-03T18:00:00Z'), pr(2), pr(3), pr(4)]]
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 1, self.cutoff), (True, 1))
-        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 4, self.cutoff), (False, 4))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, 3, 4, self.cutoff), (False, 4))
 
     def test_human_branch_is_out_of_scope(self):
         pages = [[pr(1), pr(2), pr(3), pr(4, 'fix/human')]]

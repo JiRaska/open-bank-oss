@@ -137,6 +137,11 @@ tasks.withType<Test> {
     // metadata between profile restarts, so Gradle's 512 MiB test-worker default exhausts the
     // heap before the standalone boot proofs execute. This changes test infrastructure only.
     maxHeapSize = "1536m"
+    val keycloakDockerfile = rootProject.file("openbank-infra/docker/keycloak/Dockerfile")
+    inputs.file(keycloakDockerfile)
+        .withPropertyName("catalogKeycloakImage")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.keycloak-dockerfile", keycloakDockerfile.absolutePath)
 
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`

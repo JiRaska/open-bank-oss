@@ -176,7 +176,12 @@ class McpEndpoint(
 
         val filtered = runBlocking {
             toolsCatalog.visibleTools(
-                principal = Principal(id = ctx.agentId, type = ctx.principalType, roles = ctx.roles),
+                principal = Principal(
+                    id = ctx.agentId,
+                    type = ctx.principalType,
+                    roles = ctx.roles,
+                    serviceAccount = ctx.serviceAccount,
+                ),
                 cacheKey = "${ctx.agentId}|${ctx.consentId}",
             )
         }
@@ -261,7 +266,12 @@ class McpEndpoint(
             runBlocking {
                 pdp.allow(
                     AuthzQuery(
-                        principal = Principal(id = ctx.agentId, type = ctx.principalType, roles = ctx.roles),
+                        principal = Principal(
+                            id = ctx.agentId,
+                            type = ctx.principalType,
+                            roles = ctx.roles,
+                            serviceAccount = ctx.serviceAccount,
+                        ),
                         action = capability,
                         resource = null,
                         attributes = mapOf("tool" to toolName, "consentId" to ctx.consentId),

@@ -3,6 +3,7 @@ package com.openbank.context.infrastructure
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Tags
 import io.smallrye.mutiny.Uni
@@ -129,7 +130,7 @@ class ComplaintProjectionConsumer(
               AND NOT (EXCLUDED.node_type = 'TRANSACTION' AND context_nodes.source_system = 'domestic-payment')
         """.trimIndent(),
         mapOf(
-            "rowId" to stableId("$bankScope|$projectionGeneration|${node.key}"),
+            "rowId" to Ids.newId(),
             "key" to node.key,
             "bankScope" to bankScope,
             "generation" to projectionGeneration,
