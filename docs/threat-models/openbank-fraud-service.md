@@ -222,7 +222,13 @@ Notes and residuals on this matrix:
   to both M2M clients; so any backend service sharing the client can read the analyst queue
   (amounts, counterparties of flagged payments) even though `fraud_rest_ext.rego` describes
   this read as staff-facing. `compliance-read-any` got the exclusion; `operator-read-any` did
-  not. Recorded in §5 — same family as the pre-#11480 write over-grants.
+  not. Recorded in §5 — same family as the pre-#11480 write over-grants. **Fix in flight
+  (branch `agent/fraud-operator-read-scope`, issue #12921):** the base exclusion lands in
+  `rest.rego`, and the three real edge consumers this exposes (balance trial-balance,
+  dispute list, interest read on the customer edge) are re-granted as identity-scoped
+  edge rules (`service-edge-balance-read`, `service-edge-dispute-list`,
+  `service-edge-interest-read`), each ownership-guarded at the edge before forwarding —
+  a deployed-runtime dependency worth re-verifying after that branch merges.
 - **No four-eyes on this service yet.** ADR-0067 four-eyes (`four_eyes_required`) is wired
   into the shared policy machinery but no `fraud.*` action is flagged and there is no
   `ApprovalStore` here; money-path flips are currently governed by the PR-level
