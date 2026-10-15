@@ -46,11 +46,16 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
 fi
 prompt_secret VAULT_TOKEN "OpenBao operator token — nenalezen v \$VAULT_TOKEN/\$BAO_TOKEN/\$RT, vlož ho"
 
+# Keep the operator token off local and in-pod argv for read probes as well.
+bao_get_field() {
+  # shellcheck disable=SC2016 # Positional args and token expand only inside the pod.
+  printf '%s\n' "$VAULT_TOKEN" | kubectl -n "$NS_VAULT" exec -i openbao-0 -- sh -c \
+    'IFS= read -r t && BAO_TOKEN="$t" bao kv get "-field=$1" "$2"' _ "$1" "$KV_PATH"
+}
+
 echo "==> kontroluji, jestli $KV_PATH už naseedovaný je (idempotence)"
-if kubectl -n "$NS_VAULT" exec openbao-0 -- env "BAO_TOKEN=$VAULT_TOKEN" \
-     bao kv get -field=username "$KV_PATH" >/dev/null 2>&1 \
-   && kubectl -n "$NS_VAULT" exec openbao-0 -- env "BAO_TOKEN=$VAULT_TOKEN" \
-     bao kv get -field=password "$KV_PATH" >/dev/null 2>&1; then
+if bao_get_field username >/dev/null 2>&1 \
+   && bao_get_field password >/dev/null 2>&1; then
   echo "OK: $KV_PATH už username+password má — nic nezapisuji (přepsání by zneplatnilo rotaci)."
   exit 0
 fi
@@ -82,9 +87,7 @@ printf '%s\n%s\n' "$VAULT_TOKEN" "$KC_ADMIN_PASS_B64" \
 unset KC_ADMIN_PASS_B64
 
 echo "==> ověřuji zápis (jen existence polí, ne hodnoty)"
-kubectl -n "$NS_VAULT" exec openbao-0 -- env "BAO_TOKEN=$VAULT_TOKEN" \
-  bao kv get -field=username "$KV_PATH" | grep -q . \
-  && kubectl -n "$NS_VAULT" exec openbao-0 -- env "BAO_TOKEN=$VAULT_TOKEN" \
-  bao kv get -field=password "$KV_PATH" | grep -q . \
+bao_get_field username | grep -q . \
+  && bao_get_field password | grep -q . \
   && echo "OK: $KV_PATH má username+password. Příští běh secret-rotator už nespadne na kroku 2." \
   || { echo "!! ověření zápisu selhalo" >&2; exit 1; }
