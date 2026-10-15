@@ -11,6 +11,7 @@ import com.openbank.standingorder.application.port.`in`.CreateStandingOrderComma
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
 import com.openbank.standingorder.domain.error.SepaCreditSchemeRules
+import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
 import jakarta.enterprise.context.ApplicationScoped
@@ -119,7 +120,14 @@ class StandingOrderService(
 
     override suspend fun confirmExecution(id: UUID): StandingOrder {
         val order = repo.findById(id) ?: error("Standing order not found: $id")
-        if (order.failureCount == 0) return order
+        // The failureCount == 0 fast-path is a no-op only when there is genuinely nothing left
+        // to record. For a ONCE order there always is: `confirmExecution` is the ONLY place its
+        // status ever becomes COMPLETED (recordExecution deliberately does not complete ONCE
+        // orders before the payment is attempted). Returning early here left a ONCE order that
+        // succeeded on its first execution ACTIVE forever — findDueForExecution (nextExecutionDate
+        // never advances for ONCE) re-picked it on every daily sweep, inflating executionCount
+        // and emitting a duplicate due event per sweep (#12839).
+        if (order.failureCount == 0 && order.frequency != Frequency.ONCE) return order
         return repo.save(order.confirmExecution(Instant.now(clock)))
     }
 

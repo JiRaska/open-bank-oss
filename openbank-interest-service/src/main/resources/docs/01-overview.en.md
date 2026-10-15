@@ -15,7 +15,7 @@
 - ❌ Does not hold or compute account balances — `balance-service` is the authoritative balance; interest uses the balance passed in the accrual request.
 - ❌ Does not post double-entry ledger entries — `ledger-service` does; `capitalized.ledgerEntryId` is a reference link (nullable in v1).
 - ❌ Does not move cash to the customer or to the tax authority — capitalization records a credit; the tax cash leg (odvod) is delegated downstream via the `interest.withholding.remitted.v1` event (ADR-0030 off-gate).
-- ❌ Does not resolve the beneficiary's party tax attributes yet — v1 ships a fail-safe CZ-resident-individual default provider; account→party tax resolution is a documented fast-follow.
+- ✅ Resolves the beneficiary's party tax attributes at the income event (ADR-0339 B) — account→party→AML-profile, with residency countries only (TINs stay in party-service); every failure fails safe to the CZ-resident-individual default (ADR-0033 §C).
 - ❌ Does not run KYC/AML or sanctions screening.
 
 ## Position in the domain
@@ -62,7 +62,7 @@
 - **Redis (Valkey)** — wired as a dependency; no idempotency-key flow used by the resources in v1.
 - **Keycloak** — OIDC auth.
 - **openbank-libs** — shared runtime plumbing (BuildInfo, ServiceInfoResource, DocsResource, security).
-- **TaxProfilePort** — resolves the beneficiary tax profile; v1 default provider returns the fail-safe CZ-resident-individual profile.
+- **TaxProfilePort** — resolves the beneficiary tax profile from party-owned facts (`PartyTaxProfileProvider`, ADR-0339 B: account→party type→AML-profile residency countries); any resolution failure fails safe to the CZ-resident-individual profile.
 
 ## Business value
 
