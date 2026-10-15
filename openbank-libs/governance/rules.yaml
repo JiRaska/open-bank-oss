@@ -3928,20 +3928,21 @@ autonomous_agent_prs:
   # Autonomous coding agents. Adding a login here is a governance-path change, which this
   # very guard blocks an agent from making.
   #
-  # Entry form: a bare login, or a mapping:
+  # Entry form: a bare login, or a mapping (strict schema — unknown keys fail the check):
   #   - login: <account>
-  #     allowed_money_path_services: [<token>, ...]   # optional; default is none
-  # The allowance names service TOKENS (strip `openbank-` / `-service` — the same
-  # derivation the guard uses) drawn ONLY from money_path_services above. For that one
-  # account, and only for the money-path derivation, paths under exactly those tokens
-  # downgrade from BLOCK to ALLOWED_BY_SCOPE. It can NEVER name extra_protected_tokens
-  # (payment, kyc, party, card-issuance, aml, tax, dispute — a token money_path_services
-  # does not yield fails the check loudly, it can never be read as clean), and it never
-  # affects the CI-machinery / governance / authz / trust-chain clauses, which stay
-  # unconditional. Per-ACCOUNT on purpose: a blanket branch-prefix allowance would put
-  # every agent on the money path. No account carries an allowance today — the first
-  # (the fraud pilot agent) is gated on the recorded-two-person-review ADR merging
-  # first (branch agent/adr-0340-two-person-review, #12885).
+  #     money_path_allowance:            # optional; default is none
+  #       services: [<token>, ...]       # from money_path_services ONLY, never an
+  #                                      # extra_protected_tokens entry (card-issuance is both)
+  #       expires: YYYY-MM-DD            # mandatory, at most 92 days ahead; expired = ignored
+  #       issue: <number>                # mandatory: the issue that authorised the grant
+  # Effective only while ADR-0340 (recorded two-person review) is `decision-status:
+  # accepted` under docs/adr — the guard reads it; otherwise the allowance is ignored and
+  # the verdict says so. It downgrades BLOCK to ALLOWED_BY_SCOPE only for ORDINARY SOURCE
+  # of the exact service directory (src/main/{kotlin,java}, src/test, docs, README.md,
+  # CLAUDE.md). Migrations, resources/config, openapi.yaml, version.txt/CHANGELOG, build
+  # files, Dockerfile, gitops, rego, threat models, governance and CI always keep the
+  # owner-approval gate. Per-ACCOUNT on purpose: a branch prefix never carries one. No
+  # account carries an allowance today (#12885).
   agent_accounts:
     - openbank-agent-bot[bot]
   # Deterministic automation. These legitimately touch money-path paths and their content is

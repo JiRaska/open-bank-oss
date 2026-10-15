@@ -62,20 +62,29 @@
 #   change what the PDP enforces, and blocking the documentation ABOUT a control as if it
 #   were the control trains people to route around the guard (#3888).
 #
-# SCOPE ALLOWANCE (ALLOWED_BY_SCOPE) — per-account, narrow, one-directional
-#   An agent_accounts entry may declare `allowed_money_path_services: [<token>, ...]`:
-#   service tokens (same derivation as the protected set) that account is pre-authorized
-#   to touch. Paths under exactly those tokens downgrade from BLOCK to ALLOWED_BY_SCOPE
-#   (exit 0). The allowance is per-ACCOUNT, never per branch prefix — a blanket `agent/`
-#   allowance would put every agent on the money path. It can only name tokens derived
-#   from `money_path_services`, so it can NEVER cover `extra_protected_tokens` (kyc,
-#   party, card-issuance, aml, tax, dispute); a malformed allowance — not a list, or an
-#   unknown token — FAILS the check loudly at load, never reads as "no allowance". And
-#   it never touches the CI-machinery, governance, authz, or trust-chain clauses, which
-#   stay unconditional; a prefix-scoped PR whose author is not a declared account keeps
-#   today's fail-closed behavior on every protected path. This is phase-4 groundwork
-#   (#12885): no account carries an allowance until the recorded-two-person-review ADR
-#   (branch agent/adr-0340-two-person-review) merges.
+# SCOPE ALLOWANCE (ALLOWED_BY_SCOPE) — per-account, narrow, time-boxed, fail-closed
+#   An agent_accounts entry may carry a `money_path_allowance` mapping:
+#       - login: <account>
+#         money_path_allowance:
+#           services: [<token>, ...]   # tokens derived from money_path_services ONLY
+#           expires: YYYY-MM-DD        # mandatory; at most ALLOWANCE_MAX_DAYS ahead
+#           issue: <number>            # mandatory; the issue that authorised it
+#   The schema is strict: unknown keys, wrong types, a token money_path_services does not
+#   yield, or a token that is ALSO in extra_protected_tokens (card-issuance is both) fail
+#   the load (exit 2) — a malformed allowance is never read as "no allowance".
+#
+#   It is EFFECTIVE only when all of these hold, checked in code, not in a PR body:
+#     * ADR-0340 (recorded two-person review) exists under docs/adr with
+#       `decision-status: accepted`; otherwise the allowance is IGNORED and said so;
+#     * the entry has not expired (an expired entry is ignored, said so);
+#     * the author is the declared account (never a branch prefix).
+#   And it covers only ORDINARY SOURCE of the exact service directory
+#   (`openbank-<svc>/src/main/{kotlin,java}/**`, `src/test/**`, `docs/**`, README.md,
+#   CLAUDE.md) — matched on the directory name exactly, never on a token substring.
+#   Migrations, resources/config, openapi.yaml, version.txt/CHANGELOG, build files,
+#   Dockerfile, gitops/openbank-infra, rego, threat models, governance and CI stay on the
+#   normal path: any such file keeps the BLOCK and therefore the owner-approval gate.
+#   Every verdict names the path that decided it (`decided-by:`), so it is auditable.
 #
 # FALSIFIABILITY
 #   --self-test drives the classifier over fixtures with no network: every block reason must
@@ -91,11 +100,14 @@
 #   (the gate is read-only: it only GETs from the API and never posts)
 #
 # EXIT CODES
-#   0  out of scope, or in scope and touching nothing protected
+#   0  out of scope, in scope and touching nothing protected, or every protected match
+#      covered by an EFFECTIVE scope allowance (decided-by: scope-allowance)
 #   1  in scope and touching a protected path — human review required
 #   2  could not determine author / branch / file list — NOT a clean verdict
 
 import argparse
+import datetime
+import glob
 from pathlib import Path
 import fnmatch
 import json
@@ -110,6 +122,21 @@ import gatelib  # noqa: E402  (path must be set first)
 
 REPO = "JiRaska/open-bank-oss"
 RULES = "openbank-libs/governance/rules.yaml"
+ADR_DIR = "docs/adr"
+# The allowance's precondition: the recorded-two-person-review ADR. Matched by number AND
+# slug, so a renumber collision cannot make some other ADR-0340 satisfy it.
+PRECONDITION_ADR_GLOB = "0340-*two-person-review*.md"
+ALLOWANCE_MAX_DAYS = 92
+ALLOWANCE_KEYS = {"services", "expires", "issue"}
+ACCOUNT_KEYS = {"login", "money_path_allowance"}
+# Ordinary source of a service, relative to its directory. Everything else is human-gated.
+ALLOWANCE_PATH_RE = re.compile(
+    r"^(src/main/(kotlin|java)/.+|src/test/.+|docs/.+|README\.md|CLAUDE\.md)$"
+)
+ALLOWANCE_DENY_RE = re.compile(
+    r"(^|/)db/migration/|openapi\.ya?ml$|(^|/)version\.txt$|CHANGELOG|\.gradle(\.kts)?$"
+    r"|(^|/)Dockerfile|\.rego$|/opa/|threat-model"
+)
 
 
 class Undetermined(Exception):
@@ -155,13 +182,17 @@ def money_path_tokens(cfg):
 
 
 def _account_login(entry):
-    """The login of an agent_accounts entry: a bare string, or a mapping with `login:`.
-    A malformed entry is Undetermined — it must not silently drop an account from (or
-    read a non-account into) the declared-agent set."""
+    """The login of an agent_accounts entry: a bare string, or a mapping with `login:`
+    and (optionally) `money_path_allowance:` — no other keys. A malformed entry is
+    Undetermined: it must not silently drop an account from (or read a non-account into)
+    the declared-agent set."""
     if isinstance(entry, str):
         if entry.strip():
             return entry
     elif isinstance(entry, dict):
+        unknown = sorted(set(entry) - ACCOUNT_KEYS)
+        if unknown:
+            raise Undetermined(f"autonomous_agent_prs.agent_accounts entry has unknown keys {unknown}")
         login = entry.get("login")
         if isinstance(login, str) and login.strip():
             return login
@@ -171,37 +202,129 @@ def _account_login(entry):
     )
 
 
-def agent_allowances(cfg):
-    """{normalized login: frozenset(declared money-path tokens)} for the agent_accounts
-    entries that declare `allowed_money_path_services`.
+def _as_date(value, login):
+    if isinstance(value, datetime.datetime):
+        value = value.date()
+    if isinstance(value, datetime.date):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.date.fromisoformat(value)
+        except ValueError:
+            pass
+    raise Undetermined(f"agent account `{login}`: money_path_allowance.expires must be YYYY-MM-DD — got {value!r}")
 
-    Validated every call and loud about it: an allowance that is not a list of tokens, or
-    that names a token money_path_services does not yield, is Undetermined. That second
-    rule is what makes the allowance structurally unable to cover extra_protected_tokens —
-    kyc/party/card-issuance/aml/tax/dispute are not in the derivation, so declaring them
-    is a config error, not an allowance."""
+
+def agent_allowances(cfg, today=None):
+    """{normalized login: allowance dict} for every agent_accounts entry that carries a
+    `money_path_allowance`. Validates strictly (Undetermined on any defect) but does NOT
+    decide effectiveness — expiry and the ADR precondition are applied by
+    effective_allowance, so a well-formed but dormant entry still loads.
+
+    The token rules are what keep the allowance off extra_protected_tokens: a token must
+    come from the money_path_services derivation AND must not also be an extra token —
+    `card-issuance` is both, and would otherwise be grantable."""
+    today = today or datetime.date.today()
     known = money_path_tokens(cfg)
+    extra = set(cfg.get("extra_protected_tokens") or [])
     allowed = {}
     for entry in cfg.get("agent_accounts") or []:
-        if not isinstance(entry, dict) or "allowed_money_path_services" not in entry:
+        if not isinstance(entry, dict) or "money_path_allowance" not in entry:
             continue
         login = _account_login(entry)
-        value = entry["allowed_money_path_services"]
-        if (not isinstance(value, list)
-                or not all(isinstance(t, str) and t.strip() for t in value)):
+        al = entry["money_path_allowance"]
+        if not isinstance(al, dict):
+            raise Undetermined(f"agent account `{login}`: money_path_allowance must be a mapping — got {al!r}")
+        unknown = sorted(set(al) - ALLOWANCE_KEYS)
+        missing = sorted(ALLOWANCE_KEYS - set(al))
+        if unknown or missing:
             raise Undetermined(
-                f"agent account `{login}`: allowed_money_path_services must be a list of "
-                f"service tokens — got {value!r}"
+                f"agent account `{login}`: money_path_allowance unknown keys {unknown}, missing keys {missing}"
             )
-        unknown = sorted(set(value) - known)
-        if unknown:
+        services = al["services"]
+        if (not isinstance(services, list) or not services
+                or not all(isinstance(t, str) and t.strip() for t in services)):
             raise Undetermined(
-                f"agent account `{login}`: allowed_money_path_services names {unknown}, "
-                f"which money_path_services does not yield — the allowance covers "
-                f"money-path services only, never extra_protected_tokens"
+                f"agent account `{login}`: money_path_allowance.services must be a non-empty "
+                f"list of service tokens — got {services!r}"
             )
-        allowed[norm_login(login)] = frozenset(value)
+        bad = sorted(set(services) - known)
+        if bad:
+            raise Undetermined(
+                f"agent account `{login}`: money_path_allowance.services names {bad}, which "
+                f"money_path_services does not yield"
+            )
+        overlap = sorted(set(services) & extra)
+        if overlap:
+            raise Undetermined(
+                f"agent account `{login}`: money_path_allowance.services names {overlap}, which "
+                f"is also in extra_protected_tokens — an allowance can never cover those"
+            )
+        issue = al["issue"]
+        if isinstance(issue, bool) or not isinstance(issue, int) or issue <= 0:
+            raise Undetermined(f"agent account `{login}`: money_path_allowance.issue must be a positive issue number — got {issue!r}")
+        expires = _as_date(al["expires"], login)
+        if expires > today + datetime.timedelta(days=ALLOWANCE_MAX_DAYS):
+            raise Undetermined(
+                f"agent account `{login}`: money_path_allowance.expires {expires} is more than "
+                f"{ALLOWANCE_MAX_DAYS} days ahead — an allowance is time-boxed, re-grant it instead"
+            )
+        allowed[norm_login(login)] = {
+            "services": frozenset(services), "expires": expires, "issue": issue, "login": login,
+        }
     return allowed
+
+
+def precondition_adr_status(adr_dir=ADR_DIR):
+    """(accepted: bool, why: str) for the recorded-two-person-review ADR."""
+    hits = sorted(glob.glob(os.path.join(adr_dir, PRECONDITION_ADR_GLOB)))
+    if len(hits) != 1:
+        return False, f"ADR-0340 (two-person review) found {len(hits)} times under {adr_dir}, need exactly 1"
+    try:
+        text = Path(hits[0]).read_text()
+    except OSError as e:
+        return False, f"ADR-0340 unreadable: {e}"
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    status = None
+    if m:
+        import yaml
+        try:
+            status = (yaml.safe_load(m.group(1)) or {}).get("decision-status")
+        except yaml.YAMLError:
+            status = None
+    if status != "accepted":
+        return False, f"ADR-0340 decision-status is {status!r}, not 'accepted'"
+    return True, "ADR-0340 accepted"
+
+
+def effective_allowance(author, cfg, today=None):
+    """(services frozenset, note). Empty services ⇒ no allowance in force; the note says why."""
+    today = today or datetime.date.today()
+    al = agent_allowances(cfg, today).get(norm_login(author))
+    if not al:
+        return frozenset(), ""
+    if al["expires"] < today:
+        return frozenset(), f"scope allowance for `{author}` (#{al['issue']}) EXPIRED {al['expires']} — ignored"
+    ok, why = precondition_adr_status(cfg.get("_adr_dir", ADR_DIR))
+    if not ok:
+        return frozenset(), f"scope allowance for `{author}` (#{al['issue']}) IGNORED — precondition unmet: {why}"
+    return al["services"], (
+        f"scope allowance for `{author}` in force: services {sorted(al['services'])}, "
+        f"issue #{al['issue']}, expires {al['expires']}"
+    )
+
+
+def allowance_covers(path, services, cfg):
+    """True iff `path` is ordinary source of a service directory the allowance names —
+    exact directory equality, never a token substring."""
+    extra = set(cfg.get("extra_protected_tokens") or [])
+    dirs = {str(svc) for svc in cfg.get("_money_path_services") or []
+            if (money_path_tokens({"_money_path_services": [svc]}) & set(services))
+            and not (money_path_tokens({"_money_path_services": [svc]}) & extra)}
+    head, _, rest = path.partition("/")
+    if head not in dirs or not rest:
+        return False
+    return bool(ALLOWANCE_PATH_RE.match(rest)) and not ALLOWANCE_DENY_RE.search(rest)
 
 
 def protected_tokens(cfg):
@@ -246,8 +369,7 @@ def in_scope(author, is_bot, branch, cfg):
     author_key = norm_login(author)
 
     if author_key in agents:
-        return (True, f"author `{author}` is a declared autonomous agent account",
-                agent_allowances(cfg).get(author_key, frozenset()))
+        return True, f"author `{author}` is a declared autonomous agent account", frozenset()
     for p in prefixes:
         if branch.startswith(p):
             return True, f"head branch `{branch}` uses the agent prefix `{p}`", frozenset()
@@ -292,10 +414,10 @@ def protected_reasons(files, cfg, added=frozenset(), allowed=frozenset()):
         m = svc_re.match(f)
         if not m:
             continue
-        token = m.group(1) or m.group(3)
-        # The regex pins the token, but belt-and-braces: a token the allowance does not
-        # declare lands in the block column no matter which alternative matched.
-        (scope_allowed if token in allowed else blocked_svc).append(f)
+        # The allowance is judged on the PATH, not the regex token: exact service
+        # directory, ordinary source only. gitops, migrations, contracts, build and
+        # release files never qualify, and nor does any extra_protected_tokens service.
+        (scope_allowed if allowed and allowance_covers(f, allowed, cfg) else blocked_svc).append(f)
     if blocked_svc:
         out.append(("money-path", blocked_svc))
 
@@ -357,11 +479,14 @@ REASON_TEXT = {
 }
 
 
-def verdict(author, is_bot, branch, files, cfg, added=frozenset()):
-    """(exit_code, message). Raises Undetermined when it cannot decide."""
-    scoped, why, allowed = in_scope(author, is_bot, branch, cfg)
+def verdict(author, is_bot, branch, files, cfg, added=frozenset(), today=None):
+    """(exit_code, message). Raises Undetermined when it cannot decide. Every message
+    carries `decided-by:` naming the path that decided it."""
+    scoped, why, _ = in_scope(author, is_bot, branch, cfg)
     if not scoped:
-        return 0, f"out of scope: {why}"
+        return 0, f"out of scope: {why} (decided-by: out-of-scope)"
+    allowed, note = effective_allowance(author, cfg, today) if norm_login(author) in {
+        norm_login(_account_login(a)) for a in (cfg.get("agent_accounts") or [])} else (frozenset(), "")
     if not files:
         raise Undetermined(
             "the changed-file list is empty — an agent PR that changes nothing is not a clean verdict"
@@ -370,13 +495,15 @@ def verdict(author, is_bot, branch, files, cfg, added=frozenset()):
     if not hits:
         if scope_allowed:
             return 0, (
-                f"in scope ({why}); ALLOWED_BY_SCOPE — every money-path match is under a "
-                f"service this account declares in allowed_money_path_services: "
-                f"{' '.join(sorted(scope_allowed)[:3])}. extra_protected_tokens, CI "
-                f"machinery, governance and the trust chain were checked and not hit."
+                f"decided-by: scope-allowance — ALLOWED_BY_SCOPE ({why}); {note}. "
+                f"{len(scope_allowed)} ordinary-source path(s) covered, e.g. "
+                f"{' '.join(sorted(scope_allowed)[:3])}; no other protected clause hit."
             )
-        return 0, f"in scope ({why}) and touches no protected path — {len(files)} file(s) checked"
-    lines = [f"BLOCKED: this PR is agent-authored ({why}) and:"]
+        return 0, f"in scope ({why}) and touches no protected path — {len(files)} file(s) checked (decided-by: no-protected-path)" + (
+            f" [{note}]" if note else "")
+    lines = [f"BLOCKED (decided-by: human-gate): this PR is agent-authored ({why}) and:"]
+    if note:
+        lines.append(f"  [{note}]")
     for clause, matched in hits:
         lines.append(f"  * {REASON_TEXT[clause]}")
         lines.append(f"    matched: {' '.join(sorted(matched)[:3])}")
@@ -744,24 +871,115 @@ FIXTURE = {
     "agent_accounts": [
         "openbank-agent-bot[bot]",
         # The shape rules.yaml documents for an entry with a scope allowance. The fixture
-        # authorizes `ledger` only; `balance` is money-path but NOT declared, and `kyc`
-        # is extra_protected_tokens and can never be declared.
+        # authorizes `ledger` and `account` only; `balance` is money-path but NOT declared,
+        # and card-issuance is BOTH money-path and an extra token, so never grantable.
         {
             "login": "openbank-fraud-pilot-bot[bot]",
-            "allowed_money_path_services": ["ledger"],
+            "money_path_allowance": {
+                "services": ["ledger", "account"], "expires": "2026-03-01", "issue": 12885,
+            },
         },
     ],
     "automation_accounts": ["release-please[bot]", "openbank-gitops-bot[bot]"],
     "agent_branch_prefixes": ["agent/"],
-    "extra_protected_tokens": ["kyc", "party"],
+    "extra_protected_tokens": ["kyc", "party", "card-issuance"],
     "governance_path_globs": [
         "openbank-libs/governance/*",
         ".github/gates/*",
         ".github/scripts/*",
         ".github/agent-prompts/*",
     ],
-    "_money_path_services": ["openbank-ledger-service", "openbank-balance-service"],
+    "_money_path_services": [
+        "openbank-ledger-service", "openbank-balance-service", "openbank-account-service",
+        "openbank-card-issuance-service",
+    ],
 }
+SELFTEST_TODAY = datetime.date(2026, 1, 15)
+
+
+def _write_adr(adr_dir, status):
+    import shutil
+    shutil.rmtree(adr_dir, ignore_errors=True)
+    os.makedirs(adr_dir)
+    if status is not None:
+        Path(adr_dir, "0340-money-path-agent-merges-require-recorded-two-person-review.md").write_text(
+            f"---\ndecision-status: {status}\ndelivery-status: planned\n---\n\n# ADR-0340\n"
+        )
+
+
+def allowance_self_test(failures):
+    """#12885 allowance: every negative must be reachable on its own, and the positive
+    must name the path that decided it."""
+    import tempfile
+
+    adr_dir = os.path.join(tempfile.mkdtemp(), "adr")
+    bot, br = "openbank-fraud-pilot-bot[bot]", "agent/fraud-pilot"
+    src = "openbank-ledger-service/src/main/kotlin/A.kt"
+    cases = [
+        # (name, files, adr_status, today, want_code, want_substring)
+        ("POSITIVE: declared account, ordinary source of a declared service",
+         [src, "openbank-ledger-service/src/test/kotlin/AT.kt"], "accepted", SELFTEST_TODAY,
+         0, "decided-by: scope-allowance"),
+        ("POSITIVE: service docs are ordinary source",
+         ["openbank-ledger-service/docs/notes.md", "openbank-ledger-service/README.md"],
+         "accepted", SELFTEST_TODAY, 0, "decided-by: scope-allowance"),
+        ("NEGATIVE overlap: card-issuance is money-path AND extra — never covered at runtime",
+         ["openbank-card-issuance-service/src/main/kotlin/A.kt"], "accepted", SELFTEST_TODAY,
+         1, "human-gate"),
+        ("NEGATIVE migration", [src, "openbank-ledger-service/src/main/resources/db/migration/V9__x.sql"],
+         "accepted", SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE test-tree migration (allowlisted dir, denied file)",
+         ["openbank-ledger-service/src/test/resources/db/migration/V1__x.sql"], "accepted",
+         SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE service config is not ordinary source",
+         ["openbank-ledger-service/src/main/resources/application.yaml"], "accepted",
+         SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE version.txt", ["openbank-ledger-service/version.txt"], "accepted", SELFTEST_TODAY,
+         1, "human-gate"),
+        ("NEGATIVE openapi contract", ["openbank-ledger-service/src/main/resources/openapi.yaml"],
+         "accepted", SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE build file", ["openbank-ledger-service/build.gradle.kts"], "accepted",
+         SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE Dockerfile", ["openbank-ledger-service/src/main/docker/Dockerfile.jvm"],
+         "accepted", SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE gitops manifest of a declared token",
+         ["openbank-infra/gitops/components/ledgers/kustomization.yaml"], "accepted",
+         SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE substring token: `account` must not cover a sibling directory",
+         ["openbank-accounts/src/main/kotlin/A.kt"], "accepted", SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE undeclared money-path service", ["openbank-balance-service/src/main/kotlin/A.kt"],
+         "accepted", SELFTEST_TODAY, 1, "human-gate"),
+        ("NEGATIVE mixed: allowed source cannot launder an undeclared service",
+         [src, "openbank-balance-service/src/main/kotlin/B.kt"], "accepted", SELFTEST_TODAY,
+         1, "human-gate"),
+        ("NEGATIVE CI machinery", [src, ".github/workflows/ci.yml"], "accepted", SELFTEST_TODAY,
+         1, "self-hosted runners"),
+        ("NEGATIVE expired entry", [src], "accepted", datetime.date(2026, 3, 2), 1, "EXPIRED"),
+        ("NEGATIVE ADR-0340 proposed, not accepted", [src], "proposed", SELFTEST_TODAY,
+         1, "precondition unmet"),
+        ("NEGATIVE ADR-0340 absent", [src], None, SELFTEST_TODAY, 1, "precondition unmet"),
+    ]
+    for name, files, status, today, want_code, want_sub in cases:
+        _write_adr(adr_dir, status)
+        cfg = dict(FIXTURE, _adr_dir=adr_dir)
+        try:
+            code, msg = verdict(bot, True, br, files, cfg, today=today)
+        except Undetermined as e:
+            failures.append(f"allowance {name}: raised Undetermined ({e})")
+            continue
+        if code != want_code or want_sub not in msg:
+            failures.append(f"allowance {name}: exit {code} (want {want_code}), want {want_sub!r} — {msg}")
+    # Runtime independence from the loader: even handed an allowance naming an
+    # extra_protected_tokens service, the path check refuses it.
+    if allowance_covers("openbank-card-issuance-service/src/main/kotlin/A.kt",
+                        frozenset({"card-issuance"}), dict(FIXTURE)):
+        failures.append("allowance_covers granted an extra_protected_tokens service")
+    # The branch-prefix route never carries an allowance, even with everything in force.
+    _write_adr(adr_dir, "accepted")
+    code, msg = verdict("JiRaska", False, br, [src], dict(FIXTURE, _adr_dir=adr_dir), today=SELFTEST_TODAY)
+    if code != 1:
+        failures.append(f"allowance via branch prefix alone was honoured — {msg}")
+    return len(cases) + 1
 
 
 def self_test():
@@ -843,50 +1061,6 @@ def self_test():
             "openbank-agent-bot[bot]", True, "agent/x",
             ["openbank-kyc-service/src/main/kotlin/A.kt"], 1, "money-path",
         ),
-        # ---- #12885: per-account money-path scope allowance ------------------------------
-        (
-            # The positive case: declared account, declared token, money-path derivation.
-            "an account WITH an allowance touching its declared service is ALLOWED_BY_SCOPE",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            ["openbank-ledger-service/src/main/kotlin/A.kt"], 0, "ALLOWED_BY_SCOPE",
-        ),
-        (
-            "the allowance covers the gitops component naming scheme for the declared token",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            ["openbank-infra/gitops/components/ledgers/kustomization.yaml"], 0, "ALLOWED_BY_SCOPE",
-        ),
-        (
-            "the SAME account touching a money-path service it did NOT declare is still BLOCKED",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            ["openbank-balance-service/src/main/kotlin/A.kt"], 1, "money-path",
-        ),
-        (
-            "the SAME account touching an extra_protected_token is still BLOCKED",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            ["openbank-kyc-service/src/main/kotlin/A.kt"], 1, "money-path",
-        ),
-        (
-            "the SAME account touching CI machinery is still BLOCKED on its own clause",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            [".github/workflows/ci.yml"], 1, "self-hosted runners",
-        ),
-        (
-            "the SAME account touching the governance trust chain is still BLOCKED",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            ["openbank-libs/governance/rules.yaml"], 1, "governance sources",
-        ),
-        (
-            # THE MIXED CASE: an allowed path must not launder an undeclared one. Both
-            # tokens are money-path; only `ledger` is declared. The verdict must be BLOCK,
-            # and the blocked reason must name the undeclared service — a guard that
-            # averages the two paths would read as clean here.
-            "an allowed service PLUS an undeclared money-path service still BLOCKS",
-            "openbank-fraud-pilot-bot[bot]", True, "agent/fraud-pilot",
-            [
-                "openbank-ledger-service/src/main/kotlin/A.kt",
-                "openbank-balance-service/src/main/kotlin/B.kt",
-            ], 1, "money-path",
-        ),
         # ---- #6560: a WHOLE NEW service trips no name-based clause ---------------------
         (
             "a brand-new released component is blocked even though its name is in no list",
@@ -928,6 +1102,7 @@ def self_test():
     ]
 
     failures = []
+    n_allowance = allowance_self_test(failures)
     for case in cases:
         name, author, is_bot, branch, files, want_code, want_sub = case[:7]
         added = frozenset(case[7]) if len(case) > 7 else frozenset()
@@ -973,27 +1148,43 @@ def self_test():
     # A malformed allowance must fail loudly at load — never be read as "no allowance".
     # The token set is validated against the money_path_services derivation, so an
     # extra_protected_tokens name (kyc) is a config error here, not a scope grant.
+    def acct(al):
+        return ("autonomous_agent_prs:\n  extra_protected_tokens: [kyc, card-issuance]\n"
+                "  agent_accounts:\n    - login: some-bot[bot]\n      money_path_allowance:\n" + al)
+    soon = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+    far = (datetime.date.today() + datetime.timedelta(days=ALLOWANCE_MAX_DAYS + 5)).isoformat()
     malformed_allowances = [
-        (
-            "an allowance that is not a list",
-            "autonomous_agent_prs:\n  agent_accounts:\n"
-            "    - login: some-bot[bot]\n"
-            "      allowed_money_path_services: ledger\n",
-        ),
-        (
-            "an allowance naming a token money_path_services does not yield",
-            "autonomous_agent_prs:\n  agent_accounts:\n"
-            "    - login: some-bot[bot]\n"
-            "      allowed_money_path_services: [kyc]\n",
-        ),
-        (
-            "an account entry that is neither a string nor a login mapping",
-            "autonomous_agent_prs:\n  agent_accounts:\n    - login: 42\n",
-        ),
+        ("services not a list", acct(f"        services: ledger\n        expires: {soon}\n        issue: 1\n")),
+        ("a token money_path_services does not yield (kyc)",
+         acct(f"        services: [kyc]\n        expires: {soon}\n        issue: 1\n")),
+        ("OVERLAP: card-issuance is money-path AND extra_protected_tokens",
+         acct(f"        services: [card-issuance]\n        expires: {soon}\n        issue: 1\n")),
+        ("unknown key in the allowance",
+         acct(f"        services: [ledger]\n        expires: {soon}\n        issue: 1\n        scope: all\n")),
+        ("unknown key on the account entry",
+         "autonomous_agent_prs:\n  agent_accounts:\n    - login: some-bot[bot]\n      allowed_money_path_services: [ledger]\n"),
+        ("missing expiry", acct("        services: [ledger]\n        issue: 1\n")),
+        ("missing issue", acct(f"        services: [ledger]\n        expires: {soon}\n")),
+        ("issue of the wrong type", acct(f"        services: [ledger]\n        expires: {soon}\n        issue: soon\n")),
+        ("expiry that is not a date", acct("        services: [ledger]\n        expires: never\n        issue: 1\n")),
+        ("expiry beyond the time box", acct(f"        services: [ledger]\n        expires: {far}\n        issue: 1\n")),
+        ("an account entry that is neither a string nor a login mapping",
+         "autonomous_agent_prs:\n  agent_accounts:\n    - login: 42\n"),
     ]
+    # The well-formed shape MUST load, or every negative above is vacuous.
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        fh.write("money_path_services: [openbank-ledger-service, openbank-card-issuance-service]\n"
+                 + acct(f"        services: [ledger]\n        expires: {soon}\n        issue: 1\n"))
+        good = fh.name
+    try:
+        load_rules(good)
+    except Undetermined as e:
+        failures.append(f"a well-formed allowance failed to load: {e}")
+    finally:
+        os.unlink(good)
     for label, body in malformed_allowances:
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
-            fh.write("money_path_services: [openbank-ledger-service]\n" + body)
+            fh.write("money_path_services: [openbank-ledger-service, openbank-card-issuance-service]\n" + body)
             bad = fh.name
         try:
             load_rules(bad)
@@ -1042,7 +1233,7 @@ def self_test():
             print(f"  x {f}")
         return 1
     print(
-        f"self-test OK — {len(cases)} classifier cases + "
+        f"self-test OK — {len(cases)} classifier cases + {n_allowance} allowance cases + "
         f"{4 + len(malformed_allowances)} undetermined cases + diff parser, "
         f"every block clause independently reached"
     )
@@ -1110,7 +1301,7 @@ def main():
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
         if code == 1 and owner_approval_allows(n, files):
-            code, msg = 0, ("protected changes explicitly approved by repository owner on the "
+            code, msg = 0, ("decided-by: human-gate (owner approval) — protected changes explicitly approved by repository owner on the "
                             "current head, or on an earlier head followed only by content-neutral base merges")
     except Undetermined as e:
         # Third state: the verdict could not be computed. The floor must not then convert an
