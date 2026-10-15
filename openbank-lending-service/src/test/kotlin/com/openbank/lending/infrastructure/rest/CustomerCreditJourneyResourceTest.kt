@@ -4,18 +4,29 @@
 
 package com.openbank.lending.infrastructure.rest
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.domain.model.ApplicationStateSummary
+import com.openbank.lending.domain.model.DecisionRequest
 import com.openbank.lending.domain.model.LoanApplication
+import com.openbank.lending.domain.model.LoanApplicationRequest
+import com.openbank.lending.domain.model.SignApplicationRequest
+import com.openbank.lending.domain.model.SubmitDocumentsRequest
+import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.idempotency.IdempotencyRecord
+import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.lending.origination.CreditProductKind
 import com.openbank.libs.lending.origination.OriginationState
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -98,11 +109,75 @@ class CustomerCreditJourneyResourceTest {
         principal: String = edge,
         who: SecurityIdentity = identity(principal),
         config: CustomerIntakeConfig = config(),
-    ) = CustomerCreditJourneyResource(StubRepository(rows), config, who)
+        apply: com.openbank.lending.application.port.`in`.ApplyForLoanUseCase = withdrawAlwaysSucceeds(),
+    ) = CustomerCreditJourneyResource(StubRepository(rows), apply, config, who, FakeIdempotencyStore(), ObjectMapper())
+
+    /** The withdraw leg's happy path: records the command, answers with the withdrawn application. */
+    private fun withdrawAlwaysSucceeds(): com.openbank.lending.application.port.`in`.ApplyForLoanUseCase =
+        object : com.openbank.lending.application.port.`in`.ApplyForLoanUseCase {
+            override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun decide(id: LoanApplicationId, decision: DecisionRequest, decidedBy: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun getApplication(id: LoanApplicationId): Uni<LoanApplication?> =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun listApplications(partyId: UUID): Uni<List<LoanApplication>> =
+                Uni.createFrom().item(emptyList())
+            override fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+                Uni.createFrom().item(emptyList())
+            override fun advance(id: LoanApplicationId, actor: String): Uni<LoanApplication> =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun expireIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun advanceIfInState(id: LoanApplicationId, expectedState: String, actor: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun withdraw(
+                id: LoanApplicationId,
+                request: WithdrawApplicationRequest,
+                withdrawnBy: String,
+            ): Uni<LoanApplication> = Uni.createFrom().item(
+                application(id = id.value).copy(status = OriginationState.WITHDRAWN),
+            )
+            override fun submitDocuments(
+                id: LoanApplicationId,
+                request: SubmitDocumentsRequest,
+                submittedBy: String,
+            ): Uni<LoanApplication> = Uni.createFrom().nullItem<LoanApplication>()
+            override fun sign(id: LoanApplicationId, request: SignApplicationRequest, signedBy: String) =
+                Uni.createFrom().nullItem<LoanApplication>()
+            override fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String) =
+                Uni.createFrom().item(false)
+            override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
+                Uni.createFrom().item(emptyList())
+            override fun summariseApplications(): Uni<List<ApplicationStateSummary>> =
+                Uni.createFrom().item(emptyList())
+        }
 
     @Suppress("UNCHECKED_CAST")
     private fun bodyOf(response: jakarta.ws.rs.core.Response): List<CustomerCreditJourneyDto> =
         response.entity as List<CustomerCreditJourneyDto>
+
+    /**
+     * In-memory [IdempotencyStore] that always grants the reservation: these tests exercise the
+     * edge withdraw path itself, not the replay semantics (those live in IdempotentSubmitTest and
+     * OriginationCommandsIT).
+     */
+    private class FakeIdempotencyStore : IdempotencyStore {
+        override suspend fun get(key: String): IdempotencyRecord? = null
+        override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) = Unit
+        override suspend fun save(
+            key: String,
+            requestHash: String,
+            statusCode: Int,
+            responseBody: String,
+            ttlSeconds: Long,
+        ) = Unit
+
+        override suspend fun reserve(key: String, requestHash: String, inFlightTtlSeconds: Long) =
+            ReserveResult.Reserved
+
+        override suspend fun release(key: String, requestHash: String) = Unit
+    }
 
     // ── Disclosure ────────────────────────────────────────────────────────────
 
@@ -165,6 +240,54 @@ class CustomerCreditJourneyResourceTest {
         assertThat(response.status).isEqualTo(404)
     }
 
+    // ── Withdraw (ADR-0211 customer leg, #8351 required replay key) ──────────
+
+    @Test
+    fun `the customer's own withdrawal needs an Idempotency-Key`() {
+        val app = application()
+        assertThatThrownBy {
+            runBlocking {
+                resource(listOf(app)).withdraw(
+                    party.toString(),
+                    app.id.value.toString(),
+                    WithdrawApplicationRequest("no longer needed"),
+                    null,
+                )
+            }
+        }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("Idempotency-Key")
+    }
+
+    @Test
+    fun `the customer's own withdrawal answers 200 with the journey body`(): Unit = runBlocking {
+        val app = application()
+        val response = resource(listOf(app))
+            .withdraw(
+                party.toString(),
+                app.id.value.toString(),
+                WithdrawApplicationRequest("no longer needed"),
+                "edge-key-1",
+            )
+        assertThat(response.status).isEqualTo(200)
+        // The idempotent-submit wrapper stores a serialised body so the replayed response is
+        // byte-stable; the wire shape is unchanged.
+        val body = response.entity as String
+        assertThat(body).contains("\"state\":\"WITHDRAWN\"")
+    }
+
+    @Test
+    fun `a foreign application id still reads as 404 through the withdraw leg`(): Unit = runBlocking {
+        val theirs = application(owner = stranger)
+        val response = resource(listOf(theirs))
+            .withdraw(
+                party.toString(),
+                theirs.id.value.toString(),
+                WithdrawApplicationRequest("no longer needed"),
+                "edge-key-2",
+            )
+        assertThat(response.status).isEqualTo(404)
+    }
+
     // ── Projection ────────────────────────────────────────────────────────────
 
     @Test
@@ -222,6 +345,9 @@ class CustomerCreditJourneyResourceTest {
             decisionReason: String?,
             decidedAt: OffsetDateTime?,
         ): Uni<Int> = Uni.createFrom().item(0)
+
+        override fun compareAndSetSignature(application: LoanApplication, from: OriginationState): Uni<Int> =
+            Uni.createFrom().item(0)
     }
 
     // ── #12448: the edge is identified by its CLIENT, never by its principal name ─
