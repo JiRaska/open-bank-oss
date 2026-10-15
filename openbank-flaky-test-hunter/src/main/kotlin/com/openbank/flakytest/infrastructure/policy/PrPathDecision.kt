@@ -17,6 +17,9 @@ internal object PrPathGateVocabulary {
     const val RESOURCE_GITHUB_PR = "github-pr"
     const val TIER_WRITE_PROPOSAL = "write_proposal"
 
+    /** The PR writer is disabled by configuration. Deny without consulting either policy layer. */
+    const val REASON_POLICY_GATE_DISABLED = "policy_gate_disabled"
+
     /** The packaged charter resource could not be loaded or parsed. Deny (fail closed). */
     const val REASON_CHARTER_UNAVAILABLE = "charter_unavailable"
 

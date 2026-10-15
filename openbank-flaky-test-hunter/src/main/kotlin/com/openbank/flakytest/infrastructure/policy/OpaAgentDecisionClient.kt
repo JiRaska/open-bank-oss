@@ -92,12 +92,16 @@ class OpaAgentDecisionClient @Inject constructor(private val config: FlakyTestHu
     @Suppress("TooGenericExceptionCaught")
     private fun parse(body: String): OpaAgentDecision = try {
         val result = mapper.readTree(body).path(RESULT_NODE)
-        if (result.isMissingNode || result.isNull) {
+        if (!result.isObject) {
             // OPA serves no `result` for an undefined decision — fail closed as unreachable
             // shape rather than silently reading a missing `allow` as a policy deny.
             throw OpaGateException("OPA response has no result object")
         }
-        if (result.path(ALLOW_NODE).asBoolean(false)) {
+        val allow = result.path(ALLOW_NODE)
+        if (!allow.isBoolean) {
+            throw OpaGateException("OPA result has no boolean allow decision")
+        }
+        if (allow.booleanValue()) {
             OpaAgentDecision.Allowed
         } else {
             OpaAgentDecision.Denied(result.path(REASON_NODE).asText(NO_MATCHING_RULE))

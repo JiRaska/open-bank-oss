@@ -53,12 +53,12 @@ class PrPathPolicyGateTest {
     }
 
     @Test
-    fun `a disabled gate allows without consulting the charter or the sidecar`() {
+    fun `a disabled gate denies PR writes without consulting the charter or the sidecar`() {
         gateEnabled(enabled = false)
 
         val decision = runBlocking { gate.decide(finding) }
 
-        assertThat(decision).isEqualTo(PrPathDecision.Allowed("flaky-test-hunter/unit-return-abcdef12"))
+        assertThat(decision).isEqualTo(PrPathDecision.Denied(PrPathGateVocabulary.REASON_POLICY_GATE_DISABLED))
         verify { charterVerifier wasNot Called }
         coVerify { opa wasNot Called }
     }

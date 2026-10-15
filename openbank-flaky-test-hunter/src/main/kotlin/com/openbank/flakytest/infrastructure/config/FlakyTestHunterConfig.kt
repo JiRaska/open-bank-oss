@@ -51,7 +51,7 @@ interface FlakyTestHunterConfig {
     fun policyGate(): PolicyGate
 
     interface PolicyGate {
-        /** Kill switch for the gate. Default true — the PR path is policy-gated in every profile. */
+        /** PR writer kill switch. False denies PR writes; true requires both policy layers in every profile. */
         @WithDefault("true")
         fun enabled(): Boolean
 

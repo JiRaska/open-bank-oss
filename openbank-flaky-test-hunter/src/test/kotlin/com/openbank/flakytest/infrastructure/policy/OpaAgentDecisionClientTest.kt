@@ -130,6 +130,22 @@ class OpaAgentDecisionClientTest {
     }
 
     @Test
+    fun `a missing or non-boolean allow decision is an OPA gate exception`() {
+        val malformedValues = listOf(null, "null", "\"true\"", "\"false\"", "1", "0", "{}", "[]")
+        for (value in malformedValues) {
+            val allow = value?.let { "\"allow\":$it" }.orEmpty()
+            val client = clientFor(startOpaStub(200, """{"result":{$allow}}"""))
+            try {
+                assertThatThrownBy { runBlocking { client.queryPrOpenDecision() } }
+                    .describedAs("allow=%s must not be coerced into a policy decision", value ?: "missing")
+                    .isInstanceOf(OpaGateException::class.java)
+            } finally {
+                stop()
+            }
+        }
+    }
+
+    @Test
     fun `a connection-refused sidecar is an OPA gate exception`() {
         val client = clientFor("http://127.0.0.1:1")
 

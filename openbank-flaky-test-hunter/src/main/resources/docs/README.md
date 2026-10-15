@@ -23,7 +23,7 @@ Config (`flaky-test-hunter.policy-gate`):
 
 | Key | Default | Purpose |
 |---|---|---|
-| `enabled` | `true` | master switch (dev-only escape hatch; when false the PR path is NOT policy-gated) |
+| `enabled` | `true` | PR writer kill switch: false denies writes with `policy_gate_disabled` before charter or OPA calls; true requires both policy layers |
 | `opa-url` | `http://localhost:8181` | OPA sidecar base URL |
 | `timeout` | `PT0.5S` | per-call connect + request timeout; exceeding it fails closed (`pdp_unreachable`) |
 

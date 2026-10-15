@@ -67,7 +67,7 @@ class AgentCharterGrantVerifier {
         }
         when {
             charter == null -> CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)
-            !charter.path(ENABLED_NODE).asBoolean(true) ->
+            !charter.path(ENABLED_NODE).isBoolean || !charter.path(ENABLED_NODE).booleanValue() ->
                 CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)
             tierResourceDenied(charter.path(TOOLS_NODE).path(DENY_NODE)) ->
                 CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED)

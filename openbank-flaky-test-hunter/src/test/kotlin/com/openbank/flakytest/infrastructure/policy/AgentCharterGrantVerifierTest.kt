@@ -40,6 +40,20 @@ class AgentCharterGrantVerifierTest {
     }
 
     @Test
+    fun `a missing or non-boolean enabled field denies even when the grant is present`() {
+        val malformedValues = listOf(null, "null", "\"true\"", "\"false\"", "1", "0", "{}", "[]")
+        for (value in malformedValues) {
+            val enabled = value?.let { "\"enabled\":$it," }.orEmpty()
+            val charter = """{"agents":[{"id":"flaky-test-hunter",$enabled
+                "tools":{"allow":[{"tier":"write_proposal","resources":["github-pr"]}]}}]}"""
+
+            assertThat(verifier.parse(charter))
+                .describedAs("enabled=%s must not grant PR access", value ?: "missing")
+                .isEqualTo(CharterGrant.Denied(PrPathGateVocabulary.REASON_CHARTER_DENIED))
+        }
+    }
+
+    @Test
     fun `an explicit object-shaped deny entry beats the grant`() {
         verifier.resourcePath = "governance-fixtures/agents-deny-overrides.yaml"
 

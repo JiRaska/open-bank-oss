@@ -160,10 +160,19 @@ class DiagnoseAndProposeActivityImplTest {
 
     @Test
     fun `a policy gate denial vetoes the entire PR path and records the policy-blocked disposition`() {
+        assertPolicyBlocked(PrPathGateVocabulary.REASON_PDP_UNREACHABLE)
+    }
+
+    @Test
+    fun `a disabled PR writer makes no GitHub write and audits the policy-blocked disposition`() {
+        assertPolicyBlocked(PrPathGateVocabulary.REASON_POLICY_GATE_DISABLED)
+    }
+
+    private fun assertPolicyBlocked(reason: String) {
         val finding = aFinding()
         coEvery { llm.proposeFixDiff(finding, finding.rootCause!!) } returns "add-explicit-unit-return-type"
         coEvery { prPathGate.decide(finding) } returns
-            PrPathDecision.Denied(PrPathGateVocabulary.REASON_PDP_UNREACHABLE)
+            PrPathDecision.Denied(reason)
         coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns null
         coEvery { findingRepository.update(any()) } answers { firstArg() }
 
@@ -181,7 +190,7 @@ class DiagnoseAndProposeActivityImplTest {
         assertThat(event.result).isEqualTo(AuditResult.DENIED)
         assertThat(event.payload["policy_decision"]).isEqualTo("DENY")
         assertThat(event.payload["policy_blocked"]).isEqualTo(true)
-        assertThat(event.payload["policy_denial_reason"]).isEqualTo("pdp_unreachable")
+        assertThat(event.payload["policy_denial_reason"]).isEqualTo(reason)
         assertThat(event.payload["tool"]).isEqualTo("gh.pr.open")
         assertThat(event.payload["resource"]).isEqualTo("github-pr")
         assertThat(event.payload["pr_branch"]).isEqualTo("flaky-test-hunter/unit-return-finding-")

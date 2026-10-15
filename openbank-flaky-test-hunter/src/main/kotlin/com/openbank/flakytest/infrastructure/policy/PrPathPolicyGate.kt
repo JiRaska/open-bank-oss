@@ -41,8 +41,8 @@ class PrPathPolicyGate @Inject constructor(
 
     suspend fun decide(finding: FlakyTestFinding): PrPathDecision {
         if (!config.policyGate().enabled()) {
-            log.warn("Policy gate disabled via config — PR path is NOT policy-gated (dev-only escape hatch)")
-            return PrPathDecision.Allowed(GitHubProposalPort.prBranchFor(finding.id))
+            log.warn("Policy gate disabled via config — denying the PR write path")
+            return PrPathDecision.Denied(PrPathGateVocabulary.REASON_POLICY_GATE_DISABLED)
         }
         val branch = GitHubProposalPort.prBranchFor(finding.id)
         when (val charter = charterVerifier.checkPrOpenGrant()) {

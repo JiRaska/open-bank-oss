@@ -131,6 +131,7 @@ openbank:
     # unlike the agent-service MCP read gate's advisory degradation: a write path must not open
     # a PR on the word of a PDP that cannot answer).
     policy-gate:
+      # False disables PR writes with policy_gate_disabled; it never bypasses policy checks.
       enabled: ${FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED:true}
       opa-url: ${OPA_SIDECAR_URL:http://localhost:8181}
       timeout: ${FLAKY_TEST_HUNTER_POLICY_GATE_TIMEOUT:PT0.5S}
