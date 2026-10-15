@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Journey fx-rates-read → Keycloak (:8080), token endpoint only.
+# Journey fx-rates-read → Keycloak (:8080), used for token requests.
+# This L4 policy permits TCP 8080; it does not restrict HTTP paths to the token endpoint.
 #
 # Same reasoning as networkpolicy-keycloak-synthetic-journey.yaml: the journey mints a
 # client_credentials token for its own synthetic client before its one rate-sheet read.

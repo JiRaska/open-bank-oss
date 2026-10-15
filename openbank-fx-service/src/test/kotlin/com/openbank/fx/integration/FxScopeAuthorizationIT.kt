@@ -32,8 +32,8 @@ class FxScopeAuthorizationIT {
     @TestSecurity(user = "synthetic-fx-read", augmentors = [FxScopeIdentityAugmentor::class])
     @OidcSecurity(claims = [Claim(key = "scope", value = "fx:read")])
     fun authorizesFxReadScopeWithoutRealmRoles() {
-        // Both endpoints must pass the RBAC + OPA gates for a token carrying ONLY the
-        // scope-derived role — the journey's identity shape, exactly.
+        // Both endpoints exercise the augmentor and RBAC with only the scope-derived role.
+        // OPA is advisory in this test; separate Rego tests cover policy logic.
         given().get("/api/v1/fx/rates").then().statusCode(200)
         given().get("/api/v1/fx/rates/EUR/CZK").then().statusCode(200)
     }

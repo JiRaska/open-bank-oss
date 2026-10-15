@@ -2,18 +2,25 @@
 
 The `fx-rates-read` synthetic journey is the fx-service leg of the fleet's
 synthetic-monitoring programme (runbook 0009). It answers one question
-continuously, from outside the cluster: *can a scoped synthetic identity
+continuously, from an in-cluster CronJob: *can a scoped synthetic identity
 actually read FX rates the way a customer-facing integration would?*
 
 ## Scope-derived identity (the load-bearing part)
 
-The journey does not mint a bespoke synthetic user. It derives its identity
-from the journey scope itself: `journey.fxrates.read` is the only granted
-scope, and the token's `sub`/`azp` are derived from that scope. The
-`FxScopeIdentityAugmentor` (infrastructure/security) maps the scope to a
-read-only principal at the security layer, so the journey proves the whole
-chain — token issue, scope mapping, authorization decision, repository read —
-rather than a test-only back door.
+The journey uses the dedicated client-credentials identity
+`openbank-synthetic-fx-read`, with no realm roles and the `fx:read` client
+scope. The token's `sub` and `azp` identify the service-account client;
+they are not derived from the scope. `FxScopeIdentityAugmentor` maps the
+verified token's scope claim to the read-only `FX_SCOPE_READ` role.
+
+The CronJob reads the rate sheet through the in-cluster Service. Its
+successful run can establish token issuance, scope mapping, authorization
+and the rate projection for the deployed configuration. The HTTP integration
+test separately exercises the real augmentor and RBAC with test OIDC claims;
+its default advisory OPA configuration is not proof of enforced HTTP PDP
+decisions. Rego tests cover the policy's read allow and write deny rules.
+A new service image, policy bundle, realm configuration and provisioned
+credential must be deployed before runtime journey success can be claimed.
 
 Consequences:
 
