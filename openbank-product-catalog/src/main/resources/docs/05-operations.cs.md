@@ -72,6 +72,15 @@ certifikát naváže TLS spojení, ale sám o sobě neautentizuje požadavek na 
 nakonfigurované autorizační kontroly platí dál. Úspěšný mTLS handshake ani toto nastavení
 cesty nedokazují, že byla vynucena konkrétní autorizační politika.
 
+### Autorizační bod OPA (ADR-0034)
+
+`openbank.authz.opa-pdp-producer.enabled: true` zapíná libs-runtime `PolicyDecisionPoint`
+nad OPA sidecarem, takže endpointy s `@Authorize` (čtecí most pro AI agenty,
+`query.catalog.readonly`) se ptají sidecaru na `OPA_URL` + `OPA_PATH`. GitOps Deployment
+spouští sidecar s politikou `product-catalog-opa-bundle`. `AUTHZ_ENFORCE` je ve výchozím stavu
+`false` (advisory): zamítnuté nebo nedostupné rozhodnutí se zaloguje na WARN a požadavek
+pokračuje. Požadavek odmítne až `AUTHZ_ENFORCE=true`.
+
 ## Health checky
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC běží.

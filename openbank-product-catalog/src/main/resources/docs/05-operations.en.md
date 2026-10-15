@@ -70,6 +70,15 @@ The bearer-only route permission selects the authentication mechanism; endpoint 
 and any separately configured authorization checks still apply. Do not treat successful mTLS
 handshake or this route setting as evidence that a particular authorization policy was enforced.
 
+### OPA authorization decision point (ADR-0034)
+
+`openbank.authz.opa-pdp-producer.enabled: true` opts the service in to the libs-runtime OPA
+sidecar `PolicyDecisionPoint`, so `@Authorize` endpoints (the AI-agent read bridge,
+`query.catalog.readonly`) consult the sidecar at `OPA_URL` + `OPA_PATH`. The GitOps Deployment
+runs the sidecar with the `product-catalog-opa-bundle` policy. `AUTHZ_ENFORCE` defaults to
+`false` (advisory): a denied or unreachable decision is logged at WARN and the request proceeds.
+Only with `AUTHZ_ENFORCE=true` does a deny reject the request.
+
 ## Health checks
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC up.
