@@ -60,9 +60,6 @@ env:
   # OIDC issuer of the sandbox realm (accessTokenLifespan 300 — the mint step re-arms
   # a fresh token every run, so expiry can never strand a record).
   AGENT_MERGE_RECORDER_ISSUER: ${{ vars.AGENT_MERGE_RECORDER_ISSUER }}
-  # CI-only client_credentials pair; the client carries ROLE_ADMIN for the POST endpoint.
-  AGENT_MERGE_RECORDER_CLIENT_ID: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_ID }}
-  AGENT_MERGE_RECORDER_CLIENT_SECRET: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET }}
   # Optional override for the record's proposalId; normally the script reads a
   # `Proposal-Id:` line from the PR body instead.
   AGENT_MERGE_PROPOSAL_ID: ""
@@ -73,6 +70,10 @@ env:
 jobs:
   record:
     name: record-agent-merge
+    env:
+      # Only the recorder job needs credentials for the authenticated POST.
+      AGENT_MERGE_RECORDER_CLIENT_ID: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_ID }}
+      AGENT_MERGE_RECORDER_CLIENT_SECRET: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET }}
     # The workflow fires on every closed PR; only a MERGED one can produce a merge
     # record, and the agent-authorship decision itself lives in the script (testable
     # Python, thin YAML — repo convention).

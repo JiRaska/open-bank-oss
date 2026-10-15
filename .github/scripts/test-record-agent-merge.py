@@ -370,9 +370,12 @@ class WorkflowWiringTest(unittest.TestCase):
         env = workflow['env']
         self.assertIn('vars.AGENT_SERVICE_URL', env['AGENT_SERVICE_URL'])
         self.assertIn('vars.AGENT_MERGE_RECORDER_ISSUER', env['AGENT_MERGE_RECORDER_ISSUER'])
-        self.assertIn('secrets.AGENT_MERGE_RECORDER_CLIENT_ID', env['AGENT_MERGE_RECORDER_CLIENT_ID'])
-        self.assertIn('secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET',
-                      env['AGENT_MERGE_RECORDER_CLIENT_SECRET'])
+        for key in ('AGENT_MERGE_RECORDER_CLIENT_ID', 'AGENT_MERGE_RECORDER_CLIENT_SECRET'):
+            self.assertIn('secrets.' + key, record['env'][key])
+            self.assertNotIn(key, env)
+            for name, job in workflow['jobs'].items():
+                if name != 'record':
+                    self.assertNotIn('secrets.' + key, yaml.safe_dump(job))
         # No static bearer JWT anywhere in the workflow: the realm's 300-second
         # accessTokenLifespan would kill it minutes after provisioning.
         self.assertNotIn('AGENT_MERGE_RECORDER_TOKEN', json.dumps(workflow))
