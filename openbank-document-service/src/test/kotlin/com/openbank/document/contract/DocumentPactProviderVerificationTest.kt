@@ -20,6 +20,7 @@ import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -92,6 +93,9 @@ class DocumentPactProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var sessionFactory: Mutiny.SessionFactory
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -107,16 +111,19 @@ class DocumentPactProviderVerificationTest {
     /**
      * No seeding needed, and that is a property of the provider rather than an omission:
      * `DocumentTemplateSeeder` runs on EVERY boot (`@Observes StartupEvent`) and inserts the
-     * canonical templates (including the `pension-*` ones pension-service renders, #12392) —
-     * including the `POTVRZENI_O_PLATBE_CS`/`_EN` payment confirmations this
-     * contract is about — into whatever database the service starts against, so the fresh
-     * Testcontainer DB this test boots on already satisfies the state. Seeding again through the
+     * canonical published templates, including the `POTVRZENI_O_PLATBE_CS`/`_EN` payment
+     * confirmations this contract is about, into whatever database the service starts against.
+     * Pension wording is deliberately DRAFT and has a separate conditional test-only state.
+     * The fresh Testcontainer DB this test boots on already satisfies the generic state. Seeding through the
      * repository would only assert that the fixture works.
      */
     @State("the canonical document templates are seeded and published")
     fun stateTemplatesSeeded() {
         // Intentionally empty — see the KDoc above.
     }
+
+    @State(PensionPublishedPactState.STATE)
+    fun statePensionKidPublished() = PensionPublishedPactState.publishInTestDatabase(sessionFactory)
 
     /**
      * `previewTemplate` is stateless and non-persisting by design (ADR-0248 #3): it merges a

@@ -67,6 +67,8 @@ data class DomesticPaymentStatusChangedEvent(
     val rejectReason: String?,
     val rejectDetail: String?,
     val occurredAt: Instant,
+    /** Persisted domestic settlement transition time; distinct from this event's creation time. */
+    val settledAt: Instant? = null,
     val aggregateRevision: Long = 1,
     /** Customer who initiated the payment, preserved across asynchronous status transitions. */
     val initiatedByPartyId: UUID? = null,
@@ -109,6 +111,7 @@ fun DomesticPayment.toStatusChangedEvent(previous: DomesticPayment, clock: Clock
     rejectReason = rejectReason?.name,
     rejectDetail = rejectDetail,
     occurredAt = Instant.now(clock),
+    settledAt = settledAt,
     aggregateRevision = aggregateRevision,
     initiatedByPartyId = initiatedByPartyId,
     delegationId = delegationId,

@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.1.0...customer-edge-v1.2.0) (2026-10-14)
+
+
+### Features
+
+* **referral:** shareable referral link e2e + activate referral-service on sandbox ([#12813](https://github.com/JiRaska/open-bank-oss/issues/12813)) ([b2e006a](https://github.com/JiRaska/open-bank-oss/commit/b2e006aca9f2485e08599f5d782fbc86485a7270))
+
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.0.0...customer-edge-v1.1.0) (2026-10-14)
+
+
+### Features
+
+* **customer-edge:** filter products and offers by business eligibility segment under X-Acting-For (ADR-0284 D10) ([#12758](https://github.com/JiRaska/open-bank-oss/issues/12758)) ([69dffb4](https://github.com/JiRaska/open-bank-oss/commit/69dffb49e5d72fa14ec018fd1a6d9aad7eb0c6be))
+
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.2...customer-edge-v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
 ## [0.90.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.90.1...customer-edge-v0.90.2) (2026-10-12)
 
 
