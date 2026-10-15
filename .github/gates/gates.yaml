@@ -1815,18 +1815,6 @@ gates:
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
 
-  # Deploy-PR branch updater unit test (2026-10-15 MGM deploy postmortem). Guards the
-  # script that keeps bot deploy PR branches up to date with main so armed auto-merge
-  # can complete under the strict required-status-checks policy. The test stubs gh with
-  # a fixture binary and asserts the never-touch-feature-PRs boundary above all.
-  - id: deploy-pr-updater-unit-test
-    selftest_exempt: "is-a-test-suite"
-    name: "deploy PR updater unit test"
-    group: supplychain
-    mode: enforced
-    run: |
-      bash .github/scripts/test-update-deploy-pr-branches.sh
-
   # Deployed-code-lag report unit test (2026-10-15 MGM deploy postmortem). Guards the
   # hours-scale "code on main is not running in sandbox" report that feeds the
   # deploy-code-lag-watch escalation — aged own-source drift is reported, marker-only

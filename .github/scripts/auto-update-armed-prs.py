@@ -12,14 +12,19 @@ organisation-owned repository.
 
 WHAT IT DOES
 ------------
-For every open, non-draft, same-repository PR with auto-merge armed, whose `mergeable_state` is
-`behind` and whose REQUIRED contexts (read live from the branch rules, never hard-coded) have all
-completed successfully on the current head, it calls
+For every open, non-draft, same-repository PR with auto-merge armed — plus deploy-bot PRs
+(`chore/gitops-auto-deploy-*` / `chore/admin-ui-deploy-*` opened by the gitops bot), which ship
+user-visible features and are updated the same way even when nobody armed auto-merge on them —
+whose `mergeable_state` is `behind`, it calls
 `PUT /repos/{o}/{r}/pulls/{n}/update-branch` with `expected_head_sha`. Everything else is left
 alone, with one log line per decision:
 
-  * required checks pending/failed/missing -> skip (updating would discard a verdict in flight,
+  * required checks pending/failed -> skip (updating would discard a verdict in flight,
     or refresh a PR that cannot merge anyway);
+  * required check missing or cancelled -> UPDATE: under the strict up-to-date policy the PR is
+    stranded either way, and a branch update is exactly what re-registers the context. #12928
+    rotted behind main for hours because security checks cancelled at creation read as
+    "missing" and the old code kept skipping — the chicken-and-egg case this rule exists for;
   * `dirty` (conflicts)                    -> skip, a human has to resolve those;
   * not armed                              -> skip, the author has not asked for a merge;
   * head committed < --debounce-minutes ago -> skip, so CI is not restarted repeatedly;
@@ -84,13 +89,27 @@ WORKFLOW = pathlib.Path(".github/workflows/auto-update-armed-prs.yml")
 OK_CONCLUSIONS = {"success", "neutral", "skipped"}
 
 
+# Deploy-bot PRs ship user-facing features but nobody arms auto-merge on them; they are
+# updated exactly like armed PRs. Author AND prefix are both required so a human branch can
+# never qualify — feature PRs are never touched.
+BOT_DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
+BOT_AUTHOR = "app/openbank-gitops-bot"
+
+
+def is_bot_deploy_pr(p: dict) -> bool:
+    return (p.get("user", {}).get("login") == BOT_AUTHOR
+            and any((p.get("head", {}).get("ref") or "").startswith(pre) for pre in BOT_DEPLOY_PREFIXES))
+
+
 # --------------------------------------------------------------------------- pure decision
 def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt.datetime,
            head_committed_at: dt.datetime | None, debounce_minutes: int) -> tuple[bool, str]:
     """Return (update?, reason). `checks` maps context -> conclusion (None = not completed)."""
     if pr.get("draft"):
         return False, "draft"
-    if not pr.get("auto_merge"):
+    armed = bool(pr.get("auto_merge"))
+    bot = bool(pr.get("bot_deploy"))
+    if not armed and not bot:
         return False, "auto-merge not armed"
     if not pr.get("same_repo"):
         return False, "head is a fork"
@@ -101,20 +120,30 @@ def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt
         return False, f"mergeable_state={state}, not behind"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
-    missing = [c for c in required if c not in checks]
-    if missing:
-        return False, f"required context(s) not reported: {', '.join(missing)}"
-    pending = [c for c in required if checks[c] is None]
+    actor = "armed" if armed else "bot deploy PR (not armed)"
+    # A context is "unregistered" when it is absent from `checks` (workflow path-filtered out
+    # or never registered — e.g. security checks cancelled when the PR was created, so the
+    # context never reports on the current head) or present with a `cancelled` conclusion.
+    # Under the strict up-to-date policy such a PR is stranded either way, and a branch update
+    # is exactly what re-registers the contexts. A verdict in flight (pending) or a real
+    # failure always wins, though: updating would discard the one or churn a PR that cannot
+    # merge anyway.
+    pending = [c for c in required if c in checks and checks[c] is None]
     if pending:
         return False, f"required context(s) pending: {', '.join(pending)}"
-    failed = [c for c in required if checks[c] not in OK_CONCLUSIONS]
+    failed = [c for c in required
+              if c in checks and checks[c] not in OK_CONCLUSIONS and checks[c] != "cancelled"]
     if failed:
         return False, "required context(s) not green: " + ", ".join(f"{c}={checks[c]}" for c in failed)
+    unregistered = [c for c in required if c not in checks or checks[c] == "cancelled"]
+    if unregistered:
+        return True, (f"behind + {actor} + required context(s) unregistered: "
+                      f"{', '.join(unregistered)} — update re-registers them")
     if head_committed_at is not None:
         age = (now - head_committed_at).total_seconds() / 60
         if age < debounce_minutes:
             return False, f"debounced — head committed {age:.0f} min ago (< {debounce_minutes})"
-    return True, "behind + armed + all required contexts green"
+    return True, f"behind + {actor} + all required contexts green"
 
 
 BUILD_PREFIX = "build (openbank-"
@@ -179,13 +208,24 @@ def self_test() -> int:
     green = {"Validate manifests": "success", "Gitleaks": "success"}
     base = {"draft": False, "auto_merge": {"merge_method": "squash"}, "same_repo": True,
             "mergeable_state": "behind"}
+    bot_deploy = {**base, "auto_merge": None, "bot_deploy": True}
     cases = [
         ("behind+green+armed -> update", base, green, old, True),
         ("behind+pending -> skip", base, {**green, "Gitleaks": None}, old, False),
         ("behind+failed -> skip", base, {**green, "Gitleaks": "failure"}, old, False),
-        ("behind+missing context -> skip", base, {"Validate manifests": "success"}, old, False),
+        ("behind+missing context -> update (re-registers)",
+         base, {"Validate manifests": "success"}, old, True),
+        ("behind+missing+pending -> skip (verdict in flight wins)",
+         base, {"Validate manifests": "success", "Gitleaks": None}, old, False),
+        ("behind+failed+missing -> skip (failure wins)",
+         base, {"Validate manifests": "failure"}, old, False),
+        ("behind+cancelled -> update (re-registers)",
+         base, {**green, "Gitleaks": "cancelled"}, old, True),
+        ("behind+green+bot deploy PR (not armed) -> update", bot_deploy, green, old, True),
+        ("behind+unregistered+bot deploy PR (not armed) -> update",
+         bot_deploy, {"Validate manifests": "success"}, old, True),
+        ("not armed human PR -> skip", {**base, "auto_merge": None}, green, old, False),
         ("dirty -> skip", {**base, "mergeable_state": "dirty"}, green, old, False),
-        ("not armed -> skip", {**base, "auto_merge": None}, green, old, False),
         ("draft -> skip", {**base, "draft": True}, green, old, False),
         ("fork -> skip", {**base, "same_repo": False}, green, old, False),
         ("clean (not behind) -> skip", {**base, "mergeable_state": "clean"}, green, old, False),
@@ -514,16 +554,19 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         return 0
     now = dt.datetime.now(dt.timezone.utc)
     pulls = get(f"/repos/{repo}/pulls?state=open&base={branch}&per_page=100")
-    armed = [p for p in pulls if p.get("auto_merge") and not p.get("draft")]
-    print(f"{len(pulls)} open PR(s) against {branch}, {len(armed)} armed and non-draft")
+    candidates = [p for p in pulls
+                  if not p.get("draft") and (p.get("auto_merge") or is_bot_deploy_pr(p))]
+    print(f"{len(pulls)} open PR(s) against {branch}, "
+          f"{len(candidates)} armed-or-bot-deploy and non-draft")
     failed_updates = 0
     stuck: list[str] = []
     entries, shas, budgets = [], {}, {}
-    for p in armed:
+    for p in candidates:
         n = p["number"]
         full = get(f"/repos/{repo}/pulls/{n}")
         sha = shas[n] = full["head"]["sha"]
         pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
+              "bot_deploy": is_bot_deploy_pr(full),
               "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
               "mergeable_state": full.get("mergeable_state")}
         if pr["same_repo"] and pr["mergeable_state"] in (None, "unknown"):
@@ -536,7 +579,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         if not pr["same_repo"]:
             ok, why = decide(pr, required, {}, now, None, debounce)
         else:
-            # Checks are read for every armed PR, behind or not: an up-to-date full-fleet PR
+            # Checks are read for every candidate, behind or not: an up-to-date full-fleet PR
             # whose build is running is exactly the "in flight" one that blocks the others.
             checks = head_checks(repo, sha)
             kind, building = classify(checks, fleet_threshold)
