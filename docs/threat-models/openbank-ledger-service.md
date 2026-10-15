@@ -606,7 +606,8 @@ over verbatim from the draft's §6 (IDs re-keyed).
   this PR does not touch), and an edge-scoped `prohibited` clause vetoes all five write actions
   — `approve` included despite no matrix grant, so no future matrix edit can hand the edge a
   statutory close event — at the allow head. Falsified by `ledger_rest_ext_test.rego` (stripping
-  either layer turns 7 of 12 tests red); the ext moved from a generator heredoc to a standalone
+  either layer turns its own layer's tests red — 7 of 12 at authoring time, 4 of 39 today, one
+  strip probe per layer); the ext moved from a generator heredoc to a standalone
   `ledger_rest_ext.rego` so `opa test` can load it. Rollback: revert the ext — no live caller is
   lost, as no edge ledger path exists.
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
