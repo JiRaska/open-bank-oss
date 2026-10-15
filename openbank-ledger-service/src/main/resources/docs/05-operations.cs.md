@@ -33,6 +33,12 @@ Build používá convention plugin `openbank.quarkus-service` (ADR-0049 D1). Kov
 
 Management endpointy jsou na dedikovaném **management portu 8085** (`quarkus.management.root-path: /q`); obchodní API je na **8101**.
 
+### Ověření API na produkčních listenerech
+
+Produkční HTTPS listener vyžaduje důvěryhodný klientský certifikát pro TLS spojení. Pro každý požadavek `/api/*` vyžaduje tento i nešifrovaný HTTP listener OIDC bearer token: samotný certifikát nevytváří identitu volajícího pro API. Požadavek pouze s certifikátem musí vrátit 401; platný bearer token pokračuje do stávajících kontrol rolí a oprávnění. Integrační test parity používá nastavení obou produkčních listenerů.
+
+Toto pravidlo listeneru samo nezapíná vynucování OPA. `AUTHZ_ENFORCE` má v `application.yaml` výchozí hodnotu `false`; nasazení ji musí výslovně nastavit na `true`, aby rozhodnutí OPA blokovala požadavky. Vynucování čtyř očí se zapíná samostatně a také má výchozí hodnotu `false`.
+
 ## Konfigurace
 
 | Env proměnná | Výchozí | Účel |
@@ -110,3 +116,8 @@ Denní běh automatizuje `FxRevaluationScheduler`. Opakování pro obchodní den
 ## Deploy / release
 
 Per-service path-scoped CI (buildují se jen změněné služby). Release osu vlastní **release-please** z Conventional Commits — needitovat ručně `version.txt`/`CHANGELOG.md` (aktuální release `1.2.0`). CD: ArgoCD sleduje tag image v deployment manifestu. U konfliktů tagu image v GitOpsu vždy `--ours`.
+
+
+### FINREP Pact fixture
+
+Broker ověření FINREP odvozuje reportovaný měsíc z požadavků vybraného kontraktu a používá vlastní testovací databázi. Reset fixture odmítne cizí closed-period ID a ponechá zapnutý trigger neměnné evidence. Regresní testy pokrývají historický červen 2026 i současný červen 2000 v obou pořadích, včetně odmítnutí DELETE evidence. Produkční validace frozen evidence se nemění.

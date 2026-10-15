@@ -47,13 +47,16 @@ class SepaPaymentEventsTest {
 
     @Test
     fun `toCreatedEvent projects identity, parties and amount with the supplied timestamp`() {
-        val payment = payment()
+        // revision 3 (not the default 0): the version getter mutant that returns a hardcoded
+        // 0 is invisible to an isZero assertion — the projection must carry the aggregate's
+        // actual revision so consumers can order events against the payment.
+        val payment = payment().copy(revision = 3)
         val now = Instant.parse("2026-01-02T11:00:00Z")
 
         val event = payment.toCreatedEvent(Clock.fixed(now, ZoneOffset.UTC))
 
         assertThat(event.paymentId).isEqualTo(payment.id)
-        assertThat(event.version).isZero()
+        assertThat(event.version).isEqualTo(3)
         assertThat(event.idempotencyKey).isEqualTo("idem-event")
         assertThat(event.type).isEqualTo(SepaPaymentType.SCT_INST)
         assertThat(event.status).isEqualTo(SepaPaymentStatus.RECEIVED)
@@ -100,5 +103,63 @@ class SepaPaymentEventsTest {
         assertThat(event.newStatus).isEqualTo(SepaPaymentStatus.VALIDATED)
         assertThat(event.rejectReason).isNull()
         assertThat(event.rejectDetail).isNull()
+    }
+
+    @Test
+    fun `returned event carries the full non-repudiation evidence envelope`() {
+        // Issue #6056: this record is what a denial-of-having-processed-a-return dispute turns
+        // on once audit-service persists it, so every field is asserted — a data-class getter
+        // returning a default is indistinguishable from the truth unless the values are
+        // distinctive.
+        val paymentId = UUID.randomUUID()
+        val reversalTransactionId = UUID.randomUUID()
+        val occurredAt = Instant.parse("2026-01-02T13:00:00Z")
+
+        val event = SepaPaymentReturnedEvent(
+            paymentId = paymentId,
+            version = 7,
+            originalEndToEndId = "E2E-orig-1",
+            returnReasonCode = "AC04",
+            actorId = "svc:sepa-gateway",
+            actorType = "SERVICE",
+            correlationId = "corr-42",
+            reversalPerformed = true,
+            occurredAt = occurredAt,
+            reversalTransactionId = reversalTransactionId,
+        )
+
+        assertThat(event.paymentId).isEqualTo(paymentId)
+        assertThat(event.version).isEqualTo(7)
+        assertThat(event.originalEndToEndId).isEqualTo("E2E-orig-1")
+        assertThat(event.returnReasonCode).isEqualTo("AC04")
+        assertThat(event.actorId).isEqualTo("svc:sepa-gateway")
+        assertThat(event.actorType).isEqualTo("SERVICE")
+        assertThat(event.correlationId).isEqualTo("corr-42")
+        assertThat(event.reversalPerformed).isTrue()
+        assertThat(event.occurredAt).isEqualTo(occurredAt)
+        assertThat(event.reversalTransactionId).isEqualTo(reversalTransactionId)
+        assertThat(event.eventType).isEqualTo(RETURN_EVIDENCE_EVENT_TYPE)
+        assertThat(event.sourceService).isEqualTo("sepa-payment")
+    }
+
+    @Test
+    fun `returned event defaults reversal transaction and evidence discriminator`() {
+        val event = SepaPaymentReturnedEvent(
+            paymentId = UUID.randomUUID(),
+            version = 1,
+            originalEndToEndId = "E2E-orig-2",
+            returnReasonCode = null,
+            actorId = "operator-1",
+            actorType = "EMPLOYEE",
+            correlationId = null,
+            reversalPerformed = false,
+            occurredAt = Instant.parse("2026-01-02T14:00:00Z"),
+        )
+
+        assertThat(event.returnReasonCode).isNull()
+        assertThat(event.correlationId).isNull()
+        assertThat(event.reversalTransactionId).isNull()
+        assertThat(event.reversalPerformed).isFalse()
+        assertThat(event.eventType).isEqualTo("sepa.payment.returned")
     }
 }

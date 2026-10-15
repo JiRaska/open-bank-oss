@@ -298,6 +298,10 @@ NOT_PROBED = [
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
+    # Governance rules.yaml live source (governance-auditor / control-liveness-sentinel): this is
+    # our own repo's file served by GitHub's CDN. The file itself is gate-enforced in-repo, and a
+    # raw.githubusercontent probe measures GitHub, not the document.
+    ("https://raw.githubusercontent.com/JiRaska/open-bank-oss", "our own repo's rules.yaml; the file is gate-enforced in-repo, an HTTP probe adds nothing"),
     # ADR-0284 public business registers. Both are PER-ENTITY lookup APIs, not documents: there is
     # no URL to fetch without an identifier, so a shape probe would have to invent a company to ask
     # about and would then be asserting that company's continued existence rather than the feed's
@@ -369,6 +373,7 @@ NOT_PROBED = [
     #
     # (5) OUR OWN public hostnames, each covered by its own probe or journey CronJob.
     ("https://admin.open-bank.tech", "our own admin-ui ingress; covered by the public-edge journey probe"),
+    ("https://app.open-bank.tech", "our own customer-app ingress base used only to compose shareable MGM referral landing URLs; the sandbox deployment overrides the base to admin.open-bank.tech/r/ (same probe); not an external data feed"),
     ("https://api.open-bank.tech", "our own API ingress; covered by the public-edge journey probe"),
     ("https://pricing.open-bank.tech", "our own pricing-console ingress (internal edge, ADR-0324); its OIDC redirect base"),
     ("https://customer.open-bank.tech", "our own customer ingress; covered by the public-edge journey probe"),

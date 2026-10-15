@@ -45,6 +45,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_copilots}
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_copilots}
   hibernate-orm:
@@ -101,6 +104,8 @@ quarkus:
   rest-client:
     customer-edge:
       url: ${CUSTOMER_EDGE_URL:http://localhost:8128}
+      connect-timeout: 2000
+      read-timeout: 5000
     # ADR-0269 rule 5. These two are NOT called with the propagated customer bearer, unlike the edge
     # above: "did this customer grant this scope" is not a question their own token may answer about
     # itself, and analytics-sink's profile route is an internal operator surface. The customer's

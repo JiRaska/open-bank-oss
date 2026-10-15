@@ -88,6 +88,8 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
             "openbank.edge.product-catalog-url" to base,
             "openbank.edge.campaign-service-url" to base,
             "openbank.edge.incentive-service-url" to base,
+            "openbank.edge.pension-service-url" to base,
+            "openbank.edge.sca-service-url" to base,
         )
     }
 

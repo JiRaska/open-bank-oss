@@ -12,17 +12,25 @@ import jakarta.ws.rs.ext.Provider
 /** Unknown mandate id ⇒ 404. */
 @Provider
 class MandateNotFoundMapper : ExceptionMapper<MandateNotFoundException> {
-    override fun toResponse(e: MandateNotFoundException): Response =
-        Response.status(Response.Status.NOT_FOUND)
-            .entity(mapOf("error" to e.message, "mandateId" to e.mandateId.toString()))
-            .build()
+    override fun toResponse(e: MandateNotFoundException): Response = Response.status(Response.Status.NOT_FOUND)
+        .entity(mapOf("error" to e.message, "mandateId" to e.mandateId.toString()))
+        .build()
 }
 
 /** Illegal lifecycle transition ⇒ 409 Conflict. */
 @Provider
 class IllegalMandateTransitionMapper : ExceptionMapper<IllegalMandateTransition> {
-    override fun toResponse(e: IllegalMandateTransition): Response =
-        Response.status(Response.Status.CONFLICT)
-            .entity(mapOf("error" to e.message))
-            .build()
+    override fun toResponse(e: IllegalMandateTransition): Response = Response.status(Response.Status.CONFLICT)
+        .entity(mapOf("error" to e.message))
+        .build()
+}
+
+/** ADR-0335 D6: a scoped initiator acting outside its creditor identifier or subject party. */
+@Provider
+class MandateScopeViolationMapper :
+    ExceptionMapper<com.openbank.sdd.application.usecase.MandateScopeViolationException> {
+    override fun toResponse(e: com.openbank.sdd.application.usecase.MandateScopeViolationException): Response =
+        Response.status(
+            Response.Status.FORBIDDEN,
+        ).entity(mapOf("error" to (e.message ?: "outside caller scope"))).build()
 }

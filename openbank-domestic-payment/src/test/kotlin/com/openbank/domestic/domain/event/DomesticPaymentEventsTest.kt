@@ -145,4 +145,17 @@ class DomesticPaymentEventsTest {
         assertThat(event.eventType).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
         assertThat(event.sourceService).isEqualTo("domestic-payment")
     }
+
+    @Test
+    fun `settled status event carries persisted payment transition time, not event creation time`() {
+        val before = payment().copy(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        val settledAt = Instant.parse("2026-06-01T23:59:59Z")
+        val emittedAt = Instant.parse("2026-06-02T00:00:01Z")
+        val settled = before.copy(status = DomesticPaymentStatus.SETTLED, settledAt = settledAt)
+
+        val event = settled.toStatusChangedEvent(before, Clock.fixed(emittedAt, ZoneOffset.UTC))
+
+        assertThat(event.settledAt).isEqualTo(settledAt)
+        assertThat(event.occurredAt).isEqualTo(emittedAt)
+    }
 }

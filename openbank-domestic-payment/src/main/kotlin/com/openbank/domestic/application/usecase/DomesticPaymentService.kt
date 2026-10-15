@@ -17,11 +17,13 @@ import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepositor
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.domestic.domain.model.InitiatorScope
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.observability.DomainMetrics
@@ -122,6 +124,22 @@ class DomesticPaymentService(
         require(command.delegationId == null && command.reservationId == null) {
             "The public domestic-payment use case accepts owner-funded payments only"
         }
+        DomesticSchemeRules.requireSchemeCurrency(command.amount)
+        // ADR-0335 D5: a scoped initiator pays only from its configured account; an undeclared
+        // machine pays from none. Before anything is persisted or any key is claimed.
+        if (!command.initiatorScope.permits(command.debtorAccountId)) {
+            throw InitiatorScopeViolationException(command.debtorAccountId)
+        }
+        if (command.initiatorScope is InitiatorScope.Scoped) {
+            val normalized = DomesticPaymentRequestFingerprint.normalize(command)
+            val debtorIban = CzechDomesticIban.fromAccountNumber(
+                accountNumber = normalized.debtorAccountNumber,
+                bankCode = normalized.debtorBankCode,
+            ) ?: throw InitiatorScopeViolationException(command.debtorAccountId)
+            if (accountLookupPort.findAccountIdByIban(debtorIban) != command.debtorAccountId) {
+                throw InitiatorScopeViolationException(command.debtorAccountId)
+            }
+        }
         return checkNotNull(
             createPaymentInternal(
                 command = command,
@@ -137,6 +155,7 @@ class DomesticPaymentService(
         reservationId: UUID,
         command: CreateDomesticPaymentCommand,
     ): DelegatedDomesticPaymentResult {
+        DomesticSchemeRules.requireSchemeCurrency(command.amount)
         val binding = delegatedSpendBindingRepository.findByReservationId(reservationId)
             ?: return DelegatedDomesticPaymentResult.ReservationProjectionPending
         if (binding.bindingState == DelegatedSpendBindingState.FINALIZED_ABSENT) {
@@ -387,3 +406,7 @@ class DomesticPaymentService(
     private fun generateEndToEndId(priority: DomesticPaymentPriority): String =
         "DOM${priority.name.take(1)}${clock.millis()}${(1000..9999).random()}"
 }
+
+/** ADR-0335 D5: the caller may not pay from this debtor account (403). */
+class InitiatorScopeViolationException(debtorAccountId: java.util.UUID) :
+    RuntimeException("Caller may not initiate a payment from debtor account $debtorAccountId")

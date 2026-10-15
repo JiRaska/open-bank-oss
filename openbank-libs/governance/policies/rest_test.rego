@@ -1474,6 +1474,151 @@ test_commstyle_publish_allows_human_approver if {
 	decision.reason == "commstyle-publish"
 }
 
+test_pension_catalog_approval_allows_role_qualified_human if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.pensionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "pension-catalog-decide-approval"
+}
+
+test_pension_catalog_approval_does_not_grant_generic_publish if {
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_approval_denies_service_account if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-catalog", "type": "HUMAN", "roles": ["PENSION_PRODUCT_OWNER"]},
+		"action": "catalog.pensionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_approval_read_requires_read_scope if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["PENSION_LEGAL_APPROVER"]},
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_human_reviewer_can_read_workspace_without_publish if {
+	decision := rest.allow with input as {
+		"principal": {
+			"id": "named-legal-reviewer",
+			"type": "HUMAN",
+			"roles": ["PENSION_LEGAL_APPROVER", "CATALOG_SCOPE_READ"],
+		},
+		"action": "catalog.read",
+		"resource": {"type": "catalog"},
+	} with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "pension-catalog-human-reviewer-read"
+	not rest.allow with input as {
+		"principal": {
+			"id": "named-legal-reviewer",
+			"type": "HUMAN",
+			"roles": ["PENSION_LEGAL_APPROVER", "CATALOG_SCOPE_READ"],
+		},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_pension_catalog_human_reviewer_read_denies_machine_or_missing_role if {
+	forbidden := [
+		{"id": "service-account-other", "roles": ["PENSION_LEGAL_APPROVER", "CATALOG_SCOPE_READ"]},
+		{"id": "named-legal-reviewer", "roles": ["PENSION_LEGAL_APPROVER"]},
+		{"id": "named-operator", "roles": ["CATALOG_SCOPE_READ"]},
+	]
+	every candidate in forbidden {
+		not rest.allow with input as {
+			"principal": {"id": candidate.id, "type": "HUMAN", "roles": candidate.roles},
+			"action": "catalog.read",
+			"resource": {"type": "catalog"},
+		}
+	}
+}
+
+test_pension_catalog_named_m2m_can_read_mappings_and_approval_evidence if {
+	principal := {
+		"id": "service-account-openbank-pension",
+		"type": "HUMAN",
+		"roles": ["ROLE_API", "CATALOG_SCOPE_READ"],
+	}
+	listing := rest.allow with input as {
+		"principal": principal,
+		"action": "catalog.read",
+		"resource": {"type": "catalog"},
+	} with data.openbank.bundle as bundle
+	listing.allow == true
+	listing.reason == "pension-catalog-m2m-read"
+	approval := rest.allow with input as {
+		"principal": principal,
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {
+			"azp": "openbank-pension",
+			"preferred_username": "service-account-openbank-pension",
+			"subject": "verified-service-subject",
+		},
+	} with data.openbank.bundle as bundle
+	approval.allow == true
+	approval.reason == "pension-catalog-m2m-read-approval"
+}
+
+test_pension_catalog_approval_read_rejects_missing_or_wrong_verified_client_binding if {
+	principal := {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	base := {
+		"principal": principal,
+		"action": "catalog.pensionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as base
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "other-client",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "verified-service-subject",
+	}})
+	not rest.allow with input as object.union(base, {"attributes": {
+		"azp": "openbank-pension",
+		"preferred_username": "service-account-openbank-pension",
+		"subject": "",
+	}})
+}
+
+test_pension_catalog_m2m_grant_denies_other_identity_missing_scope_and_writes if {
+	forbidden := [
+		{"id": "service-account-openbank-services", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"], "action": "catalog.read"},
+		{"id": "service-account-openbank-pension", "roles": ["ROLE_API"], "action": "catalog.read"},
+		{"id": "service-account-openbank-pension", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"], "action": "catalog.author"},
+		{"id": "service-account-openbank-pension", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"], "action": "catalog.pensionApproval.decide"},
+	]
+	every candidate in forbidden {
+		not rest.allow with input as {
+			"principal": {"id": candidate.id, "type": "HUMAN", "roles": candidate.roles},
+			"action": candidate.action,
+			"resource": {"type": "catalog", "id": "offering-1"},
+		}
+	}
+}
+
 test_commstyle_publish_denies_service_account_with_every_role if {
 	not rest.allow with input as {
 		"principal": {
@@ -1494,4 +1639,95 @@ test_commstyle_publish_denies_human_without_approver_role if {
 		"resource": {"type": "commstyle", "id": "v-1"},
 	}
 		with data.rules as rules_real
+}
+
+# ---------------------------------------------------------------------------------------
+# compliance-read-any is a STAFF grant (#3765, ADR-0223): a Keycloak service-account is
+# classified HUMAN, so the rule must exclude `service-account-*` by id or any machine holding
+# ROLE_COMPLIANCE reads every `*.read` fleet-wide — including reads operator-read-any withholds.
+# ---------------------------------------------------------------------------------------
+test_deny_service_account_compliance_generic_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_deny_any_service_account_compliance_generic_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-kyc", "type": "HUMAN", "roles": ["ROLE_API", "ROLE_COMPLIANCE"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+}
+
+# The exact defect: the CI realm's shared account holds ROLE_OPERATOR + ROLE_COMPLIANCE.
+# operator-read-any withholds an excluded read, and compliance-read-any used to hand it back.
+test_deny_service_account_compliance_reopening_operator_excluded_read if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE"]},
+		"action": "x.secret.read",
+		"resource": {"type": "secret", "id": "s-1"},
+	}
+		with data.rules.authz.operator_read_any_excluded_actions as ["x.secret.read"]
+		with data.openbank.bundle as bundle
+}
+
+test_service_account_compliance_reason_absent if {
+	reasons := rest.allowed_reasons with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_ADMIN"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+	not "compliance-read-any" in reasons
+}
+
+test_allow_human_compliance_generic_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-c", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "compliance-read-any"
+}
+
+test_allow_human_operator_generic_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-o", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "operator-read-any"
+}
+
+test_allow_human_admin_generic_read if {
+	decision := rest.allow with input as {
+		"principal": {"id": "user-a", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "operator-read-any"
+}
+
+# NOT YET CLOSED, pinned so the change is deliberate: operator-read-any still admits a
+# service-account holding ROLE_OPERATOR/ROLE_ADMIN. The deployed realm gives
+# service-account-openbank-edge ROLE_OPERATOR and customer-edge reads ~20 services through it,
+# several with no edge-named rule — retiring this grant for machines needs that inventory first
+# (ADR-0223 D2(b–c)). When it is retired, flip this to a deny.
+test_operator_read_any_still_admits_service_account_pending_edge_inventory if {
+	reasons := rest.allowed_reasons with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "x.y.read",
+		"resource": {"type": "y", "id": "y-1"},
+	}
+	"operator-read-any" in reasons
 }

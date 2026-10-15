@@ -23,6 +23,8 @@ export const ROLES = {
   CATALOG_READ: "CATALOG_SCOPE_READ",
   CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
   CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
+  PENSION_LEGAL_APPROVER: "PENSION_LEGAL_APPROVER",
+  PENSION_PRODUCT_OWNER: "PENSION_PRODUCT_OWNER",
   // ADR-0285 D6, phase 2: the write path the phase-1 communication:view comment above
   // anticipated. Maker (drafts/submits a style version) and checker (publishes/retires,
   // decides the commstyle.publish four-eyes queue) — never the same person on the same
@@ -115,6 +117,12 @@ export const PERMISSIONS = {
   // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
   "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
   "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
+  // Pension back office (ADR-0334, #12350): exactly the two pension services' @RolesAllowed.
+  // Reads admit OPERATOR, ADMIN and AUDITOR; every write (activate, NAV calculate/publish, strategy
+  // change submit/decide/apply) admits OPERATOR and ADMIN. Four-eyes between maker and checker is
+  // pension-fund-service's own check between two PEOPLE, not a role split.
+  "pension:view":    [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
+  "pension:operate": [ROLES.ADMIN, ROLES.OPERATOR],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -142,6 +150,8 @@ export const PERMISSIONS = {
   "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
   "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
   "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
+  "catalog:pension:legal-approve": [ROLES.PENSION_LEGAL_APPROVER],
+  "catalog:pension:product-approve": [ROLES.PENSION_PRODUCT_OWNER],
   // Parties / KYC / Onboarding — party-service's list/search/detail GETs accept
   // VIEWER/OPERATOR/ADMIN/KYC only (PartyResource.kt). Compliance and the
   // split KYC opener/reviewer roles use their own case endpoints and must not
@@ -363,6 +373,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['balance-sheet:view', ['/balance-sheet']],
   ['ledger-backfill:view', ['/balance-sheet/ledger-backfill']],
   ['treasury:view', ['/treasury']],
+  ['pension:view', ['/pension']],
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],
@@ -370,6 +381,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],
   ['system:view', [
+    '/api/platform-versions', '/api/finops',
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/system',
   ]],

@@ -346,6 +346,7 @@ class UpstreamClientTest {
         try {
             val baseUrl = "http://127.0.0.1:${server.address.port}"
             val client = UpstreamClient().apply {
+                tlsConfigurationName = java.util.Optional.empty()
                 tokenEndpointBase = "$baseUrl/realms/openbank"
                 clientId = "openbank-edge"
                 clientSecret = "test-secret"

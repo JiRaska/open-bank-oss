@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.1...risk-engine-v0.27.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.0...risk-engine-v0.27.1) (2026-10-12)
+
+
+### Security
+
+* **risk-engine:** authenticate the API by bearer only on the mTLS listener ([#12534](https://github.com/JiRaska/open-bank-oss/issues/12534)) ([2c033c6](https://github.com/JiRaska/open-bank-oss/commit/2c033c63464ab1b9ce6e4b989fdb9720b163cc8a))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.26.0...risk-engine-v0.27.0) (2026-10-10)
+
+
+### Features
+
+* **risk-engine:** keep limit-event dedup in its own table so risk_outbox can purge SENT rows ([#11905](https://github.com/JiRaska/open-bank-oss/issues/11905)) ([f35e14d](https://github.com/JiRaska/open-bank-oss/commit/f35e14d2991e681cfa159cf037e3245b03d61b2e))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.25.0...risk-engine-v0.26.0) (2026-10-05)
 
 

@@ -91,6 +91,8 @@ dataClassification: internal
 retentionPolicy: not applicable
 evidenceExported: false'
 
+  contains_name() { grep -qF -- "$2" <<< "$1"; }
+
   probe() {  # $1 label, $2 expected rc, $3 must-appear substring ("" = none)
     local label="$1" want="$2" needle="$3" rc=0 out
     out="$(GOVERNANCE_REPO="$tmp" bash "$self" 2>&1)" || rc=$?
@@ -99,7 +101,10 @@ evidenceExported: false'
       fails=$((fails + 1))
       return
     fi
-    if [ -n "$needle" ] && ! printf '%s' "$out" | grep -qF -- "$needle"; then
+    # Under pipefail, grep -q may exit as soon as it finds the name while printf is
+    # still writing. The resulting SIGPIPE (141) made a correctly flagged fixture
+    # look unnamed and marked this gate UNFALSIFIED on an otherwise clean PR.
+    if [ -n "$needle" ] && ! contains_name "$out" "$needle"; then
       echo "  BAD  $label: rc=$want as expected, but the output never named '$needle'"
       echo "$out" | sed 's/^/       | /'
       fails=$((fails + 1))
@@ -121,11 +126,21 @@ primaryDatastore: PostgreSQL
 databaseName: 12345'
   probe "an invalid governance.yaml is flagged, by name" 1 "openbank-selftest-service"
 
+  # Reproduce the pipefail/SIGPIPE shape: an early match followed by more than a pipe
+  # buffer. The former `printf | grep -q` check returned 141 on this input.
+  printf -v long_tail '%*s' 131072 ''
+  if contains_name "openbank-selftest-service${long_tail}" "openbank-selftest-service"; then
+    echo "  ok   an early module name survives a long diagnostic"
+  else
+    echo "  BAD  an early module name vanished from a long diagnostic"
+    fails=$((fails + 1))
+  fi
+
   if [ "$fails" -ne 0 ]; then
     echo "self-test FAILED ($fails case(s))" >&2
     exit 1
   fi
-  echo "self-test ok: governance-manifest is falsifiable (3 cases)"
+  echo "self-test ok: governance-manifest is falsifiable (4 cases)"
   exit 0
 fi
 

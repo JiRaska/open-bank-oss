@@ -45,6 +45,7 @@ import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.IncentiveOfferRef
+import com.openbank.campaign.domain.model.ReferralProgramRef
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
@@ -96,6 +97,10 @@ class CampaignEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     var segmentVersion: Int = 1
+
+    var referralProgramId: UUID? = null
+    var referralProgramName: String? = null
+    var referralProgramVersion: Int? = null
 
     // text, not jsonb (V2): under Hibernate Reactive the Vert.x PG client returns a JsonArray for a
     // jsonb array column, which cannot be cast to String — every read threw ClassCastException.
@@ -366,6 +371,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         productKind = this@toEntity.productKind
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
+        referralProgramId = this@toEntity.referralProgramRef?.id
+        referralProgramName = this@toEntity.referralProgramRef?.name
+        referralProgramVersion = this@toEntity.referralProgramRef?.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
         decisionsJson = this@toEntity.decisions.takeIf { it.isNotEmpty() }?.let { mapper.writeValueAsString(it) }
         stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
@@ -390,6 +398,9 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         goal = goal,
         productKind = productKind,
         segmentRef = SegmentRef(segmentName, segmentVersion),
+        referralProgramRef = referralProgramId?.let { id ->
+            ReferralProgramRef(id, requireNotNull(referralProgramName), requireNotNull(referralProgramVersion))
+        },
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
         decisions = decisionsJson?.let { mapper.readValue<List<CampaignDecision>>(it) } ?: emptyList(),
         stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
