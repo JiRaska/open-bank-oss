@@ -111,6 +111,11 @@ class AccountEventPactProviderVerificationTest {
         private val DELEGATION_GRANTOR_PARTY_ID = UUID.fromString("33333333-4444-4555-8666-777777777777")
         private val DELEGATE_PARTY_ID = UUID.fromString("44444444-5555-4666-8777-888888888888")
         private val DELEGATION_GRANT_ID = UUID.fromString("55555555-6666-4777-8888-999999999999")
+
+        // Must match ActiveAccountsPactConsumerTest's PACT_DETAIL_ACCOUNT_ID / PACT_PARTY_ID
+        // (openbank-interest-service, ADR-0339 B tax-profile resolution).
+        private val TAX_PROFILE_ACCOUNT_ID = UUID.fromString("60000000-0000-0000-0000-000000000060")
+        private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
@@ -329,5 +334,26 @@ class AccountEventPactProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */
+    @State("an ACTIVE CZK account exists for tax-profile resolution")
+    fun activeCzkAccountForTaxProfileResolution() = runOnVertxContext {
+        if (accountRepository.findById(TAX_PROFILE_ACCOUNT_ID) != null) return@runOnVertxContext
+        accountRepository.save(
+            Account(
+                id = TAX_PROFILE_ACCOUNT_ID,
+                accountNumber = Iban("CZ1108000000192000145401"),
+                accountType = AccountType.SAVINGS,
+                partyId = TAX_PROFILE_PARTY_ID,
+                productId = UUID.fromString("99999999-8888-4777-8666-555555555555"),
+                currency = CurrencyCode("CZK"),
+                status = AccountStatus.ACTIVE,
+                openedAt = Instant.parse("2026-01-01T00:00:00Z"),
+                closedAt = null,
+                version = 0,
+            ),
+        )
+        Unit
     }
 }
