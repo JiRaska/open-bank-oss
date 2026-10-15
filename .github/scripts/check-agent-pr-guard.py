@@ -773,6 +773,16 @@ def bypass_self_test(failures):
     )
     Path(repo, RULES).write_text(base_rules)
     cwd = os.getcwd()
+    # run-gates.py hands every gate a PRIVATE copy of the real repo's index via
+    # GIT_INDEX_FILE (concurrent gates would race .git/index.lock); a git subprocess that
+    # inherits it builds trees from THAT index, referencing blobs that do not exist in this
+    # scratch repo ("invalid object ... Error building trees" — measured on the runner).
+    # Same for GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY: they point the fixture at the
+    # real repository regardless of cwd (see probe.sh and check-pdp-flag-rollout.sh, which
+    # unset the same set). Strip them for the whole block, restore after.
+    git_env_vars = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE",
+                    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+    saved_git_env = {v: os.environ.pop(v) for v in git_env_vars if v in os.environ}
     try:
         os.chdir(repo)
         git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
@@ -801,6 +811,7 @@ def bypass_self_test(failures):
         failures.append(f"bypass head-rules.yaml case could not run: {e}")
     finally:
         os.chdir(cwd)
+        os.environ.update(saved_git_env)
         shutil.rmtree(tmp, ignore_errors=True)
     return 4
 
