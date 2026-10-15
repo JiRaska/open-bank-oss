@@ -76,6 +76,15 @@ kover {
     }
 }
 
+// Test-JVM heap: CI died with java.lang.OutOfMemoryError (`instrument ASSERTION FAILED:
+// can't create byte array`) inside the forked test JVM that runs the service's
+// @QuarkusTest suite alongside Testcontainers on the default ~512m heap. Same measured
+// failure account-service recorded (see its maxHeapSize comment): per-module on purpose,
+// not a fleet default.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 // Mutation testing (ADR-0063 / ADR-0030 D3).
 // StandingOrder carries the recurrence/failure arithmetic that decides whether the next
 // payment fires: calculateNextDate per Frequency, MAX_CONSECUTIVE_FAILURES, and the
