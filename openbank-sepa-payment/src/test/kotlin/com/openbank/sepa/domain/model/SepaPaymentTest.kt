@@ -40,6 +40,90 @@ class SepaPaymentTest {
         assertThat(transitioned.transactionId).isEqualTo(transactionId)
     }
 
+    @Test
+    fun `reject transition records reason detail and terminal timestamps`() {
+        val now = Instant.parse("2026-01-02T00:00:00Z")
+
+        val rejected = payment().transitionTo(
+            targetStatus = SepaPaymentStatus.REJECTED,
+            reason = SepaRejectReason.INSUFFICIENT_FUNDS,
+            detail = "debit account below threshold",
+            clock = Clock.fixed(now, ZoneOffset.UTC),
+        )
+
+        assertThat(rejected.status).isEqualTo(SepaPaymentStatus.REJECTED)
+        // Mutant tripwire: a negated `targetStatus == REJECTED` conditional in transitionTo
+        // would drop exactly these two fields while every other assertion still passes.
+        assertThat(rejected.rejectReason).isEqualTo(SepaRejectReason.INSUFFICIENT_FUNDS)
+        assertThat(rejected.rejectDetail).isEqualTo("debit account below threshold")
+        assertThat(rejected.submittedAt).isEqualTo(now)
+        // REJECTED is deliberately NOT in the completedAt branch set — a rejected payment
+        // has no completion; asserting null here is a tripwire against that set widening.
+        assertThat(rejected.completedAt).isNull()
+        assertThat(rejected.revision).isEqualTo(1)
+    }
+
+    @Test
+    fun `non-reject transition clears any stale reject context`() {
+        val withStaleReject = payment().copy(
+            rejectReason = SepaRejectReason.TECHNICAL_ERROR,
+            rejectDetail = "stale",
+        )
+
+        val validated = withStaleReject.transitionTo(
+            targetStatus = SepaPaymentStatus.VALIDATED,
+            // A reason supplied for a non-reject target must NOT leak into the aggregate:
+            // the conditional in transitionTo must select the else branch here.
+            reason = SepaRejectReason.INSUFFICIENT_FUNDS,
+            clock = Clock.systemUTC(),
+        )
+
+        assertThat(validated.status).isEqualTo(SepaPaymentStatus.VALIDATED)
+        assertThat(validated.rejectReason).isNull()
+        assertThat(validated.rejectDetail).isNull()
+    }
+
+    @Test
+    fun `cancelled transition is terminal and completes with a timestamp`() {
+        val now = Instant.parse("2026-01-02T00:00:00Z")
+        val submittedAt = Instant.parse("2026-01-01T12:00:00Z")
+
+        val cancelled = payment(status = SepaPaymentStatus.VALIDATED).copy(
+            submittedAt = submittedAt,
+        ).transitionTo(
+            targetStatus = SepaPaymentStatus.CANCELLED,
+            clock = Clock.fixed(now, ZoneOffset.UTC),
+        )
+
+        assertThat(cancelled.status).isEqualTo(SepaPaymentStatus.CANCELLED)
+        assertThat(cancelled.submittedAt).isEqualTo(submittedAt)
+        assertThat(cancelled.completedAt).isEqualTo(now)
+    }
+
+    @Test
+    fun `currency derives from the kernel money amount`() {
+        assertThat(payment().currency).isEqualTo("EUR")
+    }
+
+    @Test
+    fun `request hash fingerprint is preserved on the aggregate`() {
+        // Issue #10916: the fingerprint a duplicate POST is matched against must survive
+        // round-tripping the aggregate; an empty-string mutant on the getter would break
+        // idempotent-replay detection while every structural assertion stayed green.
+        val fingerprinted = payment().copy(requestHash = "sha256:deadbeef")
+
+        assertThat(fingerprinted.requestHash).isEqualTo("sha256:deadbeef")
+        assertThat(payment().requestHash).isNull()
+    }
+
+    @Test
+    fun `bic and debtor name are exposed on the aggregate`() {
+        val exposed = payment()
+
+        assertThat(exposed.creditorBic).isEqualTo("COBADEFFXXX")
+        assertThat(exposed.debtorName).isEqualTo("Debtor")
+    }
+
     private fun payment(status: SepaPaymentStatus = SepaPaymentStatus.RECEIVED) = SepaPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem",

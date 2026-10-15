@@ -373,6 +373,7 @@ NOT_PROBED = [
     #
     # (5) OUR OWN public hostnames, each covered by its own probe or journey CronJob.
     ("https://admin.open-bank.tech", "our own admin-ui ingress; covered by the public-edge journey probe"),
+    ("https://app.open-bank.tech", "our own customer-app ingress base used only to compose shareable MGM referral landing URLs; the sandbox deployment overrides the base to admin.open-bank.tech/r/ (same probe); not an external data feed"),
     ("https://api.open-bank.tech", "our own API ingress; covered by the public-edge journey probe"),
     ("https://pricing.open-bank.tech", "our own pricing-console ingress (internal edge, ADR-0324); its OIDC redirect base"),
     ("https://customer.open-bank.tech", "our own customer ingress; covered by the public-edge journey probe"),
