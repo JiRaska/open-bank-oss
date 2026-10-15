@@ -69,6 +69,9 @@ spec:
         # agent adds depth (JDBC/library spans) without duplicating the Quarkus
         # SDK's spans before annotating any other service.
         instrumentation.opentelemetry.io/inject-java: "openbank"
+        # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
+        # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
+        openbank.tech/policy-checksum: "08f5ad00d05028ff"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -131,6 +134,13 @@ spec:
             # already permitted (accounts ns has no egress policy; account-service validates here too).
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # OPA sidecar (ADR-0034, issue #12823) answers data.openbank.rest.allow for every
+            # @Authorize endpoint. AUTHZ_ENFORCE stays false: decisions are advisory (a deny is
+            # logged and the request proceeds) while @RolesAllowed remains the enforcing gate.
+            - name: OPA_URL
+              value: http://localhost:8181
+            - name: AUTHZ_ENFORCE
+              value: "false"
           startupProbe:
             httpGet:
               path: /q/health/ready
@@ -171,6 +181,80 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        # OPA policy-decision sidecar (ADR-0034, issue #12823). Serves data.openbank.rest.allow
+        # for product-catalog's @Authorize endpoints (catalog.read/list/create/update/author/
+        # publish, catalog.pensionApproval.*). Bundle mounted from product-catalog-opa-bundle.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.21.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network (not 127.0.0.1) so kubelet httpGet probes reach
+            # /health. The image is scratch (no shell), so an exec probe isn't possible.
+            # Reachability is fenced by the NetworkPolicy; OPA serves only policy decisions.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/rest.rego
+              subPath: rest.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/product_catalog_rest_ext.rego
+              subPath: product_catalog_rest_ext.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/rules/data.yaml
+              subPath: rules-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: internal-tls
           secret:
@@ -178,6 +262,11 @@ spec:
             optional: false
         - name: tmp
           emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: product-catalog-opa-bundle
 ---
 apiVersion: v1
 kind: Service
