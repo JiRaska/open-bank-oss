@@ -337,7 +337,7 @@ class CopilotChatService(
                 "\"${k}\":\"${jsonEscape(v)}\""
             }
             onChunk("[PROPOSAL_END:{\"k\":\"${p.kind.name}\",\"s\":\"${jsonEscape(p.summary)}\",\"f\":{$fields}}]")
-        }.onFailure { log.warnf("Failed to emit proposal sentinel: %s", it.message) }
+        }.onFailure { log.warnf("Failed to emit proposal sentinel: %s", it.javaClass.name) }
     }
 
     private fun jsonEscape(s: String): String =
@@ -345,7 +345,8 @@ class CopilotChatService(
 
     private fun degradeMessage(e: Exception): String {
         val msg = e.message ?: ""
-        log.warnf("model/tool call failed, degrading gracefully: %s", msg)
+        // Class name only: the message can echo tool-call arguments or model output.
+        log.warnf("model/tool call failed, degrading gracefully: %s", e.javaClass.name)
         return if ("429" in msg || "rate" in msg.lowercase()) {
             "Asistent je teď přetížený — zkuste to prosím za chvíli znovu."
         } else {
