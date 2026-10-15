@@ -79,7 +79,7 @@ class SingleParseTest(unittest.TestCase):
         with patch.object(subject, "resolve_repo") as network:
             self.assertEqual(subject.resolve_repos(set(), True), {})
             self.assertEqual(
-                subject.resolve_repos({"b", "a", "a"}, False),
+                subject.resolve_repos(set(("b", "a", "a")), False),
                 {"a": ("unknown", "network skipped"), "b": ("unknown", "network skipped")},
             )
             network.assert_not_called()
@@ -108,7 +108,7 @@ class SingleParseTest(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=1) as caller:
                 future = caller.submit(
                     subject.resolve_repos,
-                    {"d", "b", "a", "c", "e", "a"},
+                    set(("d", "b", "a", "c", "e", "a")),
                     True,
                 )
                 try:

@@ -345,7 +345,7 @@ def resolve_repos(slugs: set[str], want_network: bool) -> dict[str, tuple[str, s
         return {}
     with ThreadPoolExecutor(max_workers=min(REPO_LOOKUP_WORKERS, len(ordered))) as executor:
         results = executor.map(resolve_repo, ordered)
-        return dict(zip(ordered, results))
+        return dict(zip(ordered, results, strict=True))
 
 
 # --------------------------------------------------------------------------- scanning
