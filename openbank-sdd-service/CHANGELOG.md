@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.2...sdd-service-v0.14.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.1...sdd-service-v0.14.2) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.0...sdd-service-v0.14.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.6...sdd-service-v0.14.0) (2026-10-09)
 
 

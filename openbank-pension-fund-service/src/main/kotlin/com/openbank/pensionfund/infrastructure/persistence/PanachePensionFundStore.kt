@@ -6,20 +6,23 @@ package com.openbank.pensionfund.infrastructure.persistence
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.pensionfund.application.port.ClassificationReceipt
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.AllocationTarget
+import com.openbank.pensionfund.domain.model.ClassificationCorrectionStatus
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.FundStrategy
 import com.openbank.pensionfund.domain.model.GlidePathStep
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.NavFigures
 import com.openbank.pensionfund.domain.model.NavPosition
 import com.openbank.pensionfund.domain.model.NavRecord
 import com.openbank.pensionfund.domain.model.NavStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.OrderType
+import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
 import com.openbank.pensionfund.domain.model.Precision
 import com.openbank.pensionfund.domain.model.StrategyChange
 import com.openbank.pensionfund.domain.model.StrategyChangeStatus
@@ -32,6 +35,7 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
@@ -48,6 +52,8 @@ class PanachePensionFundStore(
     private val holdings: UnitHoldingRepository,
     private val transactions: UnitTransactionRepository,
     private val positions: FundNavPositionRepository,
+    private val classifications: PositionClassificationCorrectionRepository,
+    private val receipts: ClassificationReceiptRepository,
 ) : PensionFundStore {
 
     private val json = jacksonObjectMapper().findAndRegisterModules()
@@ -61,6 +67,18 @@ class PanachePensionFundStore(
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 val writes = mutableListOf<() -> Uni<*>>()
+                // Insert-only, first: a competing request cannot apply its mutation after this key wins.
+                changes.classificationReceipt?.let { receipt ->
+                    writes += {
+                        session.persist(
+                            ClassificationReceiptEntity().also {
+                                it.key = receipt.key
+                                it.fingerprint = receipt.fingerprint
+                                it.responseSnapshot = json.writeValueAsString(receipt.result)
+                            },
+                        ).flatMap { session.flush() }
+                    }
+                }
                 changes.funds.forEach { f -> writes += { session.merge(f.toEntity()) } }
                 changes.strategies.forEach { s -> writes += { session.merge(s.toEntity()) } }
                 changes.strategyChanges.forEach { c -> writes += { session.merge(c.toEntity()) } }
@@ -69,11 +87,71 @@ class PanachePensionFundStore(
                 changes.holdings.forEach { h -> writes += { session.merge(h.toEntity()) } }
                 changes.transactions.forEach { t -> writes += { session.merge(t.toEntity()) } }
                 changes.navPositions.forEach { p -> writes += { session.persist(p.toEntity()) } }
+                changes.classificationCorrections.forEach { c ->
+                    writes += {
+                        if (c.status == ClassificationCorrectionStatus.PROPOSED) {
+                            session.persist(c.toEntity())
+                        } else {
+                            session.createQuery<Int>(
+                                "update PositionClassificationCorrectionEntity set status = :status, " +
+                                    "decidedBy = :actor, decidedAt = :at where id = :id and status = 'PROPOSED'",
+                            )
+                                .setParameter("status", c.status.name)
+                                .setParameter("actor", c.decidedBy)
+                                .setParameter("at", c.decidedAt)
+                                .setParameter("id", c.id)
+                                .executeUpdate()
+                                .invoke { count -> check(count == 1) { "correction ${c.id} was already decided" } }
+                        }
+                    }
+                }
                 writes.fold(Uni.createFrom().voidItem() as Uni<*>) { acc, w -> acc.flatMap { w() } }
                     .flatMap { session.flush() }
             }
         }.awaitSuspending()
     }
+
+    /** The holding row serializes reservations across instances and with settlement writes. */
+    override suspend fun reserveOutgoing(order: UnitOrder): UnitOrder {
+        require(order.isOutgoing && order.status == OrderStatus.PENDING)
+        return Panache.withTransaction {
+            holdings.findById(holdingId(order.contractId, order.fundId), LockModeType.PESSIMISTIC_WRITE)
+                .flatMap { holding ->
+                    orders.find(
+                        "contractId = ?1 and idempotencyKey = ?2",
+                        order.contractId,
+                        order.idempotencyKey,
+                    ).firstResult().flatMap { existing ->
+                        if (existing != null) {
+                            val original = existing.toDomain()
+                            check(original.sameInstructionAs(order)) { "Idempotency-Key reused for a different order" }
+                            Uni.createFrom().item(original)
+                        } else {
+                            reserveAvailable(order, holding)
+                        }
+                    }
+                }
+        }.awaitSuspending()
+    }
+
+    private fun reserveAvailable(order: UnitOrder, holding: UnitHoldingEntity?): Uni<UnitOrder> = orders.find(
+        "contractId = ?1 and fundId = ?2 and status = ?3",
+        order.contractId,
+        order.fundId,
+        OrderStatus.PENDING.name,
+    ).list().flatMap { pending ->
+        val reserved = pending.map { it.toDomain() }.filter { it.isOutgoing }
+            .fold(BigDecimal.ZERO) { total, queued -> total + requireNotNull(queued.units) }
+        check((holding?.units ?: BigDecimal.ZERO) - reserved >= requireNotNull(order.units)) {
+            "Insufficient unreserved units"
+        }
+        orders.persistAndFlush(order.toEntity()).replaceWith(order)
+    }
+
+    override suspend fun classificationReceipt(key: String): ClassificationReceipt? =
+        read { receipts.findById(key) }?.let {
+            ClassificationReceipt(it.key, it.fingerprint, json.readValue(it.responseSnapshot))
+        }
 
     private suspend fun <T> read(block: () -> Uni<T>): T = Panache.withSession { block() }.awaitSuspending()
 
@@ -162,8 +240,27 @@ class PanachePensionFundStore(
         }
 
     override suspend fun navPositions(navId: UUID): List<NavPosition> =
-        read { positions.find("navId = ?1 order by instrumentId", navId).list() }
-            .map { NavPosition(it.navId, it.instrumentId, it.quantity, it.price) }
+        read { positions.find("navId = ?1 order by instrumentId", navId).list() }.map { it.toDomain() }
+
+    override suspend fun navPositionsOf(navIds: Collection<UUID>): List<NavPosition> = if (navIds.isEmpty()) {
+        emptyList()
+    } else {
+        read { positions.find("navId in ?1 order by instrumentId", navIds.toList()).list() }.map { it.toDomain() }
+    }
+
+    override suspend fun navPosition(id: UUID): NavPosition? = read { positions.findById(id) }?.toDomain()
+
+    override suspend fun classificationCorrection(id: UUID): PositionClassificationCorrection? =
+        read { classifications.findById(id) }?.toDomain()
+
+    override suspend fun classificationCorrections(
+        positionIds: Collection<UUID>,
+    ): List<PositionClassificationCorrection> = if (positionIds.isEmpty()) {
+        emptyList()
+    } else {
+        read { classifications.find("positionId in ?1 order by proposedAt", positionIds.toList()).list() }
+            .map { it.toDomain() }
+    }
 
     // ---- mapping -----------------------------------------------------------------------------
 
@@ -275,13 +372,45 @@ class PanachePensionFundStore(
     }
 
     private fun NavPosition.toEntity() = FundNavPositionEntity().also {
-        // Written only inside the NAV's own (atomic) calculation commit, so a fresh id cannot duplicate.
-        it.id = Ids.newId()
+        // Written only inside the NAV's own (atomic) calculation commit; the id is minted with it.
+        it.id = id
         it.navId = navId
         it.instrumentId = instrumentId
         it.quantity = quantity
         it.price = price
+        it.instrumentClass = instrumentClass.name
     }
+
+    private fun FundNavPositionEntity.toDomain() =
+        NavPosition(id, navId, instrumentId, quantity, price, InstrumentClass.valueOf(instrumentClass))
+
+    private fun PositionClassificationCorrection.toEntity() = PositionClassificationCorrectionEntity().also {
+        it.id = id
+        it.positionId = positionId
+        it.navId = navId
+        it.fromClass = fromClass.name
+        it.toClass = toClass.name
+        it.reason = reason
+        it.proposedBy = proposedBy
+        it.proposedAt = proposedAt
+        it.status = status.name
+        it.decidedBy = decidedBy
+        it.decidedAt = decidedAt
+    }
+
+    private fun PositionClassificationCorrectionEntity.toDomain() = PositionClassificationCorrection(
+        id = id,
+        positionId = positionId,
+        navId = navId,
+        fromClass = InstrumentClass.valueOf(fromClass),
+        toClass = InstrumentClass.valueOf(toClass),
+        reason = reason,
+        proposedBy = proposedBy,
+        proposedAt = proposedAt,
+        status = ClassificationCorrectionStatus.valueOf(status),
+        decidedBy = decidedBy,
+        decidedAt = decidedAt,
+    )
 
     private fun FundNavEntity.toDomain() = NavRecord(
         id = id,

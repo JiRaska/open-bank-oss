@@ -15,6 +15,7 @@ import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -27,7 +28,9 @@ import javax.sql.DataSource
  * The referrer's own invite list and the attribution conflict reasons, against real Postgres.
  *
  * Everything is seeded over JDBC under a DRAFT programme, so nothing here is visible to the
- * published-programme listing another test in this module asserts an exact size on.
+ * published-programme listing another test in this module asserts an exact size on — the one
+ * exception is the referral-link test, which publishes its own programme; that listing is only
+ * ever asserted with `findAll { it.id == ... }`, never an exact size.
  */
 @QuarkusTest
 @QuarkusTestResource(ReferralPostgresTestResource::class)
@@ -62,6 +65,9 @@ class ReferrerInvitesIT {
             body("[1].id", equalTo(expired.toString()))
             body("[1].status", equalTo("EXPIRED"))
             body("[1].reward", nullValue())
+            // Seeded rows predate the referral_link column: the projection carries the key as null.
+            body("[0].referralLink", nullValue())
+            body("[1].referralLink", nullValue())
         } Extract { asString() }
 
         assertThat(json)
@@ -109,13 +115,41 @@ class ReferrerInvitesIT {
         }
     }
 
+    @Test
+    fun `an issued invite's referral link is persisted and re-readable from the referrer list`() {
+        val program = seedProgram(status = "PUBLISHED")
+        val referrer = UUID.randomUUID()
+
+        val (token, link) = Given {
+            contentType("application/json")
+            header("Idempotency-Key", "link-${UUID.randomUUID()}")
+            body("""{"referrerPartyId":"$referrer"}""")
+        } When { post("/api/v1/referrals/programs/$program/invites") } Then {
+            statusCode(201)
+            body("referralLink", notNullValue())
+        } Extract { path<String>("token") to path<String>("referralLink") }
+
+        assertThat(link).startsWith("https://app.open-bank.tech/r/").endsWith("/$token")
+
+        val json = When { get("/api/v1/referrals/parties/$referrer/invites") } Then {
+            statusCode(200)
+            body("size()", equalTo(1))
+            body("[0].referralLink", equalTo(link))
+        } Extract { asString() }
+
+        // The list re-reads the persisted link (the referrer's shareable capability) but still
+        // never carries the raw token — not as a field, not inside any other value but the link's
+        // own suffix, which the referrer already holds.
+        assertThat(json).contains(link).doesNotContain("\"token\"")
+    }
+
     private fun attribute(token: String, referee: UUID) = Given {
         contentType("application/json")
         header("Idempotency-Key", "attr-${UUID.randomUUID()}")
         body("""{"refereePartyId":"$referee"}""")
     } When { post("/api/v1/referrals/invites/$token/attribute") }
 
-    private fun seedProgram(): UUID {
+    private fun seedProgram(status: String = "DRAFT"): UUID {
         val id = UUID.randomUUID()
         exec(
             """insert into referral_program (id,name,version,reward_amount,currency,qualifying_event,
@@ -127,7 +161,7 @@ class ReferrerInvitesIT {
             "CZK",
             "account.opened",
             Timestamp.from(Instant.now().plusSeconds(86_400)),
-            "DRAFT",
+            status,
             "maker@openbank.test",
             Timestamp.from(Instant.now()),
         )

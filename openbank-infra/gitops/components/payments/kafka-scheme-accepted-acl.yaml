@@ -537,6 +537,7 @@ rules:
       # Incentive lifecycle producer. The corresponding ExternalSecret is staged without a
       # Deployment, so this narrowly permits ESO to project only this Strimzi-issued client key.
       - incentive-service
+      - pension-service
       # ADR-0284: business onboarding case lifecycle producer + party-events consumer, ns kyb
       # (first ESO client there). Without this the keystore ExternalSecret sits at
       # SecretSyncedError, ArgoCD never advances past sync-wave -1, and no pod is ever created —
@@ -566,6 +567,9 @@ rules:
       # ADR-0315: treasury deal-events producer, ns treasury (first ESO client there). Without
       # this the keystore ExternalSecret sits at SecretSyncedError and no pod is ever created (#2749).
       - treasury-service
+      # #12378: payout-settlement consumer, ns pension (first ESO client there). Without this the
+      # keystore ExternalSecret sits at SecretSyncedError and no pod is ever created (#2749).
+      - pension-service
       - openbank-cluster-cluster-ca-cert
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -11,6 +11,7 @@ This documentation is published by the service at the management endpoint `/q/op
 - **Events:** transactional outbox (ADR-0003) to `openbank.wealth.events`; synthetic traffic is tainted in the outbox (ADR-0252)
 - **Auth:** M2M only, `ROLE_API`, `ROLE_OPERATOR` or `ROLE_ADMIN`. The owner arrives in the `X-Customer-Party-Id` header.
 - **Synthetic taint (ADR-0252):** a holding declared by a trusted canary principal is stored with `synthetic = true`, and every event about it carries the `x-openbank-synthetic` Kafka header, revalue and withdraw included. The flag belongs to the holding, not to the request that touched it.
+- **Canary identity test:** the HTTP integration test supplies OIDC `azp`, subject and service-account username to exercise the trusted-principal path; a role by itself is insufficient. It checks the holding and outbox rows, including revaluation. These local test claims do not prove live identity-provider configuration or a deployed canary run.
 - **Trust boundary:** by-id routes act on the holding id alone and do NOT check the owner. Customers reach this service only through customer-edge, which proves ownership before every by-id call.
 
 ## API

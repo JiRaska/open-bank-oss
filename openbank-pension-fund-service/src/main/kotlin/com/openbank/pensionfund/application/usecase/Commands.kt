@@ -6,6 +6,7 @@ package com.openbank.pensionfund.application.usecase
 
 import com.openbank.pensionfund.domain.model.AllocationTarget
 import com.openbank.pensionfund.domain.model.GlidePathStep
+import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.OrderType
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -37,7 +38,15 @@ data class StrategyChangeRequest(
     val effectiveDate: LocalDate,
 )
 
-data class PositionLine(val instrumentId: String, val quantity: BigDecimal, val price: BigDecimal?)
+/** [instrumentClass] null records the position as UNCLASSIFIED — unknown, correctable four-eyes later. */
+data class PositionLine(
+    val instrumentId: String,
+    val quantity: BigDecimal,
+    val price: BigDecimal?,
+    val instrumentClass: InstrumentClass? = null,
+)
+
+data class ClassificationCorrectionRequest(val positionId: UUID, val toClass: InstrumentClass, val reason: String)
 
 data class NavCalculationRequest(
     val valuationDate: LocalDate,

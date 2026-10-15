@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-kyc-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "1404a7e6de584df7"
+        openbank.tech/policy-checksum: "03692952057b4562"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -59,7 +59,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kyc-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-4c86c6f7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyc-service:sandbox-bc607f53
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -128,6 +128,14 @@ spec:
             # as a silent "no orphans" (the gauges are not reset on a failed pass).
             - name: PARTY_SERVICE_URL
               value: http://party-service.party.svc:8111
+            # ADR-0256 trigger loop: kyc-service opens re-screening cases through the case
+            # coordinator's case-open authority. case-coordinator-agent lives in the `platform`
+            # namespace on :8146. The screening-triggers feature ships DISABLED by default
+            # (KYC_SCREENING_TRIGGERS_ENABLED=false); without this the Optional adapter guard maps
+            # every trigger to the durable NOT_CONFIGURED failure path rather than letting the
+            # rest-client fall back to its localhost dev default and dial its own pod.
+            - name: CASE_COORDINATOR_URL
+              value: http://case-coordinator-agent.platform.svc:8146
             # Sandbox straight-through KYC (ADR-0116 §4): auto-approve cases opened from
             # PARTY_CREATED so onboarding activates without an operator. MUST be false in prod.
             - name: OPENBANK_KYC_AUTO_APPROVE

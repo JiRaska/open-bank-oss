@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.0...domestic-payment-v1.0.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.22.2...domestic-payment-v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.22.1...domestic-payment-v0.22.2) (2026-10-14)
+
+
+### Security
+
+* **libs-runtime:** send OPA a verified service_account flag (phase 1 of 2) ([#12538](https://github.com/JiRaska/open-bank-oss/issues/12538)) ([3a8493a](https://github.com/JiRaska/open-bank-oss/commit/3a8493a7d8640b0baf252a879c1a908bd19587e2))
+
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.22.0...domestic-payment-v0.22.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.9...domestic-payment-v0.22.0) (2026-10-09)
 
 

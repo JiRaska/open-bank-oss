@@ -48,8 +48,9 @@ package openbank.rest
 import rego.v1
 
 treasury_staff if {
-	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+    input.principal.type == "HUMAN"
+    input.principal.service_account == false
+    not startswith(input.principal.id, "service-account-")
 }
 
 allowed_reasons contains "treasury-staff-read" if {

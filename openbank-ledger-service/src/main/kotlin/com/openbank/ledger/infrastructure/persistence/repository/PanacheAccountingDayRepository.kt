@@ -7,6 +7,7 @@ package com.openbank.ledger.infrastructure.persistence.repository
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
+import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.ledger.infrastructure.persistence.entity.AccountingDayEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -82,7 +83,7 @@ class PanacheAccountingDayRepository(
             record.id,
             expectedVersion,
         ).flatMap { updated ->
-            check(updated == 1) {
+            checkConflict(updated == 1) {
                 "Accounting day ${record.businessDate} changed concurrently (expected version " +
                     "$expectedVersion) — retry against the current state"
             }

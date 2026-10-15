@@ -63,3 +63,13 @@ nad stejnou ceremonií nahlas kolidují (422) místo tichého přepsání.
 Vlastní databáze `openbank_documents`, `generation: none`, Flyway V1..V3. Pouze outbox entita rozšiřuje
 `PanacheOutboxEntity` (Hibernate sekvence `document_outbox_seq`, vytvořená ve V3 — hlídá
 `HibernateSequenceGuardTest`); ostatní entity používají aplikačně přidělená UUID/String id.
+
+## Seedované penzijní šablony
+
+`DocumentTemplateSeed` seeduje všech osm šablon `pension-*` ve verzi `1.0.0` jako `DRAFT`.
+Před publikací je nutná právní kontrola znění (#12392). Ostré renderování načítá jen publikované
+řádky, takže vynechání ani změna `legalReviewRequired` návrh nezpřístupní. Návrhy lze kontrolovat
+v náhledu. Seedování návrhu zachová existující publikovanou verzi stejného kódu; právně schválené
+znění publikujte existujícím kontrolovaným postupem.
+
+Ostré renderování odmítá také dříve publikovanou šablonu obsahující `LEGAL-REVIEW-REQUIRED`, ještě před vytvořením nebo uložením PDF. Existující řádky seedu s pevným ID se nepřepisují; data volajícího tuto kontrolu nemohou obejít.

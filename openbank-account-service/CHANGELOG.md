@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.34.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.2...account-service-v0.34.3) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.34.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.1...account-service-v0.34.2) (2026-10-12)
+
+
+### Security
+
+* **account:** authenticate the API by bearer only on the mTLS listener ([#12528](https://github.com/JiRaska/open-bank-oss/issues/12528)) ([d45b332](https://github.com/JiRaska/open-bank-oss/commit/d45b3322edb6c06f6cd8b27981ef78c531a277d9))
+
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.0...account-service-v0.34.1) (2026-10-11)
+
+
+### Security
+
+* **sca:** scoped downstream access for pension-service (ADR-0335) ([#12419](https://github.com/JiRaska/open-bank-oss/issues/12419)) ([21bb0e9](https://github.com/JiRaska/open-bank-oss/commit/21bb0e9d2a9e44394ec9bb1d6eac8ca7f80556a0))
+
 ## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.2...account-service-v0.34.0) (2026-10-09)
 
 

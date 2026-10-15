@@ -1,5 +1,53 @@
 # Changelog
 
+## [3.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.0.0...admin-ui-v3.1.0) (2026-10-14)
+
+
+### Features
+
+* **campaign:** pin published MGM programme versions ([#12820](https://github.com/JiRaska/open-bank-oss/issues/12820)) ([b7d7d76](https://github.com/JiRaska/open-bank-oss/commit/b7d7d7614769915158e01febec715cfdbc8621c6))
+* **referral:** shareable referral link e2e + activate referral-service on sandbox ([#12813](https://github.com/JiRaska/open-bank-oss/issues/12813)) ([b2e006a](https://github.com/JiRaska/open-bank-oss/commit/b2e006aca9f2485e08599f5d782fbc86485a7270))
+
+## [3.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v2.0.0...admin-ui-v3.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **customer-edge,admin-ui:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **customer-edge,admin-ui:** pension lifecycle UI and BFF (ADR-0334 S6) ([#12359](https://github.com/JiRaska/open-bank-oss/issues/12359)) ([542d3aa](https://github.com/JiRaska/open-bank-oss/commit/542d3aa3d8b6daef4da9f254dda257231e0bdbf2))
+
+## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v1.0.0...admin-ui-v2.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **pension:** final integration of follow-ups F1-F7 (ADR-0334 final integration) ([#12435](https://github.com/JiRaska/open-bank-oss/issues/12435)) ([1a7bd7e](https://github.com/JiRaska/open-bank-oss/commit/1a7bd7e31b28ed2c938abbb95cf4a73757c26eed))
+
+## [1.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.3...admin-ui-v1.0.0) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **communication:** Style writes now use /api/v2/personas and require basePublishedVersion. The v1 published-style read remains available.
+
+### Bug Fixes
+
+* **communication:** reject stale style publication ([#12294](https://github.com/JiRaska/open-bank-oss/issues/12294)) ([aea8ae9](https://github.com/JiRaska/open-bank-oss/commit/aea8ae95b291dcf7548f82b5482839b5747430da))
+
+## [0.277.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.2...admin-ui-v0.277.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive the service registry from the catalog instead of eight hand-kept lists ([#12487](https://github.com/JiRaska/open-bank-oss/issues/12487)) ([6bb5662](https://github.com/JiRaska/open-bank-oss/commit/6bb5662771c96c5954e3078e39c56b9c107352ae))
+
 ## [0.277.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.277.1...admin-ui-v0.277.2) (2026-10-11)
 
 
