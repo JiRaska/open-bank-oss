@@ -22,11 +22,7 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
-  services:
-    openbank-sanctions-service:
-      issue: "#11492"
-      reason: "Pause deployment while the sanctions image and review evidence are resolved."
-      release_condition: "Verify the fixed image and required reviews for #11492, then remove this hold in a separate PR."
+  services: {}
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).

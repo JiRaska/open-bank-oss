@@ -61,6 +61,20 @@ def libsPitestConfig = [
             'com.openbank.libs.idempotency.impl.*Kt',
             'com.openbank.libs.persistence.outbox.*Kt',
             'com.openbank.libs.audit.*Kt',
+            // Deprecated mapped superclass with zero usages fleet-wide (ADR-0049 audit; its own
+            // KDoc says "remove once it is clear none will appear"). No production call site and
+            // no test can reach it without resurrecting the dead repository pattern.
+            'com.openbank.libs.persistence.outbox.AbstractOutboxEntity',
+            // Session-bound Panache base: every method runs inside Panache.getSession()/withTransaction,
+            // which only exists under a booted Quarkus + database. Its behaviour is covered by the
+            // per-service @QuarkusTest ITs (OutboxClaimPlanIT and friends); the PIT JUnit runner
+            // cannot execute those, so the class scores as NO_COVERAGE no matter how many unit
+            // tests exist. Excluded rather than left to dilute the lane's measurable signal.
+            'com.openbank.libs.persistence.outbox.AbstractPanacheOutboxRepository',
+            // The companion's purgeSent runs a native UPDATE inside Panache.withTransaction — same
+            // session-bound shape as AbstractPanacheOutboxRepository; only the per-service
+            // @QuarkusTest ITs can reach it, and the PIT runner cannot execute those.
+            'com.openbank.libs.persistence.outbox.PanacheOutboxRetention$Companion',
         ],
     ],
 ]
