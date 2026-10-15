@@ -112,10 +112,12 @@ Exact pinned versions are auto-generated from `libs.versions.toml` at build and 
 
 ## Observability
 
-The service carries the `quarkus-opentelemetry` runtime like every other fleet module, so
-HTTP requests and Postgres writes emit OTLP spans into the shared Tempo pipeline. For a
-regulatory feed this is load-bearing evidence, not convenience: an exposure row written
-outside its registration request's trace answers 201 like a healthy one but has no
-observable cause. The trace contract (`AnaCreditTraceContractIT`) pins that the
-`POST /api/v1/anacredit/exposures` span and the `INSERT credit_exposures` span share one
-trace id on every run.
+The service includes the `quarkus-opentelemetry` runtime extension to instrument HTTP
+requests and reactive Postgres operations. `AnaCreditTraceContractIT` uses a test-only
+span recorder and verifies that `POST /api/v1/anacredit/exposures` and its
+`INSERT credit_exposures` operation share a trace id.
+
+The deployment must configure the intended OTLP exporter endpoint and collector route.
+This local trace contract proves HTTP/SQL correlation; it does not prove export to a
+collector, delivery to Tempo, or retention in a deployed environment. Verify those
+separately before relying on exported traces for operational investigation.
