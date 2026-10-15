@@ -5795,6 +5795,41 @@ gates:
     run: |
       python3 .github/scripts/check-agent-pr-guard.py
 
+  # Issue #12923 gap 7. ai-rollout.yaml's D5 decision is honestly `partial` today — the KMS
+  # anchor plumbing is built but the independently attested runtime evidence is still planned.
+  # Nothing except this gate stops a one-word edit (`partial` -> `built`) from telling the
+  # admin-ui route, the snapshot JSON and every compliance reader that the attestation gap is
+  # closed when it is not. A status that flips by prose alone is a hope, not a status.
+  #
+  # The gate makes the flip falsifiable: the SAME commit must add an `evidence:` mapping under
+  # decisions.D5 (attestation_workflow naming a .github/workflows/*.yml present in the PR's own
+  # checkout, last_verified_run naming a real run of that workflow, verdict VERIFIED in the
+  # attestation workflow's own vocabulary, verified_at within 14 days), and the gate then reads
+  # the live GitHub API to confirm the run exists, belongs to the declared workflow, concluded
+  # success and is itself fresh. A live-API error while a PR claims `built` FAILS CLOSED
+  # (unlike the Unreadable/UNRESOLVED convention of the always-on live gates: this one reads
+  # the API only on the rare claim, and an unverifiable claim must read exactly like a missing
+  # one). Today's `partial` state, and edits without a built/complete claim, pass with no
+  # evidence at all.
+  - id: ai-rollout-status-evidence
+    name: "D5 'built' claim in ai-rollout.yaml requires live VERIFIED attestation evidence (enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 30   # two live gh reads at a 15s cap each, worst case
+    rationale: >-
+      A one-word status flip in ai-rollout.yaml can currently claim D5 is built with no
+      attestation behind it, and every consumer of the governance snapshot inherits the lie.
+      Re-examine when the D5 evidence story is subsumed by a standing, always-on verification
+      gate (the way ruleset four-eyes would subsume agent-pr-guard).
+    review_after: "2027-03-01"
+    min_subjects: 10   # 14 today: 9 decisions + 5 roadmap entries in ai-rollout.yaml
+    when: pull_request
+    selftest: python3 .github/scripts/check-ai-rollout-status-evidence.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ai-rollout-status-evidence.py", "openbank-libs/governance/ai-rollout.yaml"]
+    run: |
+      python3 .github/scripts/check-ai-rollout-status-evidence.py
+
   # ADR-0251. The script this falsifies is the PROOF that an independent review happened, and
   # its predecessor is the reason the control was retired: ADR-0154's "Verify the Claude
   # fallback actually reviewed" step carried the SAME `if:` as the review it verified, so
