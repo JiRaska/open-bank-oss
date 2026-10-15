@@ -452,6 +452,44 @@ test_compliance_may_not_write_annuity_partners if {
 	}
 }
 
+# ---- #12425: participant aggregates for the ČNB returns ----
+
+tax_reporting_principal := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+# must-ALLOW: tax-reporting's own client and staff oversight.
+test_tax_reporting_and_staff_read_participant_aggregates if {
+	rest.allow with input as {"principal": tax_reporting_principal, "action": "pension.reporting.aggregate"}
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_AUDITOR"]},
+		"action": "pension.reporting.aggregate",
+	}
+}
+
+# must-DENY: the shared account, the edge, pension's own client, an AI agent, a customer.
+test_others_cannot_read_participant_aggregates if {
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]}, "action": "pension.reporting.aggregate"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "pension.reporting.aggregate"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}, "action": "pension.reporting.aggregate"}
+	not rest.allow with input as {"principal": {"type": "AI_AGENT", "id": "agent:x", "roles": ["ROLE_OPERATOR"]}, "action": "pension.reporting.aggregate"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "cust-1", "roles": ["ROLE_CUSTOMER"]}, "action": "pension.reporting.aggregate"}
+	not rest.allow with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": []}, "action": "pension.reporting.aggregate"}
+}
+
+# must-DENY: tax-reporting reaches no participant-level route.
+test_tax_reporting_reaches_no_participant_route if {
+	every a in {"pension.contract.inspect", "pension.exit.inspect", "pension.funding.inspect", "pension.operator.inspect", "pension.transfer.inspect", "pension.onboarding.inspect", "pension.death.inspect", "pension.annuity.inspect"} {
+		not rest.allow with input as {"principal": tax_reporting_principal, "action": a}
+	}
+}
+
+# Why the verb is not `.read`: under that name the generic rule hands it to the shared account.
+test_a_read_verb_would_have_reached_the_shared_account if {
+	rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]},
+		"action": "pension.reporting.read",
+	}
+}
+
 # --- participant valuation + operator mandates list (#12350) ------------------------------------
 
 test_edge_may_read_a_contract_valuation if {
@@ -591,6 +629,7 @@ pension_actions := {
 	"pension.operator.annuity-approve", "pension.operator.annuity-purchase", "pension.operator.annuity-read",
 	"pension.operator.annuity-write", "pension.operator.contribution", "pension.operator.exit-read",
 	"pension.operator.inspect", "pension.operator.mandate-read", "pension.operator.transfer",
+	"pension.reporting.aggregate",
 	"pension.simulation.run",
 	"pension.transfer.consent", "pension.transfer.inspect", "pension.transfer.provider-request",
 	"pension.transfer.request-out", "pension.transfer.withdraw",
