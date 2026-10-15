@@ -109,8 +109,12 @@ mp:
         topic: openbank.agent.audit.events
         # #5745, same reasoning as `audit-events-in` below. This channel needs it MORE, not less:
         # it is the strict path — AgentAuditConsumer acknowledges only after append-only
-        # persistence succeeds, so it rethrows by design, and SmallRye's default `fail` would stop
+        # persistence succeeds and NACKs on failure, and SmallRye's default `fail` would stop
         # the D5 provenance stream on the first bad record. Explicit and NESTED (#686).
+        # (The handler NACKs in a catch rather than rethrowing: this method infers MANUAL
+        # acknowledgment, and a rethrown exception bypasses message.nack entirely — the stream
+        # cancels instead of parking the record. Verified against Redpanda in
+        # AgentAuditKafkaPersistenceIT, #12256.)
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.agent-audit-events-in
