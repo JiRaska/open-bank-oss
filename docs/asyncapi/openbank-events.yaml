@@ -512,6 +512,19 @@ operations:
       $ref: '#/channels/domestic-payment-events'
     summary: domestic-payment publishes created / status-changed, discriminated by ce-type
 
+  consumeDomesticPaymentStatusForPensionSettlement:
+    action: receive
+    channel:
+      $ref: '#/channels/domestic-payment-events'
+    messages:
+      - $ref: '#/channels/domestic-payment-events/messages/DomesticPaymentStatusChanged'
+    summary: >-
+      pension-service (channel domestic-payment-events-in, group pension-service-domestic-payment)
+      reads ce-type domestic.payment.status-changed and writes SETTLED / REJECTED onto the payout
+      instruction whose payment reference is paymentId; other types and other payments are
+      ignored. Rethrown failures dead-letter to openbank.dlq.pension.domestic-payment-events-in
+      (#12378).
+
   publishTransactionEvent:
     action: send
     channel:

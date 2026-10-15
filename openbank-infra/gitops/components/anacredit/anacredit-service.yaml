@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-anacredit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "fc7e5a2d7ea2bf8a"
+        openbank.tech/policy-checksum: "18c8386e21d3ee2f"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: anacredit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-anacredit-service:sandbox-3a8493a7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-anacredit-service:sandbox-bc607f53
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

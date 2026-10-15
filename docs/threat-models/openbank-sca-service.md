@@ -362,3 +362,22 @@ is the **authentication assurance gate** for payments and consent — defeating 
   already sends its own bearer. Proven by `ScaListenerAuthParityIT` (production listener shape, real
   HTTP; 1 of 4 failing without the change, 4 of 4 with it) and gated fleet-wide by `mtls-bearer-only`.
   Rollback: revert the commit (re-opens the path).
+
+
+## Pension integration boundary (ADR-0334/0335, #12435)
+
+**Pension challenge consumption.** This integration adds the `pension` namespace to `sca-service-ingress-allow-list`.
+That grants namespace-wide network reachability to the selected provider pods; it does not
+restrict traffic to one workload and does not grant an application action. The pension REST
+client uses its own `openbank-pension` client-credentials identity for `POST /api/v1/sca/challenges/{id}/consume`.
+
+**Threat and required controls.** Challenge consumption is an authorization boundary. Knowledge of the challenge id does not establish the party, operation or payload binding. A machine caller must not create a staff-role shortcut or bypass dynamic linking and single-use consumption.
+Compromise of any admitted namespace workload is therefore a network threat, while compromise
+of the pension client credential reaches whichever actions its provider authorization permits.
+Keep token validation, identity-scoped authorization and the provider's domain checks enabled.
+
+**Rollout dependency and proof limits.** The integration depends on #12419 for scoped downstream
+authorization; the allow-list change alone does not prove that grant is deployed or correct.
+Review the corresponding provider grant and negative caller/ownership tests before enabling
+this integration. Consumer contracts pin request/response shape; they do not prove a live token
+or account entitlement. No live deployment verification is claimed by this documentation update.

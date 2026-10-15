@@ -4,102 +4,120 @@
 
 package com.openbank.pensionfund.contract
 
-import com.openbank.pensionfund.application.port.PensionFundStore
-import com.openbank.pensionfund.application.port.StoreChanges
-import com.openbank.pensionfund.domain.model.Fund
-import com.openbank.pensionfund.domain.model.FundStatus
-import com.openbank.pensionfund.domain.model.InstrumentClass
-import com.openbank.pensionfund.domain.model.NavFigures
-import com.openbank.pensionfund.domain.model.NavPosition
-import com.openbank.pensionfund.domain.model.NavRecord
-import com.openbank.pensionfund.domain.model.NavStatus
-import com.openbank.pensionfund.domain.model.UnitTransaction
-import com.openbank.pensionfund.domain.model.UnitTransactionType
-import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
-import io.vertx.core.Vertx
-import io.vertx.core.impl.ContextInternal
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
-import java.math.BigDecimal
-import java.time.Instant
-import java.time.LocalDate
+import org.eclipse.microprofile.config.ConfigProvider
+import java.sql.Connection
+import java.sql.DriverManager
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executor
-import java.util.concurrent.TimeUnit
 
-/** Provider states shared by the git and broker replays, so the two cannot drift apart. */
+/** The state name every consumer of openbank-pension-fund-service uses for its missing-identity interaction. */
+const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
+/** pension-service's priced state: a published NAV, a holding, a priced transaction, a pending order, a strategy. */
+const val PRICED_STATE = "a pension contract holds units priced at a published NAV"
+
+/** pension-service's unpriced state: a holding in a fund that has never published a NAV. */
+const val UNPUBLISHED_STATE = "a pension contract holds units in a fund with no published NAV"
+
+/**
+ * Seeds the provider states pension-service's consumer pact names, by plain JDBC against the test
+ * Postgres. Not through the API: publishing a NAV is four-eyes (two DIFFERENT principals), and a
+ * Pact replay carries exactly one `@TestSecurity` identity. Not through the reactive store either:
+ * a state-change callback has no Vert.x context (the HR000068 trap). Every insert is
+ * `ON CONFLICT DO NOTHING`, so a re-run against a warm container, and the several interactions
+ * sharing one state, see the same rows.
+ *
+ * Ids are the literals in pension-service's `PensionFundPactConsumerTest`. Public: the
+ * `providerPactTest` source set compiles the verification classes as a separate Kotlin module.
+ */
 object PensionFundPactStates {
-    /** Must match TaxReportingPensionFundPactConsumerTest (openbank-tax-reporting-service). */
-    val FUND_ID: UUID = UUID.fromString("f0a7c1e2-0000-4000-8000-000000012425")
-    const val FUND_STATE = "a pension fund with a published September 2026 NAV exists"
+    const val PRICED_CONTRACT = "7a1e0000-0000-4000-8000-0000000000c1"
+    const val UNPUBLISHED_CONTRACT = "7a1e0000-0000-4000-8000-0000000000c2"
+    const val PRICED_FUND = "7a1e0000-0000-4000-8000-0000000000f1"
+    const val UNPUBLISHED_FUND = "7a1e0000-0000-4000-8000-0000000000f2"
+    private const val NAV = "7a1e0000-0000-4000-8000-0000000000a1"
+    private const val SEED_ORDER = "7a1e0000-0000-4000-8000-0000000000d1"
+    private const val SEED_TX = "7a1e0000-0000-4000-8000-0000000000e1"
+    private const val STRATEGY = "7a1e0000-0000-4000-8000-0000000000b1"
 
-    /** The state name every consumer of this provider uses for its missing-identity interaction. */
-    const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
-
-    /** One fund, one published 30 September NAV struck on one position, one subscription priced at it. */
-    fun fundWithSeptemberNav(vertx: Vertx, store: PensionFundStore) = runOnVertxContext(vertx) {
-        if (store.fund(FUND_ID) != null) return@runOnVertxContext
-        val at = Instant.parse("2026-09-30T17:00:00Z")
-        val fund = Fund(
-            id = FUND_ID, name = "Pact Fund", isin = "CZ0001242500", lei = "315700ABCDEF12345678",
-            depositaryReference = "DEP", custodyAccountReference = "CUST-PACT", currency = "CZK", riskClass = 3,
-            mandatoryConservative = false, managementFeeRate = BigDecimal("0.008"), launchNavPerUnit = BigDecimal.ONE,
-            status = FundStatus.ACTIVE, createdAt = at, updatedAt = at,
+    fun pricedHoldings(): Unit = jdbc { c ->
+        fund(c, PRICED_FUND, "CZ000PACT0F1")
+        c.exec(
+            """
+            INSERT INTO fund_navs (id, fund_id, valuation_date, gross_assets, accrued_management_fee,
+                other_liabilities, net_assets, units_outstanding, nav_per_unit, status, calculated_by,
+                calculated_at, approved_by, published_at)
+            VALUES ('$NAV', '$PRICED_FUND', DATE '2026-10-01', 125.00, 0, 0, 125.00, 100, 1.250000,
+                'PUBLISHED', 'pact-maker', now(), 'pact-checker', now())
+            ON CONFLICT DO NOTHING
+            """,
         )
-        val navId = UUID.fromString("f0a7c1e2-0000-4000-8000-0000000a0930")
-        val nav = NavRecord(
-            id = navId, fundId = FUND_ID, valuationDate = LocalDate.parse("2026-09-30"),
-            figures = NavFigures(
-                grossAssets = BigDecimal("1000.00"),
-                accruedManagementFee = BigDecimal("0.00"),
-                otherLiabilities = BigDecimal("0.00"),
-                netAssets = BigDecimal("1000.00"),
-                unitsOutstanding = BigDecimal("1000.000000"),
-                navPerUnit = BigDecimal("1.000000"),
-            ),
-            status = NavStatus.PUBLISHED, calculatedBy = "maker", calculatedAt = at, approvedBy = "checker",
-            publishedAt = at, positionsRecorded = true,
+        holding(c, PRICED_CONTRACT, PRICED_FUND, "100")
+        c.exec(
+            """
+            INSERT INTO unit_orders (id, contract_id, fund_id, order_type, amount, status, placed_at, idempotency_key)
+            VALUES ('$SEED_ORDER', '$PRICED_CONTRACT', '$PRICED_FUND', 'SUBSCRIBE', 500.00, 'PENDING', now(),
+                'pact-seed-pending')
+            ON CONFLICT DO NOTHING
+            """,
         )
-        val subscription = UnitTransaction(
-            id = UUID.randomUUID(), orderId = null, contractId = UUID.randomUUID(), fundId = FUND_ID,
-            type = UnitTransactionType.SUBSCRIBE, units = BigDecimal("1000.000000"), amount = BigDecimal("1000.00"),
-            navId = navId, navPerUnit = BigDecimal("1.000000"), pricedAt = at,
+        c.exec(
+            """
+            INSERT INTO unit_transactions (id, contract_id, fund_id, transaction_type, units, amount, nav_id,
+                nav_per_unit, priced_at)
+            VALUES ('$SEED_TX', '$PRICED_CONTRACT', '$PRICED_FUND', 'SUBSCRIBE', 100, 125.00, '$NAV', 1.250000, now())
+            ON CONFLICT DO NOTHING
+            """,
         )
-        store.commit(
-            StoreChanges(
-                funds = listOf(fund),
-                navs = listOf(nav),
-                transactions = listOf(subscription),
-                navPositions = listOf(
-                    NavPosition(
-                        UUID.fromString("f0a7c1e2-0000-4000-8000-0000000b0930"),
-                        navId,
-                        "CZ-BOND-1",
-                        BigDecimal("10"),
-                        BigDecimal("100"),
-                        InstrumentClass.DEBT_SECURITY,
-                    ),
-                ),
-            ),
+        c.exec(
+            """
+            INSERT INTO fund_strategies (id, name, allocations, status, version, created_at, updated_at)
+            VALUES ('$STRATEGY', 'BALANCED',
+                '[{"fundId":"$PRICED_FUND","weight":1,"lowerBand":0,"upperBand":1}]', 'ACTIVE', 1, now(), now())
+            ON CONFLICT DO NOTHING
+            """,
         )
     }
 
-    /** Reactive Panache needs a Vert.x context, which Pact-JVM's state callback thread lacks. */
-    private fun runOnVertxContext(vertx: Vertx, block: suspend () -> Unit) {
-        val future = CompletableFuture<Unit>()
-        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
-        VertxContextSafetyToggle.setContextSafe(duplicated, true)
-        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
-        CoroutineScope(dispatcher).launch {
-            try {
-                block()
-                future.complete(Unit)
-            } catch (t: Throwable) {
-                future.completeExceptionally(t)
-            }
-        }
-        future.get(10, TimeUnit.SECONDS)
+    fun unpublishedNavHoldings(): Unit = jdbc { c ->
+        fund(c, UNPUBLISHED_FUND, "CZ000PACT0F2")
+        holding(c, UNPUBLISHED_CONTRACT, UNPUBLISHED_FUND, "40")
+    }
+
+    private fun fund(c: Connection, id: String, isin: String) = c.exec(
+        """
+        INSERT INTO funds (id, name, isin, lei, depositary_reference, custody_account_reference, currency,
+            risk_class, mandatory_conservative, management_fee_rate, launch_nav_per_unit, status, created_at, updated_at)
+        VALUES ('$id', 'Pact fund $isin', '$isin', '315700PACT0000000001', 'DEP-PACT', 'CUST-$isin', 'CZK',
+            3, false, 0.008, 1, 'ACTIVE', now(), now())
+        ON CONFLICT DO NOTHING
+        """,
+    )
+
+    private fun holding(c: Connection, contract: String, fund: String, units: String) = c.exec(
+        """
+        INSERT INTO unit_holdings (id, contract_id, fund_id, units)
+        VALUES ('${holdingId(contract, fund)}', '$contract', '$fund', $units)
+        ON CONFLICT (contract_id, fund_id) DO NOTHING
+        """,
+    )
+
+    /**
+     * The store keys a holding by a name-based UUID (`PanachePensionFundStore.holdingId`, private);
+     * a random id is invisible to its `holding()` lookup and every REDEEM then sees 0 units.
+     */
+    private fun holdingId(contract: String, fund: String) =
+        UUID.nameUUIDFromBytes("holding:$contract:$fund".toByteArray(Charsets.UTF_8))
+
+    private fun Connection.exec(sql: String) {
+        createStatement().use { it.executeUpdate(sql.trimIndent()) }
+    }
+
+    private fun <T> jdbc(block: (Connection) -> T): T {
+        val cfg = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            cfg.getValue("quarkus.datasource.username", String::class.java),
+            cfg.getValue("quarkus.datasource.password", String::class.java),
+        ).use(block)
     }
 }

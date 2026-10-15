@@ -5,6 +5,7 @@
 package com.openbank.customeredge
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.rest.ActingForResolver
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
@@ -14,8 +15,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.util.UUID
@@ -1845,11 +1848,12 @@ class CustomerEdgeResourceTest {
         type: String = "SAVINGS",
         status: String = "ACTIVE",
         public: Boolean = true,
+        segments: String = "[\"ALL\"]",
         extra: String = "",
     ): String = """{
         "id":"$id", "code":"${type}_STANDARD", "name":"Product $type", "type":"$type",
         "currency":"CZK", "status":"$status", "isPublic":$public, "fee":0.0,
-        "versionHistory":[{"version":"0.9.0"}], "eligibilitySegments":["ALL"]$extra
+        "versionHistory":[{"version":"0.9.0"}], "eligibilitySegments":$segments$extra
     }"""
 
     private fun offersFrom(upstream: UpstreamClient, party: UUID): com.fasterxml.jackson.databind.JsonNode {
@@ -1985,5 +1989,172 @@ class CustomerEdgeResourceTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any(), any()) } returns Response.status(500).build()
         assertThat(resourceFor(upstream, party).listProductOffers(null).status).isEqualTo(503)
+    }
+
+    // ── ADR-0284 D10: eligibility-segment filter under business profiles ──────
+    // Under a resolved X-Acting-For business profile the catalogue shows only BUSINESS (or
+    // segment-agnostic) products; in the personal profile BUSINESS-only products must not
+    // appear. The catalogue itself is unchanged — the edge filters on the eligibilitySegments
+    // the catalogue response already carries; missing/empty means ALL, the domain default.
+
+    /** [resourceFor] plus a resolved X-Acting-For switch: the mandate lookup is stubbed to [mandate]. */
+    private fun businessResourceFor(
+        upstream: UpstreamClient,
+        human: UUID,
+        company: UUID,
+        mandate: Boolean = true,
+    ): CustomerEdgeResource = resourceFor(upstream, human).apply {
+        actingForResolver = ActingForResolver(upstream, ObjectMapper(), Clock.systemUTC(), "http://party", true)
+        requestHeaders = mockk { every { getHeaderString("X-Acting-For") } returns company.toString() }
+        every {
+            upstream.get("http://party/api/v1/parties/$human/acting-for", human.toString())
+        } returns Response.ok(
+            if (mandate) """[{"partyId":"$company","partyType":"COMPANY","status":"ACTIVE"}]""" else "[]",
+        ).build()
+    }
+
+    private fun businessOffersFrom(
+        upstream: UpstreamClient,
+        human: UUID,
+        company: UUID,
+    ): com.fasterxml.jackson.databind.JsonNode {
+        val response = businessResourceFor(upstream, human, company).listProductOffers(null)
+        assertThat(response.status).isEqualTo(200)
+        return ObjectMapper().readTree(ObjectMapper().writeValueAsString(response.entity)).path("items")
+    }
+
+    @Test
+    fun `a business profile sees business and segment-agnostic products`() {
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val business = catalogueProduct(UUID.randomUUID(), type = "CURRENT", segments = "[\"BUSINESS\"]")
+        val agnostic = catalogueProduct(UUID.randomUUID())
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok("[$business,$agnostic]").build()
+
+        val codes = businessOffersFrom(upstream, human, company).map { it.path("code").asText() }
+
+        assertThat(codes).containsExactlyInAnyOrder("CURRENT_STANDARD", "SAVINGS_STANDARD")
+    }
+
+    @Test
+    fun `a personal-only product does not leak into a business profile`() {
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val retailOnly = catalogueProduct(UUID.randomUUID(), segments = "[\"RETAIL\",\"SENIOR\"]")
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok("[$retailOnly]").build()
+
+        assertThat(businessOffersFrom(upstream, human, company)).isEmpty()
+    }
+
+    @Test
+    fun `a BUSINESS-only product is not offered in the personal profile`() {
+        val party = UUID.randomUUID()
+        val businessOnly = catalogueProduct(UUID.randomUUID(), segments = "[\"BUSINESS\"]")
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok("[$businessOnly]").build()
+
+        assertThat(offersFrom(upstream, party)).isEmpty()
+    }
+
+    @Test
+    fun `no acting-for header leaves the catalogue unchanged`() {
+        // The personal profile keeps seeing segment-agnostic and retail-segmented products —
+        // the filter only removes what the profile cannot take.
+        val party = UUID.randomUUID()
+        val agnostic = catalogueProduct(UUID.randomUUID())
+        val retail = catalogueProduct(UUID.randomUUID(), segments = "[\"RETAIL\",\"SENIOR\"]")
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok("[$agnostic,$retail]").build()
+
+        assertThat(offersFrom(upstream, party)).hasSize(2)
+    }
+
+    @Test
+    fun `an unverified acting-for header fails closed before the catalogue is read`() {
+        // No mandate → 403 from the resolver itself; the catalogue is never asked.
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>(relaxed = true)
+
+        assertThatThrownBy {
+            businessResourceFor(upstream, human, company, mandate = false).listProductOffers(null)
+        }.isInstanceOf(ForbiddenException::class.java)
+        verify(exactly = 0) { upstream.get(match { it.startsWith("http://catalog") }, any()) }
+    }
+
+    @Test
+    fun `a personal-only term deposit offer is not resolvable under a business profile`() {
+        // The single-offer fetch applies the same gate as the list — otherwise the list filter
+        // would be decorative and the offer still reachable by id.
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every {
+            upstream.get("http://catalog/api/v1/products/$productId", company.toString())
+        } returns Response.ok(
+            catalogueProduct(
+                productId,
+                type = "TERM_DEPOSIT",
+                segments = "[\"RETAIL\"]",
+                extra = ""","termDepositConfig":{"termMonths":12,"interestRateAnnual":0.048}""",
+            ),
+        ).build()
+
+        val response = businessResourceFor(upstream, human, company).getTermDepositOffer(productId)
+
+        assertThat(response.status).isEqualTo(404)
+    }
+
+    @Test
+    fun `a business term deposit offer stays resolvable under a business profile`() {
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every {
+            upstream.get("http://catalog/api/v1/products/$productId", company.toString())
+        } returns Response.ok(
+            catalogueProduct(
+                productId,
+                type = "TERM_DEPOSIT",
+                segments = "[\"BUSINESS\"]",
+                extra = ""","termDepositConfig":{"termMonths":12,"interestRateAnnual":0.048}""",
+            ),
+        ).build()
+
+        val response = businessResourceFor(upstream, human, company).getTermDepositOffer(productId)
+
+        assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
+    fun `business profile term deposit offers filter to the business segment`() {
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        val config = ""","termDepositConfig":{"termMonths":12,"interestRateAnnual":0.048}"""
+        val businessTd = catalogueProduct(
+            UUID.randomUUID(),
+            type = "TERM_DEPOSIT",
+            segments = "[\"BUSINESS\"]",
+            extra = config,
+        )
+        val retailTd = catalogueProduct(
+            UUID.randomUUID(),
+            type = "TERM_DEPOSIT",
+            segments = "[\"RETAIL\"]",
+            extra = config,
+        )
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), any()) } returns Response.ok("[$businessTd,$retailTd]").build()
+
+        val response = businessResourceFor(upstream, human, company).listTermDepositOffers()
+
+        assertThat(response.status).isEqualTo(200)
+        val items = ObjectMapper().readTree(ObjectMapper().writeValueAsString(response.entity)).path("items")
+        assertThat(items).hasSize(1)
+        assertThat(items.first().path("code").asText()).isEqualTo("TERM_DEPOSIT_STANDARD")
     }
 }

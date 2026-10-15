@@ -7,6 +7,9 @@ quarkus:
     db-kind: postgresql
     reactive:
       url: "${QUARKUS_DATASOURCE_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/settlement}"
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     username: "${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"
     password: "${QUARKUS_DATASOURCE_PASSWORD:settlement}"
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Without it `migrate-at-start` kills
@@ -66,9 +69,13 @@ quarkus:
     # debit/credit and every GL posting dialled a name that cannot resolve (issue #3931).
     balance-api:
       url: "${BALANCE_SERVICE_URL:http://localhost:8103}"
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     ledger-api:
       url: "${LEDGER_SERVICE_URL:http://localhost:8101}"
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
 
 openbank:
@@ -129,8 +136,12 @@ authz:
     rest-client:
       balance-api:
         url: http://localhost:${quarkus.http.port}
+        connect-timeout: 2000
+        read-timeout: 5000
       ledger-api:
         url: http://localhost:${quarkus.http.port}
+        connect-timeout: 2000
+        read-timeout: 5000
   openbank:
     outbox:
       dispatch-enabled: false

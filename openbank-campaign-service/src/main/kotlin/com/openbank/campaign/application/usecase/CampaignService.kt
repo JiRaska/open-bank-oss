@@ -13,6 +13,7 @@ import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.IncentiveOfferRegistry
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
+import com.openbank.campaign.application.port.out.ReferralProgramCatalogPort
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.application.port.out.SegmentRegistry
@@ -30,6 +31,7 @@ import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.IncentiveOfferRef
+import com.openbank.campaign.domain.model.ReferralProgramRef
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
@@ -108,6 +110,9 @@ class CampaignService @Inject constructor(
 
     private val log = Logger.getLogger(CampaignService::class.java)
 
+    @Inject
+    lateinit var referralPrograms: ReferralProgramCatalogPort
+
     suspend fun createDraft(
         name: String,
         goal: String,
@@ -122,9 +127,21 @@ class CampaignService @Inject constructor(
         trigger: String? = null,
         decisions: List<CampaignDecision> = emptyList(),
         incentiveOfferRef: IncentiveOfferRef? = null,
+        referralProgramId: UUID? = null,
+        expectedReferralProgramRef: ReferralProgramRef? = null,
     ): Campaign {
-        val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        val (resolvedSegment, resolvedReferralProgram) = validateDraftReferences(
+            segmentRef,
+            referralProgramId,
+            conversionRule,
+            trigger,
+        )
         val resolvedIncentive = validateIncentiveOffer(incentiveOfferRef)
+        if (expectedReferralProgramRef != null && resolvedReferralProgram != expectedReferralProgramRef) {
+            throw CampaignReferenceNotFoundException(
+                "source referral programme ${expectedReferralProgramRef.id} no longer matches its published version",
+            )
+        }
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
@@ -132,6 +149,7 @@ class CampaignService @Inject constructor(
             productKind = productKind,
             segmentRef = resolvedSegment,
             steps = steps.sortedBy { it.order },
+            referralProgramRef = resolvedReferralProgram,
             stopCondition = stopCondition,
             conversionRule = conversionRule,
             holdoutPercent = holdoutPercent,
@@ -152,17 +170,29 @@ class CampaignService @Inject constructor(
     }
 
     /** A draft belongs to its maker until submitted; the request never supplies that identity. */
-    suspend fun reviseDraft(id: UUID, definition: CampaignDefinition, revisedBy: String): Campaign {
+    suspend fun reviseDraft(
+        id: UUID,
+        definition: CampaignDefinition,
+        revisedBy: String,
+        referralProgramId: UUID? = null,
+    ): Campaign {
         val existing = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         require(existing.createdBy == revisedBy) { "only the campaign maker can revise this draft" }
-        val resolvedSegment = validateDraftReferences(
+        val (resolvedSegment, resolvedReferralProgram) = validateDraftReferences(
             definition.segmentRef,
+            referralProgramId,
             definition.conversionRule,
             definition.trigger,
         )
         val resolvedIncentive = validateIncentiveOffer(definition.incentiveOfferRef)
         return campaigns.save(
-            existing.revise(definition.copy(segmentRef = resolvedSegment, incentiveOfferRef = resolvedIncentive)),
+            existing.revise(
+                definition.copy(
+                    segmentRef = resolvedSegment,
+                    referralProgramRef = resolvedReferralProgram,
+                    incentiveOfferRef = resolvedIncentive,
+                ),
+            ),
         )
     }
 
@@ -172,7 +202,9 @@ class CampaignService @Inject constructor(
      * segment, conversion-rule and trigger catalogues again, and may never inherit an approval, lifecycle
      * state, enrolment, delivery record or active Temporal schedule.  A recurring schedule remains a
      * visible DRAFT setting only; it still cannot exist in Temporal until the new draft passes
-     * its own four-eyes activation.
+     * its own four-eyes activation. The referral programme is also re-resolved by its immutable id;
+     * a missing or changed id/name/version rejects the copy before persistence rather than silently
+     * upgrading the source's pinned reference.
      */
     suspend fun duplicateAsDraft(id: UUID, createdBy: String): Campaign {
         val source = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
@@ -185,6 +217,8 @@ class CampaignService @Inject constructor(
             // Carried, never defaulted: a duplicated credit campaign that silently became NONE
             // would be a credit journey the step gate no longer recognises as one.
             productKind = source.productKind,
+            referralProgramId = source.referralProgramRef?.id,
+            expectedReferralProgramRef = source.referralProgramRef,
             stopCondition = source.stopCondition,
             conversionRule = source.conversionRule,
             holdoutPercent = source.holdoutPercent,
@@ -241,9 +275,10 @@ class CampaignService @Inject constructor(
     /** Keeps create and draft revision tied to the same reviewed catalogue boundary. */
     private suspend fun validateDraftReferences(
         segmentRef: SegmentRef,
+        referralProgramId: UUID?,
         conversionRule: String?,
         trigger: String?,
-    ): SegmentRef {
+    ): Pair<SegmentRef, ReferralProgramRef?> {
         val segment = segments.load(segmentRef.name, segmentRef.version)
             ?: throw CampaignReferenceNotFoundException("segment ${segmentRef.name}@${segmentRef.version} not found")
         // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
@@ -257,7 +292,11 @@ class CampaignService @Inject constructor(
         require(trigger == null || TriggerCatalog.exists(trigger)) {
             "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
         }
-        return SegmentRef(segment.name, segment.version)
+        val referralProgram = referralProgramId?.let { id ->
+            referralPrograms.resolvePublished(id)
+                ?: throw CampaignReferenceNotFoundException("published referral programme $id not found")
+        }
+        return SegmentRef(segment.name, segment.version) to referralProgram
     }
 
     /** Pins only an exact published offer revision; Studio never owns redemption or value mutation. */

@@ -9,7 +9,8 @@ package com.openbank.document.domain
 // Bodies are copied VERBATIM from openbank-pension-service/src/main/resources/document-templates/,
 // where a test pins their variables to what the pension adapters send. They are DRAFT wording:
 // every body carries the LEGAL-REVIEW-REQUIRED marker and renders a visible DRAFT banner while the
-// caller passes legalReviewRequired=true. Replacing them after legal review is a NEW seed version
+// caller passes legalReviewRequired=true. They are seeded DRAFT until legal review (#12392).
+// Replacing published wording after review is a NEW seed version
 // (new fixed id), never an in-place edit — published templates are immutable.
 // ---------------------------------------------------------------------------------------------
 
