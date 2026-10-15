@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "d772649a3e8aaf27"
+    openbank.tech/policy-checksum: "dafb7f4d3bcece66"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1766,6 +1766,9 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
+        # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
+        - card.details.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

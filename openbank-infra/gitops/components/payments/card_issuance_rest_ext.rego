@@ -7,6 +7,8 @@
 #   card.create    — issueCard
 #   card.list      — listAll, listByAccount (#accountId), listByParty (#partyId)
 #   card.read      — getCard (#id)
+#   card.details.read — secureDetails (#id): the synthetic PAN/CVV. Machine-only, see the
+#                    service-edge-card-details-read rule below.
 #   card.activate  — activate (#id)
 #   card.block     — block (#id) — ROLE_OPERATOR/ROLE_ADMIN/ROLE_COMPLIANCE (@RolesAllowed is a
 #                    disjunction: ROLE_COMPLIANCE widens the caller set, it does not narrow it)
@@ -18,7 +20,8 @@
 #   card.outbox.requeue — requeueDead — ROLE_ADMIN ONLY (not ROLE_OPERATOR)
 #
 # Base rest.rego already grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) for card.list/.read
-# — no extension needed for those. The remaining actions have no generic base-rego grant.
+# — no extension needed for those. card.details.read is the exception: it is listed in rules.yaml
+# authz.operator_read_any_excluded_actions, so no generic read grant reaches the PAN. The remaining actions have no generic base-rego grant.
 #
 # Verified caller: customer-edge calls card.list/card.suspend/card.resume on the customer's own
 # card via the shared `openbank-services` Keycloak client (service-account-openbank-services,
@@ -86,4 +89,17 @@ allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
 	input.principal.id in {"service-account-openbank-party"}
 	input.action == "card.list"
+}
+
+# The synthetic PAN/CVV read (CardResource.secureDetails). Excluded from operator-read-any (rules.yaml
+# authz.operator_read_any_excluded_actions) because ROLE_OPERATOR is held by staff and by machine
+# identities alike, and no back-office screen renders a PAN. The one caller is customer-edge's own
+# principal, which reaches it only after its holder-only check and a card-bound SCA challenge
+# (CustomerEdgeResource.revealCardDetails). card-issuance runs AUTHZ_ENFORCE=false, so
+# CardReadCallerGuard.requireCardDetailsReader enforces the same list in Kotlin; CardReadCallerGuardTest
+# pins the two together.
+allowed_reasons contains "service-edge-card-details-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id in {"service-account-openbank-edge"}
+	input.action == "card.details.read"
 }
