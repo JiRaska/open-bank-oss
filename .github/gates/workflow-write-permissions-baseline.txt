@@ -10,6 +10,8 @@ alert-rca-weekly.yml|job:review|pull-requests
 api-contract-post-merge.yml|job:raise-issue|issues
 audit-anchor-attestation.yml|job:close-issue|issues
 audit-anchor-attestation.yml|job:raise-issue|issues
+audit-anchor-attestation.yml|job:update-registry|contents
+audit-anchor-attestation.yml|job:update-registry|pull-requests
 auto-deploy-red-watch.yml|job:watch|issues
 auto-deploy.yml|job:build-push|contents
 auto-deploy.yml|job:build-push|id-token

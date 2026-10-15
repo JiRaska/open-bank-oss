@@ -46,10 +46,14 @@ So the verification has to be done **outside**, on public material, by code that
 | Input | Source | Do you have to trust OpenBank for it? |
 |---|---|---|
 | Anchor export | `GET /api/v1/audit/anchors?limit=200` (`ROLE_AUDITOR`) | It is the *evidence under test*; forgery is what the tool detects |
-| Public key (PEM) | **AWS KMS `GetPublicKey` on the key id recorded in the anchor** — or `GET /api/v1/audit/anchors/verification-key?keyId=…` | **No.** Fetch it from KMS yourself; that is the point |
+| Public key (PEM) | **The in-repo public registry `docs/audit/anchor-verification-keys.json`** (see `docs/audit/README.md`) — verification needs only public data | **No** — that is the point of the registry |
+| Public key (PEM), cross-check | AWS KMS `GetPublicKey` on the key id recorded in the anchor — or `GET /api/v1/audit/anchors/verification-key?keyId=…` | **No**, if you have either credential — the registry's two fallbacks |
 | Entry export (optional) | `audit_entries` rows for the attested range | It is the *log under test* |
 
-Fetch the key independently whenever you can:
+The registry is the primary key source: it is committed in-repo, its update is a reviewed PR
+(every diff is visible in the review history), and it removes the AWS-credential / bank-endpoint
+gate between a third party and a verdict. Fetch the key independently from KMS when you hold AWS
+credentials, as a cross-check on the registry entry:
 
 ```
 aws kms get-public-key --key-id <keyId recorded on the anchor> \
@@ -158,6 +162,14 @@ Three gaps are real, and a partial control described as full independence is wor
    is authentic; it does not prove the *log* still matches it. The tool says so explicitly in its
    output rather than letting a signature-only run read as a full verification.
 
+The key material itself now comes from the public in-repo registry (§3) rather than AWS
+credentials or the bank endpoint — but the registry is committed by the same CI that runs the
+attestation, so a party who distrusts the repository outright should cross-check a PEM against
+`aws kms get-public-key` when they hold AWS credentials. Note what a registry swap cannot do: a
+replaced PEM fails honest anchors under it (`INVALID SIGNATURE` → `TAMPERED`), so substituting
+the registered key surfaces as rejection, never as a clean pass — and a registry that drifted
+from the KMS-held keys is exactly what the weekly refresh PR exists to announce in review.
+
 Consequently ADR-0031 **D5 remains 🟡 Partial**. The asymmetric signer and this verifier are the
 part that is real; independent *proof of completeness and of time* is not, and the public control
 score must not advance on the strength of this runbook.
@@ -207,3 +219,10 @@ What even a green run does **not** prove — unchanged from §6, and restated in
 
 A non-VERIFIED scheduled run opens or refreshes one tracking issue and a clean run closes it;
 `workflow_dispatch` failures simply fail red.
+
+On a clean run, a follow-up job then refreshes the public verification-key registry (§3):
+it compares the fetched KMS PEMs against `docs/audit/anchor-verification-keys.json` and opens
+or updates ONE PR (branch `agent/audit-anchor-key-registry-update`) naming only the affected
+keyId(s) and PEM SHA-256 fingerprint(s). An already-current registry produces no commit and no
+PR — the update is idempotent, runs on both triggers (`workflow_dispatch` is the manual repair
+path), and only ever sees exports that just verified VERIFIED.

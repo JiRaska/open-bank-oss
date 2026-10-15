@@ -32,6 +32,13 @@
 #     rejected — check capture cadence separately, runbook §6.1), nor prove WHEN an anchor
 #     was signed (signedAt is the producer's claim, §6.2), nor that the log still matches the
 #     attested heads (no --entries export over cluster DNS; §6.3).
+#
+# GAP 6 (issue #12923): a third party verifying anchors needed AWS credentials or the
+# bank-gated /anchors/verification-key endpoint for the public key. After the export
+# VERIFIES, the update-registry job compares the fetched KMS PEMs against the PUBLIC,
+# in-repo registry (docs/audit/anchor-verification-keys.json) and opens/updates ONE PR
+# on drift — no commit, no PR when the registry already matches (idempotent). A public
+# key verifies; it cannot sign, so publishing it grants nothing. See docs/audit/README.md.
 name: Audit anchor live attestation
 
 on:
@@ -271,6 +278,74 @@ jobs:
           path: ${{ runner.temp }}/anchor-attestation
           if-no-files-found: error
           retention-days: 30
+
+  # GAP 6 (issue #12923): the public, in-repo verification-key registry. Runs only after
+  # the export independently VERIFIED — attest exits non-zero on any other verdict, so
+  # `success()` here means the fetched PEMs belong to an accepted export. A separate JOB,
+  # not a step in attest: the export/verify lane stays read-only, and the write grant
+  # lands here, on the job that calls the write API (check-workflow-supply-chain.py's
+  # token doctrine). The PEMs travel in the audit-anchor-attestation artifact the attest
+  # job already uploads. Both triggers update: the weekly cron is the cadence, and
+  # workflow_dispatch is the manual repair path (e.g. a PR that went stale).
+  update-registry:
+    name: Refresh the public verification-key registry
+    needs: attest
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write        # push the bot branch
+      pull-requests: write   # open/update the registry PR
+    steps:
+      # Token pattern reused from dependabot-verification-metadata.yml: a GITHUB_TOKEN
+      # push never re-triggers checks, so the pushed branch would sit with "expected"
+      # required checks forever. The bot PAT pushes a commit that DOES run CI, so the
+      # registry PR can be merged by the normal gate. ABSENT FAILS CLOSED — an
+      # unconfigured control reads as broken, never as green (this workflow's header
+      # doctrine); the attestation verdict itself is unaffected (that job already ran).
+      - name: Fail closed on missing refresh token
+        id: tok
+        run: |
+          set -euo pipefail
+          if [ -n "${{ secrets.METADATA_REFRESH_PAT }}" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::METADATA_REFRESH_PAT not set — the public verification-key registry cannot refresh. Provision the bot PAT (the same credential dependabot-verification-metadata.yml uses); skipping would leave the registry silently stale, and a control that does not run must not read as a pass."
+            exit 1
+          fi
+
+      - name: Checkout
+        if: steps.tok.outputs.have == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the script branches from origin/main
+          token: ${{ secrets.METADATA_REFRESH_PAT }}
+
+      # Same bundle the attest job uploaded (raw export, kms-key-ids.txt, the PEMs).
+      - name: Download the attestation bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: audit-anchor-attestation
+          path: ${{ runner.temp }}/anchor-attestation
+
+      # Falsify the refresher BEFORE it writes: added / updated / identical / malformed
+      # fixtures. A bot whose only observed behaviour is "no drift" cannot be trusted to
+      # notice drift (verify-audit-anchors.yml lesson in this workflow's header).
+      - name: Self-test the registry refresher
+        run: python3 .github/scripts/update-anchor-key-registry.py --self-test
+
+      # Idempotent: an already-current registry exits 0 with no commit and no PR. On
+      # drift the script writes docs/audit/anchor-verification-keys.json on a bot branch
+      # and opens/reuses ONE PR whose body names only keyIds and PEM SHA-256
+      # fingerprints — a verification-material refresh claim, nothing more.
+      - name: Compare fetched keys against the registry and open/update the refresh PR
+        env:
+          GH_TOKEN: ${{ secrets.METADATA_REFRESH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/update-anchor-key-registry.py \
+            --keys-dir "${{ runner.temp }}/anchor-attestation" --apply
 
   # A red scheduled run addressed to nobody is how controls decay (this repo's own
   # sbom-drift-scanner lesson, quoted in fleet-attestation.yml). Scheduled failures file or

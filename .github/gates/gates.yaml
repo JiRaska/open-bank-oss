@@ -1840,6 +1840,26 @@ gates:
     run: |
       python3 .github/scripts/verify-audit-anchors.py --self-test
 
+  # Public anchor verification-key registry refresher unit test (issue #12923 gap 6).
+  # The registry bot is a SCHEDULED control: its only in-CI evidence that it can still
+  # notice drift is this self-test. The suite constructs the four behaviours the weekly
+  # run depends on — a missing generation is added (full entry shape), a changed PEM is
+  # updated (firstSeen preserved, previous fingerprint recorded), an identical registry
+  # is a NO-OP (the idempotence property: no drift ⇒ no commit, no PR), and a malformed
+  # registry fails loud instead of being "repaired" from scratch. Plus the bundle reader's
+  # filename-sanitization parity with the attest job, and the PR body's claim boundary
+  # (keyId + PEM SHA-256 fingerprint, nothing more than a verification-material refresh).
+  - id: audit-anchor-key-registry-refresher-unit-test
+    selftest_exempt: "is-a-test-suite — the run: IS the refresher's own --self-test"
+    name: "anchor verification-key registry refresher self-test (issue #12923 gap 6)"
+    group: security
+    mode: enforced
+    min_subjects: 18   # matches the --self-test case count
+    rationale: "The registry refresher decides, on a schedule, whether the public verification-key registry drifted from the KMS-held keys; a bot whose only observed behaviour is 'no drift' cannot be trusted to notice drift, and the third party it would mislead is an auditor verifying the log without AWS credentials or bank access."
+    review_after: "2027-04-22"
+    run: |
+      python3 .github/scripts/update-anchor-key-registry.py --self-test
+
   # can-i-deploy block classifier unit test (issue #2549). The reconcile probe above
   # decides WHICH stranded services to re-drive; this one decides whether a block that
   # survives the re-drive is a build-queue lag (self-clearing) or a contract regression
