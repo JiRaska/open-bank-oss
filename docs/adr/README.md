@@ -185,7 +185,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0174](0174-ict-third-party-dependencies-and-exit-strategy.md) | ICT third-party dependencies and exit strategy | Accepted | Partial | compliance,infrastructure,governance | — |
 | [0175](0175-data-residency-and-sovereignty.md) | Data residency and sovereignty | Accepted | Partial | privacy-gdpr,compliance,infrastructure | — |
 | [0176](0176-operator-initiated-customer-messaging.md) | Operator-initiated customer messaging | Accepted | Partial | notifications,admin-ui,governance | — |
-| [0177](0177-workload-identity-m2m-auth.md) | Workload-identity service-to-service auth | Proposed | Planned | authn,secrets,kubernetes | — |
+| [0177](0177-workload-identity-m2m-auth.md) | Workload-identity service-to-service auth | Proposed | Partial | authn,secrets,kubernetes | — |
 | [0178](0178-value-date-correct-balance-reconciliation-and-projection.md) | Value-date-correct balance reconciliation and projection | Accepted | Shipped | ledger,accounts,transactions | — |
 | [0179](0179-party-identity-merge.md) | Duplicate party identity merge | Proposed | Partial | kyc,accounts,ledger | — |
 | [0180](0180-withholding-tax-statutory-filing-38d-vy-tov-n-owner-cadence-transport.md) | Withholding-tax statutory filing (§38d Vyúčtování) — owner, cadence, transport | Accepted | Partial | tax,regulatory-reporting,compliance | — |
