@@ -28,6 +28,7 @@ import com.openbank.lending.infrastructure.persistence.entity.LoanEntity
 import com.openbank.lending.infrastructure.persistence.entity.LoanProvisioningEntity
 import com.openbank.lending.infrastructure.persistence.mapper.LendingMapper
 import com.openbank.libs.domain.identifiers.CollateralId
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.lending.origination.LegacyOriginationMigration
@@ -710,7 +711,7 @@ class ProvisioningCoverageRepositoryImpl @Inject constructor(private val sf: Mut
 class ProvisioningCycleRunRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
     ProvisioningCycleRunRepository {
     override fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<UUID> = sf.withTransaction { session ->
-        val attemptId = UUID.randomUUID()
+        val attemptId = Ids.newId()
         // The first observed day is the baseline. Thereafter every calendar day must have
         // evidence, even if no pod was alive to start the scheduler on that day.
         session.createNativeQuery<Any>(
