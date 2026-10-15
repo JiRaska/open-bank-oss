@@ -24,6 +24,16 @@ Repricingová mezera, ΔEVE v šesti scénářích BCBS d368, ΔNII za 12 měsí
 - **Test odlehlé hodnoty (supervisory outlier test).** Tier 1 je `tier1Capital` od volajícího, pokud je zadán, jinak Tier 1 z vlastních zdrojů runu (CZK), tedy stejné číslo, které používá limit `irrbb-eve-outlier`; hodnota z vlastních zdrojů se použije jen pro agregát v CZK. Práh a včasné varování pocházejí z deklarovaného limitu `irrbb-eve-outlier` (dodáno 15 % / 12 %) a výsledek nese `status` (`OK`, `EARLY_WARNING`, `BREACH`, `NOT_EVALUABLE`), `tier1Source` (`caller` nebo `own-funds`) a `tier1Gap` (proč nelze Tier 1 použít). Chybějící údaj je `NOT_EVALUABLE`, nikdy `OK`.
 - **Datové mezery.** `dataGaps[]` uvádí, co čísla nezachycují, se stabilním `code`: `CURVE_EXTRAPOLATED_FLAT` (toky po posledním pilíři křivky se oceňují poslední nulovou sazbou drženou konstantně; uvádí počet toků za pilířem a jejich základní PV), `PREPAYMENT_NOT_MODELLED`, `NMD_BEHAVIOUR_SIMPLIFIED`, `COMMERCIAL_MARGIN_INCLUDED` a `INSTRUMENTS_NOT_PROJECTED`. Poslední z nich se vyvolá jen pro druhy instrumentů, které projekce stále nečte (úvěry a obchody na peněžním trhu se čtou), a detail je pojmenuje. Jde o modelová zjednodušení nebo chybějící vstupy, ne o chyby; čísla se přesto vypočtou.
 
+## Autentizace API
+
+V produkčním profilu vyžaduje `/api/*` OIDC bearer token na běžném HTTP listeneru
+i na mTLS listeneru. Na mTLS listeneru důvěryhodný klientský certifikát ověřuje
+transportní spojení; nenahrazuje bearer token ani neuděluje role pro API.
+Požadavek s důvěryhodným certifikátem bez bearer tokenu vrací 401. Bez
+důvěryhodného klientského certifikátu selže TLS handshake ještě před HTTP.
+Volající přes mTLS proto musí poslat svůj klientský certifikát i bearer token.
+Výše uvedená omezení rolí platí i nadále.
+
 ## Kontrakt
 
 Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Výše popsané změny IRRBB jsou aditivní (1.23.0 a 1.24.0).
@@ -86,3 +96,7 @@ faktorem, který engine má, takže žádná strana nemůže poměr zlepšit:
 
 `ResidualGlLiquidityClassificationTest` pokrývá novou klasifikaci; aktualizovány jsou aserce verzí sad parametrů
 v existujících likviditních testech a v `RiskLiquidityApiIT`.
+
+## Povinné minimální rezervy ČNB
+
+Risk engine odebírá `openbank.fx.cnb-policy-rate.published` do vlastní tabulky faktů o sazbách. Opakované doručení je idempotentní podle nástroje a data účinnosti; opravená sazba aktualizuje uložené faktum. Endpoint minimálních rezerv odvozuje výsledek z odsouhlaseného snapshotu a sazby rezerv i úročení účinných k datu tohoto běhu. Chybějící fakta vedou k `424 NOT_EVALUABLE` s důvodem namísto výpočtu s náhradní číselnou sazbou; neznámý běh vrací 404 a neodsouhlasený běh 409. Analýza se počítá při čtení a neukládá se jako samostatný výsledek.

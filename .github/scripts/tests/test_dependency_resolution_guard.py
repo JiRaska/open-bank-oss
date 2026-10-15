@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Exercise the real Gradle guard after setup-gradle enabled graph generation."""
+"""Exercise the real Gradle guard, including on cold governance CI runners."""
 import json
 import os
 import subprocess
@@ -94,14 +94,24 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
             task = ('ForceDependencyResolutionPlugin_resolveProjectDependencies'
                     if resolver else 'VerifyBuildscriptFreeMarker')
             env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
-            return subprocess.run(
-                [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                 # --no-daemon: a daemon started with GRADLE_USER_HOME=<temp dir> outlives the call
-                 # and keeps writing into that dir, so tearDownClass's cleanup raced it and failed
-                 # with "Directory not empty" (seen on #11546, unrelated to the PR under test).
-                 '--no-daemon', '--offline', task, *(['--dry-run'] if resolver else [])],
-                env=env, capture_output=True, text=True, timeout=120, check=False,
-            )
+            # A daemon can keep writing into the temporary Gradle home after this
+            # process exits, racing tearDownClass cleanup.
+            command = [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
+                       '--no-daemon', '--offline', task, *(['--dry-run'] if resolver else [])]
+            for attempt in range(3):
+                result = subprocess.run(command, env=env, capture_output=True, text=True,
+                                        timeout=120, check=False)
+                output = result.stdout + result.stderr
+                # --offline affects Gradle dependency resolution, not a cold wrapper's
+                # distribution download. The first call in a fresh hosted runner may fail
+                # with a connection reset; retry only that transport failure. A failed guard
+                # assertion or build still returns immediately and fails this required gate.
+                wrapper_download_failed = (result.returncode != 0
+                                           and 'Fetching distribution.' in output
+                                           and 'Downloading https://services.gradle.org/distributions/' in output
+                                           and 'Exception in thread "main"' in output)
+                if not wrapper_download_failed or attempt == 2:
+                    return result
 
     def test_vulnerable_plugin_classpath_fails(self):
         result = self.run_case('2.3.32')

@@ -5,8 +5,10 @@
 package com.openbank.risk.application.usecase
 
 import com.openbank.risk.application.port.`in`.MinReservesAnalysis
+import com.openbank.risk.application.port.`in`.MinReservesNotEvaluableException
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.CnbPolicyRateFactRepository
 import com.openbank.risk.domain.reserves.MinReserveParameters
 import com.openbank.risk.domain.reserves.MinimumReserves
 import java.util.UUID
@@ -14,13 +16,23 @@ import java.util.UUID
 /**
  * ČNB minimum reserve requirement of a TIED_OUT run, derived on request and never stored
  * (ADR-0314 D6). Same gate as every other read: 404 for an unknown run, 409 for an UNTIED one.
+ *
+ * The reserve ratio and remuneration are the ČNB facts in effect on the run's as-of date
+ * ([ReserveFacts]). With either missing the requirement is NOT_EVALUABLE: this endpoint's v1
+ * contract promises a numeric rate, so it answers 424 NOT_EVALUABLE with the reason instead of a
+ * number computed at a default.
  */
-class MinReservesService(private val snapshots: SnapshotUseCase, private val parameters: MinReserveParameters) :
-    MinReservesUseCase {
+class MinReservesService(
+    private val snapshots: SnapshotUseCase,
+    private val parameters: MinReserveParameters,
+    private val facts: CnbPolicyRateFactRepository,
+) : MinReservesUseCase {
 
     override suspend fun analyse(runId: UUID): MinReservesAnalysis {
         val positions = snapshots.getPositions(runId) // 404 / 409 (UNTIED) before anything else
         val run = snapshots.getRun(runId)
-        return MinReservesAnalysis(run, parameters, MinimumReserves.compute(positions, parameters))
+        val params = ReserveFacts.resolve(parameters, facts, run.asOf)
+        params.ratesNotStated?.let { throw MinReservesNotEvaluableException(run.id, run.asOf, it) }
+        return MinReservesAnalysis(run, params, MinimumReserves.compute(positions, params))
     }
 }

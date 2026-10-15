@@ -8,6 +8,7 @@ import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
 import java.math.BigDecimal
+import java.time.LocalDate
 
 /**
  * What a GL account IS for the ČNB minimum reserve requirement (povinné minimální rezervy, PMR).
@@ -52,12 +53,36 @@ enum class ReserveClass(val wire: String, val description: String) {
 }
 
 /**
+ * A ČNB minimum-reserve FACT in effect on a day — the reserve ratio or its remuneration — as
+ * published by fx-service (`fx.cnb-policy-rate.published.v1`) with its provenance. [rate] is a
+ * fraction (0.04 = 4 %).
+ */
+data class ReserveRateFact(
+    val instrument: String,
+    val effectiveFrom: LocalDate,
+    val rate: BigDecimal,
+    val sourceUrl: String,
+    val contentSha256: String,
+    val note: String?,
+) {
+    init {
+        requireRate(instrument, rate)
+    }
+
+    companion object {
+        const val RATIO = "MIN_RESERVE_RATIO"
+        const val REMUNERATION = "MIN_RESERVE_REMUNERATION"
+    }
+}
+
+/**
  * A versioned, cited parameter set (`openbank.risk.min-reserves.*`): every result names [id] and
  * [version].
  *
- *  - [rate]: the reserve ratio applied to the base — 2 % (Opatření ČNB o PMR).
- *  - [remunerationRate]: rate paid on the required reserves — 0 %: the ČNB has not remunerated
- *    minimum reserves since 2023-10-05.
+ *  - [ratio] / [remuneration]: the ČNB facts in effect on the evaluated day, never constants. They
+ *    come from fx-service's ČNB ingestion via [withFacts]; the configured set carries none. While
+ *    either is missing the requirement is NOT stated ([ratesNotStated]) — a defaulted ratio is a
+ *    number nobody can stand behind (ADR-0097), and the ratio has changed (2 % -> 4 % on 2025-01-02).
  *  - [holdingCurrency]: the currency reserves are held in (the ČNB current account is in CZK).
  *  - [glAccounts] / [glAccountTypes]: GL code (or, failing that, GL account type) → class.
  */
@@ -65,18 +90,47 @@ data class MinReserveParameters(
     val id: String,
     val version: String,
     val source: String,
-    val rate: BigDecimal,
-    val remunerationRate: BigDecimal,
     val holdingCurrency: String,
     val glAccounts: Map<String, ReserveClass>,
     val glAccountTypes: Map<String, ReserveClass>,
+    val ratio: ReserveRateFact? = null,
+    val remuneration: ReserveRateFact? = null,
+    /** The day the facts were resolved for; null on the configured set before [withFacts]. */
+    val factsAsOf: LocalDate? = null,
 ) {
     init {
         require(id.isNotBlank() && version.isNotBlank()) { "minimum-reserve parameter set needs an id and a version" }
-        requireRate("rate", rate)
-        requireRate("remuneration-rate", remunerationRate)
         require(holdingCurrency.isNotBlank()) { "minimum-reserve holding currency is required" }
+        require(ratio == null || ratio.instrument == ReserveRateFact.RATIO) {
+            "ratio fact must be ${ReserveRateFact.RATIO}"
+        }
+        require(remuneration == null || remuneration.instrument == ReserveRateFact.REMUNERATION) {
+            "remuneration fact must be ${ReserveRateFact.REMUNERATION}"
+        }
     }
+
+    /** The reserve ratio in effect, or null — never a default. */
+    val rate: BigDecimal? get() = ratio?.rate
+
+    /** The remuneration rate in effect, or null — never a default. */
+    val remunerationRate: BigDecimal? get() = remuneration?.rate
+
+    /** Why the requirement cannot be evaluated; null when both facts are in effect. */
+    val ratesNotStated: String?
+        get() {
+            val missing = listOfNotNull(
+                ReserveRateFact.RATIO.takeIf { ratio == null },
+                ReserveRateFact.REMUNERATION.takeIf { remuneration == null },
+            )
+            if (missing.isEmpty()) return null
+            val day = factsAsOf?.toString() ?: "the evaluated day"
+            return "NOT_EVALUABLE: no ČNB ${missing.joinToString(" / ")} fact is in effect on $day " +
+                "(fx-service ČNB policy-rate feed, fx.cnb-policy-rate.published.v1), so the requirement is not " +
+                "stated rather than computed at a default rate."
+        }
+
+    fun withFacts(asOf: LocalDate, ratio: ReserveRateFact?, remuneration: ReserveRateFact?): MinReserveParameters =
+        copy(ratio = ratio, remuneration = remuneration, factsAsOf = asOf)
 
     fun classOf(glAccountCode: String?, glAccountType: String?): ReserveClass? =
         glAccountCode?.let { glAccounts[it] } ?: glAccountType?.let { glAccountTypes[it.uppercase()] }
@@ -105,18 +159,23 @@ data class UnclassifiedReserveBalance(
 )
 
 /**
- * The reserve base of one currency. [base] and [requirement] are null, with [requirementNotStated]
- * saying why, while any LIABILITY balance in that currency is unclassified: the base would then be
- * a partial sum, and a partial sum reported as the base is a number nobody can stand behind (ADR-0097).
+ * The reserve base of one currency. [base] is null, with [baseNotStated] saying why, while any
+ * LIABILITY balance in that currency is unclassified: the base would then be a partial sum, and a
+ * partial sum reported as the base is a number nobody can stand behind (ADR-0097). [requirement] is
+ * null when the base is, and also when no reserve ratio is in effect ([rateNotStated]).
  */
 data class CurrencyReserveBase(
     val currency: String,
     val lines: List<ReserveLine>,
-    val rate: BigDecimal,
-    val requirementNotStated: String? = null,
+    val rate: BigDecimal?,
+    val baseNotStated: String? = null,
+    val rateNotStated: String? = null,
 ) {
-    val base: BigDecimal? get() = if (requirementNotStated == null) lines.sumOf { it.amount } else null
-    val requirement: BigDecimal? get() = base?.multiply(rate, BigMath.MC)
+    val base: BigDecimal? get() = if (baseNotStated == null) lines.sumOf { it.amount } else null
+    val requirement: BigDecimal? get() = rate?.let { r -> base?.multiply(r, BigMath.MC) }
+
+    /** Why [requirement] is not stated: the base gap first, then the missing ratio; null when it is. */
+    val requirementNotStated: String? get() = baseNotStated ?: rateNotStated.takeIf { rate == null }
 }
 
 data class MinReserveResult(
@@ -130,7 +189,8 @@ data class MinReserveResult(
     val holdingCurrency: String,
     val excluded: List<ExcludedLine>,
     val unclassified: List<UnclassifiedReserveBalance>,
-    val remunerationRate: BigDecimal,
+    /** Null when no remuneration fact is in effect — see [MinReserveParameters.ratesNotStated]. */
+    val remunerationRate: BigDecimal?,
     val notes: List<String>,
 ) {
     val totalHoldings: BigDecimal? get() = holdings?.sumOf { it.amount }
@@ -151,7 +211,9 @@ data class MinReserveResult(
     val surplus: BigDecimal? get() =
         requirement?.takeIf { totalCurrency == holdingCurrency }?.let { r -> totalHoldings?.subtract(r) }
 
-    val remuneration: BigDecimal get() = (requirement ?: BigDecimal.ZERO).multiply(remunerationRate, BigMath.MC)
+    val remuneration: BigDecimal? get() = remunerationRate?.let {
+        (requirement ?: BigDecimal.ZERO).multiply(it, BigMath.MC)
+    }
 }
 
 /**
@@ -216,7 +278,13 @@ object MinimumReserves {
                     it.currency == c &&
                         it.glAccountType.equals(LIABILITY, ignoreCase = true)
                 }
-                CurrencyReserveBase(c, acc.baseLines(c), params.rate, UNCLASSIFIED_LIABILITY.takeIf { gap })
+                CurrencyReserveBase(
+                    currency = c,
+                    lines = acc.baseLines(c),
+                    rate = params.rate,
+                    baseNotStated = UNCLASSIFIED_LIABILITY.takeIf { gap },
+                    rateNotStated = params.ratesNotStated,
+                )
             },
             totalCurrency = single,
             holdings = acc.holdings.takeIf { holdingsStated },

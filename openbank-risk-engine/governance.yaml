@@ -16,7 +16,7 @@ lineage:
   upstream:
     - serviceName: fx-service
       relationType: topic
-      description: consumes openbank.fx.fixing.published into fx_fixing_rate (ADR-0314 D5)
+      description: consumes openbank.fx.fixing.published into fx_fixing_rate (ADR-0314 D5) and openbank.fx.cnb-policy-rate.published into cnb_policy_rate_fact (minimum-reserve ratio and remuneration)
   downstream:
     - serviceName: ledger-service
       relationType: api

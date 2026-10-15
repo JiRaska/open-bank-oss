@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: Apache-2.0
+# CnbPolicyRateFeedStale against the SHIPPED rule: fires past 3 days for a policy-rate feed only,
+# never for another feed's gauge and never for a fresh one.
+rule_files:
+  - prometheus-rules-cnb-policy-rates.yaml
+
+evaluation_interval: 5m
+
+tests:
+  - interval: 5m
+    input_series:
+      # 4 days old and growing: must fire.
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="feed-cnb-policy-rate-repo"}'
+        values: '345600+300x24'
+      # 1 day old: must not fire.
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="feed-cnb-policy-rate-lombard"}'
+        values: '86400+300x24'
+      # Another feed, equally stale: not this rule's business.
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="feed-cnb-daily-fixing"}'
+        values: '345600+300x24'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CnbPolicyRateFeedStale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: CnbPolicyRateFeedStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              workflow: feed-cnb-policy-rate-repo
+            exp_annotations:
+              summary: "ČNB policy-rate feed feed-cnb-policy-rate-repo not ingested for 4d 1h 30m 0s"
+              description: >-
+                fx-service has not fetched and parsed feed-cnb-policy-rate-repo for more than 3 days.
+                openbank_feed_fetch_total{feed=~"cnb-policy-rate-.+"} names the failure class
+                (http_error / unreachable / parse_error); a parse_error means the file no longer
+                matches its expected shape (a `PLATNA_OD|CNB_<X>_SAZBA_V_%` history, or the PMR workbook) and nothing from it was
+                stored. Served rates and the risk engine's minimum-reserve facts stay at the last
+                good history until it recovers. Check the fx pod log for "ingestion failed"
+                and curl the URL under openbank.cnb.policy-rates.* in fx-service's application.yaml.
+
+  # The minimum-reserve workbook rides the same rule: what alerts is the FETCH (the gauge advances
+  # only on a successful download + parse), never how old the ratio's effective date is — the 4 %
+  # ratio has been in effect since 2025-01-02 and must not, by itself, ever fire this.
+  - interval: 5m
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{workflow="feed-cnb-policy-rate-min-reserves"}'
+        values: '262800+300x24'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CnbPolicyRateFeedStale
+        exp_alerts: []
+      - eval_time: 115m
+        alertname: CnbPolicyRateFeedStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              workflow: feed-cnb-policy-rate-min-reserves
+            exp_annotations:
+              summary: "ČNB policy-rate feed feed-cnb-policy-rate-min-reserves not ingested for 3d 2h 55m 0s"
+              description: >-
+                fx-service has not fetched and parsed feed-cnb-policy-rate-min-reserves for more than 3 days.
+                openbank_feed_fetch_total{feed=~"cnb-policy-rate-.+"} names the failure class
+                (http_error / unreachable / parse_error); a parse_error means the file no longer
+                matches its expected shape (a `PLATNA_OD|CNB_<X>_SAZBA_V_%` history, or the PMR workbook) and nothing from it was
+                stored. Served rates and the risk engine's minimum-reserve facts stay at the last
+                good history until it recovers. Check the fx pod log for "ingestion failed"
+                and curl the URL under openbank.cnb.policy-rates.* in fx-service's application.yaml.

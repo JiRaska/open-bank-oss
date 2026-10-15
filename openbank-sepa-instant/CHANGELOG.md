@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.4...sepa-instant-v0.11.5) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.3...sepa-instant-v0.11.4) (2026-10-09)
+
+
+### Bug Fixes
+
+* **sepa-instant:** close DB commit-to-Kafka event loss with keyed transactional outbox ([#12316](https://github.com/JiRaska/open-bank-oss/issues/12316)) ([a4ce555](https://github.com/JiRaska/open-bank-oss/commit/a4ce5550c1174f764209240e19f89896c7ec3f04))
+
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.2...sepa-instant-v0.11.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.1...sepa-instant-v0.11.2) (2026-10-04)
 
 

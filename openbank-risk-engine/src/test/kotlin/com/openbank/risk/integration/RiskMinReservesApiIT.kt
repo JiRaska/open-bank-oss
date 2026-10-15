@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -68,6 +69,9 @@ class RiskMinReservesApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @BeforeEach
+    fun facts() = TestDb.seedReserveFacts()
+
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
@@ -81,7 +85,7 @@ class RiskMinReservesApiIT {
 
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
-    fun `a tied CZK book gets base and 2 percent requirement, with holdings not stated`() {
+    fun `a tied CZK book gets base and the 4 percent requirement in effect, with holdings not stated`() {
         // the 1510 facility and the 2300 borrowing reach the engine as TREASURY_DEAL positions
         seedDeal(cnbDeal, "CNB_DEPOSIT_FACILITY", "CNB", "4000.00")
         seedDeal(borrowing, "MM_BORROWING", "BANK-A", "3000.00")
@@ -102,11 +106,16 @@ class RiskMinReservesApiIT {
         )
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("cnb-pmr")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("3")
         val czk = body["currencies"].single()
         assertThat(czk["base"].decimalValue()).isEqualByComparingTo("1500.00") // customer deposits only
-        assertThat(czk["rate"].decimalValue()).isEqualByComparingTo("0.02")
-        assertThat(body["requirement"].decimalValue()).isEqualByComparingTo("30.00")
+        // the ratio in effect on 2026-05-28 is the ČNB fact (4 % from 2025-01-02), not a constant
+        assertThat(czk["rate"].decimalValue()).isEqualByComparingTo("0.04")
+        assertThat(body["requirement"].decimalValue()).isEqualByComparingTo("60.00")
+        val facts = body["assumptions"]["rateFacts"].associateBy { it["instrument"].asText() }
+        assertThat(facts.keys).containsExactlyInAnyOrder("MIN_RESERVE_RATIO", "MIN_RESERVE_REMUNERATION")
+        assertThat(facts.getValue("MIN_RESERVE_RATIO")["effectiveFrom"].asText()).isEqualTo("2025-01-02")
+        assertThat(facts.getValue("MIN_RESERVE_RATIO")["sourceUrl"].asText()).endsWith("PMR_historie_zmen.xlsx")
         // no GL is the ČNB current account (1510 is the deposit facility): not stated, never a zero
         assertThat(body["holdings"].isNull).isTrue()
         assertThat(body["totalHoldings"].isNull).isTrue()
@@ -144,6 +153,18 @@ class RiskMinReservesApiIT {
         assertThat(body["requirement"].isNull).isTrue()
         assertThat(body["surplus"].isNull).isTrue()
         assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).containsExactly("2200")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `with no reserve ratio in effect the requirement is NOT_EVALUABLE, never a default`() {
+        TestDb.execute("DELETE FROM cnb_policy_rate_fact WHERE instrument = 'MIN_RESERVE_RATIO'")
+        val id = snapshot("2026-05-26", "TIED_OUT")
+        given().`when`().get("/api/v1/risk/snapshots/$id/min-reserves")
+            .then().statusCode(424)
+            .body("error", equalTo("NOT_EVALUABLE"))
+            .body("asOf", equalTo("2026-05-26"))
+            .body("reason", org.hamcrest.Matchers.containsString("MIN_RESERVE_RATIO"))
     }
 
     @Test

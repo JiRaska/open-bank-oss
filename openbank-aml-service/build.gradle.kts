@@ -61,6 +61,7 @@ dependencies {
     // POST /api/v1/aml/cases. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
 }
 
 // Pact: replay the committed git-pact contracts (ADR-0063) and forward broker config when CI

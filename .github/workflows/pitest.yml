@@ -101,7 +101,7 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
           # (~1.1 GB) on this job's key, into a pool already over the 10 GB ceiling — so
@@ -113,7 +113,7 @@ jobs:
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Run pitest on domain layer
         run: ./gradlew :${{ matrix.service }}:pitest
@@ -132,7 +132,7 @@ jobs:
 
       - name: Upload pitest XML report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-${{ matrix.service }}
           path: ${{ matrix.service }}/build/reports/pitest/
@@ -175,8 +175,8 @@ jobs:
   # (AuthorizeInterceptor scope derivation + OPA PDP call) is the fleet's security-critical
   # decision code — a surviving mutant there is an authorization check no test could tell
   # from its negation. The package is small (3 files, ~40s), so a blocking lane costs
-  # nothing. Threshold 63 = measured baseline (2026-09-05: 174 mutations, 110 detected);
-  # raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
+  # nothing. Threshold 70 = measured baseline (2026-10-14: 419 mutations, 316 killed + 8 timed
+  # out); raise it as surviving mutants get killed — the lane is a ratchet, never lowered.
   # pitest is applied by init script, NOT the plugins DSL: any external versioned plugin
   # in openbank-libs-runtime's plugins{} block splits the classloaders and kordamp jandex
   # loads twice (Banner$Inject_ ClassCastException) — see the init script header.
@@ -194,19 +194,19 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY — same cache-pool reasoning as the matrix job above (#3299).
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Run pitest on the authz package (threshold 63 enforced)
+      - name: Run pitest on the authz package (threshold 70 enforced)
         run: |
           ./gradlew -I .github/scripts/pitest-authz.init.gradle \
             :openbank-libs-runtime:pitest \
-            -Ppitest.mutationThreshold=63
+            -Ppitest.mutationThreshold=70
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
@@ -222,7 +222,7 @@ jobs:
 
       - name: Upload pitest XML report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-authz
           path: openbank-libs-runtime/build/reports/pitest/
@@ -252,11 +252,11 @@ jobs:
           # 62% while PIT displays 63%.
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "63" ]; then
-            echo "::error::Mutation score ${SCORE}% is below the 63% enforced threshold for the authz decision path"
+          if [ "$SCORE" -lt "70" ]; then
+            echo "::error::Mutation score ${SCORE}% is below the 70% enforced threshold for the authz decision path"
             exit 1
           fi
-          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 63%)"
+          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 70%)"
 
   # Advisory mutation testing over the shared libs modules (ADR-0063 gap): money, idempotency,
   # audit and outbox logic lives in openbank-libs-domain / openbank-libs-runtime and previously
@@ -284,13 +284,13 @@ jobs:
           java-version: "25"
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # READ-ONLY — same cache-pool reasoning as the matrix job above (#3299).
           cache-read-only: true
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Run pitest on the shared libs module (advisory)
         run: |
@@ -311,7 +311,7 @@ jobs:
 
       - name: Upload pitest XML report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-${{ matrix.module }}
           path: ${{ matrix.module }}/build/reports/pitest/

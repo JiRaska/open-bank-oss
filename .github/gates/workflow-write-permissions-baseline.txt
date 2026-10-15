@@ -31,8 +31,6 @@ branch-cleanup.yml|job:prune-stale-branches|contents
 ci.yml|job:app-status|pull-requests
 credential-inventory.yml|job:inventory|issues
 db-backup-associations.yml|job:live-check|id-token
-dependabot-auto-merge.yml|job:auto-merge|contents
-dependabot-auto-merge.yml|job:auto-merge|pull-requests
 dependabot-verification-metadata.yml|job:refresh-metadata|contents
 dependency-review.yml|job:dependency-review|pull-requests
 dependency-submission.yml|job:raise-issue|issues

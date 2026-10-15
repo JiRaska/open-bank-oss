@@ -2,7 +2,9 @@
 #
 # risk-engine CONSUMES openbank.fx.fixing.published (fx-service's central-bank fixings, ADR-0314
 # D5) as group `risk-engine-fx-fixing`, and openbank.treasury.deal.events (the bank's own
-# money-market deals, ADR-0315 D6) as group `risk-engine-treasury-deal`. It PRODUCES one domain
+# money-market deals, ADR-0315 D6) as group `risk-engine-treasury-deal`, and
+# openbank.fx.cnb-policy-rate.published (ČNB policy rates + the minimum-reserve ratio and
+# remuneration its PMR requirement reads) as group `risk-engine-cnb-policy-rate`. It PRODUCES one domain
 # topic: openbank.risk.limit.events (risk-limit early-warning / breach events relayed from its
 # outbox, ADR-0313 D9) — the Write at the end of the list. Its other Writes are its own dead-letter
 # topics: the consumer rethrows a failed write
@@ -44,6 +46,24 @@ spec:
       - resource:
           type: topic
           name: openbank.dlq.risk-engine.fx-fixing-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.fx.cnb-policy-rate.published
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: risk-engine-cnb-policy-rate
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.risk-engine.cnb-policy-rate-in
           patternType: literal
         operations: [Write, Describe]
         host: "*"

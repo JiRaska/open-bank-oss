@@ -10,6 +10,16 @@ This documentation is published by the service at the management endpoint `/q/op
 - **Ports:** 8159 (app), 8085 (management)
 - **Auth:** reads for operators, `ROLE_RISK` and `ROLE_FINANCE`; writes (snapshot runs, curve sets) for `ROLE_RISK`, `ROLE_OPERATOR` and `ROLE_ADMIN` humans only.
 
+## API authentication
+
+In the production profile, `/api/*` requires an OIDC bearer token on both the
+plain HTTP listener and the mTLS listener. On the mTLS listener, a trusted client
+certificate authenticates the transport; it does not replace the bearer token
+or grant API roles. A trusted certificate without a bearer token receives 401.
+Without a trusted client certificate, the TLS handshake is refused before HTTP.
+Callers using mTLS must therefore send both their client certificate and their
+bearer token. The role restrictions above still apply.
+
 ## Risk reads
 
 All reads hang off a snapshot run: `GET /api/v1/risk/snapshots/{id}/...` — `positions`, `instruments`, `cash-flows`, `irrbb`, `liquidity`, `liquidity-forecast`, `capital`, `min-reserves`, `limits`. A run that is not TIED_OUT answers 409; an unknown run or curve set answers 404.
@@ -86,3 +96,7 @@ conservative factor the engine has, so neither side can improve a ratio:
 
 `ResidualGlLiquidityClassificationTest` covers the new classification; the parameter-set version assertions in the
 existing liquidity tests and `RiskLiquidityApiIT` are updated.
+
+## ČNB minimum reserves
+
+The risk engine consumes `openbank.fx.cnb-policy-rate.published` into its local policy-rate fact table. A redelivery is idempotent on instrument and effective date; a revised rate updates the stored fact. The minimum-reserves endpoint derives its result from a tied-out snapshot and the reserve ratio and remuneration effective on that run's as-of date. Missing facts produce `424 NOT_EVALUABLE` with a reason instead of a default numeric rate; an unknown run remains 404 and an untied run remains 409. The analysis is calculated on read and is not persisted as a separate result.

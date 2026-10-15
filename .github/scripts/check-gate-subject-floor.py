@@ -109,6 +109,10 @@ NO_CORPUS = {
     # entry here that prints nothing at all about what it looked at.
     "openapi-version-not-taken",
 
+    # DYNAMIC HOLD SET: zero held services is the desired steady state. The gate validates
+    # the configured holds and the PR diff; a positive floor would prevent releasing the last hold.
+    "deploy-hold-image-pins",
+
     # FORBIDDEN-PATTERN gate whose TARGET state is an empty finding set. Its subjects are
     # `Instant = Instant.EPOCH` occurrences plus the baseline entries excusing them; the burn-down
     # completed 2026-09-03 (#8357), so zero is not the collapse case but the goal. A floor of 0

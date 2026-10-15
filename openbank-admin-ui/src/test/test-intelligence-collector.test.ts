@@ -481,7 +481,7 @@ journeys:
     expect(report.platformCapabilities).toContainEqual(expect.objectContaining({ id: 'probes', state: 'external-blocked' }))
   })
 
-  it('retains a fixed Pitest lane with the enforced PIT score in the required-control denominator', () => {
+  it('keeps enforced authz and advisory libs-runtime PIT verdicts separate', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-fixed-mutation-'))
     dirs.push(repo)
     write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
@@ -497,7 +497,7 @@ journeys:
             --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \\
             --mutation-threshold 63
 `)
-    write(repo, 'openbank-libs-runtime/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
+    write(repo, 'openbank-libs-runtime-authz/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
 <mutations>
   <mutation status="KILLED"/>
   <mutation status="KILLED"/>
@@ -509,7 +509,7 @@ journeys:
   <mutation status="SURVIVED"/>
 </mutations>
 `)
-    write(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
+    write(repo, 'openbank-libs-runtime-authz/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
       schemaVersion: 1,
       run: {
         id: 'mutation-authz-7', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Mutation testing',
@@ -522,31 +522,45 @@ journeys:
         detail: '4/8 killed (50%, target 63%)',
       }],
     }))
+    write(repo, 'openbank-libs-runtime/build/reports/pitest/mutations.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>
+`)
+    write(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json', JSON.stringify({
+      schemaVersion: 1,
+      run: {
+        id: 'mutation-libs-8', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Mutation testing',
+        url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/mutation-libs-8', observedAt: '2026-09-05T06:01:00Z',
+      },
+      component: 'openbank-libs-runtime', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] },
+      specializedEvidence: [{ kind: 'mutation', state: 'failed', source: 'mutations.xml', detail: '1/2 detected (50%, target 70%)' }],
+    }))
 
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
 
-    expect(report.components.find(item => item.component === 'openbank-libs-runtime')).toMatchObject({
+    expect(report.components.find(item => item.component === 'openbank-libs-runtime-authz')).toMatchObject({
       released: false,
       evidence: [expect.objectContaining({ kind: 'mutation', state: 'passed', detail: '63% mutation score' })],
     })
     expect(report.mutations).toContainEqual(
-      expect.objectContaining({ component: 'openbank-libs-runtime', killed: 4, timedOut: 1, score: 63 }),
+      expect.objectContaining({ component: 'openbank-libs-runtime-authz', killed: 4, timedOut: 1, score: 63 }),
     )
     expect(report.requiredControls?.filter(control => control.kind === 'mutation')).toEqual([
-      expect.objectContaining({ id: 'openbank-libs-runtime:mutation', state: 'passed', source: 'Pitest:mutations.xml' }),
+      expect.objectContaining({ id: 'openbank-libs-runtime-authz:mutation', state: 'passed', source: 'Pitest:mutations.xml' }),
+      expect.objectContaining({ id: 'openbank-libs-runtime:mutation', state: 'failed', source: 'Pitest:mutations.xml' }),
     ])
-    expect(report.totals).toMatchObject({ requiredControls: 1, requiredControlGaps: 0 })
+    expect(report.totals).toMatchObject({ requiredControls: 2, requiredControlGaps: 1 })
 
-    rmSync(path.join(repo, 'openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json'))
+    rmSync(path.join(repo, 'openbank-libs-runtime-authz/build/reports/pitest/test-intelligence-run.json'))
     const missingEnvelopeOut = path.join(repo, 'report-without-envelope.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', missingEnvelopeOut, '--stale-after-days', '99999'])
     const missingEnvelope = JSON.parse(readFileSync(missingEnvelopeOut, 'utf8')) as TestIntelligenceReport
     expect(missingEnvelope.mutations).toContainEqual(
-      expect.objectContaining({ component: 'openbank-libs-runtime', state: 'unknown', score: 63 }),
+      expect.objectContaining({ component: 'openbank-libs-runtime-authz', state: 'unknown', score: 63 }),
     )
-    expect(missingEnvelope.requiredControls?.find(control => control.id === 'openbank-libs-runtime:mutation')).toEqual(
+    expect(missingEnvelope.requiredControls?.find(control => control.id === 'openbank-libs-runtime-authz:mutation')).toEqual(
       expect.objectContaining({ state: 'unknown', source: 'Pitest:mutations.xml' }),
     )
   }, 15_000)
@@ -611,6 +625,33 @@ capabilities:
     expect(report.components[0].evidence).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'unit', source: 'JUnit:test' }),
     ]))
+  })
+
+  it('projects both Keycloak issuer lifecycles from a v2 run envelope', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-keycloak-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-intelligence/run.json', JSON.stringify({
+      schemaVersion: 2,
+      run: { id: '42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'Services CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-alpha-service', suites: [], testCases: [], coverage: null,
+      testInfrastructure: { declared: ['keycloak'], observed: [
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'started', observedAt: '2026-08-22T09:59:00Z', resourceScopeId: '11111111-1111-4111-8111-111111111111' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'started', observedAt: '2026-08-22T09:59:10Z', resourceScopeId: '22222222-2222-4222-8222-222222222222' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'stopped', observedAt: '2026-08-22T09:59:30Z', resourceScopeId: '11111111-1111-4111-8111-111111111111' },
+        { resource: 'keycloak', image: 'keycloak:27.0.0', lifecycle: 'stopped', observedAt: '2026-08-22T09:59:40Z', resourceScopeId: '22222222-2222-4222-8222-222222222222' },
+      ] },
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components[0].testInfrastructure.declared).toEqual(['keycloak'])
+    expect(report.components[0].testInfrastructure.observed).toHaveLength(4)
+    expect(report.requiredControls).toContainEqual(expect.objectContaining({
+      id: 'openbank-alpha-service:runtime:keycloak', state: 'passed', source: 'test-intelligence-run:v2',
+    }))
   })
 
   it('prefers the versioned run envelope and preserves provenance plus Testcontainers runtime proof', () => {

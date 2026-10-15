@@ -31,7 +31,7 @@ def check_workflow(fetch, repository, sha, workflow):
             and run.get("path") == f".github/workflows/{workflow}"
             and (run.get("repository") or {}).get("full_name") == repository]
     if not runs:
-        return False
+        return None
     run = max(runs, key=lambda item: item["id"])
     if run.get("status") != "completed":
         return False
@@ -60,13 +60,16 @@ def wait_for_validation(fetch, repository, sha, *, clock=time.monotonic,
                         sleep=time.sleep, max_wait=MAX_WAIT_SECONDS):
     deadline = clock() + max_wait
     # A governance-only push can rebuild UI code introduced by an earlier main commit.
-    # Bind Pact proof to that latest UI-changing ancestor, or the later push could bypass a
-    # failed Pact verdict simply because its own paths did not trigger Pact drift.
+    # Prefer a successful Pact run for the exact image source when one exists. Only fall
+    # back to the latest UI-changing ancestor when that source did not trigger Pact drift.
+    # A pending or failed exact-source run must never be bypassed by older evidence.
     ui_sha = latest_ui_change(fetch, repository, sha)
     while True:
-        if (check_workflow(fetch, repository, sha, "ci.yml")
-                and check_workflow(fetch, repository, ui_sha, "pact-drift-check.yml")):
-            return
+        if check_workflow(fetch, repository, sha, "ci.yml"):
+            source_pact = check_workflow(fetch, repository, sha, "pact-drift-check.yml")
+            if source_pact is True or (source_pact is None and
+                                       check_workflow(fetch, repository, ui_sha, "pact-drift-check.yml")):
+                return
         remaining = deadline - clock()
         if remaining <= 0:
             raise TimeoutError(f"Exact-source validation for {sha} did not complete within {max_wait}s")

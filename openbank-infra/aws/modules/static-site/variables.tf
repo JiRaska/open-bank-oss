@@ -22,3 +22,21 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "api_origin_domain_name" {
+  description = "Optional HTTPS Lambda URL hostname for a read-only /api/* origin."
+  type        = string
+  default     = null
+}
+
+variable "api_origin_access_control_id" {
+  description = "CloudFront Lambda origin access control ID when an API origin is configured."
+  type        = string
+  default     = null
+}
+
+variable "serve_missing_as_index" {
+  description = "Preserve the marketing site's legacy index-based 404 response."
+  type        = bool
+  default     = true
+}

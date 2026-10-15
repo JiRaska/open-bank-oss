@@ -9,6 +9,7 @@ import com.openbank.risk.application.port.`in`.MaintenancePeriodNotFoundExceptio
 import com.openbank.risk.application.port.`in`.MinReservesPeriodAnalysis
 import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.CnbPolicyRateFactRepository
 import com.openbank.risk.domain.reserves.DailyHolding
 import com.openbank.risk.domain.reserves.MaintenanceCalendar
 import com.openbank.risk.domain.reserves.MaintenancePeriod
@@ -24,7 +25,8 @@ import java.util.UUID
  * Maintenance-period averaging of ČNB minimum reserves (ADR-0315 D8), derived on request from the
  * stored TIED_OUT snapshots and never stored (ADR-0314 D6).
  *
- *  - Requirement: [MinimumReserves] on the TIED_OUT run of the period's base reference date.
+ *  - Requirement: [MinimumReserves] on the TIED_OUT run of the period's base reference date, at the
+ *    ČNB reserve ratio in effect on that date; not stated (with the reason) when none is.
  *  - Holdings: the ČNB current-account balance of each TIED_OUT run inside the period, one per day
  *    (the latest recorded), up to the evaluation date.
  */
@@ -33,6 +35,7 @@ class MinReservesPeriodService(
     private val parameters: MinReserveParameters,
     private val calendar: MaintenanceCalendar,
     private val clock: Clock,
+    private val facts: CnbPolicyRateFactRepository,
 ) : MinReservesPeriodUseCase {
 
     override fun calendar(): MaintenanceCalendar = calendar
@@ -77,7 +80,10 @@ class MinReservesPeriodService(
                 null,
                 "No TIED_OUT snapshot on the base reference date $ref, so the requirement is not stated.",
             )
-        val result = MinimumReserves.compute(snapshots.getPositions(run.id), parameters)
+        val result = MinimumReserves.compute(
+            snapshots.getPositions(run.id),
+            ReserveFacts.resolve(parameters, facts, ref),
+        )
         val holdingCurrencyBook = result.currencies.singleOrNull { it.currency == parameters.holdingCurrency }
         return when {
             result.totalCurrency != parameters.holdingCurrency -> Base(run.id, null, MinimumReserves.CURRENCY_NOTE)

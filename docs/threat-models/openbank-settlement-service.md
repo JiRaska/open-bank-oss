@@ -317,6 +317,8 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 ## Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `settlement_outbox` would have kept every SENT row, payload included, indefinitely. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; the repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched, and nothing in this service reads SENT rows. Information disclosure: shrinks the window in which a database read exposes past settlement-event payloads. No new endpoint, caller or privilege. Since slice 10 (#10041) this outbox also carries `SETTLEMENT_OPERATOR_APPROVAL_CHANGED`, the maker-checker evidence that outlives a purged approval row; its retained copy is audit-service's tamper-evident chain, which consumes `openbank.settlement.events` and keeps each entry 10 years (`retention_until`), so purging the delivered outbox row after 7 days removes a buffer, not the evidence.
+
 - **2026-10-03** — **Read-only settlement status query (#10041).** `GET /api/v1/settlements/{id}`
   returns the persisted settlement (stable v1 status vocabulary, `recoveryRequired` for an
   uncertain balance movement, amount as exact decimal text) with `Cache-Control: no-store`. It
@@ -520,3 +522,17 @@ Policy tests assert reservation admission, deny other balance actions and unrela
 and reject the wrong principal type. They do not prove token issuance or the full distributed
 workflow. Roll back this grant only after disabling new ledger-projection originations and
 draining their workflows; otherwise the cover step will be denied again.
+
+## Approval maker provenance (#11588)
+
+The operator approval REST read now exposes the maker kind stored with each approval. The trust
+boundary is authenticated maker identity → approval creation → PostgreSQL record → read-only
+response. The reader must return the stored kind, not infer it from a display name or maker ID;
+records predating this field remain `UNKNOWN`. A forged actor-looking display name must not become
+evidence that an agent or service account made the request.
+
+This field is contextual evidence for the checker, not a new permission. The existing policy gate,
+distinct maker/checker identity check, and approval status transitions remain authoritative. The
+additive migration defaults older rows to `UNKNOWN` and should be retained on application rollback
+so historical approval evidence is not discarded. Local integration tests cover persistence and
+decision transitions; they do not establish live token issuance or sandbox end-to-end behavior.

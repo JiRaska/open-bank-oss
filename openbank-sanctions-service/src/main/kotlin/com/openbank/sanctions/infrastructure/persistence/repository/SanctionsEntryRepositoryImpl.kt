@@ -7,7 +7,11 @@ package com.openbank.sanctions.infrastructure.persistence.repository
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
-import com.openbank.sanctions.domain.model.*
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
+import com.openbank.sanctions.domain.model.EntityType
+import com.openbank.sanctions.domain.model.SanctionsEntry
+import com.openbank.sanctions.domain.model.SanctionsEntryMatch
+import com.openbank.sanctions.domain.model.SanctionsListType
 import io.quarkus.logging.Log
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
@@ -28,6 +32,7 @@ import io.vertx.sqlclient.Tuple as CoreTuple
  * need direct row-level result access with score column.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one method per persistence port shape plus shared fenced implementations
 class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: Clock) : SanctionsEntryRepository {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
@@ -82,35 +87,18 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
         }
     }
 
-    override suspend fun upsertAll(entries: List<SanctionsEntry>): Int {
-        if (entries.isEmpty()) return 0
-        val sql = """
-            INSERT INTO sanctions_entries
-                (list_type, external_id, entity_type, primary_name, aliases_json,
-                 date_of_birth, nationalities, programs, search_text, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
-            ON CONFLICT (list_type, external_id) WHERE external_id IS NOT NULL DO UPDATE SET
-                entity_type  = EXCLUDED.entity_type,
-                primary_name = EXCLUDED.primary_name,
-                aliases_json = EXCLUDED.aliases_json,
-                date_of_birth= EXCLUDED.date_of_birth,
-                nationalities= EXCLUDED.nationalities,
-                programs     = EXCLUDED.programs,
-                search_text  = EXCLUDED.search_text,
-                active       = true,
-                updated_at   = NOW()
-            WHERE
-                sanctions_entries.active        IS NOT TRUE
-                OR sanctions_entries.entity_type   IS DISTINCT FROM EXCLUDED.entity_type
-                OR sanctions_entries.primary_name  IS DISTINCT FROM EXCLUDED.primary_name
-                OR sanctions_entries.aliases_json  IS DISTINCT FROM EXCLUDED.aliases_json
-                OR sanctions_entries.date_of_birth IS DISTINCT FROM EXCLUDED.date_of_birth
-                OR sanctions_entries.nationalities IS DISTINCT FROM EXCLUDED.nationalities
-                OR sanctions_entries.programs      IS DISTINCT FROM EXCLUDED.programs
-                OR sanctions_entries.search_text   IS DISTINCT FROM EXCLUDED.search_text
-            RETURNING 1
-        """.trimIndent()
+    override suspend fun upsertAll(entries: List<SanctionsEntry>): Int = upsertAll(entries, null)
 
+    override suspend fun upsertAllFenced(entries: List<SanctionsEntry>, permit: SanctionsPublicationPermit): Int =
+        upsertAll(entries, permit)
+
+    private suspend fun upsertAll(entries: List<SanctionsEntry>, permit: SanctionsPublicationPermit?): Int {
+        if (entries.isEmpty()) return 0
+        val listType = entries.first().listType
+        if (permit != null) {
+            permit.checkFor(listType)
+            require(entries.all { it.listType == listType }) { "Fenced sanctions batch mixes list types" }
+        }
         // CoreTuple.wrap(List) handles arbitrary number of params; then wrap in mutiny Tuple
         val tuples: List<Tuple> = entries.map { e ->
             Tuple.newInstance(
@@ -138,7 +126,18 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
         // changed, which is exactly the kind of number nobody would think to question.
         var total = 0
         for (chunk in tuples.chunked(500)) {
-            var rowSet: RowSet<Row>? = pool.preparedQuery(sql).executeBatch(chunk).awaitSuspending()
+            var rowSet: RowSet<Row>? = if (permit == null) {
+                pool.preparedQuery(UPSERT_SQL).executeBatch(chunk).awaitSuspending()
+            } else {
+                pool.withTransaction { conn ->
+                    conn.preparedQuery(REFRESH_GUARD_SQL)
+                        .execute(Tuple.of(listType.name, permit.generation))
+                        .flatMap { guard ->
+                            check(guard.iterator().hasNext()) { "Stale sanctions refresh for $listType" }
+                            conn.preparedQuery(UPSERT_SQL).executeBatch(chunk)
+                        }
+                }.awaitSuspending()
+            }
             while (rowSet != null) {
                 total += rowSet.size()
                 rowSet = rowSet.next()
@@ -147,7 +146,21 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
         return total
     }
 
-    override suspend fun deactivateMissing(listType: SanctionsListType, presentExternalIds: Set<String>): Int {
+    override suspend fun deactivateMissing(listType: SanctionsListType, presentExternalIds: Set<String>): Int =
+        deactivateMissing(listType, presentExternalIds, null)
+
+    override suspend fun deactivateMissingFenced(
+        listType: SanctionsListType,
+        presentExternalIds: Set<String>,
+        permit: SanctionsPublicationPermit,
+    ): Int = deactivateMissing(listType, presentExternalIds, permit)
+
+    private suspend fun deactivateMissing(
+        listType: SanctionsListType,
+        presentExternalIds: Set<String>,
+        permit: SanctionsPublicationPermit?,
+    ): Int {
+        permit?.checkFor(listType)
         // Array-parameter anti-join, not a temp table: vertx-pg-client binds a Kotlin
         // Array<String> as a native Postgres text[] parameter, so this is one round trip
         // regardless of set size (~776k for PEP_GLOBAL) and needs no session-scoped state to
@@ -155,20 +168,60 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
         // NULL (not TRUE) the moment the array contains any NULL, silently matching zero rows;
         // `= ANY` has no such trap, and an empty presentExternalIds array still deactivates
         // everything as intended (a genuinely empty upstream feed).
-        val result = pool
-            .preparedQuery(
-                """
-                UPDATE sanctions_entries
-                SET active = false, updated_at = NOW()
-                WHERE list_type = $1
-                  AND active = true
-                  AND external_id IS NOT NULL
-                  AND NOT (external_id = ANY($2))
-                """.trimIndent(),
-            )
-            .execute(Tuple.of(listType.name, presentExternalIds.toTypedArray()))
-            .awaitSuspending()
+        val sql = """
+            UPDATE sanctions_entries
+            SET active = false, updated_at = NOW()
+            WHERE list_type = $1
+              AND active = true
+              AND external_id IS NOT NULL
+              AND NOT (external_id = ANY($2))
+        """.trimIndent()
+        val args = Tuple.of(listType.name, presentExternalIds.toTypedArray())
+        val result = if (permit == null) {
+            pool.preparedQuery(sql).execute(args).awaitSuspending()
+        } else {
+            pool.withTransaction { conn ->
+                conn.preparedQuery(REFRESH_GUARD_SQL)
+                    .execute(Tuple.of(listType.name, permit.generation))
+                    .flatMap { guard ->
+                        check(guard.iterator().hasNext()) { "Stale sanctions refresh for $listType" }
+                        conn.preparedQuery(sql).execute(args)
+                    }
+            }.awaitSuspending()
+        }
         return result.rowCount()
+    }
+
+    private companion object {
+        val UPSERT_SQL = """
+            INSERT INTO sanctions_entries
+                (list_type, external_id, entity_type, primary_name, aliases_json,
+                 date_of_birth, nationalities, programs, search_text, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+            ON CONFLICT (list_type, external_id) WHERE external_id IS NOT NULL DO UPDATE SET
+                entity_type  = EXCLUDED.entity_type,
+                primary_name = EXCLUDED.primary_name,
+                aliases_json = EXCLUDED.aliases_json,
+                date_of_birth= EXCLUDED.date_of_birth,
+                nationalities= EXCLUDED.nationalities,
+                programs     = EXCLUDED.programs,
+                search_text  = EXCLUDED.search_text,
+                active       = true,
+                updated_at   = NOW()
+            WHERE
+                sanctions_entries.active        IS NOT TRUE
+                OR sanctions_entries.entity_type   IS DISTINCT FROM EXCLUDED.entity_type
+                OR sanctions_entries.primary_name  IS DISTINCT FROM EXCLUDED.primary_name
+                OR sanctions_entries.aliases_json  IS DISTINCT FROM EXCLUDED.aliases_json
+                OR sanctions_entries.date_of_birth IS DISTINCT FROM EXCLUDED.date_of_birth
+                OR sanctions_entries.nationalities IS DISTINCT FROM EXCLUDED.nationalities
+                OR sanctions_entries.programs      IS DISTINCT FROM EXCLUDED.programs
+                OR sanctions_entries.search_text   IS DISTINCT FROM EXCLUDED.search_text
+            RETURNING 1
+        """.trimIndent()
+
+        const val REFRESH_GUARD_SQL = "SELECT 1 FROM sanctions_change_publication " +
+            "WHERE list_type = $1 AND refresh_generation = $2 AND refresh_active = TRUE FOR SHARE"
     }
 
     override suspend fun countByListType(listType: SanctionsListType): Long {

@@ -44,6 +44,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       # TAG is resolved here, not in job-level `env:`, so the scheduled run has one at all.
       # An empty tag must FAIL rather than fall through to a URL ending in `/tags/`, which
       # 404s into a "no signed evidence found" error that reads like a provenance defect

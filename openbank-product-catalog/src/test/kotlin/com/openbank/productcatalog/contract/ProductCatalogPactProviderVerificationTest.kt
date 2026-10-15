@@ -12,12 +12,17 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.libs.testing.containers.PostgresTestResource
+import io.mockk.every
+import io.mockk.mockk
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -53,12 +58,16 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+    restrictToAnnotatedClass = true,
 )
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
 @Provider("openbank-product-catalog")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class ProductCatalogPactProviderVerificationTest {
+
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @Inject
     lateinit var catalogFixtures: CatalogPactProviderFixtures
@@ -74,7 +83,30 @@ class ProductCatalogPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        // Match the scoped machine caller only for its Pact; restore the operator for other consumers.
+        // Real token authentication and scope mapping are covered by CatalogPensionOidcApprovalIT.
+        val originalIdentity = testIdentityAssociation.testIdentity
+        try {
+            if (context?.consumer?.name == "openbank-pension-service") {
+                testIdentityAssociation.setTestIdentity(pensionIdentity())
+            }
+            context?.verifyInteraction()
+        } finally {
+            testIdentityAssociation.setTestIdentity(originalIdentity)
+        }
+    }
+
+    private fun pensionIdentity(): QuarkusSecurityIdentity {
+        val token = mockk<JsonWebToken>()
+        every { token.name } returns "service-account-openbank-pension"
+        every { token.subject } returns "pact-pension-service"
+        every { token.getClaim<String>("azp") } returns "openbank-pension"
+        every { token.getClaim<String>("preferred_username") } returns "service-account-openbank-pension"
+        return QuarkusSecurityIdentity.builder()
+            .setPrincipal(token)
+            .addRole("ROLE_API")
+            .addRole("CATALOG_SCOPE_READ")
+            .build()
     }
 
     /**
@@ -95,8 +127,10 @@ class ProductCatalogPactProviderVerificationTest {
      * catalogue already satisfies "no product exists with this code".
      */
     @State("no product exists with code NO_SUCH_CARD_PRODUCT")
-    fun unknownProductCodeIsAbsent() {
-        // Intentionally empty — see the KDoc above.
+    fun unknownProductCodeNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT")
+            .then().statusCode(404)
     }
 
     /**
@@ -115,7 +149,7 @@ class ProductCatalogPactProviderVerificationTest {
      * (`ProductCatalogLookupPactConsumerTest`, ADR-0264 Phase A).
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
-    fun unknownProductIdIsAbsent() {
+    fun unknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
     }
 
@@ -144,4 +178,7 @@ class ProductCatalogPactProviderVerificationTest {
 
     @State("a published priced loan revision exists for lending originations")
     fun publishedPricedLoanRevisionExists() = catalogFixtures.publishedPricedLoanRevisionExists()
+
+    @State("a published DIP strategy revision has separate legal and product approvals")
+    fun publishedPensionStrategyApprovalsExist() = catalogFixtures.publishedPensionStrategyApprovalsExist()
 }

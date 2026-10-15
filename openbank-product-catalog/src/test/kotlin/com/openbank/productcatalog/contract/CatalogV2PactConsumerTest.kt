@@ -36,6 +36,12 @@ class CatalogV2PactConsumerTest {
         .status(200)
         .headers(CONTENT_JSON)
         .body(schemaResponse())
+        .uponReceiving("Product Studio rejects an unknown schema version")
+        .path("/api/v2/product-types/org.openbank.insurance.term-life/versions/999")
+        .method("GET")
+        .headers(ACCEPT_JSON)
+        .willRespondWith()
+        .status(404)
         .given("Product Studio specification code is available")
         .uponReceiving("Product Studio creates a schema-pinned specification")
         .path("/api/v2/specifications")
@@ -78,7 +84,10 @@ class CatalogV2PactConsumerTest {
         .body(revisionResponse("DRAFT"))
         .given("Product Studio independently checkable draft exists")
         .uponReceiving("Product Studio publishes through an independent checker")
-        .path("/api/v2/offerings/$PUBLISH_OFFERING_ID/revisions/$PUBLISH_REVISION_ID/publish")
+        .pathFromProviderState(
+            "/api/v2/offerings/\${publishOfferingId}/revisions/\${publishRevisionId}/publish",
+            "/api/v2/offerings/$PUBLISH_OFFERING_ID/revisions/$PUBLISH_REVISION_ID/publish",
+        )
         .method("POST")
         .headers(JSON_HEADERS + ("If-Match" to "\"0\""))
         .body(PUBLISH_REQUEST)
@@ -92,6 +101,9 @@ class CatalogV2PactConsumerTest {
     @PactTestFor(pactMethod = "productStudioAuthorPublish")
     fun `Product Studio contract covers authoring through independent publication`(mockServer: MockServer) {
         get(mockServer, "/api/v2/product-types/org.openbank.insurance.term-life/versions/1")
+        given().baseUri(mockServer.getUrl()).accept("application/json")
+            .get("/api/v2/product-types/org.openbank.insurance.term-life/versions/999")
+            .then().statusCode(404)
         post(mockServer, "/api/v2/specifications", SPECIFICATION_REQUEST)
         post(mockServer, "/api/v2/offerings", OFFERING_REQUEST)
         post(mockServer, "/api/v2/offerings/$DRAFT_OFFERING_ID/revisions", REVISION_REQUEST)

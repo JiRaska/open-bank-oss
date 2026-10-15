@@ -6,6 +6,7 @@ package com.openbank.libs.authz
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
@@ -23,6 +24,7 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -431,7 +433,8 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = store.create(annotation.action, resourceId, maker, binding = binding)
+        val actorKind = makerActorKind(query, identity.get())
+        val pending = store.create(annotation.action, resourceId, maker, binding = binding, makerActorKind = actorKind)
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -455,10 +458,18 @@ class AuthorizeInterceptor {
 
     private fun buildQuery(ctx: InvocationContext, annotation: Authorize): AuthzQuery {
         val sc = securityContext.get()
+        // The machine flag comes from VERIFIED claims only, never from the name above.
+        // A malformed or unreadable claim is never proof of a named client.
+        val verifiedClient = runCatching { ServiceAccountIdentity.verifiedClientId(identity.get()) }.getOrNull()
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
-            type = principalType(sc),
+            type = principalType(sc, identity.get()),
             roles = identity.get().roles.toList(),
+            // FAIL CLOSED: anything not positively verified as a person is a machine.
+            serviceAccount = !ServiceAccountIdentity.isVerifiedPerson(identity.get()),
+            // A named machine grant must bind to the token's azp AND matching
+            // service-account username, never to the optional client_id session note alone.
+            clientId = verifiedClient,
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
             extractResource(ctx, annotation, expr)
@@ -470,11 +481,20 @@ class AuthorizeInterceptor {
     private fun resolveAttributes(annotation: Authorize): Map<String, Any?> {
         if (annotation.attributes.isEmpty()) return emptyMap()
         val headers = if (httpHeaders.isResolvable) httpHeaders.get() else null
+        val principalName = securityContext.get().userPrincipal?.name
+        val serviceToken = if (principalName?.startsWith("service-account-") == true) {
+            identity.get().principal as? JsonWebToken
+        } else {
+            null
+        }
         return annotation.attributes.mapNotNull { key ->
             val value: Any? = when (key) {
                 "time-of-day" -> Instant.now(clock).toString()
                 "client-ip" -> headers?.getRequestHeader("X-Forwarded-For")?.firstOrNull()
                 "idempotency-key" -> headers?.getRequestHeader("Idempotency-Key")?.firstOrNull()
+                "azp" -> serviceToken?.getClaim<String>("azp")
+                "subject" -> serviceToken?.subject
+                "preferred_username" -> serviceToken?.getClaim<String>("preferred_username")
                 else -> null
             }
             value?.let { key to it }
@@ -511,12 +531,15 @@ class AuthorizeInterceptor {
         return ResourceRef(type = type, id = resolvedValue.toString())
     }
 
-    private fun principalType(sc: SecurityContext): String {
-        // Convention: agents present `sub` prefixed `agent:` (ADR-0031); any
-        // other authenticated principal is HUMAN. SERVICE-to-service uses a
-        // separate mTLS path and never hits this interceptor.
+    private fun principalType(sc: SecurityContext, authenticatedIdentity: SecurityIdentity): String {
+        // The agent convention is on the verified bearer token's `sub`, not on
+        // SecurityContext.name (which may be a display/preferred username).
+        // Keep the existing HUMAN policy type for service accounts; the approval
+        // record separately preserves their SERVICE_ACCOUNT provenance.
         val name = sc.userPrincipal?.name ?: return "ANONYMOUS"
-        return if (name.startsWith("agent:")) "AI_AGENT" else "HUMAN"
+        val subject = (authenticatedIdentity.principal as? JsonWebToken)?.subject
+        if (subject?.startsWith("agent:") == true) return "AI_AGENT"
+        return if (name.startsWith("agent:") && subject == null) "UNKNOWN" else "HUMAN"
     }
 
     private companion object {
@@ -547,7 +570,7 @@ private fun resolveResourceField(target: Any, fieldName: String, log: Logger): A
 }
 
 /** Keycloak's service-account username convention: `service-account-<clientId>`. */
-internal const val SERVICE_ACCOUNT_PREFIX = "service-account-"
+internal const val SERVICE_ACCOUNT_PREFIX = ServiceAccountIdentity.PRINCIPAL_PREFIX
 
 /**
  * #10486: the INFO line that proves, per request, WHICH machine identity an enforced decision was
@@ -596,6 +619,21 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  * [AuthorizeInterceptor] sits at detekt's `TooManyFunctions` bound — which fires AT the threshold,
  * not above it.
  */
+private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIdentity): MakerActorKind {
+    val jwt = authenticatedIdentity.principal as? JsonWebToken
+    val preferredUsername = jwt?.getClaim<String>("preferred_username")
+    val verifiedServiceAccount = ServiceAccountIdentity.verifiedClientId(authenticatedIdentity) != null
+    return when {
+        query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
+        verifiedServiceAccount -> MakerActorKind.SERVICE_ACCOUNT
+        preferredUsername?.startsWith(SERVICE_ACCOUNT_PREFIX) == true -> MakerActorKind.UNKNOWN
+        query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) && jwt == null -> MakerActorKind.UNKNOWN
+        query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
+        query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
+        else -> MakerActorKind.UNKNOWN
+    }
+}
+
 private fun PendingApproval?.satisfies(
     action: String,
     resourceId: String?,

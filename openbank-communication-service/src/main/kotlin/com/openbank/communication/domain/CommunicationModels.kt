@@ -49,6 +49,9 @@ data class StyleVersion(
     val decidedAt: Instant?,
     val publishedAt: Instant?,
     val retiredAt: Instant?,
+    val uiMessages: Map<String, String> = emptyMap(),
+    /** Zero means no published version was observed; null marks a legacy draft with unknown base. */
+    val basePublishedVersion: Int? = null,
 )
 
 /** The composed, published style a consumer fetches and caches (D5's `GET .../published`). */
@@ -63,6 +66,7 @@ data class PublishedStyle(
     val forbiddenTerms: List<String>,
     val signature: String?,
     val publishedAt: Instant,
+    val uiMessages: Map<String, String> = emptyMap(),
 )
 
 /**

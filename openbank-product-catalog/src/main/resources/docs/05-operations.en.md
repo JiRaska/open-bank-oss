@@ -47,7 +47,7 @@ The service is configured via `application.yaml`. PostgreSQL and OIDC are requir
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | local OpenBank realm | OIDC issuer/discovery URL |
 | `CATALOG_SCOPE_CLAIM` | `scope` | claim containing space-separated or array OAuth scopes |
 | `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral permission mapping |
-| `OPENBANK_CATALOG_PACKS` | `banking,insurance` in bank; empty standalone | explicit trusted-pack selection |
+| `OPENBANK_CATALOG_PACKS` | `banking,insurance,retirement` in bank; empty standalone | explicit trusted-pack selection |
 | `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | `true` in bank; `false` standalone | explicit legacy banking API, seed and projection opt-in |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | security headers | CSP, HSTS, X-Frame-Options, nosniff, etc. |
@@ -59,6 +59,16 @@ The service is configured via `application.yaml`. PostgreSQL and OIDC are requir
 Production database credentials are secrets and must be supplied by the deployment; the checked-in password is a local-development default, not a production value.
 Standalone rejects a plaintext OIDC issuer at boot. Legacy `/api/v1` additionally requires both the
 trusted banking pack and the explicit compatibility flag.
+
+### Production listener authentication
+
+In the production profile, the TLS listener on port 8443 requires a trusted client certificate;
+the plain HTTP application listener remains available for its configured in-cluster callers.
+For `/api/*` on either listener, the caller must also present an OIDC bearer token. A client
+certificate establishes the TLS connection but does not authenticate an API request by itself.
+The bearer-only route permission selects the authentication mechanism; endpoint roles, scopes
+and any separately configured authorization checks still apply. Do not treat successful mTLS
+handshake or this route setting as evidence that a particular authorization policy was enforced.
 
 ## Health checks
 
@@ -86,6 +96,8 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 - **Stale or wrong pricing in the admin UI** — the UI must read `GET /api/v1/fees`; confirm it is not falling back to a hardcoded list. Verify the product's `fees[]` and `status` via `GET /api/v1/products/{id}`.
 - **Customer-facing listing requested** — there is no public projection in v1. Do not expose the authenticated operator list; use the v2 published projection once available.
 - **State missing after restart** — treat as an incident: product state is PostgreSQL-backed. Verify database target, Flyway history and restore procedure; the seeder never overwrites a non-empty store.
+- **Certificate accepted but API returns 401** — send a valid OIDC bearer token as well. Check the
+  token and issuer separately from the TLS certificate; a certificate alone is not an API identity.
 - **Duplicate code on create** — `409`; pick a unique `code`.
 - **Stale v2 author** — reload the draft after 412; never retry with the old ETag.
 - **Publication rejected** — verify the checker differs from the stored maker, the reason is present,

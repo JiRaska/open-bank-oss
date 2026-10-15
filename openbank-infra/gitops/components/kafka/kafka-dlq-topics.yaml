@@ -570,6 +570,21 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-kyc-service :: channel `sanctions-list-changes-in` (ADR-0256 trigger loop)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.kyc.sanctions-list-changes
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-onboarding-service :: channel `kyc-events-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
@@ -824,6 +839,24 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-risk-engine :: channel `cnb-policy-rate-in` (ČNB policy rates / minimum-reserve facts).
+# New channel, so nothing is parked anywhere to strand. Named explicitly in
+# openbank-risk-engine/src/main/resources/application.yaml (nested form, issue #686); Write granted
+# in components/risk/kafka-risk-engine-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.risk-engine.cnb-policy-rate-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-risk-engine :: channel `treasury-deal-in` (ADR-0315 D6). New channel, so nothing is
 # parked anywhere to strand. Named explicitly in openbank-risk-engine/src/main/resources/application.yaml
 # (nested form, issue #686); Write granted in components/risk/kafka-risk-engine-mtls.yaml.
@@ -831,6 +864,37 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.risk-engine.treasury-deal-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-pension-service :: channel `domestic-payment-events-in` (#12378)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.pension.domestic-payment-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-tax-reporting-service :: channel `withholding-remitted-in`
+# A record here is a §38d remittance missing from that period's withholding return until replayed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.tax-reporting.withholding-remitted-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

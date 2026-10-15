@@ -177,6 +177,14 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                             "Context audit commitment event ID reused with different evidence"
                         }
                     }
+                    if (entry.sourceService == "sepa-instant" || existing.sourceService == "sepa-instant") {
+                        // recordedAt is the consumer's ingest time and changes on a valid Kafka retry.
+                        // Compare every other persisted field, including provenance and lookup metadata.
+                        val candidate = entry.normalisedForStorage()
+                        require(
+                            existing.toDomain().copy(recordedAt = candidate.recordedAt) == candidate,
+                        ) { "SEPA Instant audit event ID reused with different evidence" }
+                    }
                     Uni.createFrom().voidItem()
                 } else {
                     find("ORDER BY id DESC").page(0, 1).firstResult().flatMap { head ->

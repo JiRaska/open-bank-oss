@@ -80,6 +80,8 @@
 #   RECONCILE_SERVICES (env): space-separated buildable allowlist (auto-deploy's
 #     ALL_SERVICES). When set, only these services are considered. When empty, no
 #     allowlist filter is applied.
+#   RECONCILE_HOLDS (env): space-separated services held by live main governance.
+#     Excluded before the oldest-first cap, so a held service cannot consume a slot.
 # Must run inside a full-history checkout (fetch-depth: 0) with main checked out. Any CWD
 # inside that checkout works: the probe anchors itself at the repository root (a relative
 # gitops-root argument is resolved against the caller's CWD first).
@@ -137,6 +139,11 @@ while IFS= read -r pin; do
   if [ -n "$ALLOWLIST" ] && ! grep -qxF "$svc" <<< "$ALLOWLIST"; then
     continue
   fi
+  case " ${RECONCILE_HOLDS:-} " in
+    *" ${svc} "*)
+      echo "::notice::reconcile held service ${svc} — excluded before cap; will re-offer after hold removal" >&2
+      continue ;;
+  esac
 
   # A pin that is not a resolvable commit is a placeholder (never really deployed) -> stale,
   # sortkey 0 so placeholders re-drive before any real-but-old pin.

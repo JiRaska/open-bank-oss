@@ -51,6 +51,8 @@ allowed_reasons contains "operator-party-write" if {
 # would over-grant these actions to any operator session.
 #
 #   - customer-edge (client-id "openbank-edge" -> principal.id "service-account-openbank-edge"):
+#       party.create — creates the customer's individual party during onboarding
+#         (OnboardingResource -> UpstreamClient.postAnonymous).
 #       party.consent.update — the app's Profile-screen marketing-consent toggle is forwarded to
 #         party-service through the edge's own M2M token (CustomerEdgeResource, PATCH
 #         /api/v1/parties/{id}/consent).
@@ -64,6 +66,7 @@ allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-edge"
 	input.action in {
+        "party.create",
 		"party.consent.update",
 		"party:resolve",
 	}
@@ -95,6 +98,20 @@ allowed_reasons contains "service-kyb-party-m2m" if {
 		"party.create",
 		"party.mandate.grant",
 	}
+}
+
+# interest-service's OWN machine principal (client `openbank-interest`, ROLE_API only), ADR-0339 B:
+#   party.amlProfile.read — the withholding policy's tax-profile resolution
+#     (PartyTaxProfileProvider: account→party→AML-profile residency countries). GET /parties/{id}
+#     itself carries no @Authorize and rides @RolesAllowed(ROLE_API); this rule covers the
+#     profile read that does.
+# Identity-gated, never a role: ROLE_API is held by every service account. The shared
+# `service-account-openbank-services` is deliberately absent — interest's named client is its
+# own principal, the same pattern as `service-kyb-party-m2m` above.
+allowed_reasons contains "service-interest-party-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-interest"
+	input.action == "party.amlProfile.read"
 }
 
 # #10486 batch 8: delegation-service's PartyMandateRestClient / PartyAuthorityRestClient read a grantor's mandates and acting-for relations to decide whether a delegation may be granted. It used to reach these reads on the shared

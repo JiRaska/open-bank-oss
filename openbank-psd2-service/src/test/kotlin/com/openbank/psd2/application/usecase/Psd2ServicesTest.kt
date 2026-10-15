@@ -572,7 +572,7 @@ class Psd2ServicesTest {
             val payment = DomesticCzPayment(
                 endToEndIdentification = "e2e-cz",
                 debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
-                instructedAmount = ObAmount("CZK", BigDecimal("250.00")),
+                instructedAmount = ObAmount(" czk ", BigDecimal("250.00")),
                 creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
                 creditorName = "Acme CZ",
                 variableSymbol = "123",

@@ -35,7 +35,7 @@ class FxBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("fx-events-out", "fx-fixing-out")
+            InMemoryConnector.switchOutgoingChannelsToInMemory("fx-events-out", "fx-fixing-out", "fx-policy-rate-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

@@ -132,7 +132,7 @@ test.describe('approval workbench', () => {
   test('filters domain work and hands a sanctions item to its governed checker', async ({ page }) => {
     const sanctionsApproval = {
       id: 'sanctions-approval / 42', domain: 'sanctions', action: 'sanctions.clear',
-      resourceId: 'check-42', maker: 'maker.sanctions', proposedAt: '2026-08-31T08:00:00Z',
+      resourceId: 'check-42', maker: 'maker.sanctions', makerActorKind: 'AI_AGENT', proposedAt: '2026-08-31T08:00:00Z',
     }
     const notificationApproval = {
       id: 'notification-approval-7', domain: 'notification', action: 'opsmessage.compose',
@@ -144,7 +144,7 @@ test.describe('approval workbench', () => {
     }
     const billingApproval = {
       id: 'billing-approval-4', domain: 'billing', action: 'fee.post',
-      resourceId: 'fee-4', maker: 'maker.billing', proposedAt: '2026-08-31T11:00:00Z',
+      resourceId: 'fee-4', maker: 'maker.billing', makerActorKind: 'HUMAN', proposedAt: '2026-08-31T11:00:00Z',
     }
 
     await page.route('**/api/agent/proposals*', route =>
@@ -173,6 +173,7 @@ test.describe('approval workbench', () => {
         resourceId: sanctionsApproval.resourceId,
         status: 'PENDING',
         makerId: sanctionsApproval.maker,
+        makerActorKind: sanctionsApproval.makerActorKind,
         createdAt: sanctionsApproval.proposedAt,
       }]) }),
     )
@@ -186,11 +187,13 @@ test.describe('approval workbench', () => {
     await expect(rows.nth(0)).toContainText(billingApproval.action)
     await expect(rows.nth(0).getByTestId('approval-resource')).toContainText(billingApproval.resourceId)
     await expect(rows.nth(0).getByTestId('approval-maker')).toContainText(billingApproval.maker)
+    await expect(rows.nth(0).getByTestId('approval-maker-kind')).toContainText(/Human|Člověk/)
     await expect(rows.nth(0).locator('time')).toHaveAttribute('datetime', billingApproval.proposedAt)
 
     await page.getByLabel(/^(Domain|Doména)$/).selectOption('sanctions')
     await expect(rows).toHaveCount(1)
     await expect(rows.first()).toContainText(sanctionsApproval.action)
+    await expect(rows.first().getByTestId('approval-maker-kind')).toContainText('AI agent')
     await page.getByLabel(/Search queue|Hledat ve frontě/).fill('maker.sanctions')
     await expect(rows).toHaveCount(1)
 

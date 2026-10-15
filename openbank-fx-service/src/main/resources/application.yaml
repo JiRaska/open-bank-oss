@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_fx
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_fx
   flyway:
@@ -87,15 +90,23 @@ quarkus:
       # silent again. Verify by hand with:
       #   curl -sSo /dev/null -w '%{http_code}\n' "<url>"     # must be 200, not 404
       url: ${CNB_FEED_URL:https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/kurzy-devizoveho-trhu/denni_kurz.txt}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     aml-service:
       url: ${AML_SERVICE_URL:http://localhost:8117}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     fraud-service:
       url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
@@ -135,6 +146,12 @@ quarkus:
         verification: none
       enabled: false
 "%test":
+  # No boot-time or daily policy-rate fetch from cnb.cz in tests; an IT re-enables it explicitly.
+  openbank:
+    cnb:
+      policy-rates:
+        ingestion-cron: "0 0 0 1 1 ? 2099"
+        startup-every: "off"
   quarkus:
     management:
       enabled: false
@@ -170,6 +187,14 @@ mp:
         topic: openbank.fx.fixing.published
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # ČNB policy rates + minimum-reserve facts: one event per new/revised (instrument, effectiveFrom)
+      # row, keyed by that pair on a COMPACTED topic, so the risk engine can rebuild the whole history.
+      fx-policy-rate-out:
+        connector: smallrye-kafka
+        client.id: fx-service-policy-rate-${quarkus.uuid}
+        topic: openbank.fx.cnb-policy-rate.published
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
@@ -187,6 +212,17 @@ openbank:
   cnb:
     # Currencies (against CZK) ingested from the ČNB central-bank fixing — ADR-0046 scope.
     currencies: ${CNB_CURRENCIES:EUR,USD,GBP}
+    # ČNB monetary-policy rate histories (CnbPolicyRateIngestionScheduler). Each URL is probed daily
+    # by check-external-feeds.py under the feed names in that scheduler. The three .txt files: UTF-8
+    # with BOM, pipe separated, `PLATNA_OD|CNB_<X>_SAZBA_V_%` header, yyyyMMdd dates, decimal comma:
+    #   curl -sS "<url>" | head -2
+    policy-rates:
+      repo-url: ${CNB_POLICY_REPO_URL:https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_repo_historie.txt}
+      discount-url: ${CNB_POLICY_DISCOUNT_URL:https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_diskontni_historie.txt}
+      lombard-url: ${CNB_POLICY_LOMBARD_URL:https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_lombard_historie.txt}
+      # Minimum reserve (PMR) ratio + remuneration: the ČNB's own change history, one sheet per year
+      # (no text feed exists). Parsed all-or-nothing by CnbMinimumReserveParser.
+      min-reserves-url: ${CNB_POLICY_MIN_RESERVES_URL:https://www.cnb.cz/export/sites/cnb/cs/financni-trhy/.galleries/penezni_trh/download/PMR_historie_zmen.xlsx}
   temporal:
     enabled: false
     server-url: ${TEMPORAL_SERVER_URL:localhost:7233}

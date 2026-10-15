@@ -89,6 +89,8 @@ Self-test:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -463,6 +465,21 @@ def render(verdict: dict) -> str:
 STATUS_EXIT = {"green": 0, "not-a-verdict": 0, "unanswerable": 1, "red": 2, "transient": 3}
 
 
+def classify_api_failure(exc: BaseException) -> tuple[int, str]:
+    """(exit code, workflow-command level) for an API failure. Pure — prints nothing.
+
+    Split out of `api_failure_exit` because the self-test must be able to drive this branch
+    WITHOUT its `::error::`/`::warning::` output reaching the shard log: a passing self-test
+    that prints `::error::` lines renders red annotations in the Actions UI on every PR whose
+    diff makes the self-test run, and reads as a gate failure to anyone (or anything) scanning
+    the log — observed on #12537, where these fixture strings were reported as the gate's CI
+    failure while the gate itself was green.
+    """
+    if gatelib.is_gh_transient(str(exc)):
+        return STATUS_EXIT["transient"], "warning"
+    return STATUS_EXIT["unanswerable"], "error"
+
+
 def api_failure_exit(exc: BaseException) -> int:
     """Decide which kind of "could not answer" an API failure is, and say so.
 
@@ -471,15 +488,16 @@ def api_failure_exit(exc: BaseException) -> int:
     online path, which is exactly the shape that goes untested and then behaves differently from
     the comment above it.
     """
-    if gatelib.is_gh_transient(str(exc)):
-        print(f"::warning::main-red-watch could not REACH the API: {exc}")
+    code, level = classify_api_failure(exc)
+    if code == STATUS_EXIT["transient"]:
+        print(f"::{level}::main-red-watch could not REACH the API: {exc}")
         print(
             "main-red-watch: NOT A VERDICT. The API refused to answer, so this run says nothing "
             "about main — neither green nor red. Exit 3."
         )
-        return STATUS_EXIT["transient"]
-    print(f"::error::main-red-watch could not answer: {exc}")
-    return STATUS_EXIT["unanswerable"]
+        return code
+    print(f"::{level}::main-red-watch could not answer: {exc}")
+    return code
 
 
 # --------------------------------------------------------------------------------------------
@@ -729,6 +747,12 @@ def self_test() -> int:
     # Both directions, because the dangerous one is the WIDENING: a message wrongly called
     # transient degrades this watch to "said nothing", and a permission misconfiguration would
     # then never be reported by the control whose job is to report.
+    #
+    # stdout is captured on every call: these fixtures exercise the REAL printing function, and
+    # the checks below assert both the exit code and the workflow-command level — a passing
+    # self-test must emit zero `::error::` lines, otherwise every PR that makes this self-test
+    # run (it fires on gates.yaml / runner changes, universal inputs) carries red annotations
+    # from a green gate (#12537).
     for msg in (
         "gh api repos/x/actions/runs/1/attempts/1 failed: gh: API rate limit exceeded for "
         "installation ... (HTTP 403)",
@@ -737,8 +761,13 @@ def self_test() -> int:
         "HTTP 503",
         "error connecting to api.github.com: connection reset by peer",
     ):
-        check(f"transient -> exit 3: {msg[:40]!r}",
-              api_failure_exit(RuntimeError(msg)) == 3)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = api_failure_exit(RuntimeError(msg))
+        out = buf.getvalue()
+        check(f"transient -> exit 3: {msg[:40]!r}", code == 3)
+        check(f"transient -> ::warning::, never ::error::: {msg[:40]!r}",
+              "::warning::" in out and "::error::" not in out)
 
     for msg in (
         "Must have admin rights to Repository.",
@@ -746,8 +775,12 @@ def self_test() -> int:
         "Not Found (HTTP 404)",
         "Bad credentials",
     ):
-        check(f"NOT transient -> exit 1: {msg[:40]!r}",
-              api_failure_exit(RuntimeError(msg)) == 1)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = api_failure_exit(RuntimeError(msg))
+        out = buf.getvalue()
+        check(f"NOT transient -> exit 1: {msg[:40]!r}", code == 1)
+        check(f"NOT transient -> ::error::: {msg[:40]!r}", "::error::" in out)
 
     # An unanswerable RUN is still exit 1 — the watch read it and the run cannot support a
     # verdict. That is a defect, not weather, and the new state must not have absorbed it.

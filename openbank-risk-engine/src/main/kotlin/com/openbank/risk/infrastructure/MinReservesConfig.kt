@@ -11,15 +11,15 @@ import com.openbank.risk.domain.reserves.MinReserveParameters
 import com.openbank.risk.domain.reserves.ReserveClass
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithName
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 
 /**
  * `openbank.risk.min-reserves.*` — the versioned ČNB minimum reserve parameter set (ADR-0313
- * treasury gap, ADR-0315). A config MAPPING: every member is required, so a deployment missing the
- * rate fails at startup instead of answering with a defaulted requirement. Values and citations
- * live in application.yaml.
+ * treasury gap, ADR-0315): classification, holding currency and calendar. A config MAPPING: every
+ * member is required. The reserve RATIO and its REMUNERATION are deliberately not here: they are
+ * ČNB facts that change over time (2 % -> 4 % on 2025-01-02), read per as-of date from
+ * `cnb_policy_rate_fact`, which fx-service's ČNB ingestion feeds.
  */
 @ConfigMapping(prefix = "openbank.risk.min-reserves")
 interface MinReservesConfig {
@@ -30,11 +30,6 @@ interface MinReservesConfig {
     fun parameterSetVersion(): String
 
     fun source(): String
-
-    fun rate(): BigDecimal
-
-    @WithName("remuneration-rate")
-    fun remunerationRate(): BigDecimal
 
     @WithName("holding-currency")
     fun holdingCurrency(): String
@@ -87,8 +82,6 @@ fun MinReservesConfig.toParameters(): MinReserveParameters = MinReserveParameter
     id = parameterSetId(),
     version = parameterSetVersion(),
     source = source(),
-    rate = rate(),
-    remunerationRate = remunerationRate(),
     holdingCurrency = holdingCurrency().trim().uppercase(),
     glAccounts = classification().glAccounts().mapKeys { it.key.trim() }.mapValues { ReserveClass.parse(it.value) },
     glAccountTypes = classification().glAccountTypes()

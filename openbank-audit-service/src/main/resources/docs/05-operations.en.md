@@ -17,6 +17,7 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | Concern | Value | Source |
 |---|---|---|
 | App HTTP port | `8113` | `quarkus.http.port` |
+| East-west mTLS port | `8443` (private-CA cert `audit-service-internal-tls`, client certificate required; `%prod` only) | `QUARKUS_HTTP_SSL_*` env, `quarkus.http.ssl.client-auth` (build time) |
 | Management port | `8085`, root-path `/q` | `quarkus.management.*` |
 | Datasource | `postgresql://localhost:5432/openbank_audit` | `quarkus.datasource` |
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
@@ -25,6 +26,8 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | enabled, max 200 concurrent | `openbank.rate-limit` |
+
+The 8443 listener exists for lending-service's evidence-bundle read (#11900), which carries a person's bearer token; HTTP/8113 stays for existing callers and the probes (`quarkus.http.insecure-requests: enabled`).
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) carry `CHANGE_ME_LOCAL_DEV_ONLY` placeholders; production injects real values (Vault, ADR-0017). Never ship the placeholders.
 
@@ -72,3 +75,11 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ## Deploy
 
 GitOps via ArgoCD (manifests in `gitops/`). On merge-conflict for image tags, take `--ours` for image lines (root CLAUDE.md). Commits must be signed with the GPG-registered email.
+
+## ČNB policy-rate evidence
+
+The audit consumer subscribes to `openbank.fx.cnb-policy-rate.published` alongside the existing FX topics. Keep this topic in the configured `audit-events-in` subscription when changing the consumer list: a newly published or revised policy-rate fact then has the same retained audit path as other business events. If records are absent, inspect the audit consumer group's lag and the topic's retention before replay.
+
+## API identity on the mTLS listener
+
+The audit API uses bearer authentication on both HTTP and mTLS listeners in production. A trusted client certificate is required for the TLS handshake but cannot replace the caller's bearer token. Missing bearer credentials return HTTP 401; route roles and OPA still decide what an authenticated caller may read. The listener parity test reads the production listener configuration and verifies no-certificate, certificate-only and valid-bearer requests over real HTTP.

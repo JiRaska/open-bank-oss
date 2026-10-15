@@ -123,6 +123,35 @@ data class TreasuryDealEvent(
     val maturityDate: LocalDate?,
 )
 
+/**
+ * One ČNB policy-rate / minimum-reserve fact as received from fx-service
+ * (`fx.cnb-policy-rate.published.v1`). [rate] is a fraction.
+ */
+data class CnbPolicyRateFactRow(
+    val instrument: String,
+    val effectiveFrom: LocalDate,
+    val rate: BigDecimal,
+    val sourceUrl: String,
+    val fetchedAt: Instant,
+    val contentSha256: String,
+    val note: String?,
+    val revised: Boolean,
+    val receivedAt: Instant,
+)
+
+enum class FactUpsert { INSERTED, REVISED, DUPLICATE }
+
+interface CnbPolicyRateFactRepository {
+    /**
+     * Idempotent on (instrument, effectiveFrom): the same rate again is [FactUpsert.DUPLICATE]; a
+     * different rate for a stored key is fx-service's revision and is applied ([FactUpsert.REVISED]).
+     */
+    suspend fun upsert(fact: CnbPolicyRateFactRow): FactUpsert
+
+    /** The fact of [instrument] with the latest effectiveFrom <= [asOf], or null — never a default. */
+    suspend fun effectiveAt(instrument: String, asOf: LocalDate): CnbPolicyRateFactRow?
+}
+
 interface FxFixingRepository {
     /** Inserts each rate unless (source, fixingDate, currency) exists. Returns how many were new. */
     suspend fun insertIfAbsent(rates: List<FxFixingRate>): Int

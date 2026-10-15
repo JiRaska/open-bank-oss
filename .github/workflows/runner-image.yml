@@ -53,7 +53,7 @@ jobs:
         run: |
           IMAGE="${REGISTRY}/${ECR_REPO}"
           docker buildx create --use --name obrunner --driver docker-container >/dev/null 2>&1 || docker buildx use obrunner
-          docker buildx build --platform linux/arm64 --provenance=false \
+          docker buildx build --platform linux/arm64 --provenance=false --sbom=false \
             --metadata-file /tmp/buildx-meta.json \
             -t "${IMAGE}:latest" --push .
 

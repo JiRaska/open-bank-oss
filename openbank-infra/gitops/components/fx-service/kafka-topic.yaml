@@ -34,3 +34,22 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# ČNB policy rates and minimum-reserve facts (fx.cnb-policy-rate.published.v1). One event per new or
+# revised (instrument, effectiveFrom) row, keyed by that pair. COMPACTED, not time-retained: the
+# facts change a few times a year, and the risk engine reads the minimum-reserve ratio from them —
+# a consumer that starts (or rebuilds) after a 30-day window must still find the ratio in effect
+# since 2025-01-02. Compaction keeps the latest value per key, which is exactly the history.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.fx.cnb-policy-rate.published
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    cleanup.policy: compact
+    min.compaction.lag.ms: 86400000

@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_parties
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_parties
   flyway:
@@ -94,19 +97,29 @@ quarkus:
       # components/accounts/account-service.yaml). 8102 is transaction-service — this repo has
       # already been bitten once by a copy-pasted neighbouring port.
       url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
     transaction-service:
       # GDPR Art. 20 portability export (ADR-0204 D2): transaction history per account.
       url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
     kyc-service:
       url: ${OPENBANK_KYC_SERVICE_URL:http://localhost:8114}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     card-service:
       url: ${OPENBANK_CARD_SERVICE_URL:http://localhost:8118}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     consent-service:
       # consent-service listens on 8106 in the `consent` namespace (gitops
       # components/consent/consent-service.yaml). ADR-0206 D5 marketing-consent forwarder.
       url: ${OPENBANK_CONSENT_SERVICE_URL:http://consent-service.consent:8106}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
@@ -242,6 +255,9 @@ mp:
       password: openbank_secret
       reactive:
         url: vertx-reactive:postgresql://localhost:5432/openbank_party_it
+        idle-timeout: 5M
+        max-lifetime: 30M
+        max-size: 20
       jdbc:
         url: jdbc:postgresql://localhost:5432/openbank_party_it
     management:
@@ -325,3 +341,16 @@ authz:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10441.
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own — on 8443 only. The API must be authenticated identically on both
+      # listeners, by the OIDC bearer OPA decides on, so /api/* accepts the bearer mechanism ONLY; the
+      # certificate stays transport authentication. Measured before this: a fleet-CA certificate with no
+      # bearer reached the API as an authenticated principal (403 from authz, not 401).
+      # PartyListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer

@@ -14,7 +14,7 @@ info:
   # 1.24.0 -> 1.25.0: additive only — GET/PUT /api/v1/parties/{id}/aml-profile (the personal AML
   # profile, AML Act §9 + FATCA/CRS self-certification) and the party detail documents the derived
   # pepFlag/pepCategory/fatcaStatus/crsStatus facts. Read off live origin/main (1.24.0).
-  version: 1.25.0
+  version: 1.26.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -987,6 +987,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           format: date-time

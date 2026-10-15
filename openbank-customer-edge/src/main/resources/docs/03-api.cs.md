@@ -42,7 +42,10 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | vlastnictví vynuceno; `cursor` URL-enkódovaný |
 | `GET /statements/{accountId}` | `accounts:read` | seznam období uzávěrek |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency v allow-listu |
-| `GET /notifications?limit=` | `accounts:read` | feed omezený na party |
+| `GET /notifications?limit=&page=` | `accounts:read` | stránkovaný feed podle party, celkový a přesný nepřečtený počet |
+| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | posledních 1–100 položek osoby a aktuálně zastupovaných firem; volitelný filtr oprávněného profilu |
+| `GET /notifications/{id}?partyId=` | `accounts:read` | detail; původní `partyId` z jednotného seznamu vybere oprávněný profil |
+| `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | označí notifikaci oprávněného profilu jako přečtenou |
 | `GET /profile` | `accounts:read` | vlastní profil party volajícího |
 | `POST /domestic-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
 | `POST /sepa-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
@@ -63,6 +66,10 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `PUT /holdings/{holdingId}/valuation` | `wealth:write` | přecenit; předchozí hodnota zůstává v historii |
 | `GET /holdings/{holdingId}/valuations` | `wealth:read` | historie ocenění, nejnovější první |
 | `DELETE /holdings/{holdingId}` | `wealth:write` | stáhnout; 409 `HOLDING_LOCKED`, dokud je zastavené |
+
+### Jednotný seznam notifikací
+
+Bez `partyId` se spojí notifikace přihlášené osoby a všech firem z aktuálního seznamu mandátů. Každá položka nese své původní `partyId`; při otevření nebo označení firemní položky jako přečtené jej předejte příslušnému endpointu. Výslovný filtr `partyId` musí patřit osobě nebo platnému mandátu. Odpověď obsahuje posledních 1–100 položek s `page: 0`; starší historii poskytuje dosavadní seznam vybraného profilu. `total` a `unreadCount` jsou součty odpovědí jednotlivých profilů pozorovaných během požadavku, nikoli atomický snímek při souběžných zápisech. Nedostupný seznam mandátů vrací 503, cizí filtr 403 a selhání či nesoulad profilu v některém feedu 502 bez částečných položek.
 
 ## Vybrané requesty
 
@@ -88,6 +95,8 @@ Content-Type: application/json
 ```
 
 Edge obohatí `debtorAccountNumber`/`debtorBankCode` (z českého IBANu účtu), `debtorName` (party-service), rozdělí kredit `number/bankcode`, namapuje `reference`→`messageForPayee`, nastaví `priority=STANDARD` a přepošle na `domestic-payment-service`. Peníze se nehýbou — iniciace jen vytvoří a proscreenuje; settlement je pod SCA.
+
+Domácí platební rail přijímá pouze CZK. Jiná měna vrátí `400 CURRENCY_NOT_ALLOWED` ještě před dohledáním účtu, rezervací delegovaného limitu nebo SCA; `Idempotency-Key` zůstane použitelný pro platný pokus. Volající bez práva odepsat peníze dostane stejnou odpověď `403` bez ohledu na existenci účtu či delegace, takže odpověď jejich existenci neprozrazuje.
 
 ### Začátek onboardingu (anonymně)
 
@@ -140,3 +149,29 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 - **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.6.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.9.0`).
 - Upstream volání míří na vlastní `/api/v1` každé služby.
 - **OpenAPI diff** v CI hlídá breaking změny bez bumpu kontraktu.
+
+## Veřejné texty stavů mobilní aplikace
+
+Anonymní `GET /customer/v1/app-copy` vrací pouze `{version, messages}` ze zveřejněného komunikačního stylu pro klienty. Neobsahuje osobní údaje ani interní instrukce persony. Zveřejněné odpovědi lze ukládat do cache na 60 sekund. Chybějící nebo vyřazená publikace vrací verzi nula a prázdnou mapu, což výslovně ruší klientské přepisy.
+
+Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE_URL`. Chybějící konfigurace nebo nedostupná služba vrací 503; neplatný dokument vrací 502. Klient v obou případech zachová ověřené uložené nebo vestavěné texty a tímto volitelným požadavkem neblokuje spuštění. Volání používá identitu služby bez hlavičky klientské party.
+
+## Zákaznické penzijní API (ADR-0334 S6)
+
+`CustomerPensionResource` obsluhuje `/customer/v1/pension` a vyžaduje `ROLE_CUSTOMER` i příslušnou autorizační akci. Pension-service dostává identitu přihlášeného účastníka. Operace nad smlouvou nejprve ověřují `participantPartyId`; chybějící i cizí smlouva vrací 404. Čtení žádosti také převádí upstream 403 na 404.
+
+- `GET /products` promítá penzijní nabídky katalogu; `POST /simulations` vrací ilustrativní projekci bez uzavření smlouvy. Simulace používá nový upstream klíč.
+- `POST /applications` a `POST /transfers-in` zahajují onboarding. Datum narození a rezidence pocházejí ze záznamu party; neúplný profil vrací 422 `PARTY_PROFILE_INCOMPLETE`.
+- Žádosti nabízejí detail, doporučení, dotazník, volbu strategie, přijetí KID, podpis a odstoupení. Podpis předává challenge pension-service, která ji spotřebuje vůči podkladům žádosti.
+- Smlouvy nabízejí detail, pozastavení/obnovení, volbu strategie, platební referenci, příspěvkové mandáty a daňový přehled.
+- `CustomerPensionChangeResource` doplňuje navazující toky z `docs/ux/pension-client-flows.md` (pension-service API 1.2.0): dotazník (sada otázek, rozpracované odpovědi, profil, upozornění a jejich potvrzení), náhled a změnu pravidelných příspěvků a obmyšlených, roční výpis a výpis výplaty, nárok na výplatu a nabídky, výběr a zrušení renty. Zrušení trvalého příkazu či inkasa je na `POST /contracts/{contractId}/contribution-mandates/{mandateId}/cancel`; stav státního příspěvku nese daňový přehled.
+- Operace vázané na dokument (podpis žádosti, ukončení a výplata, změna strategie, zřízení a zrušení mandátu, změna příspěvků a obmyšlených, výběr a zrušení renty) edge challenge nespotřebovává; spotřebuje ji pension-service. Bez challenge odpoví 403 `SCA_REQUIRED` s přesným `pension-<operace>:<hash>`.
+- Ukončení a výplaty nabízejí nabídky, stav a podpis či potvrzení. `PUT /contracts/{contractId}/payouts/{payoutId}/account` předává SCA challenge pro odloženou změnu účtu; okamžik účinnosti určuje pension-service.
+
+Penzijní změny s parametrem `Idempotency-Key` vyžadují neprázdný klíč volajícího: chybějící klíč odmítají a nenahrazují jej novým. Routy chráněné SCA vyžadují challenge header uvedený v OpenAPI. Podpis ukončení, potvrzení výplaty a změna výplatního účtu předávají challenge bez spotřebování v edge; upstream ověřuje podepsané podklady. Pozastavení/obnovení a odstoupení spotřebují challenge v edge (jmenný prostor `pension.<operace>:`).
+
+Jde o implementované routy, nikoli důkaz nasazení upstream služeb. Předpoklady rolloutů pension-service a pension-fund-service i zbývající stuby sleduje #12350 a příslušné PR; ilustrativní projekce není zárukou investičního výnosu.
+
+## Validace hodnot v URL upstream služeb
+
+Kód měny tvoří tři velká ASCII písmena; kód země dvě ASCII písmena se zachováním velikosti. Identifikátor uloženého příjemce přijímá 1–34 ASCII písmen nebo číslic bez kontroly kontrolního součtu, aby bylo možné odstranit i dříve uložené hodnoty. Edge sestaví přijaté hodnoty z vlastní abecedy před vytvořením URL upstream služby. Neplatné hodnoty vrací HTTP 400 a do URL upstream služby se nedostanou.

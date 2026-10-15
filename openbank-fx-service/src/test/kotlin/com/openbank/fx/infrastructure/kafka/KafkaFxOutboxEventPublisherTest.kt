@@ -25,11 +25,22 @@ class KafkaFxOutboxEventPublisherTest {
 
     private val conversions = mockk<MutinyEmitter<String>>()
     private val fixings = mockk<MutinyEmitter<String>>()
-    private val publisher = KafkaFxOutboxEventPublisher(conversions, fixings)
+    private val policyRates = mockk<MutinyEmitter<String>>()
+    private val publisher = KafkaFxOutboxEventPublisher(conversions, fixings, policyRates)
 
     init {
         every { conversions.sendMessage(any()) } returns Uni.createFrom().voidItem()
         every { fixings.sendMessage(any()) } returns Uni.createFrom().voidItem()
+        every { policyRates.sendMessage(any()) } returns Uni.createFrom().voidItem()
+    }
+
+    @Test
+    fun `a policy-rate event goes to the policy-rate channel only`() = runBlocking<Unit> {
+        publisher.publish(entry("fx.cnb-policy-rate.published.v1"))
+
+        verify(exactly = 1) { policyRates.sendMessage(any()) }
+        verify(exactly = 0) { fixings.sendMessage(any()) }
+        verify(exactly = 0) { conversions.sendMessage(any()) }
     }
 
     @Test
@@ -38,6 +49,7 @@ class KafkaFxOutboxEventPublisherTest {
 
         verify(exactly = 1) { fixings.sendMessage(any()) }
         verify(exactly = 0) { conversions.sendMessage(any()) }
+        verify(exactly = 0) { policyRates.sendMessage(any()) }
     }
 
     @Test

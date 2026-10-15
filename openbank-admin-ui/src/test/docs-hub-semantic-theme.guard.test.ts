@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const source = fs.readFileSync(path.join(process.cwd(), 'src/app/docs/page.tsx'), 'utf8')
+const source = fs.readFileSync(path.join(process.cwd(), 'src/components/docs/DocsHub.tsx'), 'utf8')
 
 describe('documentation hub semantic theme guard', () => {
   it('uses shared theme semantics instead of fixed presentation colours', () => {

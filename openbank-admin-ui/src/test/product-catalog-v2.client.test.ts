@@ -8,7 +8,7 @@ import { once } from 'node:events'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
-  catalogV2Operation, createCatalogV2Client,
+  CatalogV2Error, catalogV2Operation, createCatalogV2Client,
 } from '@/lib/product-catalog-v2'
 
 describe('product catalog v2 production client', () => {
@@ -46,6 +46,26 @@ describe('product catalog v2 production client', () => {
       '/api/svc/product-catalog/api/v2/products/20000000-0000-0000-0000-000000000001?effectiveAt=2026-08-13T00%3A00%3A00Z',
       '/api/svc/product-catalog/api/v2/events?after=42&limit=25',
     ])
+  })
+
+  it('uses the generated role approval route with strong revision precondition', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify([]), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    })) as unknown as typeof fetch
+    const pathParameters = { offeringId: '20000000-0000-0000-0000-000000000001',
+      revisionId: '30000000-0000-0000-0000-000000000001' }
+    await catalogV2Operation('listPensionRevisionApprovalsV2', { pathParameters }, { fetcher })
+    await catalogV2Operation('approvePensionRevisionV2', {
+      pathParameters: { ...pathParameters, role: 'LEGAL_COUNSEL' },
+      headers: { 'If-Match': '"2"' }, body: { reason: 'Independent legal review' },
+    }, { fetcher })
+    const [readUrl, readOptions] = fetcher.mock.calls[0]
+    const [writeUrl, writeOptions] = fetcher.mock.calls[1]
+    expect(readUrl).toBe(`/api/svc/product-catalog/api/v2/offerings/${pathParameters.offeringId}/revisions/${pathParameters.revisionId}/pension-approvals`)
+    expect(readOptions.method).toBe('GET')
+    expect(writeUrl).toBe(`${readUrl}/LEGAL_COUNSEL`)
+    expect(writeOptions).toMatchObject({ method: 'POST', headers: expect.objectContaining({ 'If-Match': '"2"' }) })
+    expect(writeOptions.body).toBe(JSON.stringify({ reason: 'Independent legal review' }))
   })
 
   it('drives the production client through the committed provider-replayed Pact interaction', async () => {
@@ -125,6 +145,9 @@ describe('product catalog v2 production client', () => {
       await catalogV2Operation('getProductTypeVersionV2', {
         pathParameters: { id: schemaRef.id, version: 1 },
       }, transport)
+      await expect(catalogV2Operation('getProductTypeVersionV2', {
+        pathParameters: { id: schemaRef.id, version: 999 },
+      }, transport)).rejects.toMatchObject({ status: 404 } satisfies Partial<CatalogV2Error>)
       await catalogV2Operation('createSpecificationV2', {
         body: { code: 'PACT_STUDIO_SPEC', schemaRef },
       }, transport)

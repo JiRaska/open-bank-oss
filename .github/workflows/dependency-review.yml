@@ -31,12 +31,14 @@ jobs:
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
     # became queryable ~24 min after this job started (GitHub indexes the submitted graph
     # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
-    # slow queue away from a spurious red on an honest PR. 50 contains the bounded
-    # 30-minute sparse snapshot wait, up to ~11.5 minutes of API recovery and the final
-    # ~3.25-minute basis retry, leaving over five minutes for setup and policy execution.
+    # slow queue away from a spurious red on an honest PR. #11497 measured the
+    # producer finishing ten minutes after this job began, leaving only twenty minutes
+    # for indexing in a 30-minute wait. 80 contains the producer's full 30-minute job
+    # budget followed by the 30-minute sparse indexing wait, up to ~11.5 minutes of
+    # API recovery and the final ~3.25-minute basis retry, plus setup and policy work.
     # An exhausted installation quota fails promptly instead of burning the job's remainder.
     # Only dependency-touching PRs wait; the rest finish in seconds.
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -134,7 +136,9 @@ jobs:
 
       # The action's 10-second snapshot poll exhausted this installation's API quota
       # on #9971 (2026-09-25): ~160 requests before GitHub indexed the accepted head
-      # snapshot. Probe seven times over 30 minutes instead, then run policy once.
+      # snapshot. First wait sparsely for the separate producer to succeed, then probe
+      # seven times over 30 minutes for indexing; neither a failed producer nor an
+      # unreadable comparison can become a passing review.
       - name: Wait for indexed dependency snapshots
         if: ${{ steps.deps.outputs.changed == 'true' }}
         env:
@@ -388,40 +392,8 @@ jobs:
           # response itself, not just the producer checks. The head producer on this
           # PR is independently validated above; the warning identifies a missing
           # side (or unequal positive snapshot counts after a re-run).
-          graph_response="$(mktemp)"
-          trap 'rm -f "$graph_response"' EXIT
-          if ! gh api -i "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${mb}...${HEAD_SHA}" \
-              > "$graph_response"; then
-            echo "::error title=basis unverified::Dependency comparison API is unavailable."
-            exit 1
-          fi
-          python3 - "$graph_response" <<'PY'
-          import base64
-          import re
-          import sys
-
-          with open(sys.argv[1], encoding="utf-8", errors="replace") as response:
-              status = response.readline().strip()
-              if not re.match(r"^HTTP/\S+ 200(?: |$)", status):
-                  sys.exit("::error title=basis unverified::Dependency comparison HTTP status is not 200")
-              warning = None
-              for line in response:
-                  if not line.strip():
-                      break
-                  name, sep, value = line.partition(":")
-                  if sep and name.lower() == "x-github-dependency-graph-snapshot-warnings":
-                      warning = value.strip()
-              if warning:
-                  try:
-                      decoded = base64.b64decode(warning, validate=True).decode("utf-8")
-                  except (ValueError, UnicodeDecodeError):
-                      sys.exit("::error title=basis unverified::Malformed dependency snapshot warning")
-                  counts = re.search(r"base SHA \((\d+)\) and the head SHA \((\d+)\)", decoded)
-                  if not counts:
-                      sys.exit("::error title=basis unverified::Unknown dependency snapshot warning")
-                  base_count, head_count = map(int, counts.groups())
-                  if not base_count or not head_count:
-                      sys.exit(f"::error title=Dependency review missing graph::GitHub compared base={base_count}, head={head_count} snapshots; a successful producer check did not establish a valid basis.")
-                  print(f"Snapshot warning records unequal but nonzero counts: base={base_count}, head={head_count}.")
-          PY
+          # GitHub's comparison can briefly regress from ready to "No snapshots
+          # were found for the head SHA" while indexing. Reuse the same strict
+          # warning parser as the earlier wait, with a short bounded recheck.
+          python3 .github/scripts/wait_dependency_review_snapshot.py --final-check
           echo "Both sides had successful producers and the comparison reported no missing snapshot."

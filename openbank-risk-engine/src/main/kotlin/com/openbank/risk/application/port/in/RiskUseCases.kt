@@ -149,6 +149,13 @@ data class MinReservesAnalysis(
     val result: MinReserveResult,
 )
 
+/**
+ * The minimum reserve requirement of run [runId] cannot be evaluated: no ČNB reserve ratio or
+ * remuneration fact is in effect on [asOf]. Never answered with a default rate.
+ */
+class MinReservesNotEvaluableException(val runId: UUID, val asOf: LocalDate, val reason: String) :
+    RuntimeException(reason)
+
 /** One maintenance period's averaging under a versioned calendar and parameter set (ADR-0315 D8). */
 data class MinReservesPeriodAnalysis(
     val calendar: MaintenanceCalendar,
