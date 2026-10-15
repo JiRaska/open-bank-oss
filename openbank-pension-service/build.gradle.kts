@@ -51,6 +51,8 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
+    // Provider replay classes remain in src/test/kotlin and compile with the test source set.
+    testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
@@ -97,7 +99,7 @@ kover {
 
 tasks.withType<Test>().configureEach {
     // ADR-0334 S8: the integrated module boots Quarkus once per distinct test profile (the journey
-    // E2E and the cron IT each bring one), and every boot holds an in-process
+    // E2E, the cron IT and the Pact replays each bring one), and every boot holds an in-process
     // Temporal test server; at the default heap the executor died with OutOfMemoryError (exit 134)
     // and every class after it simply never reported. Same per-module override as account-service.
     maxHeapSize = "2g"
