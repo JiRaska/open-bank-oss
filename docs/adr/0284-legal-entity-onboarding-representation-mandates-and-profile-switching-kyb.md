@@ -1,8 +1,8 @@
 ---
 date: 2026-09-05
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
-followup: "#8866 — business funnel projection, the D8 owner-graph hooks and the D9 agents; the app half ships in openbank-app#631"
+followup: "#12755 — D8 loyalty business grove + owner bridge; #12757 — owner-bundle catalog overlay + campaign business segment attributes; D9 (kyb-analyst/business-copilot runtime wiring) waits on ADR-0244; the app half ships in openbank-app#631"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -12,6 +12,17 @@ summary: "Legal entities onboard from a country-pack identifier verified against
 ---
 
 # ADR-0284 — Legal-entity onboarding, representation mandates and profile switching (KYB)
+
+**Delivery note (2026-10-14).** The core shipped on main and was verified against it, not assumed:
+`openbank-kyb-service` (onboarding case state machine, registry adapters, CZ/GB country packs,
+Temporal timers), party-service `PartyMandate`, customer-edge `ActingForResolver` fail-closed
+profile switching with `CustomerProfilesResource`, kyc-service BUSINESS subject type with KYB
+checks, the onboarding funnel projection and the admin console. D10 (products/offers filter by
+`eligibilitySegments` under `X-Acting-For`, both directions) ships in this PR — edge-side only,
+no catalog change. Remaining tails: D8 loyalty business grove + owner bridge (#12755), the
+owner-bundle catalog overlay + campaign business segment attributes (#12757), D9 waiting on
+ADR-0244, and the app half (openbank-app#631). The frontmatter followup no longer points at
+#8866 — closed 2026-09-06, stale. kyb/party are not money-path services.
 
 ## Context
 

@@ -28,6 +28,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_treasury
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     # A LITERAL jdbc url: Flyway migrates the DEFAULT (Agroal/JDBC) datasource (#3080).
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_treasury
@@ -73,11 +76,15 @@ quarkus:
       # Local default only. The in-cluster URL (ledger's mTLS listener, 8443) is declared in the
       # gitops Deployment env where gen-network-policies.py can see the edge.
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+      connect-timeout: 2000
+      read-timeout: 5000
     # ADR-0315 D9: the risk engine's curve sets for the simulated quotes (read-only, m2m identity).
     # Local default only; the in-cluster URL (the engine's mTLS listener, 8443) is declared in the
     # gitops Deployment env where gen-network-policies.py can see the edge.
     risk-engine:
       url: ${RISK_ENGINE_URL:http://localhost:8159}
+      connect-timeout: 2000
+      read-timeout: 5000
 
   smallrye-reactive-messaging:
     kafka:

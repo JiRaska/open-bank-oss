@@ -1488,7 +1488,40 @@
         "profile",
         "roles"
       ],
-      "secret": "__AGENT_CLIENT_SECRET__"
+      "secret": "__AGENT_CLIENT_SECRET__",
+      "attributes": {
+        "standard.token.exchange.enabled": "true"
+      },
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": false,
+        "policyEnforcementMode": "ENFORCING",
+        "scopes": [
+          {
+            "name": "token-exchange"
+          }
+        ],
+        "policies": [
+          {
+            "type": "client",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "name": "requester-openbank-agent",
+            "config": {
+              "clients": "[\"openbank-agent\"]"
+            }
+          },
+          {
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "name": "token-exchange.openbank-agent",
+            "config": {
+              "scopes": "[\"token-exchange\"]",
+              "applyPolicies": "[\"requester-openbank-agent\"]"
+            }
+          }
+        ]
+      }
     },
     {
       "clientId": "openbank-mcp",
@@ -2064,6 +2097,28 @@
   "attributes": {
     "acr.loa.map": "{\"pwd\":1,\"mfa\":2}"
   },
+  "identityProviders": [
+    {
+      "alias": "kubernetes",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": false,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "linkOnly": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "issuer": "__KUBERNETES_OIDC_ISSUER__",
+        "clientId": "keycloak",
+        "clientSecret": "__KUBERNETES_OIDC_CLIENT_SECRET__",
+        "useJwksUrl": "true",
+        "jwksUrl": "__KUBERNETES_OIDC_ISSUER__/openid/v1/jwks",
+        "validateSignature": "true",
+        "syncMode": "LEGACY"
+      }
+    }
+  ],
   "browserFlow": "browser",
   "directGrantFlow": "direct grant",
   "registrationFlow": "registration",
