@@ -24,10 +24,10 @@ import kotlin.io.path.readText
  * That is the corruption `AnalyticsConsumer.resolveAggregateId`'s KDoc documents from #4553,
  * reproduced on a new domain. The producer settling its own identity is what prevents it.
  *
- * WHY A SOURCE SCAN RATHER THAN ELEVEN FLOWS. The behavioural assertions live beside the flows
+ * WHY A SOURCE SCAN RATHER THAN TWELVE FLOWS. The behavioural assertions live beside the flows
  * that already drive each event (`LendingServiceTest`), and they are the real coverage. This test
  * answers the question those cannot: is there an emit site anywhere in the service that a future
- * change could add WITHOUT identity? Two of the eleven event types are emitted through a
+ * change could add WITHOUT identity? Two of the twelve event types are emitted through a
  * parameterised helper (`loan.withdrawn`, `loan.accelerated` via `TerminationService.emitDomainEvent`),
  * so a grep for `eventType = "..."` literals finds nine and misses two — the same two-idiom trap
  * this repo has hit before. Scanning the payload builders catches both idioms.
@@ -74,9 +74,9 @@ class LendingEventIdentityTest {
     }
 
     @Test
-    fun `the twelve event types are the ones this test speaks for`() {
+    fun `the thirteen event types are the ones this test speaks for`() {
         // A new event type must consciously join this list, which is what makes the scan above a
-        // ratchet rather than a snapshot. Ten are literals; two arrive as a parameter.
+        // ratchet rather than a snapshot. Eleven are literals; two arrive as a parameter.
         val publisher = Path.of(
             "src/main/kotlin/com/openbank/lending/infrastructure/outbox/KafkaLendingOutboxEventPublisher.kt",
         )
@@ -86,6 +86,7 @@ class LendingEventIdentityTest {
         assertThat(literals).containsExactlyInAnyOrder(
             "credit.application.transition",
             "credit.application.transition.refused",
+            "credit.application.four_eyes_sla_escalation",
             "credit.decision.evaluated",
             "credit.loan.transition",
             "loan.disbursed",

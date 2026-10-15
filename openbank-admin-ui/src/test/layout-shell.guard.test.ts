@@ -35,6 +35,7 @@ const EXEMPT = new Set<string>([
   'auth/error/page.tsx',
   'auth/forbidden/page.tsx',
   'privacy/page.tsx',
+  'r/[token]/page.tsx', // public referral landing (MGM) - no session, no nav chrome by design
 ])
 
 function walk(dir: string): string[] {

@@ -54,8 +54,12 @@ class VelocityAggregateRepositoryImplIT {
     private val eventTime: Instant = Instant.now(Clock.systemUTC())
 
     private suspend fun assertAllWindows(accountId: UUID, count: Long, total: String) {
+        // The rows are bucketed by this test's captured business time. Anchor reads to that same
+        // instant: the injected repository reads the current wall-clock bucket, which can advance
+        // while a real-Postgres test is running (especially across an hour or UTC-day boundary).
+        val reader = repositoryAt(eventTime.toString())
         VelocityWindow.entries.forEach { window ->
-            val aggregate = repository.findAggregate(accountId, window, CURRENCY)
+            val aggregate = reader.findAggregate(accountId, window, CURRENCY)
             assertThat(aggregate)
                 .describedAs("aggregate for window %s", window)
                 .isNotNull
@@ -213,7 +217,7 @@ class VelocityAggregateRepositoryImplIT {
         repository.recordTransaction(accountId, BigDecimal("100.00"), "EUR", transactionId, eventTime)
 
         assertAllWindows(accountId, count = 1L, total = "100.00")
-        val eur = repository.findAggregate(accountId, VelocityWindow.H1, "EUR")
+        val eur = repositoryAt(eventTime.toString()).findAggregate(accountId, VelocityWindow.H1, "EUR")
         assertThat(eur!!.transactionCount).isEqualTo(1L)
         assertThat(eur.totalAmount).isEqualByComparingTo("100.00")
     }

@@ -1,0 +1,37 @@
+{
+  "jurisdiction": "CZ",
+  "productLine": "DIP",
+  "packVersion": 1,
+  "legalReview": {
+    "status": "REQUIRES_LEGAL_REVIEW",
+    "note": "Reference onboarding values for the long-term investment product under MiFID II suitability, appropriateness and sustainability-preference rules and the PRIIPs KID; all values must be confirmed by legal review."
+  },
+  "coolingOffDays": 14,
+  "activation": { "trigger": "FIRST_CONTRIBUTION", "deadlineDays": 90 },
+  "applicationExpiryDays": 30,
+  "questionnaire": {
+    "regime": "MIFID_SUITABILITY",
+    "appropriatenessTest": true,
+    "appropriatenessMinScore": 2,
+    "esgPreferenceRequired": true,
+    "allowUnsuitableWithWarning": false,
+    "validityDays": 365
+  },
+  "keyInformationDocument": { "type": "PRIIPS_KID", "templateCode": "pension-dip-kid" },
+  "strategies": [
+    { "code": "CONSERVATIVE", "riskClass": 2 },
+    { "code": "BALANCED", "riskClass": 3 },
+    { "code": "SUSTAINABLE_BALANCED", "riskClass": 3, "sustainable": true },
+    { "code": "DYNAMIC", "riskClass": 5 },
+    { "code": "EQUITY_GLOBAL", "riskClass": 6 },
+    { "code": "LIFECYCLE", "riskClass": 5, "lifecycle": true }
+  ],
+  "lifecycleDefault": "LIFECYCLE",
+  "horizonCaps": [
+    { "maxYears": 2, "maxRiskClass": 2 },
+    { "maxYears": 5, "maxRiskClass": 3 },
+    { "maxYears": 10, "maxRiskClass": 5 }
+  ],
+  "guardianRequiredForLimitedCapacity": true,
+  "transferIn": { "fundsGraceDays": 30 }
+}

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.4...agent-service-v1.28.0) (2026-10-14)
+
+
+### Features
+
+* **keycloak:** ADR-0177 Phase 1 pilot — kubernetes IdP trust + agent token-exchange ([#12840](https://github.com/JiRaska/open-bank-oss/issues/12840)) ([27b8619](https://github.com/JiRaska/open-bank-oss/commit/27b8619ab10276af99078501d22eb5a50b771722))
+
+## [1.27.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.3...agent-service-v1.27.4) (2026-10-14)
+
+
+### Bug Fixes
+
+* audit follow-ups 4-12 — live rules.yaml reads, timeout/pool gates, ADR staleness gate, coverage floors ([#12773](https://github.com/JiRaska/open-bank-oss/issues/12773)) ([09377e6](https://github.com/JiRaska/open-bank-oss/commit/09377e6fe51a06df94b5ad8040c5cc1478c3d416))
+
 ## [1.27.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.2...agent-service-v1.27.3) (2026-10-04)
 
 

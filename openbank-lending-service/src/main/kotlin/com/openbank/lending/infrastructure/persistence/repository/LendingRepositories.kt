@@ -203,6 +203,16 @@ class LoanApplicationRepositoryImpl @Inject constructor(
                 .executeUpdate()
         }
 
+    override fun compareAndSetSignature(application: LoanApplication, from: OriginationState): Uni<Int> =
+        sf.withTransaction { s ->
+            s.createMutationQuery(SIGNATURE_HQL)
+                .setParameter("to", application.status)
+                .setParameter("artefactHash", application.signatureArtefactHash)
+                .setParameter("id", application.id.value)
+                .setParameter("from", from)
+                .executeUpdate()
+        }
+
     private companion object {
         /**
          * The `and status = :from` clause is the whole point — without it this is [update] with
@@ -225,6 +235,17 @@ class LoanApplicationRepositoryImpl @Inject constructor(
         const val ADVANCE_HQL =
             "update LoanApplicationEntity " +
                 "set status = :to, decidedBy = :decidedBy, decisionReason = :reason, decidedAt = :decidedAt " +
+                "where id = :id and status = :from"
+
+        /**
+         * The sign claim. Same conditional `status = :from` guard as [ADVANCE_HQL]; the extra
+         * column is the ADR-0214 signature artefact hash, written in the SAME statement as the
+         * AWAITING_SIGNATURE → SIGNED transition so the row and its evidentiary anchor can never
+         * disagree about which signature produced the state.
+         */
+        const val SIGNATURE_HQL =
+            "update LoanApplicationEntity " +
+                "set status = :to, signatureArtefactHash = :artefactHash " +
                 "where id = :id and status = :from"
     }
 }
