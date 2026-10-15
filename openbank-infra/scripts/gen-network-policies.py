@@ -106,9 +106,9 @@ KEDA_NS = "keda"
 # here too.
 INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-native"}
 
-# Container ports belonging to a SIDECAR the app container reaches over the pod's
-# own loopback — never a cross-namespace edge. Keyed by `ports[].name`, same
-# convention as INTERNAL_ONLY_PORT_NAMES above.
+# Sidecar ports with no application cross-namespace callers. Decisions use pod loopback;
+# read-only diagnostics may bind the pod network for kubelet probes. Neither is an app
+# HTTP discovery port. Keyed by `ports[].name`, like INTERNAL_ONLY_PORT_NAMES above.
 #
 # The OPA PDP sidecar (ADR-0034 Phase 5 / issue #1797) is the case that forced
 # this: `OpaSidecarPolicyDecisionPoint.DEFAULT_BASE_URL` is
@@ -131,7 +131,7 @@ INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-na
 # reachable via the unconditional same-namespace rule (co-tenant pods of the same
 # namespace) — NetworkPolicy cannot express "loopback only", and tightening the
 # same-namespace rule to a port list is a separate, larger change.
-SIDECAR_LOCAL_ONLY_PORT_NAMES = {"opa"}
+SIDECAR_LOCAL_ONLY_PORT_NAMES = {"opa", "opa-diagnostics"}
 
 HEADER = """\
 # SPDX-License-Identifier: Apache-2.0
@@ -416,6 +416,10 @@ spec:
           ports:
             - {name: http, containerPort: 8117}
             - {name: https, containerPort: 8443}
+        - name: opa
+          ports:
+            - {name: opa, containerPort: 8181}
+            - {name: opa-diagnostics, containerPort: 8282}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -467,7 +471,22 @@ spec:
         case("mTLS caller does not inherit HTTP", allowed("payments"), [8443])
         case("HTTP scanner does not inherit mTLS", allowed("security-scanner"), [8117])
         case("portless declaration stays conservative", allowed("legacy"), [8117, 8443])
+        case("OPA decision and diagnostics are not BFF application ports", allowed("admin-ui"), [8117, 8443])
         source = component / "workloads.yaml"
+        original_fixture = source.read_text(encoding="utf-8")
+        source.write_text(original_fixture.replace("8117", "8080"), encoding="utf-8")
+        try:
+            globals()["COMPONENTS"] = temp_dir
+            sys.argv = [sys.argv[0]]
+            main()
+        finally:
+            globals()["COMPONENTS"] = previous_components
+            sys.argv = previous_argv
+        documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+        policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
+        case("ordinary HTTP 8080 remains reachable from its caller", allowed("security-scanner"), [8080])
+        case("HTTP 8080 BFF discovery excludes both OPA ports", allowed("admin-ui"), [8080, 8443])
+        source.write_text(original_fixture, encoding="utf-8")
         source.write_text(source.read_text(encoding="utf-8").replace(
             "  annotations: {openbank.io/port-scoped-ingress: 'true'}\n", ""), encoding="utf-8")
         try:
@@ -486,7 +505,7 @@ spec:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction, atomic publication and port scoping (24 cases)")
+    print("self-test ok: dependency extraction, atomic publication and port scoping (27 cases)")
     return 0
 
 def main():
