@@ -38,6 +38,10 @@ dependencies {
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs"))
+    // ADR-0031 D9 phase 4: the shared two-layer agent policy gate (charter verifier + OPA
+    // decision client), parameterised by AgentPolicyConfig — the phase-3 gate classes moved
+    // here from this service's infrastructure.policy package.
+    implementation(project(":openbank-agent-policy"))
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
@@ -65,13 +69,6 @@ tasks.named<Copy>("processResources") {
     from(rootProject.file("openbank-libs/governance/prompts/flaky-test-hunter")) {
         include("*.md")
         into("governance-prompts/flaky-test-hunter")
-    }
-    // ADR-0031 D9 phase 3: package the agent charters so the PR-path policy gate can re-verify the
-    // flaky-test-hunter charter in-process, deny-by-default, without a network call. Derived from
-    // openbank-libs/governance/agents.yaml — never hand-edit the packaged copy.
-    from(rootProject.file("openbank-libs/governance")) {
-        include("agents.yaml")
-        into("governance-charters")
     }
 }
 

@@ -5,6 +5,7 @@
 
 package com.openbank.flakytest.application.workflow
 
+import com.openbank.agentpolicy.AgentPolicyConfig
 import com.openbank.flakytest.application.port.out.FindingRepository
 import com.openbank.flakytest.application.port.out.GitHubProposalPort
 import com.openbank.flakytest.application.port.out.LlmDiagnosisPort
@@ -12,7 +13,6 @@ import com.openbank.flakytest.domain.model.FindingStatus
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
 import com.openbank.flakytest.infrastructure.policy.PrPathDecision
-import com.openbank.flakytest.infrastructure.policy.PrPathGateVocabulary
 import com.openbank.flakytest.infrastructure.policy.PrPathPolicyGate
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
@@ -142,8 +142,8 @@ open class DiagnoseAndProposeActivityImpl(
                     "policy_decision" to if (prOpened) "ALLOW" else "DENY",
                     "policy_denial_reason" to (gateDecision as? PrPathDecision.Denied)?.reason,
                     "policy_blocked" to (fixDiff != null && gateDenied),
-                    "tool" to if (fixDiff != null) PrPathGateVocabulary.TOOL_GH_PR_OPEN else null,
-                    "resource" to if (fixDiff != null) PrPathGateVocabulary.RESOURCE_GITHUB_PR else null,
+                    "tool" to if (fixDiff != null) AgentPolicyConfig.TOOL_GH_PR_OPEN else null,
+                    "resource" to if (fixDiff != null) AgentPolicyConfig.RESOURCE_GITHUB_PR else null,
                     "pr_branch" to if (fixDiff != null) GitHubProposalPort.prBranchFor(finding.id) else null,
                     "proposal_url" to proposalUrl,
                     "human_approved_by" to null,

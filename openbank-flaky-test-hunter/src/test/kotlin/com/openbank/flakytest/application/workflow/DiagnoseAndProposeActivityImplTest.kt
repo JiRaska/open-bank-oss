@@ -5,6 +5,7 @@
 
 package com.openbank.flakytest.application.workflow
 
+import com.openbank.agentpolicy.AgentPolicyVocabulary
 import com.openbank.flakytest.application.port.out.FindingRepository
 import com.openbank.flakytest.application.port.out.GitHubProposalPort
 import com.openbank.flakytest.application.port.out.LlmDiagnosisPort
@@ -14,7 +15,6 @@ import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
 import com.openbank.flakytest.infrastructure.policy.PrPathDecision
-import com.openbank.flakytest.infrastructure.policy.PrPathGateVocabulary
 import com.openbank.flakytest.infrastructure.policy.PrPathPolicyGate
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
@@ -163,7 +163,7 @@ class DiagnoseAndProposeActivityImplTest {
         val finding = aFinding()
         coEvery { llm.proposeFixDiff(finding, finding.rootCause!!) } returns "add-explicit-unit-return-type"
         coEvery { prPathGate.decide(finding) } returns
-            PrPathDecision.Denied(PrPathGateVocabulary.REASON_PDP_UNREACHABLE)
+            PrPathDecision.Denied(AgentPolicyVocabulary.REASON_PDP_UNREACHABLE)
         coEvery { githubProposal.openTicket(finding, finding.rootCause!!) } returns null
         coEvery { findingRepository.update(any()) } answers { firstArg() }
 
