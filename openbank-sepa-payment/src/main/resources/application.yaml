@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_sepa_payments
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_sepa_payments
   flyway:
@@ -73,26 +76,40 @@ quarkus:
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     aml-service:
       url: ${AML_SERVICE_URL:http://localhost:8117}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     fraud-service:
       url: ${FRAUD_SERVICE_URL:http://localhost:8133}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     clearing-simulator:
       url: ${CLEARING_SIMULATOR_URL:http://localhost:8139}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     transaction-service:
       url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # #8505: resolves debtorAccountId → owning party for the AML case's party_id (the SEPA
     # rail's port of the domestic #3274 fix). Read by AccountServiceClient via @ConfigProperty.
     account-service:
       url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     document-service:
       url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
