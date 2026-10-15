@@ -123,6 +123,14 @@ spec:
             # warns and continues.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
+            # D5 AI-attribution provenance (#12256): consume openbank.agent.audit.events so
+            # agent-service's AI-audit events persist to audit_entries in the live cluster.
+            # The baked application.yaml default stays `false` (fail-closed for local dev and
+            # tests with no broker); THIS env is the deployment decision. group.id /
+            # auto.offset.reset for this channel come from the msg-override ConfigMap above —
+            # never as dotted YAML keys (SmallRye quotes them inertly, #686).
+            - name: AUDIT_AGENT_AUDIT_KAFKA_ENABLED
+              value: "true"
             # ADR-0031 D5: the asymmetric signing key is held by KMS; the alias is only
             # the signing input. AuditAnchorService records KMS's immutable returned key id
             # with each anchor so verification remains correct across key rotation.

@@ -10,7 +10,6 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.reactive.messaging.Message
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CompletableFuture
@@ -34,13 +33,19 @@ class AgentAuditConsumerTest {
     }
 
     @Test
-    fun `does not acknowledge a failed audit-store write`(): Unit = runBlocking {
+    fun `nacks a failed audit-store write without acknowledging`(): Unit = runBlocking {
         val message = mockk<Message<String>>()
+        val failure = IllegalStateException("store unavailable")
         every { message.payload } returns "broken"
-        coEvery { auditConsumer.persist(any(), any()) } throws IllegalStateException("store unavailable")
+        coEvery { auditConsumer.persist(any(), any()) } throws failure
+        every { message.nack(any()) } returns CompletableFuture.completedFuture(null)
 
-        assertThatThrownBy { runBlocking { consumer.consume(message) } }
-            .isInstanceOf(IllegalStateException::class.java)
+        consumer.consume(message)
+
+        // NACK, not rethrow: this method infers MANUAL acknowledgment, and a rethrown
+        // exception bypasses message.nack — the stream cancels instead of handing the record
+        // to the dead-letter-queue strategy (AgentAuditKafkaPersistenceIT proves the wedge).
+        verify { message.nack(failure) }
         verify(exactly = 0) { message.ack() }
     }
 }
