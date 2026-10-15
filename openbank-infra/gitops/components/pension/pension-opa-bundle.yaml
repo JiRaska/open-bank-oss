@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-service
     app.kubernetes.io/part-of: pension
   annotations:
-    openbank.tech/policy-checksum: "8038285734f5cc9d"
+    openbank.tech/policy-checksum: "e2eeb4e17f5b3f91"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -774,7 +774,7 @@ data:
     # never the customer edge. Four-eyes (registrar != approver) is enforced in the DeathClaim aggregate.
     allowed_reasons contains "operator-pension-death-claim" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action in {
@@ -840,7 +840,7 @@ data:
     # not relay a ceding provider's answer or a contribution (#3765/#3734).
     allowed_reasons contains "operator-pension-onboarding" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action in {"pension.operator.inspect", "pension.operator.contribution", "pension.operator.transfer"}
@@ -849,7 +849,7 @@ data:
     # Compliance reads the operator views, never acts.
     allowed_reasons contains "compliance-pension-onboarding-read" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	"ROLE_COMPLIANCE" in input.principal.roles
     	input.action == "pension.operator.inspect"
     }
@@ -881,7 +881,7 @@ data:
     # Real staff read any contract's funding.
     allowed_reasons contains "operator-pension-funding-read" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
     	input.action == "pension.funding.inspect"
@@ -891,7 +891,7 @@ data:
     # ROLE_OPERATOR (#3765) must not drive the unmatched queue or file claims.
     allowed_reasons contains "operator-pension-funding-operate" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action == "pension.funding.operate"
@@ -901,7 +901,7 @@ data:
     # is a follow-up and will get its own named service-account rule, not a role grant.
     allowed_reasons contains "operator-pension-funding-ingest" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
     	role in input.principal.roles
     	input.action == "pension.funding.ingest"
@@ -948,7 +948,7 @@ data:
     # Real staff read the marketplace; compliance included (comparison-fairness review).
     allowed_reasons contains "operator-pension-annuity-read" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
     	input.action in {"pension.annuity.inspect", "pension.operator.annuity-read"}
@@ -958,7 +958,7 @@ data:
     # ROLE_OPERATOR (#3765/#3734), never the edge.
     allowed_reasons contains "operator-pension-annuity-manage" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action in {
@@ -979,7 +979,7 @@ data:
     # ---------------------------------------------------------------------------------------------
     allowed_reasons contains "staff-pension-reporting-read" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_AUDITOR"}
     	role in input.principal.roles
     	input.action == "pension.reporting.aggregate"
@@ -1001,7 +1001,7 @@ data:
     # ---------------------------------------------------------------------------------------------
     allowed_reasons contains "operator-pension-mandate-read" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
     	input.action == "pension.operator.mandate-read"
@@ -1019,7 +1019,7 @@ data:
     # ---------------------------------------------------------------------------------------------
     allowed_reasons contains "operator-pension-participant-inspect" if {
     	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
+    	not principal_is_machine
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
     	input.action in {"pension.onboarding.inspect", "pension.transfer.inspect", "pension.death.inspect"}
