@@ -71,9 +71,6 @@ spec:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: treasury
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP

@@ -5,7 +5,9 @@ info:
   # 1.1.0: period-end reporting read model for the ČNB returns (#12425) — additive.
   # 1.2.0: separately accumulated P&L lines, the instrument class of positions and its four-eyes
   #        correction route — additive; income/expenses stay as deprecated fields.
-  version: 1.2.0
+  # 1.2.1: clarify same-currency fund switch validation (this branch's 1.1.1, re-taken on 1.2.0);
+  #        no schema change.
+  version: 1.2.1
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -546,7 +548,7 @@ components:
     OrderRequest:
       type: object
       required: [fundId, type]
-      description: SUBSCRIBE takes `amount`; REDEEM and SWITCH_OUT take `units`; SWITCH_OUT also names `targetFundId`.
+      description: SUBSCRIBE takes `amount`; REDEEM and SWITCH_OUT take `units`; SWITCH_OUT also names `targetFundId`. Source and target funds must use the same currency; a cross-currency switch is refused (400).
       properties:
         fundId: { type: string, format: uuid }
         type:

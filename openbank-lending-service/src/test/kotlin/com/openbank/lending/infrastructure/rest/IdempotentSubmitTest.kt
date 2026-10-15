@@ -70,6 +70,49 @@ class IdempotentSubmitTest {
         assertThat(store.released).isEqualTo(1)
     }
 
+    // ── ADR-0211 origination commands (#8351): 2xx transitions are replayable too ──
+
+    @Test
+    fun `a 200 transition response is stored, and a later 4xx refusal of the same command is not`() {
+        val transitionStore = FlakyStore()
+        var moved = 0
+        suspend fun transition(refuse: Boolean): Response = transitionStore.submitOnce("t", "h2", TTL) {
+            if (refuse) {
+                Response.status(422).entity("""{"error":"already moved"}""").build()
+            } else {
+                moved++
+                Response.status(200).entity("""{"state":"WITHDRAWN"}""").build()
+            }
+        }
+
+        // The machine's successful transition is stored: a retry replays it instead of eating
+        // the machine's 422 refusal.
+        assertThat(runBlocking { transition(false) }.status).isEqualTo(200)
+        val replay = runBlocking { transition(true) }
+        assertThat(replay.status).isEqualTo(200)
+        assertThat(replay.getHeaderString("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(moved).isEqualTo(1)
+    }
+
+    @Test
+    fun `a 4xx transition response releases the claim, so a corrected retry re-runs`() {
+        val transitionStore = FlakyStore()
+        var moved = 0
+        suspend fun transition(go: Boolean): Response = transitionStore.submitOnce("t", "h2", TTL) {
+            if (go) {
+                moved++
+                Response.status(200).entity("""{"state":"WITHDRAWN"}""").build()
+            } else {
+                Response.status(422).entity("""{"error":"not yet"}""").build()
+            }
+        }
+
+        assertThat(runBlocking { transition(false) }.status).isEqualTo(422)
+        assertThat(transitionStore.released).isEqualTo(1)
+        assertThat(runBlocking { transition(true) }.status).isEqualTo(200)
+        assertThat(moved).isEqualTo(1)
+    }
+
     private class FlakyStore : IdempotencyStore {
         var saveFailure: Exception? = null
         var releaseFailure: Exception? = null

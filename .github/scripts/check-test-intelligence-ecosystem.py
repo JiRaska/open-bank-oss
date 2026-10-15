@@ -569,6 +569,15 @@ def performance_selector_self_test_error(selector_path: Path) -> str | None:
     return None
 
 
+def bounded_kover_report(workflow: str) -> bool:
+    # Configuration scoping changes Gradle startup, never the timeout contract.
+    return re.search(
+        r"timeout --kill-after=10s 600s ./gradlew --no-daemon "
+        r"(?:--configure-on-demand )?:\$\{\{ inputs\.service \}\}:koverXmlReport(?:\s|$)",
+        workflow,
+    ) is not None
+
+
 def check(root: Path) -> list[str]:
     errors: list[str] = []
     schema_file = root / "openbank-libs/governance/test-intelligence-run.schema.json"
@@ -644,7 +653,7 @@ def check(root: Path) -> list[str]:
     ):
         if needle not in workflow:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
-    if "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport" not in workflow:
+    if not bounded_kover_report(workflow):
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
     immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
         "Upload coverage to Codecov"
@@ -1008,6 +1017,21 @@ def check(root: Path) -> list[str]:
 
 
 def self_test() -> int:
+    command = "timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport"
+    for candidate in (command, command.replace("--no-daemon ", "--no-daemon --configure-on-demand ")):
+        if not bounded_kover_report(candidate):
+            print("self-test failed: bounded Kover report rejected")
+            return 1
+    for candidate in (
+        command.replace("600s", "900s"),
+        command.replace("--kill-after=10s ", ""),
+        command.replace("--no-daemon ", ""),
+        command.replace("koverXmlReport", "koverXmlReportOther"),
+        command.replace("timeout --kill-after=10s 600s ", ""),
+    ):
+        if bounded_kover_report(candidate):
+            print("self-test failed: unbounded or incorrect Kover report accepted")
+            return 1
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         for path in [

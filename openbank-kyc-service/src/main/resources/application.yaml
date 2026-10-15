@@ -30,6 +30,9 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_kyc
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_kyc
   flyway:
@@ -59,10 +62,23 @@ quarkus:
   rest-client:
     sanctions-service:
       url: ${SANCTIONS_SERVICE_URL:http://localhost:8123}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
     # Party register enumeration for the #5698 orphaned-party reconciliation (read-only).
     party-service:
       url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
+    # ADR-0256: case-coordinator case-open authority. The Optional adapter guard reads
+    # openbank.kyc.case-coordinator.url (same CASE_COORDINATOR_URL env var); when the env is
+    # unset the guard maps every trigger to the durable NOT_CONFIGURED failure path instead of
+    # calling a meaningless URL. The rest-client default exists only so the client bean builds.
+    case-coordinator:
+      url: ${CASE_COORDINATOR_URL:http://localhost:8146}
+      connect-timeout: 2000
+      read-timeout: 5000
       scope: jakarta.inject.Singleton
   smallrye-reactive-messaging:
     kafka:
@@ -132,6 +148,19 @@ mp:
           topic: openbank.dlq.kyc.party-events-in
         connector: smallrye-kafka
         topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0256: sanctions per-entry diff events (openbank.sanctions.screening.event). Same
+      # wiring discipline as party-events-in — DLQ topic EXPLICIT and NESTED; group.id and
+      # auto.offset.reset come from the kyc-service-msg-override ConfigMap (dotted YAML keys are
+      # quoted by SmallRye's YAML source and never read, #686). Group: kyc-service-sanctions-list,
+      # offset earliest: the dedupe key (publication, party) makes replay safe, and a deploy must
+      # not miss a diff published while it was starting.
+      sanctions-list-changes-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.kyc.sanctions-list-changes
+        connector: smallrye-kafka
+        topic: openbank.sanctions.screening.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
     outgoing:
       # The `kyc-events-out` channel that used to sit here — a bare @Channel emitter fired AFTER
@@ -215,6 +244,18 @@ openbank:
       grace-period: "${KYC_ORPHAN_DETECTION_GRACE:PT1H}"
       page-size: "${KYC_ORPHAN_DETECTION_PAGE_SIZE:100}"
       max-pages: "${KYC_ORPHAN_DETECTION_MAX_PAGES:500}"
+    # ADR-0256 trigger loop (SANCTIONS_LIST_CHANGED → case coordinator). Deployed DISABLED by
+    # default per the contract's rollout sequence (Pact + sandbox coordinator exercise + operator
+    # metrics land before enablement); a missing CASE_COORDINATOR_URL maps triggers to the
+    # durable NOT_CONFIGURED failure path, never to a silent skip.
+    screening-triggers:
+      enabled: "${KYC_SCREENING_TRIGGERS_ENABLED:false}"
+      candidate-limit: "${KYC_SCREENING_TRIGGERS_CANDIDATE_LIMIT:500}"
+      retry-enabled: "${KYC_SCREENING_TRIGGERS_RETRY_ENABLED:true}"
+      retry-interval: "${KYC_SCREENING_TRIGGERS_RETRY_INTERVAL:1m}"
+      retry-batch-size: "${KYC_SCREENING_TRIGGERS_RETRY_BATCH_SIZE:100}"
+    case-coordinator:
+      url: "${CASE_COORDINATOR_URL:}"
 
 # OPA sidecar (ADR-0034). Advisory mode by default.
 opa:

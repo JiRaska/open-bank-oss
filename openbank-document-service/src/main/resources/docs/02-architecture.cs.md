@@ -66,8 +66,10 @@ Vlastní databáze `openbank_documents`, `generation: none`, Flyway V1..V3. Pouz
 
 ## Seedované penzijní šablony
 
-`DocumentTemplateSeed` seeduje také osm šablon `pension-*` (klíčové informace DPS, KID DIP, potvrzení
-pro daňové účely, roční výpis; cs a en) jako `PUBLISHED` `1.0.0`, protože `render` načítá jen
-publikované řádky. Jejich znění je návrh: každé tělo nese značku `LEGAL-REVIEW-REQUIRED` a vykreslí
-banner DRAFT, dokud volající posílá `legalReviewRequired=true`. Revidované znění přijde jako nová verze
-seedu.
+`DocumentTemplateSeed` seeduje všech osm šablon `pension-*` ve verzi `1.0.0` jako `DRAFT`.
+Před publikací je nutná právní kontrola znění (#12392). Ostré renderování načítá jen publikované
+řádky, takže vynechání ani změna `legalReviewRequired` návrh nezpřístupní. Návrhy lze kontrolovat
+v náhledu. Seedování návrhu zachová existující publikovanou verzi stejného kódu; právně schválené
+znění publikujte existujícím kontrolovaným postupem.
+
+Ostré renderování odmítá také dříve publikovanou šablonu obsahující `LEGAL-REVIEW-REQUIRED`, ještě před vytvořením nebo uložením PDF. Existující řádky seedu s pevným ID se nepřepisují; data volajícího tuto kontrolu nemohou obejít.

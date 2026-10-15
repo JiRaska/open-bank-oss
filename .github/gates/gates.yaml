@@ -409,6 +409,33 @@ gates:
     run: |
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
+  # A proposed ADR is an open promise; nothing distinguished "open awaiting work" from "open
+  # because everyone forgot" (84 proposed ADRs at the 2026-10 fleet audit). The clock is
+  # creation-age + an optional `last-reviewed:` re-affirmation key, NOT last-commit: measured
+  # at authoring time, weekly mechanical docs sweeps touch ADR files fleet-wide (every proposed
+  # ADR's last-commit was <= 86 days old while the oldest proposal was 110+ days old), so a
+  # last-commit clock can never fire here. Advisory first (ADR-0144): first live run flags 4
+  # ADRs (0141, 0142, 0155, 0170); each then gets decided, re-affirmed, or baselined.
+  - id: adr-proposed-staleness
+    name: "proposed ADRs must not sit undecided for more than 90 days (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 90  # real git history walk; measured 9s locally
+    verified: "2026-10-14 — 4 findings (0141, 0142, 0155, 0170) confirmed as genuinely open proposals from 2026-06/07; clock semantics validated against real sweep history"
+    rationale: >-
+      decision-status is front-matter prose read once at authoring time; without a clock the
+      proposed pool only grows. Re-affirmation is a deliberate `last-reviewed:` front-matter
+      key that mechanical sweeps do not touch — same pattern as check-advisory-finding-staleness
+      .py's `verified:` field.
+    review_after: "2027-04-14"
+    min_subjects: 1   # 4 stale proposed ADRs at authoring time (2026-10-14)
+    selftest_inputs: [".github/scripts/check-adr-proposed-staleness.py"]
+    selftest: |
+      python3 .github/scripts/check-adr-proposed-staleness.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-adr-proposed-staleness.py --root . --today "$(date -u +%F)"
+
   # ==== gitops =========================================================
   - id: deploy-hold-image-pins
     name: "held services cannot change GitOps image pins (issue #11503)"
@@ -2874,6 +2901,53 @@ gates:
       python3 .github/scripts/check-configproperty-supplied.py --self-test
     run: |
       python3 .github/scripts/check-configproperty-supplied.py --enforce
+
+  # A url-carrying quarkus.rest-client.<client> without an explicit connect/read timeout inherits
+  # SmallRye/Vert.x defaults — the classic source of a cascading overload, where one slow upstream
+  # holds every caller thread until the pool exhausts and the failure surfaces three services away
+  # from its cause. 2026-10 fleet audit: explicit timeouts on ~19 of 67 services; --fix seeded the
+  # fleet with the measured convention (connect 2000-3000 ms, read 2000-5000 ms on the 19 services
+  # that already declared them), this gate then holds the ratchet. A service whose SLO needs a
+  # different bound sets it explicitly — that decision belongs to the service owner, not the gate.
+  - id: rest-client-timeouts
+    name: "every url-carrying rest-client declares connect/read timeouts (enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 30  # indentation parse over ~30 yaml files; measured 0.2s locally
+    rationale: >-
+      An unbounded wait on a money-path call is a defect in itself, whatever the upstream does.
+      The check is indentation-based text parsing, NOT a YAML round-trip, because these files
+      carry review-critical comments a load/dump cycle would destroy.
+    review_after: "2027-04-14"
+    min_subjects: 100   # 100 clients seeded across 30 services (2026-10-14)
+    selftest_inputs: [".github/scripts/check-rest-client-timeouts.py"]
+    selftest: |
+      python3 .github/scripts/check-rest-client-timeouts.py --self-test
+    run: |
+      python3 .github/scripts/check-rest-client-timeouts.py --root . --enforce
+
+  # Quarkus leaves idle-timeout/max-lifetime/max-size OFF by default; a transient DB blip that
+  # poisons pooled connections then wedges the service until a pod restart (billing #1682: ~8h
+  # unable to reach a healthy DB, 0 restarts, every health probe green). The fix landed only in
+  # billing; the 2026-10 fleet sweep seeded billing's measured values (5M/30M/20) across the other
+  # 91 reactive pools, this gate holds the ratchet.
+  - id: datasource-pool-self-heal
+    name: "every reactive datasource pool declares idle-timeout/max-lifetime/max-size (enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 30  # indentation parse over ~30 yaml files; measured 0.1s locally
+    rationale: >-
+      Three distinct jobs (billing's own comment): idle-timeout evicts a dead idle connection
+      within the cleaner period; max-lifetime is the hard ceiling on how long any wedge can
+      survive; max-size bounds a reconnect storm. Indentation-based text parsing, NOT a YAML
+      round-trip — these files carry review-critical comments.
+    review_after: "2027-04-14"
+    min_subjects: 50   # 92 reactive pools across the fleet (2026-10-14)
+    selftest_inputs: [".github/scripts/check-datasource-pool-self-heal.py"]
+    selftest: |
+      python3 .github/scripts/check-datasource-pool-self-heal.py --self-test
+    run: |
+      python3 .github/scripts/check-datasource-pool-self-heal.py --root . --enforce
 
   # Negative control: delete `insecure-requests: enabled` from ledger-service's %prod block
   # and it exits 1 naming the file and profile; restore it and it exits 0 (66 subjects).

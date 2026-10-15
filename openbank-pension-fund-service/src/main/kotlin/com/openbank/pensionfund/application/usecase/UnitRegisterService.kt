@@ -9,6 +9,7 @@ import com.openbank.pensionfund.application.port.NotFoundException
 import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.application.port.StoreChanges
+import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.OrderStatus
 import com.openbank.pensionfund.domain.model.OrderType
@@ -46,8 +47,6 @@ class UnitRegisterService(
         require(command.type != OrderType.SWITCH_IN) {
             "SWITCH_IN is created by a settled switch, never placed directly"
         }
-        val isin = requireActiveFund(command.fundId)
-        command.targetFundId?.let { requireActiveFund(it) }
         val order = UnitOrder(
             id = Ids.newId(),
             contractId = command.contractId,
@@ -68,17 +67,21 @@ class UnitRegisterService(
             metrics.orderReplay(existing.type)
             return existing
         }
-        if (order.isOutgoing) {
-            val held = store.holding(order.contractId, order.fundId)?.units ?: BigDecimal.ZERO
-            val queued = store.pendingOrdersForContract(order.contractId)
-                .filter { it.fundId == order.fundId && it.isOutgoing }
-                .fold(BigDecimal.ZERO) { acc, o -> acc + o.units!! }
-            check(held - queued >= order.units!!) {
-                "contract ${order.contractId} has ${held - queued} units of fund ${order.fundId} available, cannot sell ${order.units}"
+        // A replay names an already accepted instruction. Its answer must remain available after
+        // the fund closes; only a NEW instruction needs to pass current fund eligibility.
+        val source = requireActiveFund(command.fundId)
+        command.targetFundId?.let {
+            val target = requireActiveFund(it)
+            require(source.currency == target.currency) {
+                "cross-currency switches are not supported: ${source.currency} to ${target.currency}"
             }
         }
+        if (order.isOutgoing) {
+            // Counted after the reservation returned, like the commit below (#12442).
+            return store.reserveOutgoing(order).also { metrics.order(source.isin, it.type, it.status) }
+        }
         store.commit(StoreChanges(orders = listOf(order)))
-        metrics.order(isin, order.type, order.status)
+        metrics.order(source.isin, order.type, order.status)
         return order
     }
 
@@ -103,10 +106,9 @@ class UnitRegisterService(
         return ContractValuation(contractId, holdings, store.pendingOrdersForContract(contractId))
     }
 
-    /** Returns the fund's ISIN, the only fund identifier a metric label may carry. */
-    private suspend fun requireActiveFund(fundId: UUID): String {
+    private suspend fun requireActiveFund(fundId: UUID): Fund {
         val fund = store.fund(fundId) ?: throw NotFoundException("fund $fundId not found")
         check(fund.status == FundStatus.ACTIVE) { "fund $fundId is closed" }
-        return fund.isin
+        return fund
     }
 }

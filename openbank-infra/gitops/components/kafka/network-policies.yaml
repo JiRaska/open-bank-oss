@@ -131,6 +131,9 @@ spec:
               kubernetes.io/metadata.name: payments
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: pension
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: pid
         - namespaceSelector:
             matchLabels:
@@ -165,9 +168,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tpp-registry
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: wealth
