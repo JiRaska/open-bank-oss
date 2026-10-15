@@ -37,7 +37,8 @@ import javax.sql.DataSource
  * human-over-ai approval changed state without an observable approver.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.agent.it.PostgresTestResource::class)
+// Keep this resource's model-key placeholder out of other profiles (ModelGatewayRoutingOverrideTest).
+@QuarkusTestResource(com.openbank.agent.it.PostgresTestResource::class, restrictToAnnotatedClass = true)
 @TestProfile(TraceContractProfile::class)
 class AgentProposalDecisionTraceContractIT {
 
