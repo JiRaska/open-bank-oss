@@ -63,7 +63,11 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
                 f'Gradle distribution pinned in {WRAPPER_PROPERTIES.relative_to(ROOT)} is not '
                 'installed under $GRADLE_USER_HOME/wrapper/dists; run ./gradlew --version once '
                 '(CI: .github/scripts/provision-gradle-distribution.sh) before these tests.')
-        cls._home = tempfile.TemporaryDirectory()
+        # ignore_cleanup_errors: a single-use daemon (--no-daemon still forks one per build) can
+        # keep writing into this home (e.g. a `9.8.1` metadata dir) after the build process exits,
+        # racing tearDownClass with ENOTEMPTY and failing the whole shard on a teardown error.
+        # Cleanup is best-effort on a CI temp dir; a leftover there must never fail the gate.
+        cls._home = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         cls.gradle_home = Path(cls._home.name)
         (cls.gradle_home / 'wrapper').mkdir()
         (cls.gradle_home / 'wrapper/dists').symlink_to(distributions, target_is_directory=True)
