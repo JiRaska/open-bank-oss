@@ -87,7 +87,8 @@ OK_CONCLUSIONS = {"success", "neutral", "skipped"}
 
 # Deploy-bot PRs are updated under the same readiness and cost controls as armed PRs.
 BOT_DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
-BOT_AUTHOR = "app/openbank-gitops-bot"
+# REST user.login uses the bot login, not gh GraphQL's app/display alias.
+BOT_AUTHOR = "openbank-gitops-bot[bot]"
 
 
 def is_bot_deploy_pr(p: dict) -> bool:
@@ -228,8 +229,9 @@ def self_test() -> int:
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: {got} ({why})")
     for name, user, ref, want in [
-        ("bot deployment prefix", BOT_AUTHOR, "chore/gitops-auto-deploy-42", True),
-        ("admin UI bot prefix", BOT_AUTHOR, "chore/admin-ui-deploy-42", True),
+        ("bot deployment REST identity", "openbank-gitops-bot[bot]", "chore/gitops-auto-deploy-42", True),
+        ("admin UI REST identity", "openbank-gitops-bot[bot]", "chore/admin-ui-deploy-42", True),
+        ("display alias is not REST identity", "app/openbank-gitops-bot", "chore/gitops-auto-deploy-42", False),
         ("human with bot-like branch", "human", "chore/gitops-auto-deploy-42", False),
         ("bot with ordinary branch", BOT_AUTHOR, "feat/payment", False),
     ]:
