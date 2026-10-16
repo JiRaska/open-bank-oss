@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "8994648efba5a628"
+    openbank.tech/policy-checksum: "27422eeba1e0d1ae"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -919,6 +919,20 @@ data:
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-settlement")
     	input.action == "balance.hold"
+    }
+
+    # ADR-0340 B — tax-reporting-service's own machine identity (client `openbank-tax-reporting`,
+    # ROLE_API only) reads period-end booked balances for the CRS/FATCA assembly
+    # (CrsFatcaReportingSources.bookedBalance -> GET /balances/{accountId}/{currency}?asOf=, the
+    # statement point-in-time route). balance.read only: it moves nothing, holds nothing, and reads
+    # nothing else.
+    allowed_reasons contains "service-tax-reporting-balance-read" if {
+    	input.principal.type == "HUMAN"
+
+    	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+    	not input.principal.service_account == null
+    	machine_named("service-account-openbank-tax-reporting")
+    	input.action == "balance.read"
     }
 
     prohibited if {

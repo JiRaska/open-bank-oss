@@ -75,6 +75,7 @@ object CatalogueParser {
         datapoints = required("datapoints").map { it.asText() },
         rules = (get("rules") ?: emptyList<JsonNode>()).map { it.toRule() },
         legalBasis = text("legalBasis"),
+        lineSchema = (get("lineSchema") ?: emptyList<JsonNode>()).map { it.asText() },
     )
 
     private fun JsonNode.toRule(): ValidationRule = when (val type = text("type")) {

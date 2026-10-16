@@ -56,6 +56,9 @@ spec:
               kubernetes.io/metadata.name: analytics
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:
