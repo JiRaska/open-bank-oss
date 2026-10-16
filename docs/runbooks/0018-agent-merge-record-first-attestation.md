@@ -7,7 +7,9 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 **Audience:** the human operator (or internal auditor) who must prove that the phase-3
 "recorded human merge" evidence chain works **in production** — not just in CI — before the
-AI-governance maturity score advances past 2/5 (tracker: issue #5261).
+AI-governance maturity phase advances past 2/5. The phase roadmap is curated in
+`openbank-libs/governance/ai-rollout.yaml`, which states that a phase may move only after its
+listed criteria are independently checked — this runbook is that check for phase 3.
 
 **Prerequisites:** PR `#12883` (recorder + `ROLE_MERGE_RECORDER`) merged and deployed, the
 `record-agent-merge` workflow provisioned per the merge-day comment in that PR (Keycloak
@@ -102,7 +104,10 @@ and file against `agent-service` as a P1.
 
 ## 6. Record the attestation
 
-Open a comment on issue #5261 containing, verbatim:
+The phase roadmap in `openbank-libs/governance/ai-rollout.yaml` moves only on independently
+checked criteria — so the attestation is not a comment, it is the **evidence attached to the PR
+that flips phase 3 from `blocked` to `active`**. Open a PR changing the phase-3 entry in
+`ai-rollout.yaml` containing, verbatim:
 
 - the workflow run URL (§2),
 - the `agent_merge_record` row as returned by the §3 query,
@@ -111,9 +116,11 @@ Open a comment on issue #5261 containing, verbatim:
 - the attestor's identity and date.
 
 The attestation is a claim others can re-verify with the same four commands — keep it
-copy-paste runnable. Absence of a record must never be read as "no agent PRs were merged"
-(see the workflow's UNCONFIGURED error path): an empty table after a real merge is itself a
-finding.
+copy-paste runnable. The snapshot generator validates the roadmap (an inactive current phase or
+an incomplete prior phase is rejected), so the PR cannot merge on narrative alone: the four
+evidence artifacts above are the checkable substance. Absence of a record must never be read as
+"no agent PRs were merged" (see the workflow's UNCONFIGURED error path): an empty table after a
+real merge is itself a finding.
 
 ## 7. Failure triage (merge missing from evidence)
 
