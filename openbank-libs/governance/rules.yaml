@@ -22,7 +22,11 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
-  services: {}
+  services:
+    openbank-case-coordinator-agent:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
