@@ -14,7 +14,12 @@ The generated `00-build` page in this same documentation index reports the relea
 
 The request adapters preserve verified bearer classification and the bound client ID when
 constructing the investigator used by the second, purpose/assignment-bound OPA check. The
-identity comes from `SecurityIdentity` through the shared `ServiceAccountIdentity` checks;
+identity comes from `SecurityIdentity` through the shared interactive staff-token verifier.
+The staff-realm interactive clients (`openbank-admin-ui`, `openbank-ops-cli`, `admin-cli`)
+have service accounts disabled and emit the human username through their profile scope.
+A nonblank subject and human username are required; both `client_id` and `clientId`
+machine-note claims must be absent, including null, blank and malformed values. Unreadable
+claims retain machine classification;
 request parameters, display names and role presence cannot establish a verified person or
 named client. Missing proof retains machine classification and no client binding.
 
