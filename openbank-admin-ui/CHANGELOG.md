@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.1.1...admin-ui-v3.2.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [3.1.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.1.0...admin-ui-v3.1.1) (2026-10-16)
 
 
