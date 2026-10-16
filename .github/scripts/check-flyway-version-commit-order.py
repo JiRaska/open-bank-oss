@@ -85,6 +85,11 @@ KNOWN_VIOLATIONS: dict[str, str] = {
         "baselining: the sandbox openbank_treasury flyway_schema_history ends at V9, so NO "
         "database has applied V11 without V10 and the next deploy applies V10 then V11 in order. "
         "No out-of-order flag is needed; renaming is blocked by db-migration-gate.",
+    "openbank-lending-service/src/main/resources/db/migration/V26__provisioning_cycle_attempts.sql":
+        "#12315 landed V26 on main (2026-10-16) after #12769 had put V27 there (2026-10-15); "
+        "renaming is blocked by db-migration-gate. QUARKUS_FLYWAY_OUT_OF_ORDER=true set in "
+        "components/lending/lending-service.yaml (campaign pattern), with its own note to remove "
+        "once every environment has recorded V26.",
 }
 
 
