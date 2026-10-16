@@ -25,7 +25,7 @@ class ArchiveFreshnessTest(unittest.TestCase):
         self.assertIn(expected, triggers['pull_request']['paths'])
         self.assertIn(expected, triggers['push']['paths'])
 
-    def fixture(self, root, member=True):
+    def fixture(self, root, member=True, missing_archive=None):
         tmp = root / 'runner'
         tmp.mkdir()
         (root / 'pacts').mkdir()
@@ -34,6 +34,8 @@ class ArchiveFreshnessTest(unittest.TestCase):
         (tmp / 'expected-jvm-pacts.txt').write_text(JVM + '\n')
         (tmp / 'pact-uncovered.txt').write_text('')
         for shard in range(4):
+            if shard == missing_archive:
+                continue
             with tarfile.open(tmp / f'jvm-pacts/shard-{shard}.tar', 'w') as archive:
                 if shard == 0 and member:
                     data = b'fresh generated contract'
@@ -43,14 +45,42 @@ class ArchiveFreshnessTest(unittest.TestCase):
                     archive.addfile(info, io.BytesIO(data))
         return tmp
 
-    def run_step(self, name, root, tmp, prefix=''):
+    def run_step(self, name, root, tmp, prefix='', step_env=None):
         jobs = yaml.safe_load(WORKFLOW.read_text())['jobs']
         steps = [s for job in jobs.values() for s in job.get('steps', []) if s.get('name') == name]
         self.assertEqual(len(steps), 1)
+        env = dict(os.environ, RUNNER_TEMP=str(tmp))
+        env.update(step_env or {})
         return subprocess.run(
             ['bash', '-c', prefix + '\n' + steps[0]['run']], cwd=root,
-            env=dict(os.environ, RUNNER_TEMP=str(tmp)), capture_output=True, text=True, check=False,
+            env=env, capture_output=True, text=True, check=False,
         )
+
+    def test_failed_dependency_still_runs_guard_step(self):
+        jobs = yaml.safe_load(WORKFLOW.read_text())['jobs']
+        job = jobs['drift-check']
+        self.assertEqual(job.get('needs'), 'gradle-pacts')
+        # This is a static policy assertion, not a simulation of GitHub's cancellation evaluator.
+        self.assertEqual(job.get('if'), '${{ !cancelled() }}')
+        steps = job.get('steps', [])
+        self.assertEqual(steps[0].get('name'), 'Require every JVM shard to succeed')
+        self.assertEqual(steps[0].get('env', {}).get('SHARD_RESULT'), '${{ needs.gradle-pacts.result }}')
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tmp = root / 'runner'
+            tmp.mkdir()
+            r = self.run_step('Require every JVM shard to succeed', root, tmp,
+                              step_env={'SHARD_RESULT': 'failure'})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('did not complete in every shard: failure', r.stdout)
+
+    def test_missing_shard_archive_fails_coverage_step(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tmp = self.fixture(root, missing_archive=2)
+            r = self.run_step('Verify shard coverage and restore regenerated JVM contracts', root, tmp)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('Missing regenerated Pact artifact for shard 2', r.stdout)
 
     def test_equal_timestamp_restored_jvm_is_accepted(self):
         with tempfile.TemporaryDirectory() as d:

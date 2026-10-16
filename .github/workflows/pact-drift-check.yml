@@ -131,7 +131,8 @@ jobs:
   drift-check:
     name: Regenerate consumer pacts and diff against committed
     needs: gradle-pacts
-    if: always()
+    # Validate failed shards, but let a cancelled run stop before this downstream job.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
