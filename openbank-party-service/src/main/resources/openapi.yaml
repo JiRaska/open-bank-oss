@@ -16,7 +16,10 @@ info:
   # pepFlag/pepCategory/fatcaStatus/crsStatus facts. Read off live origin/main (1.24.0).
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.27.0
+  # 1.27.0 -> 1.28.0: additive only — GET /api/v1/reporting/parties/{id}/tax-facts (ADR-0340 B1,
+  # the CRS/FATCA TIN boundary: the derived statuses and residencies WITH TINs, readable by
+  # service-account-openbank-tax-reporting alone, audit-logged without TINs).
+  version: 1.28.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -442,6 +445,33 @@ paths:
           description: Unknown party
         '422':
           description: The party is not a natural person, or is closed or merged
+
+  /api/v1/reporting/parties/{id}/tax-facts:
+    get:
+      tags: [Parties]
+      summary: Party tax facts for statutory reporting (the TIN boundary, ADR-0340 B1)
+      description: >-
+        The ONE route through which taxpayer identification numbers leave party-service, and it
+        exists for exactly one reader — service-account-openbank-tax-reporting, the statutory
+        reporting assembly (CRS/FATCA). The action is deliberately not a read/list verb, an
+        in-code principal guard backs the @Authorize/rego gate, and every read is audit-logged
+        with the derived statuses but WITHOUT the TINs. A party without a declared tax-residency
+        profile answers 404 (not reportable). Holder name is the platform party identity; the
+        given/surname split per the CRS schema arrives with the party-tax-profile domain.
+      operationId: getPartyTaxFacts
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Tax facts, residencies with TINs included
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyTaxFacts'
+        '403':
+          description: The caller is not the tax-reporting service account
+        '404':
+          description: Unknown party, or the party has not declared a tax-residency profile
 
   /api/v1/parties/{id}/payees:
     get:
@@ -967,6 +997,25 @@ components:
             - $ref: '#/components/schemas/PepCategory'
         fatcaStatus: { type: string, enum: [US_PERSON, NON_US] }
         crsStatus: { type: string, enum: [REPORTABLE, NON_REPORTABLE] }
+
+    PartyTaxFacts:
+      type: object
+      required: [partyId, holderName, profileVersion, declaredAt, crsStatus, fatcaStatus, taxResidencies]
+      properties:
+        partyId: { type: string, format: uuid }
+        holderName: { type: string, description: Platform party identity; the given/surname split arrives with the party-tax-profile domain }
+        profileVersion: { type: integer, minimum: 1 }
+        declaredAt: { type: string, format: date-time }
+        crsStatus: { type: string, enum: [REPORTABLE, NON_REPORTABLE] }
+        fatcaStatus: { type: string, enum: [US_PERSON, NON_US] }
+        taxResidencies:
+          type: array
+          items:
+            type: object
+            required: [country]
+            properties:
+              country: { type: string, description: ISO 3166-1 alpha-2 }
+              tin: { type: string, nullable: true, description: Taxpayer id for this residency; null when not on file }
 
     ApprovalResponse:
       type: object

@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.2.0...admin-ui-v3.3.0) (2026-10-16)
+
+
+### Features
+
+* **referral,admin-ui,infra:** marketing self-serve MGM programs (create → approve → publish) ([#13000](https://github.com/JiRaska/open-bank-oss/issues/13000)) ([feee4f3](https://github.com/JiRaska/open-bank-oss/commit/feee4f3b3c751f7f38622d7a40062355b274d70f))
+
 ## [3.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.1.1...admin-ui-v3.2.0) (2026-10-16)
 
 
