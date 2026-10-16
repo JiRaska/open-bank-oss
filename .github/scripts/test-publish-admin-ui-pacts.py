@@ -79,7 +79,7 @@ class PublicationTest(unittest.TestCase):
         self.assertNotIn(str(self.root), result.stderr)
 
     def test_prepare_cli_classifies_modified_source_without_local_details(self):
-        pact = next((self.root / "pacts").glob("*.json"))
+        pact = next((self.root / "pacts").glob("openbank-admin-ui-*.json"))
         pact.write_text(pact.read_text() + " ")
         result = self.run_prepare_cli(self.sha, self.root / "bundle.json")
         self.assertEqual(result.returncode, 1)
@@ -107,11 +107,11 @@ class PublicationTest(unittest.TestCase):
         self.assertNotIn(str(self.root), result.stderr)
 
     def test_prepare_accepts_archive_verified_jvm_contract_with_older_runner_clock(self):
-        pact = next((self.root / "pacts").glob("*.json"))
+        pact = self.root / "pacts" / "openbank-ledger-openbank-payment-service.json"
         os.utime(pact, ns=(1, 1))
         self.jvm_manifest.write_text(f"{pact.relative_to(self.root)}\n")
         bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
-        self.assertIn(str(pact.relative_to(self.root)), bundle["files"])
+        self.assertNotIn(str(pact.relative_to(self.root)), bundle["files"])
 
     def test_prepare_accepts_repo_wide_jvm_manifest_and_bundles_only_admin_ui(self):
         pacts = sorted((self.root / "pacts").glob("*.json"))
