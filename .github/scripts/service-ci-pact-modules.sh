@@ -22,13 +22,20 @@ is_inert_service_path() {
       # The changes job exercises this test; its source is not a Gradle/Pact input.
       return 0 ;;
     .github/workflows/*)
-      # Only the service CI recipes can affect a service build.
+      # The copied runtime Dockerfile is a build input for every Gradle image.
+      # Other workflows remain inert unless they are the service CI recipes.
       case "$1" in
-        .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml) return 1 ;;
+        .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/workflows/Dockerfile.deploy) return 1 ;;
         *) return 0 ;;
       esac ;;
     *) return 1 ;;
   esac
+}
+
+global_service_build_input_changed() {
+  local changed="$1"
+  grep -qE '^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$changed" \
+    || grep -Fxq '.github/workflows/Dockerfile.deploy' <<< "$changed"
 }
 
 pact_build_modules() {
@@ -58,6 +65,14 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: unrelated workflow must be inert" >&2; return 1; }
   ! is_inert_service_path ".github/workflows/services-ci.yml" \
     || { echo "selector self-test: service CI recipe must remain relevant" >&2; return 1; }
+  ! is_inert_service_path ".github/workflows/Dockerfile.deploy" \
+    || { echo "selector self-test: canonical image recipe must remain relevant" >&2; return 1; }
+  global_service_build_input_changed ".github/workflows/Dockerfile.deploy" \
+    || { echo "selector self-test: canonical recipe must select the full Gradle fleet" >&2; return 1; }
+  ! global_service_build_input_changed ".github/workflows/Dockerfile.deploy.backup" \
+    || { echo "selector self-test: backup recipe must not fan out" >&2; return 1; }
+  ! global_service_build_input_changed ".github/workflows/auto-deploy.yml" \
+    || { echo "selector self-test: unrelated workflow must not fan out" >&2; return 1; }
   ! is_inert_service_path "openbank-ledger-service/src/main/kotlin/Ledger.kt" \
     || { echo "selector self-test: service source must remain relevant" >&2; return 1; }
   ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \

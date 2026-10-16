@@ -34,6 +34,9 @@ on:
       # The canonical runtime image reads the service Dockerfile's EXPOSE declaration.
       # A port-only change therefore requires a rebuild just as source does.
       - "openbank-*/Dockerfile"
+      # The fast-jar build copies this canonical recipe for every Gradle service,
+      # including services with no per-module Dockerfile.
+      - ".github/workflows/Dockerfile.deploy"
       # openbank-libs/src/main no longer holds compiled code (ADR-0122 moved it to
       # openbank-libs-domain / openbank-libs-runtime, both already covered by the
       # openbank-*/src/main/** glob above) — only its build file and Gradle wrapper
@@ -123,6 +126,10 @@ on:
 # block); each job below declares its own override for the access it needs.
 permissions:
   contents: read
+
+env:
+  # A self-built image uses its own Dockerfile, never Dockerfile.deploy.
+  SELF_BUILT_SERVICES: "openbank-document-renderer"
 
 # NOTE: there is deliberately NO workflow-level `concurrency` here. The serialisation this
 # pipeline needs is scoped to `gitops-pr` alone (see that job); applying it workflow-wide
@@ -275,6 +282,12 @@ jobs:
           LIBS_DEPENDENTS="$(printf '%s\n' "$CODE_FILES" \
             | bash .github/scripts/libs-change-dependents.sh "$ALL_SERVICES")"
 
+          # The canonical Dockerfile is copied into every Gradle service image.
+          # Derive consumers from the declared build set, excluding self-built images.
+          TEMPLATE_DEPENDENTS="$(printf '%s\n' "$CHANGED_FILES" \
+            | bash .github/scripts/auto-deploy-template-dependents.sh \
+              "$ALL_SERVICES" "$SELF_BUILT_SERVICES")"
+
           # Services changed directly in this push.
           DIRECT_SERVICES=()
           for svc in $ALL_SERVICES; do
@@ -283,6 +296,9 @@ jobs:
             if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile|app\.py|requirements\.txt)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
+          done
+          for svc in $TEMPLATE_DEPENDENTS; do
+            DIRECT_SERVICES+=("$svc")
           done
 
           # Manual dispatch: rebuild the requested module(s), or run the scheduled reconcile
@@ -531,7 +547,6 @@ jobs:
       # Non-Gradle images built from their OWN multi-stage Dockerfile instead of the fast-jar
       # template (the SELF_BUILT set in check-dockerfile-no-build-stage.py). They skip the Gradle
       # step and share every later step: ECR push, cosign sign, CVE gate, SBOM attest, gitops PR.
-      SELF_BUILT_SERVICES: "openbank-document-renderer"
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
