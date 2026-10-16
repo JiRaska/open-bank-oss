@@ -36,6 +36,12 @@ export const ROLES = {
   // ADR-0315) and unlock nothing outside it.
   RISK:       "ROLE_RISK",
   FINANCE:    "ROLE_FINANCE",
+  // MGM (member-get-member) self-service authoring: marketing proposes a referral-program DRAFT
+  // in the console (referral:program:create below). referral-service admits the role (keycloak
+  // realm template ships it too), but this matrix deliberately does NOT grant :publish to
+  // MARKETING — marketing proposes, an operator approves, and the maker≠checker pair the service
+  // enforces as a 409 stays a split between two people rather than one role holding both buttons.
+  MARKETING:  "ROLE_MARKETING",
   TREASURY_DEALER:   "ROLE_TREASURY_DEALER",
   TREASURY_APPROVER: "ROLE_TREASURY_APPROVER",
   // ADR-0315 D4: a senior approver overrides a counterparty-limit breach on a PENDING_APPROVAL
@@ -136,6 +142,13 @@ export const PERMISSIONS = {
   "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
   "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
   "campaign:activate":      [ROLES.ADMIN, ROLES.OPERATOR],
+  // MGM program drafts (ADR-0310): marketing authors the DRAFT proposal, an operator approves it.
+  // `create` therefore admits MARKETING alongside ADMIN/OPERATOR, while `publish` deliberately
+  // does NOT — the same maker≠checker four-eyes the referral-service enforces as a 409
+  // ("maker cannot publish their own program") would be undermined by offering both buttons to
+  // one author, exactly the reasoning campaign:activate documents above.
+  "referral:program:create":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.MARKETING],
+  "referral:program:publish": [ROLES.ADMIN, ROLES.OPERATOR],
   // Card-issuance deliberately has a narrower read role than the wider payments
   // workspace: its GET endpoints accept only VIEWER/OPERATOR/ADMIN, and every
   // lifecycle writes except block/cancel accept only OPERATOR/ADMIN. Compliance
@@ -375,6 +388,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['campaign:create', ['/segments/new']],
   ['campaign:view', ['/campaigns']],
   ['campaign:create', ['/campaigns/new']],
+  ['referral:program:create', ['/campaigns/referrals/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
   ['lending:risk:view', ['/lending/risk']],
   ['balance-sheet:view', ['/balance-sheet']],
