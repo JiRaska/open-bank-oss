@@ -47,6 +47,10 @@
         "description": "Read-only access"
       },
       {
+        "name": "ROLE_MARKETING",
+        "description": "Marketing — manages referral/MGM program drafts (create), cannot attribute/qualify"
+      },
+      {
         "name": "ROLE_API",
         "description": "Machine-to-machine API access"
       },
@@ -1831,6 +1835,25 @@
         "ROLE_COMPLIANCE",
         "ROLE_VIEWER",
         "ROLE_COMMS_APPROVER"
+      ]
+    },
+    {
+      "username": "marketing@openbank.local",
+      "email": "marketing@openbank.local",
+      "firstName": "Marketing",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__MARKETING_USER_PASSWORD__",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_MARKETING",
+        "ROLE_VIEWER"
       ]
     },
     {
