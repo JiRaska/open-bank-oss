@@ -64,7 +64,9 @@ class TaxReportingAccountPactConsumerTest {
                     a.stringType("currencyCode", "CZK")
                     a.stringValue("status", "ACTIVE")
                     a.stringType("openedAt", "2026-01-01T00:00:00Z")
-                    a.stringType("closedAt", "2026-06-01T00:00:00Z")
+                    // closedAt deliberately NOT pinned: the shared ADR-0143 seed has closedAt
+                    // null and the adapter never reads it — same choice as interest-service's
+                    // accrual pact on this same state.
                 }
                 o.`object`("pagination") { p ->
                     p.booleanType("hasNextPage", false)
