@@ -179,9 +179,10 @@ components:
         currency: {type: string, minLength: 3, maxLength: 3}
         qualifyingEvent: {type: string}
         attributionWindowEndsAt: {type: string, format: date-time}
-        # GET /programs returns PUBLISHED only; GET /programs/drafts returns DRAFT only. The
-        # enum widens so one ReferralProgram schema serves both read models.
-        status: {type: string, enum: [DRAFT, PUBLISHED]}
+        # GET /programs returns PUBLISHED only; GET /programs/drafts returns DRAFT only; EXPIRED
+        # exists in the ProgramStatus domain lifecycle but is not emitted by either read model
+        # yet — the enum still mirrors the domain enum verbatim (openapi-enum-domain-drift).
+        status: {type: string, enum: [DRAFT, PUBLISHED, EXPIRED]}
         maker: {type: string}
         checker: {type: string, nullable: true}
         createdAt: {type: string, format: date-time}
