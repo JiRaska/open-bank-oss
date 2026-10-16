@@ -1,0 +1,105 @@
+{
+  "consumer": {
+    "name": "openbank-tax-reporting-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the party's tax facts for the CRS FATCA assembly",
+      "providerStates": [
+        {
+          "name": "a reportable party has declared a tax-residency profile with a TIN"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/reporting/parties/62000000-0000-0000-0000-000000000062/tax-facts"
+      },
+      "response": {
+        "body": {
+          "crsStatus": "REPORTABLE",
+          "declaredAt": "2026-06-15T10:00:00Z",
+          "fatcaStatus": "NON_US",
+          "holderName": "Pact Tax Resident",
+          "partyId": "62000000-0000-0000-0000-000000000062",
+          "profileVersion": 1,
+          "taxResidencies": [
+            {
+              "country": "DE",
+              "tin": "123456789"
+            },
+            {
+              "country": "CZ",
+              "tin": null
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.declaredAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holderName": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.profileVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.taxResidencies[0].tin": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET tax facts with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid caller identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/reporting/parties/62000000-0000-0000-0000-000000000062/tax-facts"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}
