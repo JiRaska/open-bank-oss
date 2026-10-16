@@ -1521,7 +1521,10 @@
       ],
       "secret": "__AGENT_CLIENT_SECRET__",
       "attributes": {
-        "standard.token.exchange.enabled": "true"
+        "standard.token.exchange.enabled": "true",
+        "oauth2.jwt.authorization.grant.enabled": "true",
+        "oauth2.jwt.authorization.grant.idp": "kubernetes",
+        "oauth2.jwt.authorization.grant.audience": "[{\"key\":\"kubernetes\",\"value\":\"keycloak\"}]"
       },
       "authorizationSettings": {
         "allowRemoteResourceManagement": false,
@@ -2175,6 +2178,21 @@
       "enabled": true,
       "serviceAccountClientId": "openbank-mcp-service",
       "realmRoles": []
+    },
+    {
+      "username": "wl-openbank-agent",
+      "enabled": true,
+      "firstName": "Workload",
+      "lastName": "Agent",
+      "email": "workload-agent@example.invalid",
+      "realmRoles": ["ROLE_API"],
+      "federatedIdentities": [
+        {
+          "identityProvider": "kubernetes",
+          "userId": "system:serviceaccount:platform:openbank-agent",
+          "userName": "system:serviceaccount:platform:openbank-agent"
+        }
+      ]
     }
   ],
   "attributes": {
@@ -2185,6 +2203,7 @@
       "alias": "kubernetes",
       "providerId": "oidc",
       "enabled": true,
+      "hideOnLogin": true,
       "trustEmail": false,
       "storeToken": false,
       "addReadTokenRoleOnCreate": false,
@@ -2196,8 +2215,14 @@
         "clientId": "keycloak",
         "clientSecret": "__KUBERNETES_OIDC_CLIENT_SECRET__",
         "useJwksUrl": "true",
-        "jwksUrl": "__KUBERNETES_OIDC_ISSUER__/openid/v1/jwks",
+        "jwksUrl": "__KUBERNETES_OIDC_ISSUER__/keys",
         "validateSignature": "true",
+        "disableTypeClaimCheck": "false",
+        "jwtAuthorizationGrantEnabled": "true",
+        "jwtAuthorizationGrantAssertionSignatureAlg": "RS256",
+        "jwtAuthorizationGrantAssertionReuseAllowed": "true",
+        "jwtAuthorizationGrantMaxAllowedAssertionExpiration": "7200",
+        "jwtAuthorizationGrantLimitAccessTokenExp": "true",
         "syncMode": "LEGACY"
       }
     }
