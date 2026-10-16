@@ -16,7 +16,7 @@
 # merging.
 #
 # WHAT "CONTAINS PHASE 1" MEANS
-# The marker commit is DERIVED, not hard-coded: the first commit on this history whose
+# The marker commit is DERIVED, not hard-coded: the first commit on canonical main whose
 # OpaSidecarPolicyDecisionPoint.kt puts "service_account" into the OPA input. A pinned image
 # `openbank-<svc>:sandbox-<sha>[-run<id>]` is current iff that marker is an ancestor of <sha>.
 # A pin that cannot be resolved to a commit (a placeholder, or a commit outside this clone) counts
@@ -46,15 +46,20 @@ cd "$(git rev-parse --show-toplevel)"
 REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 API=0
 
-# First commit (oldest) on HEAD's history that introduced the marker text.
+# Follow canonical main: a stacked PR can retain a parallel pre-squash introduction.
+# Local callers must fetch origin/main before checking rollout.
 marker_commit() {
   if [ "$API" -eq 0 ]; then
-    git log --format=%H --reverse -S"$MARKER_TEXT" HEAD -- "$MARKER_FILE" | head -1
+    git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1 || {
+      echo "::error::origin/main is unavailable; fetch main before checking rollout." >&2
+      return 1
+    }
+    git log --first-parent --format=%H --reverse -S"$MARKER_TEXT" origin/main -- "$MARKER_FILE" | head -1
     return
   fi
   # Commits touching the file, newest first; the marker is the oldest whose content has the text.
   local found="" sha
-  for sha in $(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=$(git rev-parse HEAD)&per_page=100" --jq '.[].sha'); do
+  for sha in $(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=main&per_page=100" --jq '.[].sha'); do
     if gh api -H 'Accept: application/vnd.github.raw' "repos/${REPO}/contents/${MARKER_FILE}?ref=${sha}" \
         | grep -qF "$MARKER_TEXT"; then
       found="$sha"
@@ -119,7 +124,7 @@ run() {
   fi
   marker="$(marker_commit)"
   if [ -z "$marker" ]; then
-    echo "::error::Phase 1 (libs-runtime sending service_account) is not on this history: no commit adds '${MARKER_TEXT}' to ${MARKER_FILE}." >&2
+    echo "::error::Phase 1 (libs-runtime sending service_account) is not on canonical main: no commit adds '${MARKER_TEXT}' to ${MARKER_FILE}." >&2
     return 1
   fi
   echo "marker commit (Phase 1): $marker"
@@ -181,6 +186,43 @@ selftest() {
     if pin_is_current "$marker" "${parent:0:12}"; then echo "selftest FAIL: an OLDER pin read as current" >&2; f=1; fi
     if pin_is_current "$marker" "000000000"; then echo "selftest FAIL: a placeholder read as current" >&2; f=1; fi
     if pin_is_current "$marker" "deadbeefdeadbeef"; then echo "selftest FAIL: an unresolvable pin read as current" >&2; f=1; fi
+    # A stacked PR retains the pre-squash phase-1 commit after main is merged in.
+    # Images are built from main's squash commit, not from that parallel ancestor.
+    git branch -M main
+    mkdir -p "$(dirname "$MARKER_FILE")"
+    printf '// baseline\n' > "$MARKER_FILE"
+    git add "$MARKER_FILE"
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -qm baseline
+    before_phase1="$(git rev-parse HEAD)"
+    git checkout -qb phase1
+    printf '%s\n' 'put("service_account", true)' > "$MARKER_FILE"
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -qam phase1
+    git checkout -q main
+    git merge --squash phase1 >/dev/null
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -qm 'squash phase1'
+    shipped="$(git rev-parse HEAD)"
+    git update-ref refs/remotes/origin/main "$shipped"
+    git checkout -qb phase2 phase1
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t merge --no-edit main >/dev/null
+    marker="$(marker_commit)"
+    [ "$marker" = "$shipped" ] || { echo "selftest FAIL: marker follows pre-squash branch history" >&2; f=1; }
+    pin_is_current "$marker" "$shipped" || { echo "selftest FAIL: squashed phase-1 image rejected" >&2; f=1; }
+    if pin_is_current "$marker" "$before_phase1"; then echo "selftest FAIL: pre-phase-1 image accepted" >&2; f=1; fi
+
+    # Exercise the shallow-clone transport without credentials or a network request.
+    gh() {
+      case "$*" in
+        *"commits?path="*"&sha=main&"*) printf '%s\n' "$shipped" "$before_phase1" ;;
+        *"contents/"*"?ref=$shipped"*) printf '%s\n' 'put("service_account", true)' ;;
+        *"contents/"*"?ref=$before_phase1"*) printf '// baseline\n' ;;
+        *) return 1 ;;
+      esac
+    }
+    API=1
+    marker="$(marker_commit)"
+    [ "$marker" = "$shipped" ] || { echo "selftest FAIL: API marker does not follow canonical main" >&2; f=1; }
+    unset -f gh
+    API=0
     exit "$f"
   ) || fail=1
   rm -rf "$tmp"
