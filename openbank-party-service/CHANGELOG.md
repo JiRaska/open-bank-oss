@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.26.0...party-service-v0.27.0) (2026-10-16)
+
+
+### Features
+
+* **tax-reporting:** CRS/FATCA information-exchange return family (ADR-0340) ([#13007](https://github.com/JiRaska/open-bank-oss/issues/13007)) ([8c85a90](https://github.com/JiRaska/open-bank-oss/commit/8c85a903f2511f6b0a421611d24bbe63f1ab3dc1))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.5...party-service-v0.26.0) (2026-10-16)
 
 
