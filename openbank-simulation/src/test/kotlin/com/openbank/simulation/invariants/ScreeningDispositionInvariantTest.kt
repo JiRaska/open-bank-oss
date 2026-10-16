@@ -164,6 +164,22 @@ class ScreeningDispositionInvariantTest {
     }
 
     @Test
+    fun `a released REVIEW that was both refused and executed is a violation`() {
+        val w = world()
+        val id = conversion()
+        w.screening.recordDecision(id, ScreeningDecision.REVIEW)
+        w.screening.openReview(id)
+        w.screening.resolveReview(id, escalated = false)
+        w.screening.markRefused(id)
+        w.screening.markExecuted(id)
+
+        val violation = MoneyPathInvariants.screeningDispositionIntegrity.check(w)
+
+        assertThat(violation).isNotNull()
+        assertThat(violation!!.detail).contains("false positive released but refused")
+    }
+
+    @Test
     fun `refusing a CLEAR conversion is a violation`() {
         val w = world()
         val id = conversion()
