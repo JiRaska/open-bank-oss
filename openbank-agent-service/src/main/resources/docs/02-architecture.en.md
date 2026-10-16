@@ -1,6 +1,6 @@
 # Architecture
 
-The service follows the hexagonal architecture mandated by [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). The domain layer has **zero framework imports**. Unlike most OpenBank services there is **no persistence adapter** — the agent service owns no banking data; its "outputs" are model completions, downstream read calls, and audit events.
+The service follows the hexagonal architecture mandated by [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). The domain layer has **zero framework imports**. The service has persistence adapters for its own proposal, kill-switch, and audit-outbox state; it does not own banking-system data. Its other outputs are model completions and downstream read calls.
 
 ## C4 — container view
 
@@ -61,7 +61,9 @@ The use-case orchestration and ports:
 
 ## Durable audit outbox
 
-The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway** and **policy gate** publish through `AuditEventPublisher`; a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain. Kafka activation remains explicitly controlled until the runtime rollout is attested.
+The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway** and **policy gate** publish through `AuditEventPublisher`; a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain.
+
+Each proposal creation or decision stores its state and the corresponding audit event in one database transaction. If the operation fails, both writes roll back. Kafka delivery happens after that database transaction and is at least once, so consumers must deduplicate. This change does not repair historical missing audit events. Kafka activation remains explicitly controlled until the runtime rollout is attested.
 
 ## Resilience
 

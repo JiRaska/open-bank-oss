@@ -1,6 +1,6 @@
 # Architektura
 
-Služba dodržuje hexagonální architekturu nařízenou [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). Doménová vrstva má **nula frameworkových importů**. Na rozdíl od většiny služeb OpenBank zde **není perzistentní adaptér** — agent service nevlastní žádná bankovní data; jejími „výstupy" jsou completiony modelu, downstream čtení a audit eventy.
+Služba dodržuje hexagonální architekturu nařízenou [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). Doménová vrstva má **nula frameworkových importů**. Služba má perzistentní adaptéry pro vlastní stav návrhů, kill switche a auditního outboxu; nevlastní data bankovních systémů. Dalšími výstupy jsou completiony modelu a downstream čtení.
 
 ## C4 — pohled na kontejner
 
@@ -61,7 +61,9 @@ Orchestrace use-case a porty:
 
 ## Odolný auditní outbox
 
-Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. **Model gateway** a **policy gate** publikují přes `AuditEventPublisher`; dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
+Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. **Model gateway** a **policy gate** publikují přes `AuditEventPublisher`; dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu.
+
+Při vytvoření návrhu i při jeho schválení či zamítnutí se stav návrhu a odpovídající auditní událost zapisují v jedné databázové transakci. Pokud operace selže, oba zápisy se vrátí zpět. Doručení do Kafky probíhá až po této databázové transakci a je typu at-least-once, takže konzumenti musí deduplikovat. Tato změna neopravuje historické chybějící auditní události. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
 
 ## Odolnost
 
