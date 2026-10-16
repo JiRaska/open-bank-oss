@@ -81,6 +81,15 @@ Only with `AUTHZ_ENFORCE=true` does a deny reject the request.
 
 The decision and management API listens only on pod loopback (`127.0.0.1:8181`). Kubelet probes use the separate read-only diagnostic listener on port 8282; that listener exposes health/metrics, not policy or data APIs. Same-namespace network access does not expose the decision listener.
 
+Under enforced OPA, `ROLE_API` alone does not grant `catalog.read` or `catalog.list`,
+including the banking product/fee compatibility endpoints. These actions also protect the
+generic catalog: API clients relying on `ROLE_API` alone need an existing named/scoped grant
+(such as the pension service with `CATALOG_SCOPE_READ`). Inherited main operator/admin read
+grants are unchanged. Human `ROLE_VIEWER` reads remain
+available; a machine or unknown identity cannot use that staff grant. The synthetic catalog
+reader retains only its named, scoped read grant. This intentionally rejects generic API
+clients rather than broadening the main policy's scope boundary.
+
 ## Health checks
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC up.

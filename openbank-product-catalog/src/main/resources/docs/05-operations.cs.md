@@ -83,6 +83,15 @@ pokračuje. Požadavek odmítne až `AUTHZ_ENFORCE=true`.
 
 Rozhodovací a řídicí API naslouchá pouze na loopbacku podu (`127.0.0.1:8181`). Kubelet sondy používají samostatný diagnostický listener na portu 8282, který poskytuje pouze health/metrics, nikoli API politik a dat. Přístup ze stejného namespace rozhodovací listener nezpřístupňuje.
 
+Při vynucování OPA samotná role `ROLE_API` nepovoluje `catalog.read` ani `catalog.list`,
+včetně bankovních kompatibilních endpointů produktů a poplatků. Stejné akce chrání i obecný
+katalog: API klient spoléhající pouze na `ROLE_API` potřebuje existující grant pro pojmenovanou
+identitu a scope (například penzijní služba s `CATALOG_SCOPE_READ`). Zděděné čtecí granty main
+pro operator/admin zůstávají beze změny. Lidskému účtu s `ROLE_VIEWER` zůstává čtení dostupné;
+stroj ani neznámá identita tento zaměstnanecký grant nepoužijí. Syntetická čtecí cesta si
+ponechává pouze grant pro svou pojmenovanou identitu a scope. Jde o vědomé odmítnutí obecných
+API klientů, aby se nerozšířila hranice oprávnění stávající main policy.
+
 ## Health checky
 
 - **Liveness:** `:8085/q/health/live` — JVM + ArC běží.

@@ -24,14 +24,15 @@ catalog_read_actions := {"catalog.read", "catalog.list"}
 
 catalog_author_actions := {"catalog.create", "catalog.update", "catalog.author"}
 
-# Fleet services read products and fees with their own client_credentials identity, which the
-# deployed realm gives ROLE_API (account, lending, interest, billing, document, agent, ...).
-# ROLE_VIEWER is the read-only staff role ProductCatalogResource / FeesResource admit.
-allowed_reasons contains "catalog-read-api-or-viewer" if {
+# ROLE_VIEWER is the read-only human staff role ProductCatalogResource / FeesResource admit.
+# ROLE_API alone is deliberately insufficient: the same catalog.read action also protects
+# generic offerings, so a blanket API grant would bypass main's named pension caller +
+# CATALOG_SCOPE_READ boundary. API clients need an existing named, scoped grant instead.
+allowed_reasons contains "catalog-read-staff-viewer" if {
 	input.principal.type == "HUMAN"
+	not principal_is_machine
 	input.action in catalog_read_actions
-	some role in {"ROLE_API", "ROLE_VIEWER"}
-	role in input.principal.roles
+	"ROLE_VIEWER" in input.principal.roles
 }
 
 # The synthetic catalog-read journey holds only the catalog:read scope (CATALOG_SCOPE_READ).
@@ -40,7 +41,10 @@ allowed_reasons contains "catalog-read-api-or-viewer" if {
 # carries preferred_username and principal.id resolves to the service-account name.
 allowed_reasons contains "catalog-read-synthetic-journey" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-synthetic-catalog-read"
+	machine_named("service-account-openbank-synthetic-catalog-read")
+
+	# Only an absent legacy marker may fall back to the name; explicit null is malformed.
+	not input.principal.service_account == null
 	"CATALOG_SCOPE_READ" in input.principal.roles
 	input.action in catalog_read_actions
 }
@@ -63,6 +67,6 @@ allowed_reasons contains "operator-catalog-publish-write" if {
 
 catalog_staff if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	not startswith(input.principal.id, "agent:")
 }
