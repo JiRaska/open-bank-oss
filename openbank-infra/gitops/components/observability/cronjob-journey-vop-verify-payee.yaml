@@ -1,0 +1,229 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: vop-verify-payee (ADR-0252, ADR-0171). The bank-owned canary customer verifies a
+# payee name against an IBAN through the PUBLIC customer edge — the same anti-APP-fraud check
+# EU regulation (Reg. (EU) 2024/886 Art. 5c) makes mandatory before a SEPA credit transfer.
+#
+# Why the public edge and not vop-service's ClusterIP: the ingress allow-list admits only
+# customer-edge and admin-ui to port 8149, and the customer-relevant question is whether a
+# payer can reach the check at all — an in-cluster call would prove the service answers and
+# nothing about the path a customer's app takes. The token comes from the public token
+# endpoint for the same reason.
+#
+# Identity: the SAME canary customer the wealth-declared-holding journey drives —
+# openbank-synthetic-retail (ADR-0331), a confidential customers-realm client whose
+# service-account user is a SYNTHETIC party with ROLE_CUSTOMER only. That role is exactly
+# what customer-edge's POST /customer/v1/vop/verify requires (class-level @RolesAllowed), and
+# the base OPA policy admits any customer.* action for ROLE_CUSTOMER, so no new client, role
+# or policy is needed. Every request carries x-openbank-synthetic: true.
+#
+# Determinism: the journey asks about a structurally valid IBAN the bank holds no name for
+# (account-service answers 404, which the VoP adapter maps to a null holder name). The wire
+# answer is therefore always {status: "no_data", reason: "account_not_found"} — a complete
+# exercise of edge → vop → account lookup → evidence row, with a stable assertion. NO_DATA is
+# the honest, designed answer here (ADR-0171 §4): a positive MATCH would require a synthetic
+# account fixture, which is ADR-0252 phase-1 account work this journey deliberately does not
+# wait for.
+#
+# Side effects: one vop_verification evidence row per run — ibanHash and nameHash only, no
+# party link, no aggregate impact; at one run per 15 minutes that is ~96 hash-only rows a
+# day. The rate limiter (60/min per requester) is never near.
+#
+# The secret arrives through the OPTIONAL ExternalSecret journey-vop-verify-payee-oidc,
+# reading the same OpenBao KV entry (keycloak/synthetic-retail) the wealth journey's
+# ExternalSecret reads. Until the identity is provisioned
+# (openbank-infra/scripts/provision-synthetic-customer.sh) the script logs "credential
+# absent" and fails every check: a red run, never a crash loop and never a green one.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-vop-verify-payee-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: vop-verify-payee
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<3000'],
+      },
+      tags: { journey: 'vop-verify-payee' },
+    };
+
+    // Read-shaped by design: the check mints nothing and moves no money, so the journey is
+    // one token request and one POST. Override the bases only for the catalog's documented
+    // falsification; the normal targets are the real public edge.
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'https://kc.open-bank.tech/realms/openbank-customers/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.SYNTHETIC_CLIENT_ID || 'openbank-synthetic-retail';
+    const CLIENT_SECRET = __ENV.SYNTHETIC_CLIENT_SECRET || '';
+
+    // A structurally valid CZ IBAN the bank holds no name for: account-service answers 404,
+    // VoP maps that to null, and the designed wire answer is no_data/account_not_found.
+    // Fixed on purpose — a rotating IBAN would make the assertion nondeterministic.
+    const UNKNOWN_IBAN = 'CZ6508000000192000145399';
+    const PAYEE_NAME = 'Canary Payee';
+
+    const CHECKS = [
+      'vop verify answers 200',
+      'vop verify returns JSON',
+      'vop verify answers no_data for an unknown IBAN',
+      'vop verify names account_not_found as the reason',
+      'vop verify never echoes a name on no_data',
+    ];
+
+    function failAll() {
+      const verdicts = {};
+      for (const name of CHECKS) verdicts[name] = () => false;
+      check(null, verdicts);
+    }
+
+    // Never log the secret, the token, headers or response bodies: retained Job logs must
+    // stay secret-free. Status codes only.
+    function fetchToken() {
+      if (!CLIENT_SECRET) {
+        console.error('vop-verify-payee credential absent: SYNTHETIC_CLIENT_SECRET is not set (ExternalSecret journey-vop-verify-payee-oidc not provisioned); refusing to probe unauthenticated');
+        return null;
+      }
+      const res = http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+      if (res.status !== 200) {
+        console.error(`vop-verify-payee token request failed: status=${res.status}`);
+        return null;
+      }
+      let token = null;
+      try { token = res.json('access_token'); } catch (_) { /* reported below */ }
+      if (typeof token !== 'string' || token.length === 0) {
+        console.error('vop-verify-payee token response carried no access_token');
+        return null;
+      }
+      return token;
+    }
+
+    function json(res) {
+      try { return res.json(); } catch (_) { return null; }
+    }
+
+    export default function () {
+      const token = fetchToken();
+      if (token === null) { failAll(); return; }
+
+      const response = http.post(
+        `${CUSTOMER_BASE}/customer/v1/vop/verify`,
+        JSON.stringify({ creditorIban: UNKNOWN_IBAN, creditorName: PAYEE_NAME }),
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'x-openbank-synthetic': 'true',
+          },
+          tags: { endpoint: 'vop-verify', service: 'customer-edge' },
+        },
+      );
+      if (response.status !== 200) {
+        console.error(`vop-verify-payee unexpected response: status=${response.status} content_type=${response.headers['Content-Type'] || 'absent'}`);
+      }
+      const contentType = response.headers['Content-Type'] || '';
+      const body = response.status === 200 ? json(response) : null;
+
+      check(response, {
+        'vop verify answers 200': (r) => r.status === 200,
+        'vop verify returns JSON': () => contentType.includes('application/json'),
+        'vop verify answers no_data for an unknown IBAN': () => !!body && body.status === 'no_data',
+        'vop verify names account_not_found as the reason': () => !!body && body.reason === 'account_not_found',
+        // ADR-0171 §6: the matched name is disclosed only on close_match, never on
+        // no_match/no_data — echoing a name here would make the endpoint a name oracle.
+        'vop verify never echoes a name on no_data': () => !body || body.matchedName == null,
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-vop-verify-payee
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: vop-verify-payee
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '4,19,34,49 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "3600"
+spec:
+  schedule: "4,19,34,49 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: vop-verify-payee
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/journey.js
+              env:
+                # Optional on purpose: an unseeded KV entry must yield a red run with an
+                # explicit "credential absent" error, not CreateContainerConfigError.
+                - name: SYNTHETIC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-vop-verify-payee-oidc
+                      key: SYNTHETIC_CLIENT_SECRET
+                      optional: true
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-vop-verify-payee-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
