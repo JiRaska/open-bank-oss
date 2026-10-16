@@ -484,11 +484,46 @@ STUB
 # does not classify as UNATTESTED, the vocabulary has moved and the gate is blind.
 # No side effects — verify-attestation is read-only.
 # ---------------------------------------------------------------------------------------
+# CI opts in only for fresh public-default trust. Generic callers retain their cache.
+COSIGN_TUF_ROOT=""
+tuf_cache_dir=""
+cosign_verify() {
+  if [ -n "$COSIGN_TUF_ROOT" ]; then
+    COSIGN_YES=true TUF_ROOT="$COSIGN_TUF_ROOT" "$COSIGN_BIN_RESOLVED" "$@"
+  else
+    COSIGN_YES=true "$COSIGN_BIN_RESOLVED" "$@"
+  fi
+}
+
+prepare_tuf_cache() {
+  case "${FLEET_ATTEST_TUF_CACHE_MODE:-}" in
+    "") return 0 ;;
+    isolated-default) ;;
+    *) echo 'UNKNOWN: unsupported TUF cache mode' >&2; return 2 ;;
+  esac
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      TUF_* | SIGSTORE_*)
+        printf 'UNKNOWN: isolated-default refuses custom trust/cache environment (%s)\n' "$name" >&2
+        return 2 ;;
+    esac
+  done < <(compgen -e)
+  if [ -z "${HOME:-}" ] || [ ! -d "$HOME" ] || [ -e "$HOME/.sigstore/root" ] || [ -L "$HOME/.sigstore/root" ]; then
+    echo 'UNKNOWN: isolated-default requires absent default TUF state and a home directory' >&2
+    return 2
+  fi
+  tuf_cache_dir="$(mktemp -d)" || return 2
+  COSIGN_TUF_ROOT="$tuf_cache_dir/vocabulary"
+  trap 'rm -rf "$tuf_cache_dir"' EXIT
+  mkdir "$COSIGN_TUF_ROOT" || return 2
+}
+
 vocabulary_control() {
   local image="$1" err verdict
   printf '==> Vocabulary control: %s with --type spdx (never attested; must read UNATTESTED)\n' \
     "${image#"${ECR_REGISTRY}"/}"
-  if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+  if err="$(cosign_verify verify-attestation \
               --key "$COSIGN_KEY" --type spdx "$image" 2>&1)"; then
     echo "ERROR: control image verified against a type it should not carry — the control is" >&2
     echo "       no longer negative. Pick a type this fleet genuinely never attests." >&2
@@ -574,6 +609,10 @@ if [ "$MODE" != check-placeholders ] && [ -z "$COSIGN_BIN_RESOLVED" ]; then
   echo "ERROR: cosign v2 unavailable — cannot verify fleet attestations." >&2
   echo "       Install cosign v2.x, set COSIGN_BIN, or set COSIGN_VERSION." >&2
   exit 1
+fi
+
+if [ "$MODE" != check-placeholders ]; then
+  prepare_tuf_cache || exit 2
 fi
 
 echo "==> Enumerating openbank-* images declared in ${GITOPS_DIR}"
@@ -850,12 +889,18 @@ cleanup_pool() {
   # orphan verification processes; it may wait for an already running cosign call.
   for pid in ${pool_pids[@]+"${pool_pids[@]}"}; do wait "$pid" 2>/dev/null || true; done
   rm -rf "$pool_dir"
+  if [ -n "$tuf_cache_dir" ]; then rm -rf "$tuf_cache_dir"; fi
 }
 trap cleanup_pool EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 probe_one_image() {
   local image="$1" result="$2" ref mode short verdict err missing_type attempt _e _pt
+  local COSIGN_TUF_ROOT="$COSIGN_TUF_ROOT"
+  if [ -n "$tuf_cache_dir" ]; then
+    COSIGN_TUF_ROOT="$tuf_cache_dir/${result##*/}"
+    mkdir "$COSIGN_TUF_ROOT" || return 2
+  fi
   ref="$(probe_ref "$image")"
   mode="$(probe_mode "$image")"
   short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
@@ -874,7 +919,7 @@ probe_one_image() {
     missing_type=""
     # The image SIGNATURE first: the policy's first validation is verifyImageSignatures, and a
     # signed attestation does not imply a signed image.
-    if ! _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
+    if ! _e="$(cosign_verify verify \
                  --key "$COSIGN_KEY" "$ref" 2>&1)"; then
       err="$_e"
       verdict="$(classify_failure "$err")"
@@ -882,7 +927,7 @@ probe_one_image() {
     fi
     for _pt in "${PREDICATE_TYPES[@]}"; do
       [ "$verdict" = OK ] || break
-      if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+      if _e="$(cosign_verify verify-attestation \
                  --key "$COSIGN_KEY" --type "$_pt" "$ref" 2>&1)"; then
         continue
       fi
@@ -997,6 +1042,7 @@ for ((i=0; i<${#IMAGES[@]}; i++)); do
   if [ "$RETRIES_DISABLED" -eq 1 ]; then : > "$pool_dir/retries-disabled"; fi
 done
 rm -rf "$pool_dir"
+if [ -n "$tuf_cache_dir" ]; then rm -rf "$tuf_cache_dir"; fi
 trap - EXIT INT TERM
 
 
