@@ -7,12 +7,8 @@
 #   fraud.score       — POST /api/v1/fraud/score: score a payment intent, return a
 #                       verdict (ALLOW/CHALLENGE/REVIEW/DECLINE). The only write
 #                       endpoint (ADR-0084 §1).
-#   fraud.review.read — GET /api/v1/fraud/review-queue: analyst work queue. Covered
-#                       by base operator-read-any / compliance-read-any (*.read
-#                       suffix) — no rule needed here. NOTE (#3734): that base rule
-#                       also admits the M2M identities to this read, the same
-#                       pre-existing fleet-wide read over-grant tracked separately;
-#                       this PR tightens WRITES only.
+#   fraud.review.read — GET /api/v1/fraud/review-queue: human analyst work queue.
+#                       The action-scoped prohibition below vetoes machine callers.
 #
 # Base rest.rego contributes nothing to fraud.score (a non-read action with no
 # resource path parameter), so BOTH write allow paths live in this extension.
@@ -41,7 +37,7 @@ allowed_reasons contains "operator-fraud-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	startswith(input.action, "fraud.")
 }
 
@@ -62,7 +58,7 @@ allowed_reasons contains "operator-fraud-write" if {
 # service sharing the client would also match this rule for fraud.score.
 allowed_reasons contains "service-fraud-scoring" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "fraud.score"
 }
 
@@ -75,6 +71,14 @@ allowed_reasons contains "service-fraud-scoring" if {
 # legitimate scoring caller (service-fraud-scoring above) — interest (#3698) could
 # prohibit every service-account because no M2M writer exists there; fraud cannot.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action == "fraud.score"
+}
+
+# Analyst review is staff-only, including when a generic read grant matches.
+# Reuse the phase-two classifier: absent or invalid markers are not staff.
+# Other services' generic reads and the named fraud.score grant are unchanged.
+prohibited if {
+	input.action == "fraud.review.read"
+	principal_is_machine
 }

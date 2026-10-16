@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.1...domestic-payment-v1.1.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.0...domestic-payment-v1.0.1) (2026-10-14)
 
 

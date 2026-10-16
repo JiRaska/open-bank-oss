@@ -32,6 +32,87 @@ describe('approval inbox triage', () => {
     ])
   })
 
+  it('filters by risk class derived from rules.yaml action-class metadata', () => {
+    const withRisk: DomainApprovalItem[] = [
+      { ...rows[0], riskClass: 'MONEY_PATH' },
+      { ...rows[1], riskClass: 'DESTRUCTIVE' },
+      { ...rows[2], riskClass: 'OPERATIONAL' },
+    ]
+    expect(filterAndSortDomainApprovals(withRisk, 'all', 'oldest', '', { riskClass: 'MONEY_PATH' }).map(r => r.id))
+      .toEqual(['balance-old'])
+    expect(filterAndSortDomainApprovals(withRisk, 'all', 'oldest', '', { riskClass: 'DESTRUCTIVE' }).map(r => r.id))
+      .toEqual(['sanctions-new'])
+    expect(filterAndSortDomainApprovals(withRisk, 'all', 'oldest', '', { riskClass: 'OPERATIONAL' }).map(r => r.id))
+      .toEqual(['notification-mid'])
+    // Items without a risk facet (older BFF snapshot) survive 'all' but match no specific class.
+    expect(filterAndSortDomainApprovals(rows, 'all', 'oldest', '', { riskClass: 'MONEY_PATH' })).toEqual([])
+    expect(filterAndSortDomainApprovals(rows, 'all', 'oldest')).toHaveLength(rows.length)
+  })
+
+  it('filters by amount band and treats an absent amount as outside every band', () => {
+    const withAmounts: DomainApprovalItem[] = [
+      { ...rows[0], amount: '500', currency: 'CZK' },
+      { ...rows[1], amount: '5000', currency: 'CZK' },
+      { ...rows[2], amount: '50000', currency: 'CZK' },
+      { ...rows[3], amount: '500000', currency: 'CZK' },
+      { ...rows[4] }, // no amount — never "a small amount"
+    ]
+    const band = (amountBand: 'lt1k' | '1k-10k' | '10k-100k' | 'gt100k') =>
+      filterAndSortDomainApprovals(withAmounts, 'all', 'oldest', '', { amountBand }).map(r => r.id)
+    expect(band('lt1k')).toEqual(['balance-old'])
+    expect(band('1k-10k')).toEqual(['sanctions-new'])
+    expect(band('10k-100k')).toEqual(['notification-mid'])
+    expect(band('gt100k')).toEqual(['billing-newest'])
+    // A non-numeric amount sits outside every band, same as an absent one.
+    const junk = withAmounts.map(r => ({ ...r, amount: r.amount ?? 'n/a' }))
+    expect(filterAndSortDomainApprovals(junk, 'all', 'oldest', '', { amountBand: 'lt1k' }).map(r => r.id))
+      .toEqual(['balance-old'])
+  })
+
+  it.each([
+    ['99999.99', '10k-100k'],
+    ['100000', '10k-100k'],
+    ['100000.01', 'gt100k'],
+  ] as const)('places %s in exactly the %s amount band', (amount, expected) => {
+    const bands = ['lt1k', '1k-10k', '10k-100k', 'gt100k'] as const
+    for (const currency of ['CZK', 'EUR']) {
+      const item: DomainApprovalItem = { ...rows[0], amount, currency }
+      const matched = bands.filter(amountBand =>
+        filterAndSortDomainApprovals([item], 'all', 'oldest', '', { amountBand }).length === 1)
+      expect(matched).toEqual([expected])
+    }
+  })
+
+  it('filters by request age against an injectable clock, with untimestamped items outside every band', () => {
+    const now = new Date('2026-08-31T12:00:00Z')
+    const aged: DomainApprovalItem[] = [
+      { ...rows[0], proposedAt: '2026-08-31T10:00:00Z' },   // 2h old
+      { ...rows[1], proposedAt: '2026-08-31T00:00:00Z' },   // 12h old
+      { ...rows[2], proposedAt: '2026-08-25T12:00:00Z' },   // 6d
+      { ...rows[3], proposedAt: '2026-08-20T12:00:00Z' },   // 11d
+      { ...rows[4], proposedAt: null },                      // no timestamp
+    ]
+    const band = (ageBand: 'lt4h' | '4h-1d' | '1d-7d' | 'gt7d') =>
+      filterAndSortDomainApprovals(aged, 'all', 'oldest', '', { ageBand, now }).map(r => r.id)
+    expect(band('lt4h')).toEqual(['balance-old'])
+    expect(band('4h-1d')).toEqual(['sanctions-new'])
+    expect(band('1d-7d')).toEqual(['notification-mid'])
+    expect(band('gt7d')).toEqual(['billing-newest'])
+    // Boundary: exactly 4h is '4h-1d', exactly 1d is '1d-7d', exactly 7d is 'gt7d'.
+    const boundary: DomainApprovalItem[] = [
+      { ...rows[0], proposedAt: '2026-08-31T08:00:00Z' }, // exactly 4h
+      { ...rows[1], proposedAt: '2026-08-30T12:00:00Z' }, // exactly 1d
+      { ...rows[2], proposedAt: '2026-08-24T12:00:00Z' }, // exactly 7d
+    ]
+    expect(filterAndSortDomainApprovals(boundary, 'all', 'oldest', '', { ageBand: 'lt4h', now })).toEqual([])
+    expect(filterAndSortDomainApprovals(boundary, 'all', 'oldest', '', { ageBand: '4h-1d', now }).map(r => r.id))
+      .toEqual(['balance-old'])
+    expect(filterAndSortDomainApprovals(boundary, 'all', 'oldest', '', { ageBand: '1d-7d', now }).map(r => r.id))
+      .toEqual(['sanctions-new'])
+    expect(filterAndSortDomainApprovals(boundary, 'all', 'oldest', '', { ageBand: 'gt7d', now }).map(r => r.id))
+      .toEqual(['notification-mid'])
+  })
+
   it('routes only to checker workbenches that preserve domain governance', () => {
     expect(approvalWorkbenchHref(rows[1])).toBe('/sanctions?approvalId=sanctions-new#sanctions-approval-id')
     expect(approvalWorkbenchHref(rows[2])).toBe('/notifications?approvalId=notification-mid#notification-approval-id')
