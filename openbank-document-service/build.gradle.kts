@@ -61,6 +61,10 @@ dependencies {
     // each consumer's own WireMock/mock stub, written from the client and so unable to disagree
     // with it (the #2269 shape).
     testImplementation(libs.pact.provider)
+    // Pact consumer legs (this PR): the document-signing ceremony spends an sca-service challenge
+    // via `POST /api/v1/sca/challenges/{id}/consume` (ADR-0169 D2). DocumentScaConsumePactConsumerTest
+    // publishes the pact replayed by sca-service's ScaPactFolderProviderVerificationTest.
+    testImplementation(libs.pact.consumer)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
     // a domain-event payload, so this service's producer tests assert against the real contract
     // rather than a per-service restatement of it (#3914).
