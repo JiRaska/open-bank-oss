@@ -234,6 +234,12 @@ class AccountPactFolderProviderVerificationTest {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
     }
 
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
+    }
+
     @State("an account has been created")
     fun accountHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
