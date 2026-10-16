@@ -1934,7 +1934,10 @@ dependencies:
     enforced: advisory
     # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
     # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
-    target_enforce_date: "2026-10-15"   # ADR-0144
+    # Moved 2026-10-15 -> 2026-11-15: gate-graduation-guard started failing fleet-wide the day
+    # after the date passed while the strict flip PR is still open — unblocking every PR behind
+    # it; the strict flip remains its own revertible PR and lands before this new date.
+    target_enforce_date: "2026-11-15"   # ADR-0144
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
