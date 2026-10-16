@@ -81,9 +81,11 @@ class AgentMergeRecordApiIT {
         c.prepareStatement(
             """
             SELECT count(*) FROM agent_audit_outbox
-             WHERE payload LIKE '%agent.pr.merged%' AND payload LIKE '%"pr_number":$prNumber%'
+             WHERE payload::jsonb ->> 'pr_number' = ?
+               AND payload::jsonb ->> 'eventType' = 'agent.pr.merged'
             """.trimIndent(),
         ).use { ps ->
+            ps.setString(1, prNumber.toString())
             ps.executeQuery().use { rs ->
                 rs.next()
                 rs.getLong(1)
@@ -154,13 +156,66 @@ class AgentMergeRecordApiIT {
 
     private fun deleteMergeFixture(prNumber: Long) {
         dataSource.connection.use { c ->
-            c.prepareStatement("DELETE FROM agent_audit_outbox WHERE payload LIKE ?").use { ps ->
-                ps.setString(1, "%\"pr_number\":$prNumber%")
+            c.prepareStatement(
+                "DELETE FROM agent_audit_outbox WHERE payload::jsonb ->> 'pr_number' = ? " +
+                    "AND payload::jsonb ->> 'eventType' = 'agent.pr.merged'",
+            ).use { ps ->
+                ps.setString(1, prNumber.toString())
                 ps.executeUpdate()
             }
             c.prepareStatement("DELETE FROM agent_merge_record WHERE pr_number = ?").use { ps ->
                 ps.setLong(1, prNumber)
                 ps.executeUpdate()
+            }
+        }
+    }
+
+    private fun assertRuntimeFailureRollback(attempts: Map<Long, Int>) {
+        val original = mergeCommand(prNumber = 9005)
+        assertFailureRollsBackThenRetry(original, IllegalStateException::class.java, "injected post-enqueue failure")
+        assertThat(attempts[9005L]).isEqualTo(2)
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "SELECT event_id, payload FROM agent_audit_outbox " +
+                    "WHERE payload::jsonb ->> 'pr_number' = '9005' " +
+                    "AND payload::jsonb ->> 'eventType' = 'agent.pr.merged'",
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    val eventId = rs.getObject("event_id", UUID::class.java)
+                    val payload = rs.getString("payload")
+                    assertThat(payload)
+                        .contains(
+                            eventId.toString(),
+                            "agent.pr.merged",
+                            original.mergedBy,
+                            original.agentId,
+                            original.headBranch,
+                            original.source,
+                        )
+                    assertThat(rs.next()).isFalse()
+                }
+            }
+        }
+        assertThat(auditCountFor(9005)).isEqualTo(1)
+    }
+
+    private fun assertCheckedFailureRollback(attempts: Map<Long, Int>) {
+        // Checked failures also need rollback: Jackson serialization and JDBC writes can throw
+        // checked exceptions before the outbox acknowledges its insert.
+        val checkedFailure = mergeCommand(prNumber = 9006)
+        assertFailureRollsBackThenRetry(checkedFailure, SQLException::class.java, "injected checked enqueue failure")
+        assertThat(attempts[9006L]).isEqualTo(2)
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "SELECT count(*) FROM agent_audit_outbox " +
+                    "WHERE payload::jsonb ->> 'pr_number' = '9006' " +
+                    "AND payload::jsonb ->> 'eventType' = 'agent.pr.merged'",
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getLong(1)).isEqualTo(1)
+                }
             }
         }
     }
@@ -228,51 +283,18 @@ class AgentMergeRecordApiIT {
     @Test
     @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
     fun `runtime and checked audit failures roll back merge row so redelivery retries both`() {
-        val attempts = installAuditFailureSpy()
-        val original = mergeCommand(prNumber = 9005)
-        assertFailureRollsBackThenRetry(original, IllegalStateException::class.java, "injected post-enqueue failure")
-        assertThat(attempts[9005L]).isEqualTo(2)
-        dataSource.connection.use { c ->
-            c.prepareStatement(
-                "SELECT event_id, payload FROM agent_audit_outbox WHERE payload LIKE '%\"pr_number\":9005%'",
-            ).use { ps ->
-                ps.executeQuery().use { rs ->
-                    assertThat(rs.next()).isTrue()
-                    val eventId = rs.getObject("event_id", UUID::class.java)
-                    val payload = rs.getString("payload")
-                    assertThat(payload)
-                        .contains(
-                            eventId.toString(),
-                            "agent.pr.merged",
-                            original.mergedBy,
-                            original.agentId,
-                            original.headBranch,
-                            original.source,
-                        )
-                    assertThat(rs.next()).isFalse()
-                }
+        try {
+            val attempts = installAuditFailureSpy()
+            assertRuntimeFailureRollback(attempts)
+            assertCheckedFailureRollback(attempts)
+        } finally {
+            // Keep this integration fixture isolated even when an assertion or retry fails.
+            try {
+                deleteMergeFixture(9005)
+            } finally {
+                deleteMergeFixture(9006)
             }
         }
-        assertThat(auditCountFor(9005)).isEqualTo(1)
-
-        // Checked failures also need rollback: Jackson serialization and JDBC writes can throw
-        // checked exceptions before the outbox acknowledges its insert.
-        val checkedFailure = mergeCommand(prNumber = 9006)
-        assertFailureRollsBackThenRetry(checkedFailure, SQLException::class.java, "injected checked enqueue failure")
-        assertThat(attempts[9006L]).isEqualTo(2)
-        dataSource.connection.use { c ->
-            c.prepareStatement("SELECT count(*) FROM agent_audit_outbox WHERE payload LIKE '%\"pr_number\":9006%'")
-                .use { ps ->
-                    ps.executeQuery().use { rs ->
-                        assertThat(rs.next()).isTrue()
-                        assertThat(rs.getLong(1)).isEqualTo(1)
-                    }
-                }
-        }
-
-        // Keep this integration fixture isolated from sibling tests that assert a fresh list.
-        deleteMergeFixture(9005)
-        deleteMergeFixture(9006)
     }
 
     @Test
