@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "33ff80372677efc2"
+    openbank.tech/policy-checksum: "bd0bf3bf9163a979"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -822,7 +822,7 @@ data:
     # pins the two together.
     allowed_reasons contains "service-edge-card-details-read" if {
     	input.principal.type == "HUMAN"
-    	input.principal.id in {"service-account-openbank-edge"}
+    	machine_named("service-account-openbank-edge")
     	input.action == "card.details.read"
     }
   agents.rego: |

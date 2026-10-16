@@ -247,3 +247,32 @@ test_customer_edge_grant_is_pan_read_only if {
 	}
 		with data.rules as pan_rules
 }
+
+# Current phase-2 markers bind the named grant to customer-edge's verified JWT client.
+test_pan_read_allowed_for_verified_customer_edge_client if {
+	d := rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-edge"},
+		"action": "card.details.read",
+	}
+		with data.rules as pan_rules
+	d.allow == true
+	d.reason == "service-edge-card-details-read"
+}
+
+test_pan_read_denied_when_named_principal_is_explicitly_human if {
+	rest.allow == false with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": false, "client_id": "openbank-admin-ui"},
+		"action": "card.details.read",
+	}
+		with data.rules as pan_rules
+}
+
+test_pan_read_denied_when_verified_client_does_not_match_edge if {
+	every principal in [
+		{"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-delegation"},
+		{"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": true},
+	] {
+		rest.allow == false with input as {"principal": principal, "action": "card.details.read"}
+			with data.rules as pan_rules
+	}
+}

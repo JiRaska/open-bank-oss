@@ -100,6 +100,6 @@ allowed_reasons contains "service-party-card-list" if {
 # pins the two together.
 allowed_reasons contains "service-edge-card-details-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {"service-account-openbank-edge"}
+	machine_named("service-account-openbank-edge")
 	input.action == "card.details.read"
 }
