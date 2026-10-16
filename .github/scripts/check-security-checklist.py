@@ -14,6 +14,7 @@ WHAT IT CHECKS — only when the PR diff touches a `money_path_services` directo
 (read from rules.yaml, the one list, so the two-lists-drift bug class cannot apply):
   * the PR body keeps a "## Security checklist" section (deleting the section is a
     finding, same as leaving it blank — otherwise the fix is "delete the question");
+  * when human judgement is needed, all six canonical question categories are present;
   * every human-judgement checkbox is ticked (`[x]`/`[X]`), except a negative
     cardholder answer may remain unticked with a specific, same-line exception
     when no cardholder-named path, cardholder field or sensitive-path declaration changes.
@@ -174,7 +175,7 @@ CARDHOLDER = re.compile(r"(card|pci|cardholder|\bpan\b|cvv|emv|tokeni[sz])", re.
 # A box matching none is UNKNOWN → human.
 ITEMS = (
     ("secrets", re.compile(r"^No secrets\b", re.I)),
-    ("suppressions", re.compile(r"^No new `@SuppressWarnings`", re.I)),
+    ("suppressions", re.compile(r"^No new (?:`@SuppressWarnings`|suppressions\b)", re.I)),
     ("dependency", re.compile(r"^No new third-party dependency\b", re.I)),
     ("auth", re.compile(r"^Auth\s*/\s*crypto\s*/\s*payment code changed\?", re.I)),
     ("pii", re.compile(r"^PII path changed\?", re.I)),
@@ -622,7 +623,17 @@ def run(root: Path, body: str, base: str, enforce: bool,
               "A PR created with `gh pr create --body-file` never gets the template automatically.")
         _write_summary(summary)
         return 1 if enforce else 0
-    _, missing = res
+    section, missing = res
+    # Count distinct canonical categories, never arbitrary checked boxes or duplicate labels.
+    # Auto-answered categories may remain unticked, but cannot replace an omitted question.
+    present = {item_of(b.group("text").strip()) for b in BOX.finditer(section)}
+    absent = [key for key, _ in ITEMS if key not in present]
+    if absent:
+        print("::error::Security checklist is incomplete; restore these canonical categories "
+              "from .github/PULL_REQUEST_TEMPLATE.md: " + ", ".join(absent))
+        summary.append("\nMissing canonical categories: " + ", ".join(absent))
+        _write_summary(summary)
+        return 1 if enforce else 0
     required = [t for t in missing if (item_of(t) is None or item_of(t) in human)
                 and not (item_of(t) == "cardholder" and
                          negative_pci_exception(t, files, add + rem, decl_changed))]
@@ -777,6 +788,26 @@ def self_test() -> int:
               "exclusion is swallowing real code, which is the gate switched off")
         bad += 1
 
+    # Presence is distinct from ticking: deleting a human question must not answer it.
+    canonical_boxes = [b.group(0) for b in BOX.finditer(unticked(ticked)[0])]
+    incomplete = [
+        ("empty", "## Security checklist\n"),
+        ("custom only", "## Security checklist\n- [x] Threat model updated\n- [x] Reviewed\n"),
+        ("auth only", "## Security checklist\n" + canonical_boxes[3]),
+        ("six copies of auth", "## Security checklist\n" + "\n".join([canonical_boxes[3]] * 6)),
+    ]
+    for key, _ in ITEMS:
+        remaining = [b for b in canonical_boxes if item_of(BOX.search(b).group("text")) != key]
+        incomplete.append(("omitted " + key, "## Security checklist\n" + "\n".join(remaining)))
+    for label, body in incomplete:
+        if fixture([f"{svc}/src/main/kotlin/Money.kt"], body) == 0:
+            print(f"self-test FAIL: incomplete canonical checklist accepted ({label})"); bad += 1
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"], ticked) != 0:
+        print("self-test FAIL: complete canonical checklist rejected"); bad += 1
+    complete_unknown = ticked.replace("## Security checklist", "## Security checklist\n- [ ] Unknown human question")
+    if fixture([f"{svc}/src/main/kotlin/Money.kt"], complete_unknown) == 0:
+        print("self-test FAIL: complete checklist hid unknown unticked question"); bad += 1
+
     pci_body = ticked.replace("- [x] " + pci, "- [ ] " + negative)
     if fixture([f"{svc}/src/main/kotlin/Money.kt"], pci_body) != 0:
         print("self-test FAIL: specific negative PCI answer rejected on an undeclared money path"); bad += 1
@@ -870,9 +901,13 @@ def self_test() -> int:
     sup = {f"{svc}/src/test/kotlin/MoneyTest.kt": '@Suppress("UNCHECKED_CAST")\nval x = y as Any\n'}
     if fixture(sup, no_checklist) == 0:
         print("self-test FAIL (e): an added @Suppress passed without a tick"); bad += 1
-    sup_ticked = "## Security checklist\n- [x] No new `@SuppressWarnings`, `as Any`, `@Suppress(\"...\")`\n"
+    sup_ticked = tpl.replace("- [ ] No new `@SuppressWarnings`", "- [x] No new `@SuppressWarnings`")
     if fixture(sup, sup_ticked) != 0:
         print("self-test FAIL (e2): ticking the one human item did not pass"); bad += 1
+    legacy_sup = sup_ticked.replace("No new `@SuppressWarnings`, `as Any`, `@Suppress(\"...\")` without",
+                                    "No new suppressions without")
+    if fixture(sup, legacy_sup) != 0:
+        print("self-test FAIL: explicit legacy suppression label rejected"); bad += 1
     # (f) an unrecognised checklist line stays required (fail closed on template drift).
     odd = "## Security checklist\n- [ ] something new nobody classified\n"
     if fixture([f"{svc}/src/main/kotlin/Money.kt"], odd.replace("[ ]", "[x]") + "- [ ] Auth / crypto x\n") == 0:
