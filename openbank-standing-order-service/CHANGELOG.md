@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.2...standing-order-service-v0.18.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **standing-order:** complete ONCE orders on confirm even without prior failures ([#12844](https://github.com/JiRaska/open-bank-oss/issues/12844)) ([2eff7c0](https://github.com/JiRaska/open-bank-oss/commit/2eff7c05497375c7ae4c64707c13786ccb82c62e))
+
 ## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.1...standing-order-service-v0.18.2) (2026-10-14)
 
 

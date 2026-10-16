@@ -45,7 +45,7 @@ import rego.v1
 # base rest.rego does not grant (OPERATOR/ADMIN already covered by base operator-read-any).
 allowed_reasons contains "aml-case-oversight-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action in {"amlCase.read", "amlCase.list"}
@@ -54,7 +54,7 @@ allowed_reasons contains "aml-case-oversight-read" if {
 # amlCase.updateDecision: an analyst dispositions a case (verb outside the base read/list set).
 allowed_reasons contains "operator-aml-case-update-decision" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "amlCase.updateDecision"
@@ -63,7 +63,7 @@ allowed_reasons contains "operator-aml-case-update-decision" if {
 # amlCase.create (POST /api/v1/aml/cases), #10486 batch 3. Staff open cases from the console.
 allowed_reasons contains "operator-aml-case-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "amlCase.create"
@@ -78,12 +78,13 @@ allowed_reasons contains "operator-aml-case-create" if {
 # enforce flip will rely on.
 allowed_reasons contains "service-aml-case-create-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id in {
+	some named_client in {
 		"service-account-openbank-domestic-payment",
 		"service-account-openbank-sepa-payment",
 		"service-account-openbank-sepa-instant",
 		"service-account-openbank-fx",
 	}
+	machine_named(named_client)
 	input.action == "amlCase.create"
 }
 
@@ -92,6 +93,6 @@ allowed_reasons contains "service-aml-case-create-m2m" if {
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
 allowed_reasons contains "service-agent-aml-case-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-agent"
+	machine_named("service-account-openbank-agent")
 	input.action in {"amlCase.list", "amlCase.read"}
 }
