@@ -58,7 +58,7 @@ import rego.v1
 # consent.* write to ROLE_OPERATOR, so matrix-allows admits nothing this exclusion doesn't close.
 allowed_reasons contains "operator-consent-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "consent.")
@@ -88,7 +88,7 @@ allowed_reasons contains "operator-consent-write" if {
 # service using that shared client, not just the two verified callers.
 allowed_reasons contains "service-consent-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in {"consent.read", "consent.validate", "consent.activate", "consent.reject"}
 }
 
@@ -109,7 +109,7 @@ allowed_reasons contains "service-consent-m2m" if {
 # flipping that flag here).
 allowed_reasons contains "service-consent-m2m-marketing" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in {"consent.grant", "consent.revoke"}
 	input.resource.id == "party-service:marketing-comms"
 }
@@ -130,7 +130,7 @@ allowed_reasons contains "service-consent-m2m-marketing" if {
 # through the same client identity.
 allowed_reasons contains "service-consent-m2m-credit" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {"consent.grant", "consent.revoke"}
 	input.resource.id == "openbank"
 }
@@ -160,6 +160,6 @@ allowed_reasons contains "operator-suppression-read" if {
 
 allowed_reasons contains "service-suppression-m2m-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "suppression.read"
 }
