@@ -3208,12 +3208,14 @@ gates:
     group: registry
     mode: enforced
     selftest_exempt: >-
-      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 22-case unittest suite
+      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 25-case unittest suite
       covering the agent/ and codex/ branch mappings, declared-agent author mapping, non-agent
       no-op exit 0, payload shape, token-file resolution (minted header wins over env fallback,
-      missing/empty file fails closed), and the workflow wiring (ARC runner, SHA pin, read-only
-      permissions, mint step, no static JWT anywhere, failure tracking issue). Its red is
-      reachable by construction: every case drives the real script against stub events/servers.
+      missing/empty file fails closed), human-merger eligibility (Bot type, app/ and [bot]
+      logins, declared-agent accounts all rejected), and the workflow wiring (ARC runner, SHA
+      pin, read-only permissions, mint step, job-scoped credentials, no static JWT anywhere,
+      failure tracking issue kept open until verified backfill). Its red is reachable by
+      construction: every case drives the real script against stub events/servers.
     budget_seconds: 60   # local HTTP stubs only, no network; ~2s observed
     rationale: >-
       ADR-0031 phase 3's "recorded human merge" evidence is produced by this CI-side recorder;
@@ -3224,7 +3226,9 @@ gates:
       check — the un-falsifiable state this evidence exists to eliminate.
     review_after: "2027-10-14"
     # Subjects are test cases, not files: the floor drops the day someone deletes a case.
-    min_subjects: 22
+    # 25 = the measured SUBJECTS count as of 2026-10-16 (22 after the fail-closed redesign
+    # plus the human-merger eligibility and verified-backfill cases); keep in lockstep.
+    min_subjects: 25
     run: |
       python3 .github/scripts/test-record-agent-merge.py
 
