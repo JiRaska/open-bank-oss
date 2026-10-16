@@ -11,6 +11,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -35,12 +37,26 @@ class PensionFundHoldingEnforcedAuthzIT {
 
     @Test
     @TestSecurity(user = "compliance-reviewer", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "compliance-reviewer"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "compliance-reviewer"),
+        ],
+    )
     fun `human compliance reader passes HTTP and OPA gates`() {
         given().get(ordersPath).then().statusCode(200)
     }
 
     @Test
     @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-pension"),
+            Claim(key = "preferred_username", value = "service-account-openbank-pension"),
+        ],
+    )
     fun `own pension client passes HTTP and OPA gates`() {
         given().get(ordersPath).then().statusCode(200)
     }
