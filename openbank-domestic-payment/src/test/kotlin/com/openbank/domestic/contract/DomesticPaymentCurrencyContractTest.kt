@@ -14,7 +14,9 @@ class DomesticPaymentCurrencyContractTest {
         val openApi = File("src/main/resources/openapi.yaml").readText()
         val create = openApi.substringAfter("  /api/v1/domestic-payments:").substringBefore("    get:")
         val invalidMoney = openApi.substringAfter("    InvalidMoney:").substringBefore("    Forbidden:")
-        val currency = openApi.substringAfter("        currency:").substringBefore("        variableSymbol:")
+        val createRequest =
+            openApi.substringAfter("    CreateDomesticPaymentRequest:").substringBefore("    TransitionStatusRequest:")
+        val currency = createRequest.substringAfter("        currency:").substringBefore("        variableSymbol:")
 
         assertThat(create).contains(
             "'400':",
@@ -23,6 +25,6 @@ class DomesticPaymentCurrencyContractTest {
             "#/components/responses/Forbidden",
         )
         assertThat(invalidMoney).contains("CURRENCY_NOT_ALLOWED", "not CZK")
-        assertThat(currency).contains("CZK only")
+        assertThat(currency).contains("type: string", "example: CZK", "CZK only")
     }
 }
