@@ -29,6 +29,7 @@
   "clients": [
     {
       "clientId": "openbank-app",
+      "fullScopeAllowed": false,
       "name": "OpenBank Customer App",
       "description": "Native mobile/cross-platform customer app (ADR-0064 KMP, ADR-0065 customer edge)",
       "enabled": true,
@@ -131,6 +132,7 @@
     },
     {
       "clientId": "customer-edge-admin",
+      "fullScopeAllowed": false,
       "name": "Customer Edge Admin",
       "description": "Service-account client for customer-edge: sets party_id user attribute after identity re-link (issue #1270 PR3 / ADR-0072 §5). Has manage-users on this realm only.",
       "enabled": true,
@@ -147,6 +149,7 @@
     },
     {
       "clientId": "openbank-edge-webauthn",
+      "fullScopeAllowed": false,
       "name": "Customer Edge WebAuthn RP",
       "description": "Service-account client for customer-edge's WebAuthn RP (ADR-0066 F2 variant B1). Creates the Keycloak user for a party enrolling a passkey, then token-exchanges it into an openbank-app session. Separate from customer-edge-admin; see README.md.",
       "enabled": true,
@@ -163,6 +166,7 @@
     },
     {
       "clientId": "openbank-synthetic-retail",
+      "fullScopeAllowed": false,
       "name": "OpenBank Synthetic Customer: retail",
       "description": "Bank-owned canary customer (ADR-0331, ADR-0252). Its service-account user IS the customer: ROLE_CUSTOMER and the party_id of one SYNTHETIC party. client_credentials only; no browser, password or implicit flow.",
       "enabled": true,
@@ -328,6 +332,12 @@
         }
       ]
     }
+  ],
+  "scopeMappings": [
+    { "client": "openbank-app", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
+    { "client": "customer-edge-admin", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
+    { "client": "openbank-edge-webauthn", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] },
+    { "client": "openbank-synthetic-retail", "roles": ["ROLE_CUSTOMER", "offline_access", "uma_authorization", "default-roles-openbank-customers"] }
   ],
   "roles": {
     "realm": [
