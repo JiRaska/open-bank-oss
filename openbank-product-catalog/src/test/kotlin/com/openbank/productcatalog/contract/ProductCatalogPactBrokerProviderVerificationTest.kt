@@ -12,12 +12,17 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.libs.testing.containers.PostgresTestResource
+import io.mockk.every
+import io.mockk.mockk
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
@@ -58,6 +63,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 class ProductCatalogPactBrokerProviderVerificationTest {
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var catalogFixtures: CatalogPactProviderFixtures
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -71,7 +79,30 @@ class ProductCatalogPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        // The pension consumer is a scoped machine caller, unlike the default Pact operator.
+        // Mirror the always-on provider verifier and restore identity after every interaction.
+        val originalIdentity = testIdentityAssociation.testIdentity
+        try {
+            if (context?.consumer?.name == "openbank-pension-service") {
+                testIdentityAssociation.setTestIdentity(pensionIdentity())
+            }
+            context?.verifyInteraction()
+        } finally {
+            testIdentityAssociation.setTestIdentity(originalIdentity)
+        }
+    }
+
+    private fun pensionIdentity(): QuarkusSecurityIdentity {
+        val token = mockk<JsonWebToken>()
+        every { token.name } returns "service-account-openbank-pension"
+        every { token.subject } returns "pact-pension-service"
+        every { token.getClaim<String>("azp") } returns "openbank-pension"
+        every { token.getClaim<String>("preferred_username") } returns "service-account-openbank-pension"
+        return QuarkusSecurityIdentity.builder()
+            .setPrincipal(token)
+            .addRole("ROLE_API")
+            .addRole("CATALOG_SCOPE_READ")
+            .build()
     }
 
     /**
