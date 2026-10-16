@@ -73,6 +73,7 @@ class WorkersTest(unittest.TestCase):
                      COSIGN_BIN=str(fake), PLACEHOLDER_FILE=str(root/'none'), FAKE_STATE=str(state),
                      FLEET_ATTEST_JSON=str(report), VERIFY_ATTEMPTS=str(attempts), VERIFY_RETRY_SLEEP='0',
                      SYSTEMIC_UNKNOWN_THRESHOLD=str(threshold), FLEET_ATTEST_WORKERS=str(workers), FAKE_FIRST_WAVE_BARRIER='4' if barrier else '')
+            env.pop('FLEET_ATTEST_TUF_CACHE_MODE', None)
             env.update(extra_env or {})
             args=['bash',str(target)]+(['--vocabulary-control'] if vocabulary else [])
             if interrupt:
