@@ -115,6 +115,10 @@ The customer (customers-realm) token is **never forwarded** — upstreams valida
 - **Failure mode** — any transport exception degrades to a JSON `502 {"error":"upstream unavailable"}`.
 - **Synthetic taint (ADR-0252)** — every upstream request is built by `upstreamRequest()`, which adds `x-openbank-synthetic: true` when the edge's own inbound filter accepted the request as synthetic (MDC or OTel baggage, both set only for a principal in `openbank.synthetic.trusted-principals`). A client-supplied header is never copied. The token request is the one exception. `UpstreamClientSyntheticTaintTest` pins both the behaviour and the single entry point.
 
+## Unified notification inbox deadline
+
+The combined notification inbox uses one monotonic aggregate deadline for all party feeds. Synthetic requests stay sequential on the caller thread to preserve taint; each upstream request receives only the remaining deadline budget. When the deadline expires, no later party call starts and the inbox returns a fail-closed response without partial results. Ordinary requests use the same deadline with bounded concurrent reads.
+
 ## Ownership / IDOR model
 
 Several upstreams scope only by `accountId` (the party header is advisory there), so the edge is the IDOR boundary:
