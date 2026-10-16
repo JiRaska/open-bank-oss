@@ -174,6 +174,8 @@ add_hold_entries() {
   if [ "${#missing[@]}" -eq 0 ]; then printf '%s\n' "$text"; return 0; fi
   awk -v pr="$pr" -v keep="$keep" -v svcs="${missing[*]}" '
     BEGIN { n = split(svcs, list, " ") }
+    # The canonical empty map is explicit; normalize only this known hold-map line.
+    inholds && !done && /^  services:[[:space:]]*\{[[:space:]]*\}[[:space:]]*$/ { $0 = "  services:" }
     { print }
     /^deploy_holds:[[:space:]]*$/ { inholds = 1; next }
     /^[^[:space:]#]/ { inholds = 0 }
@@ -190,9 +192,24 @@ add_hold_entries() {
   ' <<<"$text"
 }
 
-# Live: record the hold on #KEEP's branch (signed API commit), then draft + label + comment.
+# Stop the survivor before any fallible durable-transfer preparation. Try both independent
+# protections even if one API fails; neither an unknown result nor a partial hold is success.
+protect_hold_survivor() {
+  local keep="$1" failed=0
+  gh pr ready "$keep" --repo "$REPO" --undo || failed=1
+  gh pr edit "$keep" --repo "$REPO" --add-label blocked || failed=1
+  if [ "$failed" -ne 0 ]; then
+    echo "::error::supersede: could not establish draft/blocked protection on #$keep; no durable hold transfer or predecessor close was attempted."
+    return 1
+  fi
+}
+
+# Live: protect #KEEP first, then record its durable hold (signed API commit) and comment.
 inherit_hold() {
   local n="$1" keep="$2" services branch blob sha rules new
+  if [ "${DRY_RUN:-}" != "true" ]; then
+    protect_hold_survivor "$keep" || return 1
+  fi
   services="$(pr_diff "$n" | held_services_from_diff)"
   if [ -z "$services" ]; then
     echo "::warning::supersede: held #$n pins no readable openbank image — cannot record its hold."
@@ -223,8 +240,6 @@ inherit_hold() {
       return 1
     fi
   fi
-  gh pr ready "$keep" --repo "$REPO" --undo || return 1
-  gh pr edit "$keep" --repo "$REPO" --add-label blocked || return 1
   gh pr comment "$keep" --repo "$REPO" --body \
 "Deployment hold inherited from #$n, which was draft or labelled \`blocked\` when this PR superseded it.
 
@@ -334,7 +349,7 @@ If you believe otherwise, reopen it and say what it carries that #$KEEP does not
 $PAIRS
 EOF
 
-  echo "supersede: #$KEEP (${KEEP_SHA:0:8}) — closed=$closed skipped=$skipped stale_keep=$stale_keep inherited_hold=$inherited"
+  echo "supersede: #$KEEP (${KEEP_SHA:0:8}) — closed=$closed skipped=$skipped stale_keep=$stale_keep hold_detected=$inherited"
 
   # A stale KEEP is the one condition that must be loud. Everything else is tidiness: the image is
   # already built and pushed, and a leftover stale PR does not break a deploy.
@@ -576,8 +591,8 @@ case "${1:-}" in
   pr)
     case "${2:-}" in
       view) printf '%s\n' "$FAKE_GH_KEEP_BRANCH"; printf 'pr:view\n' >>"$FAKE_GH_EVENTS" ;;
-      ready) printf 'pr:ready\n' >>"$FAKE_GH_EVENTS" ;;
-      edit) printf 'pr:edit\n' >>"$FAKE_GH_EVENTS" ;;
+      ready) printf 'pr:ready\n' >>"$FAKE_GH_EVENTS"; [ "${FAKE_GH_FAIL_READY:-false}" != true ] || exit 44 ;;
+      edit) printf 'pr:edit\n' >>"$FAKE_GH_EVENTS"; [ "${FAKE_GH_FAIL_EDIT:-false}" != true ] || exit 45 ;;
       comment) printf 'pr:comment\n' >>"$FAKE_GH_EVENTS" ;;
       close) printf 'pr:close\n' >>"$FAKE_GH_EVENTS" ;;
       *) echo "unexpected fake gh pr command" >&2; exit 90 ;;
@@ -643,7 +658,7 @@ HOOK
       "$body_file" >/dev/null; then
     echo "SELF-TEST FAIL case 11: large JSON PUT body did not preserve full rules payload and metadata; got: $out"; ok=1
   else
-    expected_events=$'pr:view\napi:get\napi:put\npr:ready\npr:edit\npr:comment\npr:comment\npr:close'
+    expected_events=$'pr:ready\npr:edit\npr:view\napi:get\napi:put\npr:comment\npr:comment\npr:close'
     if [ "$(cat "$events_file")" != "$expected_events" ]; then
       echo "SELF-TEST FAIL case 11: hold transfer/action ordering changed; got events: $(tr '\n' ' ' <"$events_file")"; ok=1
     else
@@ -651,15 +666,15 @@ HOOK
     fi
   fi
 
-  # case 12 — a failed contents PUT must not draft/label/comment the survivor or close the held PR.
+  # case 12 — a failed contents PUT must leave the survivor protected and the predecessor open.
   : >"$events_file"
   export FAKE_BASE64_FAIL_PARTIAL=false
   export FAKE_GH_FAIL_PUT=true
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:view\napi:get\napi:put' ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
-    echo "SELF-TEST FAIL case 12: failed hold PUT mutated/closed a PR, leaked its request file, or returned success; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
+  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put' ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 12: failed hold PUT lost survivor protection, closed a predecessor, leaked its request file, or returned success; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
   else
-    echo "self-test case 12 OK (failed hold PUT leaves both PRs untouched)"
+    echo "self-test case 12 OK (failed hold PUT keeps survivor draft/blocked and predecessor open)"
   fi
 
   # case 13 — a producer that emits a prefix then fails must never let that partial JSON reach gh.
@@ -668,17 +683,58 @@ HOOK
   export FAKE_GH_FAIL_PUT=false
   export FAKE_BASE64_FAIL_PARTIAL=true
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:view\napi:get' ] || [ -e "$body_file" ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
-    echo "SELF-TEST FAIL case 13: producer failure reached PUT/PR actions or leaked its request file; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
+  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get' ] || [ -e "$body_file" ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 13: producer failure reached PUT/close or lost survivor protection or leaked its request file; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
   else
-    echo "self-test case 13 OK (partial producer failure stops before PUT and PR actions)"
+    echo "self-test case 13 OK (partial producer failure keeps survivor protected and stops before PUT/close)"
+  fi
+
+  # case 14 — the real rules source uses the explicit empty-map form. Normalize ONLY that
+  # deploy_holds.services line; a similar unrelated map and repeated application must be unchanged.
+  rules_in=$'other:\n  services: {}\ndeploy_holds:\n  services: {}\ncommits: {}'
+  rules_out="$(add_hold_entries 12956 13002 openbank-admin-ui <<<"$rules_in")" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! contains_text "$rules_out" $'other:\n  services: {}\ndeploy_holds:\n  services:\n    openbank-admin-ui:'; then
+    echo "SELF-TEST FAIL case 14: explicit empty hold map was rejected or unrelated map changed"; ok=1
+  elif [ "$(add_hold_entries 12956 13002 openbank-admin-ui <<<"$rules_out")" != "$rules_out" ]; then
+    echo "SELF-TEST FAIL case 14: adding an existing hold was not idempotent"; ok=1
+  elif add_hold_entries 1 2 openbank-admin-ui <<<$'deploy_holds:\n  services: {unknown: value}' >/dev/null; then
+    echo "SELF-TEST FAIL case 14: unsupported nonempty inline hold map was accepted"; ok=1
+  else
+    echo "self-test case 14 OK (explicit empty map supported narrowly and idempotently)"
+  fi
+
+  # case 15 — independently try BOTH protections even when either API fails. No durable
+  # transfer or predecessor close is allowed if the protection could not be established.
+  export FAKE_BASE64_FAIL_PARTIAL=false
+  export FAKE_GH_FAIL_PUT=false
+  local failure
+  for failure in ready edit; do
+    : >"$events_file"
+    export FAKE_GH_FAIL_READY=false FAKE_GH_FAIL_EDIT=false
+    if [ "$failure" = ready ]; then export FAKE_GH_FAIL_READY=true; else export FAKE_GH_FAIL_EDIT=true; fi
+    out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit' ] \
+       || ! contains_text "$out" 'could not establish draft/blocked protection'; then
+      echo "SELF-TEST FAIL case 15: failed $failure protection allowed transfer/close or skipped the other protection"; ok=1
+    fi
+  done
+  export FAKE_GH_FAIL_READY=false FAKE_GH_FAIL_EDIT=false
+  echo "self-test case 15 checked (each protection API failure keeps predecessor open)"
+
+  # case 16 — an ordinary unheld predecessor must not draft or block its survivor.
+  : >"$events_file"
+  out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(cat "$events_file")" != $'pr:comment\npr:close' ]; then
+    echo "SELF-TEST FAIL case 16: ordinary unheld supersede changed hold behavior"; ok=1
+  else
+    echo "self-test case 16 OK (ordinary unheld supersede stays unchanged)"
   fi
 
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 13 cases OK"
+  echo "self-test: all 16 cases OK"
   return 0
 }
 
