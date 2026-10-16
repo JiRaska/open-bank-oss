@@ -34,6 +34,7 @@ on:
       - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/scripts/await-admin-ui-pact-publication.py"
       - ".github/scripts/test-await-admin-ui-pact-publication.py"
+      - ".github/scripts/test-pact-archive-freshness.py"
       - ".github/workflows/pact-drift-check.yml"
       - ".github/workflows/verify-provider.yml"
   push:
@@ -59,6 +60,7 @@ on:
       - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/scripts/await-admin-ui-pact-publication.py"
       - ".github/scripts/test-await-admin-ui-pact-publication.py"
+      - ".github/scripts/test-pact-archive-freshness.py"
       - ".github/workflows/pact-drift-check.yml"
       - ".github/workflows/verify-provider.yml"
 
@@ -168,6 +170,7 @@ jobs:
       # It is bash-3.2 clean, so it runs (and can be fed a failing case) on a dev machine too.
       - name: Verify publication boundaries
         run: |
+          python3 .github/scripts/test-pact-archive-freshness.py
           python3 .github/scripts/test-publish-admin-ui-pacts.py
           python3 .github/scripts/test-await-admin-ui-pact-publication.py
 
@@ -207,14 +210,26 @@ jobs:
             echo "::error::The JVM shards did not regenerate exactly the derived committed pact set"
             exit 1
           fi
+          # Provenance is the exact validated archive set, not wall-clock ordering:
+          # extraction and marker creation can receive identical filesystem timestamps.
+          # Remove old destinations first so an unchanged checkout cannot masquerade as a restore.
+          while IFS= read -r pact; do
+            rm -f -- "$pact"
+          done < "${RUNNER_TEMP}/expected-jvm-pacts.txt"
           touch "${RUNNER_TEMP}/pact-regen-marker"
           for shard in 0 1 2 3; do
-            tar --touch -xf "${RUNNER_TEMP}/jvm-pacts/shard-${shard}.tar"
+            tar -xf "${RUNNER_TEMP}/jvm-pacts/shard-${shard}.tar"
           done
+          while IFS= read -r pact; do
+            [ -f "$pact" ] && [ ! -L "$pact" ] || {
+              echo "::error::Validated JVM archive did not restore regular file: $pact"
+              exit 1
+            }
+          done < "${RUNNER_TEMP}/expected-jvm-pacts.txt"
 
       # Run the exact files the discovery step derived — not a second glob in package.json that can
-      # drift independently. Running them after the shared marker makes the mtime proof below catch
-      # an accidentally skipped PactJS test exactly as it catches an UP-TO-DATE Gradle task.
+      # drift independently. Running them after the marker makes the mtime proof below catch
+      # an accidentally skipped PactJS test; JVM artifacts have their own restore proof above.
       - name: Regenerate every PactJS consumer pact
         run: |
           set -euo pipefail
@@ -251,6 +266,12 @@ jobs:
           stale=""
           for f in pacts/*.json; do
             if [ -n "$uncovered" ] && printf '%s\n' "$uncovered" | grep -qxF -- "$f"; then
+              continue
+            fi
+            # JVM freshness was proved by exact archive coverage and restoring absent
+            # destinations above. PactJS still requires an actual post-marker rewrite.
+            if grep -qxF -- "$f" "${RUNNER_TEMP}/expected-jvm-pacts.txt"; then
+              [ -f "$f" ] && [ ! -L "$f" ] || stale="$stale $f"
               continue
             fi
             if [ ! "$f" -nt "${RUNNER_TEMP}/pact-regen-marker" ]; then
