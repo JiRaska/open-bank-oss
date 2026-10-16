@@ -170,7 +170,9 @@ class ReferenceRestAnnuityAdapter internal constructor(
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .setSerializationInclusion(JsonInclude.Include.NON_NULL)
+            .setDefaultPropertyInclusion(
+                JsonInclude.Value.construct(JsonInclude.Include.NON_NULL, JsonInclude.Include.NON_NULL),
+            )
 
         /** For tests: an adapter with explicit collaborators. */
         internal fun create(credentials: PartnerCredentials, http: HttpClient = HttpClient.newHttpClient()) =

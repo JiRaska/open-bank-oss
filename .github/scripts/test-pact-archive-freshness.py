@@ -17,7 +17,41 @@ JS = 'pacts/openbank-ui-openbank-provider.json'
 
 
 class ArchiveFreshnessTest(unittest.TestCase):
-    def fixture(self, root, member=True, include_js=False):
+    def test_workflow_runs_this_test_for_relevant_changes(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text())
+        triggers = workflow.get('on', workflow.get(True))
+        self.assertIsNotNone(triggers)
+        expected = '.github/scripts/test-pact-archive-freshness.py'
+        self.assertIn(expected, triggers['pull_request']['paths'])
+        self.assertIn(expected, triggers['push']['paths'])
+
+    def test_failed_dependency_still_runs_guard_step(self):
+        jobs = yaml.safe_load(WORKFLOW.read_text())['jobs']
+        job = jobs['drift-check']
+        self.assertEqual(job.get('needs'), ['regeneration-scope', 'gradle-pacts'])
+        # This is a static policy assertion, not a simulation of GitHub's cancellation evaluator.
+        self.assertEqual(job.get('if'), '${{ !cancelled() }}')
+        steps = job.get('steps', [])
+        self.assertEqual(steps[0].get('name'), 'Require every JVM shard to succeed')
+        self.assertEqual(steps[0].get('env', {}).get('SHARD_RESULT'), '${{ needs.gradle-pacts.result }}')
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tmp = root / 'runner'
+            tmp.mkdir()
+            r = self.run_step('Require every JVM shard to succeed', root, tmp,
+                              step_env={'SCOPE_RESULT': 'success', 'SHARD_RESULT': 'failure'})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('Unexpected JVM scope/shard result: true:failure', r.stdout)
+
+    def test_missing_shard_archive_fails_coverage_step(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tmp = self.fixture(root, missing_archive=2)
+            r = self.run_step('Verify shard coverage and restore regenerated JVM contracts', root, tmp)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('Missing regenerated Pact artifact for shard 2', r.stdout)
+
+    def fixture(self, root, member=True, include_js=False, missing_archive=None):
         tmp = root / 'runner'
         tmp.mkdir()
         (root / 'pacts').mkdir()
@@ -33,6 +67,8 @@ class ArchiveFreshnessTest(unittest.TestCase):
             (root / JS).write_text('stale PactJS output')
             os.utime(root / JS, (1, 1))
         for shard in range(4):
+            if shard == missing_archive:
+                continue
             with tarfile.open(tmp / f'jvm-pacts/shard-{shard}.tar', 'w') as archive:
                 if shard == 0 and member:
                     data = b'fresh generated contract'
@@ -42,13 +78,15 @@ class ArchiveFreshnessTest(unittest.TestCase):
                     archive.addfile(info, io.BytesIO(data))
         return tmp
 
-    def run_step(self, name, root, tmp, prefix='', jvm_required='true'):
+    def run_step(self, name, root, tmp, prefix='', jvm_required='true', step_env=None):
         jobs = yaml.safe_load(WORKFLOW.read_text())['jobs']
         steps = [s for job in jobs.values() for s in job.get('steps', []) if s.get('name') == name]
         self.assertEqual(len(steps), 1)
+        env = dict(os.environ, RUNNER_TEMP=str(tmp), JVM_REQUIRED=jvm_required)
+        env.update(step_env or {})
         return subprocess.run(
             ['bash', '-c', prefix + '\n' + steps[0]['run']], cwd=root,
-            env=dict(os.environ, RUNNER_TEMP=str(tmp), JVM_REQUIRED=jvm_required),
+            env=env,
             capture_output=True, text=True, check=False,
         )
 

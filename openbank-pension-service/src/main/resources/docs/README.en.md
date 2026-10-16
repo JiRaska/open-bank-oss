@@ -94,3 +94,11 @@ plus helpers each service explicitly includes (CI isolation, see the
 (`InMemoryFundOrderPlans`) therefore must stay listed in the
 `consumerPactTest` include in `build.gradle.kts`; without it,
 `compileConsumerPactTestKotlin` fails with an unresolved reference.
+
+## Annuity partner wire format
+
+Requests to the reference annuity partner omit absent optional properties and
+null-valued map entries; they do not send JSON null as an alternative value.
+Partner responses may add fields without breaking parsing; decimal amounts
+and date handling retain the protocol contract. The protocol contract tests
+validate outgoing requests and parse the documented offer examples.

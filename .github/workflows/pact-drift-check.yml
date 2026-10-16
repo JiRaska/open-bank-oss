@@ -40,6 +40,7 @@ on:
       - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/scripts/await-admin-ui-pact-publication.py"
       - ".github/scripts/test-await-admin-ui-pact-publication.py"
+      - ".github/scripts/test-pact-archive-freshness.py"
       - ".github/workflows/pact-drift-check.yml"
       - ".github/workflows/verify-provider.yml"
   push:
@@ -71,6 +72,7 @@ on:
       - ".github/scripts/test-publish-admin-ui-pacts.py"
       - ".github/scripts/await-admin-ui-pact-publication.py"
       - ".github/scripts/test-await-admin-ui-pact-publication.py"
+      - ".github/scripts/test-pact-archive-freshness.py"
       - ".github/workflows/pact-drift-check.yml"
       - ".github/workflows/verify-provider.yml"
 
@@ -164,7 +166,8 @@ jobs:
   drift-check:
     name: Regenerate consumer pacts and diff against committed
     needs: [regeneration-scope, gradle-pacts]
-    if: always()
+    # Validate failed shards, but let a cancelled run stop before this downstream job.
+    if: ${{ !cancelled() }}
     env:
       JVM_REQUIRED: ${{ needs.regeneration-scope.outputs.jvm_required }}
     runs-on: ubuntu-latest

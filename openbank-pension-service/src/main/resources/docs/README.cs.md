@@ -93,3 +93,11 @@ které jednotlivé služby explicitně zahrnou (izolace v CI, viz konvence
 `openbank.quarkus-service`). Jeho in-memory backend fondových pokynů
 (`InMemoryFundOrderPlans`) proto musí zůstat uvedený v include `consumerPactTest` v
 `build.gradle.kts`; bez něj `compileConsumerPactTestKotlin` selže s unresolved reference.
+
+## Formát komunikace s partnerem pro renty
+
+Požadavky referenčnímu partnerovi vynechávají nepřítomné volitelné vlastnosti
+a položky map s hodnotou null; neposílají místo nich JSON null. Odpověď partnera může přidat
+pole bez porušení zpracování; desetinné částky a data zachovávají protokolový
+kontrakt. Kontraktové testy ověřují odchozí požadavky a načítají dokumentované
+příklady nabídek.
