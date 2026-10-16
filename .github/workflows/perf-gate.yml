@@ -334,6 +334,9 @@ jobs:
           print(f"derived values confirmed: port={port} db={db}")
           PY
 
+      - name: Test hard security and advisory latency summary classification
+        run: python3 .github/scripts/test-classify-security-abuse-summary.py
+
       - name: Resolve pinned runtimes
         run: |
           set -euo pipefail
@@ -442,22 +445,8 @@ jobs:
           K6_EXIT=$?
           set -e
 
-          python3 - <<'PY'
-          import json
-          summary = json.load(open("perf-reports/security-abuse-summary.json"))
-          breaches = summary.get("metrics", {}).get("security_contract_breaches", {}).get("values", {}).get("count")
-          if breaches is None:
-              print("::error::security_contract_breaches missing from the k6 summary — the status contract did not run")
-              raise SystemExit(1)
-          if breaches > 0:
-              print(f"::error::{breaches} security contract breach(es): an invalid request was answered 200 or 5xx — that is a defect, not a regression")
-              raise SystemExit(1)
-          print("security_contract_breaches=0 — every invalid request was rejected inside the contract")
-          PY
-
-          if [ "${K6_EXIT}" != "0" ]; then
-            echo "::warning::k6 exited ${K6_EXIT} with zero contract breaches — the ADVISORY enumeration_ms latency tripwire breached; recorded as evidence, not failing this advisory gate"
-          fi
+          python3 .github/scripts/classify-security-abuse-summary.py \
+            --summary perf-reports/security-abuse-summary.json --k6-exit "${K6_EXIT}"
 
       - name: Build security abuse Test Intelligence envelope
         if: always()
