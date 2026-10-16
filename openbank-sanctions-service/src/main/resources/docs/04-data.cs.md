@@ -124,3 +124,9 @@ Právní základ pro zpracování: **Právní povinnost** (čl. 6 odst. 1 písm.
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Čtení JSONB payloadů sankčních kontrol
+
+Sloupce `aliases`, `identifiers`, `matches` a `checked_lists` v `sanctions_checks` zůstávají JSONB s původními výchozími hodnotami a omezením NOT NULL. Entita drží JSON jako text v Kotlinu: SQL při čtení převádí sloupce na text a při zápisu převádí vázaný text na JSONB. Mezilehlý textový cast při zápisu brání uložení JSON dokumentu jako citovaného JSON řetězce. Databázová validace JSON zůstává zachovaná; migrace typu těchto sloupců není potřeba.
+
+Mapování umožňuje seznamu, detailu a čekajícím kontrolám číst neprázdná pole i objekty bez změny odpovědí nebo screeningových rozhodnutí. Regresní test se skutečným PostgreSQL pokrývá existující JSONB záznamy, reaktivní vložení a aktualizaci s opětovným načtením změněných payloadů, volitelná metadata, odmítnutí neplatného JSON a404 pro chybějící id. Kladné HTTP testy používají testovací identitu a neprokazují produkční JWT ani vynucení politik.

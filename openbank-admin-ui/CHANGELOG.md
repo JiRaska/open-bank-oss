@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.1...admin-ui-v3.4.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension:** staff contract search and state-contribution deadlines NPE ([#12943](https://github.com/JiRaska/open-bank-oss/issues/12943)) ([a012019](https://github.com/JiRaska/open-bank-oss/commit/a012019c14d530e454bc1c4aa3a323294a31e7e0))
+
 ## [3.4.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.0...admin-ui-v3.4.1) (2026-10-16)
 
 

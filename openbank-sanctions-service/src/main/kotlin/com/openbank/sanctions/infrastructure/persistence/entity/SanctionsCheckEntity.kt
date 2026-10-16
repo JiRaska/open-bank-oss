@@ -12,6 +12,7 @@ import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.ColumnTransformer
 import java.time.Instant
 import java.util.UUID
 
@@ -31,7 +32,8 @@ class SanctionsCheckEntity {
     @field:Column(name = "name")
     var name: String = ""
 
-    @field:Column(name = "aliases", columnDefinition = "text")
+    @field:Column(name = "aliases", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "aliases::text", write = "?::text::jsonb")
     var aliasesJson: String = "[]"
 
     @field:Column(name = "date_of_birth")
@@ -40,20 +42,23 @@ class SanctionsCheckEntity {
     @field:Column(name = "nationality")
     var nationality: String? = null
 
-    @field:Column(name = "identifiers", columnDefinition = "text")
+    @field:Column(name = "identifiers", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "identifiers::text", write = "?::text::jsonb")
     var identifiersJson: String = "{}"
 
     @field:Column(name = "status")
     @field:Enumerated(EnumType.STRING)
     var status: SanctionsCheckStatus = SanctionsCheckStatus.CLEAR
 
-    @field:Column(name = "matches", columnDefinition = "text")
+    @field:Column(name = "matches", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "matches::text", write = "?::text::jsonb")
     var matchesJson: String = "[]"
 
     @field:Column(name = "overall_score")
     var overallScore: Double = 0.0
 
-    @field:Column(name = "checked_lists", columnDefinition = "text")
+    @field:Column(name = "checked_lists", columnDefinition = "jsonb")
+    @field:ColumnTransformer(read = "checked_lists::text", write = "?::text::jsonb")
     var checkedListsJson: String = "[]"
 
     @field:Column(name = "reviewed_by")

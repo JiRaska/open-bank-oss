@@ -92,3 +92,9 @@ ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merg
 ## Versioning
 
 `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The MCP protocol version (`2024-11-05`) is negotiated separately on `initialize` and is independent of the HTTP API version.
+
+## Sanctions read-tool contracts
+
+`sanctions_list_checks`, `sanctions_get_check` and `sanctions_list_pending` return sanctions-service response bodies through `RestDownstreamReadAdapter`. The list tools return arrays; pending rows carry `POTENTIAL_HIT`. An unknown check id remains a downstream404 error and does not become a fabricated clear verdict.
+
+The four consumer Pact interactions cover list, a known check, pending and missing-id behavior using the real adapter with a handwritten client connected to a Pact mock. Sanctions provider replay reads a seeded row through real HTTP and PostgreSQL. These tests do not establish actual REST-client annotation mapping, JWT validity, policy enforcement, ownership or completeness of the returned population.
