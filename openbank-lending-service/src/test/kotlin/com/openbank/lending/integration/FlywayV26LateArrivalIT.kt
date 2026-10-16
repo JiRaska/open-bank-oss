@@ -38,14 +38,7 @@ class FlywayV26LateArrivalIT {
         val freshSchema = schemaName("v26_fresh")
         val lateSchema = schemaName("v26_late")
         try {
-            Files.list(fullMigrations).use { migrations ->
-                migrations.filter { it.fileName.toString().matches(Regex("V\\d+__.*\\.sql")) }
-                    .forEach { migration ->
-                        if (migration.fileName.toString() != V26) {
-                            Files.copy(migration, withoutV26.resolve(migration.fileName))
-                        }
-                    }
-            }
+            stageWithoutV26(fullMigrations, withoutV26)
 
             flyway(fullMigrations, freshSchema, outOfOrder = false, validate = false).migrate()
             assertThat(applied(freshSchema, 26)).isTrue()
@@ -80,14 +73,26 @@ class FlywayV26LateArrivalIT {
             // Once V26 is recorded, strict ordering and validation are safe again.
             flyway(fullMigrations, lateSchema, outOfOrder = false, validate = true).migrate()
         } finally {
+            cleanup(freshSchema, lateSchema, withoutV26)
+        }
+    }
+
+    private fun stageWithoutV26(source: Path, destination: Path) {
+        Files.list(source).use { migrations ->
+            migrations.filter { it.fileName.toString().matches(Regex("V\\d+__.*\\.sql")) }
+                .filter { it.fileName.toString() != V26 }
+                .forEach { Files.copy(it, destination.resolve(it.fileName)) }
+        }
+    }
+
+    private fun cleanup(freshSchema: String, lateSchema: String, temporaryDirectory: Path) {
+        try {
+            dropSchema(freshSchema)
+        } finally {
             try {
-                dropSchema(freshSchema)
+                dropSchema(lateSchema)
             } finally {
-                try {
-                    dropSchema(lateSchema)
-                } finally {
-                    deleteTree(withoutV26)
-                }
+                deleteTree(temporaryDirectory)
             }
         }
     }
