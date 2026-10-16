@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.2](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.1...pension-service-v2.0.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension,customer-edge:** replace deprecated JSON and query APIs ([#12947](https://github.com/JiRaska/open-bank-oss/issues/12947)) ([88dfa4f](https://github.com/JiRaska/open-bank-oss/commit/88dfa4f3d5e50111877c901ead84f48006692d27))
+
 ## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.0...pension-service-v2.0.1) (2026-10-14)
 
 
