@@ -52,6 +52,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Pact consumer: AgentAmlReadPactConsumerTest pins the assistant's AML case read tools
+    // against aml-service (ADR-0063, evidence-matrix contract coverage).
+    testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))
