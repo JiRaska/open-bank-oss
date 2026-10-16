@@ -39,6 +39,8 @@ ledger_pension_co_tax_reporting_actions := {"ledger.close.inspect"}
 
 ledger_pension_co_tax_reporting_read if {
 	input.principal.type == "HUMAN"
+	# Only absence is legacy compatibility; an explicit null must fail closed.
+	not input.principal.service_account == null
 	machine_named(ledger_pension_co_tax_reporting_account)
 	"ROLE_API" in input.principal.roles
 	input.action in ledger_pension_co_tax_reporting_actions

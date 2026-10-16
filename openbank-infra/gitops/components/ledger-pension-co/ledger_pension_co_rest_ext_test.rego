@@ -149,3 +149,19 @@ test_false_marker_keeps_service_prefix_write_veto if {
 	p := {"type": "HUMAN", "id": "service-account-openbank-other", "roles": ["ROLE_OPERATOR"], "service_account": false}
 	not rest.allow.allow with input as {"principal": p, "action": "ledger.create"} with data.rules as rules_mock
 }
+
+# An explicit null is malformed current input, not an absent legacy field.
+test_explicit_null_tax_marker_cannot_borrow_legacy_grant if {
+	every client in {"", "openbank-tax-reporting", "openbank-other"} {
+		p := object.union(tax_reporting, {"service_account": null, "client_id": client})
+		not rest.allow.allow with input as {"principal": p, "action": "ledger.close.inspect"} with data.rules as rules_mock
+	}
+}
+
+test_absent_tax_marker_keeps_narrow_legacy_compatibility if {
+	not "service_account" in object.keys(tax_reporting)
+	rest.allow.allow with input as {"principal": tax_reporting, "action": "ledger.close.inspect"} with data.rules as rules_mock
+	every action in {"ledger.read", "ledger.create", "ledger.reverse"} {
+		not rest.allow.allow with input as {"principal": tax_reporting, "action": action} with data.rules as rules_mock
+	}
+}
