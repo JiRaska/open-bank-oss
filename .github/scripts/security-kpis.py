@@ -63,14 +63,22 @@ def collect_freshness(tmp: Path) -> dict:
 def collect_credentials() -> dict:
     rc, out = run_json([sys.executable, ".github/scripts/credential-inventory.py",
                         "--inventory", "--today", dt.date.today().isoformat()])
-    m = re.search(r"credential-inventory: (\d+) ExternalSecrets, (\d+) static, "
-                  r"(\d+) with deadline, (\d+) overdue, (\d+) undeclared", out)
+    if rc not in (0, 1):
+        return {"available": False, "reason": "collector failed"}
+    summaries = [line for line in out.splitlines() if line.startswith("credential-inventory:")]
+    m = re.fullmatch(r"credential-inventory: (\d+) ExternalSecrets, (\d+) static, "
+                     r"(\d+) operator-managed, (\d+) dynamic, "
+                     r"(\d+) with deadline, (\d+) overdue, (\d+) undeclared",
+                     summaries[0]) if len(summaries) == 1 else None
     if not m:
         return {"available": False, "reason": "collector output unparsable"}
-    total, static, declared, overdue, undeclared = map(int, m.groups())
+    total, static, _operator_managed, _dynamic, declared, overdue, undeclared = map(int, m.groups())
+    # Inventory exits 1 for overdue credentials, not for an unavailable collector.
+    if (rc == 1) != (overdue > 0):
+        return {"available": False, "reason": "collector status inconsistent with summary"}
     return {"available": True, "totalSecrets": total, "staticSecrets": static,
             "withDeadline": declared, "overdue": overdue, "undeclared": undeclared,
-            "overdueFound": rc != 0}
+            "overdueFound": overdue > 0}
 
 
 def collect_threat_models() -> dict:
@@ -291,12 +299,52 @@ def self_test() -> int:
     netpol_line = "netpol-coverage: 59/73 components carry the generated ingress policy (81%); 14 uncovered"
     if not re.search(r"netpol-coverage: (\d+)/(\d+) components.*\((\d+)%\)", netpol_line):
         print("self-test FAIL: netpol regex"); bad += 1
-    cred_line = ("credential-inventory: 165 ExternalSecrets, 158 static, 0 with deadline, "
-                 "0 overdue, 158 undeclared")
-    m = re.search(r"credential-inventory: (\d+) ExternalSecrets, (\d+) static, "
-                  r"(\d+) with deadline, (\d+) overdue, (\d+) undeclared", cred_line)
-    if not m or m.group(2) != "158":
-        print("self-test FAIL: credential regex"); bad += 1
+    # Generate the fixture with the real producer: a copied old summary hid format drift.
+    import contextlib
+    import importlib.util
+    import io
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    spec = importlib.util.spec_from_file_location("credential_inventory", Path(__file__).with_name("credential-inventory.py"))
+    producer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(producer)
+    today = dt.date(2026, 1, 2)
+    credentials = [
+        SimpleNamespace(static=True, dynamic=False, operator_managed=False, deadline=deadline,
+                        name=f"fixture-{i}", namespace="fixture", keys=["fixture/reference"])
+        for i, deadline in enumerate(("2030-01-01", "2020-01-01", None))
+    ] + [SimpleNamespace(static=False, dynamic=True, operator_managed=False),
+         SimpleNamespace(static=False, dynamic=False, operator_managed=True)]
+    def fixture(overdue: bool) -> tuple[int, str]:
+        selected = credentials if overdue else [c for c in credentials if getattr(c, "deadline", None) != "2020-01-01"]
+        buf = io.StringIO()
+        with patch.object(producer, "scan", return_value=selected), contextlib.redirect_stdout(buf):
+            _, rc = producer.inventory(Path("."), today)
+        return rc, buf.getvalue()
+    expired = fixture(True)
+    fresh = fixture(False)
+    good = fresh[1]
+    cases = [
+        ("current producer", fresh, True, False),
+        ("overdue producer", expired, True, True),
+        ("failed producer", (2, good), False, None),
+        ("overdue exit without overdue", (1, good), False, None),
+        ("overdue count without exit", (0, expired[1]), False, None),
+        ("truncated", (0, good.rsplit(",", 1)[0]), False, None),
+        ("duplicate summary", (0, good + good), False, None),
+        ("embedded summary", (0, "prefix " + good), False, None),
+        ("trailing garbage", (0, good.rstrip() + " garbage\n"), False, None),
+        ("bad summary then good", (0, "credential-inventory: invalid\n" + good), False, None),
+    ]
+    for label, response, available, overdue in cases:
+        with patch.dict(globals(), {"run_json": lambda _, response=response: response}):
+            actual = collect_credentials()
+        if actual["available"] != available or (available and actual["overdueFound"] != overdue):
+            print(f"self-test FAIL: credential boundary {label}"); bad += 1
+    with patch.dict(globals(), {"run_json": lambda _: expired}):
+        actual = collect_credentials()
+    if actual.get("totalSecrets") != 5 or actual.get("staticSecrets") != 3 or actual.get("withDeadline") != 1 or actual.get("overdue") != 1 or actual.get("undeclared") != 1:
+        print("self-test FAIL: credential count mapping"); bad += 1
     # The fuzz collector's artifact download 302s cross-host to Azure; the opener MUST drop
     # Authorization there (a forwarded Bearer gets a 401) and KEEP it for api.github.com.
     import urllib.request

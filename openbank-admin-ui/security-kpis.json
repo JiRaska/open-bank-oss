@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-16T09:54:22.771405+00:00",
+  "generatedAt": "2026-10-16T16:17:16.204719+00:00",
   "netpol": {
     "available": true,
     "covered": 71,
@@ -9,13 +9,18 @@
   },
   "freshness": {
     "available": true,
-    "fleetScore": 61,
-    "scoredModules": 11,
-    "unknownModules": 16
+    "fleetScore": 77,
+    "scoredModules": 13,
+    "unknownModules": 14
   },
   "credentials": {
-    "available": false,
-    "reason": "collector output unparsable"
+    "available": true,
+    "totalSecrets": 229,
+    "staticSecrets": 123,
+    "withDeadline": 30,
+    "overdue": 0,
+    "undeclared": 93,
+    "overdueFound": false
   },
   "fuzz": {
     "available": true,
