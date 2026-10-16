@@ -94,3 +94,8 @@ Selže OTP store, idempotence a store rozhodnutí. Výzvy nelze spolehlivě vytv
 
 ### Flyway checksum mismatch při startu
 Nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true` v gitops env, nech pod nastartovat, pak odeber. Nikdy needituj aplikovanou migraci.
+
+
+## Integrační testy a příznak service-account (fail closed)
+
+OPA považuje každého volajícího, jehož token neprokazuje osobu, za service account (`input.principal.service_account`, fail closed). Prostá identita `@TestSecurity` nenese JWT, takže se počítá jako stroj a přichází o oprávnění vyhrazená lidem. Integrační testy, které vystupují jako skuteční zaměstnanci, proto přidávají lidské claimy přes `@OidcSecurity`. Proto modul testuje s `quarkus-test-security-oidc`.
