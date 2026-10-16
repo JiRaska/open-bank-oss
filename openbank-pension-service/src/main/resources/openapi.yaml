@@ -22,7 +22,10 @@ info:
   #        exemption applies (check-api-contract.py has none for an undeployed service). /api/v1
   #        is therefore not served at all; every route moved unchanged to /api/v2.
   # 2.1.0: additive (#12425) — participant aggregates for the ČNB statutory returns, one read route.
-  version: 2.1.0
+  # 2.2.0: additive — GET /contracts gains the optional staff free-text search parameter `q`
+  #        (contract/participant party id fragment, participant birth date, product line, payment
+  #        reference) and Contract gains `participantBirthDate`. MINOR per ADR-0048.
+  version: 2.2.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
@@ -96,6 +99,14 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: q
+          in: query
+          required: false
+          description: >-
+            Staff free-text search - a fragment of the contract or participant party id, the
+            participant birth date (ISO or bare digits, e.g. 1985-04 or 850425), the product
+            line, or the contract payment reference. Ignored for participant callers.
+          schema: { type: string, minLength: 1, maxLength: 64 }
       responses:
         '200':
           description: Contracts
@@ -2768,6 +2779,7 @@ components:
       properties:
         contractId: { type: string, format: uuid }
         participantPartyId: { type: string, format: uuid }
+        participantBirthDate: { type: string, format: date, description: Participant birth date; the operator-facing disambiguator for staff search results. }
         productLine: { $ref: '#/components/schemas/ProductLine' }
         jurisdiction: { type: string }
         packVersion: { type: integer }
