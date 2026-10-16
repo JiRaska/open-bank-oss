@@ -19,7 +19,7 @@ class InsuranceTermLifeInteroperabilityAdapter {
 
     fun toAcordProfile(attributes: CatalogValue.ObjectValue): Map<String, Any> = buildMap {
         put("productType", "TERM_LIFE")
-        put("coverage", objectValue(attributes, "coverage"))
+        put("coverage", catalogObjectValue(attributes, "coverage"))
         put("termYears", textOrDecimal(attributes, "termYears"))
         put("premiumModel", text(attributes, "premiumModel"))
         optionalObject(attributes, "premium")?.let { put("premium", it) }
@@ -36,7 +36,7 @@ class InsuranceTermLifeInteroperabilityAdapter {
         "productSpecCharacteristic" to buildList {
             addAll(
                 listOf(
-                    characteristic("coverage", objectValue(attributes, "coverage")),
+                    characteristic("coverage", catalogObjectValue(attributes, "coverage")),
                     characteristic("termYears", textOrDecimal(attributes, "termYears")),
                     characteristic("premiumModel", text(attributes, "premiumModel")),
                     characteristic("perils", arrayObjects(attributes, "perils")),
@@ -139,7 +139,7 @@ class InsuranceTermLifeInteroperabilityAdapter {
 
     private fun characteristic(name: String, value: Any): Map<String, Any> = mapOf("name" to name, "value" to value)
 
-    private fun objectValue(root: CatalogValue.ObjectValue, name: String): Map<String, Any> =
+    private fun catalogObjectValue(root: CatalogValue.ObjectValue, name: String): Map<String, Any> =
         (root.values[name] as? CatalogValue.ObjectValue)?.toWire()
             ?: throw IllegalArgumentException("term-life attributes require object '$name'")
 

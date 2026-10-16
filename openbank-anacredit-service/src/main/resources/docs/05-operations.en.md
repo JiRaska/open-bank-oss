@@ -109,3 +109,15 @@ Exact pinned versions are auto-generated from `libs.versions.toml` at build and 
 - `version.txt` is owned by **release-please** (per-service component); feature/fix PRs do not hand-edit it.
 - The OpenAPI contract version (`openapi.yaml:info.version`) is the separate API-contract axis (ADR-0048) and is verified by `AnaCreditContractTest`.
 - CD: ArgoCD picks up the new image tag from the gitops manifest bump.
+
+## Observability
+
+The service includes the `quarkus-opentelemetry` runtime extension to instrument HTTP
+requests and reactive Postgres operations. `AnaCreditTraceContractIT` uses a test-only
+span recorder and verifies that `POST /api/v1/anacredit/exposures` and its
+`INSERT credit_exposures` operation share a trace id.
+
+The deployment must configure the intended OTLP exporter endpoint and collector route.
+This local trace contract proves HTTP/SQL correlation; it does not prove export to a
+collector, delivery to Tempo, or retention in a deployed environment. Verify those
+separately before relying on exported traces for operational investigation.
