@@ -198,3 +198,81 @@ test_b6_other_role_api_sa_denied_card_reads if {
 		}
 	}
 }
+
+# --- card.details.read: the synthetic PAN/CVV is machine-only ---
+
+pan_rules := object.union(b6_rules, {"authz": {
+	"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["card.create", "card.block"]}},
+	"operator_read_any_excluded_actions": ["card.details.read"],
+}})
+
+pan_human(roles) := {"type": "HUMAN", "id": "u-staff", "roles": roles}
+
+test_pan_read_allowed_for_customer_edge_principal if {
+	d := rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+		"action": "card.details.read",
+	}
+		with data.rules as pan_rules
+	d.allow == true
+	d.reason == "service-edge-card-details-read"
+}
+
+# No staff role reaches the PAN — the read-only VIEWER least of all. Drop card.details.read from the
+# exclusion list and operator-read-any re-grants it to OPERATOR/ADMIN: this test goes red.
+test_pan_read_denied_for_every_staff_role if {
+	every roles in [["ROLE_VIEWER"], ["ROLE_OPERATOR"], ["ROLE_ADMIN"], ["ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN"]] {
+		rest.allow == false with input as {"principal": pan_human(roles), "action": "card.details.read"}
+			with data.rules as pan_rules
+	}
+}
+
+test_pan_read_denied_for_other_service_accounts if {
+	every name in ["services", "delegation", "party", "mcp"] {
+		every roles in [["ROLE_API"], ["ROLE_OPERATOR"]] {
+			rest.allow == false with input as {
+				"principal": {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": roles},
+				"action": "card.details.read",
+			}
+				with data.rules as pan_rules
+		}
+	}
+}
+
+# The edge principal's grant is that one action, not a card-read licence.
+test_customer_edge_grant_is_pan_read_only if {
+	not "service-edge-card-details-read" in rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]},
+		"action": "card.read",
+	}
+		with data.rules as pan_rules
+}
+
+# Current phase-2 markers bind the named grant to customer-edge's verified JWT client.
+test_pan_read_allowed_for_verified_customer_edge_client if {
+	d := rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-edge"},
+		"action": "card.details.read",
+	}
+		with data.rules as pan_rules
+	d.allow == true
+	d.reason == "service-edge-card-details-read"
+}
+
+test_pan_read_denied_when_named_principal_is_explicitly_human if {
+	rest.allow == false with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": false, "client_id": "openbank-admin-ui"},
+		"action": "card.details.read",
+	}
+		with data.rules as pan_rules
+}
+
+test_pan_read_denied_when_verified_client_does_not_match_edge if {
+	every principal in [
+		{"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-delegation"},
+		{"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"], "service_account": true},
+	] {
+		rest.allow == false with input as {"principal": principal, "action": "card.details.read"}
+			with data.rules as pan_rules
+	}
+}

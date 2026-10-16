@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.0...admin-ui-v3.4.1) (2026-10-16)
+
+
+### Security
+
+* **admin-ui:** patch inherited KaTeX rendering trust ([#12551](https://github.com/JiRaska/open-bank-oss/issues/12551)) ([82e97b2](https://github.com/JiRaska/open-bank-oss/commit/82e97b24fef656fb83422f778b83e363580d3fba))
+
 ## [3.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.3.0...admin-ui-v3.4.0) (2026-10-16)
 
 
