@@ -15,6 +15,7 @@ import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
+import com.openbank.simulation.model.ScreeningBook
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.model.StatementCloseBook
 import java.math.BigDecimal
@@ -68,6 +69,12 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // attempt's ReconciliationPolicy decision cross-checked against whether a period was actually
     // persisted. Populated by StatementCloseScenario; empty (trivially satisfied) otherwise.
     val statementCloses = StatementCloseBook()
+
+    // ADR-0032 §B: the FX sanctions-screening disposition invariant's state — the REAL
+    // ScreeningPolicy's verdict per conversion cross-checked against what the payment path
+    // actually did (refused / executed / held for review and resolved). Populated by
+    // FxScreeningScenario; empty (trivially satisfied) otherwise.
+    val screening = ScreeningBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency

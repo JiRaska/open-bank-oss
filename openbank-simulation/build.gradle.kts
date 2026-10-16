@@ -89,6 +89,11 @@ dependencies {
     // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
     implementation(project(":openbank-statement-service"))
 
+    // ADR-0032 §B: the harness also drives the REAL fx-service screening domain — the pure,
+    // framework-free `ScreeningPolicy` verdict over a conversion's screened names (BLOCK / REVIEW
+    // / CLEAR with the 0.85 potential-hit block threshold mirrored from sanctions' isHighRisk).
+    implementation(project(":openbank-fx-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)

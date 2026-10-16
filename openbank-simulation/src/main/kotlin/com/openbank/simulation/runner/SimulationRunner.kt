@@ -9,6 +9,7 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.FeeBillingScenario
+import com.openbank.simulation.scenario.FxScreeningScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
@@ -69,6 +70,12 @@ class SimulationRunner(
             // only, posts nothing, so this drain is a no-op today but kept for the same
             // "settled before the invariant sweep" convention as every other scenario above.
             StatementCloseScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0032 §B: the FX conversion sanctions-screening path, decided by the REAL
+            // ScreeningPolicy — reads/writes world.screening only, posts nothing to the ledger,
+            // so this drain is a no-op today but kept for the same "settled before the invariant
+            // sweep" convention as every other scenario above.
+            FxScreeningScenario.step(world)
             context.scheduler.drain()
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)

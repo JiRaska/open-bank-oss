@@ -4,9 +4,11 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.fx.domain.screening.ScreeningDecision
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.ScreeningRecord
 import com.openbank.simulation.runner.World
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
@@ -222,6 +224,56 @@ object MoneyPathInvariants {
     }
 
     /**
+     * ADR-0032 §B: the real `ScreeningPolicy`'s verdict over a conversion's screened names and the
+     * payment path's disposition of that conversion must never disagree. A BLOCK must refuse and
+     * never execute; a REVIEW alert must be resolved exactly once — false positive (released,
+     * then executed) or confirmed hit (escalated, refused, never executed) — never silently
+     * dropped, never double-resolved; a CLEAR must execute and never be refused. A conversion that
+     * executed under a BLOCK, or a REVIEW alert that vanished without a resolution, is exactly the
+     * class of defect a sanctions-path audit exists to catch.
+     */
+    val screeningDispositionIntegrity = object : Invariant {
+        override val name = "screening-disposition-integrity"
+        override fun check(world: World): Violation? {
+            world.screening.conversions().forEach { conversionId ->
+                val r = world.screening.record(conversionId) ?: return@forEach
+                dispositionDisagreement(r)?.let { detail ->
+                    return Violation(name, "conversion $conversionId: $detail")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * The per-conversion half of [screeningDispositionIntegrity] — extracted so `check` stays
+     * within the nesting budget. Returns the first disagreement between the decision and the
+     * disposition, or null when they match.
+     */
+    private fun dispositionDisagreement(r: ScreeningRecord): String? = when (r.decision) {
+        ScreeningDecision.BLOCK -> when {
+            r.executed -> "BLOCK but executed"
+            !r.refused -> "BLOCK never refused"
+            else -> null
+        }
+        ScreeningDecision.REVIEW -> reviewDisagreement(r)
+        ScreeningDecision.CLEAR -> when {
+            r.refused -> "CLEAR but refused"
+            !r.executed -> "CLEAR but never executed"
+            else -> null
+        }
+    }
+
+    private fun reviewDisagreement(r: ScreeningRecord): String? = when {
+        r.resolutionCount == 0 -> "REVIEW alert silently dropped"
+        r.resolutionCount > 1 -> "REVIEW alert resolved ${r.resolutionCount} times"
+        r.reviewEscalatedToBlock && (!r.refused || r.executed) ->
+            "escalated hit must refuse and never execute (refused=${r.refused}, executed=${r.executed})"
+        !r.reviewEscalatedToBlock && !r.executed -> "false positive released but never executed"
+        else -> null
+    }
+
+    /**
      * ADR-0035 §E / ADR-0078, issue #667: a statement period is persisted *if and only if* the
      * real `ReconciliationPolicy` decided `Reconciled` for that close attempt — never on a
      * `Mismatch` (no partial, self-inconsistent legal document is ever produced) and never skipped
@@ -253,6 +305,7 @@ object MoneyPathInvariants {
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        screeningDispositionIntegrity,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */
