@@ -105,12 +105,16 @@ class Undetermined(Exception):
 # --------------------------------------------------------------------------- rules
 
 
-def load_rules(path=RULES):
+def load_rules(path=RULES, text=None):
+    """Parse the rule set. `text` is the content read from the PR's BASE commit (see
+    base_policy); `path` is read from the working tree only for --paths and self-tests."""
     import yaml
 
     try:
-        with open(path) as fh:
-            doc = yaml.safe_load(fh)
+        if text is None:
+            with open(path) as fh:
+                text = fh.read()
+        doc = yaml.safe_load(text)
     except (OSError, yaml.YAMLError) as e:
         raise Undetermined(f"could not read {path}: {e}") from e
     cfg = (doc or {}).get("autonomous_agent_prs")
@@ -558,6 +562,12 @@ def parse_name_status_z(raw):
         paths = fields[index:index + width]
         index += width
         path = paths[-1]
+        # A rename has two sides and BOTH are changed: the old path loses its content. Taking
+        # only the destination let an agent move a protected file (e.g. a money-path
+        # migration) out to an ordinary path and pass. A rename destination is also new.
+        if status.startswith("R"):
+            files.append(paths[0])
+            added.add(path)
         files.append(path)
         if status == "A":
             added.add(path)
@@ -607,9 +617,59 @@ def fetch_pr(n):
         raise Undetermined(f"PR #{n}: could not read author/headRefName")
     pages = _gh(["api", f"repos/{REPO}/pulls/{n}/files?per_page=100", "--paginate", "--slurp"])
     flat = [f for page in pages for f in page]
+    # The files API stops at 3000 entries with no error; unseen files are unjudged files.
+    expected = _gh(["api", f"repos/{REPO}/pulls/{n}"]).get("changed_files")
+    if not isinstance(expected, int) or len(flat) != expected or len(flat) >= FILES_API_CAP:
+        raise Undetermined(f"PR #{n}: files API listed {len(flat)} of {expected} changed files — possibly truncated")
     files = [f["filename"] for f in flat]
-    added = frozenset(f["filename"] for f in flat if f.get("status") == "added")
+    # Both sides of a rename are judged (see parse_name_status_z).
+    files += [f["previous_filename"] for f in flat if f.get("previous_filename")]
+    added = frozenset(f["filename"] for f in flat if f.get("status") in {"added", "renamed"})
     return author, is_bot, branch, files, added
+
+
+FILES_API_CAP = 3000
+
+
+def _base_read(ref, path):
+    """Content of `path` at `ref`, or None if absent. git first (CI fetches the merge ref at
+    depth 2, so HEAD^1 = PR_DIFF_BASE is a local commit); the contents API otherwise.
+    Anything else is Undetermined, never 'absent'."""
+    proc = subprocess.run(["git", "cat-file", "-e", f"{ref}^{{commit}}"], capture_output=True)
+    if proc.returncode == 0:
+        proc = subprocess.run(["git", "show", f"{ref}:{path}"], capture_output=True, text=True)
+        if proc.returncode == 0:
+            return proc.stdout
+        ls = subprocess.run(["git", "ls-tree", "--name-only", ref, "--", path], capture_output=True, text=True)
+        if ls.returncode == 0 and not ls.stdout.strip():
+            return None
+        raise Undetermined(f"git show {ref}:{path} failed: {proc.stderr.strip()}")
+    import base64
+    data = _gh(["api", f"repos/{REPO}/contents/{path}?ref={ref}"])
+    if not isinstance(data, dict) or "content" not in data:
+        raise Undetermined(f"contents {path}@{ref} unreadable")
+    return base64.b64decode(data["content"]).decode()
+
+
+def base_ref_for(n):
+    """The commit whose policy judges PR n: PR_DIFF_BASE in CI, else the PR's base SHA."""
+    base = os.environ.get("PR_DIFF_BASE", "").strip()
+    if base:
+        return base
+    sha = ((_gh(["api", f"repos/{REPO}/pulls/{n}"]).get("base") or {}).get("sha") or "")
+    if not _is_sha(sha):
+        raise Undetermined(f"PR #{n}: base SHA unavailable — cannot read policy from the base")
+    return sha
+
+
+def base_policy(ref):
+    """rules.yaml AS OF THE BASE. Read from the PR head, the PR under judgement could
+    rewrite its own scope (move itself from agent_accounts to automation_accounts, prune
+    governance_path_globs or money_path_services) and be judged by the policy it wrote."""
+    text = _base_read(ref, RULES)
+    if text is None:
+        raise Undetermined(f"{RULES} absent at base {ref}")
+    return load_rules(RULES, text=text)
 
 
 def resolve_pr_number(explicit):
@@ -648,6 +708,112 @@ FIXTURE = {
     ],
     "_money_path_services": ["openbank-ledger-service", "openbank-balance-service"],
 }
+
+
+def bypass_self_test(failures):
+    """Regression cases for three authorization bypasses (found reviewing PR #12914). Each
+    must BLOCK (exit 1) or be Undetermined — never exit 0."""
+    global _gh
+    import shutil
+    import tempfile
+
+    bot = "openbank-agent-bot[bot]"
+    ledger_src = "openbank-ledger-service/src/main/kotlin/A.kt"
+
+    # 1. Rename OUT of a protected path: only the destination used to be judged.
+    files, added = parse_name_status_z(
+        "R100\0openbank-ledger-service/src/main/resources/db/migration/V1__x.sql\0docs/V1__x.sql\0")
+    code, msg = verdict(bot, True, "agent/x", files, dict(FIXTURE), added)
+    if code != 1:
+        failures.append(f"bypass rename-out-of-money-path (git diff) passed: exit {code} — {msg}")
+
+    # 1b. Same rename via the REST files API (previous_filename used to be ignored), and
+    # 2. the files API truncated at 3000 entries must be Undetermined, not judged on a subset.
+    real_gh = _gh
+    renamed = [{"filename": "docs/V1__x.sql", "status": "renamed",
+                "previous_filename": "openbank-ledger-service/src/main/resources/db/migration/V1__x.sql"}]
+
+    def fake(listing, changed):
+        def _fake(args):
+            if args[0] == "pr":
+                return {"author": {"login": bot, "is_bot": True}, "headRefName": "agent/x"}
+            if "/files" in args[1]:
+                return [listing]
+            return {"changed_files": changed}
+        return _fake
+
+    saved_event = os.environ.pop("GITHUB_EVENT_PATH", None)
+    try:
+        _gh = fake(renamed, 1)
+        a, b, br, files, added = fetch_pr(1)
+        code, msg = verdict(a, b, br, files, dict(FIXTURE), added)
+        if code != 1:
+            failures.append(f"bypass rename-out-of-money-path (files API) passed: exit {code} — {msg}")
+        _gh = fake([{"filename": f"docs/f{i}.md", "status": "modified"} for i in range(3000)], 3001)
+        try:
+            fetch_pr(1)
+            failures.append("bypass files-API truncation (3000 of 3001) was judged on the visible subset")
+        except Undetermined:
+            pass
+    finally:
+        _gh = real_gh
+        if saved_event is not None:
+            os.environ["GITHUB_EVENT_PATH"] = saved_event
+
+    # 3. rules.yaml edited in the PR (agent moved to automation_accounts): policy must come
+    #    from the BASE commit, so the agent is still in scope and still blocked.
+    tmp = tempfile.mkdtemp()
+    repo = os.path.join(tmp, "repo")
+    os.makedirs(os.path.join(repo, os.path.dirname(RULES)))
+    base_rules = (
+        "money_path_services: [openbank-ledger-service]\n"
+        "autonomous_agent_prs:\n  agent_accounts: ['openbank-agent-bot[bot]']\n"
+        "  automation_accounts: []\n  agent_branch_prefixes: ['agent/']\n"
+        "  governance_path_globs: [openbank-libs/governance/*]\n"
+    )
+    Path(repo, RULES).write_text(base_rules)
+    cwd = os.getcwd()
+    # run-gates.py hands every gate a PRIVATE copy of the real repo's index via
+    # GIT_INDEX_FILE (concurrent gates would race .git/index.lock); a git subprocess that
+    # inherits it builds trees from THAT index, referencing blobs that do not exist in this
+    # scratch repo ("invalid object ... Error building trees" — measured on the runner).
+    # Same for GIT_DIR/GIT_WORK_TREE/GIT_OBJECT_DIRECTORY: they point the fixture at the
+    # real repository regardless of cwd (see probe.sh and check-pdp-flag-rollout.sh, which
+    # unset the same set). Strip them for the whole block, restore after.
+    git_env_vars = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE",
+                    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
+    saved_git_env = {v: os.environ.pop(v) for v in git_env_vars if v in os.environ}
+    try:
+        os.chdir(repo)
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", "init", "-q"], check=True)
+        subprocess.run(["git", "add", RULES], check=True)
+        subprocess.run(git + ["commit", "-qm", "base"], check=True)
+        base = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        Path(repo, RULES).write_text(base_rules.replace(
+            "agent_accounts: ['openbank-agent-bot[bot]']", "agent_accounts: []").replace(
+            "automation_accounts: []", "automation_accounts: ['openbank-agent-bot[bot]']").replace(
+            "agent_branch_prefixes: ['agent/']", "agent_branch_prefixes: []"))
+        subprocess.run(git + ["commit", "-qam", "head"], check=True)
+        saved_base = os.environ.get("PR_DIFF_BASE")
+        os.environ["PR_DIFF_BASE"] = base
+        try:
+            bcfg = base_policy(base_ref_for(1))
+        finally:
+            if saved_base is None:
+                os.environ.pop("PR_DIFF_BASE", None)
+            else:
+                os.environ["PR_DIFF_BASE"] = saved_base
+        code, msg = verdict(bot, True, "agent/x", [ledger_src], bcfg)
+        if code != 1:
+            failures.append(f"bypass head-rules.yaml descoped the agent: exit {code} — {msg}")
+    except (Undetermined, subprocess.CalledProcessError) as e:
+        failures.append(f"bypass head-rules.yaml case could not run: {e}")
+    finally:
+        os.chdir(cwd)
+        os.environ.update(saved_git_env)
+        shutil.rmtree(tmp, ignore_errors=True)
+    return 4
 
 
 def self_test():
@@ -833,9 +999,10 @@ def self_test():
         parsed_files, parsed_added = parse_name_status_z(
             "M\0plain.kt\0A\0new file.kt\0R100\0old.kt\0renamed.kt\0C090\0source.kt\0copy.kt\0"
         )
-        if parsed_files != ["plain.kt", "new file.kt", "renamed.kt", "copy.kt"]:
+        # A rename contributes BOTH sides (old path first); its destination counts as added.
+        if parsed_files != ["plain.kt", "new file.kt", "old.kt", "renamed.kt", "copy.kt"]:
             failures.append(f"name-status parser returned wrong paths: {parsed_files}")
-        if parsed_added != frozenset({"new file.kt"}):
+        if parsed_added != frozenset({"new file.kt", "renamed.kt"}):
             failures.append(f"name-status parser returned wrong added paths: {parsed_added}")
         try:
             parse_name_status_z("R100\0only-old.kt\0")
@@ -845,13 +1012,15 @@ def self_test():
     except Undetermined as e:
         failures.append(f"valid name-status fixture was rejected: {e}")
 
+    n_bypass = bypass_self_test(failures)
+
     if failures:
         print("SELF-TEST FAILED — the guard is not falsifiable as written:")
         for f in failures:
             print(f"  x {f}")
         return 1
     print(
-        f"self-test OK — {len(cases)} classifier cases + 4 undetermined cases + diff parser, "
+        f"self-test OK — {len(cases)} classifier cases + {n_bypass} bypass regressions + 4 undetermined cases + diff parser, "
         f"every block clause independently reached"
     )
     return 0
@@ -902,7 +1071,11 @@ def main():
         return 1
 
     try:
-        cfg = load_rules()
+        n = resolve_pr_number(args.pr)
+        if n is None:
+            print("agent-pr-guard: no pull request in context — nothing to judge")
+            return 0
+        cfg = base_policy(base_ref_for(n))
         # The SUBJECT corpus is the RULE SET, not the PR. A PR-scoped gate examines one PR by
         # definition, so counting PRs could never distinguish a working gate from a broken
         # one. What CAN silently collapse is the derivation: if money_path_services stops
@@ -911,10 +1084,6 @@ def main():
         # `min_subjects:` exists for, so the floor is placed on the derived rules.
         n_rules = len(protected_tokens(cfg)) + len(cfg.get("governance_path_globs") or [])
         gatelib.subjects(n_rules, "protected service tokens + governance globs")
-        n = resolve_pr_number(args.pr)
-        if n is None:
-            print("agent-pr-guard: no pull request in context — nothing to judge")
-            return 0
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
         if code == 1 and owner_approval_allows(n, files):

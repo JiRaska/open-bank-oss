@@ -134,3 +134,8 @@ These fields are internal operator data, not customer PII. They are written to `
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+
+## Incident query filters
+
+Incident listing binds status and severity as named query parameters. Optional filters retain their previous meaning and pagination limits; values are not interpolated into query text. The parameter map replaces the deprecated builder without changing storage or the API.
