@@ -93,6 +93,8 @@ Each pass commits a `provisioning_cycle_run` row as `RUNNING` **before** its fir
 
 For an earlier-date gap, preserve the run row and compare its committed `loan_provisioning` rows and allowance outbox references with the period's independently retained loan and ledger evidence. Reconstruct neither missing rows nor journals from today's mutable loan, installment, collateral or risk state. Record the affected population, uncertainty, reviewer decision and the references of any approved **current-date** accounting adjustment in the reconciliation case. The run row remains unresolved until a reviewed reconciliation closure mechanism is implemented; do not relabel it `COMPLETE` merely to silence the alert.
 
+For same-date retries, inspect `SELECT period, attempt_id, event_type, occurred_at, missing_loans FROM provisioning_cycle_attempt WHERE period = :day ORDER BY id`. Each STARTED and measured COMPLETE/INCOMPLETE event is append-only. A STARTED event without a result means the process stopped or the pass failed before coverage could be recorded; a later attempt does not erase that evidence. A stale attempt cannot record a result over a newer attempt's reporting-day status. V26 backfills only the last start and result already present in the summary before this history table existed; do not infer older attempts from it.
+
 ### Ledger backfill (one-off, #10746)
 For loans whose GL history never reached the ledger (#6057). ROLE_FINANCE or ROLE_ADMIN (humans only), two different people (#10618). The admin console runs the whole flow under Balance sheet & risk → Ledger backfill.
 1. **Dry-run** (writes nothing): `GET /api/v1/lending/ledger-backfill/plan?cutoverDate=<today>&disbursedBefore=<date>`. Check `executable=true`, `journalCount`, `plan.tieOut[*].ties=true` (Loans Receivable after == lending unpaid principal per currency) and `glTotals`. Confirm in ledger that none of the `loan:<id>:…` references exist yet.
@@ -102,6 +104,14 @@ For loans whose GL history never reached the ledger (#6057). ROLE_FINANCE or ROL
 5. A loan whose leg fails stops at that leg, the others continue, and the request stays APPROVED. Fix the cause and run step 4 again. Legs already booked replay as no-ops in ledger.
 6. **Reverse**: reverse each journal in ledger-service (`reverseJournal`), finding them by idempotency key `loan:<id>:…`. The reversal lands in the current open day.
 Journals are booked on the cut-over date, with the original event date as `valueDate`. GL only: nothing is ever credited to a customer account.
+
+### Late provisioning migration V26 (#13026)
+
+V26 reached main after V27. With `validate-on-migrate: false`, default Flyway ordering can leave V26 unapplied even when startup migration returns successfully. The lending GitOps Rollout temporarily sets `QUARKUS_FLYWAY_OUT_OF_ORDER=true` so a database already at V27 can create `provisioning_cycle_attempt` and `provisioning_cycle_run.current_attempt_id`.
+
+Keep deployment holds and image promotion controls in place. Before an authorized rollout, inspect each target database's `flyway_schema_history`; source history and CI do not establish deployed migration state. After migration, verify successful V26/V27 entries, the attempt schema, and preservation of existing provisioning summaries and signature hashes. Repeated migration must not duplicate the V26 backfill.
+
+Remove the temporary GitOps environment entry only after **every** target database records successful V26. Retain the exact historical order exception while Git still shows V27 arriving first. Preserve committed SQL identities; this recovery does not use Flyway repair or renumbering. Schema rollback is described in V26 and requires exporting attempt history before removing it.
 
 ### Flyway checksum mismatch on startup
 Never rewrite an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` transiently, let the DB settle, then remove it.

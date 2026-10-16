@@ -81,7 +81,7 @@ class OriginationWorkflowAdapterBindingIT {
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
 )
-@TestProfile(TemporalDisabledProfile::class)
+@TestProfile(OfflineBackendsProfile::class)
 class InertOriginationWorkflowAdapterBindingIT {
 
     @Inject
@@ -104,14 +104,6 @@ class InertOriginationWorkflowAdapterBindingIT {
 class TemporalEnabledProfile : QuarkusTestProfile {
     override fun getConfigOverrides(): Map<String, String> = mapOf(
         "openbank.temporal.enabled" to "true",
-        "openbank.lending.worker.enabled" to "false",
-    )
-}
-
-/** The offline selection ADR-0028 D3 protects: no real Temporal frontend needed to boot. */
-class TemporalDisabledProfile : QuarkusTestProfile {
-    override fun getConfigOverrides(): Map<String, String> = mapOf(
-        "openbank.temporal.enabled" to "false",
         "openbank.lending.worker.enabled" to "false",
     )
 }
