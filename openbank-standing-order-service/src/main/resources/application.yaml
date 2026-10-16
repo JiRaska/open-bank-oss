@@ -223,3 +223,11 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # A trusted client certificate satisfies Quarkus's mTLS mechanism on 8443. Require a
+      # bearer identity for all standing-order API routes, including future unannotated endpoints.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/v1/standing-orders,/api/v1/standing-orders/*
+            policy: authenticated
+            auth-mechanism: bearer

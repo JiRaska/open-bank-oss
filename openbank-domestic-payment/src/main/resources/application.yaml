@@ -304,6 +304,15 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # With client-auth enabled, Quarkus can authenticate a trusted client certificate on 8443.
+      # Require the bearer mechanism for every domestic-payment API route on both listeners;
+      # `authenticated` also protects a future route that omits a JAX-RS role annotation.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/v1/domestic-payments,/api/v1/domestic-payments/*,/api/v1/business-payment-batches,/api/v1/business-payment-batches/*
+            policy: authenticated
+            auth-mechanism: bearer
     # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
     # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
     # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this

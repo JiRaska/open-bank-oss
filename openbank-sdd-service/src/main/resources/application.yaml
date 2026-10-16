@@ -219,6 +219,14 @@ mp:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # A trusted client certificate satisfies Quarkus's mTLS mechanism on 8443. Require a
+      # bearer identity for all SDD API routes, including future unannotated endpoints.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/v1/sdd,/api/v1/sdd/*
+            policy: authenticated
+            auth-mechanism: bearer
     # ADR-0335 D6: account-service's private-CA mTLS listener (8443, client auth REQUIRED), same
     # shape as aml-service's account-authority. Local/test fixtures speak plain HTTP.
     tls:
