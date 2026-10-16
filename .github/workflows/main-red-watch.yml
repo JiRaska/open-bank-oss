@@ -79,6 +79,7 @@ on:
       # Builds, signs and pushes the IdP and LLM-gateway images (#11265). A red run on main
       # means a merged Dockerfile fix (a CVE bump) is not in the registry and not deployed.
       - "Platform images"
+      - "Keycloak workload identity"
       - "Agent charter registry"
       - "AI governance snapshot"
       - "API contract post-merge guard"

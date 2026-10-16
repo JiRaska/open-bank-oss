@@ -100,7 +100,9 @@ class WorkloadIdentity(unittest.TestCase):
         }
         realm_file = cls.work / "realm.json"
         realm_file.write_text(json.dumps(realm))
-        realm_file.chmod(0o600)
+        # The disposable realm contains synthetic credentials only. Keycloak runs as UID 1000,
+        # which differs from the Linux runner owner; the private temporary directory stays 0700.
+        realm_file.chmod(0o644)
         dockerfile = (ROOT / "openbank-infra/docker/keycloak/Dockerfile").read_text()
         image = re.search(r"FROM (quay\.io/keycloak/keycloak:\$\{KEYCLOAK_VERSION\}@sha256:[a-f0-9]+)", dockerfile).group(1)
         version = re.search(r"ARG KEYCLOAK_VERSION=([0-9.]+)", dockerfile).group(1)
