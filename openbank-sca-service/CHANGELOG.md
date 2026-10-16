@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.4](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.21.3...sca-service-v0.21.4) (2026-10-16)
+
+
+### Security
+
+* **opa:** authorize machines by the verified service_account flag (phase 2 of 2, gated on [#12538](https://github.com/JiRaska/open-bank-oss/issues/12538) rollout) ([#12537](https://github.com/JiRaska/open-bank-oss/issues/12537)) ([abf3aff](https://github.com/JiRaska/open-bank-oss/commit/abf3aff4f24fd170a6e1641b3008f9e4648a9572))
+
 ## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.21.2...sca-service-v0.21.3) (2026-10-14)
 
 

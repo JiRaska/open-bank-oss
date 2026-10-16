@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.41.2...lending-service-v0.42.0) (2026-10-16)
+
+
+### Features
+
+* **lending:** ADR-0211 explicit origination commands, KYC/four-eyes timer branches, jqwik property tests ([#12769](https://github.com/JiRaska/open-bank-oss/issues/12769)) ([c319e97](https://github.com/JiRaska/open-bank-oss/commit/c319e970d2b70307bace6402e371f94b82b610a0))
+
 ## [0.41.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.41.1...lending-service-v0.41.2) (2026-10-14)
 
 
