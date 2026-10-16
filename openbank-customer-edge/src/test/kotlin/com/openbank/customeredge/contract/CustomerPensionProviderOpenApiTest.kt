@@ -23,6 +23,24 @@ class CustomerPensionProviderOpenApiTest {
         assertProviderError("/pension/transfers-in")
     }
 
+    @Test
+    fun `onboarding contracts publish 401 for missing or invalid identity`() {
+        listOf("/pension/applications", "/pension/transfers-in").forEach { path ->
+            val unauthorized = spec.path("paths").path(path).path("post").path("responses").path("401")
+            assertThat(unauthorized.isObject).describedAs("$path must publish missing-identity rejection").isTrue()
+            assertThat(unauthorized.path("description").asText()).isNotBlank()
+        }
+    }
+
+    @Test
+    fun `onboarding contracts require customer pension write authorization`() {
+        listOf("/pension/applications", "/pension/transfers-in").forEach { path ->
+            val security = spec.path("paths").path(path).path("post").path("security")
+            assertThat(security.size()).describedAs("$path must not permit anonymous access").isEqualTo(1)
+            assertThat(security[0].path("customerOidc").map { it.asText() }).containsExactly("pension:write")
+        }
+    }
+
     private fun assertProviderError(path: String) {
         val response = spec.path("paths").path(path).path("post").path("responses").path("503")
         assertThat(response.isObject).describedAs("$path must publish 503").isTrue()
