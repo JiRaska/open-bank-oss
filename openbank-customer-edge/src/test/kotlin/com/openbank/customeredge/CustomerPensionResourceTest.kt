@@ -176,6 +176,27 @@ class CustomerPensionResourceTest {
     }
 
     @Test
+    fun `transfer-in without a configured provider returns the published error before upstream access`() {
+        val body = validApplication.replace(
+            "\"participantPartyId\"",
+            "\"transferIn\":{\"providerId\":\"P1\",\"providerName\":\"Old PF\",\"contractNumber\":\"123\"}," +
+                "\"participantPartyId\"",
+        )
+        listOf(null, " ").forEach { provider ->
+            val upstream = mockk<UpstreamClient>()
+            val response = resource(upstream).apply {
+                providerEntityId = { provider }
+            }.transferIn(body, "unconfigured-transfer")
+
+            assertThat(response.status).isEqualTo(503)
+            assertThat(json(response)["code"].asText()).isEqualTo("PENSION_PROVIDER_NOT_CONFIGURED")
+            assertThat(json(response)["error"].asText()).isNotBlank()
+            verify(exactly = 0) { upstream.get(any(), any()) }
+            verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        }
+    }
+
+    @Test
     fun `signing an application forwards the challenge to pension-service and refuses a missing one`() {
         val upstream = mockk<UpstreamClient>()
         val applicationId = UUID.randomUUID()

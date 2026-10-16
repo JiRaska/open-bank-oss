@@ -130,6 +130,22 @@ term, deposit limits, early-withdrawal conditions and terms links. To open one, 
 applies the same ACTIVE-KYC and authoritative-legal-name gate as account opening. Creating the
 account is separate from funding it: the app follows with its normal account-funding flow.
 
+### Company payment batch drafts
+
+`/business/payment-batches` lists and creates drafts; `/{id}` reads one draft and
+`/{id}/items` replaces its items. These routes are disabled by default with
+`openbank.edge.business-payment-batches.enabled=false` and return 404 until explicitly enabled.
+They require a customer token and `X-Acting-For` naming a company for which the human caller has
+an active mandate. The edge derives both parties from the token and mandate inventory; the body
+cannot select them. It sends the company and human identities to domestic-payment using service
+credentials. A draft does not submit or dispatch money.
+
+Creation requires `Idempotency-Key` (1–128 characters). An exact replay returns 200 with the
+existing draft; a conflicting body returns 409. List pages contain at most 20 drafts. Detail
+returns at most 20 items per page; item replacement needs `If-Match` with the current revision
+and returns 409 on a stale revision. Successful responses expose the server-computed item count,
+total minor units, revision and timestamps as specified in `openapi.yaml`.
+
 ## Error model
 
 The edge returns small JSON error envelopes of the shape `{"error":"…"}` it generates itself, and otherwise **passes the upstream status and body through unchanged**.
@@ -166,7 +182,7 @@ The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at ru
 
 - `GET /products` projects catalog retirement offerings; `POST /simulations` returns an illustrative projection, without binding a contract. Simulations use a fresh upstream key.
 - `POST /applications` and `POST /transfers-in` start onboarding. Birth date and residency come from the party record; an incomplete profile returns 422 `PARTY_PROFILE_INCOMPLETE`.
-- Opening an application takes no provider from the app: the edge supplies the deployment's configured provider legal entity (`OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID`, which must equal pension-service's own) alongside the birth date and residency it reads from the party record. A `providerEntityId` sent by the app is ignored. When none is configured the application is refused with 503 `PENSION_PROVIDER_NOT_CONFIGURED` before anything goes upstream.
+- Opening an application takes no provider from the app: the edge supplies the deployment's configured provider legal entity (`OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID`, which must equal pension-service's own) alongside the birth date and residency it reads from the party record. A `providerEntityId` sent by the app is ignored. When none is configured, both application and transfer-in creation return the documented JSON `error` and `code` fields with 503 `PENSION_PROVIDER_NOT_CONFIGURED` before anything goes upstream.
 - Applications expose detail, recommendation, questionnaire, strategy selection, KID acceptance, signing and withdrawal. Signing forwards the challenge to pension-service, which consumes it against the application evidence.
 - Contracts expose detail, pause/resume, strategy election, payment reference, contribution mandates (set-up and cancel) and tax summary (which carries the state-contribution status per tax year).
 - `CustomerPensionChangeResource` adds the follow-up flows of `docs/ux/pension-client-flows.md` (pension-service API 1.2.0): the questionnaire (question set, draft, profile, warnings and their acknowledgement), contribution-schedule and beneficiary preview and change, annual and payout statements, payout eligibility, and annuity offers, selection and cancellation.
