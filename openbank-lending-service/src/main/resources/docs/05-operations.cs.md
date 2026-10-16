@@ -29,6 +29,8 @@
 
 `LENDING_LEDGER_BACKEND` je **build-time** (`@IfBuildProperty`): vybírá adaptér při sestavení image, ne za běhu.
 
+Zpoždění před prvním plánovaným obnovením compliance balíčků určuje `lending.compliance.refresh-initial-delay` (výchozí `10s`).
+
 ## Porty & probes
 
 - **App:** `8126`. **Management:** `8086`, root-path `/q` (`quarkus.management.enabled=true`).
