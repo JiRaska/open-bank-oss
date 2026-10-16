@@ -452,8 +452,11 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-sbom-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
           restore-keys: gradle-sbom-
+      - name: Verify SBOM effective-model failure boundary
+        run: python3 .github/scripts/test-sbom-effective-model-guard.py
       - name: Generate per-service SBOMs
-        run: ./gradlew sbomAll --console=plain --no-daemon
+        # Bound the full-fleet model traversal to the repository's 3 GB heap.
+        run: ./gradlew sbomAll --dependency-verification=strict --no-parallel --max-workers=1 --console=plain --no-daemon
       - name: Collect per-service SBOMs
         run: |
           mkdir -p sboms

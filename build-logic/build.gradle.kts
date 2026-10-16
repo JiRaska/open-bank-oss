@@ -49,6 +49,8 @@ dependencies {
     // Public model-task descriptor types are supplied at runtime by the Quarkus plugin.
     compileOnly("io.quarkus:quarkus-gradle-model:$quarkusVersion")
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:$cyclonedxVersion")
+    // Public model-builder API; the existing Quarkus/CycloneDX runtime selects 3.9.16.
+    compileOnly("org.apache.maven:maven-model-builder:3.9.16")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:$koverVersion")
     // Static analysis (SAST gate), applied fleet-wide by the openbank.static-analysis
     // convention plugin. Only ktlint is a Gradle plugin here — detekt is invoked as a
