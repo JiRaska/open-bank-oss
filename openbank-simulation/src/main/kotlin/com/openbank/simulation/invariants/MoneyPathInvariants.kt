@@ -269,6 +269,7 @@ object MoneyPathInvariants {
         r.resolutionCount > 1 -> "REVIEW alert resolved ${r.resolutionCount} times"
         r.reviewEscalatedToBlock && (!r.refused || r.executed) ->
             "escalated hit must refuse and never execute (refused=${r.refused}, executed=${r.executed})"
+        !r.reviewEscalatedToBlock && r.refused -> "false positive released but refused"
         !r.reviewEscalatedToBlock && !r.executed -> "false positive released but never executed"
         else -> null
     }
