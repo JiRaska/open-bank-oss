@@ -12,7 +12,7 @@ The case thread returned by `GET /cases/{caseId}` reads proposal events from `ca
 
 ## Case-open operational logs
 
-Case-open success, duplicate and Temporal-start failure logs correlate the workflow through a stable SHA-256 digest of its identifier. These messages omit the subject-bearing workflow identifier and Temporal exception messages or cause chains; failures retain the exception class. Success logs retain sanitized caller attribution and the case class. The digest is pseudonymous, not anonymous, and requires the same access and retention controls as other operational identifiers. API workflow identifiers, quota accounting and server-side deduplication are unchanged. This scope does not claim that every service log is free of personal data.
+Case-open success, duplicate and Temporal-start failure logs correlate the workflow through a stable SHA-256 digest of its identifier. These messages omit the subject-bearing workflow identifier and Temporal exception messages or cause chains; failures retain the exception class. Success logs retain caller attribution and the case class. Caller fields use the shared lossless log-field encoding: ordinary tokens stay unchanged, while spaces, quotes, backslashes, controls and line separators are quoted or escaped so the original identity can be recovered without creating a physical log line or an extra field. The digest is pseudonymous, not anonymous, and requires the same access and retention controls as other operational identifiers. API workflow identifiers, quota accounting and server-side deduplication are unchanged. This scope does not claim that every service log is free of personal data.
 
 ## Build identity
 
