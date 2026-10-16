@@ -88,6 +88,16 @@ spec:
               value: jdbc:postgresql://lending-db-rw.lending.svc:5432/openbank_lending
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: vertx-reactive:postgresql://lending-db-rw.lending.svc:5432/openbank_lending
+            # Flyway out-of-order: V26__provisioning_cycle_attempts.sql (#12315, merged
+            # 2026-10-16) reached main AFTER V27__loan_application_signature_artefact_hash.sql
+            # (#12769, merged 2026-10-15). V26 is additive (provisioning-cycle attempt rows) and
+            # safe to apply after V27; Flyway would otherwise refuse to start with
+            # 'Detected resolved migration not applied to database: 26'. Renaming is blocked by
+            # check-db-migration.py's db-migration-gate (rename = edit of a committed migration).
+            # Same pattern as components/campaign/campaign-service.yaml — keep explicit until
+            # every environment has recorded V26, then remove in a separately reviewed cleanup.
+            - name: QUARKUS_FLYWAY_OUT_OF_ORDER
+              value: "true"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

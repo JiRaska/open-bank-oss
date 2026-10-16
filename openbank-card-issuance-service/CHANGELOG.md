@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.2...card-issuance-service-v0.28.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **domestic-payment,card-issuance,case-coordinator-agent:** protect request-derived log fields ([#12717](https://github.com/JiRaska/open-bank-oss/issues/12717)) ([9f5862a](https://github.com/JiRaska/open-bank-oss/commit/9f5862a0246f3918a633693429fc2e2df15c4f11))
+
 ## [0.28.2](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.1...card-issuance-service-v0.28.2) (2026-10-14)
 
 
