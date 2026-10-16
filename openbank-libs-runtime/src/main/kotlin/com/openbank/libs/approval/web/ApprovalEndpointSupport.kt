@@ -6,12 +6,14 @@ package com.openbank.libs.approval.web
 
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.approval.toApprovalItem
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.config.ConfigProvider
 
 /**
- * The shared BODY of a service's checker-facing maker-checker endpoint (ADR-0155, ADR-0227 D2).
+ * The shared BODY of a service's checker-facing maker-checker endpoint (ADR-0155, ADR-0227 D1/D2).
  *
  * Deliberately a plain delegate, not an abstract JAX-RS resource and not a CDI bean:
  * - The per-service parts are ANNOTATIONS (`@Path`, `@RolesAllowed`, `@Authorize(action = ...)`,
@@ -28,6 +30,15 @@ import jakarta.ws.rs.core.Response
  *   `AuthorizeInterceptor` records as the maker id), never from the request body.
  * - Self-approval is refused by [ApprovalStore.decide] (`SelfApprovalNotAllowedException`); this
  *   class does not catch it, so the service's existing exception mapping is unchanged.
+ *
+ * ADR-0227 D1: `listPending` projects each store row into the canonical
+ * [com.openbank.libs.approval.ApprovalItem] and serves it through the additively-extended
+ * [ApprovalResponse] (new fields are all optional, so existing consumers and the 19 services'
+ * openapi MINOR bumps stay backward-compatible). The store carries no domain or risk class, so
+ * `domain` is derived from `quarkus.application.name` and `riskClass` is UNKNOWN here; the
+ * admin-UI BFF re-derives the authoritative risk class from rules.yaml action-class metadata.
+ * Nothing here creates a CDI bean or touches config beyond reading `quarkus.application.name` —
+ * reading a config value is not a bean presence, so the four-eyes invariant above is untouched.
  */
 class ApprovalEndpointSupport(private val approvalStore: ApprovalStore) {
 
@@ -85,12 +96,38 @@ class ApprovalEndpointSupport(private val approvalStore: ApprovalStore) {
          * [ApprovalStore.decide] would compare two spellings of the same person.
          */
         fun checkerId(identity: SecurityIdentity): String = identity.principal?.name ?: "anonymous"
+
+        /**
+         * The domain label for the D1 projection, derived from `quarkus.application.name` with
+         * the same normalisation rest.rego applies to `money_path_services` (strip `openbank-`
+         * and a trailing `-service`). Falls back to `unknown` only when the property is absent
+         * (e.g. a plain unit test without Quarkus config); the BFF keys items off its own source
+         * list, so a mislabelled domain here degrades display, never routing.
+         */
+        fun derivedDomain(): String = ConfigProvider.getConfig()
+            .getOptionalValue("quarkus.application.name", String::class.java)
+            .map { name -> name.removePrefix("openbank-").removeSuffix("-service") }
+            .orElse("unknown")
     }
 }
 
 data class DecideApprovalRequest(val approve: Boolean)
 
-/** Wire shape of a pending/decided approval, shared by every migrated service's `openapi.yaml`. */
+/**
+ * Wire shape of a pending/decided approval, shared by every migrated service's `openapi.yaml`.
+ *
+ * The first eight fields are the original ADR-0155 shape. The trailing fields are the ADR-0227
+ * D1 canonical projection ([com.openbank.libs.approval.ApprovalItem]) — all optional, so the
+ * change is additive per the ADR-0048 api-contract gate and existing consumers are unaffected:
+ * - `summary`: the persisted request-binding summary; `null` for application-created approvals.
+ * - `domain`: this service's domain, derived from `quarkus.application.name`.
+ * - `amount` / `currency`: always `null` today — the maker's original request amount is not
+ *   persisted (see ApprovalItem's KDoc); string-typed so a future amount serialises exactly.
+ * - `riskClass`: UNKNOWN from the service side — the authoritative classification lives in
+ *   rules.yaml action-class metadata the store cannot see; the admin-UI BFF re-derives it.
+ * - `payloadRef`: always `null` today — the persisted fingerprint is an integrity digest, not a
+ *   retrievable payload pointer.
+ */
 data class ApprovalResponse(
     val id: String,
     val action: String,
@@ -100,15 +137,29 @@ data class ApprovalResponse(
     val makerActorKind: String,
     val createdAt: String?,
     val decidedBy: String?,
+    val summary: String? = null,
+    val domain: String? = null,
+    val amount: String? = null,
+    val currency: String? = null,
+    val riskClass: String? = null,
+    val payloadRef: String? = null,
 )
 
-fun PendingApproval.toApprovalResponse() = ApprovalResponse(
-    id = id,
-    action = action,
-    resourceId = resourceId,
-    status = status.name,
-    makerId = makerId,
-    makerActorKind = makerActorKind.name,
-    createdAt = createdAt.toString(),
-    decidedBy = decidedBy,
-)
+fun PendingApproval.toApprovalResponse() = toApprovalItem(ApprovalEndpointSupport.derivedDomain()).let { item ->
+    ApprovalResponse(
+        id = item.id,
+        action = item.action,
+        resourceId = resourceId,
+        status = item.state.name,
+        makerId = item.maker.id,
+        makerActorKind = item.maker.channel.name,
+        createdAt = item.maker.at.toString(),
+        decidedBy = decidedBy,
+        summary = item.summary,
+        domain = item.domain,
+        amount = item.amount?.toPlainString(),
+        currency = item.currency,
+        riskClass = item.riskClass.name,
+        payloadRef = item.payloadRef,
+    )
+}

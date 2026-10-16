@@ -7,15 +7,15 @@ package openbank.rest_test
 import data.openbank.rest
 import rego.v1
 
-dealer := {"type": "HUMAN", "id": "dealer-1", "service_account": false, "roles": ["ROLE_TREASURY_DEALER"]}
+dealer := {"service_account": false, "type": "HUMAN", "id": "dealer-1", "roles": ["ROLE_TREASURY_DEALER"]}
 
-approver := {"type": "HUMAN", "id": "approver-1", "service_account": false, "roles": ["ROLE_TREASURY_APPROVER"]}
+approver := {"service_account": false, "type": "HUMAN", "id": "approver-1", "roles": ["ROLE_TREASURY_APPROVER"]}
 
-admin := {"type": "HUMAN", "id": "admin-1", "service_account": false, "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "admin-1", "roles": ["ROLE_ADMIN"]}
 
-senior := {"type": "HUMAN", "id": "senior-1", "service_account": false, "roles": ["ROLE_TREASURY_SENIOR_APPROVER"]}
+senior := {"service_account": false, "type": "HUMAN", "id": "senior-1", "roles": ["ROLE_TREASURY_SENIOR_APPROVER"]}
 
-nobody := {"type": "HUMAN", "id": "teller-1", "service_account": false, "roles": ["ROLE_CUSTOMER"]}
+nobody := {"service_account": false, "type": "HUMAN", "id": "teller-1", "roles": ["ROLE_CUSTOMER"]}
 
 # The shared backend client, given the approver role by mistake: still a machine, still denied.
 shared_sa := {
@@ -34,7 +34,8 @@ renamed_sa := {
 	"roles": ["ROLE_TREASURY_APPROVER", "ROLE_TREASURY_DEALER"],
 }
 
-agent := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
+
+agent := {"service_account": false, "type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
 
 reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read", "treasury.quote.read"}
 
@@ -150,6 +151,7 @@ test_ai_agent_gets_no_treasury_reason if {
 # The charter-shaped agent id, with the most roles a treasury agent client could be handed. The
 # must-DENY half at the policy layer, as the agent itself.
 chartered_agent := {
+	"service_account": false,
 	"type": "AI_AGENT",
 	"id": "agent:treasury-dealing-assistant",
 	"roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"],
