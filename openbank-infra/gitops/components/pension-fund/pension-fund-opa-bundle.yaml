@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pension-fund-service
     app.kubernetes.io/part-of: pension-fund
   annotations:
-    openbank.tech/policy-checksum: "6849d61eda960107"
+    openbank.tech/policy-checksum: "558fddc563c98bca"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1833,6 +1833,9 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
+        # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
+        - card.details.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
