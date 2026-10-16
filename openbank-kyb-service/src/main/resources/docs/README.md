@@ -9,3 +9,7 @@ The committed `src/main/resources/openapi.yaml` defines the API contract. Read `
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Representation lookup and stored extracts
+
+Representation lookup validates the legal-entity identifier before contacting the registry. Invalid identifiers do not bypass that validation. Stored registry extracts retain the same JSON representation used by onboarding cases; the specialized serializer does not change the API or persisted schema.
