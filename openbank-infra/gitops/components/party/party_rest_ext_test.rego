@@ -136,3 +136,28 @@ test_tax_reporting_tax_facts_rule_is_identity_pinned if {
 	not allow.allow with input as {"principal": shared_api_only, "action": "party.reporting.taxFacts"}
 	not allow.allow with input as {"principal": viewer, "action": "party.reporting.taxFacts"}
 }
+
+# Current PEP marker must be explicit true with the matching client. Absent is the
+# deliberate legacy ABI; explicit null is malformed and must not borrow that path.
+tax_reporting_guard_identity := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_current_and_absent_legacy_allowed if {
+	every principal in [tax_reporting_guard_identity, object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "openbank-tax-reporting"})] {
+		allow.allow with input as {"principal": principal, "action": "party.reporting.taxFacts"}
+	}
+}
+
+test_tax_reporting_explicit_null_marker_denied if {
+	not allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, {"service_account": null, "client_id": "openbank-tax-reporting"}), "action": "party.reporting.taxFacts"}
+}
+
+test_tax_reporting_false_or_bad_client_binding_denied if {
+	every changed in [
+		{"service_account": false, "client_id": "openbank-tax-reporting"},
+		{"service_account": true, "client_id": "another-client"},
+		{"service_account": true},
+		{"service_account": true, "client_id": "openbank-tax-reporting", "id": "service-account-another-client"},
+	] {
+		not allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, changed), "action": "party.reporting.taxFacts"}
+	}
+}
