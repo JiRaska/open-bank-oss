@@ -46,6 +46,7 @@
 #   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
 #   TAX_REPORTING_CLIENT_SECRET=... \
 #   DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
+#   MARKETING_USER_PASSWORD=... \
 #   KUBERNETES_OIDC_ISSUER=https://<cluster service-account-issuer> \
 #   KUBERNETES_OIDC_CLIENT_SECRET=<JWKS client credential, any non-empty value if the API \
 #     server does not authenticate JWKS clients> \
