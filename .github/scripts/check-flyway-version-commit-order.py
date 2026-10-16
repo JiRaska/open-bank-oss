@@ -190,6 +190,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
     # truncated FETCH_HEAD is a plausible-looking answer that silently changes the question.
     revs: list[str] = []
     mainline = "unresolved"
+    provenance = "unresolved"
     for ref in ("FETCH_HEAD", "origin/main", "main"):
         try:
             candidate = subprocess.run(
