@@ -102,3 +102,8 @@ erasure dimension because there is no personal data (see [06 — Compliance](./0
 | `V6__preserve_mixed_version_outbox_and_published_children.sql` | Restores old-writer outbox defaults first and closes published-child INSERT/relocation bypasses. |
 | `V7__track_bank_v1_projection_revision.sql` | Records v1 and draft watermarks so one-sided rollback writes reconcile and two-sided drift fails closed. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Assigns immutable commit-safe cursor positions so reverse commits or clock changes cannot create a gap. |
+
+
+## Catalog object conversion
+
+Nested catalog objects retain their existing serialized field representation. The specialized object conversion keeps the same output contract; no catalog data migration or API version change is required.
