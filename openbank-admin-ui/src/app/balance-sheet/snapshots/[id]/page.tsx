@@ -19,7 +19,7 @@
 
 'use client'
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react'
+import { use, useCallback, useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { ArrowLeft, Scale } from 'lucide-react'
