@@ -77,9 +77,9 @@ Vrací default id modelu a každý povolený model v registru gateway: `{ defaul
 
 ## Zaznamenané lidské merge — `/api/v1/agent-merge-records`
 
-Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kdo mergoval PR autora agentem** (tabulka viz [04 — Data](./04-data.md)). Záznamy vstupují **mimo pásmo** — GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta se servisním credential pipeline `ROLE_ADMIN`. Agent své merge **nikdy nenahlašuje sám**.
+Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kdo mergoval PR autora agentem** (tabulka viz [04 — Data](./04-data.md)). Záznamy vstupují **mimo pásmo** — GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta se servisním credential pipeline `ROLE_MERGE_RECORDER`. Agent své merge **nikdy nenahlašuje sám**.
 
-- **`POST /api/v1/agent-merge-records`** — pouze `ROLE_ADMIN` (volajícím je CI pipeline, ne interaktivní operátor). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (vše povinné), plus volitelné `proposalId` (UUID — měkký odkaz na `agent_proposal`) a `source` (default `unknown`). Idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a odpověď vrátí již uložený záznam s `inserted=false`.
+- **`POST /api/v1/agent-merge-records`** — pouze `ROLE_MERGE_RECORDER` (volajícím je CI pipeline, ne interaktivní operátor; least privilege — ani `ROLE_ADMIN` nesmí zapisovat merge důkazy). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (vše povinné), plus volitelné `proposalId` (UUID — měkký odkaz na `agent_proposal`) a `source` (default `unknown`). Idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a odpověď vrátí již uložený záznam s `inserted=false`.
 - **`GET /api/v1/agent-merge-records?agentId=`** — `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_COMPLIANCE`. Nejnovější první; volitelný `agentId` zužuje seznam na merge jednoho agenta.
 
 ## Chybový model

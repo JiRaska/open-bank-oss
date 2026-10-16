@@ -221,7 +221,7 @@ class AgentMergeRecordApiIT {
     }
 
     @Test
-    @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
     fun `ingest persists a row and enqueues exactly one audit event`() {
         given()
             .contentType("application/json")
@@ -250,7 +250,7 @@ class AgentMergeRecordApiIT {
     }
 
     @Test
-    @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
     fun `duplicate redelivery returns the stored record without a second audit event`() {
         given()
             .contentType("application/json")
@@ -281,7 +281,7 @@ class AgentMergeRecordApiIT {
     }
 
     @Test
-    @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
     fun `runtime and checked audit failures roll back merge row so redelivery retries both`() {
         try {
             val attempts = installAuditFailureSpy()
@@ -298,7 +298,7 @@ class AgentMergeRecordApiIT {
     }
 
     @Test
-    @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
     fun `missing required field returns 400`() {
         val body = ingestBody().toMutableMap()
         body.remove("mergedBy")
@@ -311,7 +311,7 @@ class AgentMergeRecordApiIT {
     }
 
     @Test
-    @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
+    @TestSecurity(user = "pipeline", roles = ["ROLE_MERGE_RECORDER"])
     fun `malformed proposalId returns 400`() {
         given()
             .contentType("application/json")
@@ -327,6 +327,20 @@ class AgentMergeRecordApiIT {
         given()
             .contentType("application/json")
             .body(ingestBody(prNumber = 9004))
+            .`when`().post("/api/v1/agent-merge-records")
+            .then()
+            .statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `ingest with ROLE_ADMIN but without ROLE_MERGE_RECORDER is rejected`() {
+        // Least-privilege guard (ADR-0031 phase 3 hardening): an interactive bank
+        // administrator must NOT be able to write merge evidence — only the dedicated
+        // ROLE_MERGE_RECORDER carried by the CI recorder client may.
+        given()
+            .contentType("application/json")
+            .body(ingestBody(prNumber = 9007))
             .`when`().post("/api/v1/agent-merge-records")
             .then()
             .statusCode(403)

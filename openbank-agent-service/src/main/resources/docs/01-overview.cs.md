@@ -13,7 +13,7 @@ Asistent běží pod jednou pevnou identitou control-plane, **`ui-assistant`** (
 ## Co služba **NEDĚLÁ**
 
 - ❌ Nedrží žádná bankovní data — nemá vlastní doménový agregát.
-- ❌ Agent nikdy nemění stav — **neexistuje zapisovací nástroj**; charter zakazuje `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`. (Jediné zápisy, které služba přijímá, jsou CI ingestované řádky merge důkazů, zapisované servisním credential `ROLE_ADMIN` — nikdy agentem.)
+- ❌ Agent nikdy nemění stav — **neexistuje zapisovací nástroj**; charter zakazuje `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`. (Jediné zápisy, které služba přijímá, jsou CI ingestované řádky merge důkazů, zapisované servisním credential `ROLE_MERGE_RECORDER` — nikdy agentem.)
 - ❌ Neprovádí platby, neúčtuje do ledgeru ani nepřesouvá peníze — **není** v `rules.yaml: money_path_services`.
 - ❌ Nespouští LLM v prohlížeči — model se volá serverově, za hranicí důvěry gateway.
 - ❌ **Není** vystavena externím TPP přes API Gateway — je to interní služba.

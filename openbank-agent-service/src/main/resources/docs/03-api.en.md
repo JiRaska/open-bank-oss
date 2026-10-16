@@ -77,9 +77,9 @@ Returns the default model id and every enabled model in the gateway registry: `{
 
 ## Recorded human merges — `/api/v1/agent-merge-records`
 
-ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merged an agent-authored PR** (table in [04 — Data](./04-data.md)). Records enter **out-of-band** — the `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR with the pipeline's `ROLE_ADMIN` service credential. The agent never self-reports its own merges.
+ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merged an agent-authored PR** (table in [04 — Data](./04-data.md)). Records enter **out-of-band** — the `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR with the pipeline's `ROLE_MERGE_RECORDER` service credential. The agent never self-reports its own merges.
 
-- **`POST /api/v1/agent-merge-records`** — `ROLE_ADMIN` only (the caller is the CI pipeline, not an interactive operator). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (all required), plus optional `proposalId` (UUID — soft link to `agent_proposal`) and `source` (default `unknown`). Idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and the response returns the already-stored record with `inserted=false`.
+- **`POST /api/v1/agent-merge-records`** — `ROLE_MERGE_RECORDER` only (the caller is the CI pipeline, not an interactive operator; least privilege — not even `ROLE_ADMIN` may write merge evidence). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (all required), plus optional `proposalId` (UUID — soft link to `agent_proposal`) and `source` (default `unknown`). Idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and the response returns the already-stored record with `inserted=false`.
 - **`GET /api/v1/agent-merge-records?agentId=`** — `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_COMPLIANCE`. Newest first; the optional `agentId` narrows the list to one agent's merges.
 
 ## Error model

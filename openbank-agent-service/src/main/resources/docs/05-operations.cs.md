@@ -80,7 +80,7 @@ Očekávané pod `advisory` jen pokud je nástroj nenamapovaný (deny-by-default
 Nastavte `AGENT_POLICY_ENFORCEMENT=block` v env deploye, jakmile je v cíli přítomen OPA sidecar. Není třeba redeploy kódu; kill-switch / charter změny žijí v `agents.yaml` + OPA bundle.
 
 ### Ingest zaznamenaného lidského merge (ADR-0031 fáze 3)
-GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta na `POST /api/v1/agent-merge-records` se servisním credential `ROLE_ADMIN`. Ingest je idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a vrátí `200` s původním záznamem a `inserted=false`, **bez druhého auditního eventu**. Chybí-li merge v důkazech: nejdřív zkontrolujte log běhu workflow (zamítnutý nebo neautentizovaný POST tam selhává hlasitě), pak roli ingest credential a dosažitelnost Postgres služby.
+GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta na `POST /api/v1/agent-merge-records` se servisním credential `ROLE_MERGE_RECORDER`. Ingest je idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a vrátí `200` s původním záznamem a `inserted=false`, **bez druhého auditního eventu**. Chybí-li merge v důkazech: nejdřív zkontrolujte log běhu workflow (zamítnutý nebo neautentizovaný POST tam selhává hlasitě), pak roli ingest credential a dosažitelnost Postgres služby.
 
 ## Verze & release
 

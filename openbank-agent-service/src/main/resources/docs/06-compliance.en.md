@@ -25,7 +25,7 @@
 | **D5 — AI attribution** | `ModelGateway` and `AgentPolicyGate` emit `AuditEvent {actorType=AI_AGENT}` for every completion / decision (model_id, model_version, prompt_hash, tokens, policy_decision, reason). |
 | **D6 — model gateway** | the single trust boundary every model call passes through; provider-agnostic, sensitive context pinned to a self-hosted model. |
 | **D9 — phased enforcement** | `EnforcementMode` ADVISORY (audit-only, default) → BLOCK; fail-closed PDP with a `pdpError` safety fallback so a dead OPA never locks the assistant out. |
-| **Phase 3 — recorded human merge** | `POST /api/v1/agent-merge-records` ingests, out-of-band by the `record-agent-merge` CI workflow (`ROLE_ADMIN`), a durable record of WHO merged an agent-authored PR — the agent never self-reports. `agent_merge_record.pr_number` UNIQUE dedupes webhook redeliveries; each merge is audited once as `agent.pr.merged` with `actorType=HUMAN` under the merging human, via the durable outbox ([04 — Data](./04-data.md)). |
+| **Phase 3 — recorded human merge** | `POST /api/v1/agent-merge-records` ingests, out-of-band by the `record-agent-merge` CI workflow (`ROLE_MERGE_RECORDER`), a durable record of WHO merged an agent-authored PR — the agent never self-reports. `agent_merge_record.pr_number` UNIQUE dedupes webhook redeliveries; each merge is audited once as `agent.pr.merged` with `actorType=HUMAN` under the merging human, via the durable outbox ([04 — Data](./04-data.md)). |
 
 ## The `ui-assistant` charter (agents.yaml)
 

@@ -25,7 +25,7 @@
 | **D5 — AI atribuce** | `ModelGateway` a `AgentPolicyGate` emitují `AuditEvent {actorType=AI_AGENT}` pro každý completion / rozhodnutí (model_id, model_version, prompt_hash, tokeny, policy_decision, reason). |
 | **D6 — model gateway** | jediná hranice důvěry, kterou prochází každé volání modelu; provider-agnostická, citlivý kontext připnut k self-hosted modelu. |
 | **D9 — fázované vynucení** | `EnforcementMode` ADVISORY (jen audit, default) → BLOCK; fail-closed PDP s bezpečnostním fallbackem `pdpError`, takže mrtvý OPA nikdy nezamkne asistenta. |
-| **Fáze 3 — zaznamenané lidské merge** | `POST /api/v1/agent-merge-records` ingestuje mimo pásmo (CI workflow `record-agent-merge`, `ROLE_ADMIN`) trvalý záznam toho, KDO mergoval PR autora agentem — agent své merge nikdy nenahlašuje sám. `agent_merge_record.pr_number` UNIQUE deduplikuje znovudoručení webhooku; každý merge je auditován jednou jako `agent.pr.merged` s `actorType=HUMAN` pod mergujícím člověkem, přes odolný outbox ([04 — Data](./04-data.md)). |
+| **Fáze 3 — zaznamenané lidské merge** | `POST /api/v1/agent-merge-records` ingestuje mimo pásmo (CI workflow `record-agent-merge`, `ROLE_MERGE_RECORDER`) trvalý záznam toho, KDO mergoval PR autora agentem — agent své merge nikdy nenahlašuje sám. `agent_merge_record.pr_number` UNIQUE deduplikuje znovudoručení webhooku; každý merge je auditován jednou jako `agent.pr.merged` s `actorType=HUMAN` pod mergujícím člověkem, přes odolný outbox ([04 — Data](./04-data.md)). |
 
 ## Charter `ui-assistant` (agents.yaml)
 
