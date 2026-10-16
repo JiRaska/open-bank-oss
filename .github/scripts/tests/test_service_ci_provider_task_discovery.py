@@ -32,6 +32,9 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         cls.stage_run = next(s["run"] for s in steps if s.get("name") == "Stage trusted Pact Broker retry helper")
         cls.warmup_run = next(s["run"] for s in steps if s.get("name") == "Warm Gradle dependency cache (self-heal corrupted entries)")
         cls.discovery_run = next(s["run"] for s in steps if s.get("name") == "Discover provider Pact task")
+        cls.preflight_run = next(
+            s["run"] for s in steps if s.get("name") == "Preflight Pact Broker selector/HAL response"
+        )
         provider_step = next(s for s in steps if s.get("name", "").startswith("Provider verification ("))
         cls.provider_run = provider_step["run"]
         cls.provider_if = provider_step["if"]
@@ -191,6 +194,48 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.run_workflow_helper_sequence(root, root / "runner-temp", historical, env)
             self.assertEqual((root / "github-output").read_text(), "available=false\n")
             self.assertEqual(len(calls.read_text().splitlines()), 1)
+
+    def test_preflight_requires_hal_link_or_embedded_object(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner_temp = root / "runner-temp"
+            runner_temp.mkdir()
+            helper = runner_temp / "pact-broker-post.sh"
+            helper.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s' \"$HAL_BODY\" > \"$3\"\n"
+                "printf '%s\\n' \"${HAL_STATUS:-200}\"\n"
+            )
+            helper.chmod(0o755)
+            env = {
+                "RUNNER_TEMP": str(runner_temp),
+                "PACT_BROKER_URL": "https://broker.invalid",
+                "SERVICE": SERVICE,
+            }
+            body = self.preflight_run.replace(
+                "/tmp/pact-preflight.json", str(root / "pact-preflight.json")
+            )
+            cases = (
+                ("links-object", '{"_links":{}}', 0),
+                ("embedded-object", '{"_embedded":{}}', 0),
+                ("both-objects", '{"_links":{},"_embedded":{}}', 0),
+                ("links-null", '{"_links":null}', 1),
+                ("embedded-scalar", '{"_embedded":"items"}', 1),
+                ("links-array", '{"_links":[]}', 1),
+                ("valid-links-with-malformed-embedded", '{"_links":{},"_embedded":null}', 1),
+                ("valid-embedded-with-malformed-links", '{"_embedded":{},"_links":false}', 1),
+                ("both-malformed", '{"_links":null,"_embedded":[]}', 1),
+                ("missing-hal-fields", '{"items":[]}', 1),
+                ("root-array", '[]', 1),
+                ("multiple-json-values", '{"_links":{}}\n{"_embedded":{}}', 1),
+            )
+            for name, response, expected in cases:
+                with self.subTest(response=name):
+                    result = self.run_shell(body, root, {**env, "HAL_BODY": response}, expect=expected)
+                    if expected == 0:
+                        self.assertIn("valid HAL/JSON", result.stdout)
+                    else:
+                        self.assertIn("not a valid HAL envelope", result.stdout)
 
 
 FAKE_TIMEOUT = r'''#!/usr/bin/env bash

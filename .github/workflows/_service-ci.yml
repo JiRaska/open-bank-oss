@@ -800,8 +800,8 @@ jobs:
       # reads exactly like a code regression in the provider under test, and the committed
       # @PactFolder replay (which never talks to the broker) is unaffected, so this diagnostic
       # exists to tell the two apart at a glance. Secret-free by construction: only structural
-      # facts (HTTP status, Content-Type, whether the body parses as JSON, whether the expected
-      # HAL keys are present) are ever echoed — never the response body or the pact content.
+      # facts (HTTP status, Content-Type, whether the body parses as one JSON object, whether the
+      # HAL envelope fields have object shape) are ever echoed — never the response body or pact.
       - name: "Preflight Pact Broker selector/HAL response"
         if: ${{ steps.provider_pact_task.outputs.available == 'true' && env.PACT_BROKER_URL != '' }}
         env:
@@ -821,8 +821,8 @@ jobs:
             echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code but the body ($byte_count bytes) is not valid JSON. pact-jvm's HalClient cannot parse this either — expect a downstream NullPointerException in fetchConsumersWithSelectorsV2 if this preflight is bypassed. This is a broker-side malformed-response problem, not a ${SERVICE} contract regression."
             exit 1
           fi
-          if ! jq -e 'has("_embedded") or has("_links")' /tmp/pact-preflight.json > /dev/null 2>&1; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid JSON, but neither '_embedded' nor '_links' is present — not a HAL document. pact-jvm's HalClient expects HAL structure here and will NPE walking it. This is a broker-side response-shape problem, not a ${SERVICE} contract regression."
+          if ! jq -s -e 'length == 1 and (.[0] | type == "object" and (has("_embedded") or has("_links")) and (if has("_embedded") then (._embedded | type == "object") else true end) and (if has("_links") then (._links | type == "object") else true end))' /tmp/pact-preflight.json > /dev/null 2>&1; then
+            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid JSON, but the response is not one object with an object-valued '_embedded' or '_links' field — not a valid HAL envelope. pact-jvm's HalClient expects HAL structure here and may NPE walking it. This is a broker-side response-shape problem, not a ${SERVICE} contract regression."
             exit 1
           fi
           echo "Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid HAL/JSON — proceeding to provider verification."
