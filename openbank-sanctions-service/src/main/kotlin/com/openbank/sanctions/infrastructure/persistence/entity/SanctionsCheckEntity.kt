@@ -31,7 +31,7 @@ class SanctionsCheckEntity {
     @field:Column(name = "name")
     var name: String = ""
 
-    @field:Column(name = "aliases", columnDefinition = "jsonb")
+    @field:Column(name = "aliases", columnDefinition = "text")
     var aliasesJson: String = "[]"
 
     @field:Column(name = "date_of_birth")
@@ -40,20 +40,20 @@ class SanctionsCheckEntity {
     @field:Column(name = "nationality")
     var nationality: String? = null
 
-    @field:Column(name = "identifiers", columnDefinition = "jsonb")
+    @field:Column(name = "identifiers", columnDefinition = "text")
     var identifiersJson: String = "{}"
 
     @field:Column(name = "status")
     @field:Enumerated(EnumType.STRING)
     var status: SanctionsCheckStatus = SanctionsCheckStatus.CLEAR
 
-    @field:Column(name = "matches", columnDefinition = "jsonb")
+    @field:Column(name = "matches", columnDefinition = "text")
     var matchesJson: String = "[]"
 
     @field:Column(name = "overall_score")
     var overallScore: Double = 0.0
 
-    @field:Column(name = "checked_lists", columnDefinition = "jsonb")
+    @field:Column(name = "checked_lists", columnDefinition = "text")
     var checkedListsJson: String = "[]"
 
     @field:Column(name = "reviewed_by")

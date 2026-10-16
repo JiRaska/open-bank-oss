@@ -22,6 +22,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * Broker-side provider verification for sanctions-service, published-result counterpart to
@@ -75,6 +77,9 @@ class SanctionsPactBrokerProviderVerificationTest {
     @Inject
     lateinit var testIdentityAssociation: TestIdentityAssociation
 
+    @Inject
+    lateinit var dataSource: DataSource
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -107,5 +112,16 @@ class SanctionsPactBrokerProviderVerificationTest {
     @State("the sanctions lists are seeded with the boot-time OFAC/EU/UN/PEP entries")
     fun stateSeededSanctionsEntriesExist() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /** Mirrors [SanctionsPactProviderVerificationTest] — direct-JDBC seed, see that class's KDoc. */
+    @State("a sanctions check exists for the pact agent probe")
+    fun statePactAgentCheckExists() = AgentSanctionsPactSeed.seedPactCheck(dataSource)
+
+    /** Mirrors [SanctionsPactProviderVerificationTest] — the negative UUID is never inserted. */
+    @State("no sanctions check exists with the requested id")
+    fun statePactAgentUnknownCheckNotFound() {
+        val missingId = UUID.fromString("6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e")
+        io.restassured.RestAssured.given().get("/api/v1/sanctions/$missingId").then().statusCode(404)
     }
 }
