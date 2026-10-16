@@ -24,10 +24,13 @@ import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import {
   approvalWorkbenchHref,
   filterAndSortDomainApprovals,
+  type ApprovalAgeBand,
+  type ApprovalAmountBand,
   type ApprovalDomain,
   type ApprovalSortOrder,
   type DomainApprovalItem,
 } from '@/lib/approvals/triage'
+import type { ApprovalRiskClass } from '@/lib/approvals/risk'
 import { parseAgentProposalList, parseApprovalInbox, type AgentProposal as Proposal, type ApprovalInboxItem as InboxItem } from '@/lib/approvals/evidence'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -46,6 +49,13 @@ const MAKER_KIND_LABELS: Record<NonNullable<DomainApprovalItem['makerActorKind']
   SERVICE_ACCOUNT: { cs: 'Servisní účet', en: 'Service account' },
   CUSTOMER_PARTY: { cs: 'Zákaznická strana', en: 'Customer party' },
   UNKNOWN: { cs: 'Původ neověřen', en: 'Origin unverified' },
+}
+
+// ADR-0227 D3: risk-class facet, derived by the BFF from rules.yaml action-class metadata.
+const RISK_LABELS: Record<ApprovalRiskClass, { cs: string; en: string; color: string; bg: string; border: string }> = {
+  MONEY_PATH: { cs: 'Peněžní tok', en: 'Money path', color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)' },
+  DESTRUCTIVE: { cs: 'Destruktivní', en: 'Destructive', color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
+  OPERATIONAL: { cs: 'Operační', en: 'Operational', color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
 }
 
 export default function ApprovalsPage() {
@@ -72,6 +82,11 @@ export default function ApprovalsPage() {
   const [domainFilter, setDomainFilter] = useState<ApprovalDomain | 'all'>('all')
   const [domainQuery, setDomainQuery] = useState('')
   const [domainSort, setDomainSort] = useState<ApprovalSortOrder>('oldest')
+  // ADR-0227 D3 facets. Amount/risk/age default to 'all': the amount band in particular matches
+  // nothing until a source actually persists amounts (see triage.ts — no amount is never zero).
+  const [amountBand, setAmountBand] = useState<ApprovalAmountBand | 'all'>('all')
+  const [riskFilter, setRiskFilter] = useState<ApprovalRiskClass | 'all'>('all')
+  const [ageBand, setAgeBand] = useState<ApprovalAgeBand | 'all'>('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -199,8 +214,10 @@ export default function ApprovalsPage() {
     [domainApprovalItems],
   )
   const visibleDomainItems = useMemo(
-    () => filterAndSortDomainApprovals(domainApprovalItems, domainFilter, domainSort, domainQuery),
-    [domainApprovalItems, domainFilter, domainQuery, domainSort],
+    () => filterAndSortDomainApprovals(domainApprovalItems, domainFilter, domainSort, domainQuery, {
+      amountBand, riskClass: riskFilter, ageBand,
+    }),
+    [domainApprovalItems, domainFilter, domainQuery, domainSort, amountBand, riskFilter, ageBand],
   )
 
   return (
@@ -289,6 +306,35 @@ export default function ApprovalsPage() {
               <option value="newest">{t('Nejnovější první', 'Newest first')}</option>
             </select>
           </div>
+          <div style={{ flex: '1 1 160px' }}>
+            <label htmlFor="approval-risk-filter" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Třída rizika', 'Risk class')}</label>
+            <select id="approval-risk-filter" className="input" value={riskFilter} onChange={event => setRiskFilter(event.target.value as ApprovalRiskClass | 'all')} style={{ width: '100%' }}>
+              <option value="all">{t('Všechny třídy', 'All classes')}</option>
+              {(Object.keys(RISK_LABELS) as ApprovalRiskClass[]).map(risk => (
+                <option key={risk} value={risk}>{t(RISK_LABELS[risk].cs, RISK_LABELS[risk].en)}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: '1 1 160px' }}>
+            <label htmlFor="approval-age-band" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Stáří žádosti', 'Request age')}</label>
+            <select id="approval-age-band" className="input" value={ageBand} onChange={event => setAgeBand(event.target.value as ApprovalAgeBand | 'all')} style={{ width: '100%' }}>
+              <option value="all">{t('Všechna stáří', 'All ages')}</option>
+              <option value="lt4h">{t('Méně než 4 hodiny', 'Under 4 hours')}</option>
+              <option value="4h-1d">4h–24h</option>
+              <option value="1d-7d">1–7 {t('dní', 'days')}</option>
+              <option value="gt7d">{t('Starší než 7 dní', 'Older than 7 days')}</option>
+            </select>
+          </div>
+          <div style={{ flex: '1 1 160px' }}>
+            <label htmlFor="approval-amount-band" style={{ display: 'block', marginBottom: 5, fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>{t('Částka', 'Amount')}</label>
+            <select id="approval-amount-band" className="input" value={amountBand} onChange={event => setAmountBand(event.target.value as ApprovalAmountBand | 'all')} style={{ width: '100%' }}>
+              <option value="all">{t('Všechny částky', 'All amounts')}</option>
+              <option value="lt1k">&lt;1k</option>
+              <option value="1k-10k">1k–10k</option>
+              <option value="10k-100k">10k–100k</option>
+              <option value="gt100k">&gt;100k</option>
+            </select>
+          </div>
           <span role="status" aria-live="polite" style={{ flex: '0 0 auto', paddingBottom: 9, fontSize: 11, color: 'var(--text-tertiary)' }}>
             {t(`Zobrazeno ${visibleDomainItems.length} z ${domainApprovalItems.length}`, `Showing ${visibleDomainItems.length} of ${domainApprovalItems.length}`)}
           </span>
@@ -311,6 +357,11 @@ export default function ApprovalsPage() {
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.action}</div>
+              {item.summary && (
+                <div data-testid="approval-summary" style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3, overflowWrap: 'anywhere' }}>
+                  {item.summary}
+                </div>
+              )}
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                 {item.resourceId && <span data-testid="approval-resource" style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
                 {item.maker && <span data-testid="approval-maker">{t('navrhl', 'by')} {item.maker}</span>}
@@ -320,6 +371,22 @@ export default function ApprovalsPage() {
                 {item.proposedAt && <time dateTime={item.proposedAt}> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</time>}
               </div>
             </div>
+            {item.riskClass && (() => {
+              const risk = RISK_LABELS[item.riskClass]
+              return (
+                <span data-testid="approval-risk" style={{
+                  fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase',
+                  color: risk.color, background: risk.bg, border: `1px solid ${risk.border}`, flexShrink: 0,
+                }}>
+                  {t(risk.cs, risk.en)}
+                </span>
+              )
+            })()}
+            {item.amount != null && (
+              <span data-testid="approval-amount" style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', flexShrink: 0 }}>
+                {item.amount}{item.currency ? ` ${item.currency}` : ''}
+              </span>
+            )}
             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
               {t('Čeká', 'Pending')}
             </span>
