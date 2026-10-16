@@ -6537,6 +6537,11 @@ gates:
     name: "native auto-merge respects live draft and blocked holds"
     group: supplychain
     mode: enforced
+    rationale: >-
+      Arming auto-merge while a PR is draft, blocked, or has malformed readiness data can leave
+      it poised to merge later without a fresh intentional check; these fixtures keep each
+      arming workflow fail-closed on current PR readiness.
+    review_after: "2027-04-16"
     budget_seconds: 30
     min_subjects: 3
     selftest_exempt: "is-a-test-suite - executes trusted verifier and actual workflow arming blocks against offline GitHub fixtures"
