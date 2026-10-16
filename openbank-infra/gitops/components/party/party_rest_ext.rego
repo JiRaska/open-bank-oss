@@ -64,7 +64,7 @@ allowed_reasons contains "operator-party-write" if {
 # a caller here only with matching evidence (a real client method + call site), never speculatively.
 allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
         "party.create",
 		"party.consent.update",
@@ -77,7 +77,7 @@ allowed_reasons contains "service-edge-party-m2m" if {
 # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
 allowed_reasons contains "kyc-party-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_KYC" in input.principal.roles
 	input.action == "party.create"
 }
@@ -93,7 +93,7 @@ allowed_reasons contains "kyc-party-create" if {
 # (PartyCreateCallerGuardTest pins that the two agree).
 allowed_reasons contains "service-kyb-party-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-kyb"
+	machine_named("service-account-openbank-kyb")
 	input.action in {
 		"party.create",
 		"party.mandate.grant",
@@ -119,6 +119,6 @@ allowed_reasons contains "service-interest-party-m2m" if {
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
 allowed_reasons contains "service-delegation-mandate-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-delegation"
+	machine_named("service-account-openbank-delegation")
 	input.action in {"party.mandate.read"}
 }
