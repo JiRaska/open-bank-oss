@@ -130,6 +130,22 @@ term, deposit limits, early-withdrawal conditions and terms links. To open one, 
 applies the same ACTIVE-KYC and authoritative-legal-name gate as account opening. Creating the
 account is separate from funding it: the app follows with its normal account-funding flow.
 
+### Company payment batch drafts
+
+`/business/payment-batches` lists and creates drafts; `/{id}` reads one draft and
+`/{id}/items` replaces its items. These routes are disabled by default with
+`openbank.edge.business-payment-batches.enabled=false` and return 404 until explicitly enabled.
+They require a customer token and `X-Acting-For` naming a company for which the human caller has
+an active mandate. The edge derives both parties from the token and mandate inventory; the body
+cannot select them. It sends the company and human identities to domestic-payment using service
+credentials. A draft does not submit or dispatch money.
+
+Creation requires `Idempotency-Key` (1–128 characters). An exact replay returns 200 with the
+existing draft; a conflicting body returns 409. List pages contain at most 20 drafts. Detail
+returns at most 20 items per page; item replacement needs `If-Match` with the current revision
+and returns 409 on a stale revision. Successful responses expose the server-computed item count,
+total minor units, revision and timestamps as specified in `openapi.yaml`.
+
 ## Error model
 
 The edge returns small JSON error envelopes of the shape `{"error":"…"}` it generates itself, and otherwise **passes the upstream status and body through unchanged**.
@@ -178,3 +194,11 @@ These are implemented routes, not evidence that the upstream services are deploy
 ## Upstream URL path validation
 
 Currency codes must contain three uppercase ASCII letters; country codes contain two ASCII letters with case preserved. Saved-payee identifiers accept 1–34 ASCII letters or digits without a checksum requirement, so existing saved values remain removable. The edge reconstructs accepted values from its own alphabet before building upstream URLs. Invalid values return HTTP 400 and are never included in an upstream URL.
+
+### Pension questionnaire drafts
+
+The draft body contains an `answers` object with at most 100 question/option pairs.
+Question ids and option codes must each contain 1–64 ASCII letters, digits, underscores,
+periods or hyphens; option values must be strings. Free text, arrays and numeric
+answers are rejected rather than forwarded as scored answers. The edge rebuilds
+the outgoing body from the accepted fields and preserves the submitted answer order.

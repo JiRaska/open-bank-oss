@@ -101,3 +101,11 @@ and runtime defaults remain unchanged. This demonstration needs no real provider
 production ownership approval. It uses synthetic data and simulated external collaborators.
 It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
 or a fully connected production money path. Those capabilities remain in #12472 and #12479.
+
+## Annuity partner wire format
+
+Requests to the reference annuity partner omit absent optional properties and
+null-valued map entries; they do not send JSON null as an alternative value.
+Partner responses may add fields without breaking parsing; decimal amounts
+and date handling retain the protocol contract. The protocol contract tests
+validate outgoing requests and parse the documented offer examples.
