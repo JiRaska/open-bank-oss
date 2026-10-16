@@ -87,3 +87,11 @@ výchozí hodnoty se nemění. Demo nepotřebuje skutečnou identitu společnost
 schválení vlastnictví dat. Používá syntetická data a simulované externí služby. Neprokazuje
 izolaci současně běžících nasazení se skutečnými OIDC/OPA tokeny, skutečné vypořádání plateb
 ani kompletně propojený produkční tok peněz. Tyto schopnosti zůstávají v #12472 a #12479.
+
+## Formát komunikace s partnerem pro renty
+
+Požadavky referenčnímu partnerovi vynechávají nepřítomné volitelné vlastnosti
+a položky map s hodnotou null; neposílají místo nich JSON null. Odpověď partnera může přidat
+pole bez porušení zpracování; desetinné částky a data zachovávají protokolový
+kontrakt. Kontraktové testy ověřují odchozí požadavky a načítají dokumentované
+příklady nabídek.
