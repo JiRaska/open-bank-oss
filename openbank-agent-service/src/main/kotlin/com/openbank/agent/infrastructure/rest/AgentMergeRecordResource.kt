@@ -80,12 +80,15 @@ class AgentMergeRecordResource {
     )
 
     /**
-     * Ingest one merged agent PR. ROLE_ADMIN only — the caller is the pipeline's service
-     * credential, not an interactive operator.
+     * Ingest one merged agent PR. ROLE_MERGE_RECORDER only — a dedicated least-privilege
+     * role (ADR-0031 phase 3 hardening): the caller is the CI pipeline's service credential
+     * and nothing else, so a full ROLE_ADMIN (an interactive bank administrator role) must
+     * NOT be able to write merge evidence. Provisioning the CI client with this role keeps
+     * the blast radius of a leaked recorder secret to one endpoint.
      */
     @POST
     @Blocking
-    @RolesAllowed("ROLE_ADMIN")
+    @RolesAllowed("ROLE_MERGE_RECORDER")
     fun ingest(body: MergeRecordIngestRequest): Response {
         val agentId = requireNotBlank(body.agentId, "agentId")
         val prUrl = requireNotBlank(body.prUrl, "prUrl")

@@ -13,7 +13,7 @@ The assistant runs under a single fixed control-plane identity, **`ui-assistant`
 ## What the service **does NOT** do
 
 - ❌ Does not hold any banking data — it has no domain aggregate of its own.
-- ❌ The agent never mutates state — there is **no write tool**; the charter denies `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`. (The only writes the service accepts are CI-ingested merge-evidence rows, written by a `ROLE_ADMIN` pipeline credential — never by the agent.)
+- ❌ The agent never mutates state — there is **no write tool**; the charter denies `money.*`, `*.write`, `gh.pr.*`, `secrets.read.raw`. (The only writes the service accepts are CI-ingested merge-evidence rows, written by a `ROLE_MERGE_RECORDER` pipeline credential — never by the agent.)
 - ❌ Does not execute payments, post to the ledger, or move money — it is **not** in `rules.yaml: money_path_services`.
 - ❌ Does not run the LLM in the browser — the model is called server-side, behind the gateway trust boundary.
 - ❌ Is **not** exposed to external TPPs via the API Gateway — it is an internal service.

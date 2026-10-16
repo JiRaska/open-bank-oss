@@ -8,7 +8,7 @@
 # agent-authored (head branch under agent/ or codex/, or author declared in rules.yaml
 # autonomous_agent_prs.agent_accounts) and POSTs the record — mergedBy, merge commit,
 # head branch, title — to POST /api/v1/agent-merge-records in openbank-agent-service
-# (ROLE_ADMIN-protected, ADR-0031 phase 3 backend).
+# (ROLE_MERGE_RECORDER-protected, ADR-0031 phase 3 backend).
 #
 # REQUIRED REPO CONFIGURATION (one-time, manual — the run FAILS CLOSED until done):
 #   * Repository variable AGENT_SERVICE_URL — base URL of openbank-agent-service, e.g.
@@ -23,7 +23,7 @@
 #     client_credentials pair on every run, never stored as a repo secret.
 #   * Repository secrets AGENT_MERGE_RECORDER_CLIENT_ID /
 #     AGENT_MERGE_RECORDER_CLIENT_SECRET — a CI-only Keycloak client_credentials pair
-#     whose client carries ROLE_ADMIN (the POST endpoint is @RolesAllowed("ROLE_ADMIN")).
+#     whose client carries ROLE_MERGE_RECORDER (the POST endpoint is @RolesAllowed("ROLE_MERGE_RECORDER")).
 #     Provisioning the client is a Keycloak admin task (same shape as the
 #     AUDIT_ANCHOR_ATTESTATION_* client in runbook 0014 §8).
 #
@@ -104,7 +104,7 @@ jobs:
           [ -n "${AGENT_MERGE_RECORDER_CLIENT_ID:-}" ] || missing+=("secrets.AGENT_MERGE_RECORDER_CLIENT_ID")
           [ -n "${AGENT_MERGE_RECORDER_CLIENT_SECRET:-}" ] || missing+=("secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET")
           if ((${#missing[@]})); then
-            echo "::error::record-agent-merge is UNCONFIGURED — missing: ${missing[*]}. A human merge of an agent PR will NOT be recorded until the sandbox CI client (client_credentials, ROLE_ADMIN) and the vars above are provisioned. Absence of a record must NOT read as 'no agent PRs merged'."
+            echo "::error::record-agent-merge is UNCONFIGURED — missing: ${missing[*]}. A human merge of an agent PR will NOT be recorded until the sandbox CI client (client_credentials, ROLE_MERGE_RECORDER) and the vars above are provisioned. Absence of a record must NOT read as 'no agent PRs merged'."
             exit 1
           fi
           echo "::notice::recorder configuration present (URL + issuer + client credentials)"
@@ -175,7 +175,7 @@ jobs:
           1. Missing vars/secrets — the run log lists exactly which (AGENT_SERVICE_URL,
              AGENT_MERGE_RECORDER_ISSUER, AGENT_MERGE_RECORDER_CLIENT_ID/SECRET).
           2. Token endpoint — is the sandbox Keycloak reachable from the ARC runner, and
-             is the CI client (ROLE_ADMIN) provisioned?
+             is the CI client (ROLE_MERGE_RECORDER) provisioned?
           3. Endpoint — POST /api/v1/agent-merge-records requires the deployed
              agent-service to carry this PR's code; a 404 means deploy drift, not "no
              records".

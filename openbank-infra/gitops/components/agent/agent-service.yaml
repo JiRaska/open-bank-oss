@@ -192,14 +192,15 @@ spec:
               value: http://dispute-service.dispute.svc:8135
             # ADR-0031 phase 3 "recorded human merge" (DOCUMENTATION ONLY — no pod env here).
             # The CI producer (.github/workflows/record-agent-merge.yml) POSTs merge records to
-            # POST /api/v1/agent-merge-records on this service (ROLE_ADMIN-protected). It consumes:
+            # POST /api/v1/agent-merge-records on this service (ROLE_MERGE_RECORDER-protected). It consumes:
             #   * repo variable AGENT_SERVICE_URL — base URL of this service as reachable from the
             #     CI runner; the job runs on the in-cluster ARC runner (runs-on: openbank-build),
             #     so cluster DNS (http://agent-service.platform.svc:8109) resolves — a GitHub-hosted
             #     runner cannot reach this name at all;
             #   * repo variable AGENT_MERGE_RECORDER_ISSUER + repo secrets
             #     AGENT_MERGE_RECORDER_CLIENT_ID/AGENT_MERGE_RECORDER_CLIENT_SECRET — a CI-only
-            #     Keycloak client_credentials pair (client carries ROLE_ADMIN) from which the
+            #     Keycloak client_credentials pair (client carries the dedicated least-privilege
+            #     ROLE_MERGE_RECORDER — never ROLE_ADMIN) from which the
             #     workflow MINTS a fresh bearer token per run. A static JWT is unusable here:
             #     the realm template's accessTokenLifespan is 300 s, so a provisioned token dies
             #     minutes after it is created.

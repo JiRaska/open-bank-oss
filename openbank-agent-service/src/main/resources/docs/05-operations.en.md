@@ -80,7 +80,7 @@ Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-
 Set `AGENT_POLICY_ENFORCEMENT=block` in the deployment env once an OPA sidecar is present in the target. No redeploy of code needed; the kill-switch / charter changes live in `agents.yaml` + OPA bundle.
 
 ### Recorded human merge ingest (ADR-0031 phase 3)
-The `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR to `POST /api/v1/agent-merge-records` with a `ROLE_ADMIN` service credential. Ingest is idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and returns `200` with the original record and `inserted=false`, with **no second audit event**. If merges are missing from the evidence: check the workflow run log first (a rejected or unauthenticated POST fails loudly there), then the ingest credential's role and the service's Postgres reachability.
+The `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR to `POST /api/v1/agent-merge-records` with a `ROLE_MERGE_RECORDER` service credential. Ingest is idempotent by `prNumber`: a redelivered webhook inserts nothing (`ON CONFLICT DO NOTHING`) and returns `200` with the original record and `inserted=false`, with **no second audit event**. If merges are missing from the evidence: check the workflow run log first (a rejected or unauthenticated POST fails loudly there), then the ingest credential's role and the service's Postgres reachability.
 
 ## Version & release
 
