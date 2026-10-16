@@ -62,6 +62,9 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: security-scanner
         - namespaceSelector:
             matchLabels:
