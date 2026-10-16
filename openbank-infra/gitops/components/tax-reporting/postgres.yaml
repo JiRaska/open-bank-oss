@@ -101,3 +101,7 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: tax-reporting/tax-reporting-db

@@ -172,7 +172,7 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
     """Return {namespace/name: {...}} for every CNPG Cluster declared in gitops."""
     found: dict[str, dict] = {}
     errors: list[str] = []
-    monitors: list[tuple[str, dict]] = []  # (namespace, spec) of every PodMonitor in gitops
+    monitors: list[tuple[str, str, dict]] = []  # (namespace, name, spec) of every PodMonitor in gitops
     for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
         # The network-policy generator writes an atomic .network-policies-*.yaml in this tree.
         # Parallel gates may enumerate it just before the generator replaces/removes it.
@@ -196,7 +196,7 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
             if doc.get("kind") == "PodMonitor":
                 pm_ns = (doc.get("metadata") or {}).get("namespace") or _namespace_from_kustomization(path)
                 if pm_ns:
-                    monitors.append((str(pm_ns), doc.get("spec") or {}))
+                    monitors.append((str(pm_ns), str((doc.get("metadata") or {}).get("name", "")), doc.get("spec") or {}))
                 continue
             if doc.get("kind") != "Cluster":
                 continue
@@ -227,7 +227,15 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
                 "instances": int(spec.get("instances") or 1),
             }
     for c in found.values():
-        c["scraped"] = any(_selects(c["namespace"], c["name"], ns, spec) for ns, spec in monitors)
+        matching = [(name, spec) for ns, name, spec in monitors
+                    if _selects(c["namespace"], c["name"], ns, spec)]
+        c["scraped"] = bool(matching)
+        for name, spec in matching:
+            if name == c["name"] + "-metrics" and not _preserves_job_identity(c["namespace"], c["name"], spec):
+                errors.append(
+                    f"{c['namespace']}/{c['name']}: PodMonitor/{name} changes the original job identity; "
+                    "prepend its namespace/cluster job replacement before copied custom target relabelings"
+                )
     return found, errors
 
 
@@ -253,6 +261,34 @@ def _selects(cluster_ns: str, cluster: str, pm_ns: str, spec: dict) -> bool:
     if set(labels) - {"cnpg.io/cluster", "cnpg.io/podRole"}:
         return False
     return any((ep or {}).get("port") == "metrics" for ep in spec.get("podMetricsEndpoints") or [])
+
+
+def _preserves_job_identity(namespace: str, cluster: str, spec: dict) -> bool:
+    """Restore the operator monitor's default before any copied custom job override.
+
+    Prometheus Operator v0.94.1 applies endpoint relabelings after its default job label.
+    A different PodMonitor name must not restart alert identities or double SUM consumers
+    while the old monitor is being removed. Existing custom rules retain their order.
+    """
+    endpoints = [ep for ep in spec.get("podMetricsEndpoints") or [] if (ep or {}).get("port") == "metrics"]
+    if not endpoints:
+        return False
+    for endpoint in endpoints:
+        rules = endpoint.get("relabelings") or []
+        first = rules[0] if rules else None
+        if not isinstance(first, dict):
+            return False
+        # Normalize only known defaults, not arbitrary RE2 equivalence. With no sources the
+        # input is empty, so (.*) always matches and a literal replacement is unconditional.
+        known = {"targetLabel", "replacement", "action", "sourceLabels", "regex", "separator"}
+        if (set(first) - known or first.get("targetLabel") != "job"
+                or first.get("replacement") != f"{namespace}/{cluster}"
+                or first.get("action", "replace") != "replace"
+                or first.get("sourceLabels", []) != []
+                or first.get("regex", "(.*)") != "(.*)"
+                or not isinstance(first.get("separator", ";"), str)):
+            return False
+    return True
 
 
 def _namespace_from_kustomization(path: Path) -> str | None:
@@ -732,6 +768,7 @@ def self_test() -> int:
             "metadata:\n  name: good-db-metrics\n  namespace: st\n"
             "spec:\n  selector:\n    matchLabels:\n      cnpg.io/cluster: good-db\n"
             "      cnpg.io/podRole: instance\n  podMetricsEndpoints:\n    - port: metrics\n"
+            "      relabelings:\n        - targetLabel: job\n          replacement: st/good-db\n"
         )
         bad = (
             "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\n"
@@ -749,6 +786,67 @@ def self_test() -> int:
             print("SELF-TEST FAIL: an unscraped cluster was not reported"); ok = False
         if any("good-db" in e for e in errors):
             print("SELF-TEST FAIL: a scraped cluster was reported"); ok = False
+
+        # A renamed monitor changes the default job identity. The constant replacement must
+        # precede copied custom rules: appending it would erase a prior custom job override.
+        missing_job = good.replace("good-db", "missing-job-db").replace(
+            "      relabelings:\n        - targetLabel: job\n          replacement: st/missing-job-db\n", "",
+        )
+        (d / "missing-job.yaml").write_text(missing_job)
+        gatelib.clear()
+        _, errors = build()
+        if not any("missing-job-db" in e and "job identity" in e for e in errors):
+            print("SELF-TEST FAIL: renamed monitor lost its original job identity without a finding"); ok = False
+        (d / "missing-job.yaml").unlink()
+
+        # Explicit Prometheus defaults are equivalent to the compact constant replacement.
+        explicit_defaults = good.replace("good-db", "explicit-job-db").replace(
+            "        - targetLabel: job\n",
+            "        - targetLabel: job\n          action: replace\n          sourceLabels: []\n"
+            "          regex: '(.*)'\n          separator: ';'\n",
+        )
+        (d / "explicit-job.yaml").write_text(explicit_defaults)
+        gatelib.clear()
+        _, errors = build()
+        if any("explicit-job-db" in e for e in errors):
+            print("SELF-TEST FAIL: explicit default fields changed the constant job replacement verdict"); ok = False
+        (d / "explicit-job.yaml").unlink()
+
+        # Neither an input-dependent rule nor a regex that does not match empty input is
+        # an unconditional default restoration, and other actions do not replace the job.
+        for field, before, after in (
+            ("action", "action: replace", "action: keep"),
+            ("sources", "sourceLabels: []", "sourceLabels: [__meta_kubernetes_namespace]"),
+            ("regex", "regex: '(.*)'", "regex: '.+'"),
+        ):
+            (d / "explicit-job.yaml").write_text(explicit_defaults.replace(before, after))
+            gatelib.clear()
+            _, errors = build()
+            if not any("explicit-job-db" in e and "job identity" in e for e in errors):
+                print(f"SELF-TEST FAIL: invalid job replacement {field} was accepted"); ok = False
+        (d / "explicit-job.yaml").unlink()
+
+        # Copied custom rules are deliberately later: restore the old default, then preserve
+        # any pre-existing customization. Reversing that order silently erases custom jobs.
+        custom = good.replace("good-db", "custom-job-db").replace(
+            "          replacement: st/custom-job-db\n",
+            "          replacement: st/custom-job-db\n        - targetLabel: job\n          replacement: legacy-custom\n",
+        )
+        (d / "custom-job.yaml").write_text(custom)
+        gatelib.clear()
+        _, errors = build()
+        if any("custom-job-db" in e for e in errors):
+            print("SELF-TEST FAIL: original custom target relabeling order was rejected"); ok = False
+        wrong_order = custom.replace(
+            "replacement: st/custom-job-db\n        - targetLabel: job\n          replacement: legacy-custom",
+            "replacement: legacy-custom\n        - targetLabel: job\n          replacement: st/custom-job-db",
+        )
+        (d / "custom-job.yaml").write_text(wrong_order)
+        gatelib.clear()
+        _, errors = build()
+        if not any("custom-job-db" in e and "job identity" in e for e in errors):
+            print("SELF-TEST FAIL: restoring the default after a custom override was accepted"); ok = False
+        (d / "custom-job.yaml").unlink()
 
         # 1b. the shapes that LOOK like coverage and are not: the deprecated flag alone, a
         # PodMonitor for another cluster, one in another namespace, one on the wrong port.

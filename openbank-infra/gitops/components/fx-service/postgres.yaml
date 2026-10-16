@@ -100,6 +100,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: fx/fx-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read

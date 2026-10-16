@@ -844,6 +844,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/transaction-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -880,6 +884,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/sepa-payment-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -916,6 +924,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/domestic-payment-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -952,6 +964,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/sepa-instant-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -988,6 +1004,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/clearing-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -1024,6 +1044,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/standing-order-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -1060,6 +1084,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/card-issuance-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -1096,6 +1124,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/card-processing-db
 ---
 # Owned replacement for the CNPG-generated PodMonitor: spec.monitoring.enablePodMonitor and
 # podMonitorMetricRelabelings are deprecated since CNPG 1.30. Same selector, port and
@@ -1115,6 +1147,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/settlement-service-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
@@ -1151,6 +1187,10 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: payments/swift-service-db
       # FinOps/observability: cnpg_pg_settings_setting is one series per Postgres GUC per
       # instance — 24 963 series on 2026-09-12, the largest metric name in a 645 k-series
       # Prometheus (12 h retention, no long-term store). Exactly ONE of those GUCs is read
