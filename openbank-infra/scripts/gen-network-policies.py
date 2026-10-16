@@ -89,6 +89,15 @@ INGRESS_NS = "ingress-nginx"
 GATEWAY_NS = "envoy-gateway-system"
 MESSAGING_NS = "messaging"
 KEDA_NS = "keda"
+# ARC runner pods (`runs-on: openbank-build`) live in a tofu-managed namespace with no
+# GitOps manifest, so no URL scan can ever derive them as a caller. Each in-cluster
+# service a workflow calls is declared here instead: (callee_ns, workload, pod port, why).
+# Keep it to workflows that MUST call in-cluster; every entry admits all runner pods.
+ARC_RUNNER_NS = "arc-runners"
+ARC_RUNNER_CALLEES = [
+    ("iam", "keycloak", 8080, "record-agent-merge.yml mints a client_credentials token"),
+    ("platform", "agent-service", 8109, "record-agent-merge.yml POSTs /api/v1/agent-merge-records"),
+]
 
 # Container ports that speak a datastore wire protocol, not HTTP — keyed by the
 # `ports[].name` every gitops manifest already uses by convention (e.g. the
@@ -709,6 +718,17 @@ def main():
             name = labels.get("app.kubernetes.io/name") or target.get("service") or target.get("name")
             if name:
                 http_scaled_targets.add((ns, name))
+
+    for callee_ns, wl_name, port, _why in ARC_RUNNER_CALLEES:
+        # Fail loudly on a rename: a declared edge to a workload that no longer exists
+        # would otherwise generate nothing and the workflow would time out in CI. A tree
+        # without the namespace at all (the self-test fixture) declares nothing to check.
+        if not any(ns == callee_ns for ns, _ in workloads):
+            continue
+        if (callee_ns, wl_name) not in workloads:
+            raise ValueError(f"ARC_RUNNER_CALLEES names unknown workload {callee_ns}/{wl_name}")
+        edges[(callee_ns, wl_name)].add(ARC_RUNNER_NS)
+        edge_ports[(callee_ns, wl_name, ARC_RUNNER_NS)].add(port)
 
     def resolve_pod_port(ns, svc_name, svc_port):
         """Service port -> containerPort on the selected workload."""
