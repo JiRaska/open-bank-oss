@@ -69,6 +69,11 @@ VERSION_RE = re.compile(r"^V(\d+)__.*\.sql$")
 # database). Checked BOTH ways, same idiom as check-kafka-acl-coverage.py's KNOWN_GAPS: an entry
 # that stops reproducing is itself reported, so this list can only shrink.
 KNOWN_VIOLATIONS: dict[str, str] = {
+    "openbank-lending-service/src/main/resources/db/migration/V26__provisioning_cycle_attempts.sql":
+        "#13026: #12315 introduced V26 after #12769 had introduced V27. Lending's "
+        "application config temporarily enables out-of-order migration so databases "
+        "already at V27 can apply V26. Keep this historical exception while git order "
+        "reproduces; remove the application flag only after all target DBs record V26.",
     "openbank-risk-engine/src/main/resources/db/migration/V7__risk_limit_outbox.sql":
         "#11549 and #11722 merged hours apart (2026-10-01/02) with V7/V8 picked in parallel; "
         "no database had applied either (sandbox pod: schema at 6), so every environment "

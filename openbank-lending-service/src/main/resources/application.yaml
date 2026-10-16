@@ -38,6 +38,10 @@ quarkus:
   flyway:
     migrate-at-start: true
     validate-on-migrate: false
+    # #13026: V26 reached main after V27. Apply the missing provisioning schema
+    # even on databases already at V27. Remove this temporary flag only after
+    # every target database records successful V26; deployment holds still apply.
+    out-of-order: true
     connect-retries: 10
     connect-retries-interval: 2S
   hibernate-orm:
