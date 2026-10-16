@@ -1,0 +1,374 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the fee schedule behind the get_product_fees tool",
+      "providerStates": [
+        {
+          "name": "a product exists with id prod-001"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/products/prod-001/fees"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 100.0,
+            "currency": "string",
+            "frequency": "string",
+            "name": "string",
+            "type": "string",
+            "waivable": true
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].currency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].frequency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].name": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].type": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].waivable": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the product behind the get_product tool",
+      "providerStates": [
+        {
+          "name": "a product exists with id prod-001"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/products/prod-001"
+      },
+      "response": {
+        "body": {
+          "baseRate": 100.0,
+          "code": "SAVINGS_STANDARD",
+          "currency": "EUR",
+          "fee": 100.0,
+          "id": "b7c93a19-1fa5-37b1-ba00-3029e3cd800a",
+          "isPublic": true,
+          "name": "Standard Savings Account",
+          "status": "ACTIVE",
+          "type": "SAVINGS",
+          "version": "string"
+        },
+        "generators": {
+          "body": {
+            "$.baseRate": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$.fee": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$.version": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.baseRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.fee": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.isPublic": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a product product-catalog does not publish, via the get_product tool",
+      "providerStates": [
+        {
+          "name": "no product exists with id 00000000-0000-0000-0000-000000000eee"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/products/00000000-0000-0000-0000-000000000eee"
+      },
+      "response": {
+        "body": {
+          "error": "string"
+        },
+        "generators": {
+          "body": {
+            "$.error": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.error": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "GET the product list behind the list_products tool",
+      "providerStates": [
+        {
+          "name": "the canonical catalog products are seeded"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/products",
+        "query": {
+          "limit": [
+            "50"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "code": "string",
+            "currency": "string",
+            "id": "string",
+            "name": "string",
+            "status": "string",
+            "type": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].code": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].currency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].id": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].name": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].status": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].type": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

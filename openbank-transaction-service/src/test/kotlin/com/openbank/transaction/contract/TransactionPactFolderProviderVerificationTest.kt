@@ -21,12 +21,23 @@ import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.transaction.domain.event.TransactionInitiatedEvent
 import com.openbank.transaction.domain.model.TransactionType
+import com.openbank.transaction.infrastructure.persistence.entity.TransactionEntity
+import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -34,6 +45,9 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Git-pact provider verification for transaction-service — the half that actually runs before a
@@ -98,6 +112,12 @@ class TransactionPactFolderProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    @Inject
+    lateinit var transactionRepository: PanacheTransactionRepository
+
+    @Inject
+    lateinit var vertx: Vertx
+
     private val objectMapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
@@ -151,6 +171,73 @@ class TransactionPactFolderProviderVerificationTest {
         // #468's missing states stayed invisible.
     }
 
+    /**
+     * party-service's portability empty-history leg (pact: "no transactions exist for the requested
+     * account"). Deliberately no seed: the pact addresses an account id this test never creates.
+     * The handler must EXIST (with this exact name, matching PartyTransactionListPactConsumerTest)
+     * because the class-level [PactFilter] drops stateless interactions from the git replay — an
+     * interaction that declares no providerState never runs here at all.
+     */
+    @State("no transactions exist for the requested account")
+    fun stateNoTransactionsForRequestedAccount() {
+        // No seed: the requested account id is one this provider test never creates.
+    }
+
+    /**
+     * party-service's GDPR Art. 20 portability leg (ADR-0204 D2): seeds one COMPLETED CREDIT
+     * targeting the pact account, so `GET /api/v1/transactions?accountId=` returns a page whose
+     * row exercises every field the export deserializes. Constants must match
+     * PartyTransactionListPactConsumerTest (openbank-party-service) — and, per this class's
+     * header, the broker twin below. `findByAccountId` matches source OR target, so the row is
+     * found via targetAccountId alone; the id + bookingDate pair is the entity's composite key,
+     * both set explicitly because the defaults (random id / EPOCH date) would not reproduce.
+     */
+    @State("a posted transaction exists for the pact account")
+    fun statePostedTransactionForPactAccount() = runOnVertxContext {
+        if (transactionRepository.findById(TRANSACTION_ID) != null) return@runOnVertxContext
+        val entity = TransactionEntity()
+        entity.id = TRANSACTION_ID
+        entity.bookingDate = BOOKING_DATE
+        entity.referenceNumber = REFERENCE_NUMBER
+        entity.type = "CREDIT"
+        entity.targetAccountId = PACT_ACCOUNT_ID
+        entity.amount = java.math.BigDecimal("100.00")
+        entity.currencyCode = "CZK"
+        entity.baseAmount = java.math.BigDecimal("100.00")
+        entity.baseCurrencyCode = "CZK"
+        entity.status = "COMPLETED"
+        entity.description = DESCRIPTION
+        entity.valueDate = BOOKING_DATE
+        entity.initiatedAt = java.time.Instant.parse("2026-01-15T00:00:00Z")
+        entity.completedAt = java.time.Instant.parse("2026-01-15T00:00:01Z")
+        entity.idempotencyKey = IDEMPOTENCY_KEY
+        Panache.withTransaction {
+            transactionRepository.persist(entity)
+        }.awaitSuspending()
+        Unit
+    }
+
+    /**
+     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback, which runs
+     * on the JUnit thread with no Vert.x context — `Panache.withTransaction` requires one. Same
+     * shape as sca-service's and account-service's provider verifications.
+     */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
+    }
+
     @State("transaction-service has initiated a payment transaction")
     fun stateTransactionInitiated() {
         // No setup needed: the message producer below returns a deterministic payload.
@@ -174,6 +261,16 @@ class TransactionPactFolderProviderVerificationTest {
             occurredAt = java.time.Instant.parse("2026-01-01T00:00:00Z"),
         )
         return objectMapper.writeValueAsString(event)
+    }
+
+    companion object {
+        // Must match PartyTransactionListPactConsumerTest (openbank-party-service).
+        val TRANSACTION_ID: UUID = UUID.fromString("88888888-9999-4aaa-bbbb-cccccccccccc")
+        val PACT_ACCOUNT_ID: UUID = UUID.fromString("77777777-8888-4999-aaaa-bbbbbbbbbbbb")
+        val BOOKING_DATE: java.time.LocalDate = java.time.LocalDate.parse("2026-01-15")
+        const val REFERENCE_NUMBER = "TXN-PARTY-PACT-001"
+        const val DESCRIPTION = "pact portability fixture"
+        const val IDEMPOTENCY_KEY = "pact-portability-001"
     }
 }
 

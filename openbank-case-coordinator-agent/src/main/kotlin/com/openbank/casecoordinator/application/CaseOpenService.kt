@@ -9,6 +9,7 @@ import com.openbank.casecoordinator.application.port.out.CaseKillSwitchStatePort
 import com.openbank.casecoordinator.domain.model.CaseClass
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.infrastructure.config.CaseCoordinatorConfig
+import com.openbank.libs.security.logfmtValue
 import com.openbank.libs.temporal.TemporalConfig
 import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.api.filter.v1.WorkflowTypeFilter
@@ -125,8 +126,8 @@ class CaseOpenService(
             log.infof(
                 "case opened: %s claimed-by %s principal %s (class %s)",
                 workflowId.logCorrelation(),
-                openedBy.sanitizeForLog(),
-                callerPrincipal.sanitizeForLog(),
+                openedBy.logfmtValue(),
+                callerPrincipal.logfmtValue(),
                 caseClass,
             )
             CaseOpenResult.Opened(workflowId)
@@ -180,14 +181,5 @@ class CaseOpenService(
 
         private fun String.logCorrelation(): String = MessageDigest.getInstance("SHA-256")
             .digest(toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-
-        /**
-         * The fleet's log-injection guard (13 services carry the same idiom): CR/LF out, so a
-         * caller-supplied string cannot forge a log line. Deliberately INSIDE the companion rather
-         * than a top-level `private fun`: a top-level declaration placed above a class silently
-         * takes that class's annotation, which is how `McpEndpoint` lost its `@Path` and answered
-         * 404 on every call for the life of the endpoint.
-         */
-        fun String.sanitizeForLog(): String = replace('\n', '_').replace('\r', '_')
     }
 }

@@ -52,6 +52,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Pact consumers cover account/transaction reads, FX quotes/board and AML case reads.
+    // They drive real read-adapter dispatch through handwritten mock-server clients, not OIDC.
+    // Catalog and Ledger read-tool contracts reuse this same Pact consumer dependency.
+    testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))

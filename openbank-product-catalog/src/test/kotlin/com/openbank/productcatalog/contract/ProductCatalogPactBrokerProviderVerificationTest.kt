@@ -117,6 +117,37 @@ class ProductCatalogPactBrokerProviderVerificationTest {
         // Intentionally empty — see the KDoc above.
     }
 
+    /**
+     * Keep-in-sync with the folder twin: `ProductCatalogSeeder` persists the whole canonical
+     * catalogue from `ProductSeed` on first boot, so the assistant consumer's `list_products`
+     * state is satisfied by every boot. The list is a global array — the pact pins per-row
+     * shape, never count or order.
+     */
+    @State("the canonical catalog products are seeded")
+    fun canonicalCatalogProductsAreSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: `prod-001` is `SAVINGS_STANDARD` in `ProductSeed` on
+     * every boot — ACTIVE, with two seeded fees (the assistant consumer's `get_product` /
+     * `get_product_fees` states).
+     */
+    @State("a product exists with id prod-001")
+    fun pactProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: the pact-pinned UUID is deliberately absent from
+     * `ProductSeed`; the seeded catalogue already satisfies the assistant consumer's negative
+     * `get_product` state.
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000eee")
+    fun agentUnknownProductIdNotFound() {
+        // Intentionally empty — see the KDoc above.
+    }
+
     @State("trusted insurance term-life schema version 1 is installed")
     fun trustedInsuranceSchemaIsInstalled() {
         // CatalogPackSeeder installs the trusted test pack before provider verification.
