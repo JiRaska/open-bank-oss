@@ -4,7 +4,7 @@
 # runs the read-only k6 baseline (perf/k6/money-path-smoke.js) weekly and on demand,
 # recording latency percentiles so a regression shows as a trend.
 #
-# ADVISORY: k6 runs with --no-thresholds-fail — a breached tripwire is reported and
+# ADVISORY: k6 evaluates thresholds — a breached tripwire is reported and
 # uploaded, never fails the run or blocks a deploy (issue #334). Money-path perf gating
 # is a deliberate later step, not a surprise red build.
 #
@@ -82,17 +82,9 @@ jobs:
           PERF_READ_TOKEN: ${{ env.PERF_READ_TOKEN }}
         run: |
           set -euo pipefail
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            --env LEDGER_URL \
-            --env TXN_URL \
-            --env PERF_READ_TOKEN \
-            --volume "$PWD:/work" \
-            --workdir /work \
-            "${K6_IMAGE}" run \
-            --no-thresholds-fail \
-            --summary-export=perf-summary.json \
-            perf/k6/money-path-smoke.js
+          python3 .github/scripts/run-k6-advisory-baseline.py \
+            --target-env LEDGER_URL --target-env TXN_URL \
+            --summary perf-summary.json --definition perf/k6/money-path-smoke.js
 
       - name: Build money-path performance Test Intelligence envelope
         if: always()
@@ -125,8 +117,8 @@ jobs:
   # Per-module read baselines (the <module>/src/test/k6/*-read-baseline.js fleet added for
   # the evidence matrix). Every leg is GET-only and independent: a module without a
   # configured target SKIPs with a notice instead of pretending to measure — the same
-  # no-silent-green contract as the money-path job above. Set PERF_<MODULE>__URL vars plus
-  # the shared PERF_READ_TOKEN environment secret to light a leg up.
+  # no-silent-green contract as the money-path job above. Set PERF_<MODULE>_URL vars plus
+  # the shared PERF_READ_TOKEN secret and required seeded fixture vars to light a leg up.
   module-read-baselines:
     name: k6 module read baseline (${{ matrix.id }})
     runs-on: ubuntu-latest
@@ -136,48 +128,65 @@ jobs:
       matrix:
         include:
           - id: account
+            fixtures: "PERF_PARTY_ID PERF_ACCOUNT_ID"
             component: openbank-account-service
             definition: openbank-account-service/src/test/k6/account-read-baseline.js
             url: "${{ vars.PERF_ACCOUNT_URL }}"
           - id: balance
+            fixtures: "PERF_ACCOUNT_ID"
             component: openbank-balance-service
             definition: openbank-balance-service/src/test/k6/balance-read-baseline.js
             url: "${{ vars.PERF_BALANCE_URL }}"
           - id: consent
+            fixtures: "PERF_PARTY_ID PERF_GRANTEE_ID"
             component: openbank-consent-service
             definition: openbank-consent-service/src/test/k6/consent-read-baseline.js
             url: "${{ vars.PERF_CONSENT_URL }}"
           - id: domestic-payment
+            fixtures: ""
             component: openbank-domestic-payment
             definition: openbank-domestic-payment/src/test/k6/domestic-payment-read-baseline.js
             url: "${{ vars.PERF_DOMESTIC_PAYMENT_URL }}"
           - id: fx
+            fixtures: ""
             component: openbank-fx-service
             definition: openbank-fx-service/src/test/k6/fx-read-baseline.js
             url: "${{ vars.PERF_FX_URL }}"
           - id: ledger
+            fixtures: ""
             component: openbank-ledger-service
             definition: openbank-ledger-service/src/test/k6/ledger-read-baseline.js
             url: "${{ vars.PERF_LEDGER_URL }}"
           - id: sca
+            fixtures: "PERF_PARTY_ID PERF_SCA_CHALLENGE_ID"
             component: openbank-sca-service
             definition: openbank-sca-service/src/test/k6/sca-read-baseline.js
             url: "${{ vars.PERF_SCA_URL }}"
           - id: sepa-instant
+            fixtures: "PERF_ACCOUNT_ID"
             component: openbank-sepa-instant
             definition: openbank-sepa-instant/src/test/k6/sepa-instant-read-baseline.js
             url: "${{ vars.PERF_SEPA_INSTANT_URL }}"
           - id: sepa-payment
+            fixtures: ""
             component: openbank-sepa-payment
             definition: openbank-sepa-payment/src/test/k6/sepa-payment-read-baseline.js
             url: "${{ vars.PERF_SEPA_PAYMENT_URL }}"
           - id: transaction
+            fixtures: "PERF_ACCOUNT_ID"
             component: openbank-transaction-service
             definition: openbank-transaction-service/src/test/k6/transaction-read-baseline.js
             url: "${{ vars.PERF_TRANSACTION_URL }}"
     env:
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
       PERF_READ_TOKEN: ${{ secrets.PERF_READ_TOKEN }}
+      PERF_PARTY_ID: ${{ vars.PERF_PARTY_ID }}
+      PERF_ACCOUNT_ID: ${{ vars.PERF_ACCOUNT_ID }}
+      PERF_GRANTEE_ID: ${{ vars.PERF_GRANTEE_ID }}
+      PERF_SCA_CHALLENGE_ID: ${{ vars.PERF_SCA_CHALLENGE_ID }}
+      PERF_CURRENCY: ${{ vars.PERF_CURRENCY }}
+      PERF_FX_BASE: ${{ vars.PERF_FX_BASE }}
+      PERF_FX_QUOTE: ${{ vars.PERF_FX_QUOTE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -187,14 +196,9 @@ jobs:
           MODULE_URL: "${{ matrix.url }}"
         run: |
           set -euo pipefail
-          if [ -z "${MODULE_URL}" ] || [ -z "${PERF_READ_TOKEN:-}" ]; then
-            echo "::notice::PERF_${{ matrix.id }}_URL (uppercase, '-'→'_') or PERF_READ_TOKEN is not configured — skipping the ${{ matrix.id }} read baseline (no authenticated target to measure)."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "reason=No safe authenticated target or read identity is configured for the ${{ matrix.id }} read baseline." >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "url=$MODULE_URL" >> "$GITHUB_OUTPUT"
-          fi
+          BASE_URL="$MODULE_URL" python3 .github/scripts/run-k6-advisory-baseline.py \
+            --check-config --required-fixtures "${{ matrix.fixtures }}" \
+            --summary "${{ matrix.id }}-summary.json" --definition "${{ matrix.definition }}"
 
       - name: Resolve pinned k6 runtime
         if: steps.target.outputs.run == 'true'
@@ -206,20 +210,14 @@ jobs:
       - name: Run k6 module read baseline
         if: steps.target.outputs.run == 'true'
         env:
-          BASE_URL: "${{ steps.target.outputs.url }}"
+          BASE_URL: "${{ matrix.url }}"
           MODULE_DEF: "${{ matrix.definition }}"
         run: |
           set -euo pipefail
-          docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            --env BASE_URL \
-            --env PERF_READ_TOKEN \
-            --volume "$PWD:/work" \
-            --workdir /work \
-            "${K6_IMAGE}" run \
-            --no-thresholds-fail \
-            --summary-export="${{ matrix.id }}-summary.json" \
-            "${MODULE_DEF}"
+          python3 .github/scripts/run-k6-advisory-baseline.py \
+            --required-fixtures "${{ matrix.fixtures }}" \
+            --pass-env PERF_CURRENCY --pass-env PERF_FX_BASE --pass-env PERF_FX_QUOTE \
+            --summary "${{ matrix.id }}-summary.json" --definition "$MODULE_DEF"
 
       - name: Build module performance Test Intelligence envelope
         if: always()
