@@ -240,7 +240,7 @@ jobs:
           # production compilation for every module while keeping the trace bounded.
           python3 .github/scripts/tests/test_codeql_compile_coverage.py
           .github/scripts/gradle-heap-headroom.sh codeql-java-kotlin -- \
-            ./gradlew classes --init-script .github/scripts/codeql-force-compilers.init.gradle --no-daemon \
+            ./gradlew classes --dependency-verification=strict --init-script .github/scripts/codeql-force-compilers.init.gradle --no-daemon \
             2>&1 | tee "${RUNNER_TEMP:-/tmp}/codeql-build.log"
           python3 .github/scripts/check-codeql-compile-coverage.py \
             --root . --log "${RUNNER_TEMP:-/tmp}/codeql-build.log"

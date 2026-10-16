@@ -4,6 +4,7 @@
 """Verify manual-build CodeQL cannot accept a partial cached fleet trace."""
 
 import importlib.util
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,21 @@ spec.loader.exec_module(coverage)
 
 
 class CompileCoverageTest(unittest.TestCase):
+    def test_traced_production_build_explicitly_uses_strict_verification(self):
+        workflow = (SCRIPT.parents[1] / "workflows/security.yml").read_text()
+        start = workflow.index("      - name: Build production classes (java-kotlin) for CodeQL tracing")
+        end = workflow.index("\n      - ", start + 1)
+        commands = [
+            shlex.split(line)
+            for line in workflow[start:end].replace("\\\n", " ").splitlines()
+            if line.lstrip().startswith(".github/scripts/gradle-heap-headroom.sh ")
+        ]
+        self.assertEqual(len(commands), 1)
+        gradle = commands[0][commands[0].index("./gradlew"):]
+        self.assertEqual(gradle[:2], ["./gradlew", "classes"])
+        verification = [arg for arg in gradle if arg.startswith("--dependency-verification")]
+        self.assertEqual(verification, ["--dependency-verification=strict"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
