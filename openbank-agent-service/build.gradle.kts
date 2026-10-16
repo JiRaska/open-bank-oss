@@ -52,6 +52,9 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Pact consumer: AgentFxReadPactConsumerTest pins the assistant's FX read tools against
+    // fx-service (ADR-0063, evidence-matrix contract coverage).
+    testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))
