@@ -550,6 +550,7 @@ jobs:
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
+      image_tag: ${{ steps.build.outputs.tag }}
       # Only the services whose image actually reached the registry. Everything after
       # the push keys off this, never off the changed set (#9714).
       pushed_services: ${{ steps.push.outputs.pushed }}
@@ -1050,6 +1051,7 @@ jobs:
     # serves this label at ~$0 idle.
     runs-on: openbank-build
     permissions:
+      actions: read
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
@@ -1099,12 +1101,18 @@ jobs:
       - name: can-i-deploy (per changed service)
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # Reconcile must prove the exact main Services CI attempt that produced each Pact
+          # source before it can ask the Broker or mutate GitOps image pins.
+          RECONCILE_SOURCE_REQUIRED: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true') }}
+          GH_TOKEN: ${{ github.token }}
           # A ${{ }} expression is substituted by the runner before the shell sees it, so it
           # cannot survive extraction into a script — these three move to the environment.
           # SERVICES stays out of any concurrency.group: interpolating a fleet-sized list into
           # a group name silently stops the job being created (#3082/#3084); an env var has no
           # such ceiling.
           SERVICES: ${{ needs.build-push.outputs.deployable_services }}
+          IMAGE_TAGS: ${{ needs.build-push.outputs.image_tags }}
+          BUILD_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
