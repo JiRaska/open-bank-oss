@@ -129,6 +129,7 @@ survives in it.
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
    SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
+   MARKETING_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
 
