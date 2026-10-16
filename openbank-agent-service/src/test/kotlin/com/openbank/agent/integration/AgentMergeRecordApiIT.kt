@@ -7,26 +7,33 @@ package com.openbank.agent.integration
 
 import com.openbank.agent.application.port.`in`.MergeRecordCommand
 import com.openbank.agent.application.port.`in`.RecordMergeUseCase
+import com.openbank.agent.infrastructure.audit.AgentAuditOutbox
 import com.openbank.agent.it.PostgresTestResource
+import io.mockk.every
+import io.mockk.spyk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.anyOf
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.`is`
 import org.junit.jupiter.api.Test
+import java.sql.SQLException
 import java.time.Instant
+import java.util.UUID
 import javax.sql.DataSource
 
 /**
  * Recorded-human-merge surface (ADR-0031 phase 3) against the real V6 schema: boots the full app
  * on an isolated PostgreSQL (Flyway migrates) and drives POST/GET /api/v1/agent-merge-records over
  * HTTP, asserting rows via plain JDBC reads — a direct resource call could not see routing or RBAC.
- * The audit outbox is asserted row-level too: exactly one `agent.pr.merged` event per inserted PR,
- * none on a duplicate redelivery.
+ * The audit outbox is asserted row-level too: exactly one `agent.pr.merged` event per PR. Injected
+ * runtime and checked failures prove both writes roll back and redelivery retries the operation.
  */
 @QuarkusTest
 // restrictToAnnotatedClass=true — same guard as ProposalApiIT: without it,
@@ -80,6 +87,80 @@ class AgentMergeRecordApiIT {
             ps.executeQuery().use { rs ->
                 rs.next()
                 rs.getLong(1)
+            }
+        }
+    }
+
+    private fun installAuditFailureSpy(): MutableMap<Long, Int> {
+        val attempts = mutableMapOf<Long, Int>()
+        val outbox = spyk(AgentAuditOutbox(dataSource))
+        every { outbox.enqueue(any(), any()) } answers {
+            val payload = secondArg<String>()
+            val prNumber = when {
+                payload.contains("\"pr_number\":9005") -> 9005L
+                payload.contains("\"pr_number\":9006") -> 9006L
+                else -> null
+            }
+            if (prNumber == null) {
+                callOriginal()
+            } else {
+                val attempt = (attempts[prNumber] ?: 0) + 1
+                attempts[prNumber] = attempt
+                when {
+                    prNumber == 9005L && attempt == 1 -> {
+                        callOriginal()
+                        error("injected post-enqueue failure")
+                    }
+                    prNumber == 9006L && attempt == 1 -> throw SQLException("injected checked enqueue failure")
+                    else -> callOriginal()
+                }
+            }
+        }
+        QuarkusMock.installMockForType(outbox, AgentAuditOutbox::class.java)
+        return attempts
+    }
+
+    private fun assertMergeCount(prNumber: Long, expected: Long) {
+        dataSource.connection.use { c ->
+            c.prepareStatement("SELECT count(*) FROM agent_merge_record WHERE pr_number = ?").use { ps ->
+                ps.setLong(1, prNumber)
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getLong(1)).isEqualTo(expected)
+                }
+            }
+        }
+    }
+
+    private fun assertFailureRollsBackThenRetry(
+        command: MergeRecordCommand,
+        exception: Class<out Throwable>,
+        message: String,
+    ) {
+        assertThatThrownBy { recordMerge.record(command) }
+            .isInstanceOf(exception)
+            .hasMessage(message)
+        assertMergeCount(command.prNumber, 0)
+        assertThat(auditCountFor(command.prNumber)).isZero()
+
+        val retry = recordMerge.record(command)
+        assertThat(retry.inserted).isTrue()
+        assertThat(retry.record.agentId).isEqualTo(command.agentId)
+        assertThat(retry.record.mergedBy).isEqualTo(command.mergedBy)
+        assertThat(retry.record.title).isEqualTo(command.title)
+        assertMergeCount(command.prNumber, 1)
+        assertThat(auditCountFor(command.prNumber)).isEqualTo(1)
+    }
+
+    private fun deleteMergeFixture(prNumber: Long) {
+        dataSource.connection.use { c ->
+            c.prepareStatement("DELETE FROM agent_audit_outbox WHERE payload LIKE ?").use { ps ->
+                ps.setString(1, "%\"pr_number\":$prNumber%")
+                ps.executeUpdate()
+            }
+            c.prepareStatement("DELETE FROM agent_merge_record WHERE pr_number = ?").use { ps ->
+                ps.setLong(1, prNumber)
+                ps.executeUpdate()
             }
         }
     }
@@ -142,6 +223,56 @@ class AgentMergeRecordApiIT {
             }
         }
         assertThat(auditCountFor(9002)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "pipeline", roles = ["ROLE_ADMIN"])
+    fun `runtime and checked audit failures roll back merge row so redelivery retries both`() {
+        val attempts = installAuditFailureSpy()
+        val original = mergeCommand(prNumber = 9005)
+        assertFailureRollsBackThenRetry(original, IllegalStateException::class.java, "injected post-enqueue failure")
+        assertThat(attempts[9005L]).isEqualTo(2)
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "SELECT event_id, payload FROM agent_audit_outbox WHERE payload LIKE '%\"pr_number\":9005%'",
+            ).use { ps ->
+                ps.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    val eventId = rs.getObject("event_id", UUID::class.java)
+                    val payload = rs.getString("payload")
+                    assertThat(payload)
+                        .contains(
+                            eventId.toString(),
+                            "agent.pr.merged",
+                            original.mergedBy,
+                            original.agentId,
+                            original.headBranch,
+                            original.source,
+                        )
+                    assertThat(rs.next()).isFalse()
+                }
+            }
+        }
+        assertThat(auditCountFor(9005)).isEqualTo(1)
+
+        // Checked failures also need rollback: Jackson serialization and JDBC writes can throw
+        // checked exceptions before the outbox acknowledges its insert.
+        val checkedFailure = mergeCommand(prNumber = 9006)
+        assertFailureRollsBackThenRetry(checkedFailure, SQLException::class.java, "injected checked enqueue failure")
+        assertThat(attempts[9006L]).isEqualTo(2)
+        dataSource.connection.use { c ->
+            c.prepareStatement("SELECT count(*) FROM agent_audit_outbox WHERE payload LIKE '%\"pr_number\":9006%'")
+                .use { ps ->
+                    ps.executeQuery().use { rs ->
+                        assertThat(rs.next()).isTrue()
+                        assertThat(rs.getLong(1)).isEqualTo(1)
+                    }
+                }
+        }
+
+        // Keep this integration fixture isolated from sibling tests that assert a fresh list.
+        deleteMergeFixture(9005)
+        deleteMergeFixture(9006)
     }
 
     @Test

@@ -15,6 +15,7 @@ import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.transaction.Transactional
 import kotlinx.coroutines.runBlocking
 import java.time.Clock
 
@@ -26,8 +27,9 @@ import java.time.Clock
  * the event reaches the same Kafka pipeline.
  *
  * Idempotency is load-bearing for the audit trail, not just for storage: the GitHub webhook can
- * redeliver, and the audit event must fire exactly once. The repository returns whether the row
- * was actually inserted; the audit publishes only when it was.
+ * redeliver, and the durable outbox must contain one event per recorded PR. Kafka delivery remains
+ * at-least-once. The merge row and durable outbox enqueue share this method's transaction, so a
+ * failed enqueue rolls back the row and redelivery retries the original insert-and-audit operation.
  */
 @ApplicationScoped
 class MergeRecordService(
@@ -37,6 +39,7 @@ class MergeRecordService(
 ) : RecordMergeUseCase,
     MergeRecordQueries {
 
+    @Transactional(rollbackOn = [Exception::class])
     override fun record(command: MergeRecordCommand): AgentMergeRecordRepository.InsertResult {
         val record = AgentMergeRecord(
             id = Ids.newId(),
