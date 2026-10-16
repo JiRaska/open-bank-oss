@@ -80,10 +80,11 @@ TASKS = ("testClasses", "quarkusDependenciesBuild")
 # the convention plugin — then misclassified analytics-sink the other way, which would
 # have silently stopped checking its prod graph rather than failing loudly.
 QUARKUS_PLUGIN_RE = re.compile(
-    r'^\s*(?:id\("openbank\.quarkus-service"\)|alias\(libs\.plugins\.quarkus\))', re.M)
+    r'^\s*(?:plugins\s*\{\s*)?(?:id\("openbank\.quarkus-service"\)|'
+    r'alias\(libs\.plugins\.quarkus\))', re.M)
 SBOM_PLUGIN_RE = re.compile(
-    r'^\s*(?:id\("openbank\.quarkus-service"\)|id\("org\.cyclonedx\.bom"\)|'
-    r'alias\(libs\.plugins\.cyclonedx\))', re.M)
+    r'^\s*(?:plugins\s*\{\s*)?(?:id\("openbank\.quarkus-service"\)|'
+    r'id\("org\.cyclonedx\.bom"\)|alias\(libs\.plugins\.cyclonedx\))', re.M)
 
 
 def tasks_for(module: str) -> tuple[str, ...]:
@@ -269,6 +270,11 @@ def selftest() -> int:
             (conv / "build.gradle.kts").write_text('plugins {\n    id("openbank.quarkus-service")\n}\n')
             check("convention plugin -> both graphs and SBOM",
                   tasks_for("openbank-conv") == (*TASKS, "cyclonedxBom"))
+            inline_conv = tmp / "openbank-inline-conv"; inline_conv.mkdir()
+            (inline_conv / "build.gradle.kts").write_text(
+                'plugins { id("openbank.quarkus-service") }\n')
+            check("inline convention plugin -> both graphs and SBOM",
+                  tasks_for("openbank-inline-conv") == (*TASKS, "cyclonedxBom"))
             aliased = tmp / "openbank-alias"; aliased.mkdir()
             (aliased / "build.gradle.kts").write_text('plugins {\n    alias(libs.plugins.quarkus)\n}\n')
             check("alias(libs.plugins.quarkus) -> both graphs",
@@ -278,11 +284,21 @@ def selftest() -> int:
                 'plugins {\n    id("org.cyclonedx.bom")\n}\n')
             check("direct CycloneDX plugin -> SBOM only",
                   tasks_for("openbank-direct-sbom") == ("testClasses", "cyclonedxBom"))
+            inline_direct_sbom = tmp / "openbank-inline-direct-sbom"; inline_direct_sbom.mkdir()
+            (inline_direct_sbom / "build.gradle.kts").write_text(
+                'plugins { id("org.cyclonedx.bom") }\n')
+            check("inline direct CycloneDX plugin -> SBOM only",
+                  tasks_for("openbank-inline-direct-sbom") == ("testClasses", "cyclonedxBom"))
             alias_sbom = tmp / "openbank-alias-sbom"; alias_sbom.mkdir()
             (alias_sbom / "build.gradle.kts").write_text(
                 'plugins {\n    alias(libs.plugins.cyclonedx)\n}\n')
             check("CycloneDX plugin alias -> SBOM only",
                   tasks_for("openbank-alias-sbom") == ("testClasses", "cyclonedxBom"))
+            inline_alias_sbom = tmp / "openbank-inline-alias-sbom"; inline_alias_sbom.mkdir()
+            (inline_alias_sbom / "build.gradle.kts").write_text(
+                'plugins { alias(libs.plugins.cyclonedx) }\n')
+            check("inline CycloneDX plugin alias -> SBOM only",
+                  tasks_for("openbank-inline-alias-sbom") == ("testClasses", "cyclonedxBom"))
 
             # (4) The comment trap: a build file that only TALKS about the plugin must
             # not get quarkusDependenciesBuild — this exact prose once classified a
