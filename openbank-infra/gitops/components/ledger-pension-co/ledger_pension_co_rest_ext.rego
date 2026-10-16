@@ -21,8 +21,9 @@
 # re-open the instance to a machine — the same reason rest.rego gates the shared-M2M write veto
 # there.
 #
-# Identity is principal.id (`service-account-<clientId>`). Never principal.type == "SERVICE":
-# AuthorizeInterceptor never emits it (#266, rules.yaml: authz_policy).
+# Named identity uses the shared machine_named helper: current verified markers bind
+# the exact username and client_id; only an absent marker retains Phase-1 compatibility.
+# Never principal.type == "SERVICE": AuthorizeInterceptor does not emit it (#266).
 #
 # Scope: one endpoint. tax-reporting reads the FROZEN trial balance of a closed period and no
 # journal, no live trial balance, no control account — on this instance only, since this file is
@@ -38,7 +39,7 @@ ledger_pension_co_tax_reporting_actions := {"ledger.close.inspect"}
 
 ledger_pension_co_tax_reporting_read if {
 	input.principal.type == "HUMAN"
-	input.principal.id == ledger_pension_co_tax_reporting_account
+	machine_named(ledger_pension_co_tax_reporting_account)
 	"ROLE_API" in input.principal.roles
 	input.action in ledger_pension_co_tax_reporting_actions
 }
@@ -47,7 +48,14 @@ allowed_reasons contains "service-tax-reporting-company-books-read" if {
 	ledger_pension_co_tax_reporting_read
 }
 
-# Every machine identity other than the one grant above is vetoed on this instance.
+# Every verified or unclassified machine is vetoed unless the exact narrow grant matches.
+prohibited if {
+	principal_is_machine
+	not ledger_pension_co_tax_reporting_read
+}
+
+# Preserve the earlier service-name veto even for a contradictory explicit person marker.
+# Otherwise a malformed marker could make the bank's generic staff write grant applicable.
 prohibited if {
 	startswith(object.get(input.principal, "id", ""), "service-account-")
 	not ledger_pension_co_tax_reporting_read

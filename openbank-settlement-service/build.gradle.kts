@@ -41,6 +41,7 @@ dependencies {
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.mockk)

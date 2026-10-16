@@ -641,8 +641,12 @@ set) apply equally to the new `ledger.approval.decide` action.
   management edges on 8085; Keycloak's allow-list gains the namespace for token validation.
   **STRIDE-E/I:** the instance bundle adds `ledger_pension_co_rest_ext.rego`, which grants
   `ledger.close.inspect` (the frozen statutory trial balance) to `service-account-openbank-tax-reporting`
-  with `ROLE_API`, keyed on the verified `principal.id`, and a `prohibited` veto that denies every other
-  `service-account-*` on this instance — so the shared `openbank-services` client, which base
+  with `ROLE_API`, using `machine_named` to bind the exact username to the verified machine flag
+  and matching client ID. Only an absent flag retains the shared Phase-1 name compatibility; an
+  explicit person flag, mismatched/missing client ID, or malformed flag cannot borrow the grant.
+  The `prohibited` veto denies every other machine or unclassified caller, including renamed machines
+  carrying staff roles, and preserves the existing `service-account-*` veto even with a contradictory
+  person marker on this instance — so the shared `openbank-services` client, which base
   `operator-read-any` and `service-ledger-post` would otherwise admit, reaches nothing here. Staff rules
   are the bank ledger's, unchanged. **Tampering/DoS:** every bank-only job (outbox dispatch, tie-out,
   FX revaluation, accounting-day lock, Kafka) is switched off and the `ledger-instance-switches-off` gate

@@ -30,7 +30,7 @@ shared_client := {"type": "HUMAN", "id": "service-account-openbank-services", "r
 
 pension_client := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
 
-staff := {"type": "HUMAN", "id": "u-accountant", "roles": ["ROLE_OPERATOR"]}
+staff := {"service_account": false, "type": "HUMAN", "id": "u-accountant", "roles": ["ROLE_OPERATOR"]}
 
 test_tax_reporting_reads_frozen_trial_balance if {
 	rest.allow.allow with input as {"principal": tax_reporting, "action": "ledger.close.inspect", "resource": "2025-01-31"}
@@ -105,4 +105,47 @@ test_anonymous_denied if {
 test_staff_still_read if {
 	rest.allow.allow with input as {"principal": staff, "action": "ledger.read"}
 		with data.rules as rules_mock
+}
+
+# Named company grants bind a current verified marker to its exact client; the
+# absent-marker compatibility path remains the shared helper's existing contract.
+test_verified_tax_client_reads_only_frozen_trial_balance if {
+	p := object.union(tax_reporting, {"service_account": true, "client_id": "openbank-tax-reporting"})
+	rest.allow.allow with input as {"principal": p, "action": "ledger.close.inspect"} with data.rules as rules_mock
+	every action in {"ledger.read", "ledger.list", "ledger.create", "ledger.reverse", "ledger.close.draft"} {
+		not rest.allow.allow with input as {"principal": p, "action": action} with data.rules as rules_mock
+	}
+}
+
+test_explicit_human_cannot_borrow_tax_named_grant if {
+	p := object.union(tax_reporting, {"service_account": false})
+	not rest.allow.allow with input as {"principal": p, "action": "ledger.close.inspect"} with data.rules as rules_mock
+}
+
+test_current_tax_marker_requires_matching_client if {
+	every claims in [
+		{"service_account": true, "client_id": "openbank-other"},
+		{"service_account": true},
+		{"service_account": "true", "client_id": "openbank-tax-reporting"},
+	] {
+		p := object.union(tax_reporting, claims)
+		not rest.allow.allow with input as {"principal": p, "action": "ledger.close.inspect"} with data.rules as rules_mock
+	}
+}
+
+test_renamed_machine_with_staff_roles_is_vetoed if {
+	p := {"type": "HUMAN", "id": "renamed-machine", "roles": ["ROLE_OPERATOR"], "service_account": true, "client_id": "openbank-other"}
+	every action in {"ledger.read", "ledger.create", "ledger.close.inspect"} {
+		not rest.allow.allow with input as {"principal": p, "action": action} with data.rules as rules_mock
+	}
+}
+
+test_unmarked_nonservice_identity_is_not_staff if {
+	p := {"type": "HUMAN", "id": "unverified-user", "roles": ["ROLE_OPERATOR"]}
+	not rest.allow.allow with input as {"principal": p, "action": "ledger.close.inspect"} with data.rules as rules_mock
+}
+
+test_false_marker_keeps_service_prefix_write_veto if {
+	p := {"type": "HUMAN", "id": "service-account-openbank-other", "roles": ["ROLE_OPERATOR"], "service_account": false}
+	not rest.allow.allow with input as {"principal": p, "action": "ledger.create"} with data.rules as rules_mock
 }
