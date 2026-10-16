@@ -36,6 +36,21 @@ Extends: ADR-0031 (AI agent governance, Accepted)
 > approach cannot satisfy. The D2 decision text below describes the original design intent; this
 > amendment is the governing status.
 
+> **Amendment 2026-10-14 (issue #12537) — named machine grants require client proof.** A
+> fixed-client grant uses `machine_named("service-account-<client>")`: `principal.id` must match
+> the grant, and when `service_account` is present as `true`, `principal.client_id` must equal the
+> client suffix. This binds the grant to the client identity derived by the current PEP from
+> verified JWT claims. If the marker is absent, the legacy name-based grant remains temporarily
+> available for old PEPs; the absence still classifies the principal as a machine and never makes
+> it eligible for staff rules. Negative prohibitions that protect against role-only grants keep
+> their raw-identity plus machine-marker test, independent of named-grant proof, so an incomplete
+> or mismatched identity cannot evade a denial. Generic any-machine grants remain explicit.
+>
+> This policy contract assumes each PEP populates `client_id` from verified claims. It does not
+> prove that every custom PEP or downstream consumer implements that contract. The Phase 2
+> rollout gate and live-pod verification remain required before deployment; policy tests alone do
+> not establish fleet readiness.
+
 ## Context
 
 Two OPA work-streams converge on the same infrastructure but were drafted
