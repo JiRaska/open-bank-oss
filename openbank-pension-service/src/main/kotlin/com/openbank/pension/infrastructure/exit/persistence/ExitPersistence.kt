@@ -243,9 +243,9 @@ internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepositor
         "contractId = :contractId".takeIf { contractId != null },
     )
     val where = if (clauses.isEmpty()) "" else clauses.joinToString(" and ", postfix = " ")
-    val params = io.quarkus.panache.common.Parameters()
-    if (status != null) params.and("status", status)
-    if (contractId != null) params.and("contractId", contractId)
+    val params = mutableMapOf<String, Any>()
+    if (status != null) params["status"] = status
+    if (contractId != null) params["contractId"] = contractId
     return Panache.withSession { find("${where}order by id desc", params).page(0, limit).list() }.awaitSuspending()
         .map { it.toDomain(T::class.java) }
 }

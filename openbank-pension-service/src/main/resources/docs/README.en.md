@@ -96,3 +96,11 @@ The `pension-state-gauges` job refreshes them every 60 seconds by default
 successful snapshot. A failed refresh leaves the previous values in place; check workflow
 liveness before treating those values as current. Labels use bounded categories, never party
 or contract identifiers.
+
+## Annuity partner wire format
+
+Requests to the reference annuity partner omit absent optional properties and
+null-valued map entries; they do not send JSON null as an alternative value.
+Partner responses may add fields without breaking parsing; decimal amounts
+and date handling retain the protocol contract. The protocol contract tests
+validate outgoing requests and parse the documented offer examples.

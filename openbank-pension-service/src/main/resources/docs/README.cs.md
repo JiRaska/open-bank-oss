@@ -95,3 +95,11 @@ Stavové metriky ukazují stavy smluv a agregátů, velikosti front a stáří n
 (`openbank.pension.state-gauges.every`). Nový pod nevystaví stavové série před prvním
 úspěšným snapshotem. Při chybě obnovy zůstávají předchozí hodnoty; před jejich použitím
 ověřte liveness úlohy. Štítky používají omezené kategorie, nikdy identifikátory stran či smluv.
+
+## Formát komunikace s partnerem pro renty
+
+Požadavky referenčnímu partnerovi vynechávají nepřítomné volitelné vlastnosti
+a položky map s hodnotou null; neposílají místo nich JSON null. Odpověď partnera může přidat
+pole bez porušení zpracování; desetinné částky a data zachovávají protokolový
+kontrakt. Kontraktové testy ověřují odchozí požadavky a načítají dokumentované
+příklady nabídek.
