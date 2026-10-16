@@ -232,17 +232,16 @@ through the approved identity process and verify their live access tokens and th
 two-person approval flow before enabling publication. Do not make either approval role
 or `catalog:read` a default scope of the Admin UI client.
 
-**Separate and still open — the reason those 25 sites are unreachable is NOT these
-roles.** `catalog:read|author|publish` is not declared as a client scope in either realm
-template: `realm-template.json` has `clientScopes: []`, and `customers-realm-template.json`
-carries `profile`, `accounts:read`, `payments:initiate`, `statements:read`,
-`sca:enroll-device`, `sca:decide`, `telemetry:rum` — no catalog scope. So no token from a
-cold-started realm can carry the scope the augmentor reads, and the augmentor returns the
-identity unchanged. Whether the *live* realm has such a scope is unverified here on
-purpose: `check-realm-role-parity` states its own blind spot (`doesNotVerify:
-"client-role assignments; group membership; …"`) and client scopes are outside it, so
-nothing in this repo currently measures it. Wiring the scope is an authorization design
-decision (default vs optional scope, and which clients may request it), not a drift fix.
+**Catalog read and write grants remain separate.** `catalog:read` is declared in the
+staff realm imports and assigned to `openbank-admin-ui` as an optional scope in both
+Docker and GitOps. The Admin UI explicitly requests it during login; it is not a default
+grant. This enables a cold staff realm to issue the read scope consumed by the augmentor.
+`catalog:author` and `catalog:publish` are still absent, and no catalog scope is assigned
+by the customer realm. Write-scope provisioning remains a separate authorization decision.
+
+These source declarations and their offline parity regression do not establish the live
+realm's assignments or a deployed Admin UI image. The role-parity gate does not verify
+client-scope assignments; runtime access and import reconciliation require separate evidence.
 
 ### `clients[openbank-edge-webauthn].description`
 
