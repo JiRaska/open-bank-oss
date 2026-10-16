@@ -107,11 +107,11 @@ Journals are booked on the cut-over date, with the original event date as `value
 
 ### Late provisioning migration V26 (#13026)
 
-V26 reached main after V27. With `validate-on-migrate: false`, default Flyway ordering can leave V26 unapplied even when startup migration returns successfully. The application temporarily enables `quarkus.flyway.out-of-order` so a database already at V27 can create `provisioning_cycle_attempt` and `provisioning_cycle_run.current_attempt_id`.
+V26 reached main after V27. With `validate-on-migrate: false`, default Flyway ordering can leave V26 unapplied even when startup migration returns successfully. The lending GitOps Rollout temporarily sets `QUARKUS_FLYWAY_OUT_OF_ORDER=true` so a database already at V27 can create `provisioning_cycle_attempt` and `provisioning_cycle_run.current_attempt_id`.
 
 Keep deployment holds and image promotion controls in place. Before an authorized rollout, inspect each target database's `flyway_schema_history`; source history and CI do not establish deployed migration state. After migration, verify successful V26/V27 entries, the attempt schema, and preservation of existing provisioning summaries and signature hashes. Repeated migration must not duplicate the V26 backfill.
 
-Remove the temporary application flag only after **every** target database records successful V26. Retain the exact historical order exception while Git still shows V27 arriving first. Preserve committed SQL identities; this recovery does not use Flyway repair or renumbering. Schema rollback is described in V26 and requires exporting attempt history before removing it.
+Remove the temporary GitOps environment entry only after **every** target database records successful V26. Retain the exact historical order exception while Git still shows V27 arriving first. Preserve committed SQL identities; this recovery does not use Flyway repair or renumbering. Schema rollback is described in V26 and requires exporting attempt history before removing it.
 
 ### Flyway checksum mismatch on startup
 Never rewrite an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` transiently, let the DB settle, then remove it.

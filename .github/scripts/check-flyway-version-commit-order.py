@@ -69,11 +69,6 @@ VERSION_RE = re.compile(r"^V(\d+)__.*\.sql$")
 # database). Checked BOTH ways, same idiom as check-kafka-acl-coverage.py's KNOWN_GAPS: an entry
 # that stops reproducing is itself reported, so this list can only shrink.
 KNOWN_VIOLATIONS: dict[str, str] = {
-    "openbank-lending-service/src/main/resources/db/migration/V26__provisioning_cycle_attempts.sql":
-        "#13026: #12315 introduced V26 after #12769 had introduced V27. Lending's "
-        "application config temporarily enables out-of-order migration so databases "
-        "already at V27 can apply V26. Keep this historical exception while git order "
-        "reproduces; remove the application flag only after all target DBs record V26.",
     "openbank-risk-engine/src/main/resources/db/migration/V7__risk_limit_outbox.sql":
         "#11549 and #11722 merged hours apart (2026-10-01/02) with V7/V8 picked in parallel; "
         "no database had applied either (sandbox pod: schema at 6), so every environment "
@@ -90,6 +85,11 @@ KNOWN_VIOLATIONS: dict[str, str] = {
         "baselining: the sandbox openbank_treasury flyway_schema_history ends at V9, so NO "
         "database has applied V11 without V10 and the next deploy applies V10 then V11 in order. "
         "No out-of-order flag is needed; renaming is blocked by db-migration-gate.",
+    "openbank-lending-service/src/main/resources/db/migration/V26__provisioning_cycle_attempts.sql":
+        "#12315 landed V26 on main (2026-10-16) after #12769 had put V27 there (2026-10-15); "
+        "renaming is blocked by db-migration-gate. QUARKUS_FLYWAY_OUT_OF_ORDER=true set in "
+        "components/lending/lending-service.yaml (campaign pattern), with its own note to remove "
+        "once every environment has recorded V26.",
 }
 
 

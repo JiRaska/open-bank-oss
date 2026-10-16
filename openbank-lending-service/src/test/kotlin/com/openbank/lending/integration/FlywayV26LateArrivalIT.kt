@@ -7,7 +7,6 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
-import org.eclipse.microprofile.config.ConfigProvider
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -27,12 +26,6 @@ class FlywayV26LateArrivalIT {
 
     @Test
     fun `late V26 is repaired without losing V27 or provisioning summary state`() {
-        val configuredOutOfOrder = ConfigProvider.getConfig()
-            .getValue("quarkus.flyway.out-of-order", Boolean::class.java)
-        assertThat(configuredOutOfOrder)
-            .`as`("application.yaml must retain the temporary V26 recovery setting")
-            .isTrue()
-
         val fullMigrations = Path.of("src/main/resources/db/migration").toAbsolutePath()
         val withoutV26 = Files.createTempDirectory("lending-migrations-without-v26-")
         val freshSchema = schemaName("v26_fresh")
@@ -58,15 +51,15 @@ class FlywayV26LateArrivalIT {
             assertThat(columnExists(lateSchema, "provisioning_cycle_run", "current_attempt_id")).isFalse()
             assertLegacyState(lateSchema)
 
-            // Drive recovery from the application setting, not a hard-coded true.
-            flyway(fullMigrations, lateSchema, outOfOrder = configuredOutOfOrder, validate = false).migrate()
+            // Model the temporary QUARKUS_FLYWAY_OUT_OF_ORDER=true GitOps setting from #13028.
+            flyway(fullMigrations, lateSchema, outOfOrder = true, validate = false).migrate()
             assertThat(applied(lateSchema, 26)).isTrue()
             assertThat(installedRank(lateSchema, 26)).isGreaterThan(installedRank(lateSchema, 27))
             assertLegacyState(lateSchema)
             assertThat(attemptEvents(lateSchema)).containsExactlyInAnyOrder("STARTED", "COMPLETE")
 
             val attemptCount = countAttempts(lateSchema)
-            flyway(fullMigrations, lateSchema, outOfOrder = configuredOutOfOrder, validate = false).migrate()
+            flyway(fullMigrations, lateSchema, outOfOrder = true, validate = false).migrate()
             assertThat(countAttempts(lateSchema)).isEqualTo(attemptCount)
             assertLegacyState(lateSchema)
 
