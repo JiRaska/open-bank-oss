@@ -357,7 +357,27 @@ jobs:
             --bootstrap \
             --use
           docker buildx inspect ob-deploy-builder
+
+      - name: Initialize collector request trace directory
+        run: |
+          trace_dir="$(mktemp -d "${RUNNER_TEMP}/admin-ui-http-trace-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.XXXXXX" 2>/dev/null || true)"
+          if [ -n "${trace_dir}" ]; then
+            printf 'ADMIN_UI_TRACE_DIR=%s\n' "${trace_dir}" >> "${GITHUB_ENV}"
+          else
+            echo "::warning::collector request trace directory unavailable; final trace will be incomplete"
+            printf 'ADMIN_UI_TRACE_DIR=\n' >> "${GITHUB_ENV}"
+          fi
+      - name: Validate collector request-send tracing
+        run: |
+          if python3 .github/scripts/test-admin-ui-request-trace.py \
+            && (cd openbank-admin-ui && node --test scripts/request-send-trace.test.mjs); then
+            printf 'ADMIN_UI_TRACE_TESTS=passed\n' >> "${GITHUB_ENV}"
+          else
+            printf 'ADMIN_UI_TRACE_TESTS=failed\n' >> "${GITHUB_ENV}"
+            echo "::warning::request-send trace fixture failed; collector report will be incomplete"
+          fi
       - name: Stage per-service SBOMs from latest security run
+        id: stage_sbom
         # security.yml uploads `per-service-sboms` (openbank-*-sbom.cdx.json). We download
         # and stage them as openbank-*/build/reports/bom.json so the Dockerfile
         # sbom-collector stage bundles them — without running Gradle here.
@@ -390,7 +410,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage sbom)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage sbom --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           staged=false
           # Sort by created_at ourselves: the API's ordering is not contractual.
@@ -424,6 +445,7 @@ jobs:
           echo "SBOM staging complete."
 
       - name: Stage Test Intelligence evidence (per-service latest artifact)
+        id: stage_service_ti
         # services-ci.yml uploads one artifact per service: test-reports-{service}
         # (7-day retention). The old approach (download from ONE run) fails with
         # path-scoped CI: only recently-changed services have artifacts in any single
@@ -444,7 +466,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage service_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage service_ti --auth github -- curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
           # Released components come from version.txt. The deterministic-simulation
@@ -537,6 +560,7 @@ jobs:
           echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
 
       - name: Stage customer-app Test Intelligence evidence
+        id: stage_customer_ti
         # Cross-repository evidence is read-only and best-effort. The compact JSON artifact
         # contains counts and provenance only; it never imports private source or test output.
         if: env.APP_RO_TOKEN != ''
@@ -545,7 +569,8 @@ jobs:
           APP_REPO: JiRaska/openbank-app
         run: |
           set -u
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage customer_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage customer_ti --auth app_ro -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/client-test-evidence
           # Only reviewed default-branch evidence may enter a deployed control plane. A newer
           # PR artifact remains visible in GitHub but cannot replace the sandbox verdict.
@@ -580,13 +605,15 @@ jobs:
           restore-keys: test-run-history-
 
       - name: Stage immutable per-attempt Test Intelligence history
+        id: stage_immutable_ti
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -u
           python3 .github/scripts/extract-test-intelligence-envelope.py --self-test
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage immutable_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage immutable_ti --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           touch openbank-admin-ui/test-run-history/.staged-ids
           # The restored cache can predate ZIP validation. Remove non-main or malformed
@@ -655,6 +682,7 @@ jobs:
           key: test-run-history-${{ github.run_id }}
 
       - name: Stage pitest mutation results from latest completed weekly run
+        id: stage_pit
         # pitest.yml uploads one artifact per governed lane (30-day retention).
         # collect-test-intelligence.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
@@ -665,7 +693,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage pit)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage pit --auth github -- curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           # A single completed-runs response has omitted a newer retained main PIT
           # run and silently projected an older failed report. Cross-check the
@@ -722,6 +751,7 @@ jobs:
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
 
       - name: Stage performance evidence from latest complete k6 run
+        id: stage_performance
         # The Test Intelligence collector reads k6 summaries only from the deployment-local
         # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
         # result, so bring in the newest authoritative completed main-run evidence even when
@@ -745,7 +775,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage performance)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage performance --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           SELECTOR=.github/scripts/select-performance-evidence.py
           SELECTOR_DIR="$(mktemp -d)"
@@ -925,6 +956,7 @@ jobs:
           fi
 
       - name: Collect CI gate-estate health snapshot (ADR-0255)
+        id: stage_gate_health
         # Derives gate-health.json from the GitHub Actions API — same read-only,
         # baked-at-build-time shape as prod-readiness above and DORA (ADR-0061):
         # the token this step holds (actions: read, job-scoped) never reaches the
@@ -935,6 +967,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          eval "$(python3 ../.github/scripts/admin_ui_trace_ipc.py begin --stage gate_health)" || true
           if ! node scripts/collect-gate-health.mjs 2>&1; then
             echo "::warning::gate-health collector failed — QG panel will show no data"
           fi
@@ -945,12 +978,14 @@ jobs:
           version: v0.72.0
 
       - name: Stage Test Intelligence deployment history
+        id: stage_deploy_ti
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -u
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage deploy_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage deploy_ti --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-intelligence-history
           # Query the owning workflow's successful main runs, not the repository-wide artifact
           # stream. Every services-ci run contributes many artifacts and previously pushed a
@@ -978,6 +1013,20 @@ jobs:
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue
                 unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
               done
+
+      - name: Summarize collector request-send trace
+        if: always()
+        env:
+          TRACE_STATUS_SBOM: ${{ steps.stage_sbom.outcome || 'not_run' }}
+          TRACE_STATUS_SERVICE_TI: ${{ steps.stage_service_ti.outcome || 'not_run' }}
+          TRACE_STATUS_CUSTOMER_TI: ${{ steps.stage_customer_ti.outcome || 'not_run' }}
+          TRACE_STATUS_IMMUTABLE_TI: ${{ steps.stage_immutable_ti.outcome || 'not_run' }}
+          TRACE_STATUS_PIT: ${{ steps.stage_pit.outcome || 'not_run' }}
+          TRACE_STATUS_PERFORMANCE: ${{ steps.stage_performance.outcome || 'not_run' }}
+          TRACE_STATUS_GATE_HEALTH: ${{ steps.stage_gate_health.outcome || 'not_run' }}
+          TRACE_STATUS_DEPLOY_TI: ${{ steps.stage_deploy_ti.outcome || 'not_run' }}
+          TRACE_APP_RO_CONFIGURED: ${{ env.APP_RO_TOKEN != '' }}
+        run: python3 .github/scripts/aggregate-admin-ui-http-trace.py
 
       - name: Build, collect, push
         id: build
