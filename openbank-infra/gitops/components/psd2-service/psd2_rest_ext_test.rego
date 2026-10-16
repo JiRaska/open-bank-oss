@@ -19,17 +19,17 @@ import rego.v1
 
 # A TPP after EidasMtlsFilter has passed it: eIDAS QWAC identity, no OIDC bearer, so
 # AuthorizeInterceptor builds exactly this principal (id defaults to "anonymous").
-tpp := {"type": "ANONYMOUS", "id": "anonymous", "roles": []}
+tpp := {"service_account": false, "type": "ANONYMOUS", "id": "anonymous", "roles": []}
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # The shared M2M identity — classified HUMAN, carries ROLE_OPERATOR. No such caller exists for
 # psd2-service today; these are regression guards that none is accidentally admitted.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the TPP plane: all five actions the 21 annotated endpoints use ---
 
