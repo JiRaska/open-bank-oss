@@ -199,6 +199,17 @@ allowed_reasons contains "service-settlement-balance-cover" if {
 	input.action == "balance.hold"
 }
 
+# ADR-0340 B — tax-reporting-service's own machine identity (client `openbank-tax-reporting`,
+# ROLE_API only) reads period-end booked balances for the CRS/FATCA assembly
+# (CrsFatcaReportingSources.bookedBalance -> GET /balances/{accountId}/{currency}?asOf=, the
+# statement point-in-time route). balance.read only: it moves nothing, holds nothing, and reads
+# nothing else.
+allowed_reasons contains "service-tax-reporting-balance-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-tax-reporting")
+	input.action == "balance.read"
+}
+
 prohibited if {
 	machine_named("service-account-openbank-edge")
 	input.action in {

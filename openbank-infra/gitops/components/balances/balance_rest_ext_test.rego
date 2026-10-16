@@ -232,3 +232,29 @@ test_settlement_cover_rejects_wrong_principal_type if {
 	}
 		with data.rules as rules_mock
 }
+
+# --- ADR-0340 B: tax-reporting's own identity may read balances, nothing else ---
+
+tax_reporting_m2m := {"service_account": true, "client_id": "openbank-tax-reporting", "type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_may_read_balance_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": tax_reporting_m2m, "action": "balance.read"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-tax-reporting-balance-read" in rest.allowed_reasons with input as {"principal": tax_reporting_m2m, "action": "balance.read"}
+		with data.rules as rules_mock
+}
+
+test_tax_reporting_denied_every_other_balance_action if {
+	every action in balance_actions - {"balance.read"} {
+		rest.allow == false with input as {"principal": tax_reporting_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_tax_reporting_balance_rule_does_not_admit_other_service_accounts if {
+	not "service-tax-reporting-balance-read" in rest.allowed_reasons with input as {"principal": other_role_api_sa, "action": "balance.read"}
+		with data.rules as rules_mock
+	not "service-tax-reporting-balance-read" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "balance.read"}
+		with data.rules as rules_mock
+}
