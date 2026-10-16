@@ -39,7 +39,7 @@ external_disclosure_exporter := "service-account-openbank-delegation-disclosure"
 
 allowed_reasons contains "service-delegation-external-disclosure-export" if {
     input.principal.type == "HUMAN"
-    input.principal.id == external_disclosure_exporter
+    machine_named(external_disclosure_exporter)
     input.action == "document.disclosure.export"
 }
 
@@ -48,7 +48,7 @@ allowed_reasons contains "service-delegation-external-disclosure-export" if {
 # shared backend identity, or another service account.
 prohibited if {
     input.action == "document.disclosure.export"
-    input.principal.id != external_disclosure_exporter
+    not machine_named(external_disclosure_exporter)
 }
 
 business_agreement_actions := {
@@ -58,7 +58,7 @@ business_agreement_actions := {
 
 allowed_reasons contains "service-kyb-business-agreement" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in business_agreement_actions
 }
 
@@ -67,6 +67,6 @@ allowed_reasons contains "service-kyb-business-agreement" if {
 # family, which would otherwise include these two actions; veto them at the allow head so the edge
 # can never render or read a company's agreement by case id directly.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in business_agreement_actions
 }
