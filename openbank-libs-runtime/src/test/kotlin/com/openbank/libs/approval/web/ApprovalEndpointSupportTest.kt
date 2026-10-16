@@ -4,6 +4,7 @@
 
 package com.openbank.libs.approval.web
 
+import com.openbank.libs.approval.ApprovalRequestBinding
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.MakerActorKind
@@ -124,6 +125,36 @@ class ApprovalEndpointSupportTest {
         @Suppress("UNCHECKED_CAST")
         val one = support.listPending(-5).entity as List<ApprovalResponse>
         assertThat(one).hasSize(1)
+    }
+
+    @Test
+    fun `listPending projects the ADR-0227 D1 canonical fields additively`(): Unit = runBlocking {
+        store.create(
+            "opsmessage.compose",
+            "res-9",
+            "maker-9",
+            binding = ApprovalRequestBinding(
+                fingerprint = "f".repeat(64),
+                summary = "POST /api/v1/ops-messages",
+            ),
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val body = (support.listPending(10).entity as List<ApprovalResponse>).single()
+
+        // Original ADR-0155 shape is unchanged.
+        assertThat(body.id).isNotBlank()
+        assertThat(body.action).isEqualTo("opsmessage.compose")
+        assertThat(body.status).isEqualTo("PENDING")
+        // D1 projection: sourced fields.
+        assertThat(body.summary).isEqualTo("POST /api/v1/ops-messages")
+        assertThat(body.domain).isEqualTo("unknown") // no quarkus.application.name in a plain unit test
+        // D1 projection: fields nothing persisted can source yet — absent, never invented.
+        assertThat(body.amount).isNull()
+        assertThat(body.currency).isNull()
+        assertThat(body.payloadRef).isNull()
+        // The service side cannot see rules.yaml action-class metadata; the BFF re-derives this.
+        assertThat(body.riskClass).isEqualTo("UNKNOWN")
     }
 
     @Test
