@@ -88,49 +88,55 @@ class IncomeCreditPersistenceIT {
     )
 
     @Test
-    fun `a redelivered record is a no-op and totals group per account and currency over the window`() = runBlocking {
-        val jan = LocalDate.of(2026, 1, 31)
-        val jun = LocalDate.of(2026, 6, 30)
-        val dec = LocalDate.of(2026, 12, 31)
+    fun `a redelivered record is a no-op and totals group per account and currency over the window`(): Unit =
+        runBlocking {
+            val jan = LocalDate.of(2026, 1, 31)
+            val jun = LocalDate.of(2026, 6, 30)
+            val dec = LocalDate.of(2026, 12, 31)
 
-        onVertxContext {
-            val w1 = UUID.fromString("10000000-0000-0000-0000-000000000001")
-            // accountA: one January credit and a redelivery of it, plus a EUR credit in June.
-            assertThat(repository.record(credit(w1, accountA, "100.00", jan))).isTrue()
-            assertThat(repository.record(credit(w1, accountA, "100.00", jan))).isFalse()
-            assertThat(
-                repository.record(
-                    credit(
-                        UUID.fromString("10000000-0000-0000-0000-000000000002"),
-                        accountA,
-                        "50.00",
-                        jun,
-                        currency = "EUR",
+            onVertxContext {
+                val w1 = UUID.fromString("10000000-0000-0000-0000-000000000001")
+                // accountA: one January credit and a redelivery of it, plus a EUR credit in June.
+                assertThat(repository.record(credit(w1, accountA, "100.00", jan))).isTrue()
+                assertThat(repository.record(credit(w1, accountA, "100.00", jan))).isFalse()
+                assertThat(
+                    repository.record(
+                        credit(
+                            UUID.fromString("10000000-0000-0000-0000-000000000002"),
+                            accountA,
+                            "50.00",
+                            jun,
+                            currency = "EUR",
+                        ),
                     ),
-                ),
-            ).isTrue()
-            // accountB: one June credit, and a credit whose period ENDS just past the window.
-            assertThat(
-                repository.record(
-                    credit(UUID.fromString("10000000-0000-0000-0000-000000000003"), accountB, "7.50", jun),
-                ),
-            ).isTrue()
-            assertThat(
-                repository.record(
-                    credit(UUID.fromString("10000000-0000-0000-0000-000000000004"), accountB, "999.00", dec),
-                ),
-            ).isTrue()
-        }
+                ).isTrue()
+                // accountB: one June credit, and a credit whose period ENDS just past the window.
+                assertThat(
+                    repository.record(
+                        credit(UUID.fromString("10000000-0000-0000-0000-000000000003"), accountB, "7.50", jun),
+                    ),
+                ).isTrue()
+                assertThat(
+                    repository.record(
+                        credit(UUID.fromString("10000000-0000-0000-0000-000000000004"), accountB, "999.00", dec),
+                    ),
+                ).isTrue()
+            }
 
-        val totals = onVertxContext {
-            repository.totalsByAccount(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 6, 30))
+            val totals = onVertxContext {
+                repository.totalsByAccount(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 6, 30))
+            }
+            // The redelivery must not double accountA's CZK gross; the out-of-window December
+            // credit must not appear; EUR and CZK stay separate totals. Amounts compare
+            // numerically — the DB column's NUMERIC(19,4) storage scale is not the contract.
+            val byKey = totals.associateBy { it.accountId to it.currency }
+            assertThat(byKey.keys).containsExactlyInAnyOrder(
+                accountA to "CZK",
+                accountA to "EUR",
+                accountB to "CZK",
+            )
+            assertThat(byKey[accountA to "CZK"]?.gross).isEqualByComparingTo("100.00")
+            assertThat(byKey[accountA to "EUR"]?.gross).isEqualByComparingTo("50.00")
+            assertThat(byKey[accountB to "CZK"]?.gross).isEqualByComparingTo("7.50")
         }
-        // The redelivery must not double accountA's CZK gross; the out-of-window December
-        // credit must not appear; EUR and CZK stay separate totals.
-        assertThat(totals).containsExactlyInAnyOrder(
-            com.openbank.tax.domain.returns.IncomeCreditTotals(accountA, "CZK", BigDecimal("100.00")),
-            com.openbank.tax.domain.returns.IncomeCreditTotals(accountA, "EUR", BigDecimal("50.00")),
-            com.openbank.tax.domain.returns.IncomeCreditTotals(accountB, "CZK", BigDecimal("7.50")),
-        )
-    }
 }

@@ -10,6 +10,7 @@ import com.openbank.tax.domain.returns.ObservedIncomeCredit
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
@@ -52,11 +53,13 @@ class ObservedIncomeCreditEntity : PanacheEntityBase {
     @Column(name = "net_amount", nullable = false)
     var netAmount: BigDecimal = BigDecimal.ZERO
 
+    // Null defaults, always set by toEntity() before persist — same shape as
+    // StatutoryReturnEntity.assembledAt; an EPOCH default would be a lie every test agrees with.
     @Column(name = "occurred_at", nullable = false)
-    var occurredAt: Instant = Instant.EPOCH
+    var occurredAt: Instant? = null
 
     @Column(name = "observed_at", nullable = false)
-    var observedAt: Instant = Instant.EPOCH
+    var observedAt: Instant? = null
 }
 
 /**
@@ -85,22 +88,24 @@ class PanacheIncomeCreditRepository :
             }
     }.awaitSuspending()
 
-    override suspend fun totalsByAccount(from: LocalDate, to: LocalDate): List<IncomeCreditTotals> =
-        Panache.withSession {
+    @Suppress("UNCHECKED_CAST") // projection rows are Object[]; the entity-typed list() would checkcast
+    override suspend fun totalsByAccount(from: LocalDate, to: LocalDate): List<IncomeCreditTotals> {
+        val rows = Panache.withSession {
             list(
                 "select accountId, currency, sum(grossAmount) from ObservedIncomeCreditEntity " +
                     "where periodTo >= ?1 and periodTo <= ?2 group by accountId, currency",
                 from,
                 to,
-            )
-        }.awaitSuspending().map { row ->
-            val cells = row as Array<*>
+            ) as Uni<List<Array<*>>>
+        }.awaitSuspending()
+        return rows.map { cells ->
             IncomeCreditTotals(
                 accountId = cells[0] as UUID,
                 currency = cells[1] as String,
                 gross = cells[2] as BigDecimal,
             )
         }
+    }
 
     private fun ObservedIncomeCredit.toEntity() = ObservedIncomeCreditEntity().also {
         it.withholdingId = withholdingId
