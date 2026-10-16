@@ -4,6 +4,8 @@
 
 package com.openbank.libs.security
 
+import java.util.regex.Pattern
+
 /**
  * Neutralises line breaks and control characters in a caller-supplied value before it is written
  * to a log line, so the value always stays on one line (CWE-117).
@@ -24,12 +26,10 @@ package com.openbank.libs.security
  * tracked in #6378 — fix that by pointing a CodeQL sanitizer model at [sanitizeForLog] directly,
  * not by choosing an implementation shape to second-guess CodeQL's default recognition.
  *
- * Two fleet call sites intentionally do NOT use this shared function and are not migrated here,
- * because their behavior differs from this one:
+ * One fleet call site intentionally does NOT use this shared function and is not migrated here,
+ * because its behavior differs from this one:
  * - `openbank-libs-runtime` `HoneytokenFilter.sanitizeForLog` — an allow-list of
  *   `isLetterOrDigit()` plus `"/-_.:@[]"`, with truncation. Stricter than this function.
- * - `openbank-case-coordinator-agent` `CaseOpenService.sanitizeForLog` — CR/LF-only stripping, declared on a
- *   non-nullable `String` receiver (no `?: "-"` fallback for null).
  */
 fun String?.sanitizeForLog(): String {
     val safe = this ?: "-"
@@ -41,8 +41,6 @@ private const val LINE_SEPARATOR = '\u2028'
 private const val PARAGRAPH_SEPARATOR = '\u2029'
 
 private fun isLogUnsafe(c: Char): Boolean = c.isISOControl() || c == LINE_SEPARATOR || c == PARAGRAPH_SEPARATOR
-
-private val BARE_LOGFMT_TOKEN = Regex("[A-Za-z0-9._:/@+\\-]+")
 
 /**
  * Renders a value for one `key=value` field of a log line so it can never add, split or rename
@@ -59,7 +57,7 @@ private val BARE_LOGFMT_TOKEN = Regex("[A-Za-z0-9._:/@+\\-]+")
  */
 fun String?.logfmtValue(): String {
     if (this == null) return "-"
-    if (this != "-" && BARE_LOGFMT_TOKEN.matches(this)) return this
+    if (this != "-" && Pattern.matches("[A-Za-z0-9._:/@+\\-]+", this)) return this
     return buildString(length + 2) {
         append('"')
         for (c in this@logfmtValue) {
