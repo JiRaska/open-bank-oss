@@ -183,7 +183,7 @@ add_hold_entries() {
       for (i = 1; i <= n; i++) {
         printf "    %s:\n", list[i]
         printf "      issue: \"#%s\"\n", pr
-        printf "      reason: \"Inherited from held deploy PR #%s when #%s superseded it (issue #11503).\"\n", pr, keep
+        printf "      reason: \"Inherited from held deploy PR #%s while preserving the hold owner (issue #11503).\"\n", pr
         printf "      release_condition: \"Resolve why #%s was held, then remove this entry in a reviewed change.\"\n", pr
       }
       done = 1
@@ -206,11 +206,17 @@ protect_hold_survivor() {
 
 # Live: protect #KEEP first, then record its durable hold (signed API commit) and comment.
 inherit_hold() {
-  local n="$1" keep="$2" services branch blob sha rules new
+  local n="$1" keep="$2" services="${3:-}" branch blob sha rules new diff
   if [ "${DRY_RUN:-}" != "true" ]; then
     protect_hold_survivor "$keep" || return 1
   fi
-  services="$(pr_diff "$n" | held_services_from_diff)"
+  if [ -z "$services" ]; then
+    if ! diff="$(pr_diff "$n")"; then
+      echo "::warning::supersede: could not read held #$n's diff — cannot record its hold."
+      return 1
+    fi
+    services="$(printf '%s\n' "$diff" | held_services_from_diff)"
+  fi
   if [ -z "$services" ]; then
     echo "::warning::supersede: held #$n pins no readable openbank image — cannot record its hold."
     return 1
@@ -241,9 +247,9 @@ inherit_hold() {
     fi
   fi
   gh pr comment "$keep" --repo "$REPO" --body \
-"Deployment hold inherited from #$n, which was draft or labelled \`blocked\` when this PR superseded it.
+"Deployment hold inherited from #$n, which is draft or labelled \`blocked\`.
 
-A descendant image pin does not clear an owner's hold (issue #11503). This PR's branch now carries a
+An overlapping image pin does not clear an owner's hold (issue #11503). This PR's branch now carries a
 \`deploy_holds\` entry in \`$RULES_PATH\` for: ${listed% }. The \`deploy-hold-image-pins\` gate
 refuses this PR's pin change for those services while the entry exists; undrafting or removing the
 \`blocked\` label does not release it. Release = a reviewed change removing the entry once the reason
@@ -252,11 +258,83 @@ for #$n's hold is resolved.
 (\`.github/scripts/supersede-deploy-prs.sh\`)"
 }
 
+# OVERLAP<TAB>services | DISJOINT | UNKNOWN. Use added image services rather than arbitrary shared
+# files such as rules.yaml. Empty or failed diffs are unknown; capture both command statuses before
+# parsing so partial output from a failed producer cannot be trusted.
+held_pin_overlap() {
+  local keep_diff other_diff keep_services other_services overlap
+  if ! keep_diff="$(pr_diff "$1")" || ! other_diff="$(pr_diff "$2")"; then
+    printf 'UNKNOWN'
+    return 0
+  fi
+  keep_services="$(printf '%s\n' "$keep_diff" | held_services_from_diff)"
+  other_services="$(printf '%s\n' "$other_diff" | held_services_from_diff)"
+  if [ -z "$keep_services" ] || [ -z "$other_services" ]; then
+    printf 'UNKNOWN'
+    return 0
+  fi
+  if ! overlap="$(LC_ALL=C comm -12 \
+    <(printf '%s\n' "$keep_services" | LC_ALL=C sort -u) \
+    <(printf '%s\n' "$other_services" | LC_ALL=C sort -u))"; then
+    printf 'UNKNOWN'
+    return 0
+  fi
+  if [ -z "$overlap" ]; then
+    printf 'DISJOINT'
+  else
+    printf 'OVERLAP\t%s' "$(printf '%s' "$overlap" | tr '\n' ' ')"
+  fi
+}
+
+# COVERED | PARTIAL<TAB>intersection | DISJOINT | UNKNOWN. Filename coverage alone is insufficient
+# for a held predecessor: one manifest can contain several service pins.
+held_pin_coverage() {
+  local keep_diff other_diff keep_services other_services missing overlap
+  if ! keep_diff="$(pr_diff "$1")" || ! other_diff="$(pr_diff "$2")"; then
+    printf 'UNKNOWN'
+    return 0
+  fi
+  keep_services="$(printf '%s\n' "$keep_diff" | held_services_from_diff)"
+  other_services="$(printf '%s\n' "$other_diff" | held_services_from_diff)"
+  if [ -z "$keep_services" ] || [ -z "$other_services" ]; then
+    printf 'UNKNOWN'
+    return 0
+  fi
+  if ! missing="$(LC_ALL=C comm -23 \
+    <(printf '%s\n' "$other_services" | LC_ALL=C sort -u) \
+    <(printf '%s\n' "$keep_services" | LC_ALL=C sort -u))" \
+    || ! overlap="$(LC_ALL=C comm -12 \
+      <(printf '%s\n' "$keep_services" | LC_ALL=C sort -u) \
+      <(printf '%s\n' "$other_services" | LC_ALL=C sort -u))"; then
+    printf 'UNKNOWN'
+    return 0
+  fi
+  if [ -z "$missing" ]; then
+    printf 'COVERED'
+  elif [ -z "$overlap" ]; then
+    printf 'DISJOINT'
+  else
+    printf 'PARTIAL\t%s' "$(printf '%s' "$overlap" | tr '\n' ' ')"
+  fi
+}
+
+# Unknown pin diffs cannot safely create durable service entries, but still stop the descendant
+# from arming. Leave the held predecessor open and attempt both independent protections.
+protect_unknown_hold() {
+  local keep="$1" held_pr="$2"
+  if [ "${DRY_RUN:-}" = "true" ]; then
+    echo "supersede: DRY_RUN — would protect #$keep as draft + 'blocked' because #$held_pr is held and pin overlap is unknown."
+    return 0
+  fi
+  protect_hold_survivor "$keep"
+}
+
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
 run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
   local n ref held other_sha verdict failed=0 stale_keep=0 closed=0 skipped=0 inherited=0
-  local KEEP_FILES other_files cov_verdict
+  local KEEP_FILES other_files cov_verdict overlap_result overlap_state overlap_services
+  local keep_files_ok=1 other_files_ok safety_unknown=0
 
   if [ -z "$PAIRS" ]; then
     echo "supersede: no other open '$PREFIX*' PRs besides #$KEEP — nothing to close."
@@ -265,16 +343,83 @@ run() {
 
   # Fetched once, reused for every candidate. An unreadable diff yields "" and classify_coverage()
   # then refuses to close anything against it — never treated as "covers everything".
-  KEEP_FILES="$(changed_files "$KEEP")"
+  if ! KEEP_FILES="$(changed_files "$KEEP")"; then
+    KEEP_FILES=""
+    keep_files_ok=0
+    safety_unknown=1
+    echo "::error::supersede: could not read #$KEEP's changed-file list; refusing coverage-based closes."
+  fi
 
   while IFS=$'\t' read -r n ref held; do
     [ -n "$n" ] || continue
     other_sha="$(sha_of_branch "$ref" "$PREFIX")"
     verdict="$(classify "$KEEP_SHA" "$other_sha")"
+    # Check a held predecessor even when ancestry cannot be established or KEEP is stale.
+    # Only proven disjoint image-pin sets allow the candidate to continue unprotected.
+    if [ "${held:-0}" = "1" ] && [ "$verdict" != "CLOSE" ]; then
+      overlap_result="$(held_pin_overlap "$KEEP" "$n")"
+      overlap_state="${overlap_result%%$'\t'*}"
+      overlap_services="${overlap_result#*$'\t'}"
+      case "$overlap_state" in
+        OVERLAP)
+          if ! inherit_hold "$n" "$KEEP" "$overlap_services"; then
+            echo "::error::supersede: could not transfer overlapping hold from #$n to #$KEEP — leaving #$n OPEN."
+          else
+            echo "::error::supersede: held #$n overlaps #$KEEP's image pins; #$KEEP inherits the shared-service hold and must not be armed."
+          fi
+          inherited=1
+          failed=1
+          ;;
+        UNKNOWN)
+          if ! protect_unknown_hold "$KEEP" "$n"; then
+            echo "::error::supersede: could not protect #$KEEP while overlap with held #$n is unknown; leaving #$n OPEN."
+          else
+            echo "::error::supersede: overlap with held #$n cannot be proven or ruled out; #$KEEP is protected and must not be armed."
+          fi
+          inherited=1
+          failed=1
+          ;;
+      esac
+    fi
     if [ "$verdict" = "CLOSE" ]; then
-      other_files="$(changed_files "$n")"
-      cov_verdict="$(classify_coverage "$KEEP_FILES" "$other_files")"
+      other_files_ok=1
+      if ! other_files="$(changed_files "$n")"; then
+        other_files=""
+        other_files_ok=0
+        safety_unknown=1
+        echo "::error::supersede: could not read #$n's changed-file list; refusing to close it."
+      fi
+      if [ "$keep_files_ok" -eq 1 ] && [ "$other_files_ok" -eq 1 ]; then
+        cov_verdict="$(classify_coverage "$KEEP_FILES" "$other_files")"
+      else
+        cov_verdict=SKIP
+      fi
       if [ "$cov_verdict" != "CLOSE" ]; then
+        if [ "${held:-0}" = "1" ]; then
+          overlap_result="$(held_pin_overlap "$KEEP" "$n")"
+          overlap_state="${overlap_result%%$'\t'*}"
+          overlap_services="${overlap_result#*$'\t'}"
+          case "$overlap_state" in
+            OVERLAP)
+              if ! inherit_hold "$n" "$KEEP" "$overlap_services"; then
+                echo "::error::supersede: could not transfer overlapping hold from #$n to #$KEEP — leaving #$n OPEN."
+              else
+                echo "::error::supersede: partial coverage of held #$n leaves it open; #$KEEP inherits shared-service hold and must not be armed."
+              fi
+              inherited=1
+              failed=1
+              ;;
+            UNKNOWN)
+              if ! protect_unknown_hold "$KEEP" "$n"; then
+                echo "::error::supersede: could not protect #$KEEP while overlap with held #$n is unknown; leaving #$n OPEN."
+              else
+                echo "::error::supersede: partial coverage and unknown pin overlap with held #$n; #$KEEP is protected and must not be armed."
+              fi
+              inherited=1
+              failed=1
+              ;;
+          esac
+        fi
         skipped=$((skipped + 1))
         echo "::warning::supersede: #$KEEP is a descendant of #$n's commit, but #$KEEP's changed" \
              "files do not cover #$n's (coverage check, issue #7621) — leaving #$n OPEN." \
@@ -282,6 +427,40 @@ run() {
              "other_files=[$(printf '%s' "$other_files" | tr '\n' ' ')]"
         continue
       fi
+    fi
+    if [ "$verdict" = "CLOSE" ] && [ "${held:-0}" = "1" ]; then
+      overlap_result="$(held_pin_coverage "$KEEP" "$n")"
+      overlap_state="${overlap_result%%$'\t'*}"
+      overlap_services="${overlap_result#*$'\t'}"
+      case "$overlap_state" in
+        PARTIAL)
+          if ! inherit_hold "$n" "$KEEP" "$overlap_services"; then
+            echo "::error::supersede: could not transfer partially covered hold from #$n to #$KEEP — leaving #$n OPEN."
+          else
+            echo "::error::supersede: #$KEEP edits #$n's manifest but omits held service pins; inherited shared-service hold and left #$n OPEN."
+          fi
+          inherited=1
+          failed=1
+          skipped=$((skipped + 1))
+          continue
+          ;;
+        DISJOINT)
+          skipped=$((skipped + 1))
+          echo "::warning::supersede: #$KEEP does not include #$n's held service pins; leaving #$n OPEN without blocking unrelated pins."
+          continue
+          ;;
+        UNKNOWN)
+          if ! protect_unknown_hold "$KEEP" "$n"; then
+            echo "::error::supersede: could not protect #$KEEP while held pin coverage for #$n is unknown; leaving #$n OPEN."
+          else
+            echo "::error::supersede: held pin coverage for #$n is unknown; #$KEEP is protected and must not be armed."
+          fi
+          inherited=1
+          failed=1
+          skipped=$((skipped + 1))
+          continue
+          ;;
+      esac
     fi
     case "$verdict" in
       STALE_KEEP)
@@ -360,6 +539,10 @@ EOF
   if [ "$inherited" -ne 0 ]; then
     return 1
   fi
+  if [ "$safety_unknown" -ne 0 ]; then
+    echo "::error::supersede: coverage evidence was unreadable; no predecessor may be closed and auto-merge must not be armed."
+    return 1
+  fi
   if [ "$failed" -ne 0 ]; then
     echo "::warning::supersede: one or more superseded deploy PRs could not be closed; close them by hand."
   fi
@@ -419,6 +602,25 @@ HOOK
 pr="$1"
 case "$pr" in
   11491|11498|11499) echo "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml" ;;
+  13010) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/accounts/account-service.yaml' \
+          'openbank-infra/gitops/components/balances/balance-service.yaml' ;;
+  13011) printf '%s\n' 'openbank-infra/gitops/components/accounts/account-service.yaml' ;;
+  13020) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/balances/balance-service.yaml' \
+          'openbank-libs/governance/rules.yaml' ;;
+  13021) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/accounts/account-service.yaml' \
+          'openbank-libs/governance/rules.yaml' ;;
+  13030) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/balances/balance-service.yaml' \
+          'openbank-libs/governance/rules.yaml' ;;
+  13031) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/accounts/account-service.yaml' \
+          'openbank-libs/governance/rules.yaml' ;;
+  13032|13033) echo '' ;;
+  13040|13041) echo 'openbank-infra/gitops/components/payments/payments-services.yaml' ;;
+  13042|13043) echo 'openbank-infra/gitops/components/payments/payments-services.yaml'; exit 48 ;;
   6222|6225|1|2) echo "openbank-infra/gitops/components/shared/shared-service.yaml" ;;
   7313) printf '%s\n' "openbank-infra/gitops/components/balances/balance-service.yaml" ;;
   7319) printf '%s\n' "openbank-infra/gitops/components/accounts/account-service.yaml" ;;
@@ -438,6 +640,31 @@ case "$1" in
   11491) printf '%s\n' '--- a/x.yaml' '+++ b/x.yaml' \
            '-          image: r.example/openbank-sanctions-service:sandbox-11111111' \
            '+          image: r.example/openbank-sanctions-service:sandbox-99f04ef5' ;;
+  11499) printf '%s\n' '--- a/x.yaml' '+++ b/x.yaml' \
+           '-          image: r.example/openbank-sanctions-service:sandbox-11111111' \
+           '+          image: r.example/openbank-sanctions-service:sandbox-bbbbbbbb' ;;
+  13010) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-aaaaaaaa' \
+           '+          image: r.example/openbank-balance-service:sandbox-aaaaaaaa' ;;
+  13011) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-bbbbbbbb' ;;
+  13020) printf '%s\n' \
+           '+          image: r.example/openbank-balance-service:sandbox-aaaaaaaa' ;;
+  13021) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-bbbbbbbb' ;;
+  13030) printf '%s\n' \
+           '+          image: r.example/openbank-balance-service:sandbox-aaaaaaaa'; exit 47 ;;
+  13031) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-bbbbbbbb' ;;
+  13032|13033) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-bbbbbbbb' ;;
+  13040) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-cccccccc' \
+           '+          image: r.example/openbank-balance-service:sandbox-cccccccc' ;;
+  13041) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-dddddddd' ;;
+  13042|13043) printf '%s\n' \
+           '+          image: r.example/openbank-account-service:sandbox-eeeeeeee' ;;
   *) echo "" ;;
 esac
 HOOK
@@ -730,11 +957,149 @@ HOOK
     echo "self-test case 16 OK (ordinary unheld supersede stays unchanged)"
   fi
 
+  # case 17 — partial manifest overlap: the held predecessor shares an account pin with the
+  # descendant, but also changes a balance pin the descendant does not cover. Inherit only the
+  # shared service hold and leave the predecessor open.
+  export DRY_RUN=true
+  out="$(run "$P" 13011 "$NEW" "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13010' \
+     || ! contains_text "$out" 'would inherit hold: #13011 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 17: partial held overlap did not protect #13011 without closing #13010; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 17 OK (partial held pin overlap -> transfer shared service, leave predecessor open)"
+  fi
+
+  # case 18 — a shared non-image rules file is not a service overlap. Distinct readable pin sets
+  # retain the ordinary coverage skip without blocking the unrelated descendant.
+  out="$(run "$P" 13021 "$NEW" "$(printf '13020\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'inherit hold' \
+     || contains_text "$out" 'would close #13020' \
+     || ! contains_text "$out" 'coverage check, issue #7621) — leaving #13020 OPEN.'; then
+    echo "SELF-TEST FAIL case 18: shared non-image file was mistaken for overlapping pins; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 18 OK (shared rules path with disjoint image pins -> no hold transfer)"
+  fi
+
+  # case 19 — even a syntactically valid added pin is UNKNOWN if the diff command fails after
+  # writing it. Protect the descendant, fail, and do not fetch/write durable rules or close the old PR.
+  export DRY_RUN=false FAKE_GH_FAIL_PUT=false
+  : >"$events_file"
+  out="$(run "$P" 13031 "$NEW" "$(printf '13030\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13030' \
+     || [ "$(cat "$events_file")" != $'pr:ready\npr:edit' ]; then
+    echo "SELF-TEST FAIL case 19: failed partial diff was trusted or did not protect both ways; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 19 OK (partial failed diff -> draft+blocked only, no rules write or close)"
+  fi
+
+  # case 20 — the partial overlap path performs the durable transfer, but still never closes the
+  # incompletely covered predecessor. Only the intersecting account service enters deploy_holds.
+  : >"$events_file"
+  local partial_expected="$tmp/partial-expected.yaml"
+  add_hold_entries 13010 13011 openbank-account-service <"$rules_file" >"$partial_expected"
+  out="$(run "$P" 13011 "$NEW" "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put\npr:comment' ] \
+     || ! jq -e --rawfile expected "$partial_expected" '(.content | @base64d) == $expected' "$body_file" >/dev/null; then
+    echo "SELF-TEST FAIL case 20: partial overlap did not durably transfer only shared pins and leave predecessor open; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 20 OK (partial overlap durably held shared pin; predecessor stayed open)"
+  fi
+
+  # case 21 — if the partial overlap transfer fails, both protections remain attempted and neither
+  # a predecessor close nor a successful result is allowed.
+  : >"$events_file"
+  export FAKE_GH_FAIL_PUT=true
+  out="$(run "$P" 13011 "$NEW" "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put' ] \
+     || contains_text "$out" 'would close #13010'; then
+    echo "SELF-TEST FAIL case 21: failed partial transfer closed predecessor or lost protection; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 21 OK (failed partial transfer leaves predecessor open and survivor protected)"
+  fi
+
+  # case 22 — STALE_KEEP cannot bypass an overlapping hold. Protect the descendant as well as
+  # reporting the ancestry error; it must never reach auto-merge.
+  export DRY_RUN=true
+  out="$(run "$P" 13011 "$OLD" "$(printf '13010\t%s%s\t1' "$P" "$NEW")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13010' \
+     || ! contains_text "$out" 'would inherit hold: #13011 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 22: stale KEEP bypassed overlapping held predecessor; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 22 OK (stale keep + overlapping hold -> protected and failed)"
+  fi
+
+  # case 23 — an unknown compare result cannot bypass an overlapping hold. The pin proof still
+  # drafts/blocks KEEP, transfers the shared service, and fails without closing the predecessor.
+  export DRY_RUN=true
+  out="$(run "$P" 13011 cccccccccccccccccccccccccccccccccccccccc "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13010' \
+     || ! contains_text "$out" 'would inherit hold: #13011 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 23: unknown ancestry bypassed overlapping held predecessor; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 23 OK (unknown compare + overlapping hold -> protected and failed)"
+  fi
+
+  # case 24 — an unparsable KEEP branch reaches the same hold check instead of returning early.
+  out="$(run "$P" 13011 '' "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13010' \
+     || ! contains_text "$out" 'would inherit hold: #13011 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 24: empty KEEP_SHA bypassed overlapping held predecessor; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 24 OK (empty keep SHA + overlapping hold -> protected and failed)"
+  fi
+
+  # case 25 — empty changed-file responses cannot imply disjointness; known overlapping pins still
+  # require protection and a failing result.
+  out="$(run "$P" 13033 "$NEW" "$(printf '13032\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13032' \
+     || ! contains_text "$out" 'would inherit hold: #13033 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 25: empty changed-file lists implied no hold risk; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 25 OK (empty file lists + known overlapping pins -> protected and failed)"
+  fi
+
+  # case 26 — same-manifest file coverage cannot close a held predecessor when KEEP contains only
+  # one of its two service pins. Transfer only the shared account pin and leave the old PR open.
+  export DRY_RUN=false FAKE_GH_FAIL_PUT=false
+  : >"$events_file"
+  add_hold_entries 13040 13041 openbank-account-service <"$rules_file" >"$partial_expected"
+  out="$(run "$P" 13041 "$NEW" "$(printf '13040\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put\npr:comment' ] \
+     || contains_text "$out" 'would close #13040' \
+     || ! jq -e --rawfile expected "$partial_expected" '(.content | @base64d) == $expected' "$body_file" >/dev/null; then
+    echo "SELF-TEST FAIL case 26: same-manifest partial pin coverage closed held predecessor or transferred wrong services; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 26 OK (same manifest but missing held pin -> transfer overlap, keep predecessor open)"
+  fi
+
+  # case 27 — a changed-file producer can emit apparent full coverage and then fail. Its partial
+  # stdout must be discarded for KEEP, causing a safe skip and nonzero result.
+  export DRY_RUN=true
+  out="$(run "$P" 13042 "$NEW" "$(printf '13041\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13041' \
+     || ! contains_text "$out" "could not read #13042's changed-file list" \
+     || ! contains_text "$out" 'would inherit hold: #13042 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 27: failed KEEP file-list producer was trusted; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 27 OK (KEEP file-list partial stdout ignored; held overlap protected)"
+  fi
+
+  # case 28 — the same partial-output failure for the held predecessor cannot establish complete
+  # filename coverage or close it.
+  out="$(run "$P" 13041 "$NEW" "$(printf '13043\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #13043' \
+     || ! contains_text "$out" "could not read #13043's changed-file list" \
+     || ! contains_text "$out" 'would inherit hold: #13041 -> rules.yaml deploy_holds [openbank-account-service]'; then
+    echo "SELF-TEST FAIL case 28: failed predecessor file-list producer was trusted; rc=$rc output=$out"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 28 OK (predecessor file-list partial stdout ignored; hold protected)"
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 16 cases OK"
+  echo "self-test: all 28 cases OK"
   return 0
 }
 
@@ -747,12 +1112,11 @@ PREFIX="${1:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | -
 KEEP="${2:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
 
-# The sha THIS run's deploy PR pins. Without it nothing can be classified, and "cannot classify"
-# must mean "close nothing" — never "close everything", which is the pre-#6231 behaviour.
+# The sha THIS run's deploy PR pins. Without it ancestry cannot be classified, so close nothing;
+# still inspect held candidates below because a pin overlap may require blocking the survivor.
 KEEP_SHA="$(sha_of_branch "$(gh pr view "$KEEP" --repo "$REPO" --json headRefName --jq '.headRefName')" "$PREFIX")"
 if [ -z "$KEEP_SHA" ]; then
-  echo "::warning::supersede: could not read a commit sha off #$KEEP's branch — closing nothing."
-  exit 0
+  echo "::warning::supersede: could not read a commit sha off #$KEEP's branch — closing nothing; checking held pin overlaps fail-closed."
 fi
 
 # `gh pr list` caps at 30 by default; a backlog can exceed that, and a cap that silently truncates
