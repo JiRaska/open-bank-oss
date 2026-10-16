@@ -12,13 +12,13 @@ import rego.v1
 
 import data.openbank.rest
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The bundle's role_action_matrix grants ROLE_OPERATOR ALL ten account.* actions — this is what
 # matrix-allows re-admits to both M2M clients without the exclusion + veto pair. Shape mirrors
@@ -113,7 +113,7 @@ test_shared_no_operator_rule_on_update if {
 
 # --- #10486 batch 5: per-service read identities (ROLE_API only, exactly as the realm grants) ---
 
-sa_api(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa_api(name) := {"service_account": true, "client_id": sprintf("openbank-%v", [name]), "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 b5_rules := {
 	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": [
@@ -185,7 +185,7 @@ test_shared_role_api_only_denied_account_list if {
 
 # --- ADR-0335 D2: pension-service gets the ownership projection and nothing else ---
 
-pension := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+pension := {"type": "HUMAN", "service_account": true, "client_id": "openbank-pension", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
 
 billing_sa := {"type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
 
@@ -223,7 +223,7 @@ test_operator_may_verify_ownership if {
 	rest.allow with input as verify_input(operator) with data.rules as rules_mock
 }
 
-sdd_sa := {"type": "HUMAN", "id": "service-account-openbank-sdd", "roles": ["ROLE_API"]}
+sdd_sa := {"type": "HUMAN", "service_account": true, "client_id": "openbank-sdd", "id": "service-account-openbank-sdd", "roles": ["ROLE_API"]}
 
 test_sdd_may_verify_ownership_and_nothing_else if {
 	rest.allow with input as verify_input(sdd_sa) with data.rules as rules_mock
