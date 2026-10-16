@@ -66,6 +66,13 @@ tasks.named<Copy>("processResources") {
         include("*.md")
         into("governance-prompts/flaky-test-hunter")
     }
+    // ADR-0031 D9 phase 3: package the agent charters so the PR-path policy gate can re-verify the
+    // flaky-test-hunter charter in-process, deny-by-default, without a network call. Derived from
+    // openbank-libs/governance/agents.yaml — never hand-edit the packaged copy.
+    from(rootProject.file("openbank-libs/governance")) {
+        include("agents.yaml")
+        into("governance-charters")
+    }
 }
 
 kover {
