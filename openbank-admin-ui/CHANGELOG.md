@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.3.0...admin-ui-v3.4.0) (2026-10-16)
+
+
+### Features
+
+* **agent-service:** record merges and stage gated development ([#12883](https://github.com/JiRaska/open-bank-oss/issues/12883)) ([86de551](https://github.com/JiRaska/open-bank-oss/commit/86de551e12b23564b6addce940508be73339e94c))
+
 ## [3.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.2.0...admin-ui-v3.3.0) (2026-10-16)
 
 
