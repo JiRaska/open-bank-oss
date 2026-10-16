@@ -1014,20 +1014,6 @@ jobs:
                 unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
               done
 
-      - name: Summarize collector request-send trace
-        if: always()
-        env:
-          TRACE_STATUS_SBOM: ${{ steps.stage_sbom.outcome || 'not_run' }}
-          TRACE_STATUS_SERVICE_TI: ${{ steps.stage_service_ti.outcome || 'not_run' }}
-          TRACE_STATUS_CUSTOMER_TI: ${{ steps.stage_customer_ti.outcome || 'not_run' }}
-          TRACE_STATUS_IMMUTABLE_TI: ${{ steps.stage_immutable_ti.outcome || 'not_run' }}
-          TRACE_STATUS_PIT: ${{ steps.stage_pit.outcome || 'not_run' }}
-          TRACE_STATUS_PERFORMANCE: ${{ steps.stage_performance.outcome || 'not_run' }}
-          TRACE_STATUS_GATE_HEALTH: ${{ steps.stage_gate_health.outcome || 'not_run' }}
-          TRACE_STATUS_DEPLOY_TI: ${{ steps.stage_deploy_ti.outcome || 'not_run' }}
-          TRACE_APP_RO_CONFIGURED: ${{ env.APP_RO_TOKEN != '' }}
-        run: python3 .github/scripts/aggregate-admin-ui-http-trace.py
-
       - name: Build, collect, push
         id: build
         env:
@@ -1066,6 +1052,21 @@ jobs:
           [ -n "${TAG}" ] || { echo "ERROR: could not extract pushed image tag"; exit 1; }
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed tag: ${TAG}"
+
+      - name: Summarize collector request-send trace
+        if: always()
+        env:
+          TRACE_STATUS_SBOM: ${{ steps.stage_sbom.outcome || 'not_run' }}
+          TRACE_STATUS_SERVICE_TI: ${{ steps.stage_service_ti.outcome || 'not_run' }}
+          TRACE_STATUS_CUSTOMER_TI: ${{ steps.stage_customer_ti.outcome || 'not_run' }}
+          TRACE_STATUS_IMMUTABLE_TI: ${{ steps.stage_immutable_ti.outcome || 'not_run' }}
+          TRACE_STATUS_PIT: ${{ steps.stage_pit.outcome || 'not_run' }}
+          TRACE_STATUS_PERFORMANCE: ${{ steps.stage_performance.outcome || 'not_run' }}
+          TRACE_STATUS_GATE_HEALTH: ${{ steps.stage_gate_health.outcome || 'not_run' }}
+          TRACE_STATUS_DEPLOY_TI: ${{ steps.stage_deploy_ti.outcome || 'not_run' }}
+          TRACE_APP_RO_CONFIGURED: ${{ env.APP_RO_TOKEN != '' }}
+          TRACE_PACT_BROKER_CONFIGURED: ${{ vars.PACT_BROKER_URL != '' }}
+        run: python3 .github/scripts/aggregate-admin-ui-http-trace.py
 
       - name: Retain immutable Test Intelligence snapshot
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

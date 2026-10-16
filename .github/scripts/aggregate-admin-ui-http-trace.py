@@ -15,14 +15,33 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from admin_ui_trace_ipc import AUTH, DESTINATIONS, STAGES
+from admin_ui_trace_ipc import AUTH, AUTH_ALLOWED, DESTINATIONS, STAGES
+
+MEASUREMENT_SCOPE = {
+    "id": "admin-ui-admitted-build-repository-owned-collector-fetches-v1",
+    "meaning": "Counts repo-owned collector HTTP header-send attempts in listed stages, including retries and redirects; not a billing, quota, or full-workflow request count.",
+    "coveredClientStages": [
+        {"stage": stage, "client": client, "authAliases": sorted(AUTH_ALLOWED[stage])}
+        for stage, clients in STAGES.items() for client in sorted(clients)
+    ],
+    "excludedTraffic": [
+        "deploy-source admission and source-recovery GitHub API calls",
+        "git fetch and other Git transport",
+        "GitHub Actions checkout, setup, cache, and artifact traffic",
+        "npm registry and cache traffic",
+        "Docker, BuildKit, and ECR registry traffic",
+        "AWS OIDC, KMS, cosign, and attestation signing traffic",
+        "AWS CLI Cost Explorer traffic",
+        "GitOps pull-request action and API traffic",
+    ],
+}
 
 REASONS = {
     "malformed_lifecycle", "invalid_lifecycle", "unmatched_lifecycle",
     "trace_limit_exceeded", "ipc_failure", "missing_terminal_frame",
     "bounded_eof_timeout", "missing_client", "no_send_observed",
     "trace_parse_failure", "pre_send_failure", "client_start_failure",
-    "hook_unavailable", "collector_not_configured",
+    "hook_unavailable", "collector_not_configured", "collector_failed",
 }
 
 
@@ -46,7 +65,7 @@ def read_stage(trace_dir: Path, stage: str) -> tuple[dict | None, bool]:
             not isinstance(payload, dict)
             or payload.get("schemaVersion") != 1
             or payload.get("stage") != stage
-            or payload.get("authAlias") != AUTH[stage]
+            or payload.get("authAlias") not in AUTH_ALLOWED[stage]
             or type(payload.get("complete")) is not bool
             or payload.get("reasonEnum") not in (None, *REASONS)
             or not isinstance(payload.get("records"), list)
@@ -91,18 +110,22 @@ def build_report() -> dict:
         for name in STAGES
     }
     app_ro_configured = os.environ.get("TRACE_APP_RO_CONFIGURED") == "true"
+    pact_broker_configured = os.environ.get("TRACE_PACT_BROKER_CONFIGURED") == "true"
     fixture_status = os.environ.get("ADMIN_UI_TRACE_TESTS", "not_run")
     records: list[dict] = []
     malformed = False
     applicable = []
     for stage, _clients in STAGES.items():
         status = statuses[stage]
-        optional_absent = stage == "customer_ti" and not app_ro_configured and status == "skipped"
+        optional_absent = (
+            (stage == "customer_ti" and not app_ro_configured and status == "skipped")
+            or (stage == "quality_report" and not pact_broker_configured and status == "skipped")
+        )
         if optional_absent:
             records.append({
                 "stage": stage,
-                "client": "curl",
-                "fixedAuthAlias": AUTH[stage],
+                "client": "node_fetch" if stage == "quality_report" else "curl",
+                "fixedAuthAlias": AUTH[stage] if stage != "quality_report" or pact_broker_configured else "none",
                 "destinationClass": "none",
                 "numericSendCount": 0,
                 "complete": False,
@@ -111,10 +134,23 @@ def build_report() -> dict:
             continue
         applicable.append(stage)
         if status != "success":
+            envelope, bad = read_stage(trace_dir, stage)
+            malformed |= bad
+            if envelope is not None:
+                for row in envelope["records"]:
+                    records.append({
+                        "stage": stage,
+                        "client": row["client"],
+                        "fixedAuthAlias": envelope["authAlias"],
+                        "destinationClass": row["destinationClass"],
+                        "numericSendCount": row["numericSendCount"],
+                        "complete": False,
+                        "reasonEnum": "stage_not_successful",
+                    })
             records.append({
                 "stage": stage,
                 "client": "stage",
-                "fixedAuthAlias": AUTH[stage],
+                "fixedAuthAlias": AUTH[stage] if stage != "quality_report" or pact_broker_configured else "none",
                 "destinationClass": "none",
                 "numericSendCount": 0,
                 "complete": False,
@@ -127,7 +163,7 @@ def build_report() -> dict:
             records.append({
                 "stage": stage,
                 "client": "stage",
-                "fixedAuthAlias": AUTH[stage],
+                "fixedAuthAlias": AUTH[stage] if stage != "quality_report" or pact_broker_configured else "none",
                 "destinationClass": "none",
                 "numericSendCount": 0,
                 "complete": False,
@@ -138,7 +174,7 @@ def build_report() -> dict:
             records.append({
                 "stage": stage,
                 "client": row["client"],
-                "fixedAuthAlias": AUTH[stage],
+                "fixedAuthAlias": envelope["authAlias"],
                 "destinationClass": row["destinationClass"],
                 "numericSendCount": row["numericSendCount"],
                 "complete": envelope["complete"],
@@ -186,6 +222,7 @@ def build_report() -> dict:
     )
     return {
         "schemaVersion": 1,
+        "measurementScope": MEASUREMENT_SCOPE,
         "runId": os.environ.get("GITHUB_RUN_ID", ""),
         "attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         "headSha": os.environ.get("GITHUB_SHA", ""),

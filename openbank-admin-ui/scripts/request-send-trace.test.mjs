@@ -10,7 +10,7 @@ import os from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { classifyOrigin, createRequestSendTrace } from './request-send-trace.mjs'
+import { classifyOrigin, createRequestSendTrace, withRequestSendTrace } from './request-send-trace.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const ipcScript = resolve(scriptDir, '../../.github/scripts/admin_ui_trace_ipc.py')
@@ -39,9 +39,9 @@ async function stopSupervisor(child) {
   }
 }
 
-async function startSupervisor(testContext, traceDir) {
+async function startSupervisor(testContext, traceDir, stage = 'gate_health', auth = 'github') {
   const env = { ...process.env, ADMIN_UI_TRACE_DIR: traceDir }
-  const child = spawn('python3', [ipcScript, 'serve', '--stage', 'gate_health'], {
+  const child = spawn('python3', [ipcScript, 'serve', '--stage', stage, '--auth', auth], {
     env, detached: true, stdio: 'ignore',
   })
   env.ADMIN_UI_TRACE_PID = String(child.pid)
@@ -50,7 +50,7 @@ async function startSupervisor(testContext, traceDir) {
   testContext.after(() => stopSupervisor(child))
   const deadline = Date.now() + 2000
   while (Date.now() < deadline) {
-    if (existsSync(join(traceDir, 'gate_health.sock')) && existsSync(join(traceDir, 'gate_health.pid'))) {
+    if (existsSync(join(traceDir, `${stage}.sock`)) && existsSync(join(traceDir, `${stage}.pid`))) {
       return { child, env }
     }
     await new Promise((resolve) => setTimeout(resolve, 10))
@@ -58,12 +58,12 @@ async function startSupervisor(testContext, traceDir) {
   throw new Error('trace supervisor did not become ready')
 }
 
-function finishSupervisor(traceDir, env) {
-  const result = spawnSync('python3', [ipcScript, 'finish', '--stage', 'gate_health'], {
+function finishSupervisor(traceDir, env, stage = 'gate_health', auth = 'github') {
+  const result = spawnSync('python3', [ipcScript, 'finish', '--stage', stage, '--auth', auth], {
     env, encoding: 'utf8', timeout: 6000,
   })
   assert.ok([0, 2].includes(result.status), result.stderr)
-  const report = JSON.parse(readFileSync(join(traceDir, 'admin-ui-stage-gate_health.json'), 'utf8'))
+  const report = JSON.parse(readFileSync(join(traceDir, `admin-ui-stage-${stage}.json`), 'utf8'))
   rmSync(traceDir, { recursive: true, force: true })
   return report
 }
@@ -155,5 +155,79 @@ test('Undici header-send observer matches loopback oracle without retaining requ
     if (existsSync(traceDir)) {
       try { finishSupervisor(traceDir, supervisor.env) } catch {}
     }
+  }
+})
+
+test('collector wrappers count retry sends for both new stages and preserve collector failures', async (testContext) => {
+  const secret = 'TRACE_SENTINEL_AUTH_8f4e'
+  let retryCount = 0
+  const server = http.createServer((_req, res) => {
+    retryCount += 1
+    res.writeHead(retryCount < 3 ? 503 : 200, { 'X-Sentinel': secret })
+    res.end(secret)
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  testContext.after(() => new Promise((resolve) => server.close(resolve)))
+  const url = `http://127.0.0.1:${server.address().port}/retry?secret=${secret}`
+  const traceDir = mkdtempSync(join(os.tmpdir(), 'admin-ui-collector-trace-'))
+  testContext.after(() => rmSync(traceDir, { recursive: true, force: true }))
+  process.env.ADMIN_UI_TRACE_DIR = traceDir
+
+  let supervisor = await startSupervisor(testContext, traceDir, 'quality_report', 'pact_broker')
+  const ok = await withRequestSendTrace('quality_report', 'pact_broker', true, async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) await fetch(url)
+    return true
+  })
+  assert.equal(ok, true)
+  const quality = finishSupervisor(traceDir, supervisor.env, 'quality_report', 'pact_broker')
+  assert.equal(quality.complete, true)
+  assert.equal(quality.authAlias, 'pact_broker')
+  assert.equal(quality.records.reduce((sum, row) => sum + row.numericSendCount, 0), 3)
+
+  supervisor = await startSupervisor(testContext, traceDir, 'infra_lifecycle', 'none')
+  await assert.rejects(
+    withRequestSendTrace('infra_lifecycle', 'none', true, async () => {
+      await fetch(url)
+      throw new Error('collector-failure-sentinel')
+    }),
+    /collector-failure-sentinel/,
+  )
+  const lifecycle = finishSupervisor(traceDir, supervisor.env, 'infra_lifecycle', 'none')
+  assert.equal(lifecycle.complete, false)
+  assert.equal(lifecycle.reasonEnum, 'collector_failed')
+  assert.equal(lifecycle.records.reduce((sum, row) => sum + row.numericSendCount, 0), 1)
+  const receipts = JSON.stringify([quality, lifecycle])
+  assert.equal(receipts.includes(secret), false)
+  delete process.env.ADMIN_UI_TRACE_DIR
+})
+
+test('unconfigured collector bypasses trace IPC and taint signaling', async () => {
+  const traceDir = mkdtempSync(join(os.tmpdir(), 'admin-ui-unconfigured-trace-'))
+  const oldDir = process.env.ADMIN_UI_TRACE_DIR
+  const oldPid = process.env.ADMIN_UI_TRACE_PID
+  const originalKill = process.kill
+  let signalCalls = 0
+  process.env.ADMIN_UI_TRACE_DIR = traceDir
+  process.env.ADMIN_UI_TRACE_PID = '424242'
+  process.kill = (...args) => {
+    if (args[1] === 'SIGUSR1') signalCalls += 1
+    return true
+  }
+  try {
+    let ran = false
+    const result = await withRequestSendTrace('quality_report', 'none', false, async () => {
+      ran = true
+      return 'unchanged-result'
+    })
+    assert.equal(ran, true)
+    assert.equal(result, 'unchanged-result')
+    assert.equal(signalCalls, 0)
+  } finally {
+    process.kill = originalKill
+    if (oldDir === undefined) delete process.env.ADMIN_UI_TRACE_DIR
+    else process.env.ADMIN_UI_TRACE_DIR = oldDir
+    if (oldPid === undefined) delete process.env.ADMIN_UI_TRACE_PID
+    else process.env.ADMIN_UI_TRACE_PID = oldPid
+    rmSync(traceDir, { recursive: true, force: true })
   }
 })

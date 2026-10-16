@@ -10,6 +10,7 @@ import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { pathToFileURL } from 'url'
+import { withRequestSendTrace } from './request-send-trace.mjs'
 import { parseStringPromise } from 'xml2js'
 import { moneyPathServices } from './lib/service-inventory.mjs'
 
@@ -333,7 +334,7 @@ function buildServiceScores(testResults, mutations, contracts) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-async function main() {
+async function collectQualityReport() {
   console.log(`Collecting quality report from ${REPO_ROOT}`)
 
   // Read existing test-results.json if present (for unit score)
@@ -359,5 +360,10 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(e => { console.error(e); process.exit(1) })
+  const configured = Boolean(process.env.PACT_BROKER_URL)
+  const authAlias = process.env.PACT_BROKER_USERNAME && process.env.PACT_BROKER_PASSWORD
+    ? 'pact_broker'
+    : 'none'
+  withRequestSendTrace('quality_report', authAlias, configured, collectQualityReport)
+    .catch(e => { console.error(e); process.exit(1) })
 }

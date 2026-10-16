@@ -7,8 +7,8 @@ import net from 'node:net'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-const STAGES = new Set(['gate_health'])
-const AUTH_ALIASES = new Set(['github'])
+const STAGES = new Set(['gate_health', 'quality_report', 'infra_lifecycle'])
+const AUTH_ALIASES = new Set(['github', 'pact_broker', 'none'])
 
 export function classifyOrigin(origin) {
   if (typeof origin !== 'string') return 'unknown'
@@ -161,18 +161,38 @@ export function createRequestSendTrace(stage, authAlias, traceDir) {
     snapshot() {
       return { counts: new Map(counts), complete: installed && !incomplete && sawSend }
     },
-    async write({ configured = true } = {}) {
-      const complete = installed && !incomplete && configured && sawSend
+    async write({ configured = true, collectorSucceeded = true } = {}) {
+      const complete = installed && !incomplete && configured && collectorSucceeded && sawSend
       const reasonEnum = !installed
         ? 'hook_unavailable'
         : incomplete
           ? 'trace_parse_failure'
           : !configured
             ? 'collector_not_configured'
+          : !collectorSucceeded
+            ? 'collector_failed'
             : !sawSend
               ? 'no_send_observed'
               : null
       return sendEnd(complete, reasonEnum)
     },
+  }
+}
+
+// Trace one collector without changing its normal local execution path. When tracing is
+// enabled, write the outcome before returning/rethrowing the collector's original result.
+export async function withRequestSendTrace(stage, authAlias, configured, operation) {
+  if (!configured) return operation()
+  const traceDir = process.env.ADMIN_UI_TRACE_DIR || ''
+  if (!traceDir) return operation()
+  const trace = createRequestSendTrace(stage, authAlias, traceDir)
+  await trace.ready()
+  let succeeded = false
+  try {
+    const result = await operation()
+    succeeded = result !== false
+    return result
+  } finally {
+    await trace.write({ configured, collectorSucceeded: succeeded })
   }
 }

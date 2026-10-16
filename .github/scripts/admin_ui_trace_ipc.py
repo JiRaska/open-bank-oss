@@ -28,6 +28,8 @@ STAGES = {
     "performance": {"curl"},
     "gate_health": {"node_fetch"},
     "deploy_ti": {"curl"},
+    "quality_report": {"node_fetch"},
+    "infra_lifecycle": {"node_fetch"},
 }
 AUTH = {
     "sbom": "github",
@@ -38,7 +40,11 @@ AUTH = {
     "performance": "github",
     "gate_health": "github",
     "deploy_ti": "github",
+    "quality_report": "pact_broker",
+    "infra_lifecycle": "none",
 }
+AUTH_ALLOWED = {stage: {alias} for stage, alias in AUTH.items()}
+AUTH_ALLOWED["quality_report"] = {"pact_broker", "none"}
 DESTINATIONS = {"api", "non_api", "unknown"}
 MAX_FRAME = 4096
 MAX_TOTAL_BYTES = 1_048_576
@@ -190,7 +196,7 @@ class _StageState:
             or (reason is not None and reason not in {
                 "trace_parse_failure", "no_send_observed", "pre_send_failure",
                 "client_start_failure", "hook_unavailable", "trace_write_failure",
-                "collector_not_configured",
+                "collector_not_configured", "collector_failed",
             })
         ):
             self.taint("malformed_lifecycle")
@@ -324,9 +330,11 @@ def atomic_report(path: Path, payload: dict) -> None:
                 pass
 
 
-def serve(stage: str) -> int:
+def serve(stage: str, auth: str | None = None) -> int:
     sock_path, pid_path, report_path = paths(stage)
-    auth = AUTH[stage]
+    auth = auth or AUTH[stage]
+    if auth not in AUTH_ALLOWED[stage]:
+        return 1
     sock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         report_path.unlink(missing_ok=True)
@@ -381,20 +389,20 @@ def serve(stage: str) -> int:
                 pass
 
 
-def shell_finish(stage: str, supervisor_pid: int | None = None) -> str:
+def shell_finish(stage: str, auth: str, supervisor_pid: int | None = None) -> str:
     pid_export = f"export ADMIN_UI_TRACE_PID={supervisor_pid}\n" if supervisor_pid else ""
     return pid_export + (
         "trace_admin_ui_finish() {\n"
         "  _trace_original_status=$?\n"
         "  trap - EXIT\n"
-        f"  python3 ${{GITHUB_WORKSPACE:-.}}/.github/scripts/trace-admin-ui-stage.py finish --stage {stage} >/dev/null 2>&1 || true\n"
+        f"  python3 ${{GITHUB_WORKSPACE:-.}}/.github/scripts/trace-admin-ui-stage.py finish --stage {stage} --auth {auth} >/dev/null 2>&1 || true\n"
         "  return \"$_trace_original_status\"\n"
         "}\n"
         "trap trace_admin_ui_finish EXIT\n"
     )
 
 
-def start(stage: str) -> str:
+def start(stage: str, auth: str) -> str:
     sock_path, _pid_path, report_path = paths(stage)
     sock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     report_path.unlink(missing_ok=True)
@@ -403,7 +411,7 @@ def start(stage: str) -> str:
         import subprocess
 
         process = subprocess.Popen(
-            [os.environ.get("PYTHON", "python3"), __file__, "serve", "--stage", stage],
+            [os.environ.get("PYTHON", "python3"), __file__, "serve", "--stage", stage, "--auth", auth],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -411,22 +419,22 @@ def start(stage: str) -> str:
             start_new_session=True,
         )
     except Exception:
-        return shell_finish(stage)
+        return shell_finish(stage, auth)
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
         if sock_path.exists() and _pid_path.exists():
             break
         time.sleep(0.02)
-    return shell_finish(stage, process.pid)
+    return shell_finish(stage, auth, process.pid)
 
 
-def finish(stage: str) -> int:
+def finish(stage: str, auth: str) -> int:
     try:
         sock_path, _pid_path, report_path = paths(stage)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(4.0)
             client.connect(str(sock_path))
-            frame = json.dumps({"type": "finish", "stage": stage, "authAlias": AUTH[stage]}, separators=(",", ":")).encode() + b"\n"
+            frame = json.dumps({"type": "finish", "stage": stage, "authAlias": auth}, separators=(",", ":")).encode() + b"\n"
             client.sendall(frame)
             response = client.makefile("rb").readline(257)
             if json.loads(response.decode("utf-8")).get("ok") is not True:
@@ -452,13 +460,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("begin", "finish", "serve"))
     parser.add_argument("--stage", required=True, choices=sorted(STAGES))
+    parser.add_argument("--auth", choices=sorted({a for aliases in AUTH_ALLOWED.values() for a in aliases}))
     args = parser.parse_args()
+    auth = args.auth or AUTH[args.stage]
+    if auth not in AUTH_ALLOWED[args.stage]:
+        parser.error("auth alias is not allowed for stage")
     if args.mode == "begin":
-        print(start(args.stage), end="")
+        print(start(args.stage, auth), end="")
         return 0
     if args.mode == "serve":
-        return serve(args.stage)
-    return finish(args.stage)
+        return serve(args.stage, auth)
+    return finish(args.stage, auth)
 
 
 if __name__ == "__main__":

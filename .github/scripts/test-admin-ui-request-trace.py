@@ -449,7 +449,10 @@ class AggregatorTests(unittest.TestCase):
         env["ADMIN_UI_TRACE_DIR"] = str(trace_dir)
         env["ADMIN_UI_TRACE_TESTS"] = fixture_status
         env["TRACE_APP_RO_CONFIGURED"] = "false"
+        env["TRACE_PACT_BROKER_CONFIGURED"] = "false"
         env["TRACE_STATUS_CUSTOMER_TI"] = "skipped"
+        env["TRACE_STATUS_QUALITY_REPORT"] = "skipped"
+        env["TRACE_STATUS_INFRA_LIFECYCLE"] = "success"
         for stage in ("sbom", "service_ti", "immutable_ti", "pit", "performance", "gate_health", "deploy_ti"):
             env[f"TRACE_STATUS_{stage.upper()}"] = "success"
         result = subprocess.run(
@@ -497,7 +500,7 @@ class AggregatorTests(unittest.TestCase):
             report = self.run_aggregator(trace_dir)
             self.assertTrue(report["complete"])
             optional_rows = [row for row in report["records"] if row["reasonEnum"] == "optional_not_configured"]
-            self.assertEqual(len(optional_rows), 1)
+            self.assertEqual(len(optional_rows), 2)
             self.assertEqual(optional_rows[0]["numericSendCount"], 0)
             self.assertFalse(optional_rows[0]["complete"])
 
@@ -516,6 +519,67 @@ class AggregatorTests(unittest.TestCase):
             self.assertEqual(report["localFixtureStatus"], "failed")
             self.assertTrue(any(row["reasonEnum"] == "malformed_receipt" for row in report["records"]))
             self.assertTrue(any(row["reasonEnum"] == "trace_fixture_failed" for row in report["records"]))
+
+    def test_missing_infra_lifecycle_stage_is_incomplete_and_scope_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace_dir = Path(directory)
+            self.write_complete_receipts(trace_dir)
+            (trace_dir / "admin-ui-stage-infra_lifecycle.json").unlink()
+            report = self.run_aggregator(trace_dir)
+            self.assertFalse(report["complete"])
+            self.assertEqual(report["measurementScope"]["id"], "admin-ui-admitted-build-repository-owned-collector-fetches-v1")
+            self.assertIn("quality_report", {row["stage"] for row in report["measurementScope"]["coveredClientStages"]})
+            self.assertTrue(report["measurementScope"]["excludedTraffic"])
+
+    def test_configured_broker_with_no_send_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace_dir = Path(directory)
+            self.write_complete_receipts(trace_dir)
+            empty = {
+                "schemaVersion": 1, "stage": "quality_report", "authAlias": "pact_broker",
+                "complete": False, "reasonEnum": "no_send_observed", "records": [],
+            }
+            (trace_dir / "admin-ui-stage-quality_report.json").write_text(json.dumps(empty))
+            env = os.environ.copy()
+            env["ADMIN_UI_TRACE_DIR"] = str(trace_dir)
+            env["ADMIN_UI_TRACE_TESTS"] = "passed"
+            env["TRACE_APP_RO_CONFIGURED"] = "false"
+            env["TRACE_PACT_BROKER_CONFIGURED"] = "true"
+            env["TRACE_STATUS_CUSTOMER_TI"] = "skipped"
+            env["TRACE_STATUS_QUALITY_REPORT"] = "success"
+            env["TRACE_STATUS_INFRA_LIFECYCLE"] = "success"
+            for stage in ("sbom", "service_ti", "immutable_ti", "pit", "performance", "gate_health", "deploy_ti"):
+                env[f"TRACE_STATUS_{stage.upper()}"] = "success"
+            result = subprocess.run([sys.executable, str(AGGREGATOR_SCRIPT)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((trace_dir / "admin-ui-api-request-trace.json").read_text())
+            self.assertFalse(report["complete"])
+
+    def test_failed_collector_retains_observed_sends_as_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            trace_dir = Path(directory)
+            self.write_complete_receipts(trace_dir)
+            failed = {
+                "schemaVersion": 1, "stage": "quality_report", "authAlias": "pact_broker",
+                "complete": False, "reasonEnum": "trace_parse_failure",
+                "records": [{"client": "node_fetch", "destinationClass": "api", "numericSendCount": 2}],
+            }
+            (trace_dir / "admin-ui-stage-quality_report.json").write_text(json.dumps(failed))
+            env = os.environ.copy()
+            env.update({
+                "ADMIN_UI_TRACE_DIR": str(trace_dir), "ADMIN_UI_TRACE_TESTS": "passed",
+                "TRACE_APP_RO_CONFIGURED": "false", "TRACE_PACT_BROKER_CONFIGURED": "true",
+                "TRACE_STATUS_CUSTOMER_TI": "skipped", "TRACE_STATUS_QUALITY_REPORT": "failure",
+                "TRACE_STATUS_INFRA_LIFECYCLE": "success",
+            })
+            for stage in ("sbom", "service_ti", "immutable_ti", "pit", "performance", "gate_health", "deploy_ti"):
+                env[f"TRACE_STATUS_{stage.upper()}"] = "success"
+            result = subprocess.run([sys.executable, str(AGGREGATOR_SCRIPT)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads((trace_dir / "admin-ui-api-request-trace.json").read_text())
+            rows = [row for row in report["records"] if row["stage"] == "quality_report" and row["client"] == "node_fetch"]
+            self.assertEqual(sum(row["numericSendCount"] for row in rows), 2)
+            self.assertTrue(all(not row["complete"] for row in rows))
 
 
 class SupervisorTests(unittest.TestCase):
