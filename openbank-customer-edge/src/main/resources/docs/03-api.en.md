@@ -130,6 +130,22 @@ term, deposit limits, early-withdrawal conditions and terms links. To open one, 
 applies the same ACTIVE-KYC and authoritative-legal-name gate as account opening. Creating the
 account is separate from funding it: the app follows with its normal account-funding flow.
 
+### Company payment batch drafts
+
+`/business/payment-batches` lists and creates drafts; `/{id}` reads one draft and
+`/{id}/items` replaces its items. These routes are disabled by default with
+`openbank.edge.business-payment-batches.enabled=false` and return 404 until explicitly enabled.
+They require a customer token and `X-Acting-For` naming a company for which the human caller has
+an active mandate. The edge derives both parties from the token and mandate inventory; the body
+cannot select them. It sends the company and human identities to domestic-payment using service
+credentials. A draft does not submit or dispatch money.
+
+Creation requires `Idempotency-Key` (1–128 characters). An exact replay returns 200 with the
+existing draft; a conflicting body returns 409. List pages contain at most 20 drafts. Detail
+returns at most 20 items per page; item replacement needs `If-Match` with the current revision
+and returns 409 on a stale revision. Successful responses expose the server-computed item count,
+total minor units, revision and timestamps as specified in `openapi.yaml`.
+
 ## Error model
 
 The edge returns small JSON error envelopes of the shape `{"error":"…"}` it generates itself, and otherwise **passes the upstream status and body through unchanged**.

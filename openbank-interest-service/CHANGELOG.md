@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.22.1...interest-service-v0.23.0) (2026-10-16)
+
+
+### Features
+
+* **interest:** resolve TaxProfile from party attributes (ADR-0033 fast-follow) ([#12837](https://github.com/JiRaska/open-bank-oss/issues/12837)) ([18fd321](https://github.com/JiRaska/open-bank-oss/commit/18fd3216e8ee7fb210579f63ad62bb6ced93c4cf))
+
 ## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.22.0...interest-service-v0.22.1) (2026-10-14)
 
 
