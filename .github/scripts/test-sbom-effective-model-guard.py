@@ -136,7 +136,9 @@ gradle.beforeProject {{
 rootProject.name = "sbom-effective-model-fixture"
 include(":probe")
 ''')
-    (fixture / "build.gradle.kts").write_text("// Isolated integration fixture root.\n")
+    # Exercise the repository's actual root callback and aggregate task rather
+    # than a hand-written verifier application or a fixture-local aggregation.
+    shutil.copyfile(repo / "build.gradle.kts", fixture / "build.gradle.kts")
     probe = fixture / "probe"
     probe.mkdir()
     (probe / "build.gradle.kts").write_text(f'''plugins {{
@@ -146,7 +148,6 @@ include(":probe")
     alias(libs.plugins.cyclonedx)
     alias(libs.plugins.kover)
     id("openbank.dependency-vulnerability-pins")
-    id("openbank.cyclonedx-verification")
 }}
 
 group = "com.openbank"
@@ -167,7 +168,7 @@ def run_gradle(repo: Path, fixture: Path, offline: bool, timeout: int) -> subpro
                "--max-workers=1"]
     if offline:
         command.append("--offline")
-    command.extend(["--rerun-tasks", ":probe:cyclonedxBom"])
+    command.extend(["--rerun-tasks", "sbomAll"])
     env = os.environ.copy()
     env.pop("REPOSILITE_MIRROR_URL", None)
     return subprocess.run(command, cwd=repo, env=env, text=True, stdout=subprocess.PIPE,
