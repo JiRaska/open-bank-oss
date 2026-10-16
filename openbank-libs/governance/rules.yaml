@@ -1929,12 +1929,13 @@ dependencies:
     # existing version no longer resolves. Lockfiles/Dependabot pin VERSIONS; this pins BYTES.
     # LENIENT (warn-only) while the metadata soaks across all CI lanes and developer
     # platforms; flip = org.gradle.dependency.verification=strict in gradle.properties.
-    # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
+    # Validate actual Dependabot metadata regeneration and push before strict rollout
+    # (dependabot-verification-metadata.yml); a successful skipped run is not proof.
     mechanism: gradle-verification-metadata-sha256
     enforced: advisory
-    # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
-    # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
-    target_enforce_date: "2026-10-15"   # ADR-0144
+    # Reassess by 2026-11-15 (#11686): daily drift does not prove strict CodeQL/SBOM
+    # resolution or an executed Dependabot refresh. Keep the strict flip separately reviewed.
+    target_enforce_date: "2026-11-15"   # ADR-0144
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
