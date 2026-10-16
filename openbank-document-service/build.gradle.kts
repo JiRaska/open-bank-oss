@@ -63,8 +63,9 @@ dependencies {
     testImplementation(libs.pact.provider)
     // document-service is also a pact CONSUMER: it reads parties (RAMCOVA_SMLOUVA's
     // {{party.*}} placeholders), accounts, the product catalog and SCA verifications through
-    // RestClients. DocumentPartyPactConsumerTest pins the party read; the others remain pinned
-    // only by their WireMock stubs, which cannot disagree with the client (#2269 shape).
+    // RestClients. DocumentPartyPactConsumerTest, DocumentAccountPactConsumerTest and
+    // DocumentProductPactConsumerTest pin those three reads; SCA verification remains pinned
+    // only by its WireMock stub (#2269 shape).
     testImplementation(libs.pact.consumer)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
     // a domain-event payload, so this service's producer tests assert against the real contract

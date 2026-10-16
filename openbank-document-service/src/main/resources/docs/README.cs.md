@@ -30,3 +30,9 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Zástupné adaptéry (za porty):** renderování šablon (bezlogické `{{token}}`, ADR-0162), generování PDF
   (stub, ADR-0162), objektové úložiště (Postgres BYTEA; S3 + WORM je ADR-0161), PAdES pečetění (no-op;
   EU DSS je ADR-0007/0162).
+
+## Kontraktní testy vstupů pro generování dokumentů
+
+Tři Pact consumer testy fixují data čtená pro právní dokumenty: název/adresu party (200 a 404 pro neznámou party), seznam CURRENT účtů dané party (200 a 401 bez identity) a identitu/název produktu, poplatky i přítomnost pole podmínek (200 a 404 pro neznámý produkt). Deserializují mock odpovědi pomocí produkčních DTO klientů a porovnávají doslovné cesty poskytovatele s anotacemi klientů. Formátování adresy test napodobuje; neprovádí celé generování dokumentu ani produkční volání REST klienta.
+
+Testovací závislost `pact.consumer` používá stávající verzi katalogu. Samostatný provider state party dodává syntetickou úplnou adresu a nemění fixture VoP bez adresy; účty a produkty používají existující sdílené provider states. Musí se provést všech šest consumer testů a samostatný folder-provider replay ověřit všech šest interakcí. Samotná mock odpověď 401 nedokazuje vynucování autentizace. Tyto offline kontrakty neověřují Pact Broker, živé JWT, nasazenou interoperabilitu, výstup PDF/podpisu ani produkční zákaznická data. Čtení SCA a další odchozí klienti zůstávají mimo tuto změnu; přeskočené testy nejsou úspěšně ověřené kontrakty.

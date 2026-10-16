@@ -30,3 +30,9 @@ This documentation is published directly by the service at the management endpoi
 - **Placeholders (behind ports):** template rendering (logic-less `{{token}}`, ADR-0162), PDF rendering
   (stub, ADR-0162), object store (Postgres BYTEA; S3 + WORM is ADR-0161), PAdES sealing (no-op; EU DSS
   is ADR-0007/0162).
+
+## Outbound rendering contract tests
+
+Three Pact consumer tests pin the data read for rendered legal documents: party legal name/address (200 and unknown-party 404), the party-scoped CURRENT account list (200 and unauthenticated 401), and product identity/name/fee rows/terms-array presence (200 and unknown-product 404). They deserialize mock responses using the production client DTOs and compare literal provider paths with the client annotations. Party address formatting is mirrored in the test; these tests do not execute a full document render or the production REST-client invocation.
+
+The test-only `pact.consumer` dependency uses the existing catalog version. A dedicated party provider state supplies a synthetic registered address without changing VoP's address-less fixture; account and product provider states remain shared existing fixtures. Six consumer test methods must execute, and folder-provider replays must separately verify all six interactions. A mock-server 401 alone is not proof of authentication enforcement. No Pact Broker, live JWT, deployed interoperability, PDF/signature output or production customer data is validated by these offline contracts. SCA reads and the other outbound clients remain outside this addition; skipped tests do not count as passed contracts.
