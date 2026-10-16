@@ -691,7 +691,7 @@ function mutationComponents() {
 // scan is the local/operator-UI fallback so the matrix shows the same trace layer without
 // a CI envelope. Only the caller-chosen low-entropy contract id is read back — never
 // trace ids, attribute values or fixture data.
-const TRACE_CONTRACT_MARKER = /OPENBANK_TRACE_CONTRACT_V1:([a-z0-9][a-z0-9._-]{0,63})/g
+const TRACE_CONTRACT_MARKER = /^OPENBANK_TRACE_CONTRACT_V1:([a-z0-9][a-z0-9._-]{0,63})$/gm
 
 function traceContractComponents() {
   const declared = new Set()
@@ -703,22 +703,48 @@ function traceContractComponents() {
   return declared
 }
 
-function traceMarkerEvidence(component) {
+async function traceMarkerEvidence(component) {
   const root = path.join(repo, component, 'build', 'test-results')
   if (!exists(root)) return []
   const observed = new Map()
   for (const file of allFiles(root, candidate => candidate.endsWith('.xml'))) {
-    const text = readText(file)
-    for (const match of text.matchAll(TRACE_CONTRACT_MARKER)) {
-      const contractId = match[1]
+    let parsed
+    try {
+      parsed = await parseStringPromise(readText(file), { explicitArray: true })
+    } catch {
+      // The ordinary JUnit fallback also reports this malformed artifact.
+      continue
+    }
+    const direct = parsed?.testsuite ? [parsed.testsuite].flat() : []
+    const wrappers = parsed?.testsuites ? [parsed.testsuites].flat() : []
+    const suites = direct.length ? direct : wrappers.flatMap(wrapper => wrapper.testsuite ?? [])
+    for (const suite of suites) {
+      const attributes = suite.$ ?? {}
+      const count = (name, fallback) => Number(attributes[name] ?? fallback)
+      const tests = count('tests', NaN)
+      const cases = suite.testcase ?? []
+      const failures = Math.max(count('failures', 0), cases.filter(item => item.failure?.length).length)
+      const errors = Math.max(count('errors', 0), cases.filter(item => item.error?.length).length)
+      const skipped = Math.max(count('skipped', 0), cases.filter(item => item.skipped?.length).length)
+      const counts = [tests, failures, errors, skipped]
+      const valid = counts.every(value => Number.isSafeInteger(value) && value >= 0)
+        && failures + errors + skipped <= tests
       const at = observedAt(file)
-      if (!observed.has(contractId) || (at && (!observed.get(contractId) || at > observed.get(contractId)))) {
-        observed.set(contractId, at)
+      const state = failures > 0 || errors > 0 ? 'failed'
+        : !valid ? 'unknown' : stateFrom(0, tests - skipped, at)
+      const output = [...(suite['system-out'] ?? []), ...(suite.testcase ?? []).flatMap(item => item['system-out'] ?? [])]
+        .map(item => typeof item === 'string' ? item : item._ ?? '').join('\n')
+      for (const match of output.matchAll(TRACE_CONTRACT_MARKER)) {
+        const contractId = match[1]
+        const previous = observed.get(contractId)
+        // A later successful file must not hide another failed/unknown suite for the contract.
+        const rank = { passed: 0, stale: 1, skipped: 2, 'not-run': 3, unknown: 4, failed: 5 }
+        if (!previous || rank[state] > rank[previous.state]) observed.set(contractId, { state, at })
       }
     }
   }
-  return [...observed].map(([contractId, at]) => ({
-    kind: 'trace', state: 'passed', source: `trace-contract:${contractId}`, environment: 'ci', observedAt: at ?? null,
+  return [...observed].map(([contractId, { state, at }]) => ({
+    kind: 'trace', state, source: `trace-contract:${contractId}`, environment: 'ci', observedAt: at ?? null,
   }))
 }
 
@@ -1208,7 +1234,7 @@ async function main() {
   // the gap where no envelope reached the deployment.
   for (const component of components) {
     const known = new Set(component.evidence.filter(item => item.kind === 'trace').map(item => item.source))
-    for (const row of traceMarkerEvidence(component.component)) {
+    for (const row of await traceMarkerEvidence(component.component)) {
       if (!known.has(row.source)) component.evidence.push(row)
     }
   }
