@@ -68,16 +68,11 @@ class AccountServiceClient(
         if (ex.response.status == HTTP_NOT_FOUND) {
             null
         } else {
-            log.warnf(
-                ex,
-                "Account lookup for IBAN %s failed with HTTP %d — treating as external",
-                iban,
-                ex.response.status,
-            )
+            log.warnf("Account lookup failed with HTTP %d — treating as external", ex.response.status)
             null
         }
     } catch (ex: Exception) {
-        log.warnf(ex, "Account lookup for IBAN %s failed — treating as external", iban)
+        log.warnf("Account lookup failed (%s) — treating as external", ex.javaClass.simpleName)
         null
     }
 
@@ -88,11 +83,11 @@ class AccountServiceClient(
         UUID.fromString(dto.partyId)
     } catch (ex: jakarta.ws.rs.WebApplicationException) {
         if (ex.response.status != HTTP_NOT_FOUND) {
-            log.warnf(ex, "Party lookup for account %s failed with HTTP %d", accountId, ex.response.status)
+            log.warnf("Party lookup failed with HTTP %d", ex.response.status)
         }
         null
     } catch (ex: Exception) {
-        log.warnf(ex, "Party lookup for account %s failed", accountId)
+        log.warnf("Party lookup failed (%s)", ex.javaClass.simpleName)
         null
     }
 
@@ -103,11 +98,11 @@ class AccountServiceClient(
         UUID.fromString(dto.id)
     } catch (ex: jakarta.ws.rs.WebApplicationException) {
         if (ex.response.status != HTTP_NOT_FOUND) {
-            log.warnf(ex, "Account id lookup for IBAN %s failed with HTTP %d", iban, ex.response.status)
+            log.warnf("Account id lookup failed with HTTP %d", ex.response.status)
         }
         null
     } catch (ex: Exception) {
-        log.warnf(ex, "Account id lookup for IBAN %s failed", iban)
+        log.warnf("Account id lookup failed (%s)", ex.javaClass.simpleName)
         null
     }
 }
