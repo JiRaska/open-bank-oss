@@ -95,3 +95,8 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 | `V6__preserve_mixed_version_outbox_and_published_children.sql` | Nejprve obnoví defaulty pro starý outbox writer a uzavře INSERT/přesun potomků publikované revize. |
 | `V7__track_bank_v1_projection_revision.sql` | Ukládá watermarky v1 i draftu; jednostrannou rollback změnu reconciliuje a oboustranný rozpor odmítne. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Přiděluje immutable commit-safe pořadí, takže opačný commit ani změna času nevytvoří mezeru v cursoru. |
+
+
+## Převod objektů katalogu
+
+Vnořené objekty katalogu zachovávají dosavadní serializovanou podobu polí. Specializovaný převod zachovává výstupní kontrakt; nevyžaduje migraci dat katalogu ani změnu verze API.
