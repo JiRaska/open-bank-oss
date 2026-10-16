@@ -1,0 +1,118 @@
+{
+  "consumer": {
+    "name": "openbank-party-service"
+  },
+  "interactions": [
+    {
+      "description": "GET transactions for the subject account during a portability export",
+      "providerStates": [
+        {
+          "name": "a posted transaction exists for the pact account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions",
+        "query": {
+          "accountId": [
+            "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
+          ],
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "amount": 100.0,
+              "bookingDate": "2026-01-15",
+              "currencyCode": "CZK",
+              "description": "pact portability fixture",
+              "id": "88888888-9999-4aaa-bbbb-cccccccccccc",
+              "referenceNumber": "TXN-PARTY-PACT-001",
+              "status": "COMPLETED",
+              "type": "CREDIT"
+            }
+          ],
+          "pagination": {
+            "hasNextPage": false
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET transactions for an account with no history",
+      "providerStates": [
+        {
+          "name": "no transactions exist for the requested account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions",
+        "query": {
+          "accountId": [
+            "77777777-8888-4999-aaaa-bbbbbbbbbbbe"
+          ],
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+
+          ],
+          "pagination": {
+            "hasNextPage": false
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET transactions with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions",
+        "query": {
+          "accountId": [
+            "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
+          ],
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}
