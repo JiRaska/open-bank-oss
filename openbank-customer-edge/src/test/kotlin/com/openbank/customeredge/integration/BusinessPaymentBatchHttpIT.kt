@@ -31,7 +31,13 @@ private const val BATCH_DEBTOR = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 @TestProfile(BusinessPaymentBatchEnabledProfile::class)
 @QuarkusTestResource(BusinessApprovalStubs::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "customer:$BATCH_HUMAN", roles = ["ROLE_CUSTOMER"])
-@OidcSecurity(claims = [Claim(key = "party_id", value = BATCH_HUMAN)])
+@OidcSecurity(
+    claims = [
+        Claim(key = "party_id", value = BATCH_HUMAN),
+        Claim(key = "azp", value = "openbank-app"),
+        Claim(key = "sub", value = BATCH_HUMAN),
+    ],
+)
 class BusinessPaymentBatchHttpIT {
     private val mapper = ObjectMapper()
 
@@ -126,6 +132,44 @@ class BusinessPaymentBatchHttpIT {
             header("X-Acting-For", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
         } When { get("/customer/v1/business/payment-batches") } Then { statusCode(403) }
         assertTrue(BusinessApprovalStubs.requests("GET", BATCH_BASE).isEmpty())
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-batch-client", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "party_id", value = BATCH_HUMAN),
+            Claim(key = "sub", value = "22222222-2222-4222-8222-222222222222"),
+            Claim(key = "preferred_username", value = "service-account-batch-client"),
+            Claim(key = "azp", value = "batch-client"),
+            Claim(key = "client_id", value = "batch-client"),
+        ],
+    )
+    fun `machine customer with mapped party and mandate cannot use any human draft route`() {
+        BusinessApprovalStubs.stub("POST", BATCH_BASE, status = 201, body = "{}")
+        BusinessApprovalStubs.stub("GET", BATCH_BASE, body = "{}")
+        BusinessApprovalStubs.stub("GET", "$BATCH_BASE/$BATCH_ID", body = "{}")
+        BusinessApprovalStubs.stub("PUT", "$BATCH_BASE/$BATCH_ID/items", body = "{}")
+        listOf(
+            "GET" to "/customer/v1/business/payment-batches",
+            "GET" to "/customer/v1/business/payment-batches/$BATCH_ID",
+            "POST" to "/customer/v1/business/payment-batches",
+            "PUT" to "/customer/v1/business/payment-batches/$BATCH_ID/items",
+        ).forEach { (method, path) ->
+            val response = io.restassured.RestAssured.given()
+                .header("X-Acting-For", BATCH_COMPANY)
+                .header("Idempotency-Key", "machine-draft")
+                .header("If-Match", "0")
+                .contentType("application/json")
+                .body(batchBody(1))
+                .request(method, path)
+            assertEquals(403, response.statusCode, "$method $path")
+        }
+        listOf("GET", "POST", "PUT").forEach { method ->
+            assertTrue(BusinessApprovalStubs.requests(method, BATCH_BASE).isEmpty())
+            assertTrue(BusinessApprovalStubs.requests(method, "$BATCH_BASE/$BATCH_ID").isEmpty())
+            assertTrue(BusinessApprovalStubs.requests(method, "$BATCH_BASE/$BATCH_ID/items").isEmpty())
+        }
     }
 
     private fun batchBody(count: Int): String {

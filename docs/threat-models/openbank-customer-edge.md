@@ -305,7 +305,13 @@ backend access while disabled. This is a server-side gate; hiding the app entry 
 activation control. The HTTP tests exercise all four disabled methods and prove no draft request
 reaches domestic-payment.
 
-The edge requires a human customer token and `X-Acting-For` on every draft route, resolves the
+The edge requires a verified customer-realm JWT from the interactive `openbank-app` client
+(service accounts disabled in the realm template), a nonblank subject, and `X-Acting-For` on
+every draft route. Both machine-note claims (`client_id` and `clientId`) must be absent, even
+when their value is null or malformed. An optional username must be a nonblank human username;
+its absence remains compatible with the customer producer's mapper contract. Unreadable claims
+fail closed. A machine token with customer roles and a mapped party cannot become the editing
+human merely by presenting that party's mandate. The edge resolves the
 human's live representation mandate, and forwards only the verified company and human to the
 persisted domestic draft aggregate. A missing, invalid, foreign, or expired mandate fails closed.
 Batch IDs cannot switch company by changing the header because the owning service scopes reads

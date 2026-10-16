@@ -34,6 +34,9 @@ class BusinessPaymentBatchResourceTest {
     private fun humanToken() {
         every { jwt.getClaim<String>("party_id") } returns human.toString()
         every { jwt.subject } returns human.toString()
+        every { jwt.claimNames } returns setOf("party_id", "sub", "azp")
+        every { jwt.getClaim<Any?>("azp") } returns "openbank-app"
+        every { jwt.getClaim<Any?>("preferred_username") } returns null
         every { merged.resolve(human) } returns human
     }
 
@@ -64,6 +67,40 @@ class BusinessPaymentBatchResourceTest {
         every { acting.resolve(human, company.toString()) } returns company
         every { acting.profilesOf(human) } returns listOf(mapOf("partyId" to company, "partyType" to "INDIVIDUAL"))
         assertThrows(ForbiddenException::class.java) { resource.list(company.toString(), 0, 20) }
+        verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `machine notes and malformed identity fail before mandate or backend access`() {
+        val badClaims = listOf(
+            "client_id" to null, "client_id" to "", "client_id" to 123,
+            "clientId" to null, "clientId" to "batch-client",
+            "preferred_username" to null, "preferred_username" to 123,
+            "preferred_username" to "", "preferred_username" to "service-account-client",
+            "azp" to "openbank-synthetic-retail", "azp" to null, "azp" to 123,
+        )
+        badClaims.forEach { (claim, value) ->
+            humanToken()
+            every { jwt.claimNames } returns setOf("party_id", "sub", "azp", claim)
+            every { jwt.getClaim<Any?>(claim) } returns value
+            assertThrows(ForbiddenException::class.java) { resource.list(company.toString(), 0, 20) }
+        }
+        verify(exactly = 0) { acting.resolve(any(), any()) }
+        verify(exactly = 0) { upstream.get(any(), any()) }
+    }
+
+    @Test
+    fun `missing subject and unreadable claims are not human evidence`() {
+        humanToken()
+        every { jwt.subject } returns ""
+        assertThrows(ForbiddenException::class.java) { resource.list(company.toString(), 0, 20) }
+        humanToken()
+        every { jwt.claimNames } throws IllegalStateException("unreadable claims")
+        assertThrows(ForbiddenException::class.java) { resource.list(company.toString(), 0, 20) }
+        humanToken()
+        every { jwt.getClaim<Any?>("azp") } throws IllegalStateException("unreadable client")
+        assertThrows(ForbiddenException::class.java) { resource.list(company.toString(), 0, 20) }
+        verify(exactly = 0) { acting.resolve(any(), any()) }
         verify(exactly = 0) { upstream.get(any(), any()) }
     }
 }

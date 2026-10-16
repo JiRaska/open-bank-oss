@@ -115,6 +115,7 @@ class BusinessPaymentBatchResource(
     // Every failure is explicit so an absent or revoked company mandate cannot fall back to the human party.
     @Suppress("ThrowsCount")
     private fun parties(header: String?): Pair<UUID, UUID> {
+        if (!isHumanCustomerToken()) throw ForbiddenException("interactive customer token is required")
         val raw = CustomerEdgeResource.resolvePartyIdClaim(jwt.getClaim<String>("party_id"), jwt.subject)
             ?: throw ForbiddenException("human party is required")
         val human = merged.resolve(
@@ -130,6 +131,21 @@ class BusinessPaymentBatchResource(
         if (!company) throw ForbiddenException("active company mandate is required")
         return human to entity
     }
+
+    // The customer realm's public openbank-app client has service accounts disabled.
+    // Its profile scope does not promise preferred_username; absence is valid, a machine note is not.
+    private fun isHumanCustomerToken(): Boolean = runCatching {
+        val claims = jwt.claimNames ?: return@runCatching false
+        val username = jwt.getClaim<Any?>("preferred_username")
+        jwt.getClaim<Any?>("azp") == "openbank-app" &&
+            !jwt.subject.isNullOrBlank() &&
+            "client_id" !in claims &&
+            "clientId" !in claims &&
+            (
+                "preferred_username" !in claims ||
+                    (username is String && username.isNotBlank() && !username.startsWith("service-account-"))
+                )
+    }.getOrDefault(false)
 
     private companion object {
         const val MAX_KEY_CHARS = 128
