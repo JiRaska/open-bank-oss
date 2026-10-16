@@ -135,6 +135,7 @@ b5_grants := {
 	"document": {"reason": "service-document-account-read", "actions": {"account.list"}},
 	"lending": {"reason": "service-lending-account-read", "actions": {"account.list"}},
 	"party": {"reason": "service-party-account-read", "actions": {"account.list"}},
+	"tax-reporting": {"reason": "service-tax-reporting-account-read", "actions": {"account.list"}},
 }
 
 b5_all_account_actions := {
