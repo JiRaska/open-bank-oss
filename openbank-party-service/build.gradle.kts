@@ -47,6 +47,10 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     // Provider-side message Pact verification for the PARTY_CREATED event (ADR-0063 P1).
     testImplementation(libs.pact.provider)
+    // Consumer legs (this PR): the ADR-0179 merge precondition guard reads account-service's
+    // `GET /api/v1/accounts?partyId=`. PartyAccountListPactConsumerTest publishes the pact
+    // replayed by account-service's AccountPactFolderProviderVerificationTest.
+    testImplementation(libs.pact.consumer)
     testImplementation(project(":openbank-libs-testing"))
 
     // CI infra pilot (P2): @QuarkusTest ITs get an isolated, per-JVM PostgreSQL +

@@ -380,6 +380,18 @@ class AccountPactFolderProviderVerificationTest {
     }
 
     /**
+     * party-service's merge-guard empty-page leg (pact: "no account exists for the requested
+     * party"). Deliberately no seed: the pact addresses a party id this test never creates, and
+     * the handler must EXIST (with this exact name, matching PartyAccountListPactConsumerTest)
+     * because the class-level [PactFilter] drops stateless interactions from the git replay —
+     * an interaction that declares no providerState never runs here at all.
+     */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
+    }
+
+    /**
      * Seeds the ACTIVE CZK SAVINGS account interest-service's ADR-0339 B tax-profile resolution
      * reads to map an account to its owning party (pact: "an ACTIVE CZK account exists for
      * tax-profile resolution"). The pact binds `partyId` non-null — a renamed field would arrive
