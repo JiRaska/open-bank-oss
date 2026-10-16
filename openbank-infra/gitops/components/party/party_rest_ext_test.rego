@@ -116,3 +116,23 @@ test_interest_rule_is_identity_pinned if {
 	not allow.allow with input as {"principal": other_api_sa, "action": "party.amlProfile.read"}
 	not allow.allow with input as {"principal": shared_api_only, "action": "party.amlProfile.read"}
 }
+
+# --- must-ALLOW / must-DENY: tax-reporting's own principal, exactly the TIN boundary (ADR-0340 B1) ---
+
+tax_reporting := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_reads_party_tax_facts if {
+	allow.allow with input as {"principal": tax_reporting, "action": "party.reporting.taxFacts"}
+}
+
+test_tax_reporting_granted_no_other_party_action if {
+	every action in {"party.create", "party.update", "party.merge", "party.amlProfile.read", "party.mandate.grant", "party:resolve"} {
+		not allow.allow with input as {"principal": tax_reporting, "action": action}
+	}
+}
+
+test_tax_reporting_tax_facts_rule_is_identity_pinned if {
+	not allow.allow with input as {"principal": other_api_sa, "action": "party.reporting.taxFacts"}
+	not allow.allow with input as {"principal": shared_api_only, "action": "party.reporting.taxFacts"}
+	not allow.allow with input as {"principal": viewer, "action": "party.reporting.taxFacts"}
+}
