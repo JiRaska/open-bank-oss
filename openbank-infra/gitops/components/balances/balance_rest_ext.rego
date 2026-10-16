@@ -206,6 +206,9 @@ allowed_reasons contains "service-settlement-balance-cover" if {
 # nothing else.
 allowed_reasons contains "service-tax-reporting-balance-read" if {
 	input.principal.type == "HUMAN"
+
+	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+	not input.principal.service_account == null
 	machine_named("service-account-openbank-tax-reporting")
 	input.action == "balance.read"
 }
