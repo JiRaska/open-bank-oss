@@ -371,3 +371,78 @@ test_deny_copilot_out_of_scope_write_by_default if {
 	agents.decision.reason == "no matching allow rule" with data.agents as charters
 		with input as {"agent": "customer-copilot", "tool": "account.write", "resource": null}
 }
+
+# ---------------------------------------------------------------------------------------
+# Object-shaped charters ({tier, resources}) — flaky-test-hunter (development plane,
+# ADR-0168/ADR-0031 D9 phase 3). Its grant is queried directly from the service's own
+# write-path PDP call with input.tier, not through the MCP gateway; the mock charter below
+# mirrors the production agents-opa-data.yaml projection for this agent.
+# ---------------------------------------------------------------------------------------
+
+tier_charters := {
+	"agents": [
+		{
+			"id": "flaky-test-hunter",
+			"plane": "development",
+			"tools": {
+				"allow": [
+					{"tier": "read", "resources": ["governance"]},
+					{"tier": "write_proposal", "resources": ["github-pr"]},
+				],
+				"deny": [
+					{"tier": "write", "resources": ["*"]},
+					{"tier": "execute", "resources": ["*"]},
+				],
+			},
+		},
+	],
+	"tool_tiers": {"deny": ["money.transfer", "money.post.ledger", "gh.pr.merge", "gh.pr.approve", "secrets.read.raw"]},
+}
+
+# The chartered write_proposal grant allows opening a PR on github-pr.
+test_allow_flaky_test_hunter_pr_open_tier_grant if {
+	agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+	agents.decision.reason == "allowed by charter" with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+}
+
+# Same charter, but the resource is outside the grant — deny-by-default on the resource axis.
+test_deny_flaky_test_hunter_pr_open_wrong_resource if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "some-other-repo", "tier": "write_proposal"}
+	agents.decision.reason == "no matching allow rule" with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "some-other-repo", "tier": "write_proposal"}
+}
+
+# No tier declared (the MCP/REST callers never send one) — the grant is not decidable, fail closed.
+test_deny_flaky_test_hunter_no_tier_input if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr"}
+	agents.decision.reason == "no matching allow rule" with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr"}
+}
+
+# Segregation of duties holds on the object-shaped charter too: merge is hard-denied for everyone.
+test_deny_flaky_test_hunter_pr_merge_hard_tier if {
+	not agents.allow with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.merge", "resource": "github-pr", "tier": "write_proposal"}
+	agents.decision.reason == "hard-denied tool tier" with data.agents as tier_charters
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.merge", "resource": "github-pr", "tier": "write_proposal"}
+}
+
+# An explicit object-shaped deny entry beats a grant (tier-level segregation).
+test_deny_flaky_test_hunter_tier_denied if {
+	agents.decision.reason == "denied by charter tier/resource grant"
+		with data.agents as {
+			"agents": [{
+				"id": "flaky-test-hunter",
+				"tools": {
+					"allow": [{"tier": "write_proposal", "resources": ["github-pr"]}],
+					"deny": [{"tier": "write_proposal", "resources": ["github-pr"]}],
+				},
+			}],
+			"tool_tiers": {"deny": []},
+		}
+		with input as {"agent": "flaky-test-hunter", "tool": "gh.pr.open", "resource": "github-pr", "tier": "write_proposal"}
+}
