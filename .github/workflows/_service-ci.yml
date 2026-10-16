@@ -212,12 +212,40 @@ jobs:
             wait "${docker_events_pid}" 2>/dev/null || true
           }
           trap cleanup_test_evidence EXIT
+          # Local task durations for the two observed slow builds; no second build
+          # or Build Scan upload. Parallel task times are not a critical-path sum.
+          GRADLE_PROFILE_ARGS=()
+          case "${{ inputs.service }}" in
+            openbank-lending-service|openbank-pension-service) GRADLE_PROFILE_ARGS=(--profile) ;;
+          esac
           # Cache healing replays this command only if verification fails before
           # the first Gradle task; tests and build outputs are never replayed.
           bash .github/scripts/retry-testcontainers-ebusy.sh -- \
             bash .github/scripts/retry-gradle-verification-cache.sh -- \
-            ./gradlew --configure-on-demand :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+            ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
+
+      # Native HTML can contain arbitrary transform names and skip messages.
+      # Publish only allowlisted task paths, numeric durations and closed outcomes.
+      - name: Sanitize Gradle task profile
+        id: gradle-task-profile
+        if: ${{ always() && (inputs.service == 'openbank-lending-service' || inputs.service == 'openbank-pension-service') }}
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/sanitize-gradle-task-profile.py \
+            --profiles build/reports/profile \
+            --wrapper gradle/wrapper/gradle-wrapper.properties \
+            --out "${{ inputs.service }}/build/test-intelligence/gradle-task-profile.json"
+
+      - name: Retain Gradle task profile
+        if: ${{ always() && (inputs.service == 'openbank-lending-service' || inputs.service == 'openbank-pension-service') && steps.gradle-task-profile.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gradle-task-profile-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ inputs.service }}/build/test-intelligence/gradle-task-profile.json
+          if-no-files-found: warn
+          retention-days: 3
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
       # cause, so the reader goes hunting for a test bug that is not there. Diagnostic only:
