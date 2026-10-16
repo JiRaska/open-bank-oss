@@ -41,6 +41,8 @@ prohibited if {
 treasury_pension_co_tax_reporting_read if {
 	input.principal.type == "HUMAN"
 	machine_named(treasury_pension_co_tax_reporting_account)
+	# Undefined is legacy; explicit null is not a verified or absent marker.
+	not input.principal.service_account == null
 	"ROLE_API" in input.principal.roles
 	input.action == "treasury.portfolio.inspect"
 }

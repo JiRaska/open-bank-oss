@@ -291,3 +291,17 @@ test_tax_reporting_current_marker_requires_matching_client if {
 		not portfolio_allowed(p, "treasury.portfolio.inspect")
 	}
 }
+
+# Only actual key absence selects the Phase-1 compatibility path. An explicit
+# JSON null is a supplied invalid marker, irrespective of any client-id value.
+test_tax_reporting_explicit_null_marker_is_not_legacy if {
+	every claims in [
+		{"service_account": null},
+		{"service_account": null, "client_id": ""},
+		{"service_account": null, "client_id": "openbank-tax-reporting"},
+		{"service_account": null, "client_id": "openbank-other"},
+	] {
+		p := object.union(tax_reporting, claims)
+		not portfolio_allowed(p, "treasury.portfolio.inspect")
+	}
+}

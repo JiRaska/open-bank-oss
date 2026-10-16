@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "fc225b2e2f68c917"
+    openbank.tech/policy-checksum: "af9cadfc7a5b0fef"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -860,6 +860,8 @@ data:
     allowed_reasons contains "service-tax-reporting-portfolio-read" if {
     	input.principal.type == "HUMAN"
     	machine_named(treasury_portfolio_reader_account)
+    	# Undefined is legacy; explicit null is not a verified or absent marker.
+    	not input.principal.service_account == null
     	"ROLE_API" in input.principal.roles
     	input.action == "treasury.portfolio.inspect"
     }

@@ -106,3 +106,18 @@ test_instance_retains_absent_marker_tax_compatibility if {
 	allow(p, "treasury.portfolio.inspect")
 	not allow(p, "treasury.portfolio.upload")
 }
+
+# The company exception itself must not confuse JSON null with the shared
+# helper's old absent-marker compatibility path, even if the bank grant denies it.
+test_company_explicit_null_marker_is_not_legacy if {
+	every claims in [
+		{"service_account": null},
+		{"service_account": null, "client_id": ""},
+		{"service_account": null, "client_id": "openbank-tax-reporting"},
+		{"service_account": null, "client_id": "openbank-other"},
+	] {
+		p := object.union(object.remove(tax, {"client_id"}), claims)
+		not rest.treasury_pension_co_tax_reporting_read with input as {"principal": p, "action": "treasury.portfolio.inspect"}
+		not allow(p, "treasury.portfolio.inspect")
+	}
+}
