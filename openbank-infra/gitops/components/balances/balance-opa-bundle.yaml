@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "92397ef2796412d7"
+    openbank.tech/policy-checksum: "27422eeba1e0d1ae"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -928,6 +928,9 @@ data:
     # nothing else.
     allowed_reasons contains "service-tax-reporting-balance-read" if {
     	input.principal.type == "HUMAN"
+
+    	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+    	not input.principal.service_account == null
     	machine_named("service-account-openbank-tax-reporting")
     	input.action == "balance.read"
     }
