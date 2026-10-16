@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.1.0...admin-ui-v3.1.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** let the comms checker reach the style editor — OR-set route guard ([#12864](https://github.com/JiRaska/open-bank-oss/issues/12864)) ([f52bd78](https://github.com/JiRaska/open-bank-oss/commit/f52bd78169a1e567440c1eb4b75c6b6a751c361d)), closes [#12830](https://github.com/JiRaska/open-bank-oss/issues/12830)
+
 ## [3.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.0.0...admin-ui-v3.1.0) (2026-10-14)
 
 
