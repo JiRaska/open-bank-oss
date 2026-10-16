@@ -16,8 +16,9 @@
 #      reason added later to rest.rego or treasury_rest_ext.rego cannot open the instance to a
 #      machine.
 #
-# Identity is principal.id (`service-account-<clientId>`); never principal.type == "SERVICE"
-# (AuthorizeInterceptor never emits it, #266, rules.yaml: authz_policy).
+# Named identity uses the shared machine_named helper: current verified flags bind
+# the exact account name and client ID; an absent flag retains Phase-1 compatibility.
+# Never principal.type == "SERVICE" (AuthorizeInterceptor does not emit it, #266).
 
 package openbank.rest
 
@@ -39,7 +40,15 @@ prohibited if {
 
 treasury_pension_co_tax_reporting_read if {
 	input.principal.type == "HUMAN"
-	input.principal.id == treasury_pension_co_tax_reporting_account
+	machine_named(treasury_pension_co_tax_reporting_account)
 	"ROLE_API" in input.principal.roles
 	input.action == "treasury.portfolio.inspect"
+}
+
+# The instance boundary must veto renamed or unclassified machines too, even if
+# a future bank/base rule adds a matching read reason. Keep the existing prefix
+# veto above for contradictory explicit person markers on service-account names.
+prohibited if {
+	principal_is_machine
+	not treasury_pension_co_tax_reporting_read
 }

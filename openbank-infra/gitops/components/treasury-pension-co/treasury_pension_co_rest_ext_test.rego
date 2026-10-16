@@ -14,7 +14,7 @@ import rego.v1
 
 import data.openbank.rest
 
-tax := {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+tax := {"type": "HUMAN", "client_id": "openbank-tax-reporting", "service_account": true, "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
 
 shared := {"type": "HUMAN", "service_account": true, "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API", "ROLE_COMPLIANCE"]}
 
@@ -71,4 +71,38 @@ test_renamed_machine_cannot_upload if {
 
 test_missing_flag_cannot_upload if {
 	not allow({"type": "HUMAN", "id": "alice", "roles": ["ROLE_TREASURY_APPROVER"]}, "treasury.portfolio.upload")
+}
+
+# The instance exception must itself be bound to the verified named client, even
+# though the bank grant independently checks the same identity.
+test_instance_tax_exception_rejects_person_marker if {
+	p := object.union(tax, {"service_account": false})
+	not rest.treasury_pension_co_tax_reporting_read with input as {"principal": p, "action": "treasury.portfolio.inspect"}
+	not allow(p, "treasury.portfolio.inspect")
+}
+
+test_instance_tax_exception_requires_current_client_binding if {
+	every p in [
+		object.union(tax, {"client_id": "openbank-other"}),
+		object.remove(tax, {"client_id"}),
+		object.union(tax, {"service_account": "true"}),
+	] {
+		not rest.treasury_pension_co_tax_reporting_read with input as {"principal": p, "action": "treasury.portfolio.inspect"}
+		not allow(p, "treasury.portfolio.inspect")
+	}
+}
+
+test_instance_veto_blocks_renamed_or_unclassified_machine_even_with_parent_grant if {
+	every p in [
+		{"type": "HUMAN", "id": "renamed-client", "service_account": true, "client_id": "openbank-other", "roles": ["ROLE_OPERATOR"]},
+		{"type": "HUMAN", "id": "unclassified", "roles": ["ROLE_OPERATOR"]},
+	] {
+		not rest.allow.allow with input as {"principal": p, "action": "treasury.portfolio.inspect"} with data.openbank.rest.allowed_reasons as {"future-parent-read"}
+	}
+}
+
+test_instance_retains_absent_marker_tax_compatibility if {
+	p := object.remove(tax, {"service_account", "client_id"})
+	allow(p, "treasury.portfolio.inspect")
+	not allow(p, "treasury.portfolio.upload")
 }

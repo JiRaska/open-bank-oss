@@ -1815,6 +1815,21 @@ gates:
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
 
+  # Deployed-code-lag report unit test. Guards the
+  # hours-scale "code on main is not running in sandbox" report that feeds the
+  # deploy-code-lag-watch escalation — aged own-source drift is reported, marker-only
+  # drift stays in deploy-drift-watch's lane.
+  - id: deploy-code-lag-report-unit-test
+    selftest_exempt: "is-a-test-suite"
+    name: "deployed-code-lag report unit test"
+    group: supplychain
+    mode: enforced
+    rationale: "Guards the hours-scale deployed-code-lag report: aged own-source drift feeds the deploy-code-lag-watch escalation, marker-only drift stays in deploy-drift-watch's lane — a silently wrong report either misses real lag or cries wolf on every marker."
+    review_after: "2027-04-01"
+    budget_seconds: 30
+    run: |
+      bash .github/scripts/test-deploy-code-lag-report.sh
+
   # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
   # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
   # machine, to decide whether OpenBank's audit log was tampered with. Nothing in CI can
@@ -6538,3 +6553,26 @@ gates:
     selftest_inputs: [".github/scripts/check-cronjob-max-success-age.py", "openbank-infra/gitops/components/observability/prometheus-rules-jobs.yaml"]
     run: |
       python3 .github/scripts/check-cronjob-max-success-age.py
+
+  # Phase 2 of the verified service_account flag. The rego that reads it treats a principal
+  # WITHOUT the field as a machine for staff rules, so it must not reach the cluster while any
+  # libs-runtime consumer still runs an image built before phase 1, which sends the field. This
+  # gate fails until every consumer's gitops pin is built from a commit that contains phase 1.
+  - id: pdp-flag-rollout-complete
+    name: "every libs-runtime consumer is pinned to an image that sends service_account (enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      A policy bundle pod-roll reaches every service at once, while a libs-runtime change reaches a
+      service only when its image is rebuilt and its gitops pin moves. If the fail-closed rego landed
+      first, every service still on the old libs would send no flag and lose all staff grants: a
+      fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
+      from history, and counts an unresolvable pin as lagging. It is monotonic once green.
+    review_after: "2027-04-11"
+    budget_seconds: 120                  # ~60 compare-API calls in a shallow checkout
+    min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
+    run: |
+      bash .github/scripts/check-pdp-flag-rollout.sh
+    selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]

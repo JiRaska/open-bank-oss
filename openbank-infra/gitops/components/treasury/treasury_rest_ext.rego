@@ -57,9 +57,8 @@ package openbank.rest
 import rego.v1
 
 treasury_staff if {
-    input.principal.type == "HUMAN"
-    input.principal.service_account == false
-    not startswith(input.principal.id, "service-account-")
+	input.principal.type == "HUMAN"
+	not principal_is_machine
 }
 
 allowed_reasons contains "treasury-staff-read" if {
@@ -138,7 +137,7 @@ treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
 
 allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == treasury_portfolio_reader_account
+	machine_named(treasury_portfolio_reader_account)
 	"ROLE_API" in input.principal.roles
 	input.action == "treasury.portfolio.inspect"
 }
