@@ -31,3 +31,15 @@ Fund PEF 13-04 uses the closing portfolio's `loansOutstanding`. The provider rep
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Testing and trace continuity
+
+Gradle `Test` tasks in this module have a maximum heap of `2g`. This test-JVM setting supports the additional Quarkus/OpenTelemetry trace profile under coverage instrumentation; it does not change the application's runtime heap, coverage thresholds, or timeouts.
+
+`TaxFilingTraceContractIT` seeds an ended, open filing in PostgreSQL and assembles it through HTTP. It requires HTTP 200, the request span and `UPDATE tax_filing` span in the same trace, their HTTP/database attributes, and no recorded error span. Its isolated profile enables the telemetry SDK, disables the scheduler, and keeps OPA enforcement advisory; the incoming remittance channel is in memory. This proves the tested request/database trace relationship, not real-token authorization, enforced OPA decisions, Kafka delivery, collector publication, or an Admin UI evidence row.
+
+## Testování a návaznost trasování
+
+Úlohy Gradle `Test` tohoto modulu mají maximální haldu `2g`. Nastavení testovací JVM podporuje další profil Quarkus/OpenTelemetry při měření pokrytí; nemění haldu běžící aplikace, limity pokrytí ani časové limity.
+
+`TaxFilingTraceContractIT` připraví v PostgreSQL otevřené vyúčtování za ukončené období a sestaví je přes HTTP. Vyžaduje HTTP 200, span požadavku a span `UPDATE tax_filing` ve stejné trace, jejich HTTP/databázové atributy a nepřítomnost zaznamenaného chybového spanu. Izolovaný profil zapíná telemetrické SDK, vypíná plánovač a ponechává OPA v poradním režimu; příchozí kanál odvodů používá paměťový konektor. Test dokládá návaznost požadavku a databázové operace, nikoli autorizaci skutečným tokenem, vynucené rozhodnutí OPA, doručení přes Kafka, publikaci do kolektoru ani řádek důkazu v Admin UI.
