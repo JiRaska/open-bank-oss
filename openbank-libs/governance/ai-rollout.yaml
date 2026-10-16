@@ -16,10 +16,10 @@
 adrRef: ADR-0031
 adrStatus: Accepted
 phase:
-  current: 2
+  current: 3
   total: 5
-  label: Governed oversight active — phase-3 mechanism implemented with PR writer stopped pending runtime evidence (no autonomous business action)
-  agentsActing: 0
+  label: Phase 3 active — one non-money development agent with recorded human merges (attested per runbook 0018, no autonomous business action)
+  agentsActing: 1
   # This is the governance-approved roadmap, not a live runtime attestation. A phase may move
   # only after its listed criteria are independently checked; the UI never treats a charter or
   # a stub as proof that a future phase is ready.
@@ -29,13 +29,13 @@ phase:
       title: Safety foundations
       outcome: Deny-by-default charters, policy gate, identity binding and audit are enforced.
     - number: 2
-      status: active
+      status: complete
       title: Read-only oversight and human queue
       outcome: Agents prepare evidence and proposals; a human makes every disposition.
     - number: 3
-      status: blocked
+      status: active
       title: One non-money development agent
-      outcome: Needs the deployed policy-gated PR path, a recorded real human merge, and deployment attestation before the phase advances.
+      outcome: Recorded human merge attested in production (runbook 0018) — evidence in docs/compliance/phase3-attestation-evidence.md.
     - number: 4
       status: blocked
       title: Expanded development, including money-path work

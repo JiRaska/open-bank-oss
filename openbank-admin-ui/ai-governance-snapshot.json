@@ -1,10 +1,10 @@
 {
   "adrRef": "ADR-0031",
   "adrStatus": "Accepted",
-  "phase": 2,
+  "phase": 3,
   "totalPhases": 5,
-  "phaseLabel": "Governed oversight active — phase-3 mechanism implemented with PR writer stopped pending runtime evidence (no autonomous business action)",
-  "agentsActing": 0,
+  "phaseLabel": "Phase 3 active — one non-money development agent with recorded human merges (attested per runbook 0018, no autonomous business action)",
+  "agentsActing": 1,
   "phaseRoadmap": [
     {
       "number": 1,
@@ -14,15 +14,15 @@
     },
     {
       "number": 2,
-      "status": "active",
+      "status": "complete",
       "title": "Read-only oversight and human queue",
       "outcome": "Agents prepare evidence and proposals; a human makes every disposition."
     },
     {
       "number": 3,
-      "status": "blocked",
+      "status": "active",
       "title": "One non-money development agent",
-      "outcome": "Needs the deployed policy-gated PR path, a recorded real human merge, and deployment attestation before the phase advances."
+      "outcome": "Recorded human merge attested in production (runbook 0018) — evidence in docs/compliance/phase3-attestation-evidence.md."
     },
     {
       "number": 4,
@@ -459,7 +459,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "1cdfff25203dfc9c"
+        "sha256": "f0bd48c6ccff88f9"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }
