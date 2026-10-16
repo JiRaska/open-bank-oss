@@ -95,3 +95,8 @@ OTP store, idempotency, and decision store fail. Challenges cannot be created/ve
 
 ### Flyway checksum mismatch on startup
 Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in the gitops env, let the pod start, then remove it. Never edit an applied migration.
+
+
+## Integration tests and the fail-closed service-account flag
+
+OPA treats any principal whose token is not verifiably a person as a service account (`input.principal.service_account`, fail closed). A plain `@TestSecurity` identity carries no JWT, so it counts as a machine and loses human-only grants. Integration tests that act as real staff therefore add `@OidcSecurity` human claims, which is why this module tests with `quarkus-test-security-oidc`.
