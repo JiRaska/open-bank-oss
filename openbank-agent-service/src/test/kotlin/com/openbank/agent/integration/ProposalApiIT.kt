@@ -6,16 +6,21 @@
 package com.openbank.agent.integration
 
 import com.openbank.agent.application.ProposalService
+import com.openbank.agent.domain.proposal.ProposalState
 import com.openbank.agent.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.anyOf
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.`is`
 import org.junit.jupiter.api.Test
+import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * First integration test for agent-service (ADR-0011 L2): boots the full Quarkus app against an
@@ -35,6 +40,9 @@ class ProposalApiIT {
 
     @Inject
     lateinit var service: ProposalService
+
+    @Inject
+    lateinit var dataSource: DataSource
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
@@ -132,5 +140,131 @@ class ProposalApiIT {
             .`when`().post("/api/v1/proposals/${proposal.id}/decision")
             .then()
             .statusCode(409)
+    }
+
+    @Test
+    fun `proposal creation rolls back when durable audit enqueue fails`() {
+        val proposedBy = "audit-rollback-${UUID.randomUUID()}"
+
+        try {
+            withFailingAuditOutboxInsert {
+                assertThatThrownBy {
+                    service.create(
+                        title = "audit rollback",
+                        rationale = "r",
+                        suggestedAction = "a",
+                        proposedBy = proposedBy,
+                        modelId = null,
+                        correlationId = null,
+                    )
+                }.hasStackTraceContaining("injected audit outbox failure")
+            }
+            assertThat(count("SELECT count(*) FROM agent_proposal WHERE proposed_by = ?", proposedBy)).isZero()
+            assertThat(
+                count(
+                    "SELECT count(*) FROM agent_audit_outbox " +
+                        "WHERE payload::jsonb ->> 'actorId' = ? " +
+                        "AND payload::jsonb ->> 'eventType' = 'agent.proposal.created'",
+                    proposedBy,
+                ),
+            ).isZero()
+        } finally {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "DELETE FROM agent_audit_outbox WHERE payload::jsonb ->> 'actorId' = ?",
+                ).use { statement ->
+                    statement.setString(1, proposedBy)
+                    statement.executeUpdate()
+                }
+                connection.prepareStatement("DELETE FROM agent_proposal WHERE proposed_by = ?").use { statement ->
+                    statement.setString(1, proposedBy)
+                    statement.executeUpdate()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `proposal decision rolls back when durable audit enqueue fails`() {
+        val proposal = service.create(
+            title = "decision audit rollback",
+            rationale = "r",
+            suggestedAction = "a",
+            proposedBy = "maker-${UUID.randomUUID()}",
+            modelId = null,
+            correlationId = null,
+        )
+
+        try {
+            withFailingAuditOutboxInsert {
+                assertThatThrownBy {
+                    service.decide(
+                        proposal.id,
+                        approve = true,
+                        decidedBy = "reviewer-${UUID.randomUUID()}",
+                        reason = "r",
+                    )
+                }.hasStackTraceContaining("injected audit outbox failure")
+            }
+            assertThat(service.get(proposal.id)?.state).isEqualTo(ProposalState.PROPOSED)
+            assertThat(
+                count(
+                    "SELECT count(*) FROM agent_audit_outbox " +
+                        "WHERE payload::jsonb ->> 'aggregateId' = ? " +
+                        "AND payload::jsonb ->> 'eventType' = 'agent.proposal.decided'",
+                    proposal.id.toString(),
+                ),
+            ).isZero()
+        } finally {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "DELETE FROM agent_audit_outbox WHERE payload::jsonb ->> 'aggregateId' = ?",
+                ).use { statement ->
+                    statement.setString(1, proposal.id.toString())
+                    statement.executeUpdate()
+                }
+                connection.prepareStatement("DELETE FROM agent_proposal WHERE id = ?").use { statement ->
+                    statement.setObject(1, proposal.id)
+                    statement.executeUpdate()
+                }
+            }
+        }
+    }
+
+    private fun withFailingAuditOutboxInsert(block: () -> Unit) {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute(
+                    """CREATE OR REPLACE FUNCTION fail_agent_audit_outbox_insert() RETURNS trigger AS $$
+                       BEGIN RAISE EXCEPTION 'injected audit outbox failure'; END;
+                       $$ LANGUAGE plpgsql""",
+                )
+                statement.execute(
+                    """CREATE TRIGGER fail_agent_audit_outbox_insert
+                       BEFORE INSERT ON agent_audit_outbox
+                       FOR EACH ROW EXECUTE FUNCTION fail_agent_audit_outbox_insert()""",
+                )
+            }
+        }
+        try {
+            block()
+        } finally {
+            dataSource.connection.use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.execute("DROP TRIGGER IF EXISTS fail_agent_audit_outbox_insert ON agent_audit_outbox")
+                    statement.execute("DROP FUNCTION IF EXISTS fail_agent_audit_outbox_insert()")
+                }
+            }
+        }
+    }
+
+    private fun count(sql: String, value: String): Long = dataSource.connection.use { connection ->
+        connection.prepareStatement(sql).use { statement ->
+            statement.setString(1, value)
+            statement.executeQuery().use { result ->
+                result.next()
+                result.getLong(1)
+            }
+        }
     }
 }
