@@ -13,9 +13,11 @@
 #   POST /api/v1/agent-merge-records in openbank-agent-service (ROLE_ADMIN-protected).
 #
 # SCOPE — what counts as agent-authored
-#   * head branch under `agent/`  — the fleet's charter branch (branch -> agentId below)
-#   * head branch under `codex/`  — external coding sessions; no in-repo charter id, so
-#                                   the agentId is the constant `external-coding-agent`
+#   * head branch carrying a declared charter id from openbank-libs/governance/agents.yaml
+#     (`<id>/<rest>`, `<id>-<rest>`, or `agent/<id>-<rest>`) — the registry is authoritative
+#   * head branch under `agent/` or `codex/` that matches NO charter id — an unchartered
+#     coding session; the agentId is the constant `external-coding-agent` (never a made-up
+#     segment id: an ADR number is not an agent)
 #   * author login declared in rules.yaml `autonomous_agent_prs.agent_accounts`
 #     (normalised the same way check-agent-pr-guard.py normalises: `app/` prefix and
 #     `[bot]` suffix are spelling variants of one machine account)
@@ -24,10 +26,14 @@
 #   branch names, while merge recording still has to cover the historical `agent/` and
 #   `codex/` shapes — those two prefixes are this recorder's own constant scope.
 #
-# agentId MAPPING
-#   agent/<id>-<rest>  -> <id>   (e.g. agent/adr-0031-... -> "adr", the charter-style id)
-#   agent/<id>         -> <id>   (no dash: the whole segment is the id)
-#   codex/<anything>   -> "external-coding-agent" (constant)
+# agentId MAPPING (registry-first; #12822 audit finding — the old first-dash-segment rule
+# recorded `agent/adr-0031-...` as agent "adr" and missed flaky-test-hunter's
+# `flaky-test-hunter/unit-return-<n>` branches entirely, so a hunter merge would have
+# passed green UNRECORDED)
+#   <id>/<rest>              -> <id>   (e.g. flaky-test-hunter/unit-return-42 -> "flaky-test-hunter")
+#   <id>-<rest>, agent/<id>-<rest> -> <id>   (longest registry prefix wins)
+#   codex/<anything>         -> "external-coding-agent" (constant; no charter id exists)
+#   agent/<seg>-<rest>, no registry match -> "external-coding-agent" (unchartered session)
 #   prefix-less branch with a declared-agent author -> the author login, verbatim
 #
 # FAIL CLOSED ON PURPOSE
@@ -36,17 +42,19 @@
 #   + exit 0 on every failure) therefore protected nothing and cost everything: a green
 #   check with a missing record reads exactly like "no agent PRs merged", the
 #   un-falsifiable state phase 3 exists to eliminate. Every path where a record SHOULD
-#   exist but does not (unreadable rules, absent merged_by, missing config, unreachable
-#   endpoint, non-2xx) now exits 1 with a `::error::`, and the workflow opens one
-#   tracking issue on top. The only exit-0 outcomes are "recorded" and "legitimately
-#   nothing to record" (the PR is not agent-authored).
+#   exist but does not (unreadable rules/agents registry, absent merged_by, missing
+#   config, unreachable endpoint, non-2xx) now exits 1 with a `::error::`, and the
+#   workflow opens one tracking issue on top. The only exit-0 outcomes are "recorded"
+#   and "legitimately nothing to record" (the PR is not agent-authored).
 #
 # USAGE
 #   python3 .github/scripts/record-agent-merge.py [--event PATH] [--rules PATH]
-#                                                 [--token-file PATH | --dry-run]
+#                                                 [--agents PATH] [--token-file PATH | --dry-run]
 #
 #   --event       pull_request closed event JSON (default: $GITHUB_EVENT_PATH)
 #   --rules       governance rules.yaml (default: openbank-libs/governance/rules.yaml)
+#   --agents      governance agents.yaml charter registry (default:
+#                 openbank-libs/governance/agents.yaml) — the only valid agentId source
 #   --token-file  0600 file holding `Authorization: Bearer <token>` (the workflow mints a
 #                 client_credentials token per run — realm accessTokenLifespan is 300 s,
 #                 so a static JWT would be dead on arrival). Wins over the env fallback.
@@ -79,6 +87,7 @@ import urllib.request
 from pathlib import Path
 
 RULES = "openbank-libs/governance/rules.yaml"
+AGENTS_REGISTRY = "openbank-libs/governance/agents.yaml"
 ENDPOINT_PATH = "/api/v1/agent-merge-records"
 SOURCE = "github-actions.record-agent-merge"
 CODEX_AGENT_ID = "external-coding-agent"
@@ -114,15 +123,57 @@ def load_agent_accounts(path=RULES):
     return {norm_login(a) for a in accounts}
 
 
-def decide_agent_id(branch, author, agent_accounts):
-    """agentId for the record, or None when the PR is not agent-authored."""
+def load_agent_ids(path=AGENTS_REGISTRY):
+    """Declared charter ids from agents.yaml — the ONLY valid agentId values for a merge
+    record (the endpoint's KDoc: "the declared agent id, derived from the PR head branch").
+    Never a hard-kept list here."""
+    import yaml
+
+    try:
+        doc = yaml.safe_load(Path(path).read_text())
+    except yaml.YAMLError as error:
+        raise ValueError(f"{path}: invalid YAML: {error}") from error
+    agents = (doc or {}).get("agents")
+    ids = [a.get("id") for a in agents
+           if isinstance(a, dict) and isinstance(a.get("id"), str) and a["id"]] \
+        if isinstance(agents, list) else None
+    if not ids:
+        raise ValueError(f"{path}: agents must be a list of objects with a non-empty id")
+    # Longest-first, so a shorter id that prefixes a longer one never wins ("finops-agent"
+    # before any hypothetical "finops").
+    return sorted(set(ids), key=len, reverse=True)
+
+
+def decide_agent_id(branch, author, agent_accounts, agent_ids):
+    """agentId for the record, or None when the PR is not agent-authored.
+
+    Resolution order — the registry is authoritative, because an id that is not a declared
+    charter id is false provenance in an audit store (#12822 audit finding):
+      1. registry longest-prefix: `<id>/<rest>`, `<id>-<rest>`, `agent/<id>-<rest>`, ...
+         (this is what catches flaky-test-hunter's `flaky-test-hunter/unit-return-<n>` —
+         the first-dash-segment rule returned no agent at all for it, so a hunter merge
+         would have passed green UNRECORDED)
+      2. `codex/<anything>` -> external-coding-agent (constant; no charter id exists)
+      3. `agent/<seg>-<rest>` with NO registry match -> external-coding-agent — an
+         unchartered coding session records as external, NEVER as the made-up segment id
+         (an ADR number is not an agent; recording `agent/adr-0031-...` as agent "adr"
+         was the second half of the finding)
+      4. author declared in rules.yaml `agent_accounts` -> the login, verbatim
+    """
+    candidates = [branch]
+    if branch.startswith("agent/"):
+        candidates.append(branch[len("agent/"):])
+    for agent_id in agent_ids:
+        for candidate in candidates:
+            if candidate == agent_id or candidate.startswith(agent_id + "/") \
+                    or candidate.startswith(agent_id + "-"):
+                return agent_id
     for prefix in AGENT_BRANCH_PREFIXES:
         if branch.startswith(prefix):
             rest = branch[len(prefix):]
-            if prefix == "codex/":
-                return CODEX_AGENT_ID
-            head, _, _ = rest.partition("-")
-            return head or None
+            # codex/ and unchartered agent/ sessions are both external coding sessions;
+            # a bare `agent/` carries no session identity at all.
+            return CODEX_AGENT_ID if rest else None
     if norm_login(author) in agent_accounts:
         return author
     return None
@@ -222,6 +273,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="record a human merge of an agent PR")
     parser.add_argument("--event", help="pull_request closed event JSON (default: $GITHUB_EVENT_PATH)")
     parser.add_argument("--rules", default=RULES, help="governance rules.yaml")
+    parser.add_argument("--agents", default=AGENTS_REGISTRY, help="governance agents.yaml charter registry")
     parser.add_argument("--token-file", help="0600 file holding 'Authorization: Bearer <token>' "
                                              "(workflow-minted client_credentials token)")
     parser.add_argument("--dry-run", action="store_true", help="print the payload, never POST")
@@ -241,15 +293,16 @@ def main(argv=None):
 
     try:
         agent_accounts = load_agent_accounts(args.rules)
+        agent_ids = load_agent_ids(args.agents)
     except (OSError, ValueError) as error:
-        print(f"::error::record-agent-merge: cannot read declared agent accounts from "
-              f"{args.rules}: {error} — the agent-authorship scope is undecidable, and an "
+        print(f"::error::record-agent-merge: cannot read governance scope ({args.rules} / "
+              f"{args.agents}): {error} — the agent-authorship scope is undecidable, and an "
               "undecidable scope must not read as 'nothing to record'", file=sys.stderr)
         return 1
 
     branch = (pull.get("head") or {}).get("ref") or ""
     author = ((pull.get("user") or {}).get("login")) or ""
-    agent_id = decide_agent_id(branch, author, agent_accounts)
+    agent_id = decide_agent_id(branch, author, agent_accounts, agent_ids)
     if agent_id is None:
         print(f"record-agent-merge: PR #{(pull.get('number'))} (branch '{branch}', author "
               f"'{author}') is not agent-authored — nothing to record.")

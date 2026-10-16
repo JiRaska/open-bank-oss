@@ -22,6 +22,9 @@ recorder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recorder)
 
 AGENT_ACCOUNTS = {'openbank-agent-bot'}
+# Mirrors load_agent_ids output ordering (longest-first); the loader sorts, unit tests
+# pass the sorted list directly.
+AGENT_IDS = sorted({'flaky-test-hunter', 'finops-agent', 'ui-assistant'}, key=len, reverse=True)
 
 
 def pull(number=12747, branch='agent/adr-0031-phase3-gated-pr-path', author='JiRaska',
@@ -41,35 +44,68 @@ def pull(number=12747, branch='agent/adr-0031-phase3-gated-pr-path', author='JiR
 
 
 class DecideAgentIdTest(unittest.TestCase):
-    def test_agent_prefix_maps_first_dash_segment(self):
-        self.assertEqual(recorder.decide_agent_id('agent/adr-0031-phase3-gated-pr-path',
-                                                  'JiRaska', AGENT_ACCOUNTS), 'adr')
-        self.assertEqual(recorder.decide_agent_id('agent/docs-fleet-ci', 'JiRaska',
-                                                  AGENT_ACCOUNTS), 'docs')
+    def test_registry_prefix_maps_hunter_branch(self):
+        # THE #12822 finding: flaky-test-hunter opens PRs from
+        # `flaky-test-hunter/unit-return-<finding>` (PR_BRANCH_PREFIX in its Kotlin source).
+        # The old first-dash-segment rule matched no prefix here, so a hunter merge would
+        # have passed green UNRECORDED.
+        self.assertEqual(recorder.decide_agent_id('flaky-test-hunter/unit-return-42',
+                                                  'JiRaska', AGENT_ACCOUNTS, AGENT_IDS),
+                         'flaky-test-hunter')
 
-    def test_agent_prefix_without_dash_uses_whole_segment(self):
-        self.assertEqual(recorder.decide_agent_id('agent/adr', 'JiRaska', AGENT_ACCOUNTS), 'adr')
+    def test_agent_prefixed_registry_id_maps_to_registry_id(self):
+        self.assertEqual(recorder.decide_agent_id('agent/flaky-test-hunter-quarantine-1',
+                                                  'JiRaska', AGENT_ACCOUNTS, AGENT_IDS),
+                         'flaky-test-hunter')
+
+    def test_bare_registry_id_prefix_maps_to_registry_id(self):
+        self.assertEqual(recorder.decide_agent_id('finops-agent/cost-report-7',
+                                                  'JiRaska', AGENT_ACCOUNTS, AGENT_IDS),
+                         'finops-agent')
+
+    def test_longest_registry_match_wins(self):
+        ids = sorted({'short', 'short-longer'}, key=len, reverse=True)
+        self.assertEqual(recorder.decide_agent_id('short-longer/x', 'JiRaska',
+                                                  AGENT_ACCOUNTS, ids), 'short-longer')
+        self.assertEqual(recorder.decide_agent_id('short/x', 'JiRaska',
+                                                  AGENT_ACCOUNTS, ids), 'short')
+
+    def test_unchartered_agent_prefix_records_external_not_made_up_segment(self):
+        # THE other half of the #12822 finding: an ADR number is not an agent. An
+        # unchartered agent/ session records as the external-coding-agent constant —
+        # never as a fabricated "adr"/"docs" segment id (false provenance in an audit store).
+        self.assertEqual(recorder.decide_agent_id('agent/adr-0031-phase3-gated-pr-path',
+                                                  'JiRaska', AGENT_ACCOUNTS, AGENT_IDS),
+                         'external-coding-agent')
+        self.assertEqual(recorder.decide_agent_id('agent/docs-fleet-ci', 'JiRaska',
+                                                  AGENT_ACCOUNTS, AGENT_IDS),
+                         'external-coding-agent')
 
     def test_codex_prefix_maps_to_constant(self):
         self.assertEqual(recorder.decide_agent_id('codex/docs-fleet-ci', 'JiRaska',
-                                                  AGENT_ACCOUNTS), 'external-coding-agent')
+                                                  AGENT_ACCOUNTS, AGENT_IDS),
+                         'external-coding-agent')
         self.assertEqual(recorder.decide_agent_id('codex/anything-at-all', 'someone',
-                                                  AGENT_ACCOUNTS), 'external-coding-agent')
+                                                  AGENT_ACCOUNTS, AGENT_IDS),
+                         'external-coding-agent')
 
     def test_declared_agent_author_on_prefixless_branch_maps_to_login(self):
         # The login is recorded verbatim, whatever spelling GitHub supplied — the
         # declaration list is normalised, the recorded identity is not.
         self.assertEqual(recorder.decide_agent_id('fix/human', 'openbank-agent-bot[bot]',
-                                                  AGENT_ACCOUNTS), 'openbank-agent-bot[bot]')
+                                                  AGENT_ACCOUNTS, AGENT_IDS),
+                         'openbank-agent-bot[bot]')
         # The `app/...` spelling of the same declared account must also match (#6403 lesson).
         self.assertEqual(recorder.decide_agent_id('chore/x', 'app/openbank-agent-bot',
-                                                  AGENT_ACCOUNTS), 'app/openbank-agent-bot')
+                                                  AGENT_ACCOUNTS, AGENT_IDS),
+                         'app/openbank-agent-bot')
 
     def test_non_agent_pr_is_noop(self):
         for branch, author in [('fix/human', 'JiRaska'), ('release-please--branches--main',
                                'release-please[bot]'), ('agent/', 'JiRaska')]:
             with self.subTest(branch=branch, author=author):
-                self.assertIsNone(recorder.decide_agent_id(branch, author, AGENT_ACCOUNTS))
+                self.assertIsNone(recorder.decide_agent_id(branch, author, AGENT_ACCOUNTS,
+                                                           AGENT_IDS))
 
 
 class PayloadTest(unittest.TestCase):
@@ -103,7 +139,7 @@ class PayloadTest(unittest.TestCase):
 class MainTest(unittest.TestCase):
     """End-to-end over main(): event file on disk, env injected, real exit codes."""
 
-    def run_main(self, event, env=None, rules=None, token_file=None):
+    def run_main(self, event, env=None, rules=None, agents=None, token_file=None):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
         event_path = Path(tmpdir.name) / 'event.json'
@@ -112,8 +148,14 @@ class MainTest(unittest.TestCase):
         rules_path.write_text(rules if rules is not None else
                               'autonomous_agent_prs:\n  agent_accounts:\n'
                               '    - openbank-agent-bot[bot]\n')
+        # Explicit registry fixture (instead of the repo default) keeps the suite
+        # independent of the checkout's cwd.
+        agents_path = Path(tmpdir.name) / 'agents.yaml'
+        agents_path.write_text(agents if agents is not None else
+                               'agents:\n  - id: flaky-test-hunter\n')
         argv = [sys.executable, str(Path(__file__).with_name('record-agent-merge.py')),
-                '--event', str(event_path), '--rules', str(rules_path)]
+                '--event', str(event_path), '--rules', str(rules_path),
+                '--agents', str(agents_path)]
         if token_file:
             argv += ['--token-file', str(token_file)]
         clean_env = {k: v for k, v in os.environ.items()
@@ -168,6 +210,14 @@ class MainTest(unittest.TestCase):
                                env={'AGENT_SERVICE_URL': 'http://127.0.0.1:9',
                                     'AGENT_MERGE_RECORDER_TOKEN': 'token'},
                                rules='not: [valid')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('undecidable scope', result.stderr)
+
+    def test_agents_registry_unreadable_fails_closed(self):
+        result = self.run_main(self.closed_event(),
+                               env={'AGENT_SERVICE_URL': 'http://127.0.0.1:9',
+                                    'AGENT_MERGE_RECORDER_TOKEN': 'token'},
+                               agents='agents: nope')
         self.assertEqual(result.returncode, 1)
         self.assertIn('undecidable scope', result.stderr)
 
@@ -229,8 +279,11 @@ class MainTest(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
+            # The chartered-agent shape that matters: hunter opens PRs from
+            # flaky-test-hunter/unit-return-<finding>; the record must carry the
+            # declared registry id, not a made-up segment or a silent skip.
             result = self.run_main(
-                self.closed_event(),
+                self.closed_event(branch='flaky-test-hunter/unit-return-9'),
                 env={'AGENT_SERVICE_URL': f'http://127.0.0.1:{server.server_port}',
                      'AGENT_MERGE_RECORDER_TOKEN': 'secret-token'})
         finally:
@@ -241,9 +294,39 @@ class MainTest(unittest.TestCase):
         self.assertEqual(received['path'], '/api/v1/agent-merge-records')
         self.assertEqual(received['auth'], 'Bearer secret-token')
         self.assertEqual(received['content_type'], 'application/json')
-        self.assertEqual(received['body']['agentId'], 'adr')
+        self.assertEqual(received['body']['agentId'], 'flaky-test-hunter')
         self.assertEqual(received['body']['mergedBy'], 'JiRaska')
         self.assertEqual(received['body']['prNumber'], 12747)
+
+    def test_happy_path_records_unchartered_session_as_external(self):
+        received = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length') or 0)
+                received['body'] = json.loads(self.rfile.read(length))
+                self.send_response(201)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            # An unchartered agent/ session (no registry id) still records — as the
+            # external-coding-agent constant, never as a fabricated segment id.
+            result = self.run_main(
+                self.closed_event(branch='agent/adr-0031-phase3-gated-pr-path'),
+                env={'AGENT_SERVICE_URL': f'http://127.0.0.1:{server.server_port}',
+                     'AGENT_MERGE_RECORDER_TOKEN': 'secret-token'})
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(received['body']['agentId'], 'external-coding-agent')
+        self.assertEqual(received['body']['headBranch'], 'agent/adr-0031-phase3-gated-pr-path')
 
     def test_non_2xx_response_fails_closed(self):
         class Handler(http.server.BaseHTTPRequestHandler):
