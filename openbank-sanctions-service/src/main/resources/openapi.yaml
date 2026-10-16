@@ -6,7 +6,9 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.1 -> 1.2): additive
   # only — GET /approvals (the checker's queue, issue #3472) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 2.1.0
+  # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
+  # payloadRef — all optional) on ApprovalResponse; no breaking change.
+  version: 2.2.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -386,6 +388,46 @@ components:
         decidedBy:
           type: string
           nullable: true
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            Bounded human-readable description of the paused request, persisted with the
+            approval (ADR-0227 D1). Null when the approval was created by application code
+            rather than by the intercepting pause.
+        domain:
+          type: string
+          nullable: true
+          description: >-
+            The service's domain in the unified approval inbox (ADR-0227 D1), derived from
+            quarkus.application.name. Informational; the inbox keys items off its own source
+            list.
+        amount:
+          type: string
+          nullable: true
+          description: >-
+            The maker's original request amount, when a future phase persists one (ADR-0227
+            D1). Always null today - the request body is not persisted, only its SHA-256
+            fingerprint. Absent never means zero.
+        currency:
+          type: string
+          nullable: true
+          description: ISO 4217 currency of `amount`, when an amount is present. Null today.
+        riskClass:
+          type: string
+          nullable: true
+          enum: [MONEY_PATH, DESTRUCTIVE, OPERATIONAL, UNKNOWN]
+          description: >-
+            Coarse action-class risk (ADR-0227 D1/D3). UNKNOWN from the service side - the
+            authoritative classification lives in rules.yaml four_eyes metadata the store
+            cannot see; the admin-UI BFF re-derives it per action.
+        payloadRef:
+          type: string
+          nullable: true
+          description: >-
+            Retrievable pointer to the maker's original request payload, when a future phase
+            persists one. Null today - the persisted fingerprint is an integrity digest, not
+            a payload pointer.
     ScreenEntityCommand:
       type: object
       required: [idempotencyKey, entityType, name]
