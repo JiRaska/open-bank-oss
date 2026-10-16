@@ -97,12 +97,33 @@ def is_bot_deploy_pr(p: dict) -> bool:
                     for pre in BOT_DEPLOY_PREFIXES))
 
 
+def readiness_hold(pr: object) -> str | None:
+    """Fail closed when the live PR cannot prove it is open, ready, and unblocked."""
+    if not isinstance(pr, dict) or pr.get("state") != "open":
+        return "PR is not confirmed open"
+    if pr.get("draft") is not False:
+        return "PR is draft or draft status is unknown"
+    labels = pr.get("labels")
+    if not isinstance(labels, list):
+        return "PR labels are missing or malformed"
+    for label in labels:
+        if not isinstance(label, dict):
+            return "PR label entry is malformed"
+        name = label.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return "PR label name is missing or malformed"
+        if name.strip().casefold() == "blocked":
+            return "PR carries the blocked hold label"
+    return None
+
+
 # --------------------------------------------------------------------------- pure decision
 def decide(pr: dict, required: list[str], checks: dict[str, str | None], now: dt.datetime,
            head_committed_at: dt.datetime | None, debounce_minutes: int) -> tuple[bool, str]:
     """Return (update?, reason). `checks` maps context -> conclusion (None = not completed)."""
-    if pr.get("draft"):
-        return False, "draft"
+    hold = readiness_hold(pr)
+    if hold:
+        return False, hold
     armed = bool(pr.get("auto_merge"))
     bot = bool(pr.get("bot_deploy"))
     if not armed and not bot:
@@ -197,7 +218,8 @@ def self_test() -> int:
     old = now - dt.timedelta(hours=2)
     req = ["Validate manifests", "Gitleaks"]
     green = {"Validate manifests": "success", "Gitleaks": "success"}
-    base = {"draft": False, "auto_merge": {"merge_method": "squash"}, "same_repo": True,
+    base = {"state": "open", "draft": False, "labels": [],
+            "auto_merge": {"merge_method": "squash"}, "same_repo": True,
             "mergeable_state": "behind"}
     cases = [
         ("behind+green+armed -> update", base, green, old, True),
@@ -215,6 +237,17 @@ def self_test() -> int:
     for name, pr, checks, committed, want in cases:
         got, why = decide(pr, req, checks, now, committed, 20)
         ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: update={got} ({why})")
+    for name, held in [
+        ("blocked label -> skip", {**base, "labels": [{"name": "blocked"}]}),
+        ("draft status missing -> skip", {key: value for key, value in base.items() if key != "draft"}),
+        ("labels missing -> skip", {key: value for key, value in base.items() if key != "labels"}),
+        ("malformed label -> skip", {**base, "labels": [{"name": " "}]}),
+        ("closed PR -> skip", {**base, "state": "closed"}),
+    ]:
+        got, why = decide(held, req, green, now, old, 20)
+        ok = not got
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  {name}: update={got} ({why})")
     bot_deploy = {**base, "auto_merge": None, "bot_deploy": True}
@@ -395,7 +428,9 @@ def self_test() -> int:
         if "/pulls?" in path:
             return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
         if path.endswith("/pulls/42"):
-            return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+            return {"state": "open", "draft": False, "labels": [],
+                    "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+                    "base": {"ref": "main"},
                     "head": {"sha": "a" * 40, "ref": "agent/example",
                              "repo": {"full_name": "example/repo"}}}
         if "/commits/" in path:
@@ -413,6 +448,107 @@ def self_test() -> int:
                 ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
                 failures += not ok
                 print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
+
+    for name, live_changes in [
+        ("blocked added after planning", {"labels": [{"name": "blocked"}]}),
+        ("draft converted after planning", {"draft": True}),
+        ("labels removed after planning", {"labels": None}),
+        ("malformed label added after planning", {"labels": [{"name": " "}]}),
+        ("head moved after planning", {"head": {"sha": "b" * 40}}),
+        ("armed state removed after planning", {"auto_merge": None}),
+        ("PR closed after planning", {"state": "closed"}),
+    ]:
+        reads = 0
+        writes = []
+        def changed_after_planning(path: str, changes=live_changes) -> object:
+            nonlocal reads
+            if path.endswith("/pulls/42"):
+                reads += 1
+                original = fixture_get(path)
+                return {**original, **(changes if reads > 1 else {})}
+            return fixture_get(path)
+        def record_update(method: str, path: str, _body: dict | None = None, writes=writes):
+            if method == "PUT":
+                writes.append((method, path))
+                return 202, {}
+            return 200, fixture_get(path)
+        report = {"targets": []}
+        with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                    "get": changed_after_planning,
+                                    "head_checks": lambda *_: {"Gitleaks": "success"},
+                                    "branch_update_count": lambda *_: 0,
+                                    "api": record_update,
+                                    "observe_update": lambda *_: "c" * 40}), contextlib.redirect_stdout(io.StringIO()):
+            result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+        ok = (result == 0 and reads >= 2 and not writes
+              and report["targets"][0]["updated"] is False
+              and report["targets"][0]["updated_head_sha"] is None)
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  live hold {name}: writes={len(writes)}")
+
+    reads = 0
+    writes = []
+    def unreadable_live_pr(path: str) -> object:
+        nonlocal reads
+        if path.endswith("/pulls/42"):
+            reads += 1
+            if reads > 1:
+                raise SystemExit("fixture API error")
+        return fixture_get(path)
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": unreadable_live_pr,
+                                "head_checks": lambda *_: {"Gitleaks": "success"},
+                                "branch_update_count": lambda *_: 0,
+                                "api": lambda method, path, _body=None: writes.append((method, path))
+                                or (202, {})}), contextlib.redirect_stdout(io.StringIO()):
+        report = {"targets": []}
+        result = run("example/repo", "main", 5, 0, False, 20, recovery_report=report)
+    ok = (result == 0 and not writes and report["targets"][0]["updated"] is False)
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  live PR API error skips PUT and recovery evidence")
+
+    # A held full-fleet build stays in the candidate set and remains the in-flight
+    # serialization barrier, while its own held status prevents an update.
+    fleet_pulls = [
+        {"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False},
+        {"number": 43, "auto_merge": {"merge_method": "squash"}, "draft": False},
+    ]
+    fleet_heads = {42: "a" * 40, 43: "b" * 40}
+    def fleet_get(path: str) -> object:
+        if "/pulls?" in path:
+            return fleet_pulls
+        for number in (42, 43):
+            if path.endswith(f"/pulls/{number}"):
+                return {"state": "open", "draft": False,
+                        "labels": [{"name": "blocked"}] if number == 42 else [],
+                        "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+                        "base": {"ref": "main"},
+                        "head": {"sha": fleet_heads[number], "ref": f"agent/{number}",
+                                 "repo": {"full_name": "example/repo"}}}
+        if "/commits/" in path:
+            return {"commit": {"committer": {"date": old.isoformat()}}}
+        raise AssertionError(f"unexpected fleet test API read {path}")
+    fleet_writes = []
+    def record_fleet_write(method: str, path: str, _body: dict | None = None):
+        fleet_writes.append((method, path))
+        return 202, {}
+    fleet_checks = {
+        fleet_heads[42]: {"build (openbank-example-service)": None},
+        fleet_heads[43]: {"build (openbank-example-service)": "success", "Gitleaks": "success"},
+    }
+    fleet_report = {"targets": []}
+    with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
+                                "get": fleet_get,
+                                "head_checks": lambda _repo, head: fleet_checks[head],
+                                "branch_update_count": lambda *_: 0,
+                                "api": record_fleet_write}), contextlib.redirect_stdout(io.StringIO()):
+        result = run("example/repo", "main", 5, 0, False, 1, recovery_report=fleet_report)
+    ok = (result == 0 and not fleet_writes
+          and [target["pr"] for target in fleet_report["targets"]] == [42, 43]
+          and all(not target["updated"] for target in fleet_report["targets"]))
+    failures += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  blocked in-flight full-fleet PR remains serialization barrier")
+
     with patch.dict(globals(), {"required_policy": lambda *_: (["Gitleaks"], True),
                                 "get": fixture_get, "head_checks": lambda *_: {},
                                 "branch_update_count": lambda *_: 0,
@@ -916,7 +1052,8 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         budget_error = False
         full = get(f"/repos/{repo}/pulls/{n}")
         sha = shas[n] = full["head"]["sha"]
-        pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
+        pr = {"state": full.get("state"), "draft": full.get("draft"),
+              "labels": full.get("labels"), "auto_merge": full.get("auto_merge"),
               "bot_deploy": is_bot_deploy_pr(full),
               "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
               "mergeable_state": full.get("mergeable_state")}
@@ -977,6 +1114,31 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
             print(f"DRY    #{n} {sha[:9]}: would update — {why} "
                   f"(budget {used}/{max_updates_per_pr})")
             updated += 1
+            continue
+        try:
+            live = get(f"/repos/{repo}/pulls/{n}")
+        except (OSError, SystemExit) as error:
+            print(f"SKIP   #{n} {sha[:9]}: live PR readiness could not be verified ({error})")
+            continue
+        hold = readiness_hold(live)
+        live_head = live.get("head") if isinstance(live, dict) else None
+        live_sha = live_head.get("sha") if isinstance(live_head, dict) else None
+        live_repo = live_head.get("repo") if isinstance(live_head, dict) else None
+        if hold:
+            print(f"SKIP   #{n} {sha[:9]}: live PR hold — {hold}")
+            continue
+        if live_sha != sha:
+            print(f"SKIP   #{n} {sha[:9]}: live head changed after planning")
+            continue
+        if not isinstance(live_repo, dict) or live_repo.get("full_name") != repo:
+            print(f"SKIP   #{n} {sha[:9]}: live head is not in this repository")
+            continue
+        live_base = live.get("base")
+        if not isinstance(live_base, dict) or live_base.get("ref") != branch:
+            print(f"SKIP   #{n} {sha[:9]}: live base changed after planning")
+            continue
+        if not live.get("auto_merge") and not is_bot_deploy_pr(live):
+            print(f"SKIP   #{n} {sha[:9]}: no longer armed and not an eligible bot deploy PR")
             continue
         code, data = api("PUT", f"/repos/{repo}/pulls/{n}/update-branch", {"expected_head_sha": sha})
         if code == 202:
