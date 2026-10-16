@@ -153,6 +153,39 @@ class ProductCatalogPactProviderVerificationTest {
         // Intentionally empty — see the KDoc above.
     }
 
+    /**
+     * No seeding: `ProductCatalogSeeder` persists the whole canonical catalogue from `ProductSeed`
+     * on first boot, so `list()` already returns products (`AgentCatalogReadPactConsumerTest`,
+     * the assistant's `list_products` tool). The list is a global array, so the consumer pact
+     * pins per-row shape, never count or order — nothing here needs an isolated aggregate.
+     */
+    @State("the canonical catalog products are seeded")
+    fun canonicalCatalogProductsAreSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: `prod-001` is `SAVINGS_STANDARD` in `ProductSeed` on every boot — ACTIVE, with
+     * two seeded fees (`AgentCatalogReadPactConsumerTest`, the assistant's `get_product` /
+     * `get_product_fees` tools). Same rationale as [cardEnabledProductIsSeeded] above — reseeding
+     * would fork a second source of truth for a product the service already owns.
+     */
+    @State("a product exists with id prod-001")
+    fun pactProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`
+     * (`AgentCatalogReadPactConsumerTest`, the assistant's `get_product` 404 leg).
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000eee")
+    fun agentUnknownProductIdNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/00000000-0000-0000-0000-000000000eee")
+            .then().statusCode(404)
+    }
+
     @State("trusted insurance term-life schema version 1 is installed")
     fun trustedInsuranceSchemaIsInstalled() {
         // CatalogPackSeeder installs the trusted test pack before provider verification.
