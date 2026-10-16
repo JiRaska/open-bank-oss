@@ -24,7 +24,6 @@
           "data": [
             {
               "accountNumber": "CZ6508000000192000145399",
-              "closedAt": "2026-06-01T00:00:00Z",
               "currencyCode": "CZK",
               "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
               "openedAt": "2026-01-01T00:00:00Z",
@@ -65,14 +64,6 @@
               ]
             },
             "$.data[*].accountNumber": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$.data[*].closedAt": {
               "combine": "AND",
               "matchers": [
                 {
