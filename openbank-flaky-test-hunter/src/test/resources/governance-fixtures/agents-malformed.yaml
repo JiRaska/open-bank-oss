@@ -1,0 +1,7 @@
+# Test fixture: a charter document that does not parse. An unparseable charter must fail closed
+# with reason charter_unavailable, never a silent grant (ADR-0031 D9 phase 3).
+agents:
+  - id: flaky-test-hunter
+    enabled: true
+    tools:
+      allow: [ {tier: write_proposal,
