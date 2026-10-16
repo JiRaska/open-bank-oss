@@ -23,6 +23,8 @@ class TraceContractProfile : QuarkusTestProfile {
     override fun getConfigOverrides(): Map<String, String> = mapOf(
         // Some modules switch the SDK off for tests; without it there are no spans to contract at all.
         "quarkus.otel.sdk.disabled" to "false",
+        // No OPA sidecar in this isolated trace fixture; keep other test profiles fail-closed.
+        "authz.enforce" to "false",
         "openbank.outbox.dispatch-enabled" to "false",
     )
 }
