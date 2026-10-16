@@ -225,10 +225,10 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       expect(seen.find(call => call.url.includes(path))?.authorization).toBe('Bearer operator-token')
     }
     expect(body.items).toEqual([
-      { id: 'newcomers@3', domain: 'audience', action: 'campaign.audience.approve', resourceId: 'newcomers@3', maker: 'marketer.three', makerActorKind: 'UNKNOWN', proposedAt: null },
-      { id: 'pack-7', domain: 'compliance-pack', action: 'lending.compliancePack.activate', resourceId: 'pack-7', maker: 'risk.officer', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T08:00:00Z' },
-      { id: 'campaign-7', domain: 'campaign', action: 'campaign.activate', resourceId: 'campaign-7', maker: 'marketer.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T09:00:00Z' },
-      { id: 'case-7', domain: 'identity-case', action: 'identity.case.secondApproval', resourceId: 'case-7', maker: 'checker.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'newcomers@3', domain: 'audience', action: 'campaign.audience.approve', resourceId: 'newcomers@3', maker: 'marketer.three', makerActorKind: 'UNKNOWN', proposedAt: null, summary: null, amount: null, currency: null, riskClass: 'OPERATIONAL', payloadRef: null },
+      { id: 'pack-7', domain: 'compliance-pack', action: 'lending.compliancePack.activate', resourceId: 'pack-7', maker: 'risk.officer', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T08:00:00Z', summary: null, amount: null, currency: null, riskClass: 'OPERATIONAL', payloadRef: null },
+      { id: 'campaign-7', domain: 'campaign', action: 'campaign.activate', resourceId: 'campaign-7', maker: 'marketer.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T09:00:00Z', summary: null, amount: null, currency: null, riskClass: 'DESTRUCTIVE', payloadRef: null },
+      { id: 'case-7', domain: 'identity-case', action: 'identity.case.secondApproval', resourceId: 'case-7', maker: 'checker.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z', summary: null, amount: null, currency: null, riskClass: 'OPERATIONAL', payloadRef: null },
     ])
     expect(JSON.stringify(body)).not.toContain('Sensitive')
     expect(JSON.stringify(body)).not.toContain('Private')
@@ -255,8 +255,8 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.treasury).toBe('ok')
     expect(body.sources['ledger-backfill']).toBe('ok')
     expect(body.items).toEqual([
-      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z' },
-      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T11:00:00Z' },
+      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z', summary: null, amount: null, currency: null, riskClass: 'OPERATIONAL', payloadRef: null },
+      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T11:00:00Z', summary: null, amount: null, currency: null, riskClass: 'OPERATIONAL', payloadRef: null },
     ])
   })
 
@@ -535,6 +535,11 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       maker: 'operator.j',
       makerActorKind: 'UNKNOWN',
       proposedAt: '2026-07-29T11:57:00Z',
+      summary: null,
+      amount: null,
+      currency: null,
+      riskClass: 'MONEY_PATH',
+      payloadRef: null,
     }])
   })
 
@@ -641,8 +646,47 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(seen).toHaveLength(2)
     expect(body.sources.sca).toBe('ok')
     expect(body.sources.settlement).toBe('ok')
-    expect(body.items).toContainEqual({ id: 'sca-1', domain: 'sca', action: 'device.revoke', resourceId: 'party-1', maker: 'maker.a', makerActorKind: 'CUSTOMER_PARTY', proposedAt: '2026-09-13T10:00:00Z' })
-    expect(body.items).toContainEqual({ id: 'set-1', domain: 'settlement', action: 'settlement.create', resourceId: null, maker: 'maker.b', makerActorKind: 'HUMAN', proposedAt: '2026-09-13T11:00:00Z' })
+    expect(body.items).toContainEqual({ id: 'sca-1', domain: 'sca', action: 'device.revoke', resourceId: 'party-1', maker: 'maker.a', makerActorKind: 'CUSTOMER_PARTY', proposedAt: '2026-09-13T10:00:00Z', summary: null, amount: null, currency: null, riskClass: 'MONEY_PATH', payloadRef: null })
+    expect(body.items).toContainEqual({ id: 'set-1', domain: 'settlement', action: 'settlement.create', resourceId: null, maker: 'maker.b', makerActorKind: 'HUMAN', proposedAt: '2026-09-13T11:00:00Z', summary: null, amount: null, currency: null, riskClass: 'DESTRUCTIVE', payloadRef: null })
+  })
+
+  it('passes through served D1 projection fields and re-derives riskClass from rules.yaml, never trusting the wire', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url)
+      if (u.includes('/api/v1/lending/approvals')) {
+        return Response.json([
+          {
+            id: 'L-9', action: 'lending.disburse', resourceId: 'loan-9', makerId: 'officer.z',
+            createdAt: '2026-09-21T09:00:00Z', summary: 'POST /api/v1/lending/loans/loan-9/disburse',
+            amount: '250000', currency: 'CZK', payloadRef: null, riskClass: 'UNKNOWN',
+          },
+          {
+            id: 'L-8', action: 'lending.writeoff', resourceId: 'loan-8', makerId: 'officer.y',
+            createdAt: '2026-09-21T08:00:00Z', summary: null, amount: null, currency: null,
+            payloadRef: null, riskClass: 'MONEY_PATH', // a lying service must not set the facet
+          },
+        ])
+      }
+      return new Response(JSON.stringify([]), { status: 200 })
+    }))
+
+    const body = await (await (await route()).GET()).json()
+    const disburse = body.items.find((i: { id: string }) => i.id === 'L-9')
+    const writeoff = body.items.find((i: { id: string }) => i.id === 'L-8')
+    expect(disburse).toMatchObject({
+      summary: 'POST /api/v1/lending/loans/loan-9/disburse',
+      amount: '250000',
+      currency: 'CZK',
+      payloadRef: null,
+      riskClass: 'MONEY_PATH', // BFF classification: lending scope + disburse verb
+    })
+    expect(writeoff).toMatchObject({
+      summary: null,
+      amount: null,
+      currency: null,
+      payloadRef: null,
+      riskClass: 'OPERATIONAL', // writeoff is not in four_eyes.verbs; the wire's MONEY_PATH is ignored
+    })
   })
 
   it('reports a forbidden operator queue (compliance caller) and a full page as not complete', async () => {
