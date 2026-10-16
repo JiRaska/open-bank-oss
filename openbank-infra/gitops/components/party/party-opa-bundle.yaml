@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "c6e49c60e28aa93d"
+    openbank.tech/policy-checksum: "64310ab2b6e3a761"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -844,6 +844,9 @@ data:
     # in rest.rego can never admit anyone else; this identity-gated rule is the whole grant.
     allowed_reasons contains "service-tax-reporting-party-tax-facts" if {
     	input.principal.type == "HUMAN"
+
+    	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+    	not input.principal.service_account == null
     	machine_named("service-account-openbank-tax-reporting")
     	input.action == "party.reporting.taxFacts"
     }
