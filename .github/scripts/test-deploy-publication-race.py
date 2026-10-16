@@ -3,11 +3,13 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Real git histories and the actual workflow publication block; no remote writes."""
 import importlib.util
+import errno
 import os
 import subprocess
 import tempfile
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -15,6 +17,51 @@ spec = importlib.util.spec_from_file_location('publication', SCRIPTS / 'deploy-p
 publication = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publication)
 WORKFLOW = (SCRIPTS.parent / 'workflows/auto-deploy.yml').read_text()
+
+
+def cleanup_temporary_directory(temporary_directory):
+    """Retry a brief ENOTEMPTY race, but fail if the fixture stays nonempty."""
+    for attempt in range(5):
+        try:
+            temporary_directory.cleanup()
+            return
+        except OSError as error:
+            if error.errno != errno.ENOTEMPTY or attempt == 4:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+
+
+class TemporaryDirectoryCleanupTests(unittest.TestCase):
+    def test_transient_enotempty_is_retried(self):
+        temporary_directory = Mock()
+        temporary_directory.cleanup.side_effect = [OSError(errno.ENOTEMPTY, 'Directory not empty'), None]
+        with patch('time.sleep') as sleep:
+            cleanup_temporary_directory(temporary_directory)
+        self.assertEqual(temporary_directory.cleanup.call_count, 2)
+        sleep.assert_called_once_with(0.1)
+
+    def test_persistent_enotempty_fails_after_bounded_retries(self):
+        temporary_directory = Mock()
+        temporary_directory.cleanup.side_effect = OSError(errno.ENOTEMPTY, 'Directory not empty')
+        with patch('time.sleep') as sleep:
+            with self.assertRaises(OSError) as error:
+                cleanup_temporary_directory(temporary_directory)
+        self.assertEqual(error.exception.errno, errno.ENOTEMPTY)
+        self.assertEqual(temporary_directory.cleanup.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
+        for call, expected in zip(sleep.call_args_list, [0.1, 0.2, 0.3, 0.4], strict=True):
+            self.assertAlmostEqual(call.args[0], expected)
+
+    def test_other_cleanup_errors_propagate_without_retry(self):
+        temporary_directory = Mock()
+        failure = OSError(errno.EACCES, 'Permission denied')
+        temporary_directory.cleanup.side_effect = failure
+        with patch('time.sleep') as sleep:
+            with self.assertRaises(OSError) as error:
+                cleanup_temporary_directory(temporary_directory)
+        self.assertIs(error.exception, failure)
+        temporary_directory.cleanup.assert_called_once_with()
+        sleep.assert_not_called()
 
 
 class PublicationTest(unittest.TestCase):
@@ -27,7 +74,7 @@ class PublicationTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = Path.cwd()
         os.chdir(self.tmp.name)
-        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(cleanup_temporary_directory, self.tmp)
         self.addCleanup(os.chdir, self.previous)
         self.git('init', '-q')
         self.git('config', 'user.email', 'test@example.com')
