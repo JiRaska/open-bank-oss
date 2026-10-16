@@ -126,6 +126,23 @@ limity vkladu, podmínky předčasného výběru a odkazy na podmínky. Pro zalo
 i autoritativní jméno jako u založení účtu. Založení účtu je oddělené od jeho financování: aplikace
 pak použije běžný tok financování účtu.
 
+### Koncepty firemních hromadných plateb
+
+`/business/payment-batches` vypisuje a zakládá koncepty, `/{id}` vrací detail a
+`/{id}/items` nahrazuje položky. Endpointy jsou ve výchozím stavu vypnuté pomocí
+`openbank.edge.business-payment-batches.enabled=false` a do zapnutí vracejí 404.
+Vyžadují zákaznický token a `X-Acting-For` s firmou, pro kterou má volající člověk
+aktivní oprávnění. Edge odvodí člověka i firmu z tokenu a oprávnění; tělo požadavku je
+neurčuje. Identitu obou stran předá službě domestic-payment se služebním tokenem.
+Koncept platbu neodesílá ani neprovádí.
+
+Založení vyžaduje `Idempotency-Key` (1–128 znaků). Přesné opakování vrací 200 se
+stejným konceptem, jiné tělo pod stejným klíčem 409. Stránka seznamu má nejvýše 20
+konceptů a stránka detailu nejvýše 20 položek. Nahrazení položek vyžaduje `If-Match`
+s aktuální revizí; zastaralá revize vrací 409. Úspěšné odpovědi obsahují serverem
+vypočtený počet položek, součet v nejmenších jednotkách, revizi a časová razítka podle
+`openapi.yaml`.
+
 ## Chybový model
 
 Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám generuje, jinak **propouští status a tělo upstreamu beze změny**.
@@ -175,3 +192,11 @@ Jde o implementované routy, nikoli důkaz nasazení upstream služeb. Předpokl
 ## Validace hodnot v URL upstream služeb
 
 Kód měny tvoří tři velká ASCII písmena; kód země dvě ASCII písmena se zachováním velikosti. Identifikátor uloženého příjemce přijímá 1–34 ASCII písmen nebo číslic bez kontroly kontrolního součtu, aby bylo možné odstranit i dříve uložené hodnoty. Edge sestaví přijaté hodnoty z vlastní abecedy před vytvořením URL upstream služby. Neplatné hodnoty vrací HTTP 400 a do URL upstream služby se nedostanou.
+
+### Rozpracované odpovědi penzijního dotazníku
+
+Tělo obsahuje objekt `answers` s nejvýše 100 dvojicemi otázka/volba. Identifikátor
+otázky i kód volby mají 1–64 ASCII písmen, číslic, podtržítek, teček nebo pomlček;
+hodnota volby musí být řetězec. Volný text, pole a číselné odpovědi se odmítnou
+místo předání ke skórování. Edge sestaví odchozí tělo z přijatých polí a zachová
+pořadí zadaných odpovědí.
