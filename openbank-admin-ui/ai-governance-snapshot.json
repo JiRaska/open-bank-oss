@@ -1,9 +1,9 @@
 {
   "adrRef": "ADR-0031",
   "adrStatus": "Accepted",
-  "phase": 3,
+  "phase": 2,
   "totalPhases": 5,
-  "phaseLabel": "One non-money development agent live — policy-gated PR path with recorded human merge (no autonomous business action)",
+  "phaseLabel": "Governed oversight active — phase-3 mechanism implemented with PR writer stopped pending runtime evidence (no autonomous business action)",
   "agentsActing": 0,
   "phaseRoadmap": [
     {
@@ -14,15 +14,15 @@
     },
     {
       "number": 2,
-      "status": "complete",
+      "status": "active",
       "title": "Read-only oversight and human queue",
       "outcome": "Agents prepare evidence and proposals; a human makes every disposition."
     },
     {
       "number": 3,
-      "status": "active",
+      "status": "blocked",
       "title": "One non-money development agent",
-      "outcome": "flaky-test-hunter ships code through a policy-gated PR path; every merge is recorded human disposition with deployment attestation."
+      "outcome": "Needs the deployed policy-gated PR path, a recorded real human merge, and deployment attestation before the phase advances."
     },
     {
       "number": 4,
@@ -103,7 +103,7 @@
       "id": "D9",
       "title": "Phasing (blast radius grows with controls)",
       "status": "partial",
-      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phases 4–5 (money-path development, then independently verifiable provenance) follow. Phase-3 mechanism (built and evidenced): flaky-test-hunter ships code through a policy-gated PR path — an in-process charter check (deny-by-default, packaged agents.yaml) plus an OPA sidecar query fail CLOSED on any PDP outage before any branch or PR is created (write path: advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). The recorded-human-merge pipeline is live: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). Phase 3 exit criteria, independently verified before this change: (1) the first real agent PR merge recorded through that pipeline (row + audit evidence), and (2) deployment attestation — a green fleet-attestation run (cosign/KMS-verified image attestations) covering the deployed agent-service and flaky-test-hunter images pinned by gitops to the merge commit, cross-checked against the Pact Broker deployed-version record. Phase.current moves to 3 only with both on file."
+      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phase 3 (one non-money development agent), then phases 4–5 (money-path development and independently verifiable provenance), remain future rollout steps. Phase-3 mechanism implemented: flaky-test-hunter's PR path checks the packaged agents.yaml charter in process and queries the OPA sidecar. Both fail CLOSED before any branch or PR is created, including on any PDP outage (advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). GitOps keeps the PR writer stopped with FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=false: this returns DENY, never bypasses the policy checks. Temporal finding workflows remain enabled. The recorded-human-merge mechanism is implemented: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). Controlled PR-writer activation and runtime verification are separate rollout work. Phase 3 remains blocked until independently verified evidence is on file: (1) the first real agent PR merge recorded through that pipeline (row + audit evidence), and (2) deployment attestation — a green fleet-attestation run (cosign/KMS-verified image attestations) covering the deployed agent-service and flaky-test-hunter images pinned by gitops to the merge commit, cross-checked against the Pact Broker deployed-version record. Phase.current moves to 3 only with both on file."
     }
   ],
   "decisionSummary": {
@@ -173,13 +173,13 @@
       "Tool-call decisions audited (agent.mcp.tool_call)",
       "Tool-execution outcomes audited (agent.mcp.tool_exec)",
       "Model completions audited (agent.model.complete)",
-      "PR-path policy decisions audited (agent.github.pr_open; fail-closed on PDP outage)",
-      "Human merge recording (agent.pr.merged → agent_merge_record, out-of-band of agent telemetry)",
       "Audit envelope + Kafka pipeline",
       "Hash-chain (record_hash/prev_hash, V5)",
       "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)"
     ],
     "planned": [
+      "Runtime verification of PR-path policy decisions (agent.github.pr_open; writer currently stopped in GitOps)",
+      "First real human merge recorded as agent_merge_record + agent.pr.merged audit, out-of-band of agent telemetry",
       "By-actor live query endpoint (audit-service)",
       "Independently attested runtime evidence of KMS-signed anchors",
       "ai_attribution populated in evidence bundle",
@@ -459,7 +459,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "3957e545324e2335"
+        "sha256": "1cdfff25203dfc9c"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

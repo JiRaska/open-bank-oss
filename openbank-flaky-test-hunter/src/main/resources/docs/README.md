@@ -27,6 +27,14 @@ Config (`flaky-test-hunter.policy-gate`):
 | `opa-url` | `http://localhost:8181` | OPA sidecar base URL |
 | `timeout` | `PT0.5S` | per-call connect + request timeout; exceeding it fails closed (`pdp_unreachable`) |
 
+The mechanism is implemented while the governance rollout remains in phase 2. GitOps explicitly
+sets `FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=false`: the gate denies branch, commit and PR creation
+with `policy_gate_disabled`; it never permits a policy bypass. Temporal finding workflows remain
+enabled. Controlled writer activation is separate rollout work. Phase 3 requires the first real
+agent PR's human merge verified in both the merge-record row and audit, plus deployment attestation
+for agent-service and flaky-test-hunter cross-checked against their deployed-version records.
+Implementation and local tests do not supply those runtime proofs.
+
 Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent.github.pr_open` for every attempted PR path, including denials, and `flaky-test-hunter.github.ticket_opened` when no fix enters the PR path. The event carries `policy_decision` (ALLOW only when the gate allowed **and** the PR was actually opened), `policy_blocked`, `policy_denial_reason`, the evaluated `tool`/`resource`/`pr_branch`, `pr_url` for an opened PR, and `proposal_url` for the selected PR or ticket. A refusal is as auditable as an opened PR; a blocked mechanical fix (`policy_blocked: true`) is distinguishable from a finding that had no fix at all.
 
 ## Build identity

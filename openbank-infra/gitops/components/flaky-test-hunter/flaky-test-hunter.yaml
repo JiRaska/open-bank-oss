@@ -78,6 +78,10 @@ spec:
               value: https://api.github.com
             - name: GITHUB_REPO
               value: JiRaska/open-bank-oss
+            # Phase-2 mechanism delivery: stop PR writes. False returns DENY rather than
+            # bypassing policy; controlled activation and runtime evidence are separate rollout work.
+            - name: FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED
+              value: "false"
             # Optional fine-grained token: until OpenBao is seeded, the phase-3 writer fails closed
             # and no pull request is opened. It is deliberately separate from every other agent's
             # credential, so revoking this one stops only this bounded development capability.
