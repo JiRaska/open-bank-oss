@@ -439,6 +439,23 @@ def self_test() -> int:
         ok = got == want
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  classify {name}: {got}")
+    workflow = WORKFLOW.read_text()
+    ccases = [
+        ("actual workflow cancels only for a newer push", workflow, True),
+        ("constant true preempts fallbacks", workflow.replace(CANCEL_ONLY_PUSH, "true"), False),
+        ("constant false loses newer-push cancellation", workflow.replace(CANCEL_ONLY_PUSH, "false"), False),
+        ("wrong event cancels scheduled work", workflow.replace("github.event_name == 'push'", "github.event_name == 'schedule'"), False),
+        ("wrong global group loses serialization", workflow.replace("group: auto-update-armed-prs", "group: another-group"), False),
+        ("comment cannot satisfy the declaration", workflow.replace(CANCEL_ONLY_PUSH, "true")
+         + f"\n# cancel-in-progress: {CANCEL_ONLY_PUSH}\n", False),
+        ("duplicate cancellation key is rejected", workflow.replace(
+            f"cancel-in-progress: {CANCEL_ONLY_PUSH}", f"cancel-in-progress: {CANCEL_ONLY_PUSH}\n  cancel-in-progress: true"), False),
+    ]
+    for name, text, want in ccases:
+        got = push_only_cancellation_declared(text)
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {got}")
     print(f"self-test: {failures} failure(s)")
     return 1 if failures else 0
 
@@ -450,10 +467,27 @@ DECLARATION = [
     ("runs this script", "auto-update-armed-prs.py"),
     ("push-to-main trigger", "branches: [main]"),
     ("schedule fallback", "cron:"),
-    ("concurrency cancels in progress", "cancel-in-progress: true"),
     ("ambient token read-only", "contents: read"),
     ("persistent per-PR budget wired", "--max-updates-per-pr 4"),
 ]
+
+
+CANCEL_ONLY_PUSH = "${{ github.event_name == 'push' }}"
+
+
+def push_only_cancellation_declared(text: str) -> bool:
+    """Require the exact global concurrency contract, not a matching comment."""
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == "concurrency:"]
+    if len(starts) != 1:
+        return False
+    entries = []
+    for line in lines[starts[0] + 1:]:
+        if line and not line[0].isspace() and not line.startswith("#"):
+            break
+        if line.strip() and not line.lstrip().startswith("#"):
+            entries.append(line.strip())
+    return entries == ["group: auto-update-armed-prs", f"cancel-in-progress: {CANCEL_ONLY_PUSH}"]
 
 
 def check_declaration() -> int:
@@ -467,6 +501,9 @@ def check_declaration() -> int:
         present = needle in text
         bad += not present
         print(f"{'ok  ' if present else 'MISS'}  {label}: {needle!r}")
+    cancellation = push_only_cancellation_declared(text)
+    bad += not cancellation
+    print(f"{'ok  ' if cancellation else 'MISS'}  only a new push cancels admitted work; one global group")
     # GITHUB_TOKEN must never be what drives the update: its pushes trigger no workflows.
     if "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text or "GH_TOKEN: ${{ github.token }}" in text:
         print("MISS  update driven by GITHUB_TOKEN — CI would never re-run on the new head")
@@ -477,7 +514,7 @@ def check_declaration() -> int:
         present = needle in src
         bad += not present
         print(f"{'ok  ' if present else 'MISS'}  {label}")
-    print(f"SUBJECTS={len(DECLARATION) + 3}")
+    print(f"SUBJECTS={len(DECLARATION) + 4}")
     return 1 if bad else 0
 
 
