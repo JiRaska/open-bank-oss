@@ -105,6 +105,27 @@ class AccountingClassGlMapIT {
     }
 
     @Test
+    fun `fee billing resolves to the two accounts its configuration used to name by id`() {
+        // Billing's previous defaults (BillingLedgerConfig): debit a0..0002 (2100), credit a0..4003 (4003).
+        Given {
+            queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
+            queryParam("role", "PRINCIPAL")
+            queryParam("currency", "CZK")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(200)
+            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000000002"))
+        }
+        Given {
+            queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
+            queryParam("role", "FEE_INCOME")
+            queryParam("currency", "CZK")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(200)
+            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000004003"))
+        }
+    }
+
+    @Test
     fun `a journal posted by class lands on the same accounts as one posted by glAccountId`() {
         val today = LocalDate.now().toString()
         val byId = post(
