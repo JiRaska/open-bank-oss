@@ -26,6 +26,7 @@ EXPECTED_GATE = (
     ("perf-reports-openbank-balance-service", "k6 smoke (openbank-balance-service)"),
     ("perf-reports-openbank-sanctions-service", "k6 smoke (openbank-sanctions-service)"),
     ("perf-reports-openbank-consent-service", "k6 smoke (openbank-consent-service)"),
+    ("perf-reports-openbank-ledger-service", "k6 smoke (openbank-ledger-service)"),
 )
 BASELINE_ARTIFACT = "k6-money-path-summary"
 OVERRIDE_SCOPE = re.compile(
@@ -275,6 +276,11 @@ def self_test() -> int:
                 "started_at": "2026-09-01T12:09:00Z",
                 "conclusion": "failure",
             },
+            {
+                "name": "k6 smoke (openbank-ledger-service)",
+                "started_at": "2026-09-01T12:10:00Z",
+                "conclusion": "failure",
+            },
         ]
     }
     scope, policies = gate_policies(jobs, attempt_start)
@@ -297,6 +303,9 @@ def self_test() -> int:
         ),
         "perf-reports-openbank-consent-service": ArtifactWindow(
             instant("2026-09-01T12:09:00Z")
+        ),
+        "perf-reports-openbank-ledger-service": ArtifactWindow(
+            instant("2026-09-01T12:10:00Z")
         ),
     }
     artifacts = {
