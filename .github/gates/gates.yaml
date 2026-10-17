@@ -3203,6 +3203,38 @@ gates:
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
+  - id: agent-merge-recorder-selftest
+    name: "agent-merge recorder maps agent PRs to merge evidence and fails closed (ADR-0031 phase 3, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 30-case unittest suite
+      covering the registry-first agentId mapping (flaky-test-hunter/unit-return-<n> and
+      agent/<id>-<rest> resolve to the declared charter id from agents.yaml, unchartered
+      agent/ sessions record as external-coding-agent, longest match wins), declared-agent
+      author mapping, non-agent no-op exit 0, payload shape, token-file resolution (minted
+      header wins over env fallback, missing/empty file fails closed), human-merger
+      eligibility (Bot type, app/ and [bot] logins, declared-agent accounts all rejected),
+      and the workflow wiring (ARC runner, SHA pin, read-only permissions, mint step,
+      job-scoped credentials, no static JWT anywhere, failure tracking issue kept open
+      until verified backfill). Its red is reachable by construction: every case drives
+      the real script against stub events/servers.
+    budget_seconds: 60   # local HTTP stubs only, no network; ~2s observed
+    rationale: >-
+      ADR-0031 phase 3's "recorded human merge" evidence is produced by this CI-side recorder;
+      an untested mapping silently attributes merges to the wrong agent (or records nothing),
+      which is worse than no record — it is false provenance in an audit store. The recorder
+      deliberately FAILS CLOSED: it runs after the merge (pull_request closed), so red blocks
+      nothing, while the previous fail-soft design let a missing record hide behind a green
+      check — the un-falsifiable state this evidence exists to eliminate.
+    review_after: "2027-10-14"
+    # Subjects are test cases, not files: the floor drops the day someone deletes a case.
+    # 30 = the measured SUBJECTS count as of 2026-10-16 (25 after the human-merger cases,
+    # plus the registry-first agentId mapping cases); keep in lockstep.
+    min_subjects: 30
+    run: |
+      python3 .github/scripts/test-record-agent-merge.py
+
   # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
   # Fleet-wide scan (not diff-scoped): every Kafka topic a service publishes must have a

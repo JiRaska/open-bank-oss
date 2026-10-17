@@ -6,7 +6,7 @@ package com.openbank.tax.infrastructure.returns.pension
 
 import com.openbank.tax.application.port.out.CompanyPortfolioPort
 import com.openbank.tax.application.port.out.CorporateFactsPort
-import com.openbank.tax.application.port.out.ReturnDataPort
+import com.openbank.tax.application.port.out.ReturnAssemblyData
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.domain.corporate.CorporateFact
 import com.openbank.tax.domain.returns.Periodicity
@@ -71,21 +71,23 @@ class PensionReturnDataAdapter(
     private val companyPortfolio: CompanyPortfolioPort,
     @ConfigProperty(name = "openbank.statutory-returns.company-books.currency", defaultValue = "CZK")
     private val reportingCurrency: String,
-) : ReturnDataPort {
-    override val available: Boolean = true
+) {
+    val available: Boolean = true
 
-    override suspend fun fetch(
+    suspend fun fetch(
+        catalogue: ReturnCatalogue,
+        definition: ReturnDefinition,
+        entityId: String,
+        period: ReportingPeriod,
+    ): ReturnAssemblyData = ReturnAssemblyData(figures(catalogue, definition, entityId, period))
+
+    private suspend fun figures(
         catalogue: ReturnCatalogue,
         definition: ReturnDefinition,
         entityId: String,
         period: ReportingPeriod,
     ): Map<String, BigDecimal> {
-        if (catalogue.id != CATALOGUE_ID) {
-            throw ReturnDataUnavailableException("No data source is bound for catalogue ${catalogue.id}")
-        }
-        UNSOURCED[definition.code]?.let { reason ->
-            throw ReturnDataUnavailableException("${definition.code}: $reason")
-        }
+        ensureBound(catalogue, definition)
         val from = periodStart(period)
         val to = period.endDate
         if (definition.code == "PSP31-04") return companyFlows(sources.participants(from, to))
@@ -100,6 +102,16 @@ class PensionReturnDataAdapter(
         val extract = FUND_RETURNS[definition.code]
             ?: throw ReturnDataUnavailableException("${definition.code}: no mapping to a source read model")
         return extract(definition.code, entityId, fund(entityId, from, to))
+    }
+
+    /** The two refuse-by-name guards in one place, so [figures] stays under the throw budget. */
+    private fun ensureBound(catalogue: ReturnCatalogue, definition: ReturnDefinition) {
+        if (catalogue.id != CATALOGUE_ID) {
+            throw ReturnDataUnavailableException("No data source is bound for catalogue ${catalogue.id}")
+        }
+        UNSOURCED[definition.code]?.let { reason ->
+            throw ReturnDataUnavailableException("${definition.code}: $reason")
+        }
     }
 
     private fun companyFlows(a: ParticipantAggregatesDto): Map<String, BigDecimal> = mapOf(

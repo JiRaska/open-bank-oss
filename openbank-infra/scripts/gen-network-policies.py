@@ -89,6 +89,15 @@ INGRESS_NS = "ingress-nginx"
 GATEWAY_NS = "envoy-gateway-system"
 MESSAGING_NS = "messaging"
 KEDA_NS = "keda"
+# ARC runner pods (`runs-on: openbank-build`) live in a tofu-managed namespace with no
+# GitOps manifest, so no URL scan can ever derive them as a caller. Each in-cluster
+# service a workflow calls is declared here instead: (callee_ns, workload, pod port, why).
+# Keep it to workflows that MUST call in-cluster; every entry admits all runner pods.
+ARC_RUNNER_NS = "arc-runners"
+ARC_RUNNER_CALLEES = [
+    ("iam", "keycloak", 8080, "record-agent-merge.yml mints a client_credentials token"),
+    ("platform", "agent-service", 8109, "record-agent-merge.yml POSTs /api/v1/agent-merge-records"),
+]
 
 # Container ports that speak a datastore wire protocol, not HTTP — keyed by the
 # `ports[].name` every gitops manifest already uses by convention (e.g. the
@@ -106,9 +115,9 @@ KEDA_NS = "keda"
 # here too.
 INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-native"}
 
-# Container ports belonging to a SIDECAR the app container reaches over the pod's
-# own loopback — never a cross-namespace edge. Keyed by `ports[].name`, same
-# convention as INTERNAL_ONLY_PORT_NAMES above.
+# Sidecar ports with no application cross-namespace callers. Decisions use pod loopback;
+# read-only diagnostics may bind the pod network for kubelet probes. Neither is an app
+# HTTP discovery port. Keyed by `ports[].name`, like INTERNAL_ONLY_PORT_NAMES above.
 #
 # The OPA PDP sidecar (ADR-0034 Phase 5 / issue #1797) is the case that forced
 # this: `OpaSidecarPolicyDecisionPoint.DEFAULT_BASE_URL` is
@@ -131,7 +140,7 @@ INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-na
 # reachable via the unconditional same-namespace rule (co-tenant pods of the same
 # namespace) — NetworkPolicy cannot express "loopback only", and tightening the
 # same-namespace rule to a port list is a separate, larger change.
-SIDECAR_LOCAL_ONLY_PORT_NAMES = {"opa"}
+SIDECAR_LOCAL_ONLY_PORT_NAMES = {"opa", "opa-diagnostics"}
 
 HEADER = """\
 # SPDX-License-Identifier: Apache-2.0
@@ -416,6 +425,10 @@ spec:
           ports:
             - {name: http, containerPort: 8117}
             - {name: https, containerPort: 8443}
+        - name: opa
+          ports:
+            - {name: opa, containerPort: 8181}
+            - {name: opa-diagnostics, containerPort: 8282}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -501,6 +514,25 @@ spec:
              any(port["port"] == 8117 for rule in isolated_policy["spec"]["ingress"]
                  for port in rule.get("ports", [])), False)
         source.write_text(original_source, encoding="utf-8")
+        # Ordinary HTTP on 8080 through the BFF's DYNAMIC discovery path: drop the explicit
+        # admin-ui edge so discovery (not a declared URL) decides its ports, and both OPA
+        # sidecar ports (decision 8181, diagnostics 8282) must stay out of it.
+        original_fixture = source.read_text(encoding="utf-8")
+        source.write_text(yaml.safe_dump_all([
+            doc for doc in yaml.safe_load_all(original_fixture) if doc["metadata"]["name"] != "admin-ui"
+        ]).replace("8117", "8080"), encoding="utf-8")
+        try:
+            globals()["COMPONENTS"] = temp_dir
+            sys.argv = [sys.argv[0]]
+            main()
+        finally:
+            globals()["COMPONENTS"] = previous_components
+            sys.argv = previous_argv
+        documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+        policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
+        case("ordinary HTTP 8080 remains reachable from its caller", allowed("security-scanner"), [8080])
+        case("HTTP 8080 BFF discovery excludes both OPA ports", allowed("admin-ui"), [8080, 8443])
+        source.write_text(original_fixture, encoding="utf-8")
         source.write_text(source.read_text(encoding="utf-8").replace(
             "  annotations: {openbank.io/port-scoped-ingress: 'true'}\n", ""), encoding="utf-8")
         try:
@@ -513,14 +545,14 @@ spec:
         documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
         policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
         case("non-opted workload retains both ports", allowed("payments"), [8117, 8443])
-        case("non-opted BFF retains dynamic HTTP fallback", allowed("admin-ui"), [8117, 8443])
+        case("non-opted BFF retains dynamic HTTP fallback without OPA ports", allowed("admin-ui"), [8117, 8443])
 
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction, atomic publication and port scoping (29 cases)")
+    print("self-test ok: dependency extraction, atomic publication and port scoping (31 cases)")
     return 0
 
 def main():
@@ -724,6 +756,17 @@ def main():
             name = labels.get("app.kubernetes.io/name") or target.get("service") or target.get("name")
             if name:
                 http_scaled_targets.add((ns, name))
+
+    for callee_ns, wl_name, port, _why in ARC_RUNNER_CALLEES:
+        # Fail loudly on a rename: a declared edge to a workload that no longer exists
+        # would otherwise generate nothing and the workflow would time out in CI. A tree
+        # without the namespace at all (the self-test fixture) declares nothing to check.
+        if not any(ns == callee_ns for ns, _ in workloads):
+            continue
+        if (callee_ns, wl_name) not in workloads:
+            raise ValueError(f"ARC_RUNNER_CALLEES names unknown workload {callee_ns}/{wl_name}")
+        edges[(callee_ns, wl_name)].add(ARC_RUNNER_NS)
+        edge_ports[(callee_ns, wl_name, ARC_RUNNER_NS)].add(port)
 
     def resolve_pod_port(ns, svc_name, svc_port):
         """Service port -> containerPort on the selected workload."""
