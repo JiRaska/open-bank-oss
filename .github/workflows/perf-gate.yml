@@ -57,8 +57,8 @@ jobs:
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
-          # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor and
-          # GovernanceAuditor added as third through forty-third
+          # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor,
+          # GovernanceAuditor and Statement added as third through forty-fourth
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -109,6 +109,7 @@ jobs:
               "openbank-agent-service",
               "openbank-authz-policy-auditor",
               "openbank-governance-auditor",
+              "openbank-statement-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -186,17 +187,23 @@ jobs:
               # container (docker.io/apache/kafka-native, a ~590 MB pull) for any
               # service whose yaml declares smallrye-kafka channels without a
               # bootstrap-servers address and without devservices disabled. The
-              # first forty-one subjects configure one or the other (measured:
+              # first forty-three subjects configure one or the other (measured:
               # none of them pulls an image at boot), so the gate never
-              # provisioned Kafka. openbank-agent-service is the first subject
-              # that would pull kafka-native on every runner boot (measured this
-              # PR: the pull starts during quarkusDev). The probe reads JDBC
-              # state, not messaging, so the broker stays unprovisioned and
-              # devservices is switched off instead — the SmallRye incoming
-              # connector logs connection-refused without one, which the
-              # disabled messaging health check already absorbs.
+              # provisioned Kafka. openbank-agent-service and
+              # openbank-statement-service (incoming account-events plus an
+              # outbox outgoing channel, no bootstrap-servers) would pull
+              # kafka-native on every runner boot (measured this PR for
+              # agent-service: the pull starts during quarkusDev). The probes
+              # read JDBC state, not messaging, so the broker stays
+              # unprovisioned and devservices is switched off instead — the
+              # SmallRye incoming connector logs connection-refused without one,
+              # which the disabled messaging health check already absorbs.
               KAFKA_DEVSERVICES_OFF = {
                   "openbank-agent-service",
+                  # measured: same kafka-native devservices pull at boot (incoming
+                  # account-events-in + outgoing statement-events-out, no
+                  # bootstrap-servers address in config)
+                  "openbank-statement-service",
               }
               temporal = None
               if svc in NEEDS_TEMPORAL:
