@@ -8,7 +8,6 @@ import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.Side
-import com.openbank.treasury.domain.model.TreasuryChart
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -55,7 +54,8 @@ data class PostJournalRequest(
 )
 
 data class JournalLineRequest(
-    val glAccountId: UUID,
+    val accountingClass: String,
+    val accountingRole: String,
     val side: String,
     val amount: BigDecimal,
     val currencyCode: String,
@@ -82,7 +82,8 @@ class LedgerPostingAdapter(@RestClient private val client: LedgerRestClient) : L
             description = description,
             lines = spec.lines.map {
                 JournalLineRequest(
-                    glAccountId = TreasuryChart.glAccountId(it.glCode),
+                    accountingClass = it.accountingClass,
+                    accountingRole = it.role.name,
                     side = if (it.side == Side.DEBIT) "DEBIT" else "CREDIT",
                     amount = it.amount,
                     currencyCode = it.currency,

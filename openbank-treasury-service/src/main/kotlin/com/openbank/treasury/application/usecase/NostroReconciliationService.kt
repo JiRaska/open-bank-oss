@@ -49,7 +49,7 @@ class NostroReconciliationService(
     ): StoredStatement {
         replayOrConflict(statement, sha256, idempotencyKey)?.let { return it }
         val glCode = requireNotNull(accounts[statement.iban]) { "${statement.iban} is not a configured nostro account" }
-        require(TreasuryChart.code(statement.currency, "nostro") == glCode) {
+        require(TreasuryChart.nostroCode(statement.currency) == glCode) {
             "statement currency ${statement.currency} does not match nostro GL $glCode"
         }
         val candidate =

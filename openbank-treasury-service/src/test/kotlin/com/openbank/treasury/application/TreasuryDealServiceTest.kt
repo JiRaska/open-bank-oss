@@ -19,6 +19,7 @@ import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.DealFixtures
+import com.openbank.treasury.domain.glCode
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.CurvePillar
@@ -434,7 +435,7 @@ class TreasuryDealServiceTest {
         val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
         assertThat(accrued).isEqualByComparingTo(deal.interest)
         val maturity = ledger.posted.single { it.event == PostingEvent.MATURED }
-        assertThat(maturity.lines.map { it.glCode }).doesNotContain("4200").contains("1520")
+        assertThat(maturity.lines.map { it.glCode() }).doesNotContain("4200").contains("1520")
     }
 
     @Test
@@ -446,7 +447,7 @@ class TreasuryDealServiceTest {
         service.reverse(b.id, "test", DealFixtures.approver)
         val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
         val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
-        val unwound = reversal.lines.single { it.glCode == "4200" }
+        val unwound = reversal.lines.single { it.glCode() == "4200" }
         assertThat(unwound.amount).isEqualByComparingTo(accrued)
     }
 
@@ -499,7 +500,7 @@ class TreasuryDealServiceTest {
         assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
         val settlement = ledger.posted.single()
         assertThat(settlement.idempotencyKey).isEqualTo("treasury:${b.id}:settled")
-        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly(
                 "DEBIT 1002 1000.00 EUR",
                 "CREDIT 1991 1000.00 EUR",
@@ -525,9 +526,9 @@ class TreasuryDealServiceTest {
         service.runSimulatedMarket()
         service.reverse(b.id, "wrong side", DealFixtures.approver)
         val (settled, reversed) = ledger.posted
-        assertThat(settled.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
-        assertThat(reversed.lines.map { it.glCode to it.side }).isEqualTo(
-            settled.lines.map { it.glCode to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
+        assertThat(settled.lines.first().let { it.side to it.glCode() }).isEqualTo(Side.CREDIT to "1002")
+        assertThat(reversed.lines.map { it.glCode() to it.side }).isEqualTo(
+            settled.lines.map { it.glCode() to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
         )
         assertThat(deals.events.last().eventType).isEqualTo("treasury.deal.reversed.v1")
         assertThat(deals.events.last().payload).contains("\"fxSide\":\"SELL\"")

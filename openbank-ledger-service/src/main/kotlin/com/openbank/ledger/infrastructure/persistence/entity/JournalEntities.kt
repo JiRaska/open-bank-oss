@@ -158,3 +158,27 @@ class LedgerIdempotencyEntity : PanacheEntityBase {
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now()
 }
+
+/** ADR-0341 D3: read-only view of `accounting_class_gl_map`; the table changes by migration only. */
+@Entity
+@Table(name = "accounting_class_gl_map")
+class AccountingClassGlMapEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id")
+    var id: UUID = UUID.randomUUID()
+
+    @Column(name = "accounting_class", nullable = false)
+    var accountingClass: String = ""
+
+    @Column(name = "role", nullable = false)
+    var role: String = ""
+
+    @Column(name = "currency_code", nullable = false, columnDefinition = "char(3)")
+    var currencyCode: String = ""
+
+    @Column(name = "gl_account_id", nullable = false)
+    var glAccountId: UUID = UUID.randomUUID()
+
+    @Column(name = "created_at", nullable = false)
+    var createdAt: Instant = Instant.now()
+}
