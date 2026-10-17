@@ -232,16 +232,29 @@ journeys:
     capability: >-
       An authenticated customer can list their accounts and see a balance consistent with the
       ledger after the read-model propagation window.
-    status: planned
-    severity: page
+    status: active
+    severity: ticket
     money_moving: false
+    covers:
+      - openbank-account-service
+      - openbank-balance-service
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml
+    schedule: "5,20,35,50 * * * *"
     target_schedule: "*/15 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and public customer edge. Read-only, but it depends on a durable
+      FIXTURE the owner creates once: one ACTIVE account of the canary's SYNTHETIC party whose
+      balance equals FIXTURE_BALANCE / FIXTURE_CURRENCY on the CronJob, seeded by a single
+      tainted posting and never moved by any journey. Until the fixture exists the listing and
+      balance checks fail, which is missing fixture evidence and not a balance-service result.
+      Severity is `ticket` until the fixture is seeded and the first green run is observed.
     falsification: >-
-      Pause the balance projection consumer: authentication and account listing may still pass,
-      but the journey must fail when the expected ledger-backed balance does not converge.
-    blocked_by: >-
-      ADR-0252 phase 1 (#4348) — needs a durable synthetic party/account fixture and a cleanup
-      contract; a shared real account would make the assertion nondeterministic.
+      Pause the balance projection consumer, or change FIXTURE_BALANCE on the CronJob by one
+      cent: authentication and the account listing still pass, but "the balance equals the
+      seeded fixture balance" must fail. Opening a second ACTIVE account for the canary party
+      must fail the listing check, and pointing CUSTOMER_BASE at a host that serves 200 for
+      every path must fail the 401 and 403 negative checks rather than read as availability.
 
   - id: sepa-credit-transfer
     title: "SEPA credit-transfer lifecycle"
