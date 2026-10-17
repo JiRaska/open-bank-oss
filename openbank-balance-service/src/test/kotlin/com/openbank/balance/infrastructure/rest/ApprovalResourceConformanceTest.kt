@@ -11,6 +11,12 @@ import io.quarkus.security.identity.SecurityIdentity
 
 /** This service's checker endpoint against the shared four-eyes conformance suite (libs-testing). */
 class ApprovalResourceConformanceTest : ApprovalEndpointConformance() {
+    override val resourceClass = ApprovalResource::class.java
+    override val listPendingSecurity =
+        EndpointSecurity(setOf("ROLE_OPERATOR", "ROLE_ADMIN"), "balance.approval.read", "")
+    override val decideSecurity =
+        EndpointSecurity(setOf("ROLE_OPERATOR", "ROLE_ADMIN"), "balance.approval.decide", "#id")
+
     override fun bind(store: ApprovalStore, identity: SecurityIdentity): Endpoint {
         val resource = ApprovalResource(store).also { it.identity = identity }
         return object : Endpoint {

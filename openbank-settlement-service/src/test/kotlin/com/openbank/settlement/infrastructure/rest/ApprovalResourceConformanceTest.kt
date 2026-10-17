@@ -13,6 +13,12 @@ import java.time.Clock
 
 /** This service's checker endpoint against the shared four-eyes conformance suite (libs-testing). */
 class ApprovalResourceConformanceTest : ApprovalEndpointConformance() {
+    override val resourceClass = ApprovalResource::class.java
+    override val listPendingSecurity =
+        EndpointSecurity(setOf("ROLE_OPERATOR", "ROLE_ADMIN"), "settlement.approval.read", "")
+    override val decideSecurity =
+        EndpointSecurity(setOf("ROLE_OPERATOR", "ROLE_ADMIN"), "settlement.approval.decide", "#id")
+
     override fun bind(store: ApprovalStore, identity: SecurityIdentity): Endpoint {
         val resource = ApprovalResource(store, SettlementApprovalRecords(Clock.systemUTC()))
         resource.identity = identity

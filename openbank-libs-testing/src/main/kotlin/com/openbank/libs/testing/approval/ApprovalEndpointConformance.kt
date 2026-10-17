@@ -11,6 +11,7 @@ import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import io.quarkus.security.identity.SecurityIdentity
+import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
@@ -34,10 +35,15 @@ import java.time.OffsetDateTime
  *   pre-resolved identity instead of a supplier reads a `lateinit` property eagerly);
  * - an unknown id is a 404, self-approval propagates, and a caller-controlled `limit` is clamped.
  *
+ * - the resource's declared security: `@RolesAllowed` and `@Authorize` (action + resource) of the two
+ *   endpoint methods against the values the service declares in [listPendingSecurity] /
+ *   [decideSecurity]. `AuthorizeInterceptor` fails OPEN on a method with no `@Authorize`, and a
+ *   widened role set is a silent grant, so a service that changes either must change its subclass.
+ *
  * Assertions go through a recording [ApprovalStore] and the HTTP status, never the entity type, so
  * a service with its own wire DTO (sca) conforms on the same terms.
  */
-@Suppress("FunctionNaming") // one backticked @Test per conformance case, as OutboxDispatchConformanceIT
+@Suppress("FunctionNaming", "TooManyFunctions") // one backticked @Test per case, as OutboxDispatchConformanceIT
 abstract class ApprovalEndpointConformance {
 
     /** The two operations every approval resource serves, adapted from the service's own types. */
@@ -47,6 +53,18 @@ abstract class ApprovalEndpointConformance {
         /** `approve == null` sends a null request body. */
         suspend fun decide(id: String, approve: Boolean?): Response
     }
+
+    /** The security a service pins on one endpoint method: its roles and `@Authorize` action/resource. */
+    data class EndpointSecurity(val roles: Set<String>, val action: String, val resource: String)
+
+    /** The service's `ApprovalResource` class, whose `listPending`/`decide` annotations are asserted. */
+    protected abstract val resourceClass: Class<*>
+
+    /** Expected `@RolesAllowed` / `@Authorize` of `listPending`. */
+    protected abstract val listPendingSecurity: EndpointSecurity
+
+    /** Expected `@RolesAllowed` / `@Authorize` of `decide`. */
+    protected abstract val decideSecurity: EndpointSecurity
 
     /** Construct the service's resource around [store], authenticated as [identity]. */
     protected abstract fun bind(store: ApprovalStore, identity: SecurityIdentity): Endpoint
@@ -59,6 +77,14 @@ abstract class ApprovalEndpointConformance {
 
         assertThat(response.status).isEqualTo(Response.Status.OK.statusCode)
         assertThat(store.findPendingLimits).containsExactly(DEFAULT_LIMIT)
+        val queue = response.entity as List<*>
+        assertThat(queue).hasSize(1)
+        val item = queue.single()
+        assertThat(property(item, "id")).isEqualTo(PENDING_ID)
+        assertThat(property(item, "action")).isEqualTo(PENDING_ACTION)
+        // Provenance: who asked and when, as the checker sees it.
+        assertThat(property(item, "makerId")).isEqualTo(MAKER)
+        assertThat(property(item, "createdAt")).isEqualTo(PENDING_CREATED_AT_WIRE)
     }
 
     @Test
@@ -78,6 +104,9 @@ abstract class ApprovalEndpointConformance {
 
         assertThat(response.status).isEqualTo(Response.Status.OK.statusCode)
         assertThat(store.decisions).containsExactly(Triple(PENDING_ID, "checker-1", true))
+        val decided = response.entity
+        assertThat(property(decided, "status")).isEqualTo("APPROVED")
+        assertThat(property(decided, "decidedBy")).isEqualTo("checker-1")
     }
 
     @Test
@@ -116,13 +145,53 @@ abstract class ApprovalEndpointConformance {
         assertThat(store.decisions).isEmpty()
     }
 
+    @Test
+    fun `listPending carries the pinned roles and authorization action`() {
+        assertSecurity(method("listPending"), listPendingSecurity)
+    }
+
+    @Test
+    fun `decide carries the pinned roles and authorization action`() {
+        assertSecurity(method("decide"), decideSecurity)
+    }
+
+    // Both endpoints are `suspend fun`s, so the compiled signature has a synthetic trailing
+    // Continuation parameter: locate by declared name rather than guessing the erased signature.
+    private fun method(name: String) = resourceClass.declaredMethods.single { it.name == name }
+
+    private fun assertSecurity(method: java.lang.reflect.Method, expected: EndpointSecurity) {
+        val roles = method.getAnnotation(RolesAllowed::class.java)
+        assertThat(roles).describedAs("${method.name}: @RolesAllowed missing").isNotNull
+        assertThat(roles.value.toSet()).describedAs("${method.name}: @RolesAllowed").isEqualTo(expected.roles)
+        // Read by name: libs-testing does not depend on libs-runtime, where @Authorize lives.
+        val found = method.annotations.singleOrNull { it.annotationClass.qualifiedName == AUTHORIZE_FQN }
+        assertThat(found)
+            .describedAs("${method.name}: @Authorize missing - the interceptor then fails OPEN")
+            .isNotNull
+        val authorize = requireNotNull(found)
+        assertThat(attribute(authorize, "action")).describedAs("${method.name}: action").isEqualTo(expected.action)
+        assertThat(attribute(authorize, "resource"))
+            .describedAs("${method.name}: resource")
+            .isEqualTo(expected.resource)
+    }
+
+    private fun attribute(annotation: Annotation, name: String): Any? =
+        annotation.annotationClass.java.getMethod(name).invoke(annotation)
+
+    /** Reads a wire-DTO property by getter, so a service with its own DTO (sca, settlement) conforms too. */
+    private fun property(entity: Any?, name: String): Any? {
+        val target = requireNotNull(entity) { "response entity is null" }
+        val getter = "get" + name.replaceFirstChar { it.uppercase() }
+        return target.javaClass.getMethod(getter).invoke(target)
+    }
+
     private fun pending() = PendingApproval(
         id = PENDING_ID,
-        action = "conformance.action",
+        action = PENDING_ACTION,
         resourceId = "resource-1",
         makerId = MAKER,
         status = ApprovalStatus.PENDING,
-        createdAt = OffsetDateTime.parse("2026-07-13T00:00:00Z"),
+        createdAt = OffsetDateTime.parse(PENDING_CREATED_AT),
     )
 
     /** A [SecurityIdentity] whose every method call is counted in [reads]; only `principal` answers. */
@@ -177,6 +246,12 @@ abstract class ApprovalEndpointConformance {
     private companion object {
         const val PENDING_ID = "appr-pending"
         const val MAKER = "maker"
+        const val PENDING_ACTION = "conformance.action"
+        const val PENDING_CREATED_AT = "2026-07-13T00:00:00Z"
+
+        /** `OffsetDateTime.toString()` of [PENDING_CREATED_AT], which is what the wire DTOs carry. */
+        const val PENDING_CREATED_AT_WIRE = "2026-07-13T00:00Z"
+        const val AUTHORIZE_FQN = "com.openbank.libs.authz.Authorize"
         const val DEFAULT_LIMIT = 50
         const val OVERSIZED_LIMIT = 10_000
 
