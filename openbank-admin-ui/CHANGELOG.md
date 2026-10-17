@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.2...admin-ui-v3.5.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+
+### Bug Fixes
+
+* **admin-ui:** request catalog:read so Product Studio can read the v2 catalog ([#12809](https://github.com/JiRaska/open-bank-oss/issues/12809)) ([1ea8f25](https://github.com/JiRaska/open-bank-oss/commit/1ea8f254a717b91dd301c3d11adede531dd30d19))
+
 ## [3.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.1...admin-ui-v3.4.2) (2026-10-16)
 
 
