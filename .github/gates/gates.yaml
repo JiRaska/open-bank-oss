@@ -4961,6 +4961,27 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  # swift-service and clearing-service served 500 on every four-eyes approvals call for 7 days:
+  # ApprovalConfig produces a Redis-backed ApprovalStore, application.yaml defaults Redis to
+  # localhost, and their Rollouts set no QUARKUS_REDIS_HOSTS. Probes never touch Redis, so pods
+  # stayed Ready. The scope is DERIVED (every src/main ApprovalStore producer), not listed.
+  - id: approvalstore-redis-supplied
+    name: "every ApprovalStore producer is deployed with a non-localhost Redis host (enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      A service producing a Redis-backed ApprovalStore whose gitops workload sets no
+      QUARKUS_REDIS_HOSTS falls back to localhost and answers 500 on every approvals call while
+      its pod reports Ready; the producer set is derived from source so a new service cannot be
+      missed.
+    min_subjects: 9   # 18 producers measured 2026-10-17; half
+    selftest: python3 .github/scripts/check-approvalstore-redis-supplied.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-approvalstore-redis-supplied.py"]
+    run: |
+      python3 .github/scripts/check-approvalstore-redis-supplied.py --root .
+
   # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
   # image, so every scheduler and outbound edge in it is live by default. The switch list is
   # derived from the ledger source; a new scheduler without a switch is red until the instance
