@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exercise the real Gradle guard, including on cold governance CI runners."""
+import errno
 import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -70,7 +73,40 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls._home.cleanup()
+        stop_error = None
+        try:
+            # This fixture class owns this Gradle home. Stop only its reusable daemon;
+            # never run --stop against the runner's normal Gradle home.
+            env = dict(os.environ, GRADLE_USER_HOME=str(cls.gradle_home))
+            result = subprocess.run(
+                [str(ROOT / 'gradlew'), '--stop', '--offline'], cwd=ROOT, env=env,
+                capture_output=True, text=True, timeout=30, check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f'Gradle daemon stop failed ({result.returncode}): {result.stdout}{result.stderr}'
+                )
+        except Exception as error:
+            stop_error = error
+
+        cleanup_error = None
+        for attempt in range(5):
+            try:
+                cls._home.cleanup()
+                break
+            except OSError as error:
+                if error.errno != errno.ENOTEMPTY or attempt == 4:
+                    cleanup_error = error
+                    break
+                time.sleep(0.1 * (attempt + 1))
+        if stop_error is not None and cleanup_error is not None:
+            raise RuntimeError(
+                f'Gradle daemon stop failed ({stop_error}); temporary Gradle home cleanup also failed ({cleanup_error})'
+            ) from stop_error
+        if stop_error is not None:
+            raise RuntimeError(f'Gradle daemon stop failed: {stop_error}') from stop_error
+        if cleanup_error is not None:
+            raise cleanup_error
 
     def run_case(self, version, resolver=False):
         with tempfile.TemporaryDirectory() as directory:
@@ -80,8 +116,6 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
                 "buildscript { repositories { maven { url = uri('repo') } }; "
                 f"dependencies {{ classpath 'org.freemarker:freemarker:{version}' }} }}\n"
             )
-            if resolver:
-                build += "tasks.register('ForceDependencyResolutionPlugin_resolveProjectDependencies')\n"
             (fixture / 'build.gradle').write_text(build)
             artifact = fixture / 'repo/org/freemarker/freemarker' / version
             artifact.mkdir(parents=True)
@@ -91,13 +125,12 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
             )
             with ZipFile(artifact / f'freemarker-{version}.jar', 'w') as jar:
                 jar.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
-            task = ('ForceDependencyResolutionPlugin_resolveProjectDependencies'
+            task = ('OpenBankResolveDependencyGraph'
                     if resolver else 'VerifyBuildscriptFreeMarker')
             env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
-            # A daemon can keep writing into the temporary Gradle home after this
-            # process exits, racing tearDownClass cleanup.
             command = [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                       '--no-daemon', '--offline', task, *(['--dry-run'] if resolver else [])]
+                       '--offline', '-Dorg.gradle.daemon.idletimeout=60000', task,
+                       *(['--dry-run'] if resolver else [])]
             for attempt in range(3):
                 result = subprocess.run(command, env=env, capture_output=True, text=True,
                                         timeout=120, check=False)
@@ -131,7 +164,61 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
         result = self.run_case('2.3.35', resolver=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertLess(result.stdout.index(':VerifyBuildscriptFreeMarker SKIPPED'),
-                        result.stdout.index(':ForceDependencyResolutionPlugin_resolveProjectDependencies SKIPPED'))
+                        result.stdout.index(':OpenBankResolveDependencyGraph SKIPPED'))
+
+
+class GradleHomeCleanupTests(unittest.TestCase):
+    def test_late_daemon_write_is_retried(self):
+        home = mock.Mock()
+        home.cleanup.side_effect = [OSError(errno.ENOTEMPTY, 'Directory not empty'), None]
+        owned_home = Path('/fixture/gradle-home')
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 0, '', '')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', owned_home, create=True), \
+                mock.patch('subprocess.run', return_value=stopped) as run, \
+                mock.patch('time.sleep'):
+            BuildscriptFreeMarkerTests.tearDownClass()
+        self.assertEqual(home.cleanup.call_count, 2)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0], [str(ROOT / 'gradlew'), '--stop', '--offline'])
+        self.assertEqual(kwargs['env']['GRADLE_USER_HOME'], str(owned_home))
+        self.assertEqual(kwargs['cwd'], ROOT)
+
+    def test_daemon_stop_failure_still_cleans_owned_home_and_fails(self):
+        home = mock.Mock()
+        owned_home = Path('/fixture/gradle-home')
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 1, '', 'stop failed')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', owned_home, create=True), \
+                mock.patch('subprocess.run', return_value=stopped) as run:
+            with self.assertRaisesRegex(RuntimeError, 'Gradle daemon stop failed'):
+                BuildscriptFreeMarkerTests.tearDownClass()
+        home.cleanup.assert_called_once()
+        self.assertEqual(run.call_args.kwargs['env']['GRADLE_USER_HOME'], str(owned_home))
+
+    def test_unrelated_cleanup_error_still_fails(self):
+        home = mock.Mock()
+        home.cleanup.side_effect = OSError(errno.EACCES, 'Permission denied')
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 0, '', '')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', Path('/fixture/gradle-home'), create=True), \
+                mock.patch('subprocess.run', return_value=stopped), mock.patch('time.sleep'):
+            with self.assertRaises(OSError) as error:
+                BuildscriptFreeMarkerTests.tearDownClass()
+        self.assertEqual(error.exception.errno, errno.EACCES)
+        home.cleanup.assert_called_once()
+
+    def test_persistent_late_writes_still_fail(self):
+        home = mock.Mock()
+        home.cleanup.side_effect = OSError(errno.ENOTEMPTY, 'Directory not empty')
+        stopped = subprocess.CompletedProcess(['gradlew', '--stop'], 0, '', '')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), \
+                mock.patch.object(BuildscriptFreeMarkerTests, 'gradle_home', Path('/fixture/gradle-home'), create=True), \
+                mock.patch('subprocess.run', return_value=stopped), mock.patch('time.sleep'):
+            with self.assertRaises(OSError) as error:
+                BuildscriptFreeMarkerTests.tearDownClass()
+        self.assertEqual(error.exception.errno, errno.ENOTEMPTY)
+        self.assertEqual(home.cleanup.call_count, 5)
 
 
 # Needs the graph plugin setup-gradle injects; dependency-submission.yml runs it and fails
@@ -162,9 +249,9 @@ class ResolutionGuardTests(unittest.TestCase):
                        DEPENDENCY_GRAPH_COVERAGE_DIR=str(coverage))
             result = subprocess.run(
                 [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                 '--no-daemon', '--no-configuration-cache', '--max-workers=1',
+                 '--no-daemon', '--no-configuration-cache', '--configure-on-demand', '--max-workers=1',
                  '-Dorg.gradle.jvmargs=-Xmx512m',
-                 ':ForceDependencyResolutionPlugin_resolveAllDependencies'],
+                 ':OpenBankResolveDependencyGraph'],
                 env=env, capture_output=True, text=True, timeout=120, check=False)
             receipts = [json.loads(p.read_text()) for p in coverage.glob('*.json')]
             return result, receipts

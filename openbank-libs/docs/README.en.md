@@ -1,6 +1,6 @@
 # openbank-libs — Documentation
 
-> **What it is:** the shared OpenBank library family. `openbank-libs-domain` holds framework-free domain primitives; `openbank-libs-runtime` holds Quarkus adapters and the self-published documentation endpoint. `openbank-libs` is a compatibility umbrella that re-exports both. It is not a running service.
+> **What it is:** the shared OpenBank library family. Domain, runtime, lending and ISO 20022 modules provide reusable code; `openbank-libs` is a compatibility umbrella. It is not a running service.
 
 This directory is bundled into the Admin UI image as a snapshot. Runnable services publish documentation from their own build at `/q/openbank/docs`; authored chapters live in each service's `src/main/resources/docs/`. See the running service's version and commit in its documentation index. The service count is derived from the build catalog, not maintained here.
 
@@ -21,9 +21,12 @@ This directory is bundled into the Admin UI image as a snapshot. Runnable servic
 |---|---|
 | `openbank-libs-domain` | Shared domain values and ports without Quarkus or CDI imports |
 | `openbank-libs-runtime` | Quarkus adapters, web resources, observability and `/q/openbank/docs` |
+| `openbank-libs-lending` | Lending calculations, credit decision policy, origination state and compliance-pack evaluation |
+| `openbank-libs-iso20022` | Typed payment rails and ISO 20022 message builders, readers and validation |
+| `openbank-libs-testing` | Shared conformance and test support; never a runtime dependency |
 | `openbank-libs` | Compatibility umbrella re-exporting domain and runtime |
 
-For a concrete service, the running `/q/openbank/docs` and `/api/v1/info` report the build that is actually deployed. The source code in the two modules above is authoritative for their current packages and APIs.
+For a concrete service, the running `/q/openbank/docs` and `/api/v1/info` report the build that is actually deployed. The Admin UI bundle index reports the Admin UI image commit that supplied this library snapshot. The module source and build files are authoritative for current packages and dependencies.
 
 ## Related documents
 

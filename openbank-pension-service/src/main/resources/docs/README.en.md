@@ -102,6 +102,16 @@ production ownership approval. It uses synthetic data and simulated external col
 It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
 or a fully connected production money path. Those capabilities remain in #12472 and #12479.
 
+## Contract testing (consumer pacts)
+
+The consumer pact test `PensionFundPactConsumerTest` compiles in the isolated
+`consumerPactTest` source set, which by design compiles only `**/*PactConsumerTest.kt`
+plus helpers each service explicitly includes (CI isolation, see the
+`openbank.quarkus-service` convention). Its in-memory fund-order plan backend
+(`InMemoryFundOrderPlans`) therefore must stay listed in the
+`consumerPactTest` include in `build.gradle.kts`; without it,
+`compileConsumerPactTestKotlin` fails with an unresolved reference.
+
 ## Annuity partner wire format
 
 Requests to the reference annuity partner omit absent optional properties and

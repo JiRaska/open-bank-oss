@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write        # POST actions/runs/{id}/cancel and /force-cancel on a stalled run
+      actions: write        # POST actions/runs/{id}/cancel for eligible stale or stalled runs
       issues: write         # gh issue create for each cancellation (fleet-health)
       pull-requests: read   # live PR state before cancelling a PR run
     timeout-minutes: 10
@@ -38,7 +38,8 @@ jobs:
         run: |
           python3 .github/scripts/check-stuck-service-build.py --self-test
           python3 .github/scripts/check-superseded-pr-runs.py --self-test
-      - name: Force-cancel only superseded queued PR runs
+          python3 .github/scripts/test-superseded-run-live-guard.py
+      - name: Cancel only superseded queued PR runs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -59,7 +60,7 @@ jobs:
             run_id=$(jq -r '.runId' <<<"$candidate")
             pr_number=$(jq -r '.pr' <<<"$candidate")
             stale_sha=$(jq -r '.headSha' <<<"$candidate")
-            # Fail closed: an API/read failure aborts before force-cancel. A newly current
+            # Fail closed: an API/read failure aborts before cancellation. A newly current
             # head is retained even if the earlier snapshots called it stale.
             live=$(gh api "repos/${REPO}/pulls/${pr_number}")
             live_state=$(jq -r '.state' <<<"$live")
@@ -68,22 +69,32 @@ jobs:
               echo "retaining run ${run_id}: PR #${pr_number} now points at ${stale_sha}"
               continue
             fi
-            if [ "$DRY_RUN" = true ]; then
-              echo "would force-cancel superseded run ${run_id} for PR #${pr_number} (${stale_sha})"
+            # A queued snapshot can start while the PR is being checked. Retain any
+            # run no longer queued; API errors abort rather than permit cancellation.
+            live_run=$(gh api "repos/${REPO}/actions/runs/${run_id}")
+            if ! jq -e --arg sha "$stale_sha" --argjson id "$run_id" \
+              '.id == $id and .status == "queued" and .head_sha == $sha and .event == "pull_request"' \
+              <<<"$live_run" >/dev/null; then
+              echo "retaining run ${run_id}: live run is no longer the queued candidate"
               continue
             fi
-            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/force-cancel" 2>&1); then
+            if [ "$DRY_RUN" = true ]; then
+              echo "would request cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
+              continue
+            fi
+            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/cancel" 2>&1); then
               # A queued run may finish after the snapshots. That is already the desired
               # terminal state; every other mutation failure remains fatal and visible.
               live_run_status=$(gh api "repos/${REPO}/actions/runs/${run_id}" --jq '.status')
               if [ "$live_run_status" = completed ]; then
-                echo "retaining run ${run_id}: it completed before force-cancel"
+                echo "retaining run ${run_id}: live run is completed"
                 continue
               fi
               echo "$cancel_error" >&2
               exit 1
             fi
-            echo "force-cancelled superseded run ${run_id} for PR #${pr_number} (${stale_sha})"
+            # HTTP 202 acknowledges the request; it does not prove terminal cancellation.
+            echo "requested cancellation of superseded queued run ${run_id} for PR #${pr_number} (${stale_sha})"
           done
       - name: Find and cancel only proved stalled service CI jobs
         env:

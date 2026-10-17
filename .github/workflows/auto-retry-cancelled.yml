@@ -132,7 +132,8 @@ jobs:
   discover:
     name: Find recent runs requiring reconciliation
     runs-on: ubuntu-latest
-    # Room for the rate-limit waits below (3 calls x up to 2 waits of 120s) plus the calls.
+    # Hard ceiling shared by all HTTP retries and whole-snapshot rereads. Sustained
+    # rate limits can exhaust it before three snapshots; timeout remains a failure.
     timeout-minutes: 15
     outputs:
       retry: ${{ steps.select.outputs.retry }}
@@ -201,12 +202,23 @@ jobs:
             rm -rf "$dir"
           }
           for workflow in services-ci.yml security.yml dependency-submission.yml; do
-            gh_retry 3 -- fetch_pages "$workflow" "$created_query" "${RUNNER_TEMP}/${workflow}.pages.json"
-            # The API caps a filtered search at 1,000 runs. An incomplete page set cannot be
-            # treated as "no spot kills"; fail visibly rather than silently drop candidates.
-            python3 .github/scripts/select-ci-reconcile-candidates.py \
-              --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
-              > "${RUNNER_TEMP}/${workflow}.json"
+            # A fixed created range prevents page drift from NEW runs, but GitHub can
+            # index an already-created run between pages and change total_count. Re-read
+            # the entire snapshot, never accept a partial page set as "no spot kills".
+            for snapshot_attempt in 1 2 3; do
+              gh_retry 3 -- fetch_pages "$workflow" "$created_query" "${RUNNER_TEMP}/${workflow}.pages.json"
+              if python3 .github/scripts/select-ci-reconcile-candidates.py \
+                --flatten-pages "${RUNNER_TEMP}/${workflow}.pages.json" \
+                > "${RUNNER_TEMP}/${workflow}.json" 2> "${RUNNER_TEMP}/${workflow}.validation.err"; then
+                break
+              fi
+              cat "${RUNNER_TEMP}/${workflow}.validation.err" >&2
+              if (( snapshot_attempt == 3 )); then
+                echo "::error::${workflow} API snapshot remained incomplete after 3 reads" >&2
+                exit 2
+              fi
+              sleep 2
+            done
           done
           jq -s 'add' "${RUNNER_TEMP}"/*.yml.json > "${RUNNER_TEMP}/runs.json"
           echo "query_elapsed_seconds=$(($(date +%s) - started_at))" >> "$GITHUB_STEP_SUMMARY"
@@ -310,6 +322,7 @@ jobs:
           # at PR time.
           GH_REPO: ${{ github.repository }}
           RETRY_CANDIDATES: ${{ needs.discover.outputs.retry }}
+          RETRY_DECISIONS_FILE: ${{ runner.temp }}/retry-decisions.jsonl
           # Cap on a SINGLE wait inside gh-retry.sh. Kept under the job's timeout-minutes above
           # with room for four of them plus the calls themselves.
           GH_RETRY_MAX_WAIT_SECONDS: "600"
@@ -324,6 +337,9 @@ jobs:
         # and why a rate limit must be told from a permission denial by message text.
         run: |
           set -euo pipefail
+          if ! : > "$RETRY_DECISIONS_FILE"; then
+            echo "::warning::Could not initialize retry decision evidence; retry verdicts remain authoritative."
+          fi
           failed=0
           while IFS=$'\t' read -r run_id run_url conclusion run_event; do
             echo "::group::Classify ${run_url}"
@@ -334,6 +350,15 @@ jobs:
             echo "::endgroup::"
           done < <(jq -r '.[] | [.run_id, .run_url, .conclusion, .event] | @tsv' <<< "${RETRY_CANDIDATES}")
           exit "${failed}"
+
+      - name: Retain retry decisions
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retry-decisions-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retry-decisions.jsonl
+          retention-days: 14
+          if-no-files-found: warn
 
   # ── The alarm (issue #2901) ───────────────────────────────────────────────────
   # Why this exists: this workflow failed 208 times without anyone noticing. It is
@@ -485,7 +510,12 @@ jobs:
         with:
           sparse-checkout: |
             .github/scripts
+            .github/workflows/auto-retry-cancelled.yml
+            .github/workflows/_service-ci.yml
           sparse-checkout-cone-mode: false
+
+      - name: Verify prior-attempt artifact recovery
+        run: python3 .github/scripts/test-rerun-flake-artifact.py
 
       - name: Find genuinely-failed jobs from the attempt this run just recovered from
         id: classify
@@ -494,18 +524,45 @@ jobs:
           PREV_ATTEMPT=$((FINAL_ATTEMPT - 1))
           echo "prev-attempt=${PREV_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
-          gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs' > "${RUNNER_TEMP}/prev-jobs.json"
+          gh api --paginate --slurp \
+            "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
+            > "${RUNNER_TEMP}/prev-job-pages.json"
+          python3 .github/scripts/record-rerun-flake.py flatten-jobs \
+            --pages-file "${RUNNER_TEMP}/prev-job-pages.json" > "${RUNNER_TEMP}/prev-jobs.json"
+
+          # An admission refusal is a policy decision, not a flaky test. Both logs must
+          # prove that narrow case; unreadable logs leave the aggregate failure visible.
+          for pair in \
+            "Detect changed services:changes" \
+            "all-green:all-green" \
+            "Agent PR admission:admission" \
+            "Validate manifests:validate-manifests" \
+            "Admin UI:admin-ui"; do
+            job_name=${pair%:*}
+            log_name=${pair#*:}
+            job_id=$(jq -r --arg name "$job_name" \
+              '[.[] | select(.name == $name) | .id] | if length == 1 then .[0] else empty end' \
+              "${RUNNER_TEMP}/prev-jobs.json")
+            if [ -n "$job_id" ]; then
+              gh api --allow-escape-sequences "repos/${GH_REPO}/actions/jobs/${job_id}/logs" \
+                > "${RUNNER_TEMP}/${log_name}.log" || rm -f "${RUNNER_TEMP}/${log_name}.log"
+            fi
+          done
 
           python3 .github/scripts/record-rerun-flake.py classify \
-            --jobs-file "${RUNNER_TEMP}/prev-jobs.json" > "${RUNNER_TEMP}/candidates.json"
+            --jobs-file "${RUNNER_TEMP}/prev-jobs.json" \
+            --changes-log "${RUNNER_TEMP}/changes.log" \
+            --all-green-log "${RUNNER_TEMP}/all-green.log" \
+            --admission-log "${RUNNER_TEMP}/admission.log" \
+            --validate-manifests-log "${RUNNER_TEMP}/validate-manifests.log" \
+            --admin-ui-log "${RUNNER_TEMP}/admin-ui.log" \
+            > "${RUNNER_TEMP}/candidates.json"
 
           count=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
             "${RUNNER_TEMP}/candidates.json")
           echo "count=${count}" >> "${GITHUB_OUTPUT}"
           if [ "${count}" -eq 0 ]; then
-            echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: every failed job carried the spot-kill "
-            echo "signature (or none failed) -- explained by infrastructure, nothing to record."
+            echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: no unexplained failed jobs to record."
           else
             echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: ${count} job(s) failed for a real reason "
             echo "and the run is now green at attempt ${FINAL_ATTEMPT} -- recording as flake(s)."
@@ -543,20 +600,24 @@ jobs:
             echo "${record}" > "${RUNNER_TEMP}/record-${i}.json"
             service=$(echo "${record}" | jq -r '.service // empty')
 
-            # `-a<PREV_ATTEMPT>` matches the naming #4983 gave the JUnit-XML-only upload; only
-            # Services CI job names resolve to a service (see `extract_service`'s docstring), so
-            # a Security-scan or Dependency-submission job legitimately has no such artifact --
-            # `continue-on-error` there is expected, not a failure of this step.
+            # Match the immutable prior-attempt XML artifact from the selected lane.
+            # Build quality evidence also includes Kover XML, which parse-junit ignores.
+            # Missing/expired evidence retains the job-level flake record.
             tests_file="${RUNNER_TEMP}/tests-${i}.json"
             echo "[]" > "${tests_file}"
             if [ -n "${service}" ]; then
               artifact_dir="${RUNNER_TEMP}/junit-${i}"
-              if gh run download "${RUN_ID}" -n "junit-xml-${service}-a${PREV_ATTEMPT}" \
+              job_name=$(echo "${record}" | jq -r '.job')
+              case "$job_name" in
+                *' (contract)') artifact_name="contract-junit-xml-${service}-a${PREV_ATTEMPT}" ;;
+                *) artifact_name="quality-evidence-${service}-a${PREV_ATTEMPT}" ;;
+              esac
+              if gh run download "${RUN_ID}" -n "$artifact_name" \
                    -D "${artifact_dir}" 2>"${RUNNER_TEMP}/download-${i}.log"; then
                 python3 .github/scripts/record-rerun-flake.py parse-junit \
                   --path "${artifact_dir}" > "${tests_file}"
               else
-                echo "No junit-xml-${service}-a${PREV_ATTEMPT} artifact on ${RUN_URL} (may have expired, or the job failed before producing test output); recording at job level only."
+                echo "No ${artifact_name} artifact on ${RUN_URL} (may have expired, or the job failed before producing test output); recording at job level only."
               fi
             fi
 

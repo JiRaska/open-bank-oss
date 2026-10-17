@@ -236,7 +236,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api --method POST \
+          source .github/scripts/gh-retry.sh
+          # Retry only the already-built snapshot upload, not fleet resolution.
+          GH_RETRY_MAX_WAIT_SECONDS=15 gh_retry 3 -- gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/dependency-graph/snapshots" \
             --input "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/merged.json"
 

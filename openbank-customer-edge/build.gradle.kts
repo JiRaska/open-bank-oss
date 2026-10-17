@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Consumer contracts share this test helper without compiling the full test suite.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt")
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)

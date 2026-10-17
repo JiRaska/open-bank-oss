@@ -16,7 +16,7 @@
 #   currently a manual habit — a `git diff origin/main origin/<branch> -- <file>` somebody
 #   has to think of running. This gate makes it automatic and free: no model and no clone.
 #   The open-PR/file inventory is one paginated GraphQL snapshot rather than one REST call
-#   per PR; blob identities for actual overlaps are fetched in bounded GraphQL batches.
+#   per PR; blob identities for overlaps with the current PR are fetched in bounded GraphQL batches.
 #
 # WHAT IT IS NOT
 #   It is not a conflict detector. Git already reports textual conflicts, and the failures
@@ -48,7 +48,7 @@
 #   neighbouring list entries silently keeps ONE (.release-please-manifest.json went 56 ->
 #   55 entries that way). Those paths are called out separately in the output. The set is
 #   deliberately SHORT and hand-kept: it is a list of external facts about which files are
-#   shared registries, not the gate's scope — the gate reads every overlapping file either
+#   shared registries, not the gate's scope — the gate reads every file overlapping this PR either
 #   way, so a path missing from this list is still reported, just without the louder header.
 #   (repo lore: never let a gate's SCOPE be hand-kept; a hand-kept list of FACTS is fine.)
 #
@@ -164,25 +164,97 @@ query($owner:String!,$name:String!,$after:String) {
 }
 """
 
-FILES_QUERY = """
-query($id:ID!,$after:String) {
-  node(id:$id) {
-    ... on PullRequest {
-      files(first:100,after:$after) { pageInfo { hasNextPage endCursor } nodes { path } }
-    }
-  }
-}
-"""
+FILES_PER_QUERY = 10
 
 
-def _fill_overlap_oids(prs, graphql):
-    """Fetch blob oids only for paths that can affect the overlap verdict."""
+def _graphql_data(response, context):
+    """Reject incomplete GraphQL payloads; partial data can hide an overlapping path."""
+    if not isinstance(response, dict) or response.get("errors"):
+        raise RuntimeError(f"{context} GraphQL request failed or returned partial errors")
+    data = response.get("data")
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{context} GraphQL response has no data object")
+    return data
+
+
+def _file_page(files, context):
+    if not isinstance(files, dict):
+        raise RuntimeError(f"{context} has no files connection")
+    nodes = files.get("nodes")
+    page_info = files.get("pageInfo")
+    if not isinstance(nodes, list) or not isinstance(page_info, dict):
+        raise RuntimeError(f"{context} has an incomplete files page")
+    has_next = page_info.get("hasNextPage")
+    if type(has_next) is not bool:
+        raise RuntimeError(f"{context} has invalid file pagination state")
+    cursor = page_info.get("endCursor")
+    if has_next and (not isinstance(cursor, str) or not cursor):
+        raise RuntimeError(f"{context} has no cursor for its next file page")
+    paths = []
+    for node in nodes:
+        if not isinstance(node, dict) or not isinstance(node.get("path"), str):
+            raise RuntimeError(f"{context} has a file without a path")
+        paths.append(node["path"])
+    return paths, has_next, cursor
+
+
+def _fetch_file_page_batch(batch, graphql):
+    declarations, fields, variables = [], [], {}
+    for index, pending in enumerate(batch):
+        id_key, cursor_key = f"id{index}", f"after{index}"
+        declarations.extend((f"${id_key}:ID!", f"${cursor_key}:String!"))
+        fields.append(
+            f"p{index}:node(id:${id_key}) {{ ... on PullRequest {{ id headRefOid "
+            f"files(first:100,after:${cursor_key}) "
+            "{ pageInfo { hasNextPage endCursor } nodes { path } } } }"
+        )
+        variables[id_key] = pending["id"]
+        variables[cursor_key] = pending["cursor"]
+    query = f"query({','.join(declarations)}) {{ {' '.join(fields)} }}"
+    data = _graphql_data(graphql(query, variables), "file continuation")
+
+    next_pending = []
+    for index, pending in enumerate(batch):
+        node = data.get(f"p{index}")
+        if not isinstance(node, dict):
+            raise RuntimeError(f"file continuation omitted alias p{index}")
+        if node.get("id") != pending["id"]:
+            raise RuntimeError(f"file continuation returned the wrong node for alias p{index}")
+        if node.get("headRefOid") != pending["pr"]["headRefOid"]:
+            raise RuntimeError("pull request head changed during file enumeration")
+        paths, has_next, cursor = _file_page(node.get("files"), f"file continuation p{index}")
+        for path in paths:
+            pending["pr"]["files"].setdefault(path, "")
+        if has_next:
+            if cursor in pending["seen_cursors"]:
+                raise RuntimeError(f"file continuation repeated cursor for alias p{index}")
+            pending["seen_cursors"].add(cursor)
+            next_pending.append({**pending, "cursor": cursor})
+    return next_pending
+
+
+def _fetch_file_pages(pending, graphql):
+    while pending:
+        next_pending = []
+        for offset in range(0, len(pending), FILES_PER_QUERY):
+            next_pending.extend(
+                _fetch_file_page_batch(pending[offset:offset + FILES_PER_QUERY], graphql)
+            )
+        pending = next_pending
+
+
+def _fill_overlap_oids(prs, graphql, focus_pr=None):
+    """Keep all owners of focused shared paths; foreign-only overlaps cannot affect its verdict."""
     owners = {}
     for pr in prs:
         for path in pr["files"]:
             owners.setdefault(path, []).append(pr)
+    focus_paths = None
+    if focus_pr is not None:
+        focus = next((pr for pr in prs if pr["number"] == focus_pr), None)
+        focus_paths = set(focus["files"]) if focus is not None else set()
     targets = [(pr, path) for path, path_prs in owners.items() if len(path_prs) > 1
-               for pr in path_prs]
+               and (focus_paths is None or path in focus_paths) for pr in path_prs]
     for offset in range(0, len(targets), 50):
         batch = targets[offset:offset + 50]
         declarations = ["$owner:String!", "$name:String!"]
@@ -201,26 +273,49 @@ def _fill_overlap_oids(prs, graphql):
             pr["files"][path] = obj.get("oid", "") if isinstance(obj, dict) else ""
 
 
-def fetch_open_prs(graphql=_graphql):
+def fetch_open_prs(graphql=_graphql, *, focus_pr=None):
     """[{number, title, files: {path: blob_sha}}] for every OPEN pull request."""
     owner, name = REPO.split("/", 1)
-    out, after = [], None
+    out, pending, after = [], [], None
+    seen_pr_cursors = set()
     while True:
-        connection = graphql(PR_QUERY, {"owner": owner, "name": name, "after": after})["data"]["repository"]["pullRequests"]
+        data = _graphql_data(
+            graphql(PR_QUERY, {"owner": owner, "name": name, "after": after}),
+            "open pull request inventory",
+        )
+        repository = data.get("repository")
+        connection = repository.get("pullRequests") if isinstance(repository, dict) else None
+        if not isinstance(connection, dict) or not isinstance(connection.get("nodes"), list):
+            raise RuntimeError("open pull request inventory is incomplete")
+        page_info = connection.get("pageInfo")
+        if not isinstance(page_info, dict) or type(page_info.get("hasNextPage")) is not bool:
+            raise RuntimeError("open pull request inventory has invalid pagination state")
         for node in connection["nodes"]:
-            files = node["files"]
-            paths = [item["path"] for item in files["nodes"]]
-            file_after = files["pageInfo"]["endCursor"]
-            while files["pageInfo"]["hasNextPage"]:
-                files = graphql(FILES_QUERY, {"id": node["id"], "after": file_after})["data"]["node"]["files"]
-                paths.extend(item["path"] for item in files["nodes"])
-                file_after = files["pageInfo"]["endCursor"]
-            out.append({"number": node["number"], "title": node.get("title", ""),
-                        "headRefOid": node["headRefOid"], "files": dict.fromkeys(paths, "")})
-        if not connection["pageInfo"]["hasNextPage"]:
+            if not isinstance(node, dict):
+                raise RuntimeError("open pull request inventory contains an invalid node")
+            node_id = node.get("id")
+            head_oid = node.get("headRefOid")
+            if not isinstance(node_id, str) or not node_id or not isinstance(head_oid, str) or not head_oid:
+                raise RuntimeError("open pull request inventory is missing its ID or head SHA")
+            number = node.get("number")
+            if type(number) is not int or number <= 0:
+                raise RuntimeError("open pull request inventory contains an invalid PR number")
+            paths, has_more_files, file_cursor = _file_page(node.get("files"), "initial PR files")
+            pr = {"number": number, "title": node.get("title", ""),
+                  "headRefOid": head_oid, "files": dict.fromkeys(paths, "")}
+            out.append(pr)
+            if has_more_files:
+                pending.append({"pr": pr, "id": node_id, "cursor": file_cursor,
+                                "seen_cursors": {file_cursor}})
+        if not page_info["hasNextPage"]:
             break
-        after = connection["pageInfo"]["endCursor"]
-    _fill_overlap_oids(out, graphql)
+        next_after = page_info.get("endCursor")
+        if not isinstance(next_after, str) or not next_after or next_after in seen_pr_cursors:
+            raise RuntimeError("open pull request inventory repeated or omitted its cursor")
+        seen_pr_cursors.add(next_after)
+        after = next_after
+    _fetch_file_pages(pending, graphql)
+    _fill_overlap_oids(out, graphql, focus_pr)
     return out
 
 
@@ -426,8 +521,8 @@ def self_test():
                                "pageInfo": {"hasNextPage": first, "endCursor": "files-next"},
                                "nodes": [{"path": "shared.txt"}]}}],
             }}}}
-        if "... on PullRequest" in query:
-            return {"data": {"node": {"files": {
+        if "node(id:$id0)" in query:
+            return {"data": {"p0": {"id": "PR10", "headRefOid": "head10", "files": {
                 "pageInfo": {"hasNextPage": False, "endCursor": None},
                 "nodes": [{"path": "only-first.txt"}],
             }}}}
@@ -466,7 +561,7 @@ def main():
         return 0
 
     try:
-        prs = fetch_open_prs()
+        prs = fetch_open_prs(focus_pr=number)
     except RuntimeError as e:
         # NOT a clean verdict. On GitHub a permission-shaped absence is byte-identical to a
         # real one, so the only honest answer is "could not check".

@@ -2,7 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
+import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
 import java.util.zip.ZipFile
+import javax.inject.Inject
+import org.gradle.api.file.FileSystemOperations
 
 // Convention plugin applied by every openbank-*-service (and equivalent modules).
 // Centralises the boilerplate that used to be copy-pasted across 31 build.gradle.kts
@@ -12,7 +16,6 @@ import java.util.zip.ZipFile
 plugins {
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.allopen")
-    id("io.quarkus")
     id("org.cyclonedx.bom")
     id("org.jetbrains.kotlinx.kover")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
@@ -29,6 +32,39 @@ group = "com.openbank"
 // quarkus.application.version at build time, which ServiceInfoResource
 // (/api/v1/info) and the X-API-Version response header report at runtime.
 version = file("version.txt").readText().trim()
+
+// Quarkus captures the application coordinates when its plugin is applied.
+// Set the canonical version first so its model and runner use the same version.
+pluginManager.apply("io.quarkus")
+
+// Model collection appends to mutable workspace descriptors. Sharing a descriptor
+// between launch modes changes the next test model and can execute tests again.
+// Capture established Maven coordinates here and give each model task its own
+// provider before evaluation ends: buildForApp registers afterEvaluate source wiring.
+// Eager task configuration is intentional for that lifecycle boundary.
+tasks.withType<QuarkusApplicationModelTask>().all {
+    projectDescriptor.set(ProjectDescriptorBuilder.buildForApp(project))
+}
+
+abstract class QuarkusPackagingFileOperations {
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+}
+
+// Quarkus 3.38 calls DeleteSpec.delete repeatedly, replacing earlier targets.
+// Its generated staging directory then retains obsolete versioned application JARs.
+// Clear that staging directory before augmentation; keep the cacheable app output
+// and dependency output under Quarkus ownership. This action also changes the task
+// implementation fingerprint, so previously contaminated cache entries are not reused.
+val packagingFileOperations = objects.newInstance<QuarkusPackagingFileOperations>()
+val quarkusGeneratedStaging = layout.buildDirectory.dir("quarkus-build/gen")
+tasks.named("quarkusAppPartsBuild") {
+    doFirst {
+        packagingFileOperations.fileSystemOperations.delete {
+            delete(quarkusGeneratedStaging.get().asFile)
+        }
+    }
+}
 
 // Every service publishes documentation from the same build that produces its JAR.
 // The generated page contains only facts from build inputs. It also supplies an
@@ -92,6 +128,37 @@ val generateServiceDocs by tasks.registering {
             appendLine()
             appendLine("The running build and its Git commit are reported by `/q/openbank/docs` and `/api/v1/info`. The API contract is published at `/q/openapi` where enabled.")
         })
+        if (openapiFile.asFile.isFile) {
+            // Regenerate this index from the committed contract on every build.
+            // Authored chapters explain behaviour; this page cannot drift when
+            // an endpoint is added, removed or renamed in openapi.yaml.
+            val pathLine = Regex("^  (/\\S+):\\s*$")
+            val operationLine = Regex("^    (get|post|put|patch|delete|options|head):\\s*$")
+            var currentPath: String? = null
+            var inPaths = false
+            val operations = mutableListOf<Pair<String, String>>()
+            for (line in openapiFile.asFile.readLines()) {
+                if (line == "paths:") { inPaths = true; continue }
+                if (inPaths && line.isNotBlank() && !line.startsWith(" ") && !line.startsWith("#")) break
+                if (!inPaths) continue
+                pathLine.matchEntire(line)?.let { currentPath = it.groupValues[1] }
+                operationLine.matchEntire(line)?.let { match ->
+                    currentPath?.let { operations += match.groupValues[1].uppercase() to it }
+                }
+            }
+            docs.resolve("00-api-surface.md").writeText(buildString {
+                appendLine("# API surface — $module")
+                appendLine()
+                appendLine("Generated from this build's committed `openapi.yaml` at `$gitCommit`.")
+                appendLine("Contract version: ${apiVersion?.let { "`$it`" } ?: "not declared"}.")
+                appendLine("For request and response schemas, use the full contract at `/q/openapi` where enabled.")
+                appendLine()
+                appendLine("| Method | Path |")
+                appendLine("|---|---|")
+                for ((method, endpoint) in operations) appendLine("| $method | `$endpoint` |")
+                if (operations.isEmpty()) appendLine("| — | No operations declared in the committed contract |")
+            })
+        }
         if (authoredDocs.none { it.name == "README.md" || it.name == "README.en.md" || it.name == "README.cs.md" }) {
             docs.resolve("README.md").writeText(buildString {
                 appendLine("# $module")
@@ -120,6 +187,8 @@ val verifyServiceDocs by tasks.registering {
         check(appJars.size == 1) { "${project.name}: expected one Quarkus application JAR" }
         ZipFile(appJars.single()).use { jar ->
             val facts = jar.getEntry("docs/00-build.md")?.let { jar.getInputStream(it).bufferedReader().readText() }
+            val apiSurface = jar.getEntry("docs/00-api-surface.md")
+                ?.let { jar.getInputStream(it).bufferedReader().readText() }
             val properties = jar.getEntry("openbank-service-build.properties")
                 ?.let { jar.getInputStream(it).bufferedReader().readText() }
             val commit = properties
@@ -127,6 +196,11 @@ val verifyServiceDocs by tasks.registering {
             check(facts != null && facts.contains(project.version.toString())
                 && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()) {
                 "${project.name}: current build facts were not packaged in the Quarkus application JAR"
+            }
+            if (layout.projectDirectory.file("src/main/resources/openapi.yaml").asFile.isFile) {
+                check(apiSurface != null && apiSurface.contains(commit)) {
+                    "${project.name}: current API surface was not packaged in the Quarkus application JAR"
+                }
             }
         }
     }
@@ -280,6 +354,30 @@ tasks.withType<Test>().configureEach {
         "pact.provider.branch",
         "pact.provider.tag",
     ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+}
+
+// Consumer contracts compile independently of the full service test suite.
+// Helpers stay in their existing test paths and are explicitly included by their owners.
+val consumerPactTestSourceSet =
+    sourceSets.create("consumerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*PactConsumerTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath = sourceSets.main.get().output + configurations.testCompileClasspath.get()
+        runtimeClasspath = output + sourceSets.main.get().output + configurations.testRuntimeClasspath.get()
+    }
+kotlin.target.compilations.getByName("consumerPactTest")
+    .associateWith(kotlin.target.compilations.getByName("main"))
+
+tasks.register<Test>("consumerPactTest") {
+    description = "Regenerates consumer Pact contracts without compiling unrelated service tests."
+    group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = consumerPactTestSourceSet.output.classesDirs
+    classpath = consumerPactTestSourceSet.runtimeClasspath
+    filter.includeTestsMatching("*.contract.*PactConsumerTest")
+    // Pact files live outside this task's declared outputs: every invocation must regenerate.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
 }
 
 // ADR-0250 Phase 2 (issue #4414): a Pact provider-verification test needs `-Dpactbroker.url` set

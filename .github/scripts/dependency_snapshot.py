@@ -5,6 +5,8 @@ import re
 from copy import deepcopy
 
 IDENTITY = ('version', 'sha', 'ref', 'job', 'detector')
+# Bound each process while amortizing Gradle startup across more projects.
+PROJECTS_PER_SHARD = 16
 
 def load_snapshot(path):
     def unique(pairs):
@@ -194,32 +196,35 @@ def generate(repo, output, env, extra_arguments=()):
     if env.get('DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS') != excluded:
         raise ValueError('unexpected dependency configuration policy')
     modules = inventory(repo)
-    # Nineteen serial shards can otherwise consume 58 minutes under their
-    # individual caps, while the Actions job ends after 30. Reserve ten minutes
+    # Serial shards can exceed the Actions job budget if each consumes its
+    # individual cap. Reserve ten minutes
     # for setup, validation and submission; never publish a partial graph.
     deadline = time.monotonic() + 20 * 60
     (output / 'inventory.json').write_text(json.dumps(modules, indent=2))
-    expected = [f'shard-{i // 4:02}' for i in range(0, len(modules), 4)]
+    expected = [f'shard-{i // PROJECTS_PER_SHARD:02}' for i in range(0, len(modules), PROJECTS_PER_SHARD)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
                     'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
                     'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
-    for i in range(0, len(modules), 4):
-        shard = output / expected[i // 4]
+    for i in range(0, len(modules), PROJECTS_PER_SHARD):
+        shard = output / expected[i // PROJECTS_PER_SHARD]
         shard.mkdir()
         reports, coverage = shard / 'reports', shard / 'coverage'
         reports.mkdir()
         coverage.mkdir()
-        projects = [':' + module for module in modules[i:i + 4]]
+        projects = [':' + module for module in modules[i:i + PROJECTS_PER_SHARD]]
         if i == 0:
             projects.insert(0, ':')
-        tasks = [p.rstrip(':') + ':ForceDependencyResolutionPlugin_resolveProjectDependencies'
+        tasks = [p.rstrip(':') + ':OpenBankResolveDependencyGraph'
                  for p in projects]
         child_env = dict(env, DEPENDENCY_GRAPH_REPORT_DIR=str(reports),
                          DEPENDENCY_GRAPH_COVERAGE_DIR=str(coverage))
+        # Register our strict resolver before project evaluation so demand
+        # configuration can select it. The graph plugin still captures the
+        # resolved configurations and writes the snapshot after a successful build.
         command = ['./gradlew', '--init-script', str(repo / '.github/scripts/dependency-resolution-strict.init.gradle'),
-                   '--no-daemon', '--no-configuration-cache', '--no-configure-on-demand',
+                   '--no-daemon', '--no-configuration-cache', '--configure-on-demand', '--stacktrace',
                    '--max-workers=2', '-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g',
                    *extra_arguments, *tasks]
         started = time.monotonic()

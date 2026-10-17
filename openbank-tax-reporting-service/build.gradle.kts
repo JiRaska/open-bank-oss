@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Compile the corporate-facts test double used by this module's consumer Pact tests.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/tax/contract/NoCorporateFacts.kt")
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)
@@ -45,4 +50,10 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
     // #12425: consumer pacts for the pension reporting read models, written to pacts/.
     testImplementation(libs.pact.consumer)
+}
+
+// Independent Quarkus boot profiles retain more than the default 512 MiB test heap.
+// The complete real-DB/Kafka suite measured 680 MiB after GC with a 1 GiB cap (#12250).
+tasks.named<Test>("test") {
+    maxHeapSize = "1g"
 }

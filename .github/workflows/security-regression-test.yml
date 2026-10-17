@@ -33,12 +33,13 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: security-regression-test-${{ github.event.pull_request.number }}
+  group: security-regression-test-${{ github.event.pull_request.number }}-${{ github.event.pull_request.state }}
   cancel-in-progress: true
 
 jobs:
   security-regression-test:
     name: security-regression-test
+    if: github.event.pull_request.state == 'open'
     # actions/github-script only — no self-hosted-pool dependency.
     runs-on: ubuntu-latest
     timeout-minutes: 10

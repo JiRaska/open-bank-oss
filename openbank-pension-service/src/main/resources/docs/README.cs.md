@@ -99,6 +99,15 @@ schválení vlastnictví dat. Používá syntetická data a simulované externí
 izolaci současně běžících nasazení se skutečnými OIDC/OPA tokeny, skutečné vypořádání plateb
 ani kompletně propojený produkční tok peněz. Tyto schopnosti zůstávají v #12472 a #12479.
 
+## Contract testing (consumer pacts)
+
+Consumer pact test `PensionFundPactConsumerTest` se kompiluje v izolovaném source setu
+`consumerPactTest`, který záměrně kompiluje pouze `**/*PactConsumerTest.kt` plus helpery,
+které jednotlivé služby explicitně zahrnou (izolace v CI, viz konvence
+`openbank.quarkus-service`). Jeho in-memory backend fondových pokynů
+(`InMemoryFundOrderPlans`) proto musí zůstat uvedený v include `consumerPactTest` v
+`build.gradle.kts`; bez něj `compileConsumerPactTestKotlin` selže s unresolved reference.
+
 ## Formát komunikace s partnerem pro renty
 
 Požadavky referenčnímu partnerovi vynechávají nepřítomné volitelné vlastnosti

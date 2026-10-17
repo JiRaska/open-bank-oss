@@ -46,7 +46,7 @@ import javax.sql.DataSource
  *
  * This class carries class-level `@TestSecurity`, which authenticates every request it makes.
  * That is correct for the roster/thread/status interactions, but would silently turn the
- * adversarial 401 interaction green. [CaseCoordinatorUnauthorizedPactVerificationTest] replays
+ * adversarial 401 interaction green. [CaseCoordinatorUnauthorizedProviderVerificationTest] replays
  * interactions whose provider state is [NEGATIVE_AUTH_STATE] with no `@TestSecurity`, so the
  * request arrives anonymous and the secured endpoint answers 401 as the consumer encoded.
  * pact-jvm 4.7.3 matches provider-state filters with `String.matches` (full-match Java regex), so

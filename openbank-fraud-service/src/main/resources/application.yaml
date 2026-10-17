@@ -184,6 +184,9 @@ mp:
         transaction-signal:
           connector: smallrye-kafka
           enabled: false
+      outgoing:
+        fraud-outbox-out:
+          enabled: false
   openbank:
     outbox:
       dispatch-enabled: false

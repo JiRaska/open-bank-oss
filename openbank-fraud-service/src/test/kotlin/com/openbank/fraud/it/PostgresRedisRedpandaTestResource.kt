@@ -86,6 +86,7 @@ class PostgresRedisRedpandaTestResource : QuarkusTestResourceLifecycleManager {
             "kafka.bootstrap.servers" to rp.bootstrapServers,
             "mp.messaging.connector.smallrye-kafka.bootstrap.servers" to rp.bootstrapServers,
             "mp.messaging.incoming.transaction-signal.enabled" to "true",
+            "mp.messaging.outgoing.fraud-outbox-out.enabled" to "true",
             "mp.messaging.incoming.transaction-signal.connector" to "smallrye-kafka",
             // Set here (a genuine runtime property source, not YAML) rather than in
             // application.yaml, for the same reason production sets them via env vars: SmallRye

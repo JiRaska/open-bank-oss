@@ -13,7 +13,7 @@ SPEC.loader.exec_module(MODULE)
 
 
 def group(name: str) -> list[str]:
-    return [f":{name}:test", "--rerun", "--tests", "*.contract.*PactConsumerTest"]
+    return [f":{name}:consumerPactTest", "--rerun", "--tests", "*.contract.*PactConsumerTest"]
 
 
 class ShardPactGradleArgsTest(unittest.TestCase):
@@ -28,6 +28,11 @@ class ShardPactGradleArgsTest(unittest.TestCase):
     def test_rejects_incomplete_or_unexpected_scope(self) -> None:
         for malformed in ([], group("x")[:-1], [*group("x"), *group("x")]):
             with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                MODULE.shard_args(malformed, 0, 4)
+        for wrong_task in (":x:test", ":x:providerPactTest", ":x:consumerPactTestTypo"):
+            malformed = group("x")
+            malformed[0] = wrong_task
+            with self.subTest(task=wrong_task), self.assertRaises(ValueError):
                 MODULE.shard_args(malformed, 0, 4)
         malformed = group("x")
         malformed[1] = "--rerun-tasks"

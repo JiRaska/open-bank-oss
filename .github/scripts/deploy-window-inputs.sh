@@ -13,15 +13,17 @@ set -euo pipefail
 out="${1:?usage: deploy-window-inputs.sh <outdir>}"
 repo="${GITHUB_REPOSITORY:?}"
 mkdir -p "$out"
-gh api "repos/${repo}/commits?sha=main&per_page=50" \
+selected_main=$(gh api "repos/${repo}/git/ref/heads/main" --jq .object.sha)
+printf '%s\n' "$selected_main" > "$out/main.sha"
+gh api "repos/${repo}/commits?sha=${selected_main}&per_page=50" \
   --jq '[.[] | {message: .commit.message, epoch: (.commit.committer.date | fromdateiso8601)}]' \
   > "$out/commits.json"
 gh pr list --repo "$repo" --state open --limit 200 \
-  --json number,headRefName,createdAt,autoMergeRequest,isCrossRepository,isDraft,labels \
+  --json number,headRefName,headRefOid,createdAt,autoMergeRequest,isCrossRepository,isDraft,labels \
   --jq '[.[] | select(.isCrossRepository | not) | select(.isDraft | not)
              | select([.labels[].name] | index("blocked") | not)
              | select(.headRefName | startswith("chore/gitops-auto-deploy-") or startswith("chore/admin-ui-deploy-"))
-             | {number, head: .headRefName, created_at: .createdAt, armed: (.autoMergeRequest != null)}]' \
+             | {number, head: .headRefName, head_sha: .headRefOid, created_at: .createdAt, armed: (.autoMergeRequest != null)}]' \
   > "$out/prs.json"
 jq -e 'type == "array"' "$out/commits.json" "$out/prs.json" >/dev/null
 echo "deploy-window inputs: $(jq length "$out/commits.json") commits, $(jq length "$out/prs.json") open deploy PR(s), $(jq '[.[]|select(.armed)]|length' "$out/prs.json") armed"

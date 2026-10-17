@@ -55,6 +55,9 @@ ARTIFACT_RE = re.compile(r'<artifact name="([^"]*)"')
 # is exactly how the prod-side gap in #3017 stayed invisible; quarkusDependenciesBuild
 # resolves the Quarkus application model (prod runtime classpath + platform BOMs)
 # without the cost of a full quarkusBuild — see #3199.
+# CycloneDX also resolves effective Maven models and parent/import POMs that
+# neither graph above traverses. tasks_for adds its task only where that plugin
+# is applied; otherwise an unrelated library would fail with an unknown task.
 TASKS = ("testClasses", "quarkusDependenciesBuild")
 
 # `quarkusDependenciesBuild` only exists on modules applying the `openbank.quarkus-service`
@@ -77,7 +80,11 @@ TASKS = ("testClasses", "quarkusDependenciesBuild")
 # the convention plugin — then misclassified analytics-sink the other way, which would
 # have silently stopped checking its prod graph rather than failing loudly.
 QUARKUS_PLUGIN_RE = re.compile(
-    r'^\s*(?:id\("openbank\.quarkus-service"\)|alias\(libs\.plugins\.quarkus\))', re.M)
+    r'^\s*(?:plugins\s*\{\s*)?(?:id\("openbank\.quarkus-service"\)|'
+    r'alias\(libs\.plugins\.quarkus\))', re.M)
+SBOM_PLUGIN_RE = re.compile(
+    r'^\s*(?:plugins\s*\{\s*)?(?:id\("openbank\.quarkus-service"\)|'
+    r'id\("org\.cyclonedx\.bom"\)|alias\(libs\.plugins\.cyclonedx\))', re.M)
 
 
 def tasks_for(module: str) -> tuple[str, ...]:
@@ -86,8 +93,14 @@ def tasks_for(module: str) -> tuple[str, ...]:
         text = build_file.read_text(encoding="utf-8")
     except OSError:
         return ("testClasses",)
-    code = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("//"))
-    return TASKS if QUARKUS_PLUGIN_RE.search(code) else ("testClasses",)
+    # Ignore both Kotlin comment forms before matching plugin declarations. Preserve
+    # newlines so the anchored patterns still operate on complete source lines.
+    code = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group().count("\n"), text, flags=re.S)
+    code = "\n".join(l.split("//", 1)[0] for l in code.split("\n"))
+    tasks = list(TASKS if QUARKUS_PLUGIN_RE.search(code) else ("testClasses",))
+    if SBOM_PLUGIN_RE.search(code):
+        tasks.append("cyclonedxBom")
+    return tuple(tasks)
 
 
 def artifact_set(path: pathlib.Path) -> set[str]:
@@ -167,7 +180,7 @@ def regenerate(modules: list[str]) -> None:
         env = dict(os.environ)
         env["GRADLE_OPTS"] = GRADLE_LAUNCHER_OPTS
         result = subprocess.run(
-            ["./gradlew", "--write-verification-metadata", "sha256",
+            ["./gradlew", "--configure-on-demand", "--write-verification-metadata", "sha256",
              # Without this the check is vacuous on CI. A warm Gradle cache does not
              # re-resolve metadata artifacts, so nothing gets re-hashed and the run
              # reports "no gaps" even when an entry is demonstrably missing — measured:
@@ -250,15 +263,42 @@ def selftest() -> int:
         previous_cwd = os.getcwd()
         os.chdir(tmp)
         try:
-            # (3) tasks_for: both plugin-application shapes get the full task pair.
+            # (3) The task graph must follow plugins actually applied. The service
+            # convention adds CycloneDX transitively; one service applies it directly
+            # through the version catalog instead.
             conv = tmp / "openbank-conv"; conv.mkdir()
             (conv / "build.gradle.kts").write_text('plugins {\n    id("openbank.quarkus-service")\n}\n')
-            check("convention plugin -> both graphs",
-                  tasks_for("openbank-conv") == TASKS)
+            check("convention plugin -> both graphs and SBOM",
+                  tasks_for("openbank-conv") == (*TASKS, "cyclonedxBom"))
+            inline_conv = tmp / "openbank-inline-conv"; inline_conv.mkdir()
+            (inline_conv / "build.gradle.kts").write_text(
+                'plugins { id("openbank.quarkus-service") }\n')
+            check("inline convention plugin -> both graphs and SBOM",
+                  tasks_for("openbank-inline-conv") == (*TASKS, "cyclonedxBom"))
             aliased = tmp / "openbank-alias"; aliased.mkdir()
             (aliased / "build.gradle.kts").write_text('plugins {\n    alias(libs.plugins.quarkus)\n}\n')
             check("alias(libs.plugins.quarkus) -> both graphs",
                   tasks_for("openbank-alias") == TASKS)
+            direct_sbom = tmp / "openbank-direct-sbom"; direct_sbom.mkdir()
+            (direct_sbom / "build.gradle.kts").write_text(
+                'plugins {\n    id("org.cyclonedx.bom")\n}\n')
+            check("direct CycloneDX plugin -> SBOM only",
+                  tasks_for("openbank-direct-sbom") == ("testClasses", "cyclonedxBom"))
+            inline_direct_sbom = tmp / "openbank-inline-direct-sbom"; inline_direct_sbom.mkdir()
+            (inline_direct_sbom / "build.gradle.kts").write_text(
+                'plugins { id("org.cyclonedx.bom") }\n')
+            check("inline direct CycloneDX plugin -> SBOM only",
+                  tasks_for("openbank-inline-direct-sbom") == ("testClasses", "cyclonedxBom"))
+            alias_sbom = tmp / "openbank-alias-sbom"; alias_sbom.mkdir()
+            (alias_sbom / "build.gradle.kts").write_text(
+                'plugins {\n    alias(libs.plugins.cyclonedx)\n}\n')
+            check("CycloneDX plugin alias -> SBOM only",
+                  tasks_for("openbank-alias-sbom") == ("testClasses", "cyclonedxBom"))
+            inline_alias_sbom = tmp / "openbank-inline-alias-sbom"; inline_alias_sbom.mkdir()
+            (inline_alias_sbom / "build.gradle.kts").write_text(
+                'plugins { alias(libs.plugins.cyclonedx) }\n')
+            check("inline CycloneDX plugin alias -> SBOM only",
+                  tasks_for("openbank-inline-alias-sbom") == ("testClasses", "cyclonedxBom"))
 
             # (4) The comment trap: a build file that only TALKS about the plugin must
             # not get quarkusDependenciesBuild — this exact prose once classified a
@@ -269,12 +309,23 @@ def selftest() -> int:
                 'plugins {\n    kotlin("jvm") version "2.3.20"\n}\n')
             check("comment-only mention -> testClasses only",
                   tasks_for("openbank-talker") == ("testClasses",))
+            block_talker = tmp / "openbank-block-talker"; block_talker.mkdir()
+            (block_talker / "build.gradle.kts").write_text(
+                '/*\n    id("org.cyclonedx.bom")\n*/\n'
+                'plugins {\n    kotlin("jvm") version "2.3.20"\n}\n')
+            check("block-comment-only CycloneDX mention -> testClasses only",
+                  tasks_for("openbank-block-talker") == ("testClasses",))
 
             # (5) Neither plugin -> testClasses only; missing build file -> same, no crash.
             plain = tmp / "openbank-plain"; plain.mkdir()
             (plain / "build.gradle.kts").write_text('plugins {\n    kotlin("jvm") version "2.3.20"\n}\n')
             check("no Quarkus plugin -> testClasses only",
                   tasks_for("openbank-plain") == ("testClasses",))
+            library = tmp / "openbank-library"; library.mkdir()
+            (library / "build.gradle.kts").write_text(
+                'plugins {\n    id("org.cyclonedx.bom")\n}\n')
+            check("library with CycloneDX -> testClasses and SBOM, no Quarkus graph",
+                  tasks_for("openbank-library") == ("testClasses", "cyclonedxBom"))
             check("missing build file -> testClasses only",
                   tasks_for("openbank-does-not-exist") == ("testClasses",))
         finally:
@@ -283,7 +334,7 @@ def selftest() -> int:
     if failures:
         print(f"selftest FAILED ({failures} case(s))")
         return 1
-    print("selftest OK — parser, verdict algebra, and both plugin shapes proven both ways.")
+    print("selftest OK — parser, verdict algebra, and plugin-scoped build/SBOM graphs proven both ways.")
     return 0
 
 

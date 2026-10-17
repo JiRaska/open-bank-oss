@@ -1188,6 +1188,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install deploy-hold parser
         run: |
@@ -1216,6 +1217,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
@@ -1225,9 +1227,9 @@ jobs:
           # and therefore NO workflow run at all. Not skipped, absent. It renders as "waiting",
           # never as broken, and the image is never deployed.
           #
-          # Safe because the rewrite is deterministic — pin each image: to the tag just built —
-          # so recomputing against a newer main is always correct.
-          git fetch --depth=100 origin main
+          # Reconciliation preserves concurrently advanced pins when the complete source
+          # trees differ only in GitOps image pins; manual rebuilds retain their intent.
+          git fetch origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           # Read the hold from the newly fetched main, before assembling a bot PR.
@@ -1280,6 +1282,17 @@ jobs:
               old_tag="$(grep -oE "${image}:sandbox-[A-Za-z0-9._-]+" "$f" | head -1 | cut -d: -f2 || true)"
               if [ "$old_tag" = "$tag" ]; then
                 echo "  [${svc}] already at ${tag} in ${f}"
+                continue
+              fi
+              initial_tag="$old_tag"
+              if [ "$GITHUB_EVENT_NAME" = "schedule" ] || { [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_RECONCILE" = "true" ]; }; then
+                initial_tag="$(git show "${GITHUB_SHA}:${f}" | grep -oE "${image}:sandbox-[A-Za-z0-9._-]+" | head -1 | cut -d: -f2)"
+              fi
+              publication="$(python3 .github/scripts/deploy-publication-race.py \
+                --event "$GITHUB_EVENT_NAME" --reconcile "$INPUT_RECONCILE" \
+                --initial "$initial_tag" --current "$old_tag" --candidate "$tag" --source "$GITHUB_SHA")"
+              if [ "$publication" = "preserve" ]; then
+                echo "  [${svc}] concurrent main pin already covers these sources — preserving ${old_tag}"
                 continue
               fi
               sed -i.bak "s|${image}:sandbox-[A-Za-z0-9._-]*|${image}:${tag}|g" "$f"

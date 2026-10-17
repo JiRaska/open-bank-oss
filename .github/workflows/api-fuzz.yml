@@ -189,6 +189,12 @@ jobs:
             -r .github/workflows/requirements/schemathesis.txt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Shared tool regression: run once in the existing first selected shard, using
+      # its installed locked package, rather than repeat it for every service.
+      - name: Verify Schemathesis response isolation
+        if: matrix.service == fromJSON(needs.prepare.outputs.services)[0]
+        run: python3 .github/scripts/fuzz_tests/test_fuzz_response_isolation.py
+
       - name: Fuzz services
         run: .github/scripts/fuzz-services.sh
 

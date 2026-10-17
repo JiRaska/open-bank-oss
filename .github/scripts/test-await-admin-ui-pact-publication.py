@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Negative and positive proofs for exact-main Pact publication ordering."""
 
+import ast
 import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import tempfile
 import textwrap
 import unittest
+from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("waiter", Path(__file__).with_name("await-admin-ui-pact-publication.py"))
 waiter = importlib.util.module_from_spec(spec)
@@ -23,6 +24,36 @@ SHA = "a" * 40
 def run(*, sha=SHA, status="completed", conclusion="success"):
     return {"id": 123, "head_sha": sha, "event": "push", "status": status,
             "conclusion": conclusion}
+
+
+def evaluate_github_expression(expression, context):
+    """Evaluate the side-effect-free expression subset used by the build job."""
+    expression = re.sub(r"needs\.([a-z][a-z-]*-[a-z][a-z-]*)\.", r'needs["\1"].', expression)
+    tree = ast.parse(expression.replace("&&", " and ").replace("||", " or "), mode="eval")
+
+    def value(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            return context[node.id]
+        if isinstance(node, ast.Attribute):
+            return value(node.value)[node.attr]
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+            return value(node.value)[node.slice.value]
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "always":
+            if node.args or node.keywords:
+                raise AssertionError("unexpected arguments to always()")
+            return True
+        if isinstance(node, ast.BoolOp):
+            values = [value(child) for child in node.values]
+            return all(values) if isinstance(node.op, ast.And) else any(values)
+        if isinstance(node, ast.Compare) and len(node.ops) == len(node.comparators) == 1:
+            left, right = value(node.left), value(node.comparators[0])
+            if isinstance(node.ops[0], ast.Eq):
+                return left == right
+        raise AssertionError(f"unsupported GitHub expression node: {ast.dump(node)}")
+
+    return bool(value(tree.body))
 
 
 class PublicationWaitTest(unittest.TestCase):
@@ -84,11 +115,36 @@ class PublicationWaitTest(unittest.TestCase):
         self.assertIn("admin-ui-pact-changed == 'true'", wait)
         self.assertIn("python3 .github/scripts/await-admin-ui-pact-publication.py", wait)
         self.assertIn("needs: [changes, publication-ready]", build)
+        build_condition = re.search(r"(?m)^    if: (.+)$", build)
+        self.assertIsNotNone(build_condition)
+        condition = build_condition.group(1)
+        for changes_result, selected, publication_result, expected in [
+            ("success", "true", "success", True),
+            ("success", "true", "skipped", True),
+            ("success", "true", "failure", False),
+            ("success", "true", "cancelled", False),
+            ("failure", "true", "skipped", False),
+            ("cancelled", "true", "success", False),
+            ("skipped", "true", "skipped", False),
+            ("success", "false", "skipped", False),
+        ]:
+            context = {"needs": {
+                "changes": {"result": changes_result, "outputs": {"any": selected}},
+                "publication-ready": {"result": publication_result},
+            }}
+            with self.subTest(changes_result=changes_result, selected=selected,
+                              publication_result=publication_result):
+                self.assertEqual(evaluate_github_expression(condition, context), expected)
         self.assertIn("needs.publication-ready.result == 'success'", build)
         self.assertIn("needs.publication-ready.result == 'skipped'", build)
         self.assertIn("github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''", build)
         self.assertIn("github.event_name == 'push' || github.event_name == 'workflow_dispatch'", build)
-        self.assertIn("needs: [changes, publication-ready, build, verification-metadata]", all_green)
+        aggregate_needs = re.search(r"(?m)^    needs: \[([^\]\n]+)\]$", all_green)
+        self.assertIsNotNone(aggregate_needs)
+        prerequisites = {name.strip() for name in aggregate_needs.group(1).split(",")}
+        self.assertTrue({"changes", "publication-ready", "build", "verification-metadata",
+                         "deploy-source-freshness"}
+                        <= prerequisites, prerequisites)
         self.assertIn('needs.publication-ready.result }}" != "success"', all_green)
         self.assertNotIn("verify-admin-ui-providers:", pact)
         self.assertIn("needs: drift-check", job(pact, "publish-admin-ui"))
@@ -139,6 +195,7 @@ class PublicationWaitTest(unittest.TestCase):
         treasury = "build (openbank-treasury-service) / openbank-treasury-service (build)"
         for verdicts, expected_success in [
             ([(account, "success"), (treasury, "success")], True),
+            ([], False),
             ([(account, "success"), (treasury, "cancelled")], False),
             ([(account, "success")], False),
             ([(account, "success"), (treasury, "success"), (treasury, "success")], False),
@@ -152,7 +209,30 @@ class PublicationWaitTest(unittest.TestCase):
                 result = subprocess.run(["python3", "-c", python.group(1)], env=env,
                                         capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode == 0, expected_success, result.stderr)
-
+    def test_required_service_aggregate_rejects_failed_detection_with_skipped_build(self):
+        services = (Path(__file__).parents[1] / "workflows" / "services-ci.yml").read_text()
+        match = re.search(
+            r"(?ms)^      - name: Verify no service failed\n        run: \|\n(.*?)(?=^      - name:|^  [a-z][a-z-]*:|\Z)",
+            services,
+        )
+        self.assertIsNotNone(match)
+        script = textwrap.dedent(match.group(1))
+        values = {
+            "needs.changes.result": "failure",
+            "needs.build.result": "skipped",
+            "needs.changes.outputs.admission": "true",
+            "needs.changes.outputs.admin-ui-pact-changed": "false",
+            "needs.changes.outputs.verification-modules": "",
+            "needs.publication-ready.result": "skipped",
+            "needs.verification-metadata.result": "skipped",
+        }
+        for key, value in values.items():
+            script = script.replace("${{ " + key + " }}", value)
+        self.assertNotIn("${{", script)
+        result = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", script], capture_output=True, text=True, check=False
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
 
 if __name__ == "__main__":
     unittest.main()

@@ -6565,6 +6565,21 @@ gates:
     run: |
       python3 .github/scripts/check-cronjob-max-success-age.py
 
+  - id: native-auto-merge-holds
+    name: "native auto-merge respects live draft and blocked holds"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      Arming auto-merge while a PR is draft, blocked, or has malformed readiness data can leave
+      it poised to merge later without a fresh intentional check; these fixtures keep each
+      arming workflow fail-closed on current PR readiness.
+    review_after: "2027-04-16"
+    budget_seconds: 30
+    min_subjects: 3
+    selftest_exempt: "is-a-test-suite - executes trusted verifier and actual workflow arming blocks against offline GitHub fixtures"
+    run: |
+      python3 .github/scripts/test-verify-dependabot-auto-merge.py
+
   # Phase 2 of the verified service_account flag. The rego that reads it treats a principal
   # WITHOUT the field as a machine for staff rules, so it must not reach the cluster while any
   # libs-runtime consumer still runs an image built before phase 1, which sends the field. This

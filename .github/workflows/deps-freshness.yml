@@ -25,6 +25,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: dependency-freshness-report
+  cancel-in-progress: false
+
 jobs:
   freshness:
     name: dependency freshness score
@@ -38,7 +42,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Script self-test (offline — proves the scoring logic can still fail)
-        run: python3 .github/scripts/deps-freshness.py --self-test
+        run: |
+          python3 .github/scripts/deps-freshness.py --self-test
+          python3 .github/scripts/select-deps-freshness-issue.py --self-test
 
       - name: Compute freshness
         run: |
@@ -57,11 +63,14 @@ jobs:
           retention-days: 90
 
       - name: Update the standing report issue
+        if: ${{ github.event_name == 'schedule' || inputs.limit == 0 }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          ISSUE=$(gh issue list --label deps-freshness --state open --limit 1 --json number --jq '.[0].number' || true)
+          # The label also appears on dependency work items. Never edit one by accident.
+          ISSUE=$(gh issue list --label deps-freshness --state open --limit 1000 \
+            --json number,title | python3 .github/scripts/select-deps-freshness-issue.py)
           if [ -n "$ISSUE" ]; then
             gh issue edit "$ISSUE" --body-file freshness.md
             echo "updated standing issue #$ISSUE"

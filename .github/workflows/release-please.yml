@@ -263,12 +263,19 @@ jobs:
         with:
           github-token: ${{ steps.app_token.outputs.token }}
           script: |
-            const { data: prs } = await github.rest.pulls.list({
+            const prs = await github.paginate(github.rest.pulls.list, {
               owner: context.repo.owner, repo: context.repo.repo, state: 'open', per_page: 100,
             });
-            const releasePrs = prs.filter(p =>
-              p.labels.some(l => l.name === 'autorelease: pending') ||
-              p.title.startsWith('chore(main): release'));
+            const isRelease = p => Array.isArray(p.labels) &&
+              (p.labels.some(l => l?.name === 'autorelease: pending') ||
+               p.title?.startsWith('chore(main): release'));
+            const ready = p => p.state === 'open' && p.draft === false &&
+              typeof p.head?.sha === 'string' && /^[0-9a-f]{40}$/.test(p.head.sha) &&
+              typeof p.node_id === 'string' && p.node_id.length > 0 &&
+              Array.isArray(p.labels) && p.labels.every(l =>
+                typeof l?.name === 'string' && l.name.trim().length > 0 &&
+                l.name.toLowerCase() !== 'blocked');
+            const releasePrs = prs.filter(p => isRelease(p) && ready(p));
             const mutation = `mutation($id: ID!) {
               enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
                 pullRequest { number }
@@ -276,7 +283,15 @@ jobs:
             }`;
             for (const pr of releasePrs) {
               try {
-                await github.graphql(mutation, { id: pr.node_id });
+                // Selection may predate an owner's hold. Re-read immediately before arming.
+                const { data: live } = await github.rest.pulls.get({
+                  owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
+                });
+                if (!ready(live) || !isRelease(live) || live.head?.sha !== pr.head?.sha) {
+                  core.info(`#${pr.number}: held, changed, or no longer a release PR — not arming`);
+                  continue;
+                }
+                await github.graphql(mutation, { id: live.node_id });
                 core.info(`auto-merge enabled on #${pr.number} (${pr.title})`);
               } catch (e) {
                 core.info(`#${pr.number}: ${e.message}`);  // already merging / mergeable-unknown / checks pending

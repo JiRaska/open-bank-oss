@@ -226,3 +226,5 @@ if [ "$(jq -c . <<< "$GOT2")" != "[]" ]; then
 fi
 
 echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, loop-stability"
+
+python3 "${SCRIPT_DIR}/test-deploy-publication-race.py"

@@ -25,7 +25,9 @@ import { findService } from './fleet'
 import { serviceBaseUrl, k8sNameOf, type ServiceEntry } from './registry'
 import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
 
-const FETCH_TIMEOUT_MS = 2000
+// A fleet-wide overview probes many pods concurrently; 2s produced false
+// "documentation unavailable" cards during normal JVM scheduling delays.
+const FETCH_TIMEOUT_MS = 8000
 const DEFAULT_LANG = 'en'
 const FALLBACK_CHAIN = ['en', 'cs']
 
@@ -141,6 +143,10 @@ async function indexFromBundle(serviceDir: string, requestedLang: string): Promi
       .sort()
     return {
       service: serviceDir,
+      // The bundle is copied into this exact Admin UI image at build time.
+      // Expose its provenance just as live services expose their own commit.
+      gitCommit: process.env.BUILD_GIT_SHA,
+      buildTime: process.env.BUILD_DATE,
       source: 'bundle',
       requestedLang,
       availableLanguages,

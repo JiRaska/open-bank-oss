@@ -120,6 +120,32 @@ This mirrors the exact checks the CI gates enforce (ADR-0029). Run this before o
 Docker) is the earliest point where CDI failures surface. Add it to your pre-push routine when
 modifying producers, interceptors, or `@ApplicationScoped` beans.
 
+### Scope integration-test infrastructure
+
+`ResourceArg(name = "db", value = ...)` names a database; it does not limit the
+resource to that test. For a resource owned by one test class, use
+`restrictToAnnotatedClass = true` on its `@QuarkusTestResource` annotation. Check
+inherited tests and profile resources first. Keep resources shared by several tests
+grouped, including their messaging and TLS setup.
+
+Resources also contribute configuration overrides, even when they start no
+container. Keep overrides within the tests that need them; inspect other tests
+for undeclared dependencies before narrowing their scope. If two resource
+implementations use equivalent images, lifecycle and configuration, reuse the
+existing shared implementation and preserve its evidence recording. Count every
+container type: a new boot group can save one service while restarting another.
+
+Verify the complete module test suite before and after changing resource scope.
+Compare every test outcome, preserving repeated parameterized cases, and count
+physical container starts from verbose logs. Fewer starts alone do not prove lower
+CI wall time. Then run the module build for lint, coverage and CDI validation.
+
+Resource isolation can change Quarkus restart boundaries. If a test passes alone
+but fails in the complete suite, investigate the application lifecycle before
+changing assertions. A dedicated empty test profile can separate boot contexts;
+verify the complete suite and its memory use before adopting it. Set any measured
+test heap requirement on that module's test task, keeping runtime settings separate.
+
 ### Run admin-ui locally
 
 ```bash
@@ -167,6 +193,13 @@ starts the required containers automatically:
   interrupted.
 - **`fun foo() = runBlocking { }` drops tests silently.** JUnit 5 requires `void`-returning test
   methods. Always write `fun foo(): Unit = runBlocking { }` or use the Kotlin coroutine test runner.
+
+- **A matched diagnostic can fail under `pipefail`.** In `printf '%s' "$output" | grep -q ...`,
+  grep exits after the match; a producer still writing a large report can receive SIGPIPE,
+  making the pipeline return 141 and selecting the no-match branch. For literal text, use
+  `[[ "$output" == *"literal"* ]]`; for line-oriented regexes, use `grep -qE 'pattern' <<< "$output"`.
+  Preserve the matching vocabulary and verdict policy. Regression fixtures must include large
+  synthetic matching and nonmatching output; short fixtures cannot expose this defect.
 
 ## Workflow
 

@@ -127,6 +127,7 @@ jobs:
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
+          python3 .github/scripts/test-service-ci-path-selection.py
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
@@ -156,22 +157,8 @@ jobs:
               echo "Decision: push changed only inert paths (release/docs/admin-ui/infra/external workflows) -> build nothing."
               CHANGED=""
             else
-              # Scope the main-push build instead of always full-fleeting (#1208/#2039). Full-fleet
-              # on ANY build-relevant change is ~30 jobs and, on the 6-runner pool, wedges the queue
-              # for hours (a merged contract fix sits unverified behind it — the #1348 drain, #945).
-              # The safe direction is still over-build: the moment a changed path is NOT cleanly
-              # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
-              # the Pact graph.
-              #   - code-global input (core libs, gradle, build-logic) -> full-fleet.
-              #     libs-lending and libs-iso20022 follow their declared Gradle consumers.
-              #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
-              #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
-              #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
-              #     publishes it, so only its provider belongs in this matrix.
-              #   - <module>/... changed -> that module.
-              #   - openbank-libs/governance/ -> data for CI checks/admin-ui, not a compile input.
-              #   - the CI recipe itself -> canary below.
-              #   - anything else -> unattributable -> full-fleet (safety).
+              # Shared production/build inputs select the full fleet; unknown paths fail closed.
+              # Library-owned tests stay local, while all shared fixtures remain fleet-wide.
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
               FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
               # An exact raised-floor-only diff stays local to libs-domain.
@@ -221,6 +208,9 @@ jobs:
                      && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                     CHANGED="$CHANGED openbank-client-product-catalog"
                   fi
+                  # Preserve cross-module test readers on main as well as on PRs.
+                  CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                    --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
                      && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
@@ -250,7 +240,10 @@ jobs:
             DIFF_BASE="$MB"
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
-            echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
+            echo "Changed files:"
+            while IFS= read -r changed_file; do
+              printf '  %s\n' "$changed_file"
+            done <<< "$FILES"
 
             # Code-global inputs every module compiles/tests against -> rebuild all.
             # Except a lib's own test sources (filter-lib-test-only-paths.py header).
@@ -364,11 +357,9 @@ jobs:
                  && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                 CHANGED="$CHANGED openbank-client-product-catalog"
               fi
-              # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
-              # Derived from test sources; rationale in the script header.
-              if [ -n "${CHANGED// /}" ]; then
-                CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "$CHANGED")"
-              fi
+              # Derive cross-module test readers from filtered inputs (#11513, #11560).
+              CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+                --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag
@@ -387,6 +378,23 @@ jobs:
             fi
           fi
 
+          # PRs must retain the same conservative unknown-path fallback as main.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              is_inert_service_path "$f" && continue
+              case "$f" in
+                openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
+                openbank-*/*)
+                  m="${f%%/*}"
+                  if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then continue; fi ;;
+              esac
+              CHANGED="$ALL"
+              echo "Decision: unowned PR input -> full-fleet."
+              break
+            done <<< "$FILES"
+          fi
+
           # grep -v exits 1 when CHANGED is empty (PR touched no service module);
           # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
@@ -397,7 +405,8 @@ jobs:
             echo "services=[]" >> "$GITHUB_OUTPUT"
             echo "any=false" >> "$GITHUB_OUTPUT"
           else
-            JSON=$(printf '%s\n' $CHANGED | sort -u | jq -R . | jq -cs .)
+            read -r -a changed_modules <<< "$CHANGED"
+            JSON=$(printf '%s\n' "${changed_modules[@]}" | sort -u | jq -R . | jq -cs .)
             echo "services=$JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
@@ -418,6 +427,39 @@ jobs:
             python3 .github/scripts/check-service-docs-freshness_test.py
           fi
           python3 .github/scripts/check-service-docs-freshness.py --base "$BASE_SHA" --head "$HEAD_SHA"
+
+  deploy-source-freshness:
+    name: Verify exact-head GitOps image source
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Run the verifier from the trusted event base, never from the deploy PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable candidate image pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$HEAD_SHA"
+          python3 .github/scripts/check-deploy-source-freshness.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA"
+          git rev-list "$BASE_SHA..$HEAD_SHA" > "$RUNNER_TEMP/deploy-head-commits"
+          while IFS= read -r commit; do
+            verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq '.commit.verification.verified')
+            if [ "$verified" != 'true' ]; then
+              echo "::error::Deploy head contains a commit without a verified signature: $commit"
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/deploy-head-commits"
 
   publication-ready:
     name: Await exact-SHA Admin UI Pact publication
@@ -443,7 +485,7 @@ jobs:
 
   build:
     needs: [changes, publication-ready]
-    if: always() && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped')
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped')
     # The reusable workflow assumes openbank-arc-build-runner via GitHub OIDC for ECR auth
     # (needed on the Hetzner pool, which has no ambient AWS creds). A job that calls a reusable
     # workflow must grant the token here; the callee cannot elevate beyond the caller.
@@ -553,13 +595,22 @@ jobs:
   # change. #3955 tracks that decision.
   all-green:
     name: all-green
-    needs: [changes, publication-ready, build, verification-metadata]
+    needs: [changes, publication-ready, build, verification-metadata, deploy-source-freshness]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
       actions: read
     steps:
+      - name: Require exact-head GitOps source freshness
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+        env:
+          SOURCE_RESULT: ${{ needs.deploy-source-freshness.result }}
+        run: |
+          if [ "$SOURCE_RESULT" != 'success' ]; then
+            echo "::error::GitOps image source freshness was not proven for this PR head."
+            exit 1
+          fi
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then
