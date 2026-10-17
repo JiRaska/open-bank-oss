@@ -344,7 +344,7 @@ def self_test() -> int:
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
     print(f"self-test ok: event-consumer liveness is falsifiable "
-          f"(18 cases + a live read of {len(live_files)} config(s))")
+          f"(27 cases + a live read of {len(live_files)} config(s))")
     return 0
 
 
