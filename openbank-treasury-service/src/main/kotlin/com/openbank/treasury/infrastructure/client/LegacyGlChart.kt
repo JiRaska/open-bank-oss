@@ -12,7 +12,7 @@ import java.util.UUID
  * classes to, as the fixed ids treasury used to send before ADR-0341 D3. It is used ONLY while
  * `openbank.treasury.ledger.post-by-class` is false (the default), so that deploying treasury before
  * a ledger that serves classes cannot fail a posting: the payload stays the explicit `glAccountId`
- * an old ledger understands. Flip the flag once the ledger carrying V31 is live, then delete this
+ * an old ledger understands. Flip the flag once the ledger carrying V32 is live, then delete this
  * file. `LegacyGlChartTest` pins it to the same table as the ledger migration so the two cannot
  * drift while both exist.
  */
