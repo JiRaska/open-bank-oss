@@ -33,3 +33,7 @@ suspend, reinstate or renounce events without notifying customers.
   safe generic state until that client contract is available and verified end to end.
 - At-least-once delivery may create duplicate notification rows. This is visible but not an
   authorization or money-movement defect; durable deduplication remains preferable for UX quality.
+
+## Managed template editorial access
+
+The policy for all managed-template editorial routes, including list/detail reads, requires a verified human operator or administrator. `commstemplate.read` is excluded from the generic operator/compliance read grants; the dedicated editorial grant requires the verified person marker. A machine holding a staff role cannot use this surface, even when its principal name has no service-account prefix. This policy boundary does not itself prove the target environment has deployed the matching identity-producing PEP and policy bundle.
