@@ -112,6 +112,68 @@ class LowBalanceAlertIT {
         assertThat(alertPayloads(accountId)).hasSize(1)
     }
 
+    @Test
+    fun `a second party on the owner's account can neither read nor overwrite the owner's setting`() {
+        val accountId = UUID.randomUUID()
+        val ownerParty = UUID.randomUUID()
+        val otherParty = UUID.randomUUID()
+        val accounts = mockk<AccountServiceClient>()
+        // account-service models exactly one owning party per account; an authorised person
+        // (account_authorizations) is never returned as the owner.
+        coEvery { accounts.getPartyId(accountId) } returns ownerParty
+        QuarkusMock.installMockForType(accounts, AccountServiceClient::class.java)
+
+        Given {
+            contentType("application/json")
+            body("""{"currency":"CZK","initialAmount":200}""")
+        } When {
+            post("/api/v1/balances/$accountId/initialize")
+        } Then {
+            statusCode(201)
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", ownerParty.toString())
+            body("""{"enabled":true,"threshold":100,"rearmMargin":20}""")
+        } When {
+            put("/api/v1/balances/$accountId/CZK/low-balance-alert")
+        } Then {
+            statusCode(200)
+        }
+
+        Given {
+            header("X-Customer-Party-Id", otherParty.toString())
+        } When {
+            get("/api/v1/balances/$accountId/CZK/low-balance-alert")
+        } Then {
+            statusCode(404)
+        }
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", otherParty.toString())
+            body("""{"enabled":false,"threshold":5,"rearmMargin":1}""")
+        } When {
+            put("/api/v1/balances/$accountId/CZK/low-balance-alert")
+        } Then {
+            statusCode(404)
+        }
+
+        val rows = dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                "SELECT party_id, enabled, threshold FROM balance_low_alert_preferences WHERE account_id = ?",
+            ).use { statement ->
+                statement.setObject(1, accountId)
+                statement.executeQuery().use { rs ->
+                    buildList { while (rs.next()) add(Triple(rs.getObject(1), rs.getBoolean(2), rs.getBigDecimal(3))) }
+                }
+            }
+        }
+        assertThat(rows).hasSize(1)
+        assertThat(rows.single().first).isEqualTo(ownerParty)
+        assertThat(rows.single().second).isTrue()
+        assertThat(rows.single().third).isEqualByComparingTo("100")
+    }
+
     private fun wakeAlertConsumer(accountId: UUID) {
         val bootstrap = ConfigProvider.getConfig().getValue("kafka.bootstrap.servers", String::class.java)
         val config = mapOf(
