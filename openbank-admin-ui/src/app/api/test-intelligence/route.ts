@@ -469,12 +469,12 @@ function cacheFor(file: string) {
   return cache
 }
 
-export async function GET(req?: Request): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
   const { value, producedAt } = await cacheFor(reportFile()).get()
   const payload = JSON.stringify({ ...value.report, evidence: buildEvidenceMeta(value.report, value.runningKnown, producedAt) })
   const etag = etagOf(payload)
   // `no-cache` = always revalidate; an unchanged poll is a bodyless 304.
   const headers = { 'Cache-Control': 'private, no-cache', ETag: etag }
-  if (ifNoneMatchHits(req?.headers.get('if-none-match') ?? null, etag)) return new Response(null, { status: 304, headers })
+  if (ifNoneMatchHits(req.headers.get('if-none-match') ?? null, etag)) return new Response(null, { status: 304, headers })
   return new NextResponse(payload, { headers: { ...headers, 'Content-Type': 'application/json' } })
 }

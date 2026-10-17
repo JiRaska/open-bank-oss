@@ -29,6 +29,18 @@ export function sameCommit(a: string | null, b: string | null): boolean | null {
   return a.startsWith(b) || b.startsWith(a)
 }
 
+/**
+ * Rows the fleet collector adds from OTHER producers (Pact broker, Pitest, k6, simulation
+ * scenarios). The per-commit store carries only the component's own run envelope, so on a
+ * store hit these are kept from the snapshot rather than silently dropped. They describe
+ * their own runs (a pact verification, a mutation sweep), never the snapshot's commit.
+ */
+const CROSS_SOURCE_PREFIXES = ['Pact:', 'Pitest:', 'k6:']
+export function crossSourceEvidence(posture: ComponentTestPosture): ComponentTestPosture['evidence'] {
+  return posture.evidence.filter(item => item.kind === 'simulation'
+    || CROSS_SOURCE_PREFIXES.some(prefix => item.source?.startsWith(prefix)))
+}
+
 export async function overlayRunningEvidence(
   report: TestIntelligenceReport,
   running: Map<string, RunningWorkload> | null,
@@ -45,7 +57,11 @@ export async function overlayRunningEvidence(
     if (!runningCommit) return { ...posture, running: base }
     const result = await read(posture.component, runningCommit)
     if (result.status === 'hit') {
-      return { ...result.posture, running: { ...base, source: 'running-commit', snapshotCommit: runningCommit, match: true, storeStatus: 'hit' } }
+      return {
+        ...result.posture,
+        evidence: [...result.posture.evidence, ...crossSourceEvidence(posture)],
+        running: { ...base, source: 'running-commit', snapshotCommit: runningCommit, match: true, storeStatus: 'hit' },
+      }
     }
     return { ...posture, running: { ...base, storeStatus: result.status } }
   }))

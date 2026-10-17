@@ -166,6 +166,23 @@ describe('running commit join', () => {
     expect(c).toMatchObject({ source: 'snapshot', runningCommit: null, match: null, storeStatus: 'not-running' })
     expect(read).toHaveBeenCalledTimes(2)
   })
+
+  it('keeps cross-source rows (Pact, Pitest, k6, simulation) on a store hit and drops the stale envelope rows', async () => {
+    const snapshot = posture('openbank-a', '1111111aaaa')
+    snapshot.evidence.push(
+      { kind: 'contract', state: 'passed', observedAt: '2026-10-17T09:00:00Z', source: 'Pact:openbank-x-openbank-a.json', environment: 'ci' },
+      { kind: 'mutation', state: 'failed', observedAt: '2026-10-17T09:00:00Z', source: 'Pitest:mutations.xml', environment: 'ci' },
+      { kind: 'performance', state: 'passed', observedAt: '2026-10-17T09:00:00Z', source: 'k6:smoke', environment: 'sandbox' },
+      { kind: 'simulation', state: 'passed', observedAt: '2026-10-17T09:00:00Z', source: 'JUnit:test/Scenario.xml', environment: 'ci' },
+    )
+    const report = { components: [snapshot] } as unknown as TestIntelligenceReport
+    const map = new Map([['openbank-a', { component: 'openbank-a', commit: '9999999', image: null }]])
+    const out = await overlayRunningEvidence(report, map, async () => ({ status: 'hit' as const, posture: posture('openbank-a', '9999999') }))
+    const evidence = out.components[0].evidence
+    expect(evidence.map(item => item.kind).sort()).toEqual(['contract', 'mutation', 'performance', 'simulation', 'unit'])
+    // the snapshot's own run-envelope row (another commit) must NOT survive next to the store's
+    expect(evidence.filter(item => item.run).map(item => item.run!.commit)).toEqual(['9999999'])
+  })
 })
 
 describe('GET /api/test-intelligence under load', () => {
@@ -215,7 +232,7 @@ describe('GET /api/test-intelligence under load', () => {
   it('reports running commits as unknown off-cluster instead of guessing', async () => {
     bundle()
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.evidence.runningCommits.known).toBeNull()
     expect(body.components[0].running).toMatchObject({ match: null, storeStatus: 'not-running' })
   })
