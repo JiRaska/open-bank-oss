@@ -6,7 +6,9 @@
 // Day-close participants (ADR-0342): every calendar-driven product service that must report on an
 // accounting day before the ledger ties it out. Read from ledger-service through the generic
 // /api/svc proxy; a declared participant with no report is shown as MISSING — the state that holds
-// the day in CUTOFF once the ledger's participant check is enforced.
+// the day in CUTOFF once the ledger's participant check is enforced. A REFUSED participant holds
+// the day the same way: its work was not posted, so it is not "reported" in the sense that lets the
+// day tie out - it needs a RAN report or an explicit operator waiver.
 
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Users } from 'lucide-react'
@@ -31,6 +33,7 @@ export interface DayCloseCompleteness {
   businessDate: string
   complete: boolean
   missing: string[]
+  refused: string[]
   participants: DayCloseParticipant[]
 }
 
@@ -62,8 +65,21 @@ export function parseDayCloseCompleteness(raw: unknown): DayCloseCompleteness | 
     businessDate: body.businessDate,
     complete: body.complete,
     missing: body.missing.filter((m): m is string => typeof m === 'string'),
+    refused: Array.isArray(body.refused) ? body.refused.filter((m): m is string => typeof m === 'string') : [],
     participants,
   }
+}
+
+/** What holds the day: participants with no report, and participants whose postings were refused. */
+function heldText(data: DayCloseCompleteness, lang: 'cs' | 'en'): string {
+  const parts: string[] = []
+  if (data.missing.length > 0) {
+    parts.push(`${lang === 'cs' ? 'Chybí hlášení' : 'Missing'}: ${data.missing.join(', ')}`)
+  }
+  if (data.refused.length > 0) {
+    parts.push(`${lang === 'cs' ? 'Odmítnuto (práce nebyla zaúčtována)' : 'Refused (work was not posted)'}: ${data.refused.join(', ')}`)
+  }
+  return parts.join('; ')
 }
 
 function yesterday(): string {
@@ -161,8 +177,8 @@ export function DayCloseParticipantsPanel() {
             color: data.complete ? 'var(--success-text)' : 'var(--danger-text)' }}>
             {data.complete
               ? t('Všichni účastníci nahlásili výsledek — den může být uzavřen.', 'Every participant has reported — the day can tie out.')
-              : t(`Chybí hlášení: ${data.missing.join(', ')} — den zůstane v CUTOFF, dokud nenahlásí nebo nejsou prominuti.`,
-                  `Missing: ${data.missing.join(', ')} — the day stays in CUTOFF until they report or are waived.`)}
+              : t(`${heldText(data, 'cs')} — den zůstane v CUTOFF, dokud účastník nenahlásí proběhnutí nebo ho operátor výslovně nepromině.`,
+                  `${heldText(data, 'en')} — the day stays in CUTOFF until the participant reports it ran or an operator explicitly waives it.`)}
           </p>
           <table className="table" style={{ width: '100%' }}>
             <thead>
