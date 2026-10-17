@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFile, execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs'
 import { createServer } from 'http'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -20,6 +20,80 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
+  it.each([
+    ['passed', 'tests="1" failures="0" errors="0" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'passed'],
+    ['failed', 'tests="1" failures="1" errors="0" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'failed'],
+    ['error', 'tests="1" failures="0" errors="1" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'failed'],
+    ['skipped', 'tests="1" failures="0" errors="0" skipped="1"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'skipped'],
+    ['empty', 'tests="0" failures="0" errors="0" skipped="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'skipped'],
+    ['embedded', 'tests="1" failures="0" errors="0"', 'prefixOPENBANK_TRACE_CONTRACT_V1:fixture suffix', null],
+    ['missing marker', 'tests="1" failures="0" errors="0"', 'no marker', null],
+    ['missing counts', '', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'unknown'],
+    ['invalid counts', 'tests="invalid" failures="0" errors="0"', 'OPENBANK_TRACE_CONTRACT_V1:fixture', 'unknown'],
+  ])('classifies trace XML fallback %s without laundering its verdict', (_, attributes, output, state) => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-fallback-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/trace.xml', `<testsuites><testsuite ${attributes}><system-out>${output}</system-out></testsuite></testsuites>`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const trace = report.components.find(item => item.component === 'openbank-alpha-service')!.evidence.filter(item => item.kind === 'trace')
+    expect(trace).toEqual(state ? [expect.objectContaining({ state, source: 'trace-contract:fixture' })] : [])
+  })
+
+  it.each(['failure', 'error', 'skipped'])('respects testcase %s elements when aggregate attributes are omitted', element => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-case-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/case.xml', `<testsuite tests="1"><testcase><${element}/><system-out>before\nOPENBANK_TRACE_CONTRACT_V1:fixture\nafter</system-out></testcase></testsuite>`)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')!.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'trace-contract:fixture', state: element === 'skipped' ? 'skipped' : 'failed' }),
+    ]))
+  })
+
+  it('keeps trace fallback failures across files and ages successful observations', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-age-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const root = 'openbank-alpha-service/build/test-results/test/'
+    write(repo, `${root}failed.xml`, '<testsuite tests="1" failures="1"><system-out>OPENBANK_TRACE_CONTRACT_V1:duplicate</system-out></testsuite>')
+    write(repo, `${root}success.xml`, '<testsuite tests="1" failures="0"><system-out>OPENBANK_TRACE_CONTRACT_V1:duplicate</system-out></testsuite>')
+    write(repo, `${root}old.xml`, '<testsuite tests="1" failures="0"><testcase><system-out>OPENBANK_TRACE_CONTRACT_V1:old</system-out></testcase></testsuite>')
+    const old = new Date('2000-01-01T00:00:00Z')
+    utimesSync(path.join(repo, root, 'old.xml'), old, old)
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')!.evidence).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'trace-contract:duplicate', state: 'failed' }),
+      expect.objectContaining({ source: 'trace-contract:old', state: 'stale' }),
+    ]))
+  })
+
+  it('does not extract trace markers from malformed XML or arbitrary XML elements', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-trace-invalid-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, 'openbank-alpha-service/build/test-results/test/broken.xml', '<testsuite><system-out>OPENBANK_TRACE_CONTRACT_V1:fixture')
+    write(repo, 'openbank-alpha-service/build/test-results/test/other.xml', '<report>OPENBANK_TRACE_CONTRACT_V1:fixture</report>')
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.components.find(item => item.component === 'openbank-alpha-service')!.evidence.filter(item => item.kind === 'trace')).toEqual([])
+  })
+
   it('retains both Security Excellence browser variants as a distinct governed journey', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-security-browser-'))
     dirs.push(repo)

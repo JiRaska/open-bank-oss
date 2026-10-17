@@ -685,6 +685,69 @@ function mutationComponents() {
   return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])
 }
 
+// Trace contracts (openbank-libs-testing TraceContract.verifiedAs) prove the observable
+// distributed-system contract and print a bounded marker into the JUnit XML system-out.
+// The CI run-envelope collector turns that marker into specialized trace evidence; this
+// scan is the local/operator-UI fallback so the matrix shows the same trace layer without
+// a CI envelope. Only the caller-chosen low-entropy contract id is read back — never
+// trace ids, attribute values or fixture data.
+const TRACE_CONTRACT_MARKER = /^OPENBANK_TRACE_CONTRACT_V1:([a-z0-9][a-z0-9._-]{0,63})$/gm
+
+function traceContractComponents() {
+  const declared = new Set()
+  for (const component of fs.readdirSync(repo)) {
+    const source = path.join(repo, component, 'src')
+    if (!exists(source) || !component.startsWith('openbank-')) continue
+    if (allFiles(source, file => /TraceContractIT\.(kt|java)$/.test(file)).length > 0) declared.add(component)
+  }
+  return declared
+}
+
+async function traceMarkerEvidence(component) {
+  const root = path.join(repo, component, 'build', 'test-results')
+  if (!exists(root)) return []
+  const observed = new Map()
+  for (const file of allFiles(root, candidate => candidate.endsWith('.xml'))) {
+    let parsed
+    try {
+      parsed = await parseStringPromise(readText(file), { explicitArray: true })
+    } catch {
+      // The ordinary JUnit fallback also reports this malformed artifact.
+      continue
+    }
+    const direct = parsed?.testsuite ? [parsed.testsuite].flat() : []
+    const wrappers = parsed?.testsuites ? [parsed.testsuites].flat() : []
+    const suites = direct.length ? direct : wrappers.flatMap(wrapper => wrapper.testsuite ?? [])
+    for (const suite of suites) {
+      const attributes = suite.$ ?? {}
+      const count = (name, fallback) => Number(attributes[name] ?? fallback)
+      const tests = count('tests', NaN)
+      const cases = suite.testcase ?? []
+      const failures = Math.max(count('failures', 0), cases.filter(item => item.failure?.length).length)
+      const errors = Math.max(count('errors', 0), cases.filter(item => item.error?.length).length)
+      const skipped = Math.max(count('skipped', 0), cases.filter(item => item.skipped?.length).length)
+      const counts = [tests, failures, errors, skipped]
+      const valid = counts.every(value => Number.isSafeInteger(value) && value >= 0)
+        && failures + errors + skipped <= tests
+      const at = observedAt(file)
+      const state = failures > 0 || errors > 0 ? 'failed'
+        : !valid ? 'unknown' : stateFrom(0, tests - skipped, at)
+      const output = [...(suite['system-out'] ?? []), ...(suite.testcase ?? []).flatMap(item => item['system-out'] ?? [])]
+        .map(item => typeof item === 'string' ? item : item._ ?? '').join('\n')
+      for (const match of output.matchAll(TRACE_CONTRACT_MARKER)) {
+        const contractId = match[1]
+        const previous = observed.get(contractId)
+        // A later successful file must not hide another failed/unknown suite for the contract.
+        const rank = { passed: 0, stale: 1, skipped: 2, 'not-run': 3, unknown: 4, failed: 5 }
+        if (!previous || rank[state] > rank[previous.state]) observed.set(contractId, { state, at })
+      }
+    }
+  }
+  return [...observed].map(([contractId, { state, at }]) => ({
+    kind: 'trace', state, source: `trace-contract:${contractId}`, environment: 'ci', observedAt: at ?? null,
+  }))
+}
+
 function platformCapabilities() {
   const file = path.join(repo, 'openbank-libs', 'governance', 'test-intelligence-capabilities.yaml')
   try {
@@ -716,6 +779,7 @@ function platformCapabilities() {
 function requiredControls(components, contracts, mutations, performance, synthetics, runVersionByComponent = new Map()) {
   const pactParticipants = new Set(contracts.flatMap(item => [item.consumer, item.provider]))
   const mutationParticipants = mutationComponents()
+  const traceDeclared = traceContractComponents()
   const mutationByComponent = new Map(mutations.map(item => [item.component, item]))
   const performanceComponents = new Set(performance.map(item => item.component).filter(Boolean))
   const controls = []
@@ -749,6 +813,7 @@ function requiredControls(components, contracts, mutations, performance, synthet
           : 'A declared container topology requires an integration run.')
       }
       if (pactParticipants.has(component.component)) addEvidence(component, 'contract', 'The component participates in a governed Pact contract.')
+      if (traceDeclared.has(component.component)) addEvidence(component, 'trace', 'The component declares a trace contract suite and must publish its trace evidence.')
       if (performanceComponents.has(component.component)) addEvidence(component, 'performance', 'A governed k6 scenario exists for this component.')
       for (const resource of component.testInfrastructure.declared) {
         const rows = component.testInfrastructure.observed.filter(item => item.resource === resource)
@@ -1162,6 +1227,15 @@ async function main() {
         source: `Pact:${item.pactFile}`, environment: 'ci',
         detail: `${item.consumer} -> ${item.provider} (${item.interactions} interactions)`,
       })
+    }
+  }
+  // Trace contract markers from locally staged JUnit XML. CI envelopes already carry the
+  // same specialized evidence; rows already present (by source) win, so this only fills
+  // the gap where no envelope reached the deployment.
+  for (const component of components) {
+    const known = new Set(component.evidence.filter(item => item.kind === 'trace').map(item => item.source))
+    for (const row of await traceMarkerEvidence(component.component)) {
+      if (!known.has(row.source)) component.evidence.push(row)
     }
   }
   const performanceEvidence = performance()
