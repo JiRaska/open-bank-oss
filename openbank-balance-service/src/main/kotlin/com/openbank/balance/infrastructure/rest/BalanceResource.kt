@@ -98,6 +98,21 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
         return Response.ok(svc.getBalance(GetBalanceQuery(accountId, currency, asOf))).build()
     }
 
+    @GET
+    @Path("/{accountId}/holds")
+    @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "balance.read", resource = "#accountId")
+    suspend fun getHolds(
+        @PathParam("accountId") accountId: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        if (customerPartyId != null) {
+            val ownerPartyId = accountClient.getPartyId(accountId)
+            if (ownerPartyId == null || ownerPartyId != customerPartyId) return NOT_FOUND
+        }
+        return Response.ok(mapOf("holds" to svc.getHolds(accountId))).build()
+    }
+
     @POST
     @Path("/{accountId}/holds")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
