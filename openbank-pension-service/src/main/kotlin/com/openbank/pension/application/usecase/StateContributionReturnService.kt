@@ -5,6 +5,8 @@
 package com.openbank.pension.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import com.openbank.pension.application.port.out.AgencyDocument
 import com.openbank.pension.application.port.out.AgencyDocumentKind
 import com.openbank.pension.application.port.out.ContractFundingDirectory
@@ -157,48 +159,69 @@ class StateContributionReturnService(
     }
 
     /**
-     * Files the return report for [month] with every DUE return (§18(4), by the 10th). Returns
-     * null when nothing is due. The report is stored before it is transmitted.
+     * Files the return reports for [month] with every DUE return (§18(4), by the 10th): ONE report
+     * per currency. Returns an empty list when nothing is due. Each report is stored before it is
+     * transmitted.
+     *
+     * Amounts of different currencies are never added together. The agency file carries a single
+     * header total, so a mixed batch would have to either sum crowns with euros or convert one into
+     * the other — both would misstate what is owed. Instead the DUE set is grouped by currency and
+     * each currency goes out as its own report and file, whose header names the currency and totals
+     * only its own lines ([Money] arithmetic refuses a cross-currency sum). A return in a currency
+     * other than CZK therefore never blocks the crown report, and vice versa. Each per-currency
+     * report is filed atomically on its own: one losing a race does not hold back the others.
      */
-    suspend fun fileReturnReport(month: YearMonth): ReturnReport? {
+    suspend fun fileReturnReport(month: YearMonth): List<ReturnReport> {
         val due = returns.byStatus(ReturnStatus.DUE)
-        if (due.isEmpty()) return null
-        // The CZ agency format has no currency field. Refuse the whole batch before persisting or
-        // transmitting it when an obligation is not in crowns; neither its lines nor its metric
-        // may silently describe a mixed-currency sum as CZK.
-        check(due.all { it.currency == "CZK" }) {
-            "CZ state-contribution return report contains an obligation outside CZK"
-        }
+        if (due.isEmpty()) return emptyList()
+        return due.groupBy { CurrencyCode.of(it.currency) }
+            .toSortedMap(compareBy { it.code })
+            .mapNotNull { (currency, items) -> fileCurrencyReport(month, currency, items) }
+    }
+
+    private suspend fun fileCurrencyReport(
+        month: YearMonth,
+        currency: CurrencyCode,
+        due: List<StateContributionReturn>,
+    ): ReturnReport? {
         val lines = due.map { r ->
             ReturnReportLine(
                 r.id,
                 references.referenceFor(r.contractId),
                 r.cause,
-                r.amount,
+                r.money(),
                 r.claimId?.let { claims.findById(it)?.period },
             )
         }
-        val report =
-            ReturnReport(Ids.newId(), month, due.map { it.id }, channel.render(month, lines), null, false, now())
+        val total = lines.fold(Money(BigDecimal.ZERO, currency)) { sum, l -> sum + l.amount }
+        val report = ReturnReport(
+            Ids.newId(),
+            month,
+            due.map { it.id },
+            channel.render(month, currency, lines),
+            null,
+            false,
+            now(),
+            total,
+        )
         if (!returns.fileReportAtomically(report, now())) {
-            log.warnf("return report for %s lost a race with a concurrent run; nothing reported twice", month)
+            log.warnf(
+                "%s return report for %s lost a race with a concurrent run; nothing reported twice",
+                currency.code,
+                month,
+            )
             return null
         }
         val receipt = gateway.transmit(
             AgencyDocument(
                 AgencyDocumentKind.RETURN_REPORT,
                 channel.format,
-                "VR-$month-${report.id}.txt",
+                "VR-$month-${currency.code}-${report.id}.txt",
                 report.payload,
             ),
         )
         returns.setReportChannelReference(report.id, receipt.channelReference)
-        metrics.stateContributionReturns(
-            StateReturnEvent.REPORTED,
-            due.size,
-            due.fold(java.math.BigDecimal.ZERO) { sum, r -> sum + r.amount },
-            "CZK",
-        )
+        metrics.stateContributionReturns(StateReturnEvent.REPORTED, due.size, total.amount, currency.code)
         return report.copy(channelReference = receipt.channelReference)
     }
 

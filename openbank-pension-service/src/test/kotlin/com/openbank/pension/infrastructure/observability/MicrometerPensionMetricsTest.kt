@@ -99,4 +99,22 @@ class MicrometerPensionMetricsTest {
                 .counter()!!.count(),
         ).isEqualTo(2.0)
     }
+
+    @Test
+    fun `money metrics carry a bounded ISO 4217 currency label, per currency`() {
+        metrics.stateContributionReturns(StateReturnEvent.REPORTED, 2, BigDecimal("300.50"), "CZK")
+        metrics.stateContributionReturns(StateReturnEvent.REPORTED, 1, BigDecimal("20.25"), "EUR")
+        metrics.stateContributionReturns(StateReturnEvent.REPORTED, 1, BigDecimal("1"), "not-a-currency")
+        metrics.stateContributionReturns(StateReturnEvent.REPORTED, 1, BigDecimal("1"), "ZZZ")
+
+        fun amount(currency: String) = registry.find("openbank.pension.state_contribution.return_amount")
+            .tags("event", "reported", "currency", currency).counter()?.count()
+        assertThat(amount("CZK")).isEqualTo(300.5)
+        assertThat(amount("EUR")).isEqualTo(20.25)
+        assertThat(amount("INVALID")).describedAs("free text never becomes a label").isEqualTo(2.0)
+        assertThat(
+            registry.find("openbank.pension.state_contribution.return_amount").counters()
+                .map { it.id.getTag("currency") },
+        ).containsExactlyInAnyOrder("CZK", "EUR", "INVALID")
+    }
 }

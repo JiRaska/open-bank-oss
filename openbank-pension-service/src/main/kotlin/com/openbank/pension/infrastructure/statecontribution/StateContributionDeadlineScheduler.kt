@@ -86,9 +86,14 @@ class StateContributionDeadlineScheduler(
         val (filed, unfiled) = incentives.submitPending()
         if (filed.isNotEmpty()) log.infof("filed %d claim batch(es); unfiled formats %s", filed.size, unfiled)
         val month = YearMonth.from(today)
-        returns.fileReturnReport(month)?.let { report ->
+        returns.fileReturnReport(month).forEach { report ->
             if (today.isAfter(CzStateContributionCalendar.returnReportDeadline(month))) {
-                log.warnf("return report %s for %s filed after the 10th (ZDPS §18(4))", report.id, month)
+                log.warnf(
+                    "%s return report %s for %s filed after the 10th (ZDPS §18(4))",
+                    report.total.currency.code,
+                    report.id,
+                    month,
+                )
             }
         }
         val d = returns.deadlines(today)

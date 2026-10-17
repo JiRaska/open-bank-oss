@@ -55,6 +55,20 @@ příspěvku k referenčnímu datu. Resource volá metodu služby bez argumentů
 "today" uvnitř služby (výchozí argument četl na CDI client proxině) padlo na NPE, proto metoda
 řeší hodiny na reálném beane a jen scheduler předává explicitní datum.
 
+### Vratky ve více měnách
+
+Měsíční hlášení o vratkách státního příspěvku (ZDPS §18(4), `POST .../state-contribution/return-reports`)
+se podává **zvlášť pro každou měnu**. Všechny vratky ve stavu DUE se seskupí podle měny ISO 4217
+a každá skupina odchází jako samostatné hlášení a soubor (`VR-<měsíc>-<měna>-<id>.txt`). Částky
+různých měn se nikdy nesčítají ani nepřepočítávají: hlavička hlášení nese jeho měnu
+(`H;cz-mf-state-contribution-v1;RETURNS;<IČO>;<YYYY-MM>;<měna>;<počet>;<součet>`) a sčítá jen jeho
+vlastní řádky typem `Money` z libs, který součet napříč měnami odmítne. Vratka v EUR proto nikdy
+neblokuje hlášení v CZK. Odpověď je vrací v poli `reports` (`report` je první z nich, kvůli starším
+klientům); každé nese `currency` a `total`, uložené v `pension_return_reports`
+(`V16__return_report_currency`). Vratka s měnou, která není platný kód ISO 4217, je odmítnuta už
+při vzniku. Metrika `openbank_pension_state_contribution_return_amount_total` má label měny; hodnota
+mimo ISO 4217 se zapíše jako `currency="INVALID"`, takže množina labelů zůstává omezená.
+
 ## Vykazování účastníků pro výkazy ČNB
 
 `GET /api/v2/pension/reporting/participant-aggregates` vrací agregace za jedno období pro výkazy

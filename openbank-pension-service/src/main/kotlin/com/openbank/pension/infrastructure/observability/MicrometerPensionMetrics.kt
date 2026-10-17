@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.observability
 
+import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.pension.application.port.out.AnnuityQuoteOutcome
 import com.openbank.pension.application.port.out.IncentiveClaimEvent
 import com.openbank.pension.application.port.out.PensionMetrics
@@ -75,7 +76,10 @@ class MicrometerPensionMetrics(private val registry: MeterRegistry) : PensionMet
             .record(elapsed)
         if (amount != null && currency != null) {
             money("openbank.pension.transfer.amount", "Net amount of completed provider transfers")
-                .tag("direction", direction.name).tag("currency", currency).register(registry).add(amount)
+                .tag(
+                    "direction",
+                    direction.name,
+                ).tag("currency", currencyLabel(currency)).register(registry).add(amount)
         }
     }
 
@@ -97,7 +101,7 @@ class MicrometerPensionMetrics(private val registry: MeterRegistry) : PensionMet
             money("openbank.pension.contributions.amount", "Money received, credited or parked as unmatched")
                 .tag("source", source.name)
                 .tag("outcome", outcome.name.lowercase())
-                .tag("currency", currency)
+                .tag("currency", currencyLabel(currency))
                 .register(registry)
                 .add(amount)
         }
@@ -119,7 +123,7 @@ class MicrometerPensionMetrics(private val registry: MeterRegistry) : PensionMet
             .increment(count.toDouble())
         if (amount != null && currency != null) {
             money("openbank.pension.incentive.amount", "State-incentive money by lifecycle event")
-                .tag("event", event.name.lowercase()).tag("currency", currency).register(registry)
+                .tag("event", event.name.lowercase()).tag("currency", currencyLabel(currency)).register(registry)
                 .add(amount)
         }
     }
@@ -132,7 +136,7 @@ class MicrometerPensionMetrics(private val registry: MeterRegistry) : PensionMet
             .increment(count.toDouble())
         if (amount != null && currency != null) {
             money("openbank.pension.state_contribution.return_amount", "Money returned to the state agency")
-                .tag("event", event.name.lowercase()).tag("currency", currency).register(registry)
+                .tag("event", event.name.lowercase()).tag("currency", currencyLabel(currency)).register(registry)
                 .add(amount)
         }
     }
@@ -146,7 +150,7 @@ class MicrometerPensionMetrics(private val registry: MeterRegistry) : PensionMet
             .increment()
         if (amount != null && currency != null) {
             money("openbank.pension.payout.amount", "Gross amount of payouts the participant confirmed")
-                .tag("form", form.name).tag("currency", currency).register(registry).add(amount)
+                .tag("form", form.name).tag("currency", currencyLabel(currency)).register(registry).add(amount)
         }
     }
 
@@ -218,6 +222,17 @@ class MicrometerPensionMetrics(private val registry: MeterRegistry) : PensionMet
 
     private companion object {
         const val NONE = "NONE"
+
+        /** The `currency` label of every money metric: anything not ISO 4217 collapses here. */
+        const val INVALID_CURRENCY = "INVALID"
+
+        /**
+         * Bounded `currency` label: an ISO 4217 code ([CurrencyCode] — upper case, known, with a minor
+         * unit) or [INVALID_CURRENCY]. A free-text value never becomes a label, so the label set is
+         * at most the ISO table plus one, whatever a caller passes.
+         */
+        fun currencyLabel(currency: String): String =
+            runCatching { CurrencyCode.of(currency).code }.getOrDefault(INVALID_CURRENCY)
         val MAX_ONBOARDING: Duration = Duration.ofDays(60)
         val MAX_TRANSFER: Duration = Duration.ofDays(60)
     }
