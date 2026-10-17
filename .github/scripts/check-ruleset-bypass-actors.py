@@ -76,6 +76,8 @@ Usage:  check-ruleset-bypass-actors.py [--enforce] [--repo OWNER/REPO]
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -234,8 +236,36 @@ def _run_main(argv: list[str]) -> int:
         sys.argv = saved
 
 
+def _capture(fn) -> tuple[int, str]:
+    """Run fn with stdout and stderr captured, so self-test fixtures never reach the CI log.
+
+    Before this, every fixture the self-test drove through main() printed its `::error::` lines
+    straight into the gate's output: a fake `Team#999` and a fake `gh api exploded` read as live
+    findings on the real run (2026-10-17, #13137/#13138/#13156/#13159). Output is now returned to
+    the caller, which asserts on it and prints it as a labelled case line.
+    """
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        rc = fn()
+    return rc, out.getvalue()
+
+
 def self_test() -> int:
     fails: list[str] = []
+
+    def run_case(label, fake, want_rc, must_contain=(), must_not=()):
+        """Drive main() end to end through a fake API; assert exit code and printed text."""
+        globals()["gh_api"] = fake
+        rc, out = _capture(lambda: _run_main(["--enforce"]))
+        print(f"case [{label}] rc={rc} output: {' | '.join(out.strip().splitlines())}")
+        if rc != want_rc:
+            fails.append(f"{label}: want rc={want_rc}, got {rc}")
+        for s in must_contain:
+            if s not in out:
+                fails.append(f"{label}: output must contain {s!r}")
+        for s in must_not:
+            if s in out:
+                fails.append(f"{label}: output must NOT contain {s!r}")
 
     def case(label, live, declared, want_undeclared, want_stale):
         u, s = findings(live, {k: "" for k in declared})
@@ -291,28 +321,53 @@ def self_test() -> int:
         # The exit code for "could not look" is the whole point of the Unreadable/RuntimeError
         # split: an enforced gate that answers 1 here is red on every CI run and never once says
         # anything about bypass actors. Assert the code, not just the exception type.
-        rc = _run_main(["--enforce"])
-        if rc != 0:
-            fails.append(f"an unreadable subject must exit 0 (UNRESOLVED), got {rc}")
-
-        # ...and the opposite direction, or "exit 0" would just mean "never fails".
-        globals()["gh_api"] = _fake_detail(
-            {
-                "conditions": {"ref_name": {"include": [TARGET_REF]}},
-                "bypass_actors": [{"actor_id": 999, "actor_type": "Team", "bypass_mode": "always"}],
-            }
-        )
-        rc = _run_main(["--enforce"])
-        if rc != 1:
-            fails.append(f"an undeclared live bypass actor must exit 1 under --enforce, got {rc}")
-
+        # The three end-to-end cases the gate must tell apart. Each prints its own output so the
+        # PR body can show it; the fixtures are captured, so none of them reaches the CI log as a
+        # finding unless the case is the one that is supposed to fail.
         def _broken(path):
             raise RuntimeError("gh api exploded")
 
-        globals()["gh_api"] = _broken
-        rc = _run_main(["--enforce"])
-        if rc != 1:
-            fails.append(f"a broken API call must still exit 1, got {rc}")
+        # 1. API error: could-not-check, with the error text, and NO invented actor.
+        run_case(
+            "api-error",
+            _broken,
+            0,
+            must_contain=["could not check ruleset bypass actors: gh api exploded"],
+            must_not=["Team#", "RepositoryRole#", "NOT declared", "::error"],
+        )
+
+        # 2. Real undeclared actor (fixture id 999): must fail under --enforce.
+        run_case(
+            "undeclared-actor",
+            _fake_detail(
+                {
+                    "conditions": {"ref_name": {"include": [TARGET_REF]}},
+                    "bypass_actors": [{"actor_id": 999, "actor_type": "Team", "bypass_mode": "always"}],
+                }
+            ),
+            1,
+            must_contain=["Team#999 (bypass_mode=always) can bypass main-protection and is NOT declared"],
+        )
+
+        # 3. No actors at all: must pass, with the honest zero count.
+        run_case(
+            "no-actors",
+            _fake_detail(
+                {"conditions": {"ref_name": {"include": [TARGET_REF]}}, "bypass_actors": []}
+            ),
+            0,
+            must_contain=["0 live bypass actor(s), 0 undeclared, 0 stale"],
+            must_not=["::error", "NOT declared", "could not check"],
+        )
+
+        # An unreadable ruleset (non-admin token, no bypass_actors key) is UNRESOLVED: exit 0.
+        run_case(
+            "unreadable-no-bypass-field",
+            _fake_detail({"conditions": {"ref_name": {"include": [TARGET_REF]}}}),
+            0,
+            must_contain=["could not check ruleset bypass actors"],
+            must_not=["Team#", "NOT declared"],
+        )
 
         # A RATE LIMIT is the third state, and both halves of the split have to be held or the
         # change is untested: the limit must NOT go red, and everything else must still go red.
@@ -421,7 +476,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: ruleset-bypass-actors is falsifiable (21 cases, both directions, exit codes and the shared transient vocabulary included)")
+    print("self-test ok: ruleset-bypass-actors is falsifiable (API error, undeclared actor, no actors, unreadable, rate limit, both directions, exit codes and the shared transient vocabulary)")
     return 0
 
 
@@ -448,7 +503,7 @@ def main() -> int:
             gatelib.subjects_unresolved("the rulesets API was rate limited — the subject was never read")
         else:
             gatelib.subjects_unresolved("bypass_actors is not visible to this token (admin scope required)")
-        print(f"::warning::ruleset-bypass-actors: {exc}")
+        print(f"::warning::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}")
         remedy = (
             "wait for the limit to reset, or reduce what spends the installation's API budget"
             if rate_limited
@@ -462,8 +517,16 @@ def main() -> int:
         )
         return 0
     except RuntimeError as exc:
-        sys.stderr.write(f"::error::ruleset-bypass-actors: {exc}\n")
-        return 1
+        # A failed API call is "could not check", never a finding: no actor was read, so none can
+        # be reported. Exit 0 = UNRESOLVED, the same contract as Unreadable above (gate mode is
+        # enforced; a transient API error must not redden every PR, and a pass is never claimed).
+        gatelib.subjects_unresolved("the rulesets API call failed — no bypass actor was read")
+        print(f"::warning::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}")
+        print(
+            "ruleset-bypass-actors: NOT EVALUATED on this run (API error). Nothing was read, so "
+            "this is neither a pass nor a finding."
+        )
+        return 0
 
     undeclared, stale = findings(live, DECLARED_BYPASS_ACTORS)
     level = "error" if args.enforce else "warning"
