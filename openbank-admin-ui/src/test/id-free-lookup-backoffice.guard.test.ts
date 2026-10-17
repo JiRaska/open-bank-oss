@@ -21,6 +21,8 @@ describe('back-office screens pick records instead of asking for ids', () => {
     const src = read('app/treasury/nostro/page.tsx')
     expect(src).toContain('Recently reconciled statements')
     expect(src).toContain('<details')
+    // IBANs are account data: the recent list lives in memory, never in browser storage (CodeQL).
+    expect(src).not.toMatch(/localStorage|sessionStorage/)
   })
 
   it.each(['settlements', 'consents', 'identity-cases', 'business-onboarding', 'pid'])('%s copy never says UUID or asks for an id', name => {

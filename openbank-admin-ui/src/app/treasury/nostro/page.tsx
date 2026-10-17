@@ -33,28 +33,10 @@ export default function NostroReconciliationPage() {
 type Notice = { tone: 'success' | 'danger'; text: string }
 
 // treasury-service has no "list statements" endpoint, so the picker is the statements reconciled in
-// THIS browser: each is named by account IBAN + statement date + file, never by its technical id.
-// Bounded, per-viewer convenience only (localStorage may be unavailable — the page works without it).
+// THIS page session: each is named by account IBAN + statement date + file, never by its technical id.
+// Held in memory only — an IBAN is account data and is never written to browser storage.
 type RecentStatement = { id: string; iban: string; statementDate: string; fileName: string | null }
-const RECENT_KEY = 'openbank.treasury.nostro.recent'
 const RECENT_MAX = 12
-
-function readRecent(): RecentStatement[] {
-  try {
-    const raw = window.localStorage.getItem(RECENT_KEY)
-    const parsed: unknown = raw ? JSON.parse(raw) : []
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((r): r is RecentStatement => !!r && typeof r.id === 'string' && typeof r.iban === 'string' && typeof r.statementDate === 'string')
-      .slice(0, RECENT_MAX)
-  } catch {
-    return []
-  }
-}
-
-function writeRecent(list: RecentStatement[]) {
-  try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, RECENT_MAX))) } catch { /* private window — list is session-only */ }
-}
 
 function Nostro() {
   const { t, language } = useLanguage()
@@ -70,14 +52,12 @@ function Nostro() {
   const [result, setResult] = useState<NostroReconciliation | null>(null)
   const [lookupId, setLookupId] = useState('')
   const [recent, setRecent] = useState<RecentStatement[]>([])
-  useEffect(() => { setRecent(readRecent()) }, [])
   const remember = (rec: NostroReconciliation, fileName: string | null) => {
     setRecent(prev => {
       const next = [
         { id: rec.statementId, iban: rec.iban, statementDate: rec.statementDate, fileName: fileName ?? prev.find(r => r.id === rec.statementId)?.fileName ?? null },
         ...prev.filter(r => r.id !== rec.statementId),
       ].slice(0, RECENT_MAX)
-      writeRecent(next)
       return next
     })
   }
