@@ -94,25 +94,74 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       use_explicit_sources=true
     fi
   fi
+  historical_services='[]'
+  source_probe_map='{}'
+  historical_source_map='{}'
+  if [ "$source_failure" -eq 0 ] && [ "$use_explicit_sources" != true ]; then
+    for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      present="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+      source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
+        --arg present "$present" '$old + {($svc): $present}')"
+      case "$present" in
+        yes|equivalent:*) ;;
+        no)
+          historical_services="$(jq -cn --argjson old "$historical_services" \
+            --arg svc "$svc" '$old + [$svc]')"
+          ;;
+        absent)
+          echo "::error::reconcile source refused for ${svc}: Broker has no Pacticipant and no verified Pact source"
+          source_failure=1
+          ;;
+        *)
+          echo "::error::reconcile source refused for ${svc}: no exact or tree-equivalent Pact source (${present})"
+          source_failure=1
+          ;;
+      esac
+    done
+  fi
+  if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then
+    historical_source_map="$(python3 .github/scripts/verify-successful-service-ci.py \
+      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || {
+      echo "::error::reconcile source refused: no verified historical Services CI source for every requested service"
+      source_failure=1
+    }
+    if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
+      type == "object" and (keys | sort) == ($services | sort) and
+      all(.[]; type == "object" and
+        (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
+        (.run_id | type == "string" and length > 0) and
+        (.attempt | type == "number" and . > 0))
+    ' >/dev/null <<< "$historical_source_map"; then
+      echo "::error::reconcile source refused: historical source resolver returned incomplete or malformed evidence"
+      source_failure=1
+    fi
+  fi
   if [ "$source_failure" -eq 0 ]; then
     for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      source_ci_verified=false
       if [ "$use_explicit_sources" = true ]; then
         source_sha="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$explicit_sources")"
         present="yes"
       else
-        present="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+        present="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$source_probe_map")"
         case "$present" in
           yes) source_sha="$GITHUB_SHA" ;;
           equivalent:*) source_sha="${present#equivalent:}" ;;
+          no)
+            source_sha="$(jq -er --arg svc "$svc" '.[$svc].sha' <<< "$historical_source_map")"
+            resolved="$(jq -c --arg svc "$svc" '.[$svc]' <<< "$historical_source_map")"
+            present="equivalent:${source_sha}"
+            source_ci_verified=true
+            echo "  ✓ ${svc} will use exact successful Services CI/Pact source ${source_sha} from run $(jq -r '.run_id' <<< "$resolved")"
+            ;;
           absent)
-            # No Pacticipant means there is no Pact source to borrow, but the
-            # service still needs exact-main build/contract CI evidence for the
-            # SHA whose image build-push produced. The verifier below is required
-            # for absent participants too; only Pact provenance is skipped.
-            source_sha="$GITHUB_SHA"
-            reconcile_present="$(jq -cn --argjson old "$reconcile_present" --arg svc "$svc" \
-              '$old + {($svc): "absent"}')"
-            echo "  ✓ ${svc} has no Pacticipant; using only this run's built image (no contracts exist to query)"
+            # Reconcile is retried independently of the original push. Without a
+            # registered Pacticipant there is no durable contract verdict to bind
+            # to this image; a later registration could make the same image unsafe
+            # after this job has already handed its result to gitops-pr.
+            echo "::error::reconcile source refused for ${svc}: Broker has no Pacticipant and no verified Pact source"
+            source_failure=1
+            continue
             ;;
           *)
             echo "::error::reconcile source refused for ${svc}: no exact or tree-equivalent Pact source (${present})"
@@ -141,7 +190,8 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
           continue
         fi
       fi
-      if ! python3 .github/scripts/verify-successful-service-ci.py "$svc" "$source_sha"; then
+      if [ "$source_ci_verified" != true ] \
+         && ! python3 .github/scripts/verify-successful-service-ci.py "$svc" "$source_sha"; then
         source_failure=1
         continue
       fi
@@ -154,12 +204,12 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
     {
       echo "### can-i-deploy: reconcile source evidence missing"
-      echo "No can-i-deploy verdict or GitOps image-pin mutation was allowed because at least one service lacked exact image evidence and successful exact-main Services CI build/contract evidence, or lacked Pact provenance for a registered participant."
+      echo "No can-i-deploy verdict or GitOps image-pin mutation was allowed because at least one service lacked exact image evidence, successful exact-main Services CI build/contract evidence, or a verifiable Pact source."
       echo "Requested services: \`$(echo "$SERVICES" | jq -r 'join(" ")')\`."
     } >> "$GITHUB_STEP_SUMMARY"
     exit 1
   fi
-  echo "Verified exact build-push image evidence and successful exact-main Services CI build/contract evidence for all reconcile services; registered participants also require Pact provenance."
+  echo "Verified exact build-push image evidence, successful exact-main Services CI build/contract evidence, and a verifiable Pact source for every reconcile service."
 fi
 
 arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
@@ -272,21 +322,6 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
       # REFUSE; its --self-test asserts no branch can ever emit a moving tag again.
       if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
         vpresent="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")"
-        if [ "$vpresent" = "absent" ]; then
-          participant_code="$(curl -s -o /dev/null -w '%{http_code}' \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
-          if [ "$participant_code" != "404" ]; then
-            echo "::error::reconcile source refused for ${svc}: no-contract state changed or became inconclusive before co-deploy (HTTP ${participant_code})"
-            echo "deployable=[]" >> "$GITHUB_OUTPUT"
-            echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
-            {
-              echo "### can-i-deploy: reconcile Pacticipant state changed"
-              echo "The Broker no longer proves that every no-contract service is absent; no GitOps image-pin mutation was allowed."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-        fi
       else
         vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
       fi
@@ -356,13 +391,11 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
   code="$(curl -s -o /dev/null -w '%{http_code}' \
     -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
     "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
-  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ] \
-     && [ "$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$reconcile_present")" = "absent" ] \
-     && [ "$code" != "404" ]; then
-    # The no-contract exception is valid only while the participant is absent.
-    # If it appeared (or the Broker became inconclusive) after preflight, discard
-    # the whole batch before GitOps can consume a partial deployable set.
-    echo "::error::reconcile source refused for ${svc}: Pacticipant absence changed or became inconclusive after preflight (HTTP ${code})"
+  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ] && [ "$code" != "200" ]; then
+    # A source that disappears or becomes unobservable after preflight cannot
+    # inherit the successful source proof. Do not let 404, 5xx or network errors
+    # turn into the ordinary no-contract deploy path for a reconcile.
+    echo "::error::reconcile source refused for ${svc}: Pacticipant is missing or unavailable after source preflight (HTTP ${code})"
     echo "deployable=[]" >> "$GITHUB_OUTPUT"
     echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
     {
