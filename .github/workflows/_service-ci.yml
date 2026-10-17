@@ -111,8 +111,35 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref != '' && inputs.ref || '' }}
+          # A historical provider ref may predate the retry helpers used by this workflow.
+          # Stage the helpers from the trusted triggering SHA before switching to that ref.
+          ref: ${{ inputs.ref != '' && github.sha || '' }}
           fetch-depth: ${{ inputs.ref == '' && 1 || 0 }}
+
+      - name: Stage trusted build retry helpers
+        if: inputs.ref != ''
+        run: |
+          set -euo pipefail
+          for helper in retry-testcontainers-ebusy.sh retry-gradle-verification-cache.sh heal-gradle-verification-failure.sh; do
+            cp ".github/scripts/${helper}" "${RUNNER_TEMP}/${helper}"
+          done
+
+      - name: Check out historical service source with trusted helpers
+        if: inputs.ref != ''
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          resolved_ref="$(git rev-parse --verify "${REF}^{commit}")"
+          git merge-base --is-ancestor "$resolved_ref" origin/main || {
+            echo '::error::Historical provider ref is not on main.'
+            exit 1
+          }
+          git checkout --detach --quiet "$resolved_ref"
+          for helper in retry-testcontainers-ebusy.sh retry-gradle-verification-cache.sh heal-gradle-verification-failure.sh; do
+            cp "${RUNNER_TEMP}/${helper}" ".github/scripts/${helper}"
+          done
 
       # Resolve GRADLE_USER_HOME. This job is ALWAYS `runner.environment == 'github-hosted'`
       # now (never self-hosted), so it always takes the default-home branch below — restoring

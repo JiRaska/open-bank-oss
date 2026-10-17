@@ -222,7 +222,7 @@ STUB
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
            ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
            VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
-           SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
+           FLEET_ATTEST_WORKERS=1 SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
     # Both failure branches print what the run ACTUALLY produced, not only what was wanted.
@@ -835,12 +835,30 @@ SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
 BY_DIGEST=0
 BY_TAG=0
-for image in "${IMAGES[@]}"; do
+# Each worker owns one private indexed result directory. Never source worker output.
+# Four workers may be in flight; a systemic outage disables retries for all workers
+# at their next retry boundary. At most three other image groups are in flight;
+# each retains up to VERIFY_ATTEMPTS attempts (at most nine attempts at defaults).
+# This bounds registry load but is not the old serial circuit's exact retry budget.
+FLEET_ATTEST_WORKERS="${FLEET_ATTEST_WORKERS:-4}"
+case "$FLEET_ATTEST_WORKERS" in 1|2|3|4) ;; *) echo 'ERROR: FLEET_ATTEST_WORKERS must be 1..4' >&2; exit 2 ;; esac
+pool_dir="$(mktemp -d)" || exit 2
+pool_pids=()
+cleanup_pool() {
+  local pid
+  # Drain only our own workers before deleting their output. Interruption does not
+  # orphan verification processes; it may wait for an already running cosign call.
+  for pid in ${pool_pids[@]+"${pool_pids[@]}"}; do wait "$pid" 2>/dev/null || true; done
+  rm -rf "$pool_dir"
+}
+trap cleanup_pool EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+probe_one_image() {
+  local image="$1" result="$2" ref mode short verdict err missing_type attempt _e _pt
   ref="$(probe_ref "$image")"
   mode="$(probe_mode "$image")"
-  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
   short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
-
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
   # retried, so a genuinely unattested image still fails fast and no result is retried into
@@ -875,7 +893,7 @@ for image in "${IMAGES[@]}"; do
     done
     [ "$verdict" = OK ] && break
     [ "$verdict" != "UNKNOWN" ] && break
-    [ "$RETRIES_DISABLED" -eq 1 ] && break
+    [ -f "$pool_dir/retries-disabled" ] && break
     [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
     printf '  retry %s/%s  %s  (probe failed, not a verdict)\n' \
       "$attempt" "$VERIFY_ATTEMPTS" "$short"
@@ -883,6 +901,56 @@ for image in "${IMAGES[@]}"; do
     attempt=$((attempt + 1))
   done
 
+  printf '%s\n' "$image" > "$result/image"
+  printf '%s\n' "$verdict" > "$result/verdict"
+  printf '%s' "$err" > "$result/error"
+  printf '%s\n' "$missing_type" > "$result/missing-type"
+  printf '%s\n' "$attempt" > "$result/attempt"
+}
+
+# Admit at most four images, then fold in enumeration order. A worker that exits
+# without a complete, unique result is UNKNOWN, never a successful partial fleet.
+next_image=0
+launch_image() {
+  local index="$1"
+  mkdir "$pool_dir/$index" || return 1
+  probe_one_image "${IMAGES[$index]}" "$pool_dir/$index" > "$pool_dir/$index/output" 2>&1 &
+  pool_pids[$index]=$!
+}
+for ((i=0; i<${#IMAGES[@]}; i++)); do
+  while [ "$next_image" -lt "${#IMAGES[@]}" ] && [ "$next_image" -lt "$((i + FLEET_ATTEST_WORKERS))" ]; do
+    launch_image "$next_image" || exit 2
+    next_image=$((next_image + 1))
+  done
+  image="${IMAGES[$i]}"
+  ref="$(probe_ref "$image")"
+  mode="$(probe_mode "$image")"
+  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
+  short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
+  result="$pool_dir/$i"
+  worker_ok=1
+  wait "${pool_pids[$i]}" || worker_ok=0
+  for field in image verdict error missing-type attempt output; do
+    [ -f "$result/$field" ] && [ ! -L "$result/$field" ] || worker_ok=0
+  done
+  [ "$(find "$result" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 6 ] || worker_ok=0
+  if [ "$worker_ok" -eq 1 ]; then
+    [ "$(cat "$result/image")" = "$image" ] || worker_ok=0
+    verdict="$(cat "$result/verdict")"
+    case "$verdict" in OK|ABSENT|UNATTESTED|UNKNOWN) ;; *) worker_ok=0 ;; esac
+    attempt="$(cat "$result/attempt")"
+    case "$attempt" in ''|*[!0-9]*) worker_ok=0 ;; esac
+    [ "$attempt" -ge 1 ] && [ "$attempt" -le "$VERIFY_ATTEMPTS" ] || worker_ok=0
+  fi
+  if [ "$worker_ok" -eq 1 ]; then
+    cat "$result/output"
+    err="$(cat "$result/error")"
+    missing_type="$(cat "$result/missing-type")"
+  else
+    verdict=UNKNOWN
+    err='worker failed or produced an incomplete/ambiguous result; no image verdict'
+    missing_type=''
+  fi
   case "$verdict" in
     OK)
       printf '  OK          %s\n' "$short"
@@ -926,7 +994,11 @@ for image in "${IMAGES[@]}"; do
   else
     CONSECUTIVE_UNKNOWN=0
   fi
+  if [ "$RETRIES_DISABLED" -eq 1 ]; then : > "$pool_dir/retries-disabled"; fi
 done
+rm -rf "$pool_dir"
+trap - EXIT INT TERM
+
 
 FAIL=$((UNATTESTED + ABSENT))
 
