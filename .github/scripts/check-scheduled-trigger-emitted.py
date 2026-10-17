@@ -29,6 +29,7 @@ Self-test:       .github/scripts/check-scheduled-trigger-emitted.py --self-test
 
 from __future__ import annotations
 
+import datetime
 import re
 import sys
 from pathlib import Path
@@ -46,10 +47,19 @@ ENUM_RE = re.compile(r"enum\s+class\s+(\w*Trigger)\s*\{([^}]*)\}", re.S)
 # direction of the ratchet is what forced this edit — leaving a fixed service listed is itself a
 # failure, so the list cannot rot into an excuse nobody rereads (same shape as KNOWN_UNCOVERED in
 # check-pact-provider-replay.py, also empty). A new entry needs a reason and a way out.
-KNOWN_UNEMITTED: dict[str, str] = {
-    "openbank-flaky-test-hunter": "weekly sweep removed 2026-10-17 (pod has no checkout); SCHEDULED kept "
-    "@Deprecated so Temporal histories (168 h retention) still deserialize. Delete both after 2026-10-31.",
+# Each value is (reason, expires): `expires` is an ISO date (UTC) after which the entry itself
+# FAILS the gate, so the way out is enforced rather than promised in prose.
+KNOWN_UNEMITTED: dict[str, tuple[str, str]] = {
+    "openbank-flaky-test-hunter": (
+        "weekly sweep removed 2026-10-17 (pod has no checkout); SCHEDULED kept "
+        "@Deprecated so Temporal histories (168 h retention) still deserialize. Delete both after 2026-10-31.",
+        "2026-10-31",
+    ),
 }
+
+
+def today_utc() -> datetime.date:
+    return datetime.datetime.now(datetime.timezone.utc).date()
 
 
 def strip_comments(text: str) -> str:
@@ -91,17 +101,21 @@ def analyse(service_dir: Path) -> tuple[set[str], set[str], bool]:
     return declared, emitted, has_scheduled
 
 
-def audit() -> list[str]:
+def audit(known: dict[str, tuple[str, str]] | None = None, today: datetime.date | None = None,
+          repo: Path | None = None) -> list[str]:
+    known = KNOWN_UNEMITTED if known is None else known
+    today = today or today_utc()
+    repo = repo or REPO
     findings: list[str] = []
     offenders: set[str] = set()
-    for service_dir in sorted(REPO.glob("openbank-*/src/main")):
+    for service_dir in sorted(repo.glob("openbank-*/src/main")):
         service = service_dir.parents[1].name
         declared, emitted, has_scheduled = analyse(service_dir)
         unemitted = declared - emitted
         if not unemitted:
             continue
         offenders.add(service)
-        if service in KNOWN_UNEMITTED:
+        if service in known:
             continue
         findings.append(
             f"{service}: declares {sorted(unemitted)} with a SCHEDULED value, but nothing "
@@ -112,8 +126,13 @@ def audit() -> list[str]:
         )
     # The ratchet's other direction: a baselined service that is now covered must be removed from
     # KNOWN_UNEMITTED, or the list rots into a permanent excuse nobody rereads.
-    for service, reason in sorted(KNOWN_UNEMITTED.items()):
-        if not (REPO / service / "src" / "main").is_dir():
+    for service, (reason, expires) in sorted(known.items()):
+        if today > datetime.date.fromisoformat(expires):
+            findings.append(
+                f"{service}: KNOWN_UNEMITTED entry expired on {expires} (today {today}) — "
+                f"fix the service or delete the entry (recorded reason: {reason})."
+            )
+        if not (repo / service / "src" / "main").is_dir():
             findings.append(f"{service}: listed in KNOWN_UNEMITTED but has no src/main — stale entry, remove it.")
         elif service not in offenders:
             findings.append(
@@ -160,13 +179,28 @@ def self_test() -> int:
          {"a.kt": "enum class RunTrigger { RESCHEDULED_LATER }", "b.kt": "fun f() {}"}, set()),
     ]
     failed = 0
+
+    def expiry_case(label: str, expires: str, want_expired: bool) -> None:
+        nonlocal failed
+        root = build({"a.kt": "enum class RunTrigger { SCHEDULED }", "b.kt": "fun f() {}"})
+        repo = root.parents[2]
+        out = audit({"openbank-x": ("r", expires)}, datetime.date(2026, 10, 17), repo)
+        got = any("expired" in f for f in out)
+        ok = got == want_expired
+        failed += not ok
+        print(f"  {'PASS' if ok else 'FAIL'}  {label} (expired finding expected={want_expired}, got={got})")
+
+    expiry_case("an expired KNOWN_UNEMITTED entry fails", "2026-10-16", True)
+    expiry_case("a future KNOWN_UNEMITTED entry passes", "2026-10-31", False)
+    expiry_case("an entry expiring today still passes", "2026-10-17", False)
+    n_extra = 3
     for name, files, expected in cases:
         declared, emitted, _ = analyse(build(files))
         got = declared - emitted
         ok = got == expected
         failed += not ok
         print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {sorted(expected)}, got {sorted(got)})")
-    print(f"self-test: {len(cases) - failed}/{len(cases)} passed")
+    print(f"self-test: {len(cases) + n_extra - failed}/{len(cases) + n_extra} passed")
     return 1 if failed else 0
 
 
