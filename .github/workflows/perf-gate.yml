@@ -8,6 +8,11 @@
 #
 # v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
 # only once the isolated harness and synthetic-data boundary are proven (issue #3348).
+# v1.1: adds the read-only FX rate sheet — FX lookup sits inside every cross-currency
+# payment, so its read latency is additive to the money path without touching it.
+# v1.2: adds the balance pending-approvals read — the one balance read that answers 200
+# on a fresh database; the id-scoped balance rows need seeded fixtures (perf gate has
+# none by design).
 name: Performance gate
 
 on:
@@ -16,11 +21,11 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated service modules to test (blank = declared v1 scope)"
+        description: "Space-separated service modules to test (blank = declared scope)"
         required: false
         # A dispatch input's default is still a non-empty override.  Keeping this empty means
         # an operator-triggered run measures the same declared Product Catalog + Flaky Test
-        # Hunter denominator as the scheduled run, unless they deliberately narrow it.
+        # Hunter + FX denominator as the scheduled run, unless they deliberately narrow it.
         default: ""
 
 permissions:
@@ -47,12 +52,26 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
-          # summary can say what the run was SUPPOSED to measure, not only what it did.
-          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
-          # money-path flows out of this GitHub-hosted lane until their isolated target and
-          # synthetic identities exist (perf/scenarios.yaml).
-          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
+          # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
+          # Ledger, Interest, KYC, Transaction and SEPA Payment added as third through
+          # eleventh read-only subjects). Kept as a named constant so the summary can
+          # say what the run was SUPPOSED to measure, not only what it did. All
+          # subjects are non-mutating reads booted against disposable PostgreSQL.
+          # Keep money-path WRITES out of this GitHub-hosted lane until their isolated
+          # target and synthetic identities exist (perf/scenarios.yaml).
+          DECLARED = [
+              "openbank-product-catalog",
+              "openbank-flaky-test-hunter",
+              "openbank-fx-service",
+              "openbank-balance-service",
+              "openbank-sanctions-service",
+              "openbank-consent-service",
+              "openbank-ledger-service",
+              "openbank-interest-service",
+              "openbank-kyc-service",
+              "openbank-transaction-service",
+              "openbank-sepa-payment",
+          ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
@@ -71,7 +90,25 @@ jobs:
               if not port or not db:
                   skipped.append((svc, "cannot derive port/DB"))
                   continue
-              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1)})
+              # A declared quarkus.redis host means readiness includes the Redis health check
+              # (measured on openbank-fx-service: /api/v1/fx/rates answered 200 while
+              # /q/health/ready stayed 503 — the Redis check was DOWN with no broker). Boot a
+              # throwaway redis alongside postgres so the readiness gate can ever go green.
+              needs_redis = bool(re.search(r"^  redis:\n(?:.*\n)?\s*hosts:", raw, re.M))
+              # A declared `temporal:` block means a worker registers against Temporal at BOOT
+              # (measured on openbank-transaction-service: quarkusDev dies with gRPC
+              # UNAVAILABLE / connection refused on localhost:7233 with no server). The
+              # namespace is read from the service's own config, never a list kept here —
+              # the api-fuzz-authenticated derivation, same shape as the redis probe above.
+              temporal = re.search(r"^  temporal:\n(?:.*\n)?\s*namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M) \
+                  or re.search(r"^  temporal:\n(?:.*\n)?\s*namespace:\s*([^\s${]+)", raw, re.M)
+              matrix.append({
+                  "service": svc,
+                  "port": int(port.group(1)),
+                  "db": db.group(1),
+                  "redis": "true" if needs_redis else "false",
+                  "temporal": (temporal.group(1).strip() if temporal else ""),
+              })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
           print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
@@ -136,6 +173,11 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      NEEDS_REDIS: ${{ matrix.redis }}
+      # Set by the derive step when the service's application.yaml declares a `temporal:`
+      # block (namespace read from the service's own config). Empty for subjects without
+      # a Temporal worker — the boot skips the server entirely.
+      TEMPORAL_NS: ${{ matrix.temporal }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -185,6 +227,50 @@ jobs:
             exit 1
           fi
 
+          # Only services whose application.yaml declares quarkus.redis.hosts get a broker:
+          # their readiness includes the Redis health check and can never go green without
+          # one. redis:7.2-alpine matches the dast-zap-baseline and api-fuzz-authenticated
+          # throwaway brokers.
+          if [ "${NEEDS_REDIS}" = "true" ]; then
+            echo "==> [${SERVICE}] starting redis (application.yaml declares quarkus.redis.hosts)"
+            docker rm -f perf-redis >/dev/null 2>&1 || true
+            docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
+          fi
+
+          # Only services whose application.yaml declares a `temporal:` block get a dev
+          # server: their worker registers against Temporal at BOOT and quarkusDev dies
+          # with gRPC UNAVAILABLE without one (measured on openbank-transaction-service,
+          # connection refused on localhost:7233). temporalio/temporal:1.8.2
+          # `server start-dev` is IN-MEMORY (no extra database) and creates the namespace
+          # it is given — the api-fuzz-authenticated harness's image and readiness probe.
+          if [ -n "${TEMPORAL_NS}" ]; then
+            echo "==> [${SERVICE}] starting Temporal dev server (namespace ${TEMPORAL_NS})"
+            docker rm -f perf-temporal >/dev/null 2>&1 || true
+            docker run -d --name perf-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            TEMPORAL_UP=0
+            for _ in $(seq 1 30); do
+              if docker exec perf-temporal temporal operator namespace describe \
+                   --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1; then
+                TEMPORAL_UP=1; break
+              fi
+              sleep 2
+            done
+            if [ "$TEMPORAL_UP" != "1" ]; then
+              echo "::error::[${SERVICE}] Temporal dev server never became ready"
+              docker logs perf-temporal 2>&1 | tail -20; exit 1
+            fi
+          fi
+
+          # Two advisory flags keep the boot green without provisioning OPA or Kafka, both
+          # measured on openbank-sanctions-service (fifth subject):
+          #   - authz.enforce=false is the ADR-0034 D5 advisory mode — the @Authorize
+          #     interceptor logs "PDP unavailable" and proceeds instead of 503ing the
+          #     route (same flag api-fuzz-authenticated boots with; OIDC is already off).
+          #   - quarkus.messaging.health.enabled=false drops the SmallRye messaging check:
+          #     without a broker it is DOWN for a service with outgoing channels
+          #     (sanctions), UP for one with only incoming (balance) — SmallRye is
+          #     asymmetric here, and the lane times HTTP read handlers, not messaging.
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
@@ -193,6 +279,8 @@ jobs:
             -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             -Dquarkus.oidc.enabled=false \
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
+            -Dauthz.enforce=false \
+            -Dquarkus.messaging.health.enabled=false \
             -Dquarkus.management.enabled=false \
             -Dquarkus.console.basic=true \
             --console=plain --quiet \
@@ -244,7 +332,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg >/dev/null 2>&1 || true
+          docker rm -f perf-pg perf-redis perf-temporal >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()

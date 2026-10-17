@@ -22,6 +22,15 @@ UNKNOWN = 4
 EXPECTED_GATE = (
     ("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)"),
     ("perf-reports-openbank-flaky-test-hunter", "k6 smoke (openbank-flaky-test-hunter)"),
+    ("perf-reports-openbank-fx-service", "k6 smoke (openbank-fx-service)"),
+    ("perf-reports-openbank-balance-service", "k6 smoke (openbank-balance-service)"),
+    ("perf-reports-openbank-sanctions-service", "k6 smoke (openbank-sanctions-service)"),
+    ("perf-reports-openbank-consent-service", "k6 smoke (openbank-consent-service)"),
+    ("perf-reports-openbank-ledger-service", "k6 smoke (openbank-ledger-service)"),
+    ("perf-reports-openbank-interest-service", "k6 smoke (openbank-interest-service)"),
+    ("perf-reports-openbank-kyc-service", "k6 smoke (openbank-kyc-service)"),
+    ("perf-reports-openbank-transaction-service", "k6 smoke (openbank-transaction-service)"),
+    ("perf-reports-openbank-sepa-payment", "k6 smoke (openbank-sepa-payment)"),
 )
 BASELINE_ARTIFACT = "k6-money-path-summary"
 OVERRIDE_SCOPE = re.compile(
@@ -251,6 +260,51 @@ def self_test() -> int:
                 "started_at": "2026-09-01T12:05:00Z",
                 "conclusion": "failure",
             },
+            {
+                "name": "k6 smoke (openbank-fx-service)",
+                "started_at": "2026-09-01T12:06:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-balance-service)",
+                "started_at": "2026-09-01T12:07:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sanctions-service)",
+                "started_at": "2026-09-01T12:08:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-consent-service)",
+                "started_at": "2026-09-01T12:09:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-ledger-service)",
+                "started_at": "2026-09-01T12:10:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-interest-service)",
+                "started_at": "2026-09-01T12:11:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-kyc-service)",
+                "started_at": "2026-09-01T12:12:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-transaction-service)",
+                "started_at": "2026-09-01T12:13:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sepa-payment)",
+                "started_at": "2026-09-01T12:14:00Z",
+                "conclusion": "failure",
+            },
         ]
     }
     scope, policies = gate_policies(jobs, attempt_start)
@@ -261,6 +315,33 @@ def self_test() -> int:
         ),
         "perf-reports-openbank-flaky-test-hunter": ArtifactWindow(
             instant("2026-09-01T12:05:00Z")
+        ),
+        "perf-reports-openbank-fx-service": ArtifactWindow(
+            instant("2026-09-01T12:06:00Z")
+        ),
+        "perf-reports-openbank-balance-service": ArtifactWindow(
+            instant("2026-09-01T12:07:00Z")
+        ),
+        "perf-reports-openbank-sanctions-service": ArtifactWindow(
+            instant("2026-09-01T12:08:00Z")
+        ),
+        "perf-reports-openbank-consent-service": ArtifactWindow(
+            instant("2026-09-01T12:09:00Z")
+        ),
+        "perf-reports-openbank-ledger-service": ArtifactWindow(
+            instant("2026-09-01T12:10:00Z")
+        ),
+        "perf-reports-openbank-interest-service": ArtifactWindow(
+            instant("2026-09-01T12:11:00Z")
+        ),
+        "perf-reports-openbank-kyc-service": ArtifactWindow(
+            instant("2026-09-01T12:12:00Z")
+        ),
+        "perf-reports-openbank-transaction-service": ArtifactWindow(
+            instant("2026-09-01T12:13:00Z")
+        ),
+        "perf-reports-openbank-sepa-payment": ArtifactWindow(
+            instant("2026-09-01T12:14:00Z")
         ),
     }
     artifacts = {
