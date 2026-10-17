@@ -186,6 +186,7 @@ main.go:74: error during command execution: no matching attestations:'
 # fails the way its name declares. Deliberately writes to stderr, as the real one does.
 if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
 img="${!#}"
+[ -n "${TUF_LOG:-}" ] && printf '%s\n' "${TUF_ROOT:-UNSET}" >> "$TUF_LOG"
 case "$img" in
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
@@ -221,7 +222,7 @@ STUB
     # default and the systemic case would prove nothing.
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
            ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
-           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
+           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" TUF_LOG="$tmp/tuf.log" \
            FLEET_ATTEST_WORKERS=1 SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
@@ -351,6 +352,19 @@ STUB
   run_fixture "all attested -> exit 0" 0 \
     "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t"
+  # Workers must not share a cosign TUF cache: concurrent probes lost the refresh lock with
+  # "getting Rekor public keys ... resource temporarily unavailable" and failed auto-deploy's
+  # Build job. Two images were just probed (a signature check plus one verify-attestation per
+  # predicate each); every call must see a TUF_ROOT, and the two images must not share one.
+  # Without the export in probe_one_image the stub logs UNSET and this fails.
+  cases=$((cases + 1))
+  if [ -s "$tmp/tuf.log" ] && ! grep -qx UNSET "$tmp/tuf.log" \
+     && [ "$(sort -u "$tmp/tuf.log" | wc -l)" -ge 2 ]; then
+    printf '  ok: each probe worker gets its own TUF_ROOT\n'
+  else
+    printf '  FAIL: probe workers share (or lack) a TUF_ROOT: %s\n' "$(sort -u "$tmp/tuf.log" 2>/dev/null | tr '\n' ' ')"
+    failures=$((failures + 1))
+  fi
   # A real gap -> 1. Both fatal classes, so the summary carries each count.
   run_fixture "unattested + absent -> exit 1" 1 \
     "2 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
@@ -859,6 +873,12 @@ probe_one_image() {
   ref="$(probe_ref "$image")"
   mode="$(probe_mode "$image")"
   short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
+  # One TUF cache per worker. cosign keeps its trusted-root cache under $TUF_ROOT (default
+  # ~/.sigstore) and takes an exclusive lock on it while it refreshes; with four workers sharing
+  # it, a probe loses the race with "getting Rekor public keys: creating cached local store:
+  # resource temporarily unavailable" -- UNKNOWN, no verdict -- and the retry hits the same
+  # contended lock, so the whole auto-deploy Build job exits 2 and nothing is pinned.
+  export TUF_ROOT="$result/tuf"
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
   # retried, so a genuinely unattested image still fails fast and no result is retried into
