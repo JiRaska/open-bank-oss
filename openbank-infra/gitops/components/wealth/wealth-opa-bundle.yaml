@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: wealth-service
     app.kubernetes.io/part-of: wealth
   annotations:
-    openbank.tech/policy-checksum: "8465b38dc6f88b97"
+    openbank.tech/policy-checksum: "94830a026815ff3e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -901,11 +901,19 @@ data:
     # tool -> tier before querying, so this rule re-validates only the (tier, resource) grant
     # against the served charter data). No input.tier, no grant: deny-by-default is preserved,
     # and the MCP / REST paths above are unchanged because they never send input.tier.
+    #
+    # input.tier is caller-DECLARED, so the grant must not trust it on its own: the tool has to be
+    # a member of that tier's tool set in agents.yaml tool_tiers. Without that binding a caller
+    # declaring tier=read with a granted resource got charter_allowed for ANY tool string -- a write,
+    # a REST action, anything not hard-denied -- because charter_allowed is the decision shared by
+    # the MCP and REST paths. The deny side stays unbound on purpose: a wider deny fails closed, and
+    # charters deny tiers (write, execute) that tool_tiers does not enumerate.
     charter_allowed if tier_resource_charter_allowed
 
     charter_denied if tier_resource_charter_denied
 
     tier_resource_charter_allowed if {
+    	input.tool in tier_tools(input.tier)
     	some entry in tier_resource_allow_entries
     	entry.tier == input.tier
     	tier_resource_resources_granted(entry.resources)
@@ -916,6 +924,13 @@ data:
     	entry.tier == input.tier
     	tier_resource_resources_granted(entry.resources)
     }
+
+    # The grantable tiers, each spelled out (gen-agents-opa-data.py projects data.agents statically,
+    # so no dynamic index). A tier not listed here -- write, execute, deny, or any typo -- has no
+    # tool set and therefore grants nothing.
+    tier_tools("read") := data.agents.tool_tiers.read
+
+    tier_tools("write_proposal") := data.agents.tool_tiers.write_proposal
 
     # Only OBJECT-shaped entries carry .tier; for a plain-string entry `entry.tier` is undefined
     # and the body fails, so string-pattern charters are never collected here.
@@ -931,9 +946,11 @@ data:
     	entry.tier
     }
 
-    tier_resource_resources_granted(resources) if input.resource in resources
-
-    tier_resource_resources_granted(resources) if "*" in resources
+    # Resources are globs ("*", "github-*"); glob_match also covers the exact and bare-"*" cases.
+    tier_resource_resources_granted(resources) if {
+    	some pattern in resources
+    	glob_match(pattern, input.resource)
+    }
 
     # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
     # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
@@ -1051,8 +1068,33 @@ data:
     # Derived paths (read out of the .rego sources, never listed by hand):
     #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
     #   data.agents.tool_tiers.deny
+    #   data.agents.tool_tiers.read
+    #   data.agents.tool_tiers.write_proposal
 
     tool_tiers:
+      read:
+      - query.ledger.readonly
+      - query.gl.readonly
+      - query.catalog.readonly
+      - read.logs
+      - read.governance
+      - query.compliance.readonly
+      - query.payments.readonly
+      - query.interest.readonly
+      - query.disputes.readonly
+      - query.observability.readonly
+      - query.balance.readonly
+      - query.transaction.readonly
+      - query.account.readonly
+      - query.consent.readonly
+      - verify.mandate
+      write_proposal:
+      - draft.ticket
+      - gh.pr.open
+      - draft.adr
+      - git.branch
+      - git.commit.signed
+      - run.skill
       deny:
       - money.transfer
       - money.post.ledger
