@@ -11,6 +11,7 @@ import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.application.port.out.NostroGl
 import com.openbank.treasury.domain.model.LedgerNostroLine
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.client.LegacyGlChart
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -22,6 +23,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -117,9 +119,32 @@ data class AccountBalanceView(
 class LedgerReadAdapter(
     @RestClient private val client: LedgerReadRestClient,
     @RestClient private val classes: LedgerAccountingClassRestClient,
+    /**
+     * `openbank.treasury.ledger.post-by-class`, the same rollout switch as the posting side. While it is
+     * false the ledger may be an older one that does not serve `/api/v1/accounting-classes` (404), so the
+     * nostro accounts come from the shim chart instead and reconciliation keeps working in either deploy
+     * order. Once true, the ledger's own map is the only source.
+     */
+    @ConfigProperty(name = "openbank.treasury.ledger.post-by-class", defaultValue = "false")
+    private val postByClass: Boolean,
 ) : LedgerReadPort {
 
+    @Volatile
+    private var cached: Pair<Long, Map<String, NostroGl>>? = null
+
+    /**
+     * One map read serves a whole reconcile (upload check + the line read) instead of one call each: the
+     * answer is cached for [MAP_TTL_NANOS]. A failed read is never cached.
+     */
     override suspend fun nostroAccounts(): Map<String, NostroGl> {
+        val now = System.nanoTime()
+        cached?.let { (at, map) -> if (now - at < MAP_TTL_NANOS) return map }
+        val fresh = if (postByClass) readMap() else LegacyGlChart.nostroAccounts()
+        cached = now to fresh
+        return fresh
+    }
+
+    private suspend fun readMap(): Map<String, NostroGl> {
         val rows = try {
             classes.list().awaitSuspending()
         } catch (e: WebApplicationException) {
@@ -199,6 +224,7 @@ class LedgerReadAdapter(
         const val PAGE_SIZE = 200
         const val MAX_PAGES = 50
         const val NOT_FOUND = 404
+        const val MAP_TTL_NANOS = 30_000_000_000L
         const val NOSTRO_CLASS = "NOSTRO_ACCOUNT"
         const val PRINCIPAL_ROLE = "PRINCIPAL"
         val BOOKED = setOf("POSTED", "REVERSED")

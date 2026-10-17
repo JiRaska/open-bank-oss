@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.infrastructure.client
 
+import com.openbank.treasury.application.port.out.NostroGl
 import com.openbank.treasury.domain.model.PostingLine
 import java.util.UUID
 
@@ -46,6 +47,13 @@ internal object LegacyGlChart {
         Triple(accountingClass, role, currency) to code
 
     val entries: Map<Triple<String, String, String>, String> get() = codes
+
+    /** The nostro accounts by currency (class NOSTRO_ACCOUNT, role PRINCIPAL), for reads against an older ledger. */
+    fun nostroAccounts(): Map<String, NostroGl> = codes
+        .filterKeys { it.first == "NOSTRO_ACCOUNT" && it.second == "PRINCIPAL" }
+        .entries.associate { (key, code) -> key.third to NostroGl(code, idOf(code)) }
+
+    private fun idOf(code: String): UUID = UUID.fromString("a0000000-0000-0000-0000-00000000$code")
 
     fun glAccountId(line: PostingLine): UUID {
         val code = requireNotNull(codes[Triple(line.accountingClass, line.role.name, line.currency)]) {
