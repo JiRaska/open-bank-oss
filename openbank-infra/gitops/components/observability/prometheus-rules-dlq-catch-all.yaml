@@ -1,0 +1,33 @@
+# Catch-all dead-letter alert. Per-topic DLQ alerts exist for only a handful of topics, while
+# every Kafka incoming channel in the fleet dead-letters. A topic with no dedicated rule would
+# otherwise fill unseen (openbank.dlq.audit.audit-events-in took records with no alert).
+#
+# Series come from the Strimzi Kafka Exporter (kafka_topic_partition_current_offset, topicRegex
+# ".*"), the same ones the per-topic DLQ alerts use. Not openbank_* metrics, so
+# alert-metric-emitted does not apply. Legacy names (dead-letter-topic-*) are matched too.
+# Per-topic alerts stay: they carry the stricter severity and a service-specific runbook.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-dlq-catch-all
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.dlq.catch-all
+      rules:
+        - alert: DeadLetterTopicGrowing
+          # New records in the last hour. The offset only grows, so increase() lets the alert
+          # clear once arrivals stop; retained-but-quiet records are the per-topic NotEmpty rules'
+          # job. Labelled per topic so each DLQ alerts on its own.
+          expr: |
+            sum by (topic) (
+              increase(kafka_topic_partition_current_offset{topic=~"openbank\\.dlq\\..+|dead-letter-topic-.+"}[1h])
+            ) > 0
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Dead-letter topic {{ $labels.topic }} received records"
+            description: "{{ $labels.topic }} gained {{ $value }} record(s) in the last hour. A consumer nacked them after retries. Inspect the records and the owning service's logs. This is the fleet-wide catch-all; a dedicated per-topic alert may fire as well."
