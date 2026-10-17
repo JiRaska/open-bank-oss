@@ -43,6 +43,24 @@ data class PostingLine(
     val side: Side,
     val amount: BigDecimal,
     val currency: String,
+    /**
+     * Set ONLY on a reversal leg, to the account the ORIGINAL posting of this class/role/currency
+     * actually landed on ([ResolvedAccount]). The ledger map may be re-pointed between a settlement
+     * and its reversal by a reviewed migration; a reversal that re-resolved the class would then
+     * offset a different account than the one it is reversing. Null on every other leg.
+     */
+    val glAccountId: UUID? = null,
+)
+
+/**
+ * What the ledger resolved one leg of a journal to when it was posted. Recorded with the deal's
+ * journal so a later reversal can offset exactly those accounts, whatever the map says by then.
+ */
+data class ResolvedAccount(
+    val accountingClass: String,
+    val role: LedgerRole,
+    val currency: String,
+    val glAccountId: UUID,
 )
 
 /**
@@ -67,24 +85,6 @@ data class JournalSpec(
         }
         require(lines.all { it.amount.signum() > 0 }) { "every journal line amount must be positive" }
     }
-}
-
-/**
- * The nostro GL accounts, for the READ side only: a correspondent statement is reconciled against
- * the ledger's account addressed by code (`GET /api/v1/journals/accounts/{code}/balance`). Postings
- * no longer name GL accounts at all (ADR-0341 D3) -- see [PostingRules].
- */
-object TreasuryChart {
-    private val nostroByCurrency: Map<String, String> = mapOf(Deal.CZK to "1001", Deal.EUR to "1002")
-
-    fun nostroCode(currency: String): String =
-        nostroByCurrency[currency] ?: error("no treasury nostro GL account in $currency")
-
-    /** Fixed ids seeded by the ledger migration: `a0000000-0000-0000-0000-00000000<code>`. */
-    fun glAccountId(code: String): UUID = UUID.fromString("a0000000-0000-0000-0000-00000000$code")
-
-    /** The nostro GL of every currency — the only accounts a correspondent statement may reconcile. */
-    val nostroCodes: Set<String> get() = nostroByCurrency.values.toSet()
 }
 
 /**

@@ -89,6 +89,13 @@ interface NostroBreakRepository {
  * on treasury's own identity. Never writes: reconciliation lists differences, it does not post them.
  */
 interface LedgerReadPort {
+    /**
+     * The ledger's nostro accounts by currency, read from its accountingClass -> GL map
+     * (class `NOSTRO_ACCOUNT`, role `PRINCIPAL`; ADR-0341 D3). Treasury names no GL code itself.
+     * A ledger that does not serve the map yet is a [LedgerUnavailableException], never an empty map.
+     */
+    suspend fun nostroAccounts(): Map<String, NostroGl>
+
     /** Booked (POSTED or REVERSED) real journal lines on [glCode] with entry date in [from]..[to]. */
     suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine>
 
@@ -103,3 +110,6 @@ interface LedgerReadPort {
      */
     suspend fun accountBalance(glCode: String, currency: String, asOf: LocalDate): BigDecimal?
 }
+
+/** A nostro GL account as the ledger's map names it. */
+data class NostroGl(val glCode: String, val glAccountId: java.util.UUID)

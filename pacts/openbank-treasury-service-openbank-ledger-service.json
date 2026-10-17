@@ -269,6 +269,24 @@
       }
     },
     {
+      "description": "GET the accountingClass map with a missing or expired token",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/accounting-classes"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "GET the nostro journal window with a missing or expired token",
       "providerStates": [
         {
@@ -416,6 +434,49 @@
       },
       "response": {
         "status": 401
+      }
+    },
+    {
+      "description": "GET the accountingClass to GL account map",
+      "providerStates": [
+        {
+          "name": "the standard chart of accounts is seeded"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/accounting-classes"
+      },
+      "response": {
+        "body": [
+          {
+            "accountingClass": "NOSTRO_ACCOUNT",
+            "currencyCode": "CZK",
+            "glAccountId": "a0000000-0000-0000-0000-000000001001",
+            "glCode": "1001",
+            "role": "PRINCIPAL"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
       }
     },
     {

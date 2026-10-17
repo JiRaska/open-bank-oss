@@ -78,7 +78,7 @@ class TreasuryNostroLedgerReadPactConsumerTest {
                     j.minArrayLike("lines", 1) { l ->
                         l.uuid("id")
                         // stringValue: this interaction's whole point is that GL 1001 (CZK nostro,
-                        // TreasuryChart.glAccountId("1001")) carries the seeded line.
+                        // the chart id of 1001) carries the seeded line.
                         l.stringValue("glAccountId", NOSTRO_CZK_GL_ID)
                         l.stringValue("side", "CREDIT")
                         l.decimalType("amount", 250000.00)
@@ -227,6 +227,43 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         .status(401)
         .toPact()
 
+    /**
+     * ADR-0341 D3 -- the READ of the ledger's accountingClass -> GL map, which is where treasury now
+     * learns which GL is a currency's nostro (it names no GL code itself). The row is pinned by value:
+     * the nostro CZK row, its fixed chart id and its code.
+     */
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun accountingClassMapPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the standard chart of accounts is seeded")
+        .uponReceiving("GET the accountingClass to GL account map")
+        .path("/api/v1/accounting-classes")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            au.com.dius.pact.consumer.dsl.PactDslJsonArray.arrayMinLike(1)
+                .stringValue("accountingClass", "NOSTRO_ACCOUNT")
+                .stringValue("role", "PRINCIPAL")
+                .stringValue("currencyCode", "CZK")
+                .stringValue("glAccountId", NOSTRO_CZK_GL_ID)
+                .stringValue("glCode", "1001")
+                .closeObject()!!,
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun rejectsAccountingClassMapWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the accountingClass map with a missing or expired token")
+        .path("/api/v1/accounting-classes")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
     private fun journalBody(accountingClass: String, role: String, key: String = JOURNAL_KEY) = newJsonBody { o ->
         o.stringValue("idempotencyKey", key)
         o.uuid("transactionId")
@@ -259,6 +296,7 @@ class TreasuryNostroLedgerReadPactConsumerTest {
     private fun postBody(accountingClass: String, key: String = JOURNAL_KEY): String {
         fun leg(cls: String, role: String, side: String) =
             com.openbank.treasury.infrastructure.client.JournalLineRequest(
+                glAccountId = null,
                 accountingClass = cls,
                 accountingRole = role,
                 side = side,
@@ -285,6 +323,36 @@ class TreasuryNostroLedgerReadPactConsumerTest {
     }
 
     private fun clientDerivedPostPath(): String = clientDerivedJournalsPath()
+
+    @Test
+    @PactTestFor(pactMethod = "accountingClassMapPact")
+    fun `the accounting class map names the nostro GL of a currency`(mockServer: MockServer) {
+        val rows = given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get("/api/v1/accounting-classes")
+            .then()
+            .statusCode(200)
+            .extract().jsonPath()
+        assertThat(rows.getString("[0].glCode")).isEqualTo("1001")
+        assertThat(rows.getString("[0].glAccountId")).isEqualTo(NOSTRO_CZK_GL_ID)
+        // the production client reads exactly this route
+        assertThat(
+            com.openbank.treasury.infrastructure.nostro.LedgerAccountingClassRestClient::class.java
+                .getAnnotation(jakarta.ws.rs.Path::class.java).value,
+        ).isEqualTo("/api/v1/accounting-classes")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsAccountingClassMapWithMissingToken")
+    fun `the accounting class map is refused with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get("/api/v1/accounting-classes")
+            .then()
+            .statusCode(401)
+    }
 
     @Test
     @PactTestFor(pactMethod = "postJournalByAccountingClassPact")
@@ -423,7 +491,7 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         const val JOURNAL_DATE = "2026-03-16"
         const val JOURNAL_KEY = "treasury:0191c0de-0000-7000-8000-000000000001:settled"
 
-        // TreasuryChart.glAccountId("1001") — CZK nostro, seeded by ledger's
+        // the chart id of GL 1001 — CZK nostro, seeded by ledger's
         // V29__treasury_money_market_accounts.sql.
         const val NOSTRO_CZK_GL_ID = "a0000000-0000-0000-0000-000000001001"
     }

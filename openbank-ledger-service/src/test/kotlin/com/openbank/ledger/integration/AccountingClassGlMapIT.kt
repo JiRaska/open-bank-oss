@@ -59,22 +59,41 @@ class AccountingClassGlMapIT {
             listOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103").map { (ccy, code) ->
                 row(cls, "PRINCIPAL", ccy, code)
             }
-        } + row("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK", "4003")
+        } + listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM").flatMap { cls ->
+            // Billing always debited 2100 whatever the currency; FEE_SETTLEMENT keeps that byte for byte.
+            listOf("CZK", "EUR", "USD", "GBP").map { ccy -> row(cls, "FEE_SETTLEMENT", ccy, "2100") }
+        } + listOf("CZK", "EUR", "USD", "GBP").map { ccy -> row("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy, "4003") }
         ).toMap()
 
     private fun row(accountingClass: String, role: String, currency: String, code: String) =
         Triple(accountingClass, role, currency) to code
+
+    /**
+     * The fixed id of a chart account: `a0000000-0000-0000-0000-00000000<code>`, except 2100, which
+     * V3 seeded as `...0002` and which billing's configuration has always named by that id.
+     */
+    private fun chartId(code: String) =
+        if (code == "2100") "a0000000-0000-0000-0000-000000000002" else "a0000000-0000-0000-0000-00000000$code"
 
     @Test
     fun `the seeded map is exactly the golden table, every row on an enabled leaf account`() {
         val body: String = Given { this } When { get("/api/v1/accounting-classes") } Then {
             statusCode(200)
         } Extract { asString() }
-        val actual = com.fasterxml.jackson.databind.ObjectMapper().readTree(body).associate {
+        val rows = com.fasterxml.jackson.databind.ObjectMapper().readTree(body)
+        val actual = rows.associate {
             Triple(it["accountingClass"].asText(), it["role"].asText(), it["currencyCode"].asText()) to
                 it["glCode"].asText()
         }
         assertThat(actual).isEqualTo(golden)
+        assertThat(rows.size()).describedAs("no duplicate triple hides behind the map").isEqualTo(golden.size)
+        // The chart's ids are fixed (see chartId); a row that resolved to
+        // some other account id with the right code would pass the glCode comparison alone. Every row.
+        rows.forEach {
+            assertThat(it["glAccountId"].asText())
+                .describedAs("${it["accountingClass"].asText()}/${it["role"].asText()}/${it["currencyCode"].asText()}")
+                .isEqualTo(chartId(it["glCode"].asText()))
+        }
     }
 
     @Test
@@ -108,23 +127,26 @@ class AccountingClassGlMapIT {
     }
 
     @Test
-    fun `fee billing resolves to the two accounts its configuration used to name by id`() {
-        // Billing's previous defaults (BillingLedgerConfig): debit a0..0002 (2100), credit a0..4003 (4003).
-        Given {
-            queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
-            queryParam("role", "PRINCIPAL")
-            queryParam("currency", "CZK")
-        } When { get("/api/v1/accounting-classes/resolve") } Then {
-            statusCode(200)
-            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000000002"))
-        }
-        Given {
-            queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
-            queryParam("role", "FEE_INCOME")
-            queryParam("currency", "CZK")
-        } When { get("/api/v1/accounting-classes/resolve") } Then {
-            statusCode(200)
-            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000004003"))
+    fun `fee billing resolves to the two accounts its configuration used to name by id, in every currency`() {
+        // Billing's previous defaults (BillingLedgerConfig): debit a0..0002 (2100), credit a0..4003 (4003),
+        // whatever the currency of the fee.
+        for (ccy in listOf("CZK", "EUR", "USD", "GBP")) {
+            Given {
+                queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
+                queryParam("role", "FEE_SETTLEMENT")
+                queryParam("currency", ccy)
+            } When { get("/api/v1/accounting-classes/resolve") } Then {
+                statusCode(200)
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-000000000002"))
+            }
+            Given {
+                queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
+                queryParam("role", "FEE_INCOME")
+                queryParam("currency", ccy)
+            } When { get("/api/v1/accounting-classes/resolve") } Then {
+                statusCode(200)
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-000000004003"))
+            }
         }
     }
 

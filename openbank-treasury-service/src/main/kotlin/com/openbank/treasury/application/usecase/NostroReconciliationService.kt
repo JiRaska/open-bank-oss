@@ -15,15 +15,14 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.NostroMatcher
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
-import com.openbank.treasury.domain.model.TreasuryChart
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
 /**
  * Nostro reconciliation (ADR-0315, #10896). [accounts] maps a nostro IBAN to its treasury GL code
- * (config `openbank.treasury.nostro.accounts`); a statement for any other account is refused, and
- * a mapping to a GL code the treasury chart does not know as a nostro is refused at construction.
+ * (config `openbank.treasury.nostro.accounts`); a statement for any other account is refused, and so
+ * is one whose configured GL code is not the ledger's nostro account of the statement currency.
  */
 class NostroReconciliationService(
     private val statements: NostroStatementRepository,
@@ -34,13 +33,6 @@ class NostroReconciliationService(
 
     private val accounts: Map<String, String> = accounts.mapKeys { it.key.replace(" ", "").uppercase() }
 
-    init {
-        val nostroCodes = TreasuryChart.nostroCodes
-        this.accounts.forEach { (iban, code) ->
-            require(code in nostroCodes) { "nostro account $iban maps to $code, which is not a treasury nostro GL" }
-        }
-    }
-
     override suspend fun upload(
         statement: NostroStatement,
         sha256: String,
@@ -49,8 +41,14 @@ class NostroReconciliationService(
     ): StoredStatement {
         replayOrConflict(statement, sha256, idempotencyKey)?.let { return it }
         val glCode = requireNotNull(accounts[statement.iban]) { "${statement.iban} is not a configured nostro account" }
-        require(TreasuryChart.nostroCode(statement.currency) == glCode) {
-            "statement currency ${statement.currency} does not match nostro GL $glCode"
+        // Which GL is the nostro of a currency is the LEDGER's map (ADR-0341 D3), asked at upload time:
+        // treasury carries no GL code of its own. This also refuses an IBAN configured onto a GL that
+        // is not a nostro at all, which used to be a construction-time check against a literal list.
+        val nostro = requireNotNull(ledger.nostroAccounts()[statement.currency]) {
+            "the ledger maps no nostro account in ${statement.currency}"
+        }
+        require(nostro.glCode == glCode) {
+            "statement currency ${statement.currency} does not match nostro GL $glCode (the ledger maps ${nostro.glCode})"
         }
         val candidate =
             StoredStatement(

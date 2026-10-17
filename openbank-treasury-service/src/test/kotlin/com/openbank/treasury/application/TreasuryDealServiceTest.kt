@@ -452,6 +452,52 @@ class TreasuryDealServiceTest {
     }
 
     @Test
+    fun `a reversal offsets the accounts the settlement landed on even after the ledger map is re-pointed`(): Unit =
+        runBlocking {
+            val b = book()
+            service.runSimulatedMarket()
+            val settled = ledger.posted.single { it.event == PostingEvent.SETTLED }
+            val landedOn = settled.lines.associate {
+                Triple(it.accountingClass, it.role, it.currency) to ledger.resolve(it)
+            }
+            // A reviewed migration re-points every class between the settlement and its reversal.
+            ledger.mapGeneration = 2
+            service.reverse(b.id, "test", DealFixtures.approver)
+            val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+            reversal.lines.forEach {
+                assertThat(it.glAccountId)
+                    .describedAs("${it.accountingClass}/${it.role}/${it.currency} must keep the settlement's account")
+                    .isEqualTo(landedOn.getValue(Triple(it.accountingClass, it.role, it.currency)))
+                // and re-resolving the class NOW would have been a different account: not vacuous
+                assertThat(it.glAccountId).isNotEqualTo(ledger.resolve(it.copy(glAccountId = null)))
+            }
+        }
+
+    @Test
+    fun `a reversal also pins the accrued-interest unwind to the accounts the accruals landed on`(): Unit =
+        runBlocking {
+            val b = book()
+            service.runSimulatedMarket()
+            clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+            service.accrueInterest(LocalDate.now(clock))
+            val accrual = ledger.posted.first { it.event == PostingEvent.ACCRUED }
+            val accruedOn = accrual.lines.associate {
+                Triple(it.accountingClass, it.role, it.currency) to
+                    ledger.resolve(it)
+            }
+            ledger.mapGeneration = 2
+            service.reverse(b.id, "test", DealFixtures.approver)
+            val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+            val unwind = reversal.lines.filter { Triple(it.accountingClass, it.role, it.currency) in accruedOn }
+            assertThat(unwind).isNotEmpty()
+            unwind.forEach {
+                assertThat(
+                    it.glAccountId,
+                ).isEqualTo(accruedOn.getValue(Triple(it.accountingClass, it.role, it.currency)))
+            }
+        }
+
+    @Test
     fun `a failing deal does not stop the accrual pass, and is reported`(): Unit = runBlocking {
         val a = book()
         val b = book(cmd(principal = "50000.00"))
