@@ -421,7 +421,6 @@ selftest() {
       && git add .github/workflows/auto-deploy.yml && git commit -qm 'augmentation input changed' \
       && git rev-parse HEAD)"
   _expect "augmentation-time build input changed" DIFFERENT svc-a "$s6b" "$s6c"
-
   # 7. A `.github/` path that is NOT a build input must not block.
   local s7; s7="$(_commit .github/workflows/security.yml changed)"
   _expect "an unrelated workflow changed" EQUIVALENT svc-a "$s6c" "$s7"
@@ -468,7 +467,27 @@ selftest() {
   local o7; o7="$(_commit 'svc-a/Prod Config.txt' changed)"
   _expect "overlay: production file with a spaced name is refused" DIFFERENT --own-test-overlay svc-a "$o6" "$o7"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 27 cases (19 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs, unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  # Keep the fail-closed workflow-input negatives last: each commit intentionally makes the
+  # required inputs missing or ambiguous, so later known-positive cases must not inherit it.
+  local s6d s6e s6f s6g
+  s6d="$(cd "$tmp" && git checkout -q "$s6c" && printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n' > .github/workflows/auto-deploy.yml \
+      && git add .github/workflows/auto-deploy.yml && git commit -qm 'augmentation input missing' \
+      && git rev-parse HEAD)"
+  _expect "missing augmentation-time build input fails closed" DIFFERENT svc-a "$s6c" "$s6d"
+  s6e="$(cd "$tmp" && printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: memory\n  AGENT_SVID_NONCE_STORE: redis\n' > .github/workflows/auto-deploy.yml \
+      && git add .github/workflows/auto-deploy.yml && git commit -qm 'augmentation input duplicated' \
+      && git rev-parse HEAD)"
+  _expect "duplicate augmentation-time build input fails closed" DIFFERENT svc-a "$s6c" "$s6e"
+  s6f="$(cd "$tmp" && git checkout -q "$s6c" && printf 'env:\n  AGENT_SVID_NONCE_STORE: redis\n' > .github/workflows/auto-deploy.yml \
+      && git add .github/workflows/auto-deploy.yml && git commit -qm 'first augmentation input missing' \
+      && git rev-parse HEAD)"
+  _expect "first augmentation-time build input fails closed when missing" DIFFERENT svc-a "$s6c" "$s6f"
+  s6g="$(cd "$tmp" && printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  ANALYTICS_SINK_TYPE: postgres\n  AGENT_SVID_NONCE_STORE: redis\n' > .github/workflows/auto-deploy.yml \
+      && git add .github/workflows/auto-deploy.yml && git commit -qm 'first augmentation input duplicated' \
+      && git rev-parse HEAD)"
+  _expect "first augmentation-time build input fails closed when duplicated" DIFFERENT svc-a "$s6c" "$s6g"
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: 31 cases (23 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 
