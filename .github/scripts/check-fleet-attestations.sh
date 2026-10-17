@@ -57,7 +57,6 @@
 #   .github/scripts/check-fleet-attestations.sh              # verify the whole fleet
 #   COSIGN_BIN=/path/to/cosign-v2 ... check-fleet-attestations.sh
 #   FLEET_ATTEST_JSON=out.json ...                           # also emit a JSON report
-#   VERIFY_WORKERS=2 ...                                  # first probes, bounded 1–4
 #   VERIFY_ATTEMPTS=3 VERIFY_RETRY_SLEEP=5 ...               # bounded retry (defaults)
 #   .github/scripts/check-fleet-attestations.sh --selftest   # prove the classifier both ways
 #
@@ -124,79 +123,6 @@ print_classified_stderr() {
   printf '%s\n' "$1" | sed 's/^/                  | /' | tail -5
 }
 
-probe_once() {
-  local ref="$1" _e _pt
-  verdict=OK
-  err=""
-  missing_type=""
-  # The image SIGNATURE first: the policy's first validation is verifyImageSignatures, and a
-  # signed attestation does not imply a signed image.
-  if ! _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
-               --key "$COSIGN_KEY" "$ref" 2>&1)"; then
-    err="$_e"
-    verdict="$(classify_failure "$err")"
-    missing_type="signature"
-  fi
-  for _pt in "${PREDICATE_TYPES[@]}"; do
-    [ "$verdict" = OK ] || break
-    if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
-               --key "$COSIGN_KEY" --type "$_pt" "$ref" 2>&1)"; then
-      continue
-    fi
-    err="$_e"
-    verdict="$(classify_failure "$err")"
-    missing_type="$_pt"
-    break
-  done
-}
-
-
-cleanup_probe_workers() {
-  local pid
-  for pid in ${PROBE_PIDS[@]+"${PROBE_PIDS[@]}"}; do wait "$pid" 2>/dev/null || :; done
-  [ -z "$PROBE_RESULTS_DIR" ] || rm -rf "$PROBE_RESULTS_DIR"
-}
-
-
-submit_first_probe() {
-  local index="$1"
-  [ "$index" -lt "${#IMAGES[@]}" ] || return 0
-  (
-    probe_once "$(probe_ref "${IMAGES[$index]}")"
-    printf '%s\n' "$verdict" > "$PROBE_RESULTS_DIR/$index.verdict"
-    printf '%s\n' "$missing_type" > "$PROBE_RESULTS_DIR/$index.type"
-    printf '%s' "$err" > "$PROBE_RESULTS_DIR/$index.stderr"
-  ) > "$PROBE_RESULTS_DIR/$index.worker-stdout" 2> "$PROBE_RESULTS_DIR/$index.worker-stderr" &
-  PROBE_PIDS[index]=$!
-}
-
-
-consume_first_probe() {
-  local index="$1" worker_code=0
-  wait "${PROBE_PIDS[$index]}" || worker_code=$?
-  if [ "$worker_code" -ne 0 ] || [ ! -f "$PROBE_RESULTS_DIR/$index.verdict" ] ||
-     [ ! -f "$PROBE_RESULTS_DIR/$index.type" ] || [ ! -f "$PROBE_RESULTS_DIR/$index.stderr" ]; then
-    verdict=UNKNOWN
-    missing_type=""
-    err="First probe worker failed or did not retain a complete result (exit $worker_code)"
-    local diagnostic
-    for diagnostic in "$PROBE_RESULTS_DIR/$index.worker-stderr" "$PROBE_RESULTS_DIR/$index.worker-stdout"; do
-      if [ -s "$diagnostic" ]; then
-        err="$err"$'\n'"$(tail -n 5 "$diagnostic")"
-      fi
-    done
-    return
-  fi
-  verdict="$(cat "$PROBE_RESULTS_DIR/$index.verdict")"
-  missing_type="$(cat "$PROBE_RESULTS_DIR/$index.type")"
-  err="$(cat "$PROBE_RESULTS_DIR/$index.stderr")"
-  case "$verdict" in
-    OK|ABSENT|UNATTESTED|UNKNOWN) ;;
-    *) verdict=UNKNOWN; err="First probe worker retained an invalid verdict" ;;
-  esac
-}
-
-
 selftest() {
   # `cases` is the SUBJECT COUNT this gate reports (gates.yaml min_subjects). A checker whose
   # corpus is its own fixtures examines nothing the day someone deletes them, and the floor is
@@ -225,8 +151,8 @@ selftest() {
 main.go:74: error during command execution: no matching attestations:'
   check_case "invalid signature" UNATTESTED 'Error: invalid signature when validating ASN.1 encoded signature'
 
-  # A matching diagnostic followed by large stderr must not become UNKNOWN when
-  # grep exits early and its producer receives SIGPIPE under pipefail.
+  # A long diagnostic used to make grep exit early and SIGPIPE printf under pipefail,
+  # misclassifying a real absence/verdict as UNKNOWN on faster runners.
   local large_stderr
   large_stderr="$(python3 -c 'print("synthetic filler\n" * 40000)')"
   check_case "large absent stderr" ABSENT "NAME_UNKNOWN"$'\n'"$large_stderr"
@@ -267,29 +193,6 @@ main.go:74: error during command execution: no matching attestations:'
 # fails the way its name declares. Deliberately writes to stderr, as the real one does.
 if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
 img="${!#}"
-if [ -n "${ATTEST_FIXTURE_PROBE_STATE:-}" ]; then
-  operation="$1"
-  fixture_lock() {
-    until mkdir "$ATTEST_FIXTURE_PROBE_STATE/lock" 2>/dev/null; do sleep 0.01; done
-  }
-  fixture_finish() {
-    fixture_lock
-    printf 'finish %s %s\n' "$operation" "${img##*/}" >> "$ATTEST_FIXTURE_PROBE_STATE/events"
-    rmdir "$ATTEST_FIXTURE_PROBE_STATE/active/$$"
-    rmdir "$ATTEST_FIXTURE_PROBE_STATE/lock"
-  }
-  fixture_lock
-  mkdir "$ATTEST_FIXTURE_PROBE_STATE/active/$$"
-  active_probe_dirs=("$ATTEST_FIXTURE_PROBE_STATE"/active/*)
-  printf 'start %s %s %s\n' "${#active_probe_dirs[@]}" "$operation" "${img##*/}" >> "$ATTEST_FIXTURE_PROBE_STATE/events"
-  rmdir "$ATTEST_FIXTURE_PROBE_STATE/lock"
-  trap fixture_finish EXIT
-  if [ "$operation" = verify ] && [[ "$img" == *fixture-ok-a:* ]]; then
-    sleep 0.8
-  else
-    sleep 0.03
-  fi
-fi
 case "$img" in
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
@@ -325,10 +228,8 @@ STUB
     # default and the systemic case would prove nothing.
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
            ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
-           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="${fixture_json:-}" \
-           VERIFY_WORKERS="${fixture_workers:-${VERIFY_WORKERS:-2}}" \
-           ATTEST_FIXTURE_PROBE_STATE="${fixture_probe_state:-}" \
-           SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
+           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
+           FLEET_ATTEST_WORKERS=1 SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
     # Both failure branches print what the run ACTUALLY produced, not only what was wanted.
@@ -569,122 +470,6 @@ STUB
   run_placeholder_fixture "one live + one stale -> exit 1" 1 \
     "1 stale" "openbank-fixture-new:sandbox-init openbank-fixture-gone:sandbox-init" \
     "openbank-fixture-new:sandbox-init" "openbank-fixture-ok:t"
-
-  # Delay an earlier image deliberately: completion order must not become verdict order.
-  fixture_probe_state="$tmp/probe-state"
-  mkdir -p "$fixture_probe_state/active"
-  : > "$fixture_probe_state/events"
-  fixture_workers=2
-  fixture_json="$tmp/parallel.json"
-  run_fixture "two workers preserve attested verdicts" 0 "4 attested / 0 unattested" \
-    "openbank-fixture-ok-a:t" "openbank-fixture-ok-b:t" "openbank-fixture-ok-c:t"
-  local parallel_verdicts serial_verdicts peak finish_a finish_b
-  parallel_verdicts="$(printf '%s\n' "$LAST_OUT" | grep -E '^  (OK|ABSENT|UNATTESTED|PLACEHOLDER|UNKNOWN)[[:space:]]')"
-  peak="$(awk '$1 == "start" && $2 > peak {peak=$2} END {print peak+0}' "$fixture_probe_state/events")"
-  cases=$((cases + 1))
-  if [ "$peak" -ne 2 ]; then
-    echo "  FAIL: two-worker probe cap/overlap (observed $peak)"
-    failures=$((failures + 1))
-  else
-    echo "  ok: first attempts overlap without exceeding two workers"
-  fi
-  finish_a="$(grep -n '^finish verify openbank-fixture-ok-a:t$' "$fixture_probe_state/events" | cut -d: -f1)"
-  finish_b="$(grep -n '^finish verify openbank-fixture-ok-b:t$' "$fixture_probe_state/events" | cut -d: -f1)"
-  cases=$((cases + 1))
-  if [ -z "$finish_a" ] || [ -z "$finish_b" ] || [ "$finish_b" -ge "$finish_a" ]; then
-    echo "  FAIL: fixture did not produce out-of-order first-probe completion"
-    failures=$((failures + 1))
-  else
-    echo "  ok: later first probe completes before the delayed earlier probe"
-  fi
-  : > "$fixture_probe_state/events"
-  fixture_workers=1
-  fixture_json="$tmp/serial.json"
-  run_fixture "serial mode retains the same attested verdicts" 0 "4 attested / 0 unattested" \
-    "openbank-fixture-ok-a:t" "openbank-fixture-ok-b:t" "openbank-fixture-ok-c:t"
-  serial_verdicts="$(printf '%s\n' "$LAST_OUT" | grep -E '^  (OK|ABSENT|UNATTESTED|PLACEHOLDER|UNKNOWN)[[:space:]]')"
-  peak="$(awk '$1 == "start" && $2 > peak {peak=$2} END {print peak+0}' "$fixture_probe_state/events")"
-  cases=$((cases + 1))
-  if [ "$peak" -ne 1 ] || [ "$serial_verdicts" != "$parallel_verdicts" ]; then
-    echo "  FAIL: declared verdict order differs between serial and parallel probes"
-    failures=$((failures + 1))
-  else
-    echo "  ok: serial and parallel verdicts are byte-identical in declared order"
-  fi
-  if command -v jq >/dev/null 2>&1; then
-    cases=$((cases + 1))
-    if [ "$(jq -S 'del(.scannedAt)' "$tmp/parallel.json")" != "$(jq -S 'del(.scannedAt)' "$tmp/serial.json")" ]; then
-      echo "  FAIL: serial and parallel JSON verdict evidence differs"
-      failures=$((failures + 1))
-    else
-      echo "  ok: serial and parallel JSON evidence matches apart from observation time"
-    fi
-  fi
-  unset fixture_json
-  : > "$fixture_probe_state/events"
-  fixture_workers=5
-  run_fixture "oversized worker count fails incomplete" 2 "VERIFY_WORKERS must be 1, 2, 3 or 4" \
-    "openbank-fixture-ok:t"
-  cases=$((cases + 1))
-  if [ -s "$fixture_probe_state/events" ]; then
-    echo "  FAIL: invalid worker count started an image probe"
-    failures=$((failures + 1))
-  else
-    echo "  ok: invalid worker count never starts image probes"
-  fi
-  unset fixture_workers fixture_probe_state
-
-  # A worker/result failure is an incomplete probe, even if a partial file claims OK.
-  PROBE_RESULTS_DIR="$tmp/worker-results"
-  mkdir "$PROBE_RESULTS_DIR"
-  PROBE_PIDS=()
-  printf 'OK\n' > "$PROBE_RESULTS_DIR/0.verdict"
-  printf '\n' > "$PROBE_RESULTS_DIR/0.type"
-  : > "$PROBE_RESULTS_DIR/0.stderr"
-  printf 'worker diagnostic %s\n' 1 2 3 4 5 6 7 8 > "$PROBE_RESULTS_DIR/0.worker-stderr"
-  (exit 9) &
-  PROBE_PIDS[0]=$!
-  consume_first_probe 0
-  cases=$((cases + 1))
-  if [ "$verdict" != UNKNOWN ]; then
-    echo "  FAIL: failed worker with partial OK evidence became a verdict"
-    failures=$((failures + 1))
-  else
-    echo "  ok: failed worker cannot publish an OK verdict"
-  fi
-  cases=$((cases + 1))
-  if [[ "$err" != *"worker diagnostic 8"* || "$err" == *"worker diagnostic 1"* ]]; then
-    echo "  FAIL: failed worker diagnostics are missing or unbounded"
-    failures=$((failures + 1))
-  else
-    echo "  ok: failed worker preserves a bounded diagnostic tail"
-  fi
-  (:) &
-  PROBE_PIDS[1]=$!
-  consume_first_probe 1
-  cases=$((cases + 1))
-  if [ "$verdict" != UNKNOWN ]; then
-    echo "  FAIL: missing worker result became a verdict"
-    failures=$((failures + 1))
-  else
-    echo "  ok: missing worker result remains UNKNOWN"
-  fi
-  printf 'UNATTESTED\n' > "$PROBE_RESULTS_DIR/2.verdict"
-  printf 'cyclonedx\n' > "$PROBE_RESULTS_DIR/2.type"
-  printf 'first diagnostic\nsecond diagnostic' > "$PROBE_RESULTS_DIR/2.stderr"
-  (:) &
-  PROBE_PIDS[2]=$!
-  consume_first_probe 2
-  cases=$((cases + 1))
-  if [ "$verdict" != UNATTESTED ] || [ "$missing_type" != cyclonedx ] ||
-     [ "$err" != $'first diagnostic\nsecond diagnostic' ]; then
-    echo "  FAIL: buffered verdict lost predicate or multiline stderr evidence"
-    failures=$((failures + 1))
-  else
-    echo "  ok: buffered verdict retains predicate and complete multiline stderr"
-  fi
-  PROBE_RESULTS_DIR=""
-  PROBE_PIDS=()
 
   rm -rf "$tmp"
 
@@ -1055,32 +840,32 @@ RETRIES_DISABLED=0
 # and report exit 2 honestly.
 SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
-
-# First attempts may overlap; retries and all verdict aggregation remain ordered below.
-VERIFY_WORKERS="${VERIFY_WORKERS:-2}"
-case "$VERIFY_WORKERS" in
-  1|2|3|4) ;;
-  *) echo "VERIFY_WORKERS must be 1, 2, 3 or 4" >&2; exit 2 ;;
-esac
-PROBE_RESULTS_DIR=""
-PROBE_PIDS=()
-if [ "$VERIFY_WORKERS" -gt 1 ]; then
-  PROBE_RESULTS_DIR="$(mktemp -d)" || exit 2
-  trap 'cleanup_probe_workers' EXIT
-  for ((probe_slot=0; probe_slot<VERIFY_WORKERS; probe_slot++)); do
-    submit_first_probe "$probe_slot"
-  done
-fi
-image_index=0
-
 BY_DIGEST=0
 BY_TAG=0
-for image in "${IMAGES[@]}"; do
+# Each worker owns one private indexed result directory. Never source worker output.
+# Four workers may be in flight; a systemic outage disables retries for all workers
+# at their next retry boundary. At most three other image groups are in flight;
+# each retains up to VERIFY_ATTEMPTS attempts (at most nine attempts at defaults).
+# This bounds registry load but is not the old serial circuit's exact retry budget.
+FLEET_ATTEST_WORKERS="${FLEET_ATTEST_WORKERS:-4}"
+case "$FLEET_ATTEST_WORKERS" in 1|2|3|4) ;; *) echo 'ERROR: FLEET_ATTEST_WORKERS must be 1..4' >&2; exit 2 ;; esac
+pool_dir="$(mktemp -d)" || exit 2
+pool_pids=()
+cleanup_pool() {
+  local pid
+  # Drain only our own workers before deleting their output. Interruption does not
+  # orphan verification processes; it may wait for an already running cosign call.
+  for pid in ${pool_pids[@]+"${pool_pids[@]}"}; do wait "$pid" 2>/dev/null || true; done
+  rm -rf "$pool_dir"
+}
+trap cleanup_pool EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+probe_one_image() {
+  local image="$1" result="$2" ref mode short verdict err missing_type attempt _e _pt
   ref="$(probe_ref "$image")"
   mode="$(probe_mode "$image")"
-  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
   short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
-
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
   # retried, so a genuinely unattested image still fails fast and no result is retried into
@@ -1091,14 +876,31 @@ for image in "${IMAGES[@]}"; do
     # Every predicate the policies require, not the first one that happens to pass. An image
     # carrying a CycloneDX SBOM and no SLSA provenance is exactly the September shape, and it
     # must read UNATTESTED here rather than OK.
-    if [ "$attempt" -eq 1 ] && [ "$VERIFY_WORKERS" -gt 1 ]; then
-      consume_first_probe "$image_index"
-    else
-      probe_once "$ref"
+    verdict=OK
+    err=""
+    missing_type=""
+    # The image SIGNATURE first: the policy's first validation is verifyImageSignatures, and a
+    # signed attestation does not imply a signed image.
+    if ! _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
+                 --key "$COSIGN_KEY" "$ref" 2>&1)"; then
+      err="$_e"
+      verdict="$(classify_failure "$err")"
+      missing_type="signature"
     fi
+    for _pt in "${PREDICATE_TYPES[@]}"; do
+      [ "$verdict" = OK ] || break
+      if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+                 --key "$COSIGN_KEY" --type "$_pt" "$ref" 2>&1)"; then
+        continue
+      fi
+      err="$_e"
+      verdict="$(classify_failure "$err")"
+      missing_type="$_pt"
+      break
+    done
     [ "$verdict" = OK ] && break
     [ "$verdict" != "UNKNOWN" ] && break
-    [ "$RETRIES_DISABLED" -eq 1 ] && break
+    [ -f "$pool_dir/retries-disabled" ] && break
     [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
     printf '  retry %s/%s  %s  (probe failed, not a verdict)\n' \
       "$attempt" "$VERIFY_ATTEMPTS" "$short"
@@ -1106,6 +908,56 @@ for image in "${IMAGES[@]}"; do
     attempt=$((attempt + 1))
   done
 
+  printf '%s\n' "$image" > "$result/image"
+  printf '%s\n' "$verdict" > "$result/verdict"
+  printf '%s' "$err" > "$result/error"
+  printf '%s\n' "$missing_type" > "$result/missing-type"
+  printf '%s\n' "$attempt" > "$result/attempt"
+}
+
+# Admit at most four images, then fold in enumeration order. A worker that exits
+# without a complete, unique result is UNKNOWN, never a successful partial fleet.
+next_image=0
+launch_image() {
+  local index="$1"
+  mkdir "$pool_dir/$index" || return 1
+  probe_one_image "${IMAGES[$index]}" "$pool_dir/$index" > "$pool_dir/$index/output" 2>&1 &
+  pool_pids[$index]=$!
+}
+for ((i=0; i<${#IMAGES[@]}; i++)); do
+  while [ "$next_image" -lt "${#IMAGES[@]}" ] && [ "$next_image" -lt "$((i + FLEET_ATTEST_WORKERS))" ]; do
+    launch_image "$next_image" || exit 2
+    next_image=$((next_image + 1))
+  done
+  image="${IMAGES[$i]}"
+  ref="$(probe_ref "$image")"
+  mode="$(probe_mode "$image")"
+  if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
+  short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
+  result="$pool_dir/$i"
+  worker_ok=1
+  wait "${pool_pids[$i]}" || worker_ok=0
+  for field in image verdict error missing-type attempt output; do
+    [ -f "$result/$field" ] && [ ! -L "$result/$field" ] || worker_ok=0
+  done
+  [ "$(find "$result" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" = 6 ] || worker_ok=0
+  if [ "$worker_ok" -eq 1 ]; then
+    [ "$(cat "$result/image")" = "$image" ] || worker_ok=0
+    verdict="$(cat "$result/verdict")"
+    case "$verdict" in OK|ABSENT|UNATTESTED|UNKNOWN) ;; *) worker_ok=0 ;; esac
+    attempt="$(cat "$result/attempt")"
+    case "$attempt" in ''|*[!0-9]*) worker_ok=0 ;; esac
+    [ "$attempt" -ge 1 ] && [ "$attempt" -le "$VERIFY_ATTEMPTS" ] || worker_ok=0
+  fi
+  if [ "$worker_ok" -eq 1 ]; then
+    cat "$result/output"
+    err="$(cat "$result/error")"
+    missing_type="$(cat "$result/missing-type")"
+  else
+    verdict=UNKNOWN
+    err='worker failed or produced an incomplete/ambiguous result; no image verdict'
+    missing_type=''
+  fi
   case "$verdict" in
     OK)
       printf '  OK          %s\n' "$short"
@@ -1149,18 +1001,11 @@ for image in "${IMAGES[@]}"; do
   else
     CONSECUTIVE_UNKNOWN=0
   fi
-  if [ "$VERIFY_WORKERS" -gt 1 ]; then
-    submit_first_probe "$((image_index + VERIFY_WORKERS))"
-  fi
-  image_index=$((image_index + 1))
+  if [ "$RETRIES_DISABLED" -eq 1 ]; then : > "$pool_dir/retries-disabled"; fi
 done
+rm -rf "$pool_dir"
+trap - EXIT INT TERM
 
-if [ "$VERIFY_WORKERS" -gt 1 ]; then
-  cleanup_probe_workers
-  PROBE_RESULTS_DIR=""
-  PROBE_PIDS=()
-  trap - EXIT
-fi
 
 FAIL=$((UNATTESTED + ABSENT))
 

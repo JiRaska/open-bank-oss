@@ -278,6 +278,37 @@ async function main() {
   await applyVerdict(github, context, verdict(206, 'green', [], [greenJob('B')]))
   assert.equal(issues[0].state, 'closed')
 
+  // Global admission updates one PR per updater run. A validated history budget
+  // alone is not proof of a branch update; retain each target until its own
+  // exact server-side merge transition is observed.
+  issues.length = 0
+  const updater = (runId, status, failing = [], successful = []) => ({
+    ...verdict(runId, status, failing, successful), workflow: 'Auto-update armed PRs',
+  })
+  const targetEvidence = async (_github, _repo, _verdict) => ({ targets: [
+    { pr: 42, budget_validated: false, history_error: true, updated: false },
+    { pr: 43, budget_validated: false, history_error: true, updated: false },
+  ] })
+  await applyVerdict(github, context, updater(700, 'red', [failed('updater')]), targetEvidence)
+  assert.deepEqual(require('./main-red-watch-target.cjs').targetPrs(issues[0].body), [42, 43])
+  await applyVerdict(github, context, updater(701, 'green'), async () => ({ targets: [
+    { pr: 42, budget_validated: true, updated: true },
+    { pr: 43, budget_validated: true, updated: false },
+  ] }))
+  assert.equal(issues[0].state, 'open')
+  assert.deepEqual(require('./main-red-watch-target.cjs').targetPrs(issues[0].body), [43])
+  assert.match(issues[0].body, /- `updater` \[failure\]/)
+  await applyVerdict(github, context, updater(702, 'green', [], ['updater']), async () => ({ targets: [
+    { pr: 43, budget_validated: true, updated: false },
+  ] }))
+  assert.equal(issues[0].state, 'open', 'budget validation without observed update must remain blocking')
+  assert.deepEqual(require('./main-red-watch-target.cjs').targetPrs(issues[0].body), [43])
+  await applyVerdict(github, context, updater(703, 'green', [], ['updater']), async () => ({ targets: [
+    { pr: 43, budget_validated: true, updated: true },
+  ] }))
+  assert.equal(issues[0].state, 'closed')
+  assert.match(issues[0].body, /### Recovered failing jobs/)
+
   // Different failed steps in the same job remain independent obligations.
   issues.length = 0
   await applyVerdict(github, context, verdict(301, 'red', [{ ...failed('A'), steps: ['X'] }]))

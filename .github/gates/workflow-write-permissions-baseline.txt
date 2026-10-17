@@ -61,6 +61,7 @@ platform-images.yml|job:build|id-token
 platform-tofu.yml|job:apply|id-token
 platform-tofu.yml|job:infracost|pull-requests
 platform-tofu.yml|job:plan|id-token
+record-agent-merge.yml|job:raise-issue|issues
 release-please.yml|job:provenance|contents
 release-please.yml|job:provenance|id-token
 release-please.yml|job:release-evidence|attestations

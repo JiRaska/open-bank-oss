@@ -9,8 +9,9 @@ const { spawnSync } = require('node:child_process')
 const { unprocessedAttempts, remainingFailureLines, withFailureLines, mergeFailureLines, LatestRunLagError } =
   require('./main-red-watch-order.cjs')
 const { ensureStateBranch, readCheckpoint, writeCheckpoint } = require('./main-red-watch-checkpoint.cjs')
-const { WORKFLOW: TARGET_WORKFLOW, targetPrs, withTargets, targetsCovered, loadTargetEvidence } =
+const { WORKFLOW: TARGET_WORKFLOW, targetPrs, withTargets, loadTargetEvidence } =
   require('./main-red-watch-target.cjs')
+const { replaceTargets } = require('./main-red-watch-target.cjs')
 
 const MAX_ATTEMPTS = 200
 const BATCH_SIZE = 25
@@ -101,20 +102,26 @@ async function applyVerdict(github, context, verdict, loadEvidence = loadTargetE
     if (!open) return
     const remaining = remainingFailureLines(open.body, verdict.successful_jobs)
     if (remaining === null) throw new Error('Cannot read open main-red failure inventory')
-    if (remaining.length) {
-      const prior = remainingFailureLines(open.body, [])
-      if (remaining.length !== prior.length) {
-        await github.rest.issues.update({ ...repo, issue_number: open.number,
-          body: withFailureLines(open.body, remaining) })
-      }
-      return
-    }
+    let body = open.body
+    let unresolvedTargets = null
     if (verdict.workflow === TARGET_WORKFLOW) {
       // The generic job and step can pass after the updater skips the PR whose
       // history failed. A legacy issue with no target marker cannot auto-close.
       if (!targetPrs(open.body)) return
       const evidence = await loadEvidence(github, repo, verdict)
-      if (!targetsCovered(open.body, evidence)) return
+      if (!evidence) return
+      const targets = targetPrs(open.body)
+      const proven = new Set(evidence.targets.filter(target =>
+        target.budget_validated && target.updated).map(target => target.pr))
+      unresolvedTargets = targets.filter(pr => !proven.has(pr))
+      body = replaceTargets(body, unresolvedTargets)
+    }
+    if (remaining.length) body = withFailureLines(body, remaining)
+    if (remaining.length || (unresolvedTargets && unresolvedTargets.length)) {
+      if (body !== open.body) {
+        await github.rest.issues.update({ ...repo, issue_number: open.number, body })
+      }
+      return
     }
     await github.rest.issues.createComment({ ...repo, issue_number: open.number,
       body: `\`${verdict.workflow}\` recovered every recorded failing job on main through run ${verdict.run_id} attempt ${verdict.attempt}.` })
@@ -133,7 +140,7 @@ async function applyVerdict(github, context, verdict, loadEvidence = loadTargetE
     const merged = mergeFailureLines(outstanding, current)
     const { title, body } = redBody(verdict, marker, merged, context)
     const stillUnresolved = (targetPrs(open.body) || []).filter(pr =>
-      !evidence?.targets.some(target => target.pr === pr && target.budget_validated))
+      !evidence?.targets.some(target => target.pr === pr && target.budget_validated && target.updated))
     const targetBody = verdict.workflow === TARGET_WORKFLOW
       ? withTargets(body, [...stillUnresolved, ...newTargets]) : body
     await github.rest.issues.update({ ...repo, issue_number: open.number, title, body: targetBody })
@@ -157,7 +164,7 @@ async function applyVerdict(github, context, verdict, loadEvidence = loadTargetE
       lines = mergeFailureLines(prior, current)
       if (verdict.workflow === TARGET_WORKFLOW) {
         const unresolved = (targetPrs(closed.body) || []).filter(pr =>
-          !evidence?.targets.some(target => target.pr === pr && target.budget_validated))
+          !evidence?.targets.some(target => target.pr === pr && target.budget_validated && target.updated))
         targets = [...unresolved, ...newTargets]
       }
     }

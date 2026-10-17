@@ -32,6 +32,16 @@ function withTargets(body, prs) {
   return all.length ? `${clean}\n${all.map(n => `<!-- main-red-target-pr:${n} -->`).join('\n')}` : clean
 }
 
+function replaceTargets(body, prs) {
+  if (typeof body !== 'string' || !Array.isArray(prs) ||
+      prs.some(n => !Number.isSafeInteger(n) || n < 1) || new Set(prs).size !== prs.length) {
+    throw new Error('Malformed recovery targets')
+  }
+  const clean = body.replace(ANY_MARKER, '').trimEnd()
+  const sorted = [...prs].sort((a, b) => a - b)
+  return sorted.length ? `${clean}\n${sorted.map(n => `<!-- main-red-target-pr:${n} -->`).join('\n')}` : clean
+}
+
 function validateEvidence(report, verdict) {
   if (!report || report.version !== 1 || report.complete !== true || report.dry_run !== false ||
       typeof report.successful !== 'boolean' ||
@@ -103,4 +113,4 @@ async function loadTargetEvidence(github, repo, verdict) {
   }
 }
 
-module.exports = { WORKFLOW, targetPrs, withTargets, validateEvidence, targetsCovered, loadTargetEvidence }
+module.exports = { WORKFLOW, targetPrs, withTargets, replaceTargets, validateEvidence, targetsCovered, loadTargetEvidence }

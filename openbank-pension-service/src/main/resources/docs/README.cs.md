@@ -23,7 +23,7 @@ Dokumentaci služba publikuje na management endpointu `/q/openbank/docs` (Docs-a
 | `PUT /api/v2/pension/contracts/{id}/strategy` | Zvolí nebo změní strategii (historie se zachová) |
 | `POST /api/v2/pension/contracts/{id}/suspend` / `resume` | Přeruší / obnoví placení příspěvků |
 | `POST /api/v2/pension/contracts/{id}/incentive-evaluation` | Pobídky fixovaného balíčku pro jeden příspěvek |
-| `GET /api/v2/pension/contracts` | Vlastní smlouvy účastníka (personál: podle stavu) |
+| `GET /api/v2/pension/contracts` | Vlastní smlouvy účastníka (personál: podle stavu, volitelně full-text `q`) |
 | `POST /api/v2/pension/simulations` | Ilustrativní projekce podle strategie (není poradenství) |
 | `PUT /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | Změna účtu pro výplatu se SCA, odkladem 3 dny a oznámením |
 | `GET /api/v2/pension/operator/payouts`, `GET /api/v2/pension/death-claims` | Fronty pro personál |
@@ -40,6 +40,20 @@ Recovery sweep výplat při startu registruje workflow `pension-payout-schedule-
 `openbank_workflow_success_recorded` rozlišuje registrované workflow bez dokončeného běhu od úspěchu. `openbank_workflow_last_success_age_seconds` se inicializuje při registraci, takže samotná nízká hodnota po startu nedokazuje provedení sweepu. Stávající gauge opožděných splátek měří práci; heartbeat měří provedení.
 
 Interval `off` nebo `disabled` vypíná plánování a nepublikuje heartbeat workflow.
+
+## Hledání smluv pro personál
+
+Personál (`ROLE_OPERATOR`/`ROLE_ADMIN`) může na `GET /api/v2/pension/contracts` předat
+free-text parametr `q`. Case-insensitive hledá fragment id smlouvy nebo participant party id,
+product line, datum narození účastníka — v ISO tvaru (`1985-05-05`) i holých číslicích
+(`850505`) — a referenci / variabilní symbol přes `pension_contract_references`. Odpověď nese
+`participantBirthDate`, aby se daly rozlišit shodná jména. Účastník bez personální role `q`
+použít nemůže; parametr se ignoruje a vrátí se jen vlastní smlouvy dané strany.
+
+`GET /api/v2/state-contributions/deadlines` vrací pohled lhůt pro podání vratky státního
+příspěvku k referenčnímu datu. Resource volá metodu služby bez argumentů; dřívější řešení
+"today" uvnitř služby (výchozí argument četl na CDI client proxině) padlo na NPE, proto metoda
+řeší hodiny na reálném beane a jen scheduler předává explicitní datum.
 
 ## Vykazování účastníků pro výkazy ČNB
 
