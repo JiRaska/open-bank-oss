@@ -217,6 +217,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: ledger-pension-co
+            cluster: ledger-pension-co-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: ledger
             cluster: ledger-db
             origin: manifest
@@ -630,6 +636,11 @@ spec:
           labels:
             namespace: kyc
             cluster: kyc-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: ledger-pension-co
+            cluster: ledger-pension-co-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:
