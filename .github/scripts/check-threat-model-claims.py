@@ -845,9 +845,15 @@ def fetch_latest_evidence(dest: pathlib.Path) -> list[pathlib.Path]:
             ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts", "--paginate", "--jq",
              ".artifacts[] | select(.name | startswith(\"test-intelligence-run-\")) | .name"],
             capture_output=True, text=True, timeout=120, check=True)
-        for name in listing.stdout.split():
+        from concurrent.futures import ThreadPoolExecutor
+
+        def pull(name: str) -> None:
             subprocess.run(["gh", "run", "download", str(run_id), "-R", repo, "-n", name,
                             "-D", str(dest / name)], capture_output=True, text=True, timeout=120, check=True)
+
+        # ~80 envelopes: sequential downloads took minutes; a handful in parallel keeps the gate cheap.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(pull, listing.stdout.split()))
     except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError):
         return []
     return [dest]
