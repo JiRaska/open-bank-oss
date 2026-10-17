@@ -12,6 +12,7 @@ import com.sun.net.httpserver.HttpServer
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.WebApplicationException
@@ -26,6 +27,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.lang.reflect.Type
@@ -209,7 +211,22 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `a reader that fails with a non-Jackson exception still leaves the 2xx Booked`() {
+    fun `a reader failing with a non-Jackson exception leaves the 2xx Booked with exactly that error`() {
+        // Over a real socket the client's built-in Jackson reader takes every body, so a failure that is
+        // NOT a Jackson one has to come from a Response whose readEntity throws it.
+        val response = fake(201, entity = true)
+        val boom = IllegalStateException("reader exploded")
+        every { response.readEntity(TransactionResponse::class.java) } throws boom
+
+        val result = TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
+            .await().indefinitely() as TransactionCallOutcome.Booked
+
+        assertThat(result.body).isNull()
+        assertThat(result.bodyError).isSameAs(boom)
+    }
+
+    @Test
+    fun `a 2xx with malformed JSON leaves it Booked with the parser error`() {
         body = "EXPLODE"
 
         val result = outcome() as TransactionCallOutcome.Booked
@@ -246,7 +263,7 @@ class TransactionClientOutcomeTest {
     fun `an unreadable 422 body leaves problem null and keeps the exception`() {
         val response = fake(422, entity = true)
         val boom = IllegalStateException("garbled")
-        every { response.readEntity(String::class.java) } throws boom
+        every { response.readEntity(InputStream::class.java) } throws boom
 
         val result = TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
             .await().indefinitely() as TransactionCallOutcome.Rejected
@@ -268,7 +285,7 @@ class TransactionClientOutcomeTest {
         )
         cases.forEach { (code, entity) ->
             val response = fake(code, entity)
-            every { response.readEntity(String::class.java) } returns "problem"
+            every { response.readEntity(InputStream::class.java) } returns ByteArrayInputStream("problem".toByteArray())
             runCatching {
                 TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
                     .await().indefinitely()
@@ -288,6 +305,73 @@ class TransactionClientOutcomeTest {
             }
             verify(exactly = 1) { response.close() }
         }
+    }
+
+    @Test
+    fun `a close() that throws does not replace an already decided outcome`() {
+        val failures = TransactionClient.closeFailures.get()
+        listOf(201, 409, 422).forEach { code ->
+            val response = fake(code, entity = code == 422)
+            every { response.readEntity(InputStream::class.java) } returns ByteArrayInputStream("p".toByteArray())
+            every { response.close() } throws IllegalStateException("close exploded")
+
+            val result = TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
+                .await().indefinitely()
+
+            when (code) {
+                201 -> assertThat(result).isInstanceOf(TransactionCallOutcome.Booked::class.java)
+                409 -> assertThat(result).isEqualTo(TransactionCallOutcome.Conflict)
+                else -> assertThat(result).isInstanceOf(TransactionCallOutcome.Rejected::class.java)
+            }
+        }
+        assertThat(TransactionClient.closeFailures.get()).isEqualTo(failures + 3)
+    }
+
+    @Test
+    fun `the body is read before the Response is closed`() {
+        val booked = fake(201, entity = true)
+        every { booked.readEntity(TransactionResponse::class.java) } returns TransactionResponse(id = UUID.randomUUID())
+        val rejected = fake(422, entity = true)
+        every { rejected.readEntity(InputStream::class.java) } returns ByteArrayInputStream("p".toByteArray())
+        val viaException = fake(400, entity = true)
+        every { viaException.readEntity(InputStream::class.java) } returns ByteArrayInputStream("p".toByteArray())
+
+        TransactionClient.classify(
+            Uni.createFrom().item(booked),
+            TransactionResponse::class.java,
+        ).await().indefinitely()
+        TransactionClient.classify(
+            Uni.createFrom().item(rejected),
+            TransactionResponse::class.java,
+        ).await().indefinitely()
+        TransactionClient.classify(
+            Uni.createFrom().failure(WebApplicationException(viaException)),
+            TransactionResponse::class.java,
+        )
+            .await().indefinitely()
+
+        verifyOrder {
+            booked.readEntity(TransactionResponse::class.java)
+            booked.close()
+        }
+        verifyOrder {
+            rejected.readEntity(InputStream::class.java)
+            rejected.close()
+        }
+        verifyOrder {
+            viaException.readEntity(InputStream::class.java)
+            viaException.close()
+        }
+    }
+
+    @Test
+    fun `a refusal body is read bounded, not whole`() {
+        status = 422
+        body = "x".repeat(200_000)
+
+        val result = outcome() as TransactionCallOutcome.Rejected
+
+        assertThat(result.problem).hasSize(300)
     }
 
     /** Minimal JSON reader: the facade reads bodies through whatever the caller's client registers. */
