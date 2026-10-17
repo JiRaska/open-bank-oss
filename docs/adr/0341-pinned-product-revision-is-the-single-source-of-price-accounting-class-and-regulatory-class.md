@@ -8,7 +8,6 @@ superseded-by: []
 delivery-repos: []
 tags: [product-catalog, fees-billing, ledger, regulatory-reporting]
 summary: "Every product-bearing contract pins a published catalog revision; its prices, accounting class and regulatory class come only from that revision, the ledger maps accounting class to GL, and no service keeps its own copy."
-followup: "#668 — adoption is one service per PR (interest, billing, pension-fund, treasury, lending phase D, account); #13167 tracks day-end participation"
 ---
 
 # ADR-0341 — Pinned product revision is the single source of price, accounting class and regulatory class
@@ -73,7 +72,8 @@ accounting and regulatory terms.
    offerings too: their revision carries accounting and regulatory class and limits, while the
    deal price stays dealer-entered.
 5. **Adoption is one service per change**, in this order: interest (turn sync on, needs the catalog
-   read grant from #8481), billing, pension-fund, treasury, lending phase D, account. Each step
+   read grant from #8481), billing, pension-fund, pension, treasury, lending phase D, account.
+   Tracked in #668; day-end participation is #13167. Each step
    updates its threat model (ADR-0030) and adds a consumer pact against the catalog provider.
 
 ## Alternatives considered
@@ -125,11 +125,13 @@ four-digit GL code outside the ledger chart. It starts advisory with a `target_e
 ### Delivery check
 
 ```bash
-for s in billing interest lending pension pension-fund treasury account; do
-  git grep -l product_revision_id -- "openbank-$s*/src/main/resources/db/migration" | head -1
-done                                            # expect 7 paths, one per service
+for m in openbank-billing-service openbank-interest-service openbank-lending-service \
+         openbank-pension-service openbank-pension-fund-service openbank-treasury-service \
+         openbank-account-service; do
+  printf '%s ' "$m"; git grep -l product_revision_id -- "$m/src/main/resources/db/migration" | wc -l
+done                                            # expect a non-zero count on all 7 lines
 git grep -n 'INTEREST_CATALOG_SYNC_ENABLED:false' -- openbank-interest-service   # expect nothing
-yq '.gates[] | select(.id == "product-revision-pinned") | .mode' .github/gates/gates.yaml  # expect enforced
+yq '.gates[] | select(.id == "product-revision-pinned") | .mode' .github/gates/gates.yaml  # expect enforced once adoption ends (advisory until then)
 ```
 
 ## Compliance impact
