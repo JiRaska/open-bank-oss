@@ -48,7 +48,14 @@ queue. So at most ONE full-fleet PR is in flight at a time:
     `auto_merge.enabled_at`, else PR created_at; tie-break lowest number) is updated;
   * a head with no build check runs cannot be classified -> treated as small (today's
     behaviour) and logged as such.
-Small PRs are unaffected.
+The global lane additionally admits at most one eligible PR of any size per invocation.
+Fresh current-main/head CI reservations carry that admission across invocations: required
+pending or a mapped primary CI attempt reserves it; an independent terminal required failure
+releases it. Ready, clean, armed heads reserve only for the existing debounce interval.
+Explicit blocked/draft PRs and unarmed human work are outside this updater's admission lane;
+this is not a host-wide runner scheduler and cannot control external merges or manual builds.
+Unarmed generated deployment PRs retain existing eligibility and reserve pending CI, but do
+not get a ready-to-merge lease. The existing full-fleet constraint remains an additional filter.
 
 THE TOKEN MATTERS
 -----------------
@@ -82,6 +89,7 @@ import os
 import pathlib
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
@@ -338,10 +346,14 @@ def self_test() -> int:
             print("FAIL  unreadable head passed")
 
     def fixture_get(path: str) -> object:
+        if "/git/ref/" in path:
+            return {"object": {"sha": "main"}}
+        if "/compare/" in path:
+            return {"behind_by": 1}
         if "/pulls?" in path:
             return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
         if path.endswith("/pulls/42"):
-            return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+            return {"number": 42, "state": "open", "labels": [], "draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
                     "head": {"sha": fixture_head, "ref": "agent/example",
                              "repo": {"full_name": "example/repo"}}}
         if "/commits/" in path:
@@ -439,6 +451,23 @@ def self_test() -> int:
         ok = got == want
         failures += not ok
         print(f"{'PASS' if ok else 'FAIL'}  classify {name}: {got}")
+    workflow = WORKFLOW.read_text()
+    ccases = [
+        ("actual workflow cancels only for a newer push", workflow, True),
+        ("constant true preempts fallbacks", workflow.replace(CANCEL_ONLY_PUSH, "true"), False),
+        ("constant false loses newer-push cancellation", workflow.replace(CANCEL_ONLY_PUSH, "false"), False),
+        ("wrong event cancels scheduled work", workflow.replace("github.event_name == 'push'", "github.event_name == 'schedule'"), False),
+        ("wrong global group loses serialization", workflow.replace("group: auto-update-armed-prs", "group: another-group"), False),
+        ("comment cannot satisfy the declaration", workflow.replace(CANCEL_ONLY_PUSH, "true")
+         + f"\n# cancel-in-progress: {CANCEL_ONLY_PUSH}\n", False),
+        ("duplicate cancellation key is rejected", workflow.replace(
+            f"cancel-in-progress: {CANCEL_ONLY_PUSH}", f"cancel-in-progress: {CANCEL_ONLY_PUSH}\n  cancel-in-progress: true"), False),
+    ]
+    for name, text, want in ccases:
+        got = push_only_cancellation_declared(text)
+        ok = got == want
+        failures += not ok
+        print(f"{'PASS' if ok else 'FAIL'}  {name}: {got}")
     print(f"self-test: {failures} failure(s)")
     return 1 if failures else 0
 
@@ -450,10 +479,27 @@ DECLARATION = [
     ("runs this script", "auto-update-armed-prs.py"),
     ("push-to-main trigger", "branches: [main]"),
     ("schedule fallback", "cron:"),
-    ("concurrency cancels in progress", "cancel-in-progress: true"),
     ("ambient token read-only", "contents: read"),
     ("persistent per-PR budget wired", "--max-updates-per-pr 4"),
 ]
+
+
+CANCEL_ONLY_PUSH = "${{ github.event_name == 'push' }}"
+
+
+def push_only_cancellation_declared(text: str) -> bool:
+    """Require the exact global concurrency contract, not a matching comment."""
+    lines = text.splitlines()
+    starts = [index for index, line in enumerate(lines) if line == "concurrency:"]
+    if len(starts) != 1:
+        return False
+    entries = []
+    for line in lines[starts[0] + 1:]:
+        if line and not line[0].isspace() and not line.startswith("#"):
+            break
+        if line.strip() and not line.lstrip().startswith("#"):
+            entries.append(line.strip())
+    return entries == ["group: auto-update-armed-prs", f"cancel-in-progress: {CANCEL_ONLY_PUSH}"]
 
 
 def check_declaration() -> int:
@@ -467,6 +513,9 @@ def check_declaration() -> int:
         present = needle in text
         bad += not present
         print(f"{'ok  ' if present else 'MISS'}  {label}: {needle!r}")
+    cancellation = push_only_cancellation_declared(text)
+    bad += not cancellation
+    print(f"{'ok  ' if cancellation else 'MISS'}  only a new push cancels admitted work; one global group")
     # GITHUB_TOKEN must never be what drives the update: its pushes trigger no workflows.
     if "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text or "GH_TOKEN: ${{ github.token }}" in text:
         print("MISS  update driven by GITHUB_TOKEN — CI would never re-run on the new head")
@@ -477,7 +526,7 @@ def check_declaration() -> int:
         present = needle in src
         bad += not present
         print(f"{'ok  ' if present else 'MISS'}  {label}")
-    print(f"SUBJECTS={len(DECLARATION) + 3}")
+    print(f"SUBJECTS={len(DECLARATION) + 4}")
     return 1 if bad else 0
 
 
@@ -515,20 +564,190 @@ def required_policy(repo: str, branch: str) -> tuple[list[str], bool]:
 
 
 def head_checks(repo: str, sha: str) -> dict[str, str | None]:
-    out: dict[str, str | None] = {}
+    latest = {}
     page = 1
     while True:
-        data = get(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100&page={page}")
-        # Newest first per name: a re-run supersedes the earlier attempt.
-        for run in sorted(data["check_runs"], key=lambda r: r.get("started_at") or "", reverse=True):
-            out.setdefault(run["name"], run["conclusion"] if run["status"] == "completed" else None)
-        if len(data["check_runs"]) < 100:
+        checks = get(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100&page={page}")["check_runs"]
+        for check in checks:
+            if check["name"] not in latest or check["id"] > latest[check["name"]]["id"]:
+                latest[check["name"]] = check
+        if len(checks) < 100:
             break
         page += 1
-    for st in get(f"/repos/{repo}/commits/{sha}/status")["statuses"]:
-        if st["context"] not in out:
-            out[st["context"]] = None if st["state"] == "pending" else st["state"]
+    out = {name: check["conclusion"] if check["status"] == "completed" else None
+           for name, check in latest.items()}
+    for status in sorted(get(f"/repos/{repo}/commits/{sha}/status")["statuses"],
+                         key=lambda st: st["id"], reverse=True):
+        out.setdefault(status["context"], None if status["state"] == "pending" else status["state"])
     return out
+
+
+# Stateless admission: fresh immutable-head reservations across invocations.
+PRIMARY_CI_PATHS = {".github/workflows/services-ci.yml", ".github/workflows/ci.yml"}
+
+
+def global_plan(entries: list[dict], max_updates: int) -> list[tuple[int, bool, str]]:
+    """One admission across cron runs, using freshly read immutable-head reservations."""
+    blockers = [e for e in entries if e.get("reservation") in ("reserved", "unknown")]
+    eligible = sorted((e for e in entries if e["ok"] and not e.get("held")),
+                      key=lambda e: (e["waiting_since"], e["number"]))
+    chosen = eligible[0]["number"] if eligible and max_updates > 0 and not blockers else None
+    result = []
+    for e in entries:
+        ok = e["ok"] and not e.get("held") and e["number"] == chosen
+        why = e["why"]
+        if e.get("held"):
+            why = "explicit hold — excluded"
+        elif e["ok"] and blockers:
+            why = f"global refresh slot unavailable: #{blockers[0]['number']} {blockers[0]['reservation']}"
+        elif e["ok"] and not ok:
+            why = "global refresh admission: another eligible PR has waited longer or cap is zero"
+        result.append((e["number"], ok, why))
+    return result
+
+
+def check_has_active_retry(repo: str, number: int, sha: str, check: dict,
+                                  latest_runs: dict, reader) -> bool:
+    """Recognize a proven newer attempt of this required check's actual producer.
+
+    Check IDs do not encode workflow attempts. The Actions job endpoint provides
+    run_attempt; the run endpoint binds that attempt to a workflow ID and PR.
+    A queued independent workflow must never erase a required failure.
+    """
+    url = urllib.parse.urlsplit(check.get("details_url", ""))
+    prefix = f"/{repo}/actions/runs/"
+    if url.scheme != "https" or url.netloc != "github.com" or not url.path.startswith(prefix):
+        return False
+    parts = url.path[len(prefix):].split("/")
+    if len(parts) != 3 or parts[1] != "job" or not parts[0].isdigit() or not parts[2].isdigit():
+        return False
+    run_id, job_id = int(parts[0]), int(parts[2])
+    job = reader(f"/repos/{repo}/actions/jobs/{job_id}")
+    if (job["id"] != job_id or job["run_id"] != run_id or job["head_sha"] != sha
+            or job["check_run_url"] != f"{API}/repos/{repo}/check-runs/{check['id']}"):
+        return False
+    old = reader(f"/repos/{repo}/actions/runs/{run_id}")
+    if (old["id"] != run_id or old["head_sha"] != sha or old["event"] != "pull_request"
+            or old["repository"]["full_name"] != repo
+            or not any(p["number"] == number for p in old["pull_requests"])):
+        return False
+    current = latest_runs.get(old["path"])
+    return bool(current and current["workflow_id"] == old["workflow_id"]
+                and current["status"] != "completed"
+                and (current["id"], current["run_attempt"]) > (run_id, job["run_attempt"]))
+
+
+def read_reservation(repo: str, number: int, main_sha: str, required: list[str],
+                     now: dt.datetime, debounce_minutes: int, reader=get) -> dict:
+    """Fresh native-required bindings plus primary CI discovery; never infer prose holds."""
+    # A check's job/run may be shared by many required contexts; cache only within
+    # this immutable-head observation, never across invocations or pre-PUT snapshots.
+    raw_reader, cache = reader, {}
+    def reader(path):
+        if path not in cache:
+            cache[path] = raw_reader(path)
+        return cache[path]
+    result = {"number": number, "main_snapshot": main_sha, "reservation": "none", "held": False}
+    try:
+        pr = reader(f"/repos/{repo}/pulls/{number}")
+        result["head"] = sha = pr["head"]["sha"]
+        result["held"] = pr["draft"] or any(x["name"] == "blocked" for x in pr["labels"])
+        if (pr["state"] != "open" or result["held"] or not (pr["auto_merge"] or is_bot_deploy_pr(pr))
+                or (pr["head"].get("repo") or {}).get("full_name") != repo):
+            return result
+        compare = reader(f"/repos/{repo}/compare/{main_sha}...{sha}")
+        if type(compare["behind_by"]) is not int or compare["behind_by"] < 0:
+            raise ValueError("invalid behind count")
+        if compare["behind_by"] != 0:
+            return result
+        latest = {}
+        page = 1
+        while True:
+            checks = reader(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100&page={page}")["check_runs"]
+            for check in checks:
+                if check["name"] not in latest or check["id"] > latest[check["name"]]["id"]:
+                    latest[check["name"]] = check
+            if len(checks) < 100:
+                break
+            page += 1
+        # Preserve legacy commit-status contexts, but never replace a check-run verdict.
+        for status in sorted(reader(f"/repos/{repo}/commits/{sha}/status")["statuses"],
+                             key=lambda s: s["id"], reverse=True):
+            if status["context"] not in latest:
+                latest[status["context"]] = {
+                    "id": status["id"], "name": status["context"],
+                    "status": "in_progress" if status["state"] == "pending" else "completed",
+                    "conclusion": None if status["state"] == "pending" else status["state"],
+                    "completed_at": status["updated_at"],
+                }
+        latest_runs = {}
+        page = 1
+        while True:
+            runs = reader(f"/repos/{repo}/actions/runs?head_sha={sha}&event=pull_request&per_page=100&page={page}")["workflow_runs"]
+            for run in runs:
+                if (run["head_sha"] == sha and run["event"] == "pull_request"
+                        and run["repository"]["full_name"] == repo
+                        and any(p["number"] == number for p in run["pull_requests"])):
+                    if not isinstance(run.get("status"), str) or not run["status"]:
+                        raise ValueError("missing workflow run status")
+                    key = run["path"]
+                    if key not in latest_runs or (run["id"], run["run_attempt"]) > (latest_runs[key]["id"], latest_runs[key]["run_attempt"]):
+                        latest_runs[key] = run
+            if len(runs) < 100:
+                break
+            page += 1
+        verdicts = [latest[c] for c in required if c in latest]
+        # Derive producers from each native required check's exact job/run binding.
+        # This includes Secret scan and any future required producer without treating
+        # unrelated advisory runs as admission work. Success from an older attempt
+        # must not let the ready lease expire while its real retry is still active.
+        retry = {c["name"]: check_has_active_retry(repo, number, sha, c, latest_runs, reader)
+                 for c in verdicts if c["status"] == "completed"}
+        for check in verdicts:
+            if (check["status"] == "completed" and check["conclusion"] not in OK_CONCLUSIONS
+                    and not retry[check["name"]]):
+                return result  # An independent/current required failure still releases.
+        if any(c["status"] != "completed" for c in verdicts) or any(retry.values()):
+            result["reservation"] = "reserved"
+            return result
+        # A same-head rerun can be queued before its new checks replace old success.
+        # Always read mapped primary runs before applying the bounded ready lease.
+        primary_runs = {p: r for p, r in latest_runs.items() if p in PRIMARY_CI_PATHS}
+        if any(r["status"] != "completed" for r in primary_runs.values()):
+            result["reservation"] = "reserved"
+            return result
+        if required and len(verdicts) == len(required):
+            if not pr["auto_merge"] or pr.get("mergeable_state") != "clean":
+                return result
+            # Existing debounce bounds a ready lease; no permanent all-green lock.
+            completed = max(parse_ts(c["completed_at"]) for c in verdicts)
+            if (now - completed).total_seconds() < debounce_minutes * 60:
+                result["reservation"] = "reserved"
+            return result
+        if primary_runs and all(r["conclusion"] not in OK_CONCLUSIONS for r in primary_runs.values()):
+            result["reservation"] = "none"
+        else:
+            result["reservation"] = "unknown"  # No CI proof: fail closed, explicit starvation risk.
+    except (KeyError, TypeError, ValueError, RuntimeError, OSError, SystemExit):
+        result["reservation"] = "unknown"
+    return result
+
+
+def snapshot_unchanged(repo: str, branch: str, main_sha: str, number: int,
+                       head_sha: str, reader=get) -> bool:
+    """Prototype ref/authority drift guard; decide/checks/budget still required before PUT."""
+    try:
+        if reader(f"/repos/{repo}/git/ref/heads/{branch}")["object"]["sha"] != main_sha:
+            return False
+        pr = reader(f"/repos/{repo}/pulls/{number}")
+        return (pr["state"] == "open" and not pr["draft"]
+                and not any(label["name"] == "blocked" for label in pr["labels"])
+                and pr["head"]["sha"] == head_sha
+                and (pr["head"].get("repo") or {}).get("full_name") == repo
+                and pr["mergeable_state"] == "behind"
+                and bool(pr["auto_merge"] or is_bot_deploy_pr(pr)))
+    except (KeyError, TypeError, ValueError, RuntimeError, OSError, SystemExit):
+        return False
 
 
 def parse_ts(s: str) -> dt.datetime:
@@ -579,110 +798,140 @@ def write_summary(lines: list[str]) -> None:
         fh.write("### Armed PRs the updater will not touch\n\n" + "\n".join(lines) + "\n")
 
 
+def open_pulls(repo: str, branch: str) -> list[dict]:
+    pulls, page = [], 1
+    while True:
+        batch = get(f"/repos/{repo}/pulls?state=open&base={branch}&per_page=100&page={page}")
+        pulls.extend(batch)
+        if len(batch) < 100:
+            return pulls
+        page += 1
+
+
+def explicit_hold(pr: dict) -> bool:
+    return pr["draft"] or any(label["name"] == "blocked" for label in pr["labels"])
+
+
+def evaluate_current(repo: str, branch: str, full: dict, required: list[str],
+                     now: dt.datetime, debounce: int, fleet_threshold: int,
+                     cap: int) -> dict:
+    number, sha = full["number"], full["head"]["sha"]
+    held = explicit_hold(full)
+    pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
+          "bot_deploy": is_bot_deploy_pr(full),
+          "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
+          "mergeable_state": full.get("mergeable_state")}
+    if full["state"] != "open" or held:
+        return {"number": number, "head": sha, "held": held, "ok": False, "why": "closed or explicit hold",
+                    "kind": "unknown", "building": False, "waiting_since": "", "budget": None}
+    if pr["same_repo"] and pr["mergeable_state"] in (None, "unknown"):
+        behind = get(f"/repos/{repo}/compare/{branch}...{sha}")["behind_by"]
+        pr["mergeable_state"] = resolve_state(pr["mergeable_state"], full.get("mergeable"), behind)
+    checks = head_checks(repo, sha) if pr["same_repo"] else {}
+    kind, building = classify(checks, fleet_threshold)
+    committed = None
+    if pr["same_repo"] and pr["mergeable_state"] == "behind":
+        committed = parse_ts(get(f"/repos/{repo}/commits/{sha}")["commit"]["committer"]["date"])
+    ok, why = decide(pr, required, checks, now, committed, debounce)
+    used = None
+    if ok:
+        try:
+            used = branch_update_count(repo, sha, branch, cap)
+        except BudgetUnreadable as error:
+            ok, why = False, f"update budget unreadable ({error})"
+        else:
+            if used >= cap:
+                ok, why = False, (f"update budget exhausted ({used}/{cap} consecutive base merges); "
+                                  "to unblock, push to the branch only after checking why CI keeps losing the race")
+    return {"number": number, "head": sha, "held": held, "ok": ok, "why": why, "kind": kind, "building": building,
+                "waiting_since": (full["auto_merge"] or {}).get("enabled_at") or full.get("created_at") or "",
+                "budget": used}
+
+
+def admission_entries(repo: str, branch: str, main_sha: str, required: list[str],
+                      now: dt.datetime, debounce: int, fleet_threshold: int, cap: int) -> list[dict]:
+    entries = []
+    for summary in open_pulls(repo, branch):
+        if not (summary.get("auto_merge") or is_bot_deploy_pr(summary)):
+            continue
+        full = get(f"/repos/{repo}/pulls/{summary['number']}")
+        entry = evaluate_current(repo, branch, full, required, now, debounce, fleet_threshold, cap)
+        reservation = read_reservation(repo, full["number"], main_sha, required, now, debounce, reader=get)
+        if reservation.get("head") != entry["head"]:
+            reservation["reservation"] = "unknown"  # Head raced while assembling this snapshot.
+        entry["reservation"] = reservation["reservation"]
+        entries.append(entry)
+    # Retain the original full-fleet serialization constraint before applying the global lane.
+    native = {n: (ok, why) for n, ok, why in plan(entries, len(entries))}
+    for entry in entries:
+        entry["ok"], entry["why"] = native[entry["number"]]
+    return entries
+
+
 def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool,
         fleet_threshold: int, max_updates_per_pr: int = 4) -> int:
-    required, strict = required_policy(repo, branch)
-    print(f"required contexts on {branch} (live): {required}; strict={strict}")
+    try:
+        required, strict = required_policy(repo, branch)
+    except (KeyError, TypeError, ValueError, RuntimeError, OSError, SystemExit) as error:
+        print(f"::error::required policy read failed; no update: {error}")
+        return 1
     if not required:
         print("::error::no required contexts resolved — refusing to act on an empty set")
         return 1
     if not strict:
         print("strict up-to-date checks disabled; no branch update is needed")
         return 0
-    now = dt.datetime.now(dt.timezone.utc)
-    pulls = get(f"/repos/{repo}/pulls?state=open&base={branch}&per_page=100")
-    candidates = [p for p in pulls
-                  if not p.get("draft") and (p.get("auto_merge") or is_bot_deploy_pr(p))]
-    print(f"{len(pulls)} open PR(s) against {branch}, "
-          f"{len(candidates)} armed-or-bot-deploy and non-draft")
-    failed_updates = 0
-    stuck: list[str] = []
-    entries, shas, budgets = [], {}, {}
-    for p in candidates:
-        n = p["number"]
-        full = get(f"/repos/{repo}/pulls/{n}")
-        sha = shas[n] = full["head"]["sha"]
-        pr = {"draft": full["draft"], "auto_merge": full["auto_merge"],
-              "bot_deploy": is_bot_deploy_pr(full),
-              "same_repo": (full["head"].get("repo") or {}).get("full_name") == repo,
-              "mergeable_state": full.get("mergeable_state")}
-        if pr["same_repo"] and pr["mergeable_state"] in (None, "unknown"):
-            behind_by = (get(f"/repos/{repo}/compare/{branch}...{sha}") or {}).get("behind_by")
-            settled = resolve_state(pr["mergeable_state"], full.get("mergeable"), behind_by)
-            print(f"STATE  #{n} {sha[:9]}: mergeable_state={pr['mergeable_state']}, "
-                  f"behind_by={behind_by} -> {settled}")
-            pr["mergeable_state"] = settled
-        kind, building = "unknown", False
-        if not pr["same_repo"]:
-            ok, why = decide(pr, required, {}, now, None, debounce)
-        else:
-            # Checks are read for every candidate, behind or not: an up-to-date full-fleet PR
-            # whose build is running is exactly the "in flight" one that blocks the others.
-            checks = head_checks(repo, sha)
-            kind, building = classify(checks, fleet_threshold)
-            if pr["mergeable_state"] != "behind":
-                ok, why = decide(pr, required, {}, now, None, debounce)
-            else:
-                commit = get(f"/repos/{repo}/commits/{sha}")
-                committed = parse_ts(commit["commit"]["committer"]["date"])
-                ok, why = decide(pr, required, checks, now, committed, debounce)
-        if ok:
-            try:
-                used = branch_update_count(repo, sha, branch, max_updates_per_pr)
-            except BudgetUnreadable as error:
-                # Fail closed for THIS PR only; the others are still served and the run stays green.
-                ok, why = False, f"update budget unreadable ({error}); skipped, retried next run"
-                print(f"::warning::#{n}: {why}")
-                stuck.append(f"- #{n}: {why}")
-            else:
-                budgets[n] = used
-                if used >= max_updates_per_pr:
-                    ok, why = False, (
-                        f"update budget exhausted ({used}/{max_updates_per_pr} consecutive base "
-                        "merges since the last author push); to unblock, push to the branch "
-                        "(merge or rebase main locally) or press 'Update branch' once by hand "
-                        "after checking why CI keeps losing the race")
-                    print(f"::warning::#{n}: {why}")
-                    stuck.append(f"- #{n}: {why}")
-        since = (full["auto_merge"] or {}).get("enabled_at") or full.get("created_at") or ""
-        print(f"CLASS  #{n} {sha[:9]}: {kind}{' (no build-matrix check runs: none selected or not started -> small)' if kind == 'unknown' else ''}"
-              f"{', build in flight' if building else ''}, armed since {since or '?'}")
-        entries.append({"number": n, "ok": ok, "why": why, "kind": kind, "building": building,
-                        "waiting_since": since})
-    updated = 0
-    for n, ok, why in plan(entries, max_updates):
-        sha = shas[n]
-        if not ok:
-            print(f"SKIP   #{n} {sha[:9]}: {why}")
-            continue
-        used = budgets[n]
+    try:
+        main_sha = get(f"/repos/{repo}/git/ref/heads/{branch}")["object"]["sha"]
+        entries = admission_entries(repo, branch, main_sha, required, dt.datetime.now(dt.timezone.utc),
+                                    debounce, fleet_threshold, max_updates_per_pr)
+        for entry in entries:
+            print(f"CLASS #{entry['number']}: {entry['why']}; reservation={entry['reservation']}")
+        write_summary([f"- #{e['number']}: {e['why']}" for e in entries if "budget" in e["why"]])
+        selected = [n for n, ok, _ in global_plan(entries, max_updates) if ok]
+        if not selected:
+            print("SKIP global admission: no eligible PR or current-head reservation")
+            return 0
+        number = selected[0]
+        original = next(e for e in entries if e["number"] == number)
         if dry_run:
-            print(f"DRY    #{n} {sha[:9]}: would update — {why} "
-                  f"(budget {used}/{max_updates_per_pr})")
-            updated += 1
-            continue
-        code, data = api("PUT", f"/repos/{repo}/pulls/{n}/update-branch", {"expected_head_sha": sha})
+            print(f"DRY #{number}: one global admission, budget {original['budget']}/{max_updates_per_pr}")
+            return 0
+        # Refresh every reservation and eligibility decision: a queued retry may have registered
+        # after the initial snapshot. A native expected_head_sha still guards the final write.
+        current_required, current_strict = required_policy(repo, branch)
+        if current_required != required or not current_strict:
+            return 0
+        fresh = admission_entries(repo, branch, main_sha, required, dt.datetime.now(dt.timezone.utc),
+                                  debounce, fleet_threshold, max_updates_per_pr)
+        if [n for n, ok, _ in global_plan(fresh, max_updates) if ok] != [number]:
+            return 0
+        entry = next(e for e in fresh if e["number"] == number)
+        if entry["head"] != original["head"]:
+            return 0
+        # Final exact live authority/check/budget/debounce guard, then immutable-main recheck.
+        full = get(f"/repos/{repo}/pulls/{number}")
+        checked = evaluate_current(repo, branch, full, required, dt.datetime.now(dt.timezone.utc),
+                                   debounce, fleet_threshold, max_updates_per_pr)
+        if not checked["ok"] or checked["head"] != original["head"]:
+            return 0
+        if not snapshot_unchanged(repo, branch, main_sha, number, checked["head"], reader=get):
+            return 0
+        code, data = api("PUT", f"/repos/{repo}/pulls/{number}/update-branch",
+                         {"expected_head_sha": checked["head"]})
         if code == 202:
-            updated += 1
-            print(f"UPDATE #{n} {sha[:9]}: {why} "
-                  f"(budget {used + 1}/{max_updates_per_pr})")
-        elif code == 409 or (
-            code == 422 and isinstance(data, dict) and isinstance(data.get("message"), str)
-            and data["message"] in (
+            print(f"UPDATE #{number}: one global admission (budget {checked['budget'] + 1}/{max_updates_per_pr})")
+            return 0
+        if code == 409 or (code == 422 and isinstance(data, dict) and data.get("message") in (
                 "expected head sha didn’t match current head ref.",
-                "expected head sha didn't match current head ref.",
-            )
-        ):
-            # A competing update changed the expected head. The next run re-reads it.
-            # Only this exact 422 response is a race; other validation failures remain red.
-            print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
-        else:
-            failed_updates += 1
-            print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
-    write_summary(stuck)
-    print(f"done: {updated} update(s), {failed_updates} failed update(s), "
-          f"{len(stuck)} PR(s) held by the budget")
-    return 1 if failed_updates else 0
+                "expected head sha didn't match current head ref.")):
+            print(f"SKIP #{number}: head changed during update ({code})")
+            return 0
+        print(f"::error::FAILED #{number}: update-branch -> {code}: {data}")
+        return 1
+    except (KeyError, TypeError, ValueError, RuntimeError, OSError, SystemExit) as error:
+        print(f"::error::global admission read failed; no retry: {error}")
+        return 1
 
 
 def main() -> int:

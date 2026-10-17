@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.0...domestic-payment-v1.2.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **domestic-payment,card-issuance,case-coordinator-agent:** protect request-derived log fields ([#12717](https://github.com/JiRaska/open-bank-oss/issues/12717)) ([9f5862a](https://github.com/JiRaska/open-bank-oss/commit/9f5862a0246f3918a633693429fc2e2df15c4f11))
+
 ## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.1.0...domestic-payment-v1.2.0) (2026-10-16)
 
 
