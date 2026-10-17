@@ -59,8 +59,8 @@ jobs:
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
           # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor,
           # GovernanceAuditor, Statement, Swift, Treasury, RiskEngine,
-          # CardProcessing, TppRegistry and PensionFund added as third through
-          # fiftieth
+          # CardProcessing, TppRegistry, PensionFund and TaxReporting added as
+          # third through fifty-first
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -118,6 +118,7 @@ jobs:
               "openbank-card-processing-service",
               "openbank-tpp-registry-service",
               "openbank-pension-fund-service",
+              "openbank-tax-reporting-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -212,6 +213,9 @@ jobs:
                   # account-events-in + outgoing statement-events-out, no
                   # bootstrap-servers address in config)
                   "openbank-statement-service",
+                  # measured: same pull (one smallrye-kafka channel, no
+                  # bootstrap-servers address in config)
+                  "openbank-tax-reporting-service",
               }
               temporal = None
               if svc in NEEDS_TEMPORAL:
