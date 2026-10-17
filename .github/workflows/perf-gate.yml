@@ -59,7 +59,8 @@ jobs:
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
           # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor,
           # GovernanceAuditor, Statement, Swift, Treasury, RiskEngine,
-          # CardProcessing and TppRegistry added as third through forty-ninth
+          # CardProcessing, TppRegistry and PensionFund added as third through
+          # fiftieth
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -116,6 +117,7 @@ jobs:
               "openbank-risk-engine",
               "openbank-card-processing-service",
               "openbank-tpp-registry-service",
+              "openbank-pension-fund-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
