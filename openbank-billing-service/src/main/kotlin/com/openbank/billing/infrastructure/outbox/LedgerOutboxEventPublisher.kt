@@ -114,9 +114,10 @@ class LedgerOutboxEventPublisher(
 
     /**
      * A row written before ADR-0341 carries no class. It is still posted -- refusing would strand a
-     * charge the customer's statement already shows -- as the demand-deposit class. The fee leg's
-     * (CUSTOMER_DEPOSIT_DEMAND, FEE_SETTLEMENT, currency) resolves to 2100 in EVERY currency, which is
-     * exactly the account those rows were always written for, and `FeeJournalsUnchangedTest` pins it.
+     * charge the customer's statement already shows -- as the demand-deposit class. In CZK
+     * (CUSTOMER_DEPOSIT_DEMAND, PRINCIPAL, CZK) resolves to 2100, exactly the account those rows were
+     * written for (`FeeJournalsUnchangedTest` pins it). Such a row in another currency resolves to that
+     * currency's control account (2101-2103) rather than the CZK 2100 the ledger always refused it on.
      * The fallback is COUNTED so its disappearance is observable. Rows written by this release always
      * carry the class.
      */

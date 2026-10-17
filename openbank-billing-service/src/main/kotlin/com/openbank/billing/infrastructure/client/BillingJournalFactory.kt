@@ -23,12 +23,13 @@ import java.util.UUID
 object BillingJournalFactory {
 
     /**
-     * The customer leg's class comes from the pinned revision; the ledger maps (class, FEE_SETTLEMENT,
-     * currency) to the deposit-control GL billing always debited: 2100 in EVERY currency, not the
-     * per-currency control account PRINCIPAL would name (ledger V31). Byte-identical to before ADR-0341;
-     * `FeeJournalsUnchangedTest` proves it for every currency and both legs.
+     * The customer leg's class comes from the pinned revision; the ledger maps (class, PRINCIPAL,
+     * currency) to that currency's deposit-control GL (ledger V31). In CZK that is 2100, the very
+     * account billing always debited; `FeeJournalsUnchangedTest` proves CZK is byte-identical. A
+     * non-CZK fee debits its own control account (2101-2103) -- the old fixed CZK account was refused
+     * by the ledger for any other currency, so no non-CZK fee ever posted through it.
      */
-    private const val CUSTOMER_ROLE = "FEE_SETTLEMENT"
+    private const val CUSTOMER_ROLE = "PRINCIPAL"
 
     /** The bank's fee income, a class of its own that no product revision carries (ADR-0341 D3). */
     private const val FEE_INCOME_CLASS = "FEE_INCOME_ACCOUNT"

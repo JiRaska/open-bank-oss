@@ -27,20 +27,27 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * ADR-0341 D3 differential proof for fee billing: for EVERY supported currency, every deposit
- * class and both journals (charge and reversal), the legs billing now builds -- resolved through
- * the ledger's accountingClass map -- land on exactly the GL accounts the previous release posted
- * to: the fixed `a0..0002` (2100) on the customer leg and `a0..4003` (4003) on the income leg,
- * whatever the currency. [LegacyFeeOracle] is a verbatim copy of the previous factory; never edit
- * it to make a test pass.
+ * ADR-0341 D3 differential proof for fee billing. [LegacyFeeOracle] is a verbatim copy of the legs
+ * the previous release built: the fixed `a0..0002` (2100) debit and `a0..4003` (4003) credit, whatever
+ * the currency. For CZK -- the only currency those two accounts can take -- the legs billing builds now,
+ * resolved through the ledger's accountingClass map, land on EXACTLY those accounts, with the same
+ * sides, amounts, base amounts and sub-account, for every deposit class, for the charge and the
+ * reversal, and for an outbox row written before classes existed.
  *
- * The map is held here twice: as a literal ([LedgerMap.billing]) and, in the last test, parsed out of
- * the ledger's own migration so the literal cannot drift away from what the database is seeded with.
+ * For every OTHER currency there is nothing to be identical to: the ledger refuses a line whose
+ * currency is not its GL account's ([LedgerRules]), and both fixed accounts are CZK, so the previous
+ * release's EUR/USD/GBP fee journals were refused at the ledger and never posted. The tests below pin
+ * that fact (so nobody "restores" a behaviour that never worked) and what the new path does instead:
+ * the debit leg lands on the currency's own control account and the income leg, for which the chart has
+ * no account, is an explicit unmapped-row failure.
+ *
+ * The map is held here as a literal and, in the last test, parsed out of the ledger's own migration so
+ * the literal cannot drift away from what the database is seeded with.
  */
 class FeeJournalsUnchangedTest {
 
-    private val currencies = listOf("CZK", "EUR", "USD", "GBP")
     private val classes = listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM")
+    private val nonCzk = listOf("EUR", "USD", "GBP")
 
     private fun charge(ccy: String, cls: String) = FeeJournalCommand(
         idempotencyKey = "fee-2026-07-acc-1-f1-$ccy",
@@ -78,73 +85,96 @@ class FeeJournalsUnchangedTest {
     }
 
     @Test
-    fun `a charge lands on the same two accounts as before, in every currency and class`() {
-        for (ccy in currencies) {
+    fun `a CZK charge lands on the same two accounts as before, for every deposit class`() {
+        for (cls in classes) {
+            val cmd = charge("CZK", cls)
+            assertThat(resolved(BillingJournalFactory.buildLines(cmd)))
+                .describedAs("charge $cls CZK")
+                .isEqualTo(LegacyFeeOracle.charge(cmd))
+        }
+    }
+
+    @Test
+    fun `a CZK reversal lands on the same two accounts as before, for every deposit class`() {
+        for (cls in classes) {
+            val cmd = reversal("CZK", cls)
+            assertThat(resolved(BillingJournalFactory.buildReversalLines(cmd)))
+                .describedAs("reversal $cls CZK")
+                .isEqualTo(LegacyFeeOracle.reversal(cmd))
+        }
+    }
+
+    @Test
+    fun `an outbox row written before accounting classes lands on the old accounts in CZK`(): Unit = runBlocking {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val posted = slot<FeeJournalCommand>()
+        coEvery { ledger.post(capture(posted)) } returns UUID.randomUUID()
+        coEvery { assessments.markPosted(any(), any()) } returns Unit
+        val legacyPayload = "{\"schemaVersion\":1,\"idempotencyKey\":\"fee-2026-07-acc-1-f1-CZK\"," +
+            "\"cycleId\":\"2026-07\",\"accountId\":\"0191c0de-0000-7000-8000-000000000042\"," +
+            "\"feeId\":\"f1\",\"amount\":\"150.00\",\"currency\":\"CZK\"," +
+            "\"description\":\"Fee charge: Maintenance\"}"
+        assertThat(legacyPayload).doesNotContain("accountingClass")
+
+        LedgerOutboxEventPublisher(ledger, assessments, mockk(relaxed = true), SimpleMeterRegistry())
+            .publish(entry(legacyPayload))
+
+        assertThat(posted.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+        assertThat(resolved(BillingJournalFactory.buildLines(posted.captured)))
+            .isEqualTo(LegacyFeeOracle.charge(charge("CZK", "CUSTOMER_DEPOSIT_DEMAND")))
+    }
+
+    @Test
+    fun `the previous release never posted a non-CZK fee - the ledger refuses its fixed CZK accounts`() {
+        for (ccy in nonCzk) {
+            val oracle = LegacyFeeOracle.charge(charge(ccy, classes.first()))
+            assertThat(oracle.map { LedgerRules.refusal(it) })
+                .describedAs("previous release, $ccy fee")
+                .allSatisfy { assertThat(it).isNotNull().contains("does not match GL account") }
+        }
+        // ...and a CZK fee is accepted by the same rule, so the rule is not simply refusing everything
+        assertThat(LegacyFeeOracle.charge(charge("CZK", classes.first())).map { LedgerRules.refusal(it) })
+            .containsOnly(null)
+    }
+
+    @Test
+    fun `a non-CZK fee debits its own control account and its income leg is an explicit unmapped failure`() {
+        val expectedControl = mapOf("EUR" to "2101", "USD" to "2102", "GBP" to "2103")
+        for (ccy in nonCzk) {
             for (cls in classes) {
-                val cmd = charge(ccy, cls)
-                assertThat(resolved(BillingJournalFactory.buildLines(cmd)))
-                    .describedAs("charge $cls $ccy")
-                    .isEqualTo(LegacyFeeOracle.charge(cmd))
+                val debit = BillingJournalFactory.buildLines(charge(ccy, cls)).single { it.side == "DEBIT" }
+                val account = LedgerMap.resolve(debit.accountingClass, debit.accountingRole, debit.currencyCode)
+                assertThat(account).describedAs("$cls $ccy").isEqualTo(LedgerMap.idOf(expectedControl.getValue(ccy)))
+                // and the ledger would ACCEPT that leg: the currency is the account's
+                assertThat(LedgerRules.accountCurrency(account)).isEqualTo(ccy)
             }
+            val credit = BillingJournalFactory.buildLines(charge(ccy, classes.first())).single { it.side == "CREDIT" }
+            val thrown = runCatching {
+                LedgerMap.resolve(credit.accountingClass, credit.accountingRole, credit.currencyCode)
+            }
+            assertThat(thrown.exceptionOrNull())
+                .describedAs("fee income in $ccy")
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("FEE_INCOME_ACCOUNT/FEE_INCOME/$ccy")
         }
     }
 
     @Test
-    fun `a reversal lands on the same two accounts as before, in every currency and class`() {
-        for (ccy in currencies) {
-            for (cls in classes) {
-                val cmd = reversal(ccy, cls)
-                assertThat(resolved(BillingJournalFactory.buildReversalLines(cmd)))
-                    .describedAs("reversal $cls $ccy")
-                    .isEqualTo(LegacyFeeOracle.reversal(cmd))
-            }
+    fun `the check is not vacuous - a wrong class or role is caught by the CZK comparison`() {
+        val cmd = charge("CZK", "CUSTOMER_DEPOSIT_DEMAND")
+        val moved = BillingJournalFactory.buildLines(cmd).map { leg ->
+            val isDebit = leg.side == "DEBIT"
+            if (isDebit) leg.copy(accountingClass = "FEE_INCOME_ACCOUNT", accountingRole = "FEE_INCOME") else leg
         }
+        // both legs now resolve to 4003: the debit has visibly moved off 2100
+        assertThat(resolved(moved)).isNotEqualTo(LegacyFeeOracle.charge(cmd))
+        val unknownClass = runCatching { LedgerMap.resolve("CUSTOMER_DEPOSIT_UNKNOWN", "PRINCIPAL", "CZK") }
+        assertThat(unknownClass.exceptionOrNull()).isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test
-    fun `an outbox row written before accounting classes lands on the old accounts in every currency`(): Unit =
-        runBlocking {
-            for (ccy in currencies) {
-                val ledger = mockk<LedgerPostingPort>()
-                val assessments = mockk<BillingAssessmentRepository>()
-                val posted = slot<FeeJournalCommand>()
-                coEvery { ledger.post(capture(posted)) } returns UUID.randomUUID()
-                coEvery { assessments.markPosted(any(), any()) } returns Unit
-                val legacyPayload = "{\"schemaVersion\":1,\"idempotencyKey\":\"fee-2026-07-acc-1-f1-$ccy\"," +
-                    "\"cycleId\":\"2026-07\",\"accountId\":\"0191c0de-0000-7000-8000-000000000042\"," +
-                    "\"feeId\":\"f1\",\"amount\":\"150.00\",\"currency\":\"$ccy\"," +
-                    "\"description\":\"Fee charge: Maintenance\"}"
-                assertThat(legacyPayload).doesNotContain("accountingClass")
-
-                LedgerOutboxEventPublisher(
-                    ledger,
-                    assessments,
-                    mockk(relaxed = true),
-                    SimpleMeterRegistry(),
-                ).publish(entry(legacyPayload))
-
-                assertThat(posted.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
-                assertThat(resolved(BillingJournalFactory.buildLines(posted.captured)))
-                    .describedAs("legacy fallback $ccy")
-                    .isEqualTo(LegacyFeeOracle.charge(charge(ccy, "CUSTOMER_DEPOSIT_DEMAND")))
-            }
-        }
-
-    @Test
-    fun `the check is not vacuous - the per-currency control account would have moved a EUR fee`() {
-        // The PRINCIPAL role names 2101 for EUR. Had billing kept it, this very comparison goes red:
-        // the differential test can tell the defect from the fix.
-        val wrongRole = BillingJournalFactory.buildLines(charge("EUR", "CUSTOMER_DEPOSIT_DEMAND"))
-            .map { if (it.side == "DEBIT") it.copy(accountingRole = "PRINCIPAL") else it }
-        assertThat(resolved(wrongRole))
-            .isNotEqualTo(LegacyFeeOracle.charge(charge("EUR", "CUSTOMER_DEPOSIT_DEMAND")))
-        // and a currency the map does not carry has no account at all rather than a guessed one
-        val thrown = runCatching { resolved(BillingJournalFactory.buildLines(charge("PLN", classes.first()))) }
-        assertThat(thrown.exceptionOrNull()).isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    @Test
-    fun `the literal map equals the fee rows the ledger migration seeds`() {
+    fun `the literal map equals the billing rows the ledger migration seeds`() {
         val migration = listOf(
             Path.of("../openbank-ledger-service/src/main/resources/db/migration/V31__accounting_class_gl_map.sql"),
             Path.of("openbank-ledger-service/src/main/resources/db/migration/V31__accounting_class_gl_map.sql"),
@@ -192,18 +222,14 @@ private object LedgerMap {
         if (code == "2100") "a0000000-0000-0000-0000-000000000002" else "a0000000-0000-0000-0000-00000000$code",
     )
 
-    private val currencies = listOf("CZK", "EUR", "USD", "GBP")
     private val classes = listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM")
-    private val perCurrencyControl = mapOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103")
+    private val control = mapOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103")
 
     val billing: Map<Triple<String, String, String>, UUID> = buildMap {
-        for (ccy in currencies) {
-            for (cls in classes) {
-                put(Triple(cls, "PRINCIPAL", ccy), idOf(perCurrencyControl.getValue(ccy)))
-                put(Triple(cls, "FEE_SETTLEMENT", ccy), idOf("2100"))
-            }
-            put(Triple("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy), idOf("4003"))
+        for ((ccy, code) in control) {
+            for (cls in classes) put(Triple(cls, "PRINCIPAL", ccy), idOf(code))
         }
+        put(Triple("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK"), idOf("4003"))
     }
 
     fun resolve(accountingClass: String, role: String, currency: String): UUID = requireNotNull(
@@ -211,9 +237,28 @@ private object LedgerMap {
     ) { "the ledger map has no row for $accountingClass/$role/$currency" }
 }
 
+/** The one ledger rule that matters here: a line's currency must be its GL account's (LedgerService). */
+private object LedgerRules {
+    private val currencyOf = mapOf(
+        LedgerMap.idOf("2100") to "CZK",
+        LedgerMap.idOf("2101") to "EUR",
+        LedgerMap.idOf("2102") to "USD",
+        LedgerMap.idOf("2103") to "GBP",
+        LedgerMap.idOf("4003") to "CZK",
+    )
+
+    fun accountCurrency(account: UUID): String = currencyOf.getValue(account)
+
+    fun refusal(leg: Landed): String? = if (accountCurrency(leg.account) == leg.baseCurrency) {
+        null
+    } else {
+        "Line base currency ${leg.baseCurrency} does not match GL account currency ${accountCurrency(leg.account)}"
+    }
+}
+
 /**
  * ORACLE: a verbatim copy of the fee legs the previous release built (fixed `BillingLedgerConfig`
- * defaults `a0..0002` and `a0..4003`, for every currency).
+ * defaults `a0..0002` and `a0..4003`, for every currency). Never edit it to make a test pass.
  */
 private object LegacyFeeOracle {
     private val feeReceivable = UUID.fromString("a0000000-0000-0000-0000-000000000002")
