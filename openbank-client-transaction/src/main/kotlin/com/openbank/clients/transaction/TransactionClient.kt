@@ -12,7 +12,9 @@ import com.openbank.clients.transaction.model.TransactionResponse
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
+import java.io.InputStream
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The ONLY place that interprets an HTTP answer from transaction-service (ADR-0319).
@@ -55,6 +57,8 @@ class TransactionClient(private val api: TransactionsApi) {
         classify(api.listTransactions(accountId, limit, cursor), TransactionPage::class.java)
 
     internal companion object {
+        /** A refusal body is read at most this many bytes, whatever the server sends. */
+        private const val PROBLEM_MAX_BYTES = 4096
         private const val PROBLEM_MAX_CHARS = 300
         private const val HTTP_OK = 200
         private const val HTTP_MULTIPLE_CHOICES = 300
@@ -70,17 +74,40 @@ class TransactionClient(private val api: TransactionsApi) {
                 fromError<T>(failure as WebApplicationException)
             }
 
-        private fun <T> fromResponse(response: Response, type: Class<T>): TransactionCallOutcome<T> = response.use {
-            when (val status = it.status) {
-                in HTTP_OK until HTTP_MULTIPLE_CHOICES -> booked(it, status, type)
-                HTTP_CONFLICT -> TransactionCallOutcome.Conflict
-                HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE -> rejected(it, status)
-                else -> throw TransactionHttpException(status)
+        /** How many times closing a Response itself failed. Counted and logged, never allowed to change a result. */
+        internal val closeFailures = AtomicLong()
+
+        private val log = System.getLogger(TransactionClient::class.java.name)
+
+        /**
+         * Closes [response] without letting a failing `close()` replace an outcome that is already decided:
+         * a booked debit must not be reported as an error, and so retried, because releasing the connection
+         * went wrong afterwards.
+         */
+        @Suppress("TooGenericExceptionCaught")
+        private fun closeQuietly(response: Response) {
+            try {
+                response.close()
+            } catch (e: Exception) {
+                closeFailures.incrementAndGet()
+                log.log(System.Logger.Level.WARNING, "closing a transaction-service Response failed", e)
             }
         }
 
-        private fun <T> fromError(failure: WebApplicationException): Uni<TransactionCallOutcome<T>> =
-            failure.response.use { response ->
+        private fun <T> fromResponse(response: Response, type: Class<T>): TransactionCallOutcome<T> = try {
+            when (val status = response.status) {
+                in HTTP_OK until HTTP_MULTIPLE_CHOICES -> booked(response, status, type)
+                HTTP_CONFLICT -> TransactionCallOutcome.Conflict
+                HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE -> rejected(response, status)
+                else -> throw TransactionHttpException(status)
+            }
+        } finally {
+            closeQuietly(response)
+        }
+
+        private fun <T> fromError(failure: WebApplicationException): Uni<TransactionCallOutcome<T>> {
+            val response = failure.response
+            return try {
                 when (val status = response.status) {
                     in HTTP_OK until HTTP_MULTIPLE_CHOICES ->
                         Uni.createFrom().item(TransactionCallOutcome.Booked(status, null, failure))
@@ -88,7 +115,10 @@ class TransactionClient(private val api: TransactionsApi) {
                     HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE -> Uni.createFrom().item(rejected(response, status))
                     else -> Uni.createFrom().failure(TransactionHttpException(status, failure))
                 }
+            } finally {
+                closeQuietly(response)
             }
+        }
 
         @Suppress("TooGenericExceptionCaught")
         private fun <T> booked(response: Response, status: Int, type: Class<T>): TransactionCallOutcome<T> = try {
@@ -98,15 +128,14 @@ class TransactionClient(private val api: TransactionsApi) {
             TransactionCallOutcome.Booked(status, null, e)
         }
 
+        private fun boundedText(response: Response): String =
+            response.readEntity(InputStream::class.java).use { it.readNBytes(PROBLEM_MAX_BYTES) }
+                .toString(Charsets.UTF_8)
+                .take(PROBLEM_MAX_CHARS)
+
         @Suppress("TooGenericExceptionCaught")
         private fun rejected(response: Response, status: Int): TransactionCallOutcome.Rejected = try {
-            val problem = if (response.hasEntity()) {
-                response.readEntity(
-                    String::class.java,
-                ).take(PROBLEM_MAX_CHARS)
-            } else {
-                null
-            }
+            val problem = if (response.hasEntity()) boundedText(response) else null
             TransactionCallOutcome.Rejected(status, problem)
         } catch (e: Exception) {
             TransactionCallOutcome.Rejected(status, null, e)
