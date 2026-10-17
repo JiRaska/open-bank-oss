@@ -86,15 +86,6 @@ quarkus:
       # QuarkusBindException whenever anything else on the machine holds the port.
       test-port: 0
 
-  openbank:
-    flaky-test-hunter:
-      # A cron that never fires (the 31st of February), NOT `quarkus.scheduler.enabled: false`.
-      # Disabling the scheduler makes the class structurally invisible to every test — which is how
-      # five schedulers in this fleet reached production having never run (#2148, #2187). With a
-      # real-but-unreachable expression the wiring is still built and validated at boot, and a test
-      # profile can override this key with a fast cron to drive the REAL schedule.
-      check-cron: "0 0 5 31 2 ?"
-
 openbank:
   api:
     # Major matches the served /api/v1 path and openapi.yaml (ADR-0048).
@@ -105,25 +96,19 @@ openbank:
     namespace: ${TEMPORAL_NAMESPACE:openbank}
     task-queue: flaky-test-hunter
   flaky-test-hunter:
-    # Periodic sweep (ADR-0168) — weekly on Sunday at 06:30 UTC. The control-plane AI agents are offset from one
-    # another because they share ONE LiteLLM gateway and one Prometheus, and each carries its own
-    # daily token budget: finops 03:00, control-liveness-sentinel 03:15, devops 03:30,
-    # governance-auditor 04:30, release-steward 05:00, then the three weekly sweeps on Sunday at
-    # 05:30 / 06:00 / 06:30 — placed AFTER the last daily agent so that on Sunday, the one day all
-    # eight can coincide, no sweep starts while another is still in its opening minutes.
-    # Collisions with unrelated per-service batch jobs are explicitly not a consideration:
-    # different pods, different databases.
-    # Quarkus cron is SIX fields (second minute hour day month weekday).
-    check-cron: ${FLAKY_TEST_HUNTER_CHECK_CRON:0 30 6 ? * SUN}
+    # No periodic sweep cron. The weekly sweep (ADR-0168) was removed on 2026-10-17: the deployed
+    # pod has no repository checkout, so the sweep scanned an empty tree every Sunday and could
+    # never find anything. The agent's production input is the Admin UI Test Intelligence
+    # snapshot (POST /api/v1/flaky-test-hunter/evidence/analyze); the scan path stays reachable
+    # through the webhook and operator triggers where a checkout exists.
     github-api-url: ${GITHUB_API_URL:https://api.github.com}
     github-repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
     # Optional (Optional<String>, no default): absent until openbank/flaky-test-hunter is seeded in
     # OpenBao, and the writer fails closed on a blank value (see GitHubProposalAdapter).
     github-token: ${FLAKY_TEST_HUNTER_GITHUB_TOKEN:}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
-    # Filesystem path to the monorepo checkout this agent reads */src/test/kotlin/**/*.kt,
-    # .github/scripts/*.sh CI guard scripts, and */build/test-results/test/*.xml JUnit reports
-    # from (TestScanPort).
+    # Filesystem path to a monorepo checkout for TestScanPort (webhook / operator scan path only;
+    # the deployed pod mounts none — see the note above).
     repo-root: ${FLAKY_TEST_HUNTER_REPO_ROOT:.}
     # ADR-0031 D9 phase 3: policy pre-flight gate on the rare gh.pr.open write path. Deny-by-
     # default — in-process charter re-check against the packaged agents.yaml, then an OPA sidecar
