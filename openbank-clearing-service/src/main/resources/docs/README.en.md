@@ -24,3 +24,19 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** `Idempotency-Key` accepted as a CORS/allowed header; Redis (Valkey) is wired as a dependency
 - **Auth:** Keycloak OIDC; per-operation `@RolesAllowed` (least-privilege); `settle` also `@Authorize` via OPA (advisory)
 - **Money-path:** **YES** — this service is in `rules.yaml: money_path_services` (2 approvals + threat model required)
+
+## Agent read contracts
+
+`AgentClearingReadPactConsumerTest` records four read-only Agent interactions: list batches,
+get a batch, list its items, and return HTTP 404 for an unknown batch. The committed contract
+is `pacts/openbank-agent-service-openbank-clearing-service.json`.
+`ClearingPactProviderVerificationTest` loads it from the repository `pacts/` folder and replays
+all four interactions against real Quarkus HTTP with seeded Testcontainers infrastructure.
+The folder replay requires the JSON: a missing contract must fail verification rather than
+produce a successful run with no interactions. Regenerate and commit the JSON together with
+consumer changes; keep the folder and broker provider-state handlers aligned.
+
+The separate broker verifier remains conditional on a non-empty `pactbroker.url`; folder
+verification needs no broker credentials. The replay checks HTTP and JSON compatibility using
+test identities and configured test authorization settings. It does not establish production
+OIDC, ownership, or OPA enforcement.
