@@ -34,3 +34,7 @@ Configured values:
 - `max-size: 20`
 
 
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the reactive datasource pool bounds (`quarkus.datasource.reactive.idle-timeout` 5M, `max-lifetime` 30M, `max-size` 20). They come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file, and equal what this service used to declare. A value set in this service's `application.yaml` takes precedence.

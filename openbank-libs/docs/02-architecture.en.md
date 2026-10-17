@@ -36,3 +36,7 @@ The root build uses Gradle subprojects. Service modules generally declare `imple
 ## Policy-rate topic ownership
 
 `openbank-libs-domain` maps `openbank.fx.cnb-policy-rate.published` to `fx-service` in `TopicProducers`. This records the producing service for shared analytics and governance checks; it does not publish or consume the event. The producer is the FX ingestion pipeline, while risk-engine and audit-service consume its facts and audit trail. Keep the mapping in step with a topic rename or ownership change.
+
+## Shared configuration defaults
+
+`openbank-libs-runtime/src/main/resources/application.yaml` is on every service classpath at a lower precedence than the service's own `application.yaml`. It supplies the HTTP security response headers, the management interface (port 8085, root path `/q`) and the reactive datasource pool self-heal bounds (`idle-timeout` 5M, `max-lifetime` 30M, `max-size` 20, #1682). A service overrides any of them by setting the same key; `check-datasource-pool-self-heal.py` reads this file when deciding whether a pool is bounded.

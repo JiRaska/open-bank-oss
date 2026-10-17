@@ -36,3 +36,7 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 ## Vlastnictví topicu sazeb ČNB
 
 `openbank-libs-domain` mapuje `openbank.fx.cnb-policy-rate.published` na `fx-service` v `TopicProducers`. Tím zaznamenává producenta pro sdílenou analytiku a kontroly správy; knihovna událost sama nepublikuje ani neodebírá. Producentem je cesta příjmu sazeb ve FX, zatímco risk engine a audit-service odebírají fakta a auditní stopu. Při přejmenování topicu nebo změně vlastníka aktualizujte i mapování.
+
+## Sdílené výchozí konfigurace
+
+`openbank-libs-runtime/src/main/resources/application.yaml` je na classpath každé služby s nižší prioritou než vlastní `application.yaml` služby. Dodává bezpečnostní hlavičky HTTP odpovědí, management rozhraní (port 8085, kořenová cesta `/q`) a meze poolu reaktivního datasource (`idle-timeout` 5M, `max-lifetime` 30M, `max-size` 20, #1682). Služba kteroukoli hodnotu přepíše nastavením stejného klíče; `check-datasource-pool-self-heal.py` tento soubor čte při rozhodování, zda je pool omezený.
