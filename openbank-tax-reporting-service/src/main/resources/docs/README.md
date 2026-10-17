@@ -31,3 +31,12 @@ Fund PEF 13-04 uses the closing portfolio's `loansOutstanding`. The provider rep
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Test coverage floor
+
+The module enforces a Kover LINE floor of **78 %** over its own sources (`build.gradle.kts`,
+`kover { verify { … minValue = 78 } }`; the fleet filter excludes `com.openbank.libs.*`). It was
+set on 2026-10-17 from a measured 80.94 % (1452/1794 lines) minus two points, ADR-0020 style, and
+only ever moves up: lowering it needs a `coverage-floor-lowered: #<issue>` trailer on the PR (gate
+`coverage-floor-ratchet`). Before this the module had no `verify {}` rule, so `koverVerify` passed
+on any number.
