@@ -12,12 +12,14 @@ a four-eyes gate the service does not have. Sampling found 2 of 15 files stale; 
 
 WHAT IT CHECKS: every backticked CamelCase identifier (>= 6 chars, at least two humps — `AgentPolicyGate`,
 not `Panache` or `PENDING_KYC`) in a `openbank-*/CLAUDE.md` whose directory has `src/main` must occur as a
-whole word in some tracked source file (.kt .java .kts .ts .tsx .py .yaml .yml .sql .rego .json .sh .toml).
+DECLARED (class/interface/object/typealias/fun/type/...) in a source file under some `src/` directory
+(.kt .java .ts .tsx .py .rego), or occur as a word in a Gradle build file. A bare occurrence is not a
+definition, and .github/ is never a corpus, so this docstring cannot vouch for the names above.
 Markdown is NOT a source: a README mentioning a class does not make it exist, and other CLAUDE.md files
 cannot vouch for one another. `docs/adr/` is excluded for the same reason.
 
 A name that is legitimately external (a library class, a Kubernetes condition) is not in the tree; list
-it in EXTERNAL below WITH a reason. It is empty today: the first run found only real defects.
+it in EXTERNAL below WITH a reason. Entries are library classes or alert names; the rest of the first run were real defects.
 
 Usage: check-claude-md-identifiers.py [--root .] [--enforce | --selftest]
 """
@@ -31,40 +33,61 @@ import subprocess
 import sys
 import tempfile
 
-SOURCE_EXT = {".kt", ".java", ".kts", ".ts", ".tsx", ".py", ".yaml", ".yml", ".sql", ".rego", ".json", ".sh", ".toml"}
-SKIP_DIRS = {".git", "node_modules", "build", ".gradle", ".claude", ".next", "dist", "docs"}
+SOURCE_EXT = {".kt", ".java", ".ts", ".tsx", ".py", ".rego"}
+BUILD_EXT = {".kts", ".gradle"}
+# Skipped ABOVE the `src` component only: a package named `build` or `docs` inside src/ is source.
+SKIP_DIRS = {".git", "node_modules", "build", ".gradle", ".claude", ".next", "dist", "docs", ".github"}
+# A name is defined only where it is DECLARED; a bare word occurrence (comment, string, docstring) is not.
+DECL = re.compile(
+    r"\b(?:class|interface|object|typealias|fun|type|enum|function|const|val|var|def|data)\s+"
+    r"(?:<[^>]*>\s*)?(?:[A-Za-z0-9_]+\.)*([A-Za-z][A-Za-z0-9_]{5,})"
+)
 TOKEN = re.compile(r"`([A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+)`")
 WORD = re.compile(r"[A-Za-z][A-Za-z0-9]{5,}")
 
-# identifier -> reason it is not in this tree. EMPTY on purpose.
-EXTERNAL: dict[str, str] = {}
+# identifier -> reason it is not declared in this tree.
+EXTERNAL: dict[str, str] = {
+    "BlockingNotAllowedException": "SmallRye/Vert.x library exception, not declared in this tree",
+    "ObjectNode": "Jackson library class",
+    "PanacheEntity": "Quarkus Panache library base class",
+    "AuditChainBroken": "Prometheus alert name (openbank-infra prometheus-rules-audit-chain.yaml), not a class",
+}
 
 
-def _source_files(root: pathlib.Path):
-    """Tracked files when `root` is a git checkout (fast, and build/ node_modules/ are not in it);
-    otherwise a filtered walk (the self-test fixtures)."""
+def _rel_paths(root: pathlib.Path):
     try:
         res = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, check=True)
-        for rel in res.stdout.decode("utf-8", "ignore").split("\0"):
-            if rel and os.path.splitext(rel)[1] in SOURCE_EXT and not set(rel.split("/")[:-1]) & SKIP_DIRS:
-                yield root / rel
+        yield from (r for r in res.stdout.decode("utf-8", "ignore").split("\0") if r)
         return
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", ".gradle"}]
         for name in filenames:
-            if os.path.splitext(name)[1] in SOURCE_EXT:
-                yield pathlib.Path(dirpath) / name
+            yield os.path.relpath(os.path.join(dirpath, name), root)
+
+
+def _source_files(root: pathlib.Path):
+    """Yield (path, is_build). Source = a file under a `src/` directory; build files = *.kts / *.gradle.
+    .github/ (this script and its self-test) is never a source."""
+    for rel in _rel_paths(root):
+        parts = rel.split("/")
+        ext = os.path.splitext(rel)[1]
+        if ext in BUILD_EXT and not set(parts[:-1]) & SKIP_DIRS:
+            yield root / rel, True
+        elif ext in SOURCE_EXT and "src" in parts[:-1]:
+            if not set(parts[: parts.index("src")]) & SKIP_DIRS:
+                yield root / rel, False
 
 
 def corpus_words(root: pathlib.Path) -> set[str]:
     words: set[str] = set()
-    for f in _source_files(root):
+    for f, is_build in _source_files(root):
         try:
-            words.update(WORD.findall(f.read_text(encoding="utf-8", errors="ignore")))
+            text = f.read_text(encoding="utf-8", errors="ignore")
         except OSError:
-            pass
+            continue
+        words.update(WORD.findall(text) if is_build else DECL.findall(text))
     return words
 
 
@@ -72,13 +95,15 @@ def service_claude_files(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(c for c in root.glob("openbank-*/CLAUDE.md") if (c.parent / "src" / "main").is_dir())
 
 
-def findings(root: pathlib.Path, words: set[str] | None = None) -> tuple[list[str], int, int]:
+def findings(root: pathlib.Path, words: set[str] | None = None,
+             claude_text: dict[pathlib.Path, str] | None = None) -> tuple[list[str], int, int]:
     words = corpus_words(root) if words is None else words
     out: list[str] = []
     checked = 0
     files = service_claude_files(root)
     for c in files:
-        for i, line in enumerate(c.read_text(encoding="utf-8").splitlines(), 1):
+        text = (claude_text or {}).get(c)
+        for i, line in enumerate((text if text is not None else c.read_text(encoding="utf-8")).splitlines(), 1):
             for m in TOKEN.finditer(line):
                 ident = m.group(1)
                 if len(ident) < 6:
@@ -122,7 +147,31 @@ def selftest() -> int:
         got, _, _ = findings(root)
         if got:
             fails.append(f"the corrected names must pass (got {got})")
-    live, checked, nfiles = findings(pathlib.Path(__file__).resolve().parents[2])
+        # a name that only OCCURS (comment, string literal, a .github file) is not defined
+        (svc / "src" / "main" / "kotlin" / "C.kt").write_text('// MentionedOnly\nval s = "StringOnly"\n')
+        (root / ".github" / "scripts").mkdir(parents=True)
+        (root / ".github" / "scripts" / "g.py").write_text("class GithubOnly\n")
+        (svc / "CLAUDE.md").write_text("`MentionedOnly` `StringOnly` `GithubOnly`\n")
+        got, _, _ = findings(root)
+        if len(got) != 3:
+            fails.append(f"occurrence without declaration / .github must be flagged (got {got})")
+        # a package directory named build INSIDE src is still source
+        (svc / "src" / "main" / "kotlin" / "build").mkdir()
+        (svc / "src" / "main" / "kotlin" / "build" / "D.kt").write_text("class InsideBuildPkg\n")
+        (svc / "CLAUDE.md").write_text("`InsideBuildPkg`\n")
+        got, _, _ = findings(root)
+        if got:
+            fails.append(f"a `build` package inside src must count (got {got})")
+    real = pathlib.Path(__file__).resolve().parents[2]
+    live, checked, nfiles = findings(real)
+    # the REAL findings() over the REAL tree, ghost names injected into an in-memory copy of a real CLAUDE.md
+    target = service_claude_files(real)[0]
+    ghosts = ["PromptInjectionGuardrail", "FourEyesGate", "AgentProposalService", "KillSwitchEntry", "McpServerResource"]
+    text = target.read_text(encoding="utf-8") + "\n" + " ".join(f"`{g}`" for g in ghosts) + "\n"
+    got, _, _ = findings(real, claude_text={target: text})
+    missed = [g for g in ghosts if not any(f"`{g}`" in x for x in got)]
+    if missed:
+        fails.append(f"real-tree ghost injection not reported: {missed}")
     if nfiles < 10 or checked < 50:
         fails.append(f"the live scan is vacuous: {nfiles} files, {checked} identifiers")
     if fails:

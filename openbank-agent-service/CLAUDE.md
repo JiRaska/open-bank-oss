@@ -21,7 +21,7 @@ Implements the AI agent governance control plane (ADR-0031 D1–D9):
 ## Database — applied migrations + rollback notes
 
 Migrations run via Flyway JDBC (reactive Panache cannot drive the synchronous MCP tool path —
-see `AgentProposalEntity` docs). **Never edit an applied migration file** (Flyway checksum
+see `JdbcAgentProposalRepository` docs). **Never edit an applied migration file** (Flyway checksum
 will mismatch → crashloop). Rollback notes for applied migrations are kept here, not in the
 SQL file.
 
