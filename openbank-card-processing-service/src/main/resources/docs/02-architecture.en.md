@@ -228,3 +228,7 @@ stateDiagram-v2
 3. **The database restates the money invariants** — CHECK constraints for cleared ≤ authorised and decline-reason-iff-declined.
 4. **A skipped or failed side effect is never a success** — posting and scoring have their own `SKIPPED_DISABLED` / `FAILED` outcomes.
 5. **No card data** — references by card-issuance id only.
+
+## transaction-service client (ADR-0319)
+
+The outbound call to transaction-service no longer uses a hand-written REST interface and DTOs. The service extends the interface generated from transaction-service's own `openapi.yaml` (module `openbank-client-transaction`, versioned by the provider's API-contract version). Auth, config key and request filters stay in this service's `@RegisterRestClient` sub-interface. A drifted path or field now fails compilation, and the consumer pact is replayed against the provider on every PR.

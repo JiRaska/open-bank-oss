@@ -166,3 +166,7 @@ The HTTP listener remains enabled during the staged migration. Publish and verif
 compatible signed image before configuring the HTTPS listener and certificate rotation;
 switch pension callers only after the listener and network policies are ready. Restore
 caller URLs before reverting the provider image or removing its TLS listener.
+
+## transaction-service client (ADR-0319)
+
+The call that hands a due order to transaction-service now goes through the client generated from transaction-service's `openapi.yaml` (module `openbank-client-transaction`, ADR-0319) instead of a hand-written interface. Behaviour is unchanged; a contract drift fails compilation and the consumer pact replay.

@@ -39,6 +39,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
@@ -47,6 +49,9 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     // Provider-side message Pact verification for the PARTY_CREATED event (ADR-0063 P1).
     testImplementation(libs.pact.provider)
+    // Consumer pact for transaction-service's GET /api/v1/transactions (ADR-0319 D3), replayed by
+    // transaction-service's @PactFolder class on every PR.
+    testImplementation(libs.pact.consumer)
     testImplementation(project(":openbank-libs-testing"))
 
     // CI infra pilot (P2): @QuarkusTest ITs get an isolated, per-JVM PostgreSQL +
