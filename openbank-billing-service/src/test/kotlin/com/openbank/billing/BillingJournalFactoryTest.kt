@@ -58,7 +58,7 @@ class BillingJournalFactoryTest {
 
     @Test
     fun `is balanced and single-currency (no FX in phase 2)`() {
-        val lines = BillingJournalFactory.buildLines(command("fee-c-acc-f1-EUR", currency = "EUR")
+        val lines = BillingJournalFactory.buildLines(command("fee-c-acc-f1-EUR", currency = "EUR"))
         assertThat(lines).hasSize(2)
         val debit = lines.single { it.side == "DEBIT" }.amount
         val credit = lines.single { it.side == "CREDIT" }.amount
@@ -132,8 +132,8 @@ class BillingJournalFactoryTest {
 
     @Test
     fun `a reversal is the exact reverse of the charge — credits fee-receivable, debits fee income`() {
-        val chargeLines = BillingJournalFactory.buildLines(command("fee-2026-07-acc-1-f1-CZK")
-        val reversalLines = BillingJournalFactory.buildReversalLines(reversalCommand()
+        val chargeLines = BillingJournalFactory.buildLines(command("fee-2026-07-acc-1-f1-CZK"))
+        val reversalLines = BillingJournalFactory.buildReversalLines(reversalCommand())
 
         val chargeDebit = chargeLines.single { it.side == "DEBIT" }
         val chargeCredit = chargeLines.single { it.side == "CREDIT" }
@@ -153,7 +153,7 @@ class BillingJournalFactoryTest {
 
     @Test
     fun `a reversal is balanced and single-currency`() {
-        val lines = BillingJournalFactory.buildReversalLines(reversalCommand(currency = "EUR")
+        val lines = BillingJournalFactory.buildReversalLines(reversalCommand(currency = "EUR"))
         assertThat(lines).hasSize(2)
         val debit = lines.single { it.side == "DEBIT" }.amount
         val credit = lines.single { it.side == "CREDIT" }.amount

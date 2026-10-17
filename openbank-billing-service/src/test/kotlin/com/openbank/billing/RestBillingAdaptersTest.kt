@@ -4,6 +4,7 @@
 
 package com.openbank.billing
 
+import com.openbank.billing.application.port.out.AccountingClassSource
 import com.openbank.billing.infrastructure.adapter.RestAccountContextPort
 import com.openbank.billing.infrastructure.adapter.RestAccountPartyLookupPort
 import com.openbank.billing.infrastructure.adapter.RestBillableAccountDiscoveryPort
@@ -23,9 +24,8 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
-import kotlinx.coroutines.runBlocking
-import com.openbank.billing.application.port.out.AccountingClassSource
 import jakarta.ws.rs.NotFoundException
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -117,11 +117,10 @@ class RestBillingAdaptersTest {
 
     private val meters = SimpleMeterRegistry()
 
-    private fun legacyDocument(vararg feeIds: String) =
-        """{"fees":[""" + feeIds.joinToString(",") {
-            """{"id":"$it","name":"Fee $it","type":"MONTHLY","amount":5.0,"currency":"CZK","waivable":true,""" +
-                """"waiveCondition":"Balance > 50 000 CZK"}"""
-        } + "]}"
+    private fun legacyDocument(vararg feeIds: String) = """{"fees":[""" + feeIds.joinToString(",") {
+        """{"id":"$it","name":"Fee $it","type":"MONTHLY","amount":5.0,"currency":"CZK","waivable":true,""" +
+            """"waiveCondition":"Balance > 50 000 CZK"}"""
+    } + "]}"
 
     private fun revision(
         state: String = "PUBLISHED",

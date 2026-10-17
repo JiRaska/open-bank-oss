@@ -85,11 +85,7 @@ interface ProductCatalogRestClient {
 
 /** The subset of a catalog `ProductRevision` billing reads (`GET /api/v2/revisions/{id}`). */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class RevisionDto(
-    val id: String,
-    val state: String,
-    val content: RevisionContentDto = RevisionContentDto(),
-)
+data class RevisionDto(val id: String, val state: String, val content: RevisionContentDto = RevisionContentDto())
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class RevisionContentDto(

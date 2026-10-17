@@ -26,7 +26,8 @@ class LegacyFeesTest {
 
     @Test
     fun `an embedded document keys its fees by price code and tolerates absence`() {
-        val doc = """{"fees":[{"id":"f1","name":"Maintenance","type":"MONTHLY","waivable":true,"waiveCondition":"x"}]}"""
+        val doc = """{"fees":[{"id":"f1","name":"Maintenance","type":"MONTHLY",""" +
+            """"waivable":true,"waiveCondition":"x"}]}"""
         assertThat(LegacyFees.byPriceCode(doc).getValue("FEE_F1_3F524CDC07A11D7C6220").name).isEqualTo("Maintenance")
         assertThat(LegacyFees.byPriceCode(null)).isEmpty()
         assertThat(LegacyFees.byPriceCode("")).isEmpty()

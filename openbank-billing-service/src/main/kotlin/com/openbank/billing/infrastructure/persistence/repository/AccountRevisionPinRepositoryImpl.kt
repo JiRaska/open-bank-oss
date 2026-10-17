@@ -27,7 +27,7 @@ class AccountRevisionPinRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
 
     override suspend fun pinIfAbsent(accountId: String, revisionId: String): String {
         sf.withTransaction { s ->
-            s.createNativeQuery(
+            s.createNativeQuery<Int>(
                 "INSERT INTO billing_account_pin (account_id, product_revision_id, pinned_at) " +
                     "VALUES (:a, :r, :t) ON CONFLICT (account_id) DO NOTHING",
             ).setParameter("a", accountId).setParameter("r", UUID.fromString(revisionId))

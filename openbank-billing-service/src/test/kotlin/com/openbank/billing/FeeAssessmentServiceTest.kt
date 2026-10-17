@@ -29,8 +29,11 @@ class FeeAssessmentServiceTest {
         override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
     }
 
-    private fun service(billing: AccountBilling?, fees: List<BillableFee>, revisions: FakeRevisions = FakeRevisions(fees)) =
-        FeeAssessmentService(accounts(billing), revisions, pins)
+    private fun service(
+        billing: AccountBilling?,
+        fees: List<BillableFee>,
+        revisions: FakeRevisions = FakeRevisions(fees),
+    ) = FeeAssessmentService(accounts(billing), revisions, pins)
 
     @Suppress("TooGenericExceptionThrown")
     private fun serviceWithUnreachableCatalog(billing: AccountBilling?) = FeeAssessmentService(

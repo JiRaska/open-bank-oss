@@ -11,13 +11,13 @@ import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.outbox.LedgerOutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.MutinyEmitter
 import kotlinx.coroutines.runBlocking
@@ -69,7 +69,12 @@ class LedgerOutboxEventPublisherTest {
             coEvery { ledger.post(capture(commandSlot)) } returns journalId
             coEvery { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(entry(payload()))
+            LedgerOutboxEventPublisher(
+                ledger,
+                assessments,
+                noOpEmitter(),
+                SimpleMeterRegistry(),
+            ).publish(entry(payload()))
 
             coVerify(exactly = 1) { ledger.post(any()) }
             coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
@@ -122,7 +127,14 @@ class LedgerOutboxEventPublisherTest {
         coEvery { ledger.post(any()) } throws RuntimeException("ledger down")
 
         assertThatThrownBy {
-            runBlocking { LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(entry(payload())) }
+            runBlocking {
+                LedgerOutboxEventPublisher(
+                    ledger,
+                    assessments,
+                    noOpEmitter(),
+                    SimpleMeterRegistry(),
+                ).publish(entry(payload()))
+            }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
         coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
@@ -161,7 +173,12 @@ class LedgerOutboxEventPublisherTest {
                 assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId)
             } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(reversalEntry(reversalPayload()))
+            LedgerOutboxEventPublisher(
+                ledger,
+                assessments,
+                noOpEmitter(),
+                SimpleMeterRegistry(),
+            ).publish(reversalEntry(reversalPayload()))
 
             coVerify(exactly = 1) { ledger.postReversal(any()) }
             coVerify(exactly = 1) { assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId) }
@@ -181,7 +198,12 @@ class LedgerOutboxEventPublisherTest {
 
         assertThatThrownBy {
             runBlocking {
-                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(reversalEntry(reversalPayload()))
+                LedgerOutboxEventPublisher(
+                    ledger,
+                    assessments,
+                    noOpEmitter(),
+                    SimpleMeterRegistry(),
+                ).publish(reversalEntry(reversalPayload()))
             }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
@@ -210,7 +232,12 @@ class LedgerOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(messageSlot)) } returns Uni.createFrom().voidItem()
         val payload = "{\"eventType\":\"AnnualFeeSummaryReady\",\"accountId\":\"acc-1\"}"
 
-        LedgerOutboxEventPublisher(ledger, assessments, emitter, SimpleMeterRegistry()).publish(annualSummaryEntry(payload))
+        LedgerOutboxEventPublisher(
+            ledger,
+            assessments,
+            emitter,
+            SimpleMeterRegistry(),
+        ).publish(annualSummaryEntry(payload))
 
         coVerify(exactly = 0) { ledger.post(any()) }
         coVerify(exactly = 0) { ledger.postReversal(any()) }

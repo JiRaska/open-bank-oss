@@ -42,6 +42,10 @@ import jakarta.ws.rs.Path as JaxrsPath
  * client pointed at a route the provider does not serve fails here by name rather than as an opaque
  * mock-server 500 -- and the provider replay is what catches it on the other side.
  *
+ * No 401 interaction here, unlike the ledger contracts: the catalog's provider verifier runs under a class-level
+ * `@TestSecurity` with OIDC disabled (see its KDoc), so a missing-token replay cannot be expressed there; the
+ * "reads require a token" half is owned by `ProductCatalogSecurityTest`.
+ *
  * The provider state seeds ONE published revision under a FIXED id ([REVISION_ID]) in the offering
  * mapped to the seeded CURRENT_PERSONAL product, shaped like a lossless v1 projection (the only kind
  * of revision a deposit account has today): a `productType`, an embedded v1 document carrying the fee's
@@ -115,18 +119,6 @@ class ProductCatalogRevisionPactConsumerTest {
         .status(404)
         .toPact()
 
-    /** ADR-0279: every changed contract test carries a 401 negative interaction. */
-    @Pact(consumer = "openbank-billing-service", provider = "openbank-product-catalog")
-    fun rejectsLookupWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("no valid M2M identity is presented")
-        .uponReceiving("GET a published revision with a missing or expired token")
-        .path("/api/v2/legacy-products/$CURRENT_PERSONAL_PRODUCT_ID/published-revision")
-        .method("GET")
-        .headers(mapOf("Accept" to "application/json"))
-        .willRespondWith()
-        .status(401)
-        .toPact()
-
     @Test
     @PactTestFor(pactMethod = "publishedRevisionLookupPact")
     fun `the lookup answers the revision id a contract pins`(mockServer: MockServer) {
@@ -161,12 +153,6 @@ class ProductCatalogRevisionPactConsumerTest {
     @PactTestFor(pactMethod = "unknownProductLookupPact")
     fun `an unknown product is the catalog's 404`(mockServer: MockServer) {
         assertThat(get(mockServer, lookupPathFor(UNKNOWN_PRODUCT_ID)).first).isEqualTo(404)
-    }
-
-    @Test
-    @PactTestFor(pactMethod = "rejectsLookupWithMissingToken")
-    fun `the lookup is refused with 401 when the caller has no valid identity`(mockServer: MockServer) {
-        assertThat(get(mockServer, lookupPathFor(CURRENT_PERSONAL_PRODUCT_ID)).first).isEqualTo(401)
     }
 
     private fun assertReflectedPathsMatchTheContract() {
@@ -205,7 +191,9 @@ class ProductCatalogRevisionPactConsumerTest {
 
         const val UNKNOWN_PRODUCT_ID = "00000000-0000-0000-0000-000000000fff"
 
-        private val CLIENT_PATH: String = ProductCatalogRestClient::class.java.getAnnotation(JaxrsPath::class.java).value
+        private val CLIENT_PATH: String = ProductCatalogRestClient::class.java.getAnnotation(
+            JaxrsPath::class.java,
+        ).value
 
         private fun methodPath(name: String): String =
             ProductCatalogRestClient::class.java.getMethod(name, String::class.java)

@@ -4,10 +4,10 @@
   },
   "interactions": [
     {
-      "description": "GET the fee schedule for a fee-bearing product",
+      "description": "GET an immutable deposit revision by its id",
       "providerStates": [
         {
-          "name": "a product with fees exists for code CURRENT_PERSONAL"
+          "name": "a published v1-projected deposit revision exists for billing"
         }
       ],
       "request": {
@@ -15,33 +15,35 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/products/3f20a53e-5ea4-307a-8a0f-9605728381ba/fees"
+        "path": "/api/v2/revisions/0191c0de-0000-7000-8000-00000000b111"
       },
       "response": {
-        "body": [
-          {
-            "amount": 3.99,
-            "currency": "EUR",
-            "id": "string",
-            "name": "Monthly Fee",
-            "type": "MONTHLY",
-            "waivable": true
-          }
-        ],
-        "generators": {
-          "body": {
-            "$[*].id": {
-              "size": 20,
-              "type": "RandomString"
-            }
-          }
+        "body": {
+          "content": {
+            "attributes": {
+              "legacyDocument": "{\"fees\":[{\"id\":\"f1\",\"name\":\"Monthly maintenance\",\"type\":\"MONTHLY\",\"amount\":150.0,\"currency\":\"CZK\",\"waivable\":false}]}",
+              "productType": "CURRENT"
+            },
+            "prices": [
+              {
+                "cadence": "MONTHLY",
+                "code": "FEE_F1_3F524CDC07A11D7C6220",
+                "currency": "CZK",
+                "kind": "AMOUNT",
+                "unit": "monthly",
+                "value": "150.00"
+              }
+            ]
+          },
+          "id": "0191c0de-0000-7000-8000-00000000b111",
+          "state": "PUBLISHED"
         },
         "headers": {
           "Content-Type": "application/json"
         },
         "matchingRules": {
           "body": {
-            "$": {
+            "$.content.attributes.legacyDocument": {
               "combine": "AND",
               "matchers": [
                 {
@@ -49,23 +51,16 @@
                 }
               ]
             },
-            "$[*].amount": {
+            "$.content.prices": {
               "combine": "AND",
               "matchers": [
                 {
-                  "match": "decimal"
+                  "match": "type",
+                  "min": 1
                 }
               ]
             },
-            "$[*].currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$[*].id": {
+            "$.content.prices[*].cadence": {
               "combine": "AND",
               "matchers": [
                 {
@@ -73,23 +68,7 @@
                 }
               ]
             },
-            "$[*].name": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$[*].type": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            },
-            "$[*].waivable": {
+            "$.content.prices[*].unit": {
               "combine": "AND",
               "matchers": [
                 {
@@ -100,6 +79,49 @@
           }
         },
         "status": 200
+      }
+    },
+    {
+      "description": "GET the published revision of a v1 deposit product by its product id",
+      "providerStates": [
+        {
+          "name": "a published v1-projected deposit revision exists for billing"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/legacy-products/3f20a53e-5ea4-307a-8a0f-9605728381ba/published-revision"
+      },
+      "response": {
+        "body": {
+          "id": "0191c0de-0000-7000-8000-00000000b111",
+          "state": "PUBLISHED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the published revision of a v1 product the catalog does not know",
+      "providerStates": [
+        {
+          "name": "no product exists with id 00000000-0000-0000-0000-000000000fff"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/legacy-products/00000000-0000-0000-0000-000000000fff/published-revision"
+      },
+      "response": {
+        "status": 404
       }
     }
   ],

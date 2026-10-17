@@ -29,22 +29,19 @@ object BillingJournalFactory {
     private const val FEE_INCOME_CLASS = "FEE_INCOME_ACCOUNT"
     private const val FEE_INCOME_ROLE = "FEE_INCOME"
 
-    fun buildRequest(
-        command: FeeJournalCommand,
-        systemActorId: UUID,
-        date: LocalDate,
-    ): LedgerPostJournalRequest = LedgerPostJournalRequest(
-        // The idempotency key is already unique per (cycleId, accountId, feeId, currency)
-        // (ADR-0143 step 3), so it doubles as the ledger's own dedup key — a redrive replays
-        // to the same journal rather than posting a second one.
-        idempotencyKey = command.idempotencyKey,
-        transactionId = UUID.nameUUIDFromBytes(command.idempotencyKey.toByteArray(Charsets.UTF_8)),
-        entryDate = date.toString(),
-        valueDate = date.toString(),
-        description = command.description,
-        createdBy = systemActorId,
-        lines = buildLines(command),
-    )
+    fun buildRequest(command: FeeJournalCommand, systemActorId: UUID, date: LocalDate): LedgerPostJournalRequest =
+        LedgerPostJournalRequest(
+            // The idempotency key is already unique per (cycleId, accountId, feeId, currency)
+            // (ADR-0143 step 3), so it doubles as the ledger's own dedup key — a redrive replays
+            // to the same journal rather than posting a second one.
+            idempotencyKey = command.idempotencyKey,
+            transactionId = UUID.nameUUIDFromBytes(command.idempotencyKey.toByteArray(Charsets.UTF_8)),
+            entryDate = date.toString(),
+            valueDate = date.toString(),
+            description = command.description,
+            createdBy = systemActorId,
+            lines = buildLines(command),
+        )
 
     fun buildLines(command: FeeJournalCommand): List<LedgerJournalLineRequest> {
         val ccy = command.currency

@@ -25,7 +25,16 @@ class BankV1FeeCodeVectorTest {
 
     private fun codeOf(feeId: String): String {
         val product = ProductSeed.products.first().copy(
-            fees = listOf(Fee(id = feeId, name = "n", type = "MONTHLY", amount = 1.0, currency = "CZK", frequency = "MONTHLY")),
+            fees = listOf(
+                Fee(
+                    id = feeId,
+                    name = "n",
+                    type = "MONTHLY",
+                    amount = 1.0,
+                    currency = "CZK",
+                    frequency = "MONTHLY",
+                ),
+            ),
         )
         return mapping.contentOf(product).prices.single { it.code.startsWith("FEE_") }.code
     }

@@ -7,15 +7,17 @@ package com.openbank.billing.infrastructure.adapter
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
 import com.openbank.billing.application.port.out.AccountPartyLookupPort
+import com.openbank.billing.application.port.out.AccountingClassSource
 import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.port.out.BillableAccountsPage
-import com.openbank.billing.application.port.out.AccountingClassSource
 import com.openbank.billing.application.port.out.ProductRevisionPort
 import com.openbank.billing.application.port.out.RevisionTerms
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.infrastructure.client.AccountRestClient
 import com.openbank.billing.infrastructure.client.BalanceRestClient
+import com.openbank.billing.infrastructure.client.PriceComponentDto
 import com.openbank.billing.infrastructure.client.ProductCatalogRestClient
+import com.openbank.billing.infrastructure.client.RevisionDto
 import com.openbank.libs.product.FeeContext
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -116,31 +118,7 @@ class RestProductRevisionPort(
     private suspend fun loadTerms(revisionId: String): RevisionTerms {
         val revision = catalog.getRevision(revisionId).awaitSuspending()
         require(revision.id == revisionId) { "catalog answered revision ${revision.id} for $revisionId" }
-        val attributes = revision.content.attributes
-        val explicit = (attributes["accountingClass"] as? String)?.takeIf(String::isNotBlank)
-        val derived = if (explicit == null) LegacyProductTypes.accountingClassOf(attributes["productType"] as? String) else null
-        val legacyFees = LegacyFees.byPriceCode(attributes[LEGACY_DOCUMENT] as? String)
-        val terms = RevisionTerms(
-            revisionId = revisionId,
-            accountingClass = explicit ?: derived,
-            accountingClassSource = when {
-                explicit != null -> AccountingClassSource.REVISION
-                derived != null -> AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE
-                else -> AccountingClassSource.NONE
-            },
-            fees = revision.content.prices.filter { it.kind == "AMOUNT" && it.currency != null }.map { price ->
-                val meta = legacyFees[price.code]
-                BillableFee(
-                    feeId = meta?.id ?: price.code,
-                    name = meta?.name ?: price.code,
-                    type = meta?.type ?: (price.cadence ?: "UNSPECIFIED"),
-                    amount = price.value,
-                    currency = checkNotNull(price.currency),
-                    waivable = meta?.waivable ?: false,
-                    waiveCondition = meta?.waiveCondition,
-                )
-            },
-        )
+        val terms = toTerms(revision)
         if (terms.accountingClassSource == AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE) {
             meters.counter("billing.accounting_class.derived", "source", "legacy_product_type").increment()
         }
@@ -150,6 +128,40 @@ class RestProductRevisionPort(
         }
         return terms
     }
+
+    private fun toTerms(revision: RevisionDto): RevisionTerms {
+        val attributes = revision.content.attributes
+        val explicit = (attributes["accountingClass"] as? String)?.takeIf(String::isNotBlank)
+        val derived = if (explicit ==
+            null
+        ) {
+            LegacyProductTypes.accountingClassOf(attributes["productType"] as? String)
+        } else {
+            null
+        }
+        val legacyFees = LegacyFees.byPriceCode(attributes[LEGACY_DOCUMENT] as? String)
+        return RevisionTerms(
+            revisionId = revision.id,
+            accountingClass = explicit ?: derived,
+            accountingClassSource = when {
+                explicit != null -> AccountingClassSource.REVISION
+                derived != null -> AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE
+                else -> AccountingClassSource.NONE
+            },
+            fees = revision.content.prices.filter { it.kind == "AMOUNT" && it.currency != null }
+                .map { price -> toFee(price, legacyFees[price.code]) },
+        )
+    }
+
+    private fun toFee(price: PriceComponentDto, meta: LegacyFees.LegacyFee?) = BillableFee(
+        feeId = meta?.id ?: price.code,
+        name = meta?.name ?: price.code,
+        type = meta?.type ?: (price.cadence ?: "UNSPECIFIED"),
+        amount = price.value,
+        currency = checkNotNull(price.currency),
+        waivable = meta?.waivable ?: false,
+        waiveCondition = meta?.waiveCondition,
+    )
 
     private companion object {
         const val LEGACY_DOCUMENT = "legacyDocument"
