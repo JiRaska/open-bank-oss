@@ -19,7 +19,13 @@ info:
   # #8838 and then #9115 have both since passed.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.20.0
+  # 1.20.0 -> 1.21.0 (ADR-0319): description-only. Four `'400': {description: a, b, c}` flow
+  # mappings on the merchant routes were unquoted, so YAML parsed each comma as a new key and the
+  # document failed spec validation in openapi-generator (8 errors); the descriptions are now quoted.
+  # Also additive: TransactionPage.pagination now declares the fields the server actually sends
+  # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
+  # never sent, is kept and labelled. No path, parameter or status code changes.
+  version: 1.21.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -447,7 +453,7 @@ paths:
       responses:
         '200': {description: Entry replaced}
         '201': {description: Entry created}
-        '400': {description: Key normalises to nothing, cleanName missing, or only one coordinate}
+        '400': {description: "Key normalises to nothing, cleanName missing, or only one coordinate"}
     delete:
       tags: [Merchant catalogue]
       summary: Remove a catalogue entry
@@ -566,7 +572,7 @@ paths:
             image/png:
               schema: {type: string, format: binary}
         '304': {description: The client's cached copy is current}
-        '400': {description: Key normalises to nothing, or an unsupported size}
+        '400': {description: "Key normalises to nothing, or an unsupported size"}
         '404': {description: No logo stored for this merchant}
     put:
       tags: [Merchant catalogue]
@@ -611,7 +617,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MerchantLogoWritten'}
-        '400': {description: Missing body, unsupported format, oversized upload, or implausible dimensions}
+        '400': {description: "Missing body, unsupported format, oversized upload, or implausible dimensions"}
         '404': {description: No catalogue entry under that key to attach a logo to}
     delete:
       tags: [Merchant catalogue]
@@ -670,7 +676,7 @@ paths:
       responses:
         '200': {description: Location replaced}
         '201': {description: Location created}
-        '400': {description: Key or town normalises to nothing, unknown precision, or EXACT without a terminalId}
+        '400': {description: "Key or town normalises to nothing, unknown precision, or EXACT without a terminalId"}
     delete:
       tags: [Merchant catalogue]
       summary: Remove one town's location for a merchant
@@ -1221,11 +1227,28 @@ components:
         pagination:
           type: object
           properties:
+            limit:
+              type: integer
+              description: The page size the server applied.
+            hasNextPage:
+              type: boolean
+              description: Whether another page follows. This is the field the server sends.
             nextCursor:
               type: string
               nullable: true
+            previousCursor:
+              type: string
+              nullable: true
+            totalCount:
+              type: integer
+              format: int64
+              nullable: true
             hasMore:
               type: boolean
+              description: >
+                GATE-CONSTRAINED (oasdiff response-property-removed): the server has never sent this
+                field - use `hasNextPage`. It stays declared only because removing a published
+                response property is a breaking change under ADR-0048.
 
     TransactionSearchResult:
       type: object
