@@ -89,6 +89,24 @@ kafka:
       connect-timeout: 2000
       read-timeout: 10000
 
+    # ADR-0340 B: the CRS/FATCA assembly's three read models, all under tax-reporting-service's
+    # OWN machine identity (Keycloak client `openbank-tax-reporting`, ROLE_API only). party-service
+    # admits its tax-facts TIN boundary for service-account-openbank-tax-reporting ALONE; the
+    # account-service /active roster and the balance-service statement asOf read are admitted for
+    # the same caller in rego.
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 10000
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      connect-timeout: 2000
+      read-timeout: 10000
+    balance-service:
+      url: ${BALANCE_SERVICE_URL:http://localhost:8103}
+      connect-timeout: 2000
+      read-timeout: 10000
+
 mp:
   messaging:
     incoming:
@@ -135,7 +153,7 @@ openbank:
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
-    catalogues: statutory-returns/cz/pension-cnb.v1.json
+    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json
     company-id: company
     deadline-check-every: 1h
     # ADR-0337: the first day of the pension company's books. Unset = every company-books return
@@ -168,3 +186,28 @@ openbank:
       enabled: false
   authz:
     enforce: "false"
+
+"%prod":
+  quarkus:
+    # East-west mTLS (ASVS V9.1): the pension company's ledger-service (ADR-0337) is called on its
+    # private-CA listener, 8443, which REQUIRES a client certificate (ledger's %prod
+    # quarkus.http.ssl.client-auth). One client identity, tax-reporting-internal-tls, mounted at
+    # /mnt/internal-tls; its ca.crt is openbank-ca, which verifies the server. Hostname
+    # verification stays at Quarkus' default (HTTPS): the ledger certificate's dnsNames carry
+    # ledger-service.ledger-pension-co.svc. Under %prod only — the certificate exists only in the
+    # cluster, and local/test fixtures speak plain HTTP. ONE `tls:` map and ONE `rest-client:` map
+    # (SnakeYAML keeps only the last of a repeated key): add further upstreams to these maps.
+    tls:
+      internal-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/internal-tls/tls.crt
+              key: /mnt/internal-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/internal-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      ledger-service:
+        tls-configuration-name: internal-authority

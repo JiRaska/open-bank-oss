@@ -73,6 +73,35 @@ prints nothing useful.
 - A user needs `firstName`/`lastName`/`email`, or Keycloak 26 answers "Account is not
   fully set up" with no hint why.
 
+## Role scope: `fullScopeAllowed: false` plus explicit `scopeMappings`
+
+Keycloak 26 deprecates the per-client "Full scope allowed" switch and logs a WARN for every
+client that leaves it on (its default). Every client in both templates therefore sets
+`fullScopeAllowed: false`, and the top-level `scopeMappings` array grants each of those
+clients every realm role the template declares. That is deliberately the same set full
+scope allowed: a token still carries exactly the user's effective realm roles, and a role
+added to a user later still reaches the token.
+
+**Turning the switch off without the mapping strips every role from every token** — M2M
+and user alike — and every `@RolesAllowed` endpoint answers 403. So:
+
+- A new realm role must be appended to every `scopeMappings` entry in the same change.
+- A new client gets `fullScopeAllowed: false` and its own `scopeMappings` entry.
+  `openbank-synthetic-catalog-read` is the one client with no entry: it is meant to carry
+  no realm roles at all.
+
+The equivalence was measured, not argued: import the template before and after into a
+local Keycloak at the `keycloak.yaml` version, then for every client × every user
+(service-account users included) call
+`GET /admin/realms/<r>/clients/<id>/evaluate-scopes/generate-example-access-token?userId=<u>`
+and compare `realm_access`, `resource_access`, `aud` and `scope`. All 1,769 pairs were
+identical. With `scopeMappings` removed, all 1,435 pairs that carry roles lost every one of
+them, which shows the comparison can see the failure it guards against.
+
+Like everything else here, this is a cold-start-only change. A running realm keeps its
+current switches until someone applies the same mapping with `kcadm` (see
+`openbank-infra/CLAUDE.md`). Add the mappings **before** you turn the switch off.
+
 ## Secrets
 
 Every client secret and user password is a `__PLACEHOLDER__` token. **This repo is

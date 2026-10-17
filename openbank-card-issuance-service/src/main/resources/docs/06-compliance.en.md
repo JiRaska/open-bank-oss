@@ -90,6 +90,8 @@ sequenceDiagram
 
 Every lifecycle transition emits `card.status_changed.v1` carrying `previousStatus`, `newStatus`, `reason`, `changedBy` (the `X-Operator-Id`) and `occurredAt`. Issuance emits `card.issued.v1`. These flow through the outbox to the audit pipeline for tamper-evident, long-term retention.
 
+Reads of secure card details also write an access-audit log entry with the requested operator identity. The identity is retained losslessly as a quoted logfmt field, with control characters escaped so it cannot split or add audit fields; PAN and CVV are excluded.
+
 ## Security controls
 
 - ✅ AuthN: Keycloak OIDC, Bearer JWT

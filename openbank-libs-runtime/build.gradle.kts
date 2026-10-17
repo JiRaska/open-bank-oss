@@ -187,6 +187,12 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    val governanceRules = rootProject.file("openbank-libs/governance/rules.yaml")
+    inputs.file(governanceRules)
+        .withPropertyName("governanceRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // Test runs from projectDir; keep its input property independent of the checkout path.
+    systemProperty("openbank.test.governance-rules", project.relativePath(governanceRules))
     // Ephemeral Quarkus test ports - see openbank.quarkus-service.gradle.kts, which this module
     // does not apply. Enforced by the `quarkus-test-ports-ephemeral` gate.
     systemProperty("quarkus.http.test-port", "0")
