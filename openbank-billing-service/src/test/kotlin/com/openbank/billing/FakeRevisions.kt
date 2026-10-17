@@ -23,6 +23,7 @@ class FakeRevisions(
     private val allFees: List<BillableFee> = fees,
     private val feeBearing: Boolean = allFees.isNotEmpty(),
     private val dropped: Int = 0,
+    private val noIdentity: Int = 0,
     /** Fails ONLY the terms read (the lookup still works), to tell the failure kinds apart. */
     private val termsFailure: Exception? = null,
 ) : ProductRevisionPort {
@@ -48,6 +49,7 @@ class FakeRevisions(
             fees.filter { it.currency == currency },
             feeBearing = feeBearing,
             droppedFeeComponents = dropped,
+            noFeeIdentityComponents = noIdentity,
         )
     }
 

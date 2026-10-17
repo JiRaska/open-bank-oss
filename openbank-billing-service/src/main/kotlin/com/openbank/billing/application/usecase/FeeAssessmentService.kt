@@ -74,6 +74,11 @@ class FeeAssessmentService(
         if (accountingClass == null || terms.accountingClassSource == AccountingClassSource.NONE) {
             return skipped(cycleId, accountId, currency, "ACCOUNTING_CLASS_UNRESOLVED")
         }
+        if (terms.noFeeIdentityComponents > 0) {
+            // AMOUNT components with no fee identity are not fees (a minimum balance, a limit). Counted per
+            // assessment so a v2 product whose fees are ALL unidentified shows up, not as a zero bill alone.
+            meters.counter("billing.assessment.no_fee_identity").increment()
+        }
         // A product that declares fees but yields none we can charge in this currency (only other
         // currencies, or only components billing cannot price) must NOT come out as a clean zero-fee
         // assessment: that reads exactly like a product with no fees and silently under-charges.

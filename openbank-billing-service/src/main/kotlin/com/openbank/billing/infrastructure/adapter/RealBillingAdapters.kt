@@ -168,8 +168,9 @@ class RestProductRevisionPort(
         // identity in the document IS reported (it looks like a fee billing cannot place).
         val prices = revision.content.prices
         val usable = prices.filter { it.code in legacyFees && it.kind == "AMOUNT" && it.currency != null }
-        val dropped = prices.filter { it !in usable && (it.code in legacyFees || it.code.startsWith("FEE_")) }
-        reportDropped(revision.id, dropped, legacyFees.keys)
+        val dropped = droppedFeeComponents(prices, usable, legacyFees.keys)
+        reportDropped(revision.id, dropped)
+        val noIdentity = prices.count { it.kind == "AMOUNT" && it.code !in legacyFees && !it.code.startsWith("FEE_") }
         return RevisionTerms(
             revisionId = revision.id,
             accountingClass = explicit ?: derived,
@@ -181,31 +182,45 @@ class RestProductRevisionPort(
             fees = usable.map { price -> toFee(price, legacyFees[price.code]) },
             feeBearing = legacyFees.isNotEmpty() || dropped.isNotEmpty(),
             droppedFeeComponents = dropped.size,
+            noFeeIdentityComponents = noIdentity,
         )
     }
 
+    /**
+     * A legacy v1 fee the document declares but the revision has no price component for, plus every
+     * fee component (legacy or fee-coded) that billing cannot price. Each is a fee the bill silently lacks.
+     */
+    private fun droppedFeeComponents(
+        prices: List<PriceComponentDto>,
+        usable: List<PriceComponentDto>,
+        legacyCodes: Set<String>,
+    ): List<Pair<String, String>> {
+        val unusable = prices.filter { it !in usable && (it.code in legacyCodes || it.code.startsWith("FEE_")) }.map {
+            val reason = when {
+                it.code !in legacyCodes -> "NOT_IN_LEGACY_DOCUMENT"
+                it.kind != "AMOUNT" -> "NON_AMOUNT_KIND"
+                else -> "NULL_CURRENCY"
+            }
+            it.code to reason
+        }
+        val missing = (legacyCodes - prices.map { it.code }.toSet()).sorted().map { it to "MISSING_PRICE_COMPONENT" }
+        return unusable + missing
+    }
+
+    @Suppress("TooGenericExceptionCaught")
     private fun legacyFeesOf(revision: RevisionDto): Map<String, LegacyFees.LegacyFee> = try {
         LegacyFees.byPriceCode(revision.content.attributes[LEGACY_DOCUMENT] as? String)
-    } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
         throw RevisionTermsUnreadableException("revision ${revision.id}: embedded v1 document unreadable", e)
     }
 
     /** A component billing cannot price is DROPPED, never silently: counted and logged by reason. */
-    private fun reportDropped(revisionId: String, dropped: List<PriceComponentDto>, legacyCodes: Set<String>) {
-        dropped.forEach { price ->
-            val reason = when {
-                price.code !in legacyCodes -> "NOT_IN_LEGACY_DOCUMENT"
-                price.kind != "AMOUNT" -> "NON_AMOUNT_KIND"
-                else -> "NULL_CURRENCY"
-            }
+    private fun reportDropped(revisionId: String, dropped: List<Pair<String, String>>) {
+        dropped.forEach { (code, reason) ->
             meters.counter("billing.fee.component.dropped", "reason", reason).increment()
-            log.warnf(
-                "revision %s: fee component %s (kind=%s) is not billable: %s",
-                revisionId,
-                price.code,
-                price.kind,
-                reason,
-            )
+            log.warnf("revision %s: fee component %s is not billable: %s", revisionId, code, reason)
         }
     }
 

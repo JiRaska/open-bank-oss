@@ -64,6 +64,13 @@ data class RevisionTerms(
      * (`billing.assessment.dropped_components`) every time, not only when the revision is first read.
      */
     val droppedFeeComponents: Int = 0,
+    /**
+     * AMOUNT price components that carry no fee identity: not one of the revision's legacy v1 fees and
+     * not fee-coded. By decision (consistent with #13230) they are NOT fees -- a minimum balance, a limit
+     * -- so nothing is charged for them, but every assessment under such a revision is counted
+     * (`billing.assessment.no_fee_identity`) so a v2 product whose fees are all unidentified is visible.
+     */
+    val noFeeIdentityComponents: Int = 0,
 )
 
 /**

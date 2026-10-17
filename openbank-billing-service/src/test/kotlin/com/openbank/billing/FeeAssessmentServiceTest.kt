@@ -328,4 +328,17 @@ class FeeAssessmentServiceTest {
             serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
             assertThat(meters.counter("billing.assessment.dropped_components").count()).isEqualTo(2.0)
         }
+
+    @Test
+    fun `amounts with no fee identity charge nothing but every such assessment is counted`(): Unit = runBlocking {
+        val service = serviceWith(FakeRevisions(emptyList(), noIdentity = 2))
+        val a = service.assess("c", "acc-1", "CZK")
+        service.assess("c", "acc-2", "CZK")
+        assertThat(a.skipped).isFalse()
+        assertThat(a.assessedFees).isEmpty()
+        assertThat(meters.counter("billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
+        // a revision without such components does not count
+        serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
+        assertThat(meters.counter("billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
+    }
 }

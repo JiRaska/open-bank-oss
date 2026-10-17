@@ -182,7 +182,7 @@ class RestBillingAdaptersTest {
     }
 
     @Test
-    fun `only the revision's legacy v1 fees are fees - a minimum balance or a limit is never billed`(): Unit =
+    fun `only legacy v1 fees are fees - a minimum balance or a limit is never billed but is counted`(): Unit =
         runBlocking {
             val catalog = mockk<ProductCatalogRestClient>()
             every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
@@ -191,6 +191,7 @@ class RestBillingAdaptersTest {
                     prices = arrayOf(
                         price("MINIMUM_BALANCE", "1000", "CZK"),
                         price("DAILY_WITHDRAWAL_LIMIT", "50000", "CZK"),
+                        price("INTEREST_RATE", "0.02", "CZK", kind = "RATE"),
                     ),
                 ),
             )
@@ -199,7 +200,31 @@ class RestBillingAdaptersTest {
             assertThat(terms.fees).isEmpty()
             assertThat(terms.feeBearing).isFalse()
             assertThat(terms.droppedFeeComponents).isEqualTo(0)
+            // the two AMOUNTs have no fee identity (the RATE is not an amount and is not counted)
+            assertThat(terms.noFeeIdentityComponents).isEqualTo(2)
             assertThat(meters.find("billing.fee.component.dropped").counter()).isNull()
+        }
+
+    @Test
+    fun `a legacy fee the document declares but the revision has no price component for is dropped`(): Unit =
+        runBlocking {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+                revision(
+                    attributes = mapOf(
+                        "accountingClass" to "CUSTOMER_DEPOSIT_DEMAND",
+                        "legacyDocument" to legacyDocument("f1", "f2"),
+                    ),
+                    prices = arrayOf(price("FEE_F1_3F524CDC07A11D7C6220", "5", "CZK")),
+                ),
+            )
+            val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+            assertThat(terms.fees.map { it.feeId }).containsExactly("f1")
+            assertThat(terms.droppedFeeComponents).isEqualTo(1)
+            assertThat(
+                meters.get("billing.fee.component.dropped").tag("reason", "MISSING_PRICE_COMPONENT").counter().count(),
+            ).isEqualTo(1.0)
         }
 
     @Test
