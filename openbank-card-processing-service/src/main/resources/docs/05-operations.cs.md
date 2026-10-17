@@ -97,7 +97,43 @@ Clearing je zaznamenán, účetnictví možná ne. Hledejte řádek logu `ledger
 
 Každý řádek clearingu nese stav zaúčtování (`card_clearings.posting_status` `PENDING` / `POSTED` / `FAILED` / `UNKNOWN`, `posting_attempts`, `posting_last_error`, `posting_next_attempt_at`), zapsaný ve stejné transakci jako clearing. Plánovaný re-driver (`openbank.card-processing.posting-redrive-cron`, výchozí každou minutu, heartbeat `card-processing-ledger-posting-redrive`) zaúčtuje každý nezaúčtovaný řádek znovu s exponenciálním backoffem (`posting-backoff-seconds` 60, strop `posting-backoff-max-seconds` 3600) nejvýše `posting-max-attempts` (12) krát. Opakování stejného clearingu akvirerem ledger stále nezasáhne; jen re-driver.
 
-Po posledním pokusu řádek zůstane `FAILED`/`UNKNOWN` (nikdy se nezahodí) a `openbank.card.processing.ledger.posting.exhausted` stoupne nad nulu: alert `CardLedgerPostingExhausted`. Odstraňte příčinu a řádek znovu zpřístupněte (`UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now() WHERE id = …`); idempotency key zaručí jediný debet.
+Po posledním pokusu řádek zůstane `FAILED`/`UNKNOWN` (nikdy se nezahodí) a `openbank.card.processing.ledger.posting.exhausted` stoupne nad nulu: alert `CardLedgerPostingExhausted`. Řádek se opakuje jen dokud není `POSTED` a výsledek zapíše jen pokus, který stále drží claim token řádku, takže pomalý přeběhlý pokus nemůže přepsat novější výsledek ani se započítat. (Detekce duplicit v transaction-service sama není race-safe, #13231; claim brání dvěma pokusům na jednom řádku.)
+
+**Postup u vyčerpaných řádků.** Nikdy neresetovat naslepo - nejdřív prokažte, že transaction-service booking nemá.
+
+1. V databázi card-processing vypište řádky a jejich ledger klíče:
+
+```sql
+SELECT id, authorization_id, idempotency_key, posting_status, posting_attempts, posting_last_error,
+       'card-clearing:' || authorization_id || ':h:' ||
+       translate(rtrim(encode(sha256(convert_to(idempotency_key, 'UTF8')), 'base64'), '='), '+/', '-_') AS ledger_key
+FROM card_clearings
+WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
+```
+
+2. V databázi transaction-service každý `ledger_key` vyhledejte:
+
+```sql
+SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
+```
+
+   - `COMPLETED`: debet JE zaúčtovaný; označte řádek: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL WHERE id = '<clearing id>';`
+   - žádný řádek: bezpečné znovu odeslat: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
+   - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service drží klíč v tomto stavu a bude jím dál odpovídat; je to incident transaction-service, ne reset - neresetovat.
+
+**Jednorázová rekonciliace clearingů před V5.** V5 označila všechny existující řádky `POSTED` (jejich stav se nikdy nezaznamenával). Poznáte je podle `posting_last_attempt_at IS NULL`. Krok 1 spusťte v databázi card-processing, krok 2 v databázi transaction-service; každý klíč vrácený krokem 2 je historický clearing, který se nikdy nedostal do účetnictví a lze ho znovu odeslat (na řádku nastavte `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()`, `posting_claim_token = NULL`).
+
+```sql
+-- 1. DB card-processing
+SELECT 'card-clearing:' || authorization_id || ':h:' ||
+       translate(rtrim(encode(sha256(convert_to(idempotency_key, 'UTF8')), 'base64'), '='), '+/', '-_') AS ledger_key
+FROM card_clearings WHERE posting_status = 'POSTED' AND posting_last_attempt_at IS NULL;
+-- 2. DB transaction-service: vložte klíče z kroku 1
+SELECT k.ledger_key
+FROM (VALUES ('<ledger_key>'), ...) AS k(ledger_key)
+LEFT JOIN transactions t ON t.idempotency_key = k.ledger_key
+WHERE t.id IS NULL OR t.status <> 'COMPLETED';
+```
 
 ### Každá autorizace je zamítnuta
 

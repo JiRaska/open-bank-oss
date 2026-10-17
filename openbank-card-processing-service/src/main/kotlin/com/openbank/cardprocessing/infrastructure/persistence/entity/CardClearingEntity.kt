@@ -56,6 +56,9 @@ class CardClearingEntity {
     @Column(name = "posting_next_attempt_at")
     var postingNextAttemptAt: Instant? = null
 
+    @Column(name = "posting_claim_token")
+    var postingClaimToken: UUID? = null
+
     @Column(name = "posting_transaction_id")
     var postingTransactionId: UUID? = null
 }

@@ -97,7 +97,43 @@ The clearing is recorded; the books may not be. Look for the log line `ledger po
 
 Each clearing row carries its posting state (`card_clearings.posting_status` `PENDING` / `POSTED` / `FAILED` / `UNKNOWN`, `posting_attempts`, `posting_last_error`, `posting_next_attempt_at`), written in the clearing's own transaction. The scheduled re-driver (`openbank.card-processing.posting-redrive-cron`, default every minute, heartbeat `card-processing-ledger-posting-redrive`) posts every unposted row again with exponential backoff (`posting-backoff-seconds` 60, capped at `posting-backoff-max-seconds` 3600) up to `posting-max-attempts` (12). An acquirer retry of the same clearing still does **not** touch the ledger; only the re-driver does.
 
-After the last attempt the row stays `FAILED`/`UNKNOWN` (never dropped) and `openbank.card.processing.ledger.posting.exhausted` goes above zero: alert `CardLedgerPostingExhausted`. Fix the cause, then make the row due again (`UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now() WHERE id = …`); the ledger idempotency key guarantees one debit.
+After the last attempt the row stays `FAILED`/`UNKNOWN` (never dropped) and `openbank.card.processing.ledger.posting.exhausted` goes above zero: alert `CardLedgerPostingExhausted`. A row is only ever retried while it is not `POSTED`, and an outcome is only recorded by the attempt that still holds the row's claim token, so a slow superseded attempt can neither overwrite a newer result nor count. (transaction-service's own duplicate detection is not race-safe, #13231; the claim is what keeps two attempts off one row.)
+
+**Remedy for exhausted rows.** Never reset blindly - first prove transaction-service has no booking.
+
+1. In the card-processing database, list the rows and their ledger keys:
+
+```sql
+SELECT id, authorization_id, idempotency_key, posting_status, posting_attempts, posting_last_error,
+       'card-clearing:' || authorization_id || ':h:' ||
+       translate(rtrim(encode(sha256(convert_to(idempotency_key, 'UTF8')), 'base64'), '='), '+/', '-_') AS ledger_key
+FROM card_clearings
+WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
+```
+
+2. In the transaction-service database, look each `ledger_key` up:
+
+```sql
+SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
+```
+
+   - `COMPLETED`: the debit IS booked; mark the card row done: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL WHERE id = '<clearing id>';`
+   - no row: safe to re-drive: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
+   - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service holds the key in that state and will keep answering with it; this is a transaction-service incident, not a reset - do not reset.
+
+**One-off reconciliation of clearings from before V5.** V5 marked every existing row `POSTED` (their state was never recorded). Those rows are recognisable by `posting_last_attempt_at IS NULL`. Run step 1 below in the card-processing database, step 2 in the transaction-service database; any key returned by step 2 is a historical clearing that never reached the books and can be re-driven (set `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()` on that row, `posting_claim_token = NULL`).
+
+```sql
+-- 1. card-processing DB
+SELECT 'card-clearing:' || authorization_id || ':h:' ||
+       translate(rtrim(encode(sha256(convert_to(idempotency_key, 'UTF8')), 'base64'), '='), '+/', '-_') AS ledger_key
+FROM card_clearings WHERE posting_status = 'POSTED' AND posting_last_attempt_at IS NULL;
+-- 2. transaction-service DB: paste the keys from step 1
+SELECT k.ledger_key
+FROM (VALUES ('<ledger_key>'), ...) AS k(ledger_key)
+LEFT JOIN transactions t ON t.idempotency_key = k.ledger_key
+WHERE t.id IS NULL OR t.status <> 'COMPLETED';
+```
 
 ### Every authorisation is declined
 

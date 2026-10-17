@@ -41,48 +41,70 @@ class ClearingPostingRepositoryImpl : ClearingPostingRepository {
             }
         }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun claim(clearingId: UUID, now: Instant, leaseUntil: Instant, maxAttempts: Int): Boolean =
-        Panache.withTransaction {
+    override suspend fun claim(clearingId: UUID, now: Instant, leaseUntil: Instant, maxAttempts: Int): UUID? {
+        val token = UUID.randomUUID()
+        val claimed = Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Int>(
-                    "UPDATE card_clearings SET posting_next_attempt_at = :lease " +
+                    "UPDATE card_clearings SET posting_next_attempt_at = :lease, posting_claim_token = :token " +
                         "WHERE id = :id AND posting_status <> 'POSTED' AND posting_attempts < :max " +
                         "AND (posting_next_attempt_at IS NULL OR posting_next_attempt_at <= :now)",
                 )
                     .setParameter("lease", utc(leaseUntil))
+                    .setParameter("token", token)
                     .setParameter("id", clearingId)
                     .setParameter("max", maxAttempts)
                     .setParameter("now", utc(now))
                     .executeUpdate()
             }
         }.awaitSuspending() == 1
+        return if (claimed) token else null
+    }
 
     override suspend fun recordAttempt(
         clearingId: UUID,
+        claimToken: UUID,
         status: PostingStatus,
         transactionId: UUID?,
         error: String?,
         now: Instant,
         nextAttemptAt: Instant?,
-    ) {
+    ): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Int>(
+                "UPDATE card_clearings SET posting_status = :status, " +
+                    "posting_attempts = posting_attempts + 1, posting_last_error = :error, " +
+                    "posting_last_attempt_at = :now, posting_next_attempt_at = :next, " +
+                    "posting_claim_token = NULL, " +
+                    "posting_transaction_id = COALESCE(:tx, posting_transaction_id) " +
+                    // POSTED is terminal, and only the attempt that still holds the claim may write.
+                    "WHERE id = :id AND posting_status <> 'POSTED' " +
+                    "AND posting_claim_token = :token",
+            )
+                .setParameter("status", status.name)
+                .setParameter("error", error?.take(MAX_ERROR_LENGTH))
+                .setParameter("now", utc(now))
+                .setParameter("next", nextAttemptAt?.let { utc(it) })
+                .setParameter("tx", transactionId)
+                .setParameter("token", claimToken)
+                .setParameter("id", clearingId)
+                .executeUpdate()
+        }
+    }.awaitSuspending() == 1
+
+    override suspend fun deferWithoutAttempt(clearingId: UUID, claimToken: UUID, nextAttemptAt: Instant): Boolean =
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Int>(
-                    "UPDATE card_clearings SET posting_status = :status, " +
-                        "posting_attempts = posting_attempts + 1, posting_last_error = :error, " +
-                        "posting_last_attempt_at = :now, posting_next_attempt_at = :next, " +
-                        "posting_transaction_id = COALESCE(:tx, posting_transaction_id) WHERE id = :id",
+                    "UPDATE card_clearings SET posting_next_attempt_at = :next, posting_claim_token = NULL " +
+                        "WHERE id = :id AND posting_status <> 'POSTED' AND posting_claim_token = :token",
                 )
-                    .setParameter("status", status.name)
-                    .setParameter("error", error?.take(MAX_ERROR_LENGTH))
-                    .setParameter("now", utc(now))
-                    .setParameter("next", nextAttemptAt?.let { utc(it) })
-                    .setParameter("tx", transactionId)
+                    .setParameter("next", utc(nextAttemptAt))
+                    .setParameter("token", claimToken)
                     .setParameter("id", clearingId)
                     .executeUpdate()
             }
-        }.awaitSuspending()
-    }
+        }.awaitSuspending() == 1
 
     override suspend fun backlog(maxAttempts: Int): PostingBacklog = Panache.withSession {
         Panache.getSession().chain { session ->

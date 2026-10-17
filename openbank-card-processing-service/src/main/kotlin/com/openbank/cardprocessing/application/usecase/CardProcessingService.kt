@@ -301,6 +301,7 @@ class CardProcessingService(
             occurredAt = Instant.now(clock),
         )
         val appliedAt = Instant.now(clock)
+        val claimToken = UUID.randomUUID()
         // Written PENDING in the SAME transaction as the clearing: a crash between the commit and the
         // first posting attempt leaves a row the re-driver finds (V5, #13228). The first backoff gives
         // the inline attempt below room to finish before the re-driver can claim the row.
@@ -313,7 +314,10 @@ class CardProcessingService(
             currencyCode = command.currencyCode.uppercase(),
             appliedAt = appliedAt,
             postingStatus = PostingStatus.PENDING,
-            postingNextAttemptAt = appliedAt.plus(FIRST_POSTING_GRACE),
+            postingNextAttemptAt = poster.firstAttemptAt(appliedAt),
+            // The inline attempt below owns this claim; a re-driver claim replaces it, which is what makes
+            // a slow inline attempt unable to overwrite the newer result.
+            postingClaimToken = claimToken,
         )
         val saved = try {
             repository.saveClearing(cleared, outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event), clearing)
@@ -330,7 +334,7 @@ class CardProcessingService(
         // unreachable would lose it. A FAILED or UNKNOWN posting is a finding, not a silent success,
         // and it is RE-DRIVEN (LedgerPostingRedriver) from the state recorded on the clearing row.
         // A replay of this clearing deliberately posts nothing; the re-driver is separate.
-        poster.post(saved, clearing)
+        poster.post(saved, clearing, claimToken)
         return PresentmentOutcome.Accepted(saved)
     }
 
@@ -460,9 +464,6 @@ class CardProcessingService(
 
         /** The first try plus one re-evaluation after losing a concurrent-write race. */
         private const val WRITE_ATTEMPTS = 2
-
-        /** Room for the inline posting attempt before the re-driver may claim a fresh clearing. */
-        private val FIRST_POSTING_GRACE: Duration = Duration.ofMinutes(1)
 
         /** Card-issuance's own name for an MCC it has no category for. */
         const val UNMAPPED_CATEGORY = "UNMAPPED"

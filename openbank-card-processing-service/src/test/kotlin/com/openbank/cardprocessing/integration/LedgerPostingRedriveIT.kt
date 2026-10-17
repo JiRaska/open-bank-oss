@@ -20,6 +20,7 @@ import io.restassured.http.ContentType
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
+import kotlinx.coroutines.delay
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.Test
@@ -56,6 +57,8 @@ class LedgerPostingRedriveIT {
             "openbank.card-processing.posting-backoff-seconds" to "3",
             "openbank.card-processing.posting-backoff-max-seconds" to "3",
             "openbank.card-processing.posting-max-attempts" to "4",
+            "openbank.card-processing.posting-first-grace-seconds" to "2",
+            "openbank.card-processing.posting-lease-seconds" to "4",
             "openbank.outbox.dispatch-enabled" to "false",
         )
 
@@ -85,6 +88,12 @@ class LedgerPostingRedriveIT {
             val n = attempts.computeIfAbsent(idempotencyKey) { AtomicInteger() }.incrementAndGet()
             val ledgerKey = CardClearingLedgerKey.of(authorization.id, idempotencyKey)
             return when {
+                // A SLOW inline attempt that outlives the re-driver's claim and answers late with a
+                // failure: the stale result must not overwrite the newer attempt's POSTED.
+                idempotencyKey.startsWith("it-rd-stale") && n == 1 -> {
+                    delay(STALE_ATTEMPT_MILLIS)
+                    PostingResult(PostingOutcome.FAILED, null, "late failure from a superseded attempt")
+                }
                 idempotencyKey.startsWith("it-rd-fail") -> PostingResult(PostingOutcome.FAILED, null, "ledger refused")
                 // The debit IS booked on the first attempt, but the answer is lost: exactly the case
                 // where only the idempotency key stands between a retry and a double debit.
@@ -231,7 +240,26 @@ class LedgerPostingRedriveIT {
         ).describedAs("the exhausted gauge is the alert signal").isTrue()
     }
 
+    @Test
+    fun `a slow superseded attempt cannot overwrite a newer POSTED nor count as an attempt`() {
+        val key = "it-rd-stale-1"
+        val id = authorize(key)
+        // Blocks ~10s inside the inline attempt. Meanwhile the row is due (2s grace), the cron claims it
+        // and its attempt POSTS; the inline attempt then answers FAILED, late, holding a dead claim.
+        clear(id, key)
+
+        assertThat(await { status(key) == "POSTED" }).isTrue()
+        assertThat(ledger.attempts[key]!!.get()).describedAs("inline + re-driver").isEqualTo(2)
+        assertThat(status(key)).describedAs("POSTED is terminal: the late FAILED is ignored").isEqualTo("POSTED")
+        assertThat(attempts(key)).describedAs("only the valid attempt counted").isEqualTo(1)
+        assertThat(books(id, key)).isEqualTo(1)
+        Thread.sleep(SETTLE_MILLIS)
+        assertThat(status(key)).isEqualTo("POSTED")
+        assertThat(attempts(key)).isEqualTo(1)
+    }
+
     private companion object {
+        const val STALE_ATTEMPT_MILLIS = 10_000L
         const val CREATED = 201
         const val OK = 200
         const val MAX_ATTEMPTS = 4

@@ -87,6 +87,8 @@ data class RecordedClearing(
     val postingStatus: PostingStatus = PostingStatus.PENDING,
     val postingAttempts: Int = 0,
     val postingNextAttemptAt: Instant? = null,
+    /** The claim the inline attempt holds from the moment the row is written; re-driver claims replace it. */
+    val postingClaimToken: UUID? = null,
 )
 
 /** Where a clearing stands with the ledger (V5). Anything but [POSTED] is re-driven. */
@@ -105,20 +107,35 @@ interface ClearingPostingRepository {
     suspend fun findDue(now: Instant, maxAttempts: Int, limit: Int): List<RecordedClearing>
 
     /**
-     * Takes a short lease on a due clearing by pushing its next attempt to [leaseUntil]. `false` when
-     * another instance got there first or the row is no longer due.
+     * Takes a short lease on a due clearing by pushing its next attempt to [leaseUntil] and stamping a
+     * fresh claim token, which is returned. `null` when another instance got there first or the row is
+     * no longer due.
      */
-    suspend fun claim(clearingId: UUID, now: Instant, leaseUntil: Instant, maxAttempts: Int): Boolean
+    suspend fun claim(clearingId: UUID, now: Instant, leaseUntil: Instant, maxAttempts: Int): UUID?
 
-    /** Records one attempt: increments the attempt count and stores the outcome and the next backoff. */
+    /**
+     * Records one attempt: increments the attempt count and stores the outcome and the next backoff.
+     *
+     * Applied ONLY if the row is not already POSTED and still carries [claimToken] - the inline attempt's
+     * token is stamped when the row is written, a re-driver's when it claims. Returns `false` when it was
+     * not applied - the attempt no longer counts: a newer claim superseded it or the debit is already
+     * booked. POSTED is never overwritten.
+     */
     suspend fun recordAttempt(
         clearingId: UUID,
+        claimToken: UUID,
         status: PostingStatus,
         transactionId: UUID?,
         error: String?,
         now: Instant,
         nextAttemptAt: Instant?,
-    )
+    ): Boolean
+
+    /**
+     * Pushes a claimed row's next attempt to [nextAttemptAt] WITHOUT counting an attempt (the adapter
+     * did not try: it is switched off). Same token and not-POSTED guard as [recordAttempt].
+     */
+    suspend fun deferWithoutAttempt(clearingId: UUID, claimToken: UUID, nextAttemptAt: Instant): Boolean
 
     suspend fun backlog(maxAttempts: Int): PostingBacklog
 }

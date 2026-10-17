@@ -7,25 +7,31 @@ package com.openbank.cardprocessing.application.usecase
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.ClearingPostingRepository
 import com.openbank.cardprocessing.application.port.out.PostingBacklog
+import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
-import java.time.Duration
 import java.time.Instant
+
+/** What one re-drive tick did. [skippedDisabled] rows were not attempted: the adapter is switched off. */
+data class RedriveResult(val attempted: Int, val skippedDisabled: Int)
 
 /**
  * Posts the clearings whose ledger posting is still owed (V5, #13228): PENDING (the inline attempt
  * never recorded an outcome), FAILED and UNKNOWN.
  *
  * Every attempt presents the SAME ledger idempotency key as the first one (the adapter derives it
- * from the authorisation and the clearing key), and transaction-service dedupes on it - so running
- * a row twice, from two pods, or after a crash that lost the outcome, books the debit once.
+ * from the authorisation and the clearing key), and transaction-service dedupes on it. That dedupe is
+ * NOT race-safe (#13231), so the real protection is that two attempts never run on one row at once:
+ * a row is claimed (a lease on its next-attempt time plus a fresh claim token) before it is posted,
+ * and an outcome is recorded only while the row still carries that token and is not POSTED.
  *
- * A row is claimed (a short lease on its next-attempt time) before it is posted, so two instances do
- * not post the same row at once. After [maxAttempts] a row is no longer picked up - it is NOT dropped:
- * it stays FAILED/UNKNOWN and the exhausted count in [backlog] is what the alert watches.
+ * One bad row never stops the batch: an exception, or an authorisation that cannot be found, is
+ * recorded as a counted FAILED attempt, so such a row reaches the ceiling and the alert instead of
+ * being re-selected for ever. After [maxAttempts] a row is no longer picked up - it is NOT dropped.
  */
 @ApplicationScoped
 class LedgerPostingRedriver(
@@ -37,31 +43,47 @@ class LedgerPostingRedriver(
     val maxAttempts: Int,
     @ConfigProperty(name = "openbank.card-processing.posting-redrive-batch", defaultValue = "50")
     private val batchSize: Int,
+    @ConfigProperty(name = "openbank.card-processing.posting-lease-seconds", defaultValue = "300")
+    private val leaseSeconds: Long,
 ) {
     private val log = Logger.getLogger(LedgerPostingRedriver::class.java)
 
-    /** Re-drives one batch; returns how many clearings were attempted. */
-    suspend fun redriveDue(): Int {
+    /** Re-drives one batch. */
+    suspend fun redriveDue(): RedriveResult {
         val now = Instant.now(clock)
-        return postings.findDue(now, maxAttempts, batchSize).count { redrive(it, now) }
+        var attempted = 0
+        var skipped = 0
+        for (clearing in postings.findDue(now, maxAttempts, batchSize)) {
+            when (redrive(clearing, now)) {
+                PostingOutcome.SKIPPED_DISABLED -> skipped++
+                null -> Unit
+                else -> attempted++
+            }
+        }
+        return RedriveResult(attempted, skipped)
     }
 
-    /** `true` when the row was claimed and a posting was attempted. */
-    private suspend fun redrive(clearing: RecordedClearing, now: Instant): Boolean {
-        if (!postings.claim(clearing.id, now, now.plus(LEASE), maxAttempts)) return false
-        val authorization = repository.findById(clearing.authorizationId)
-        if (authorization == null) {
-            log.errorf("clearing %s has no authorisation %s - cannot re-drive", clearing.id, clearing.authorizationId)
-            return false
+    /** The outcome of the attempt, or `null` when the row was not ours to attempt. */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun redrive(clearing: RecordedClearing, now: Instant): PostingOutcome? {
+        val token = postings.claim(clearing.id, now, now.plusSeconds(leaseSeconds), maxAttempts) ?: return null
+        return try {
+            val authorization = repository.findById(clearing.authorizationId)
+            if (authorization == null) {
+                log.errorf("clearing %s has no authorisation %s", clearing.id, clearing.authorizationId)
+                poster.recordFailure(clearing, token, "authorisation ${clearing.authorizationId} not found")
+                PostingOutcome.FAILED
+            } else {
+                poster.post(authorization, clearing, token).outcome
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.errorf(e, "re-driving clearing %s failed", clearing.id)
+            poster.recordFailure(clearing, token, "re-drive failed: ${e.javaClass.simpleName}: ${e.message}")
+            PostingOutcome.FAILED
         }
-        poster.post(authorization, clearing)
-        return true
     }
 
     suspend fun backlog(): PostingBacklog = postings.backlog(maxAttempts)
-
-    private companion object {
-        /** A claimed row is invisible to other instances for this long if its owner dies mid-attempt. */
-        val LEASE: Duration = Duration.ofMinutes(5)
-    }
 }

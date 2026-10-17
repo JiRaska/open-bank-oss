@@ -252,6 +252,7 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         it.postingStatus = postingStatus.name
         it.postingAttempts = postingAttempts
         it.postingNextAttemptAt = postingNextAttemptAt
+        it.postingClaimToken = postingClaimToken
     }
 
     private fun CardClearingEntity.toDomain() = RecordedClearing(

@@ -14,6 +14,7 @@ import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
+import kotlinx.coroutines.CancellationException
 import org.jboss.logging.Logger
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
@@ -65,19 +66,30 @@ class LedgerPostingRedriveSweep(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
         identity = "card-processing-ledger-posting-redrive",
     )
+    @Suppress("TooGenericExceptionCaught")
     suspend fun sweep() {
         // best-effort per tick: the work is selected by STATE (unposted rows whose backoff elapsed), so a
         // tick that fails re-selects the same rows next minute and loses nothing; letting the exception
         // escape would kill the schedule, which is the one outcome that does lose the work.
-        // observed-by: the liveness gauge stops refreshing on this path -> WorkflowLivenessStale.
-        runCatching {
-            val attempted = redriver.redriveDue()
+        // The two halves are independent: a failing re-drive must not freeze the gauges (the exhausted
+        // gauge is the alert), and a failing gauge refresh must not hide a working re-drive.
+        // observed-by: the heartbeat below is recorded only when BOTH halves returned, so either kind of
+        // failure surfaces as WorkflowLivenessStale.
+        val redriven = guarded("ledger posting re-drive") {
+            val result = redriver.redriveDue()
+            if (result.attempted > 0) log.infof("re-drove %d ledger posting(s)", result.attempted)
+            if (result.skippedDisabled > 0) {
+                log.warnf(
+                    "%d clearing(s) not re-driven: ledger posting is switched off " +
+                        "(openbank.card-processing.ledger-posting-enabled=false)",
+                    result.skippedDisabled,
+                )
+            }
+        }
+        val refreshed = guarded("ledger posting backlog refresh") {
             val backlog = redriver.backlog()
             unposted.set(backlog.unposted)
             exhausted.set(backlog.exhausted)
-            if (attempted > 0) {
-                log.infof("re-drove %d ledger posting(s); %d still unposted", attempted, backlog.unposted)
-            }
             if (backlog.exhausted > 0) {
                 log.errorf(
                     "%d clearing(s) exhausted their ledger posting attempts - the books are missing them",
@@ -85,8 +97,19 @@ class LedgerPostingRedriveSweep(
                 )
             }
         }
-            .onSuccess { liveness?.recordSuccess() }
-            .onFailure { log.error("ledger posting re-drive failed", it) }
+        if (redriven && refreshed) liveness?.recordSuccess()
+    }
+
+    /** Runs [block]; cancellation propagates (a `runCatching` would swallow it), anything else is logged. */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun guarded(what: String, block: suspend () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        log.errorf(e, "%s failed", what)
+        false
     }
 
     private companion object {

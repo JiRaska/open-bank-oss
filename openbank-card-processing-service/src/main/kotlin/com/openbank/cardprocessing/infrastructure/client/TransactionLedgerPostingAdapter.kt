@@ -23,6 +23,8 @@ import java.time.Clock
 import java.util.Base64
 import java.util.Currency
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Posts a cleared presentment as a `CARD`-rail debit through transaction-service.
@@ -50,6 +52,8 @@ class TransactionLedgerPostingAdapter(
 ) : LedgerPostingPort {
 
     private val log = Logger.getLogger(TransactionLedgerPostingAdapter::class.java)
+    private val lastDisabledWarnAt = AtomicLong(0)
+    private val suppressedDisabledWarns = AtomicInteger(0)
 
     override suspend fun postClearedSpend(
         authorization: CardAuthorization,
@@ -58,12 +62,7 @@ class TransactionLedgerPostingAdapter(
     ): PostingResult {
         if (!postingEnabled) {
             // Loud, and its own outcome value. A quiet skip is the failure mode the enum exists for.
-            log.warnf(
-                "ledger posting DISABLED — card spend %d %s on authorization %s is NOT in the books",
-                clearedAmountMinorUnits,
-                authorization.currencyCode,
-                authorization.id,
-            )
+            warnDisabled(clearedAmountMinorUnits, authorization)
             return PostingResult(PostingOutcome.SKIPPED_DISABLED, null, DISABLED_DETAIL)
         }
         return try {
@@ -83,7 +82,7 @@ class TransactionLedgerPostingAdapter(
                     instructionType = INSTRUCTION_ONE_OFF,
                 ),
             )
-            PostingResult(PostingOutcome.POSTED, response.id, response.status)
+            outcomeOf(response.id, response.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // An unreadable answer proves nothing: the debit may or may not be booked. It is neither
             // POSTED nor FAILED but UNKNOWN, and the re-driver posts it again under the same key.
@@ -97,6 +96,45 @@ class TransactionLedgerPostingAdapter(
             log.errorf(e, "ledger posting failed for authorization %s", authorization.id)
             PostingResult(PostingOutcome.FAILED, null, e.message)
         }
+    }
+
+    /**
+     * A 2xx is not "booked": for a duplicate key transaction-service answers with the EXISTING
+     * transaction in whatever state it is in. Only COMPLETED is the debit in the books; FAILED and
+     * REVERSED mean it is not (the re-driver will meet the same answer until a human acts - the
+     * ceiling and the alert); PENDING, PROCESSING and anything unrecognised are not settled yet, so
+     * UNKNOWN and posted again later.
+     */
+    private fun outcomeOf(id: UUID?, status: String?): PostingResult = when (status?.uppercase()) {
+        "COMPLETED" -> PostingResult(PostingOutcome.POSTED, id, status)
+        "FAILED", "REVERSED" -> PostingResult(
+            PostingOutcome.FAILED,
+            id,
+            "transaction-service holds the transaction as $status",
+        )
+        else -> PostingResult(
+            PostingOutcome.UNKNOWN,
+            id,
+            "transaction-service status is ${status ?: "absent"}, not settled",
+        )
+    }
+
+    /** Loud, but once a minute with a count: a re-driver sweeping a backlog must not log one line per row. */
+    private fun warnDisabled(clearedAmountMinorUnits: Long, authorization: CardAuthorization) {
+        val now = System.currentTimeMillis()
+        val last = lastDisabledWarnAt.get()
+        if (now - last < DISABLED_WARN_INTERVAL_MILLIS || !lastDisabledWarnAt.compareAndSet(last, now)) {
+            suppressedDisabledWarns.incrementAndGet()
+            return
+        }
+        log.warnf(
+            "ledger posting DISABLED — card spend %d %s on authorization %s is NOT in the books " +
+                "(%d similar warning(s) suppressed in the last minute)",
+            clearedAmountMinorUnits,
+            authorization.currencyCode,
+            authorization.id,
+            suppressedDisabledWarns.getAndSet(0),
+        )
     }
 
     private fun isUnreadableResponse(e: Throwable): Boolean = e is ProcessingException ||
@@ -114,6 +152,7 @@ class TransactionLedgerPostingAdapter(
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
         const val UNREADABLE_DETAIL = "transaction-service answer unreadable; booking unknown"
+        const val DISABLED_WARN_INTERVAL_MILLIS = 60_000L
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */

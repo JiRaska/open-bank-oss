@@ -87,7 +87,15 @@ class CardProcessingServiceTest {
         repository = repository,
         cards = cards,
         issuerPolicy = issuer,
-        poster = ClearingLedgerPoster(ledger, postings, metrics, clock, backoffSeconds = 60, backoffMaxSeconds = 3600),
+        poster = ClearingLedgerPoster(
+            ledger,
+            postings,
+            metrics,
+            clock,
+            backoffSeconds = 60,
+            backoffMaxSeconds = 3600,
+            firstGraceSeconds = 60,
+        ),
         fraud = fraud,
         merchants = merchants,
         metrics = metrics,
@@ -310,7 +318,7 @@ class CardProcessingServiceTest {
             PostingResult(PostingOutcome.POSTED, null, null)
         runBlocking {
             val quietMetrics = mockk<CardProcessingMetricsPort>(relaxed = true)
-            val poster = ClearingLedgerPoster(quietLedger, postings, quietMetrics, clock, 60, 3600)
+            val poster = ClearingLedgerPoster(quietLedger, postings, quietMetrics, clock, 60, 3600, 60)
             CardProcessingService(
                 repo, cards, issuer, poster, fraud, merchants, quietMetrics, mapper, clock, HOLD_DAYS,
             ).clear(fingerprintOf.copy(authorizationId = authorizationId, idempotencyKey = key))

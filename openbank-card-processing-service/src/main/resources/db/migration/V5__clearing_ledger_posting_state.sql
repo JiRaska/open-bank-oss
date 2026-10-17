@@ -18,7 +18,10 @@
 -- exhausted gauge that alerts - it is never dropped.
 --
 -- posting_next_attempt_at is both the backoff schedule and a short lease: a re-driver claims a row by
--- pushing it forward, so two pods do not post the same row at once. The re-post is safe regardless:
+-- pushing it forward and stamping posting_claim_token with a fresh UUID. An attempt's outcome is only
+-- written WHERE posting_claim_token still equals the token it was started with (the inline attempt,
+-- which claims nothing, writes with a NULL token), and POSTED is terminal: a slow attempt whose lease
+-- expired can therefore never overwrite a newer claim's result or turn POSTED back into FAILED. The re-post is safe regardless:
 -- the ledger idempotency key is derived from (authorisation, clearing key) and transaction-service
 -- dedupes on it.
 --
@@ -39,6 +42,7 @@ ALTER TABLE card_clearings
     ADD COLUMN posting_last_attempt_at TIMESTAMPTZ,
     ADD COLUMN posting_next_attempt_at TIMESTAMPTZ,
     ADD COLUMN posting_transaction_id  UUID,
+    ADD COLUMN posting_claim_token     UUID,
     ADD CONSTRAINT ck_card_clearings_posting_status
         CHECK (posting_status IN ('PENDING', 'POSTED', 'FAILED', 'UNKNOWN'));
 

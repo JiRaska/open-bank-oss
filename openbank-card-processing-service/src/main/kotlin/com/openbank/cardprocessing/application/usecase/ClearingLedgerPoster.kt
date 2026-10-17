@@ -18,6 +18,7 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.UUID
 
 /**
  * One attempt to post a clearing to the ledger, and the record of how it went (V5, #13228).
@@ -41,10 +42,20 @@ class ClearingLedgerPoster(
     private val backoffSeconds: Long,
     @ConfigProperty(name = "openbank.card-processing.posting-backoff-max-seconds", defaultValue = "3600")
     private val backoffMaxSeconds: Long,
+    @ConfigProperty(name = "openbank.card-processing.posting-first-grace-seconds", defaultValue = "60")
+    private val firstGraceSeconds: Long,
 ) {
     private val log = Logger.getLogger(ClearingLedgerPoster::class.java)
 
-    suspend fun post(authorization: CardAuthorization, clearing: RecordedClearing): PostingResult {
+    /** Room for the inline attempt before the re-driver may claim a fresh clearing. */
+    fun firstAttemptAt(appliedAt: Instant): Instant = appliedAt.plusSeconds(firstGraceSeconds)
+
+    /**
+     * [claimToken] is the token this attempt holds: the one stamped when the row was written (inline
+     * attempt) or the re-driver's claim. The outcome is recorded only while the row still carries it,
+     * so a slow attempt that was superseded can neither overwrite a newer result nor count.
+     */
+    suspend fun post(authorization: CardAuthorization, clearing: RecordedClearing, claimToken: UUID): PostingResult {
         val result = ledger.postClearedSpend(authorization, clearing.amountMinorUnits, clearing.idempotencyKey)
         metrics.ledgerPosting(result.outcome)
         if (result.outcome == PostingOutcome.FAILED || result.outcome == PostingOutcome.UNKNOWN) {
@@ -56,13 +67,32 @@ class ClearingLedgerPoster(
                 result.detail?.forLog(),
             )
         }
-        // A switched-off adapter did not attempt anything: no attempt is counted, the row stays due.
-        if (result.outcome != PostingOutcome.SKIPPED_DISABLED) record(clearing, result)
+        if (result.outcome == PostingOutcome.SKIPPED_DISABLED) {
+            // A switched-off adapter did not attempt anything: no attempt is counted, but the row is pushed
+            // out by the backoff ceiling so it is not re-selected every lease period.
+            defer(clearing, claimToken)
+        } else {
+            record(clearing, claimToken, result)
+        }
         return result
     }
 
+    /** A re-driver attempt that failed before the ledger was reached: it still counts, so it reaches the cap. */
+    suspend fun recordFailure(clearing: RecordedClearing, claimToken: UUID, detail: String?) {
+        record(clearing, claimToken, PostingResult(PostingOutcome.FAILED, null, detail))
+    }
+
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun record(clearing: RecordedClearing, result: PostingResult) {
+    private suspend fun defer(clearing: RecordedClearing, claimToken: UUID) {
+        try {
+            postings.deferWithoutAttempt(clearing.id, claimToken, Instant.now(clock).plusSeconds(backoffMaxSeconds))
+        } catch (e: Exception) {
+            log.errorf(e, "could not defer clearing %s while posting is disabled", clearing.id)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun record(clearing: RecordedClearing, claimToken: UUID, result: PostingResult) {
         val now = Instant.now(clock)
         val status = when (result.outcome) {
             PostingOutcome.POSTED -> PostingStatus.POSTED
@@ -71,7 +101,16 @@ class ClearingLedgerPoster(
         }
         val next = if (status == PostingStatus.POSTED) null else now.plus(backoff(clearing.postingAttempts + 1))
         try {
-            postings.recordAttempt(clearing.id, status, result.transactionId, result.detail, now, next)
+            val applied =
+                postings.recordAttempt(clearing.id, claimToken, status, result.transactionId, result.detail, now, next)
+            if (!applied) {
+                // The attempt no longer counts: a newer claim superseded it, or the debit is already booked.
+                log.warnf(
+                    "posting outcome %s of clearing %s was not applied (superseded or already POSTED)",
+                    status,
+                    clearing.id,
+                )
+            }
         } catch (e: Exception) {
             // observed-by: the unposted gauge and the re-driver - the row keeps its previous state.
             log.errorf(e, "could not record the %s posting state of clearing %s", status, clearing.id)
