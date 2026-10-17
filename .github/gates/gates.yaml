@@ -2119,6 +2119,7 @@ gates:
       and this gate fails when the committed file drifts from what the generator would write.
     review_after: '2027-04-17'
     min_subjects: 20
+    budget_seconds: 30   # parses one YAML and renders JSON; ~2s observed
     selftest: python3 .github/scripts/gen-slo-dashboard.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/gen-slo-dashboard.py", ".github/scripts/slo-dashboard-base.json"]
