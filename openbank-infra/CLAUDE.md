@@ -398,7 +398,8 @@ out of it (they are path-scoped, not less important — several are live-inciden
   save you — Prometheus writes `up` per TARGET, so a workload nobody scrapes has no `up` either.**
   `PostgresInstanceDown` documents at length that `cnpg_collector_up` cannot report its own
   exporter's death and that `up` survives instead; that is right and stops one level short. A CNPG
-  `Cluster` without `spec.monitoring.enablePodMonitor` creates no PodMonitor, so all nine Postgres
+  `Cluster` that no PodMonitor selects (since CNPG 1.30: an owned `<cluster>-metrics` PodMonitor next
+  to the Cluster; the operator flag is deprecated and the gate rejects it) is not a target, so all nine Postgres
   alerts — `PostgresInstanceDown` included — matched an empty vector forever. Measured 2026-08-30:
   4 of 62 declared clusters, two of them the party and identity golden-record databases, both
   backing up to S3 with that backup state watched by nothing. **The fix is a denominator that
