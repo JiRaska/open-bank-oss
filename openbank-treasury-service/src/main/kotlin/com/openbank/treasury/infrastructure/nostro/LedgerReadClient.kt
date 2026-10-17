@@ -129,20 +129,12 @@ class LedgerReadAdapter(
     private val postByClass: Boolean,
 ) : LedgerReadPort {
 
-    @Volatile
-    private var cached: Pair<Long, Map<String, NostroGl>>? = null
-
     /**
-     * One map read serves a whole reconcile (upload check + the line read) instead of one call each: the
-     * answer is cached for [MAP_TTL_NANOS]. A failed read is never cached.
+     * Read fresh on every call and never cached: the caller (one upload, or one reconcile run) holds the
+     * map for the duration of its own run, so a re-pointed map is seen by the next run.
      */
-    override suspend fun nostroAccounts(): Map<String, NostroGl> {
-        val now = System.nanoTime()
-        cached?.let { (at, map) -> if (now - at < MAP_TTL_NANOS) return map }
-        val fresh = if (postByClass) readMap() else LegacyGlChart.nostroAccounts()
-        cached = now to fresh
-        return fresh
-    }
+    override suspend fun nostroAccounts(): Map<String, NostroGl> =
+        if (postByClass) readMap() else LegacyGlChart.nostroAccounts()
 
     private suspend fun readMap(): Map<String, NostroGl> {
         val rows = try {
@@ -158,9 +150,8 @@ class LedgerReadAdapter(
             .associate { it.currencyCode to NostroGl(it.glCode, it.glAccountId) }
     }
 
-    override suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
-        val glId = nostroAccounts().values.firstOrNull { it.glCode == glCode }?.glAccountId
-            ?: error("$glCode is not a nostro account in the ledger's accounting class map")
+    override suspend fun nostroLines(nostro: NostroGl, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
+        val glId = nostro.glAccountId
         val out = mutableListOf<LedgerNostroLine>()
         var cursor: String? = null
         var pages = 0
@@ -224,7 +215,6 @@ class LedgerReadAdapter(
         const val PAGE_SIZE = 200
         const val MAX_PAGES = 50
         const val NOT_FOUND = 404
-        const val MAP_TTL_NANOS = 30_000_000_000L
         const val NOSTRO_CLASS = "NOSTRO_ACCOUNT"
         const val PRINCIPAL_ROLE = "PRINCIPAL"
         val BOOKED = setOf("POSTED", "REVERSED")

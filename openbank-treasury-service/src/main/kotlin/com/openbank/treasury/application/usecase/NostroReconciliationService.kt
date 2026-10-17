@@ -97,7 +97,10 @@ class NostroReconciliationService(
         // statementDate]. Reading lines to a later day than the closing balance (or opening a day
         // before the first entry) would turn a quiet day or a later booking into a false difference.
         // Balances are read in the STATEMENT currency from native amounts (#11107), every nostro alike.
-        val lines = ledger.nostroLines(stored.glCode, statement.firstDate, statement.lastDate)
+        val nostro = requireNotNull(ledger.nostroAccounts().values.firstOrNull { it.glCode == stored.glCode }) {
+            "${stored.glCode} is not a nostro account in the ledger's accounting class map"
+        }
+        val lines = ledger.nostroLines(nostro, statement.firstDate, statement.lastDate)
         val opening = ledger.accountBalance(stored.glCode, statement.currency, statement.openingDate)
         val closing = ledger.accountBalance(stored.glCode, statement.currency, statement.statementDate)
         val stated = opening != null && closing != null

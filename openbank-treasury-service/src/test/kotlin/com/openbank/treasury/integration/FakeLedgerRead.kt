@@ -38,7 +38,8 @@ class FakeLedgerRead : LedgerReadPort {
         "EUR" to NostroGl("1002", java.util.UUID.fromString("a0000000-0000-0000-0000-000000001002")),
     )
 
-    override suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
+    override suspend fun nostroLines(nostro: NostroGl, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
+        val glCode = nostro.glCode
         queries += "lines:$glCode:$from..$to"
         return lines.filter { it.first == glCode && it.second.entryDate in from..to }.map { it.second }
     }
