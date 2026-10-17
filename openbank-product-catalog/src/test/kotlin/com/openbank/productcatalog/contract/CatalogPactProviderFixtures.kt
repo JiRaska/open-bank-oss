@@ -205,6 +205,42 @@ class CatalogPactProviderFixtures(
         }
     }
 
+    /** ADR-0341: a published pension-savings v2 revision a fund pins; its fee schedule is 0.80 percent. */
+    fun publishedPensionFundFeeRevisionExists() = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "INSERT INTO catalog_specifications " +
+                "(id, code, schema_id, schema_version, created_at, lock_version) VALUES (?, ?, ?, 2, ?, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, FUND_FEE_SPECIFICATION_ID)
+            statement.setString(2, "PACT_PENSION_FUND_FEE")
+            statement.setString(3, PENSION_SCHEMA_ID)
+            statement.setObject(4, PENSION_FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+        insertOffering(connection, FUND_FEE_OFFERING_ID, FUND_FEE_SPECIFICATION_ID, "PACT_PENSION_FUND_FEE_OFFERING")
+        connection.prepareStatement(
+            "INSERT INTO catalog_revisions " +
+                "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
+                "maker_id, checker_id, reason, content_hash, created_at, updated_at, lock_version) " +
+                "VALUES (?, ?, 1, ?, 2, 'PUBLISHED', CAST(? AS jsonb), ?, ?, ?, ?, ?, ?, ?, 0) " +
+                "ON CONFLICT (id) DO NOTHING",
+        ).use { statement ->
+            statement.setObject(1, FUND_FEE_REVISION_ID)
+            statement.setObject(2, FUND_FEE_OFFERING_ID)
+            statement.setString(3, PENSION_SCHEMA_ID)
+            statement.setString(4, FUND_FEE_REVISION_CONTENT)
+            statement.setObject(5, OffsetDateTime.parse("2026-10-01T00:00:00Z"))
+            statement.setString(6, "pact-fund-fee-maker")
+            statement.setString(7, "pact-fund-fee-checker")
+            statement.setString(8, "published pension fund fee fixture")
+            statement.setString(9, "b".repeat(64))
+            statement.setObject(10, PENSION_FIXTURE_TIME)
+            statement.setObject(11, PENSION_FIXTURE_TIME)
+            statement.executeUpdate()
+        }
+    }
+
     private fun pensionApprovalDigest(content: JsonNode) = catalogJson.sha256(
         mapper.createObjectNode().apply {
             put("offeringId", PENSION_OFFERING_ID.toString())
@@ -295,6 +331,11 @@ class CatalogPactProviderFixtures(
         val PENSION_LEGAL_APPROVAL_ID: UUID = UUID.fromString("40000000-0000-0000-0000-000000000084")
         val PENSION_PRODUCT_APPROVAL_ID: UUID = UUID.fromString("40000000-0000-0000-0000-000000000085")
         const val PENSION_SCHEMA_ID = "org.openbank.retirement.pension-savings"
+        val FUND_FEE_SPECIFICATION_ID: UUID = UUID.fromString("10000000-0000-0000-0000-000000000341")
+        val FUND_FEE_OFFERING_ID: UUID = UUID.fromString("20000000-0000-0000-0000-000000000341")
+        val FUND_FEE_REVISION_ID: UUID = UUID.fromString("30000000-0000-0000-0000-000000000341")
+        const val FUND_FEE_REVISION_CONTENT =
+            """{"name":{"en":"Pact fund fee"},"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP","fundStrategy":"DYNAMIC","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED","instrumentClasses":["BOND_FUNDS"],"feeSchedule":{"managementFeeAnnualPercent":"0.80","performanceFeePercent":"0"}},"prices":[],"eligibility":[],"relationships":[],"documentCodes":[]}"""
         val PENSION_FIXTURE_TIME: OffsetDateTime = OffsetDateTime.parse("2026-10-08T09:00:00Z")
         const val PENSION_REVISION_CONTENT =
             """{"name":{"en":"Pact DIP strategy"},"attributes":{"productLine":"DIP","jurisdictionPackId":"CZ/DIP","fundStrategy":"DYNAMIC","reviewStatus":"LEGAL_AND_COMMERCIAL_REVIEWED","instrumentClasses":["BOND_FUNDS","EQUITY_FUNDS"]},"prices":[],"eligibility":[],"relationships":[],"documentCodes":[]}"""

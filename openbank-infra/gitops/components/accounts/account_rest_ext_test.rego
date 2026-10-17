@@ -256,3 +256,32 @@ test_tax_reporting_false_or_bad_client_binding_denied if {
 		not rest.allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, changed), "action": "account.list"}
 	}
 }
+
+# ADR-0341 — pension-fund-service's own principal reads the published catalog (catalog.read) and
+# nothing else; the shared and sibling principals stay denied.
+pension_fund_catalog := {"type": "HUMAN", "service_account": true, "client_id": "openbank-pension-fund", "id": "service-account-openbank-pension-fund", "roles": ["CATALOG_SCOPE_READ"]}
+
+test_pension_fund_catalog_read_allowed if {
+	rest.allow.allow with input as {"principal": pension_fund_catalog, "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+		with data.rules as rules_mock
+}
+
+test_pension_fund_catalog_grant_is_read_only_and_needs_the_scope if {
+	every action in ["catalog.author", "catalog.publish", "catalog.pensionApproval.decide"] {
+		not rest.allow.allow with input as {"principal": pension_fund_catalog, "action": action, "resource": {"type": "catalog", "id": "r-1"}}
+			with data.rules as rules_mock
+	}
+	not rest.allow.allow with input as {"principal": object.union(pension_fund_catalog, {"roles": []}), "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+		with data.rules as rules_mock
+}
+
+test_other_principals_denied_pension_fund_catalog_read if {
+	every principal in [
+		object.union(shared, {"roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}),
+		object.union(pension_fund_catalog, {"client_id": "another-client"}),
+		object.union(pension_fund_catalog, {"id": "service-account-openbank-pension-fund-x"}),
+	] {
+		not rest.allow.allow with input as {"principal": principal, "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+			with data.rules as rules_mock
+	}
+}

@@ -1359,6 +1359,28 @@
       "secret": "__PENSION_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-pension-fund",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Pension Fund Service",
+      "description": "Per-service M2M client for pension-fund-service's pinned-revision catalog read (ADR-0341). Holds only the narrow catalog:read scope; OPA grants catalog.read to this identity alone.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "basic",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "secret": "__PENSION_FUND_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-tax-reporting",
       "fullScopeAllowed": false,
       "name": "OpenBank Tax Reporting Service",
@@ -2152,6 +2174,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-pension-fund",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension-fund",
+      "realmRoles": []
     },
     {
       "username": "service-account-openbank-tax-reporting",

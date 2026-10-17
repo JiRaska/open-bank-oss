@@ -52,7 +52,7 @@ class PensionFundApiIT {
     private fun fundBody(isin: String, currency: String = "CZK") = """
         {"name":"Fund $isin","isin":"$isin","lei":"315700ABCDEF12345678","depositaryReference":"DEP-1",
          "custodyAccountReference":"CUST-$isin","currency":"$currency","riskClass":3,"mandatoryConservative":false,
-         "managementFeeRate":0.008,"launchNavPerUnit":1}
+         "productRevisionId":"00000000-0000-0000-0000-000000000002","launchNavPerUnit":1}
     """.trimIndent()
 
     private fun allocation(a: String, b: String) = """

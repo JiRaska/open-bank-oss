@@ -21,6 +21,11 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    // ADR-0341: a fund's management fee is read from its pinned catalog revision with this service's
+    // OWN client-credentials token (Keycloak client openbank-pension-fund, catalog:read only).
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
@@ -49,6 +54,7 @@ dependencies {
     // #12425: the provider replay of tax-reporting-service's consumer pact lands with that pact
     // (stacked tax-reporting PR): check-pact-provider-replay.py rejects a replay class with no pact.
     testImplementation(libs.pact.provider)
+    testImplementation(libs.pact.consumer)
 }
 
 // twins, and the synthetic-taint profile), and the default 512m heap ran out on the fourth boot

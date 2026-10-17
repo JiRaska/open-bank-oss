@@ -120,3 +120,24 @@ Client authentication is fixed at Quarkus augmentation time. The `%prod` profile
 sets `quarkus.http.ssl.client-auth=required` and retains the HTTP compatibility listener;
 the matching deployment variable alone cannot establish required client authentication.
 Rollout verification must use the reviewed image built from this configuration.
+
+## 2026-10-17 - Fund management fee pinned to a published catalog revision (ADR-0341)
+
+New outbound edge: pension-fund-service -> product-catalog (`accounts` namespace, private-CA mTLS
+8443, client cert `pension-fund-service-client-tls`, %prod TLS bucket `catalog-authority`) to read
+ONE immutable published revision by id (`GET /api/v2/revisions/{id}`) when a fund is created. The
+fund stores `product_revision_id` (V5) and the fee derived from the revision's
+`feeSchedule.managementFeeAnnualPercent`; NAV accrues exactly that stored rate.
+
+| Threat | Control |
+|---|---|
+| **Tampering** - an operator sets an arbitrary fee on a fund (the previous `managementFeeRate` request field priced every NAV) | The field is gone from create and amend; the fee is the revision's, maker-checker approved in the catalog. Amend rejects any `productRevisionId` that differs from the pinned one (a re-pin is not an amendment). Funds created before pinning keep their stored rate, read-only through the API. |
+| **Spoofing** - another service reads or authors catalog terms with this credential | Own Keycloak client `openbank-pension-fund`: no realm role, only the `catalog:read` scope. product-catalog's OPA bundle admits `catalog.read` for `service-account-openbank-pension-fund` alone (`machine_named` + `CATALOG_SCOPE_READ`); `catalog.author`/`publish`/approvals stay denied (rego tests). |
+| **Elevation** - unpublished or foreign terms priced as a fund fee | `FundRevisionTerms.parse` fails closed unless the revision id matches, `state=PUBLISHED`, schema `org.openbank.retirement.pension-savings` version >= 2, and a fee string is present. |
+| **Denial of service** - catalog down | Fund CREATION fails closed (no fund without a pinned revision); NAV, register, orders and reporting read the stored rate and never call the catalog. |
+| **Repudiation** | The revision id on the fund row is the audit link from a NAV fee back to the approved terms. |
+
+Rollback: revert the commit; `product_revision_id` stays (nullable, additive) and `management_fee_rate`
+remains correct as cached. Rollout order: seed Vault `keycloak/pension-fund-service`, create the
+Keycloak client, then deploy (the env ref is `optional: true`, so an unseeded secret fails creation
+closed rather than the pod).

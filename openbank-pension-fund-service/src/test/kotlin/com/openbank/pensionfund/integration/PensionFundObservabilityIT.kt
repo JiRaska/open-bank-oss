@@ -79,7 +79,7 @@ class PensionFundObservabilityIT {
             "/api/v1/funds",
             """{"name":"Obs","isin":"$isin","lei":"315700ABCDEF12345678","depositaryReference":"DEP-1",
                "custodyAccountReference":"CUST-OBS","currency":"CZK","riskClass":3,"mandatoryConservative":false,
-               "managementFeeRate":0,"launchNavPerUnit":1}""",
+               "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}""",
         ).then().statusCode(201).extract().path("id")
 
         given().contentType("application/json").header("Idempotency-Key", "obs-1")

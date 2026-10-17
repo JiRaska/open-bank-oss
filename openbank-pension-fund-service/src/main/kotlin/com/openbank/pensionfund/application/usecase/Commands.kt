@@ -21,7 +21,8 @@ data class FundDefinition(
     val currency: String,
     val riskClass: Int,
     val mandatoryConservative: Boolean,
-    val managementFeeRate: BigDecimal,
+    /** Required to create a fund; on amend it must be absent or equal to the pinned revision (no re-pin here). */
+    val productRevisionId: UUID?,
     val launchNavPerUnit: BigDecimal,
 )
 
