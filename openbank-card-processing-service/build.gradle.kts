@@ -84,7 +84,14 @@ kover {
 pitest {
     junit5PluginVersion = "1.2.3"
     targetClasses = setOf("com.openbank.cardprocessing.domain.*", "com.openbank.cardprocessing.application.*")
-    targetTests = setOf("com.openbank.cardprocessing.domain.*", "com.openbank.cardprocessing.application.*")
+    // First run (#13149) with domain/application-only targetTests scored billing 0% and card-processing 4%:
+    // their unit tests live in the package root, usecase/ and scheme/. Run every unit test and drop the
+    // Quarkus/contract/e2e ones, which need infrastructure and would only add minutes per mutant.
+    targetTests = setOf("com.openbank.cardprocessing.*")
+    excludedTestClasses = setOf(
+        "com.openbank.cardprocessing.integration.*", "com.openbank.cardprocessing.it.*", "com.openbank.cardprocessing.contract.*",
+        "com.openbank.cardprocessing.e2e.*", "com.openbank.cardprocessing.testsupport.*",
+    )
     mutationThreshold = 0
     outputFormats = setOf("XML", "HTML")
     timestampedReports = false

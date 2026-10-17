@@ -101,7 +101,14 @@ tasks.withType<Test>().configureEach {
 pitest {
     junit5PluginVersion = "1.2.3"
     targetClasses = setOf("com.openbank.psd2.domain.*", "com.openbank.psd2.application.*")
-    targetTests = setOf("com.openbank.psd2.domain.*", "com.openbank.psd2.application.*")
+    // First run (#13149) with domain/application-only targetTests scored billing 0% and card-processing 4%:
+    // their unit tests live in the package root, usecase/ and scheme/. Run every unit test and drop the
+    // Quarkus/contract/e2e ones, which need infrastructure and would only add minutes per mutant.
+    targetTests = setOf("com.openbank.psd2.*")
+    excludedTestClasses = setOf(
+        "com.openbank.psd2.integration.*", "com.openbank.psd2.it.*", "com.openbank.psd2.contract.*",
+        "com.openbank.psd2.e2e.*", "com.openbank.psd2.testsupport.*",
+    )
     mutationThreshold = 0
     outputFormats = setOf("XML", "HTML")
     timestampedReports = false

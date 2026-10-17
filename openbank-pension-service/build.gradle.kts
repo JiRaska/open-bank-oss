@@ -156,7 +156,14 @@ tasks.named("check") { dependsOn(dipCrossServiceIT) }
 pitest {
     junit5PluginVersion = "1.2.3"
     targetClasses = setOf("com.openbank.pension.domain.*", "com.openbank.pension.application.*")
-    targetTests = setOf("com.openbank.pension.domain.*", "com.openbank.pension.application.*")
+    // First run (#13149) with domain/application-only targetTests scored billing 0% and card-processing 4%:
+    // their unit tests live in the package root, usecase/ and scheme/. Run every unit test and drop the
+    // Quarkus/contract/e2e ones, which need infrastructure and would only add minutes per mutant.
+    targetTests = setOf("com.openbank.pension.*")
+    excludedTestClasses = setOf(
+        "com.openbank.pension.integration.*", "com.openbank.pension.it.*", "com.openbank.pension.contract.*",
+        "com.openbank.pension.e2e.*", "com.openbank.pension.testsupport.*",
+    )
     mutationThreshold = 0
     outputFormats = setOf("XML", "HTML")
     timestampedReports = false
