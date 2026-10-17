@@ -3266,6 +3266,9 @@ authz:
   operator_read_any_excluded_actions:
     - tax.filing.read
     - commstemplate.read
+    # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
+    # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
+    - card.details.read
   role_action_matrix:
     ROLE_OPERATOR:
       grant:

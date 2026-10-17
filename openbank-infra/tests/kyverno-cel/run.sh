@@ -151,6 +151,11 @@ if extra:
 sys.exit(1 if bad else 0)
 PY
 
+# Native operation-aware CLI tests exercise metadata-only UPDATE (oldObject == object).
+# This guards controller autogen as well as Pods; CREATE mutation parity remains below.
+docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" test "$T/image-update" \
+  --require-tests --remove-color
+
 # ── Mutation parity: ecr-pull-through-rewrite (v1, pinned) vs -cel ───────────────
 # The v1 ClusterPolicy was deleted when its CEL port was enabled (#11437). Its output
 # image per (namespace, pod, list, container) is pinned in V1_IMAGES, measured with this

@@ -8,6 +8,7 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.IdempotencyKeyReusedExceptionMapper
 import com.openbank.libs.api.error.IdempotencyRequestInProgressExceptionMapper
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.idempotency.ReserveResult
@@ -61,6 +62,18 @@ class RedisIdempotencyStoreTest {
     }
 
     @Test
+    fun `response at the byte limit remains replayable but one byte over does not`(): Unit = runBlocking {
+        val small = RedisIdempotencyStore(redis(), clock, maxResponseBytes = 8)
+
+        small.save("exact", first, 201, "12345678")
+        assertThat(small.lookup("exact", first)!!.responseBody).isEqualTo("12345678")
+
+        small.save("over", first, 201, "123456789")
+        assertThat(small.reserve("over", first)).isEqualTo(ReserveResult.Mismatch)
+        assertThat(backing["idempotency:over"]).doesNotContain("123456789")
+    }
+
+    @Test
     fun `same key with a different payload is refused`(): Unit = runBlocking {
         store.save("k1", first, 201, """{"id":"p1"}""")
 
@@ -71,6 +84,62 @@ class RedisIdempotencyStoreTest {
     @Test
     fun `unknown key is a miss`(): Unit = runBlocking {
         assertThat(store.lookup("nope", first)).isNull()
+    }
+
+    @Test
+    fun `invalid fingerprints cannot claim or write a record`(): Unit = runBlocking {
+        listOf("", "bad|hash").forEach { hash ->
+            assertThatThrownBy { runBlocking { store.reserve("invalid", hash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+            assertThatThrownBy { runBlocking { store.save("invalid", hash, 201, "{}") } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+        }
+    }
+
+    @Test
+    fun `invalid fingerprints cannot release another request marker`(): Unit = runBlocking {
+        store.reserve("held", first)
+        val marker = backing["idempotency:held"]
+        listOf("", "bad|hash").forEach { hash ->
+            assertThatThrownBy { runBlocking { store.release("held", hash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing["idempotency:held"]).isEqualTo(marker)
+            assertThat(store.reserve("held", first)).isEqualTo(ReserveResult.InFlight)
+        }
+    }
+
+    @Test
+    fun `truncated completed records are neither replayed nor overwritten`(): Unit = runBlocking {
+        listOf("v2|", "v2|$first", "v2|$first|201", "v2|$first|201|2026-09-01T00:00Z").forEach { raw ->
+            backing["idempotency:truncated"] = raw
+            assertThat(store.get("truncated")).isNull()
+            assertThat(store.reserve("truncated", first)).isEqualTo(ReserveResult.Mismatch)
+            assertThat(backing["idempotency:truncated"]).isEqualTo(raw)
+        }
+    }
+
+    @Test
+    fun `HTTP status boundaries and empty body decode faithfully`(): Unit = runBlocking {
+        listOf(100, 599).forEach { status ->
+            backing["idempotency:boundary"] = "v2|$first|$status|2026-09-01T00:00Z|"
+            val record = store.lookup("boundary", first)!!
+            assertThat(record.statusCode).isEqualTo(status)
+            assertThat(record.responseBody).isEmpty()
+            assertThat(record.requestHash).isEqualTo(first)
+        }
+    }
+
+    @Test
+    fun `invalid status or timestamp refuses replay`(): Unit = runBlocking {
+        listOf("99|2026-09-01T00:00Z", "600|2026-09-01T00:00Z", "bad|2026-09-01T00:00Z", "200|bad").forEach { fields ->
+            val raw = "v2|$first|$fields|{}"
+            backing["idempotency:corrupt"] = raw
+            assertThatThrownBy { runBlocking { store.lookup("corrupt", first) } }
+                .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+            assertThat(backing["idempotency:corrupt"]).isEqualTo(raw)
+        }
     }
 
     @Test
