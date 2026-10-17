@@ -8,6 +8,8 @@
 #
 # v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
 # only once the isolated harness and synthetic-data boundary are proven (issue #3348).
+# v1.1: adds the read-only FX rate sheet — FX lookup sits inside every cross-currency
+# payment, so its read latency is additive to the money path without touching it.
 name: Performance gate
 
 on:
@@ -16,11 +18,11 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated service modules to test (blank = declared v1 scope)"
+        description: "Space-separated service modules to test (blank = declared scope)"
         required: false
         # A dispatch input's default is still a non-empty override.  Keeping this empty means
         # an operator-triggered run measures the same declared Product Catalog + Flaky Test
-        # Hunter denominator as the scheduled run, unless they deliberately narrow it.
+        # Hunter + FX denominator as the scheduled run, unless they deliberately narrow it.
         default: ""
 
 permissions:
@@ -47,12 +49,17 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
-          # summary can say what the run was SUPPOSED to measure, not only what it did.
-          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
-          # money-path flows out of this GitHub-hosted lane until their isolated target and
-          # synthetic identities exist (perf/scenarios.yaml).
-          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
+          # The declared scope (ADR-0243, issue #3348; FX added as the third read-only
+          # subject). Kept as a named constant so the summary can say what the run was
+          # SUPPOSED to measure, not only what it did. All subjects are non-mutating
+          # reads booted against disposable PostgreSQL. Keep money-path flows out of this
+          # GitHub-hosted lane until their isolated target and synthetic identities exist
+          # (perf/scenarios.yaml).
+          DECLARED = [
+              "openbank-product-catalog",
+              "openbank-flaky-test-hunter",
+              "openbank-fx-service",
+          ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
@@ -71,7 +78,17 @@ jobs:
               if not port or not db:
                   skipped.append((svc, "cannot derive port/DB"))
                   continue
-              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1)})
+              # A declared quarkus.redis host means readiness includes the Redis health check
+              # (measured on openbank-fx-service: /api/v1/fx/rates answered 200 while
+              # /q/health/ready stayed 503 — the Redis check was DOWN with no broker). Boot a
+              # throwaway redis alongside postgres so the readiness gate can ever go green.
+              needs_redis = bool(re.search(r"^  redis:\n(?:.*\n)?\s*hosts:", raw, re.M))
+              matrix.append({
+                  "service": svc,
+                  "port": int(port.group(1)),
+                  "db": db.group(1),
+                  "redis": "true" if needs_redis else "false",
+              })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
           print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
@@ -136,6 +153,7 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      NEEDS_REDIS: ${{ matrix.redis }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -183,6 +201,16 @@ jobs:
           if [ "$PG_UP" != "1" ]; then
             echo "::error::[${SERVICE}] postgres never became ready"
             exit 1
+          fi
+
+          # Only services whose application.yaml declares quarkus.redis.hosts get a broker:
+          # their readiness includes the Redis health check and can never go green without
+          # one. redis:7.2-alpine matches the dast-zap-baseline and api-fuzz-authenticated
+          # throwaway brokers.
+          if [ "${NEEDS_REDIS}" = "true" ]; then
+            echo "==> [${SERVICE}] starting redis (application.yaml declares quarkus.redis.hosts)"
+            docker rm -f perf-redis >/dev/null 2>&1 || true
+            docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
           fi
 
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
@@ -244,7 +272,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg >/dev/null 2>&1 || true
+          docker rm -f perf-pg perf-redis >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()

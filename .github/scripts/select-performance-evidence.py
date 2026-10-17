@@ -22,6 +22,7 @@ UNKNOWN = 4
 EXPECTED_GATE = (
     ("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)"),
     ("perf-reports-openbank-flaky-test-hunter", "k6 smoke (openbank-flaky-test-hunter)"),
+    ("perf-reports-openbank-fx-service", "k6 smoke (openbank-fx-service)"),
 )
 BASELINE_ARTIFACT = "k6-money-path-summary"
 OVERRIDE_SCOPE = re.compile(
@@ -251,6 +252,11 @@ def self_test() -> int:
                 "started_at": "2026-09-01T12:05:00Z",
                 "conclusion": "failure",
             },
+            {
+                "name": "k6 smoke (openbank-fx-service)",
+                "started_at": "2026-09-01T12:06:00Z",
+                "conclusion": "failure",
+            },
         ]
     }
     scope, policies = gate_policies(jobs, attempt_start)
@@ -261,6 +267,9 @@ def self_test() -> int:
         ),
         "perf-reports-openbank-flaky-test-hunter": ArtifactWindow(
             instant("2026-09-01T12:05:00Z")
+        ),
+        "perf-reports-openbank-fx-service": ArtifactWindow(
+            instant("2026-09-01T12:06:00Z")
         ),
     }
     artifacts = {
