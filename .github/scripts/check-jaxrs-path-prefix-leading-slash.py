@@ -70,7 +70,9 @@ ALIAS_ASSIGN_RE = re.compile(
     # An alias that is NORMALISED on assignment (`ctx.uriInfo.path.removePrefix("/")`) no longer
     # carries the leading slash, so a slash-less literal against it is correct -- that is exactly
     # how #11008 fixed the three psd2 filters. Without this the gate flagged the fix itself.
-    r"(?!\.(?:removePrefix|trimStart|drop)\b)",
+    # Narrow on purpose: only a LEADING-SLASH strip counts. removePrefix("api/"), a bare trimStart()
+    # (whitespace) or drop(n) leave the slash in place, so they must not exempt a site.
+    r"(?!\.(?:removePrefix\(\s*(?:\"/\"|'/')\s*\)|trimStart\(\s*(?:\"/\"|'/')\s*\)))",
 )
 
 
@@ -225,6 +227,15 @@ def self_test() -> int:
         )
 
         checks = []
+
+        # The normalisation exemption is ONLY a leading-slash strip. Anything else keeps the slash.
+        partial = 'val p = ctx.uriInfo.path.removePrefix("api/")\nval g = p.startsWith("v1/x")\n'
+        bare = 'val p = ctx.uriInfo.path.trimStart()\nval g = p.startsWith("v1/x")\n'
+        checks.append((len(findings_in_file(partial)) == 1, 'removePrefix("api/") must NOT exempt an alias'))
+        checks.append((len(findings_in_file(bare)) == 1, "bare trimStart() must NOT exempt an alias"))
+        for form in ('removePrefix("/")', "removePrefix('/')", "trimStart('/')", 'trimStart("/")'):
+            src = f'val p = ctx.uriInfo.path.{form}\nval g = p.startsWith("v1/x")\n'
+            checks.append((not findings_in_file(src), f"{form} stays exempt (known-negative)"))
 
         base.write_text("")
         checks.append((run(root) == 1, "empty baseline over a dirty tree fails (2 known-positive files)"))
