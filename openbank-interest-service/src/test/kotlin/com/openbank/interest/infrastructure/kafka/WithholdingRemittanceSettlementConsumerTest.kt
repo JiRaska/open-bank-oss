@@ -5,8 +5,10 @@
 package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
-import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -15,6 +17,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.apache.kafka.clients.consumer.ConsumerRecord
@@ -72,11 +75,23 @@ class WithholdingRemittanceSettlementConsumerTest {
         return record
     }
 
+    private fun created(): Response =
+        Response.status(201).entity(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")).build()
+
+    /** A proven 201 whose body cannot be read: the debit HAS booked. */
+    private fun createdWithUnreadableBody(): Response {
+        val response = mockk<Response>(relaxed = true)
+        every { response.status } returns 201
+        every { response.hasEntity() } returns true
+        every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException("garbled")
+        return response
+    }
+
     @Test
     fun `books the remittance debit and settles the batch on a 2xx`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(created())
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
         consumer.consume(record())
@@ -96,7 +111,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     fun `a numeric totalTaxAmount encoding is accepted too`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(created())
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
         consumer.consume(record(payload = remittedPayload(totalTaxAmount = "1234.00")))
@@ -108,7 +123,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     @Test
     fun `a 409 from transaction-service still settles the batch (idempotent success)`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(409).build())
+            Uni.createFrom().failure(WebApplicationException(409))
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
         consumer.consume(record())
@@ -124,13 +139,43 @@ class WithholdingRemittanceSettlementConsumerTest {
      * distinguishes a real retry from a single call that happens to throw.
      */
     @Test
-    fun `a non-2xx-non-409 response is retried and rethrown, never settled or acked`(): Unit = runBlocking {
+    fun `a 201 whose body cannot be read still settles - the status was proven`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(500).build())
+            Uni.createFrom().item(createdWithUnreadableBody())
+        every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
+
+        consumer.consume(record())
+
+        verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 1) { remitUseCase.settle(remittanceId) }
+    }
+
+    @Test
+    fun `a 422 refusal is retried and rethrown as a booking failure, never settled or acked`(): Unit = runBlocking {
+        every { transactionClient.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(WebApplicationException(422))
 
         assertThatThrownBy { runBlocking { consumer.consume(record()) } }
             .isInstanceOf(WithholdingRemittanceBookingFailedException::class.java)
             .hasMessageContaining("did not move money")
+
+        verify(exactly = 0) { remitUseCase.settle(any()) }
+    }
+
+    /**
+     * A 5xx proves nothing about the booking, so it is NOT reported as a failed booking: it is retried
+     * [EventRetry.DEFAULT_MAX_ATTEMPTS] times and rethrown untouched for the connector to dead-letter.
+     * The attempt count is what distinguishes a real retry from a single call that happens to throw.
+     */
+    @Test
+    fun `a 503 is retried and rethrown untouched, never settled or acked`(): Unit = runBlocking {
+        every { transactionClient.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(WebApplicationException(503))
+
+        assertThatThrownBy { runBlocking { consumer.consume(record()) } }
+            .isInstanceOfSatisfying(TransactionHttpException::class.java) {
+                assertThat(it.status).isEqualTo(503)
+            }
 
         verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { transactionClient.initiateTransaction(any()) }
         verify(exactly = 0) { remitUseCase.settle(any()) }

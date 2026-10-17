@@ -5,16 +5,18 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.messaging.EventRetry
-import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.time.LocalDate
 
 /**
  * Books the debtor-side debit for an authorised SEPA Direct Debit collection (#1000).
@@ -44,6 +46,7 @@ class SddCollectionDebitConsumer(
     @RestClient private val transactionClient: TransactionServiceClient,
 ) {
     private val log = Logger.getLogger(SddCollectionDebitConsumer::class.java)
+    private val transactions = TransactionClient(transactionClient)
 
     @Incoming("sdd-collection-authorised-in")
     // Poison-pill safety applies to the PAYLOAD only: an unparseable event is acked, because a
@@ -69,32 +72,30 @@ class SddCollectionDebitConsumer(
             val request = debitRequestFrom(node, mandateId, umr)
 
             EventRetry.withRetry(log, "SDD collection debit", "$mandateId/$umr") {
-                val response = transactionClient.initiateTransaction(request).awaitSuspending()
-                when {
-                    response.statusInfo.family == Response.Status.Family.SUCCESSFUL -> {
-                        log.infof(
-                            "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d)",
-                            mandateId,
-                            umr,
-                            response.status,
-                        )
-                    }
-                    response.status == HTTP_CONFLICT -> {
-                        log.infof(
-                            "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
-                            mandateId,
-                            umr,
-                        )
-                    }
-                    else -> {
-                        // A non-2xx-non-409 is the rail refusing an AUTHORISED collection. Throwing
-                        // rather than logging is the whole point: R-transaction/return generation is
-                        // not built (#1000), so the only way this reaches a human is the DLQ.
-                        throw SddDebitFailedException(
-                            "[sdd-collection-debit] mandate=$mandateId umr=$umr FAILED to debit " +
-                                "(HTTP ${response.status}) — an authorised collection did not move money",
-                        )
-                    }
+                // Only a PROVEN 2xx counts as debited, whether or not the body can be read; an answer that
+                // proves nothing (5xx, dropped connection) is thrown by TransactionClient untouched, so
+                // EventRetry retries it - the idempotency key makes that safe - and it is never reported
+                // as "FAILED to debit".
+                when (val outcome = transactions.initiate(request).awaitSuspending()) {
+                    is TransactionCallOutcome.Booked -> log.infof(
+                        "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d, transaction %s)",
+                        mandateId,
+                        umr,
+                        outcome.status,
+                        outcome.body?.id,
+                    )
+                    TransactionCallOutcome.Conflict -> log.infof(
+                        "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
+                        mandateId,
+                        umr,
+                    )
+                    // The rail refused an AUTHORISED collection (400/422). Throwing rather than logging is the
+                    // whole point: R-transaction/return generation is not built (#1000), so the only way this
+                    // reaches a human is the DLQ.
+                    is TransactionCallOutcome.Rejected -> throw SddDebitFailedException(
+                        "[sdd-collection-debit] mandate=$mandateId umr=$umr REFUSED by transaction-service " +
+                            "(HTTP ${outcome.status}) — an authorised collection did not move money",
+                    )
                 }
             }
         } catch (e: IllegalArgumentException) {
@@ -129,7 +130,9 @@ class SddCollectionDebitConsumer(
             description = "SEPA Direct Debit ${node.path(
                 "creditorIdentifier",
             ).asText()} / $umr".take(MAX_DESCRIPTION),
-            valueDate = dueDate,
+            // A non-ISO date throws DateTimeParseException (not the poison-pill IllegalArgumentException):
+            // it surfaces for dead-lettering, as the 400 it used to earn from transaction-service did.
+            valueDate = LocalDate.parse(dueDate),
             rail = "SEPA_CT",
             instructionType = "DIRECT_DEBIT",
         )
@@ -137,7 +140,6 @@ class SddCollectionDebitConsumer(
 
     private companion object {
         const val EVENT_COLLECTION_AUTHORISED = "sdd.collection.authorised.v1"
-        const val HTTP_CONFLICT = 409
         const val MAX_DESCRIPTION = 140
     }
 }

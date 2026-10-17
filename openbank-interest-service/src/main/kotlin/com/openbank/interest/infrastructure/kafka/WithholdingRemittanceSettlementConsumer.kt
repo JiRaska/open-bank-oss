@@ -6,14 +6,15 @@ package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
-import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.core.Response
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -21,6 +22,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -77,6 +79,7 @@ class WithholdingRemittanceSettlementConsumer(
     private val remittanceSourceAccountId: String,
 ) {
     private val log = Logger.getLogger(WithholdingRemittanceSettlementConsumer::class.java)
+    private val transactions = TransactionClient(transactionClient)
 
     @Incoming("interest-withholding-remitted-in")
     // Poison-pill safety applies to the PAYLOAD only: an unparseable body, a bad remittanceId or an
@@ -111,14 +114,19 @@ class WithholdingRemittanceSettlementConsumer(
             return
         }
 
+        // Built BEFORE the retry: a due date that is not an ISO date is bad data, and retrying the same
+        // bytes cannot help - it is thrown once (DateTimeParseException) and dead-lettered by the connector.
+        val debit = if (decoded.totalTaxAmount.signum() > 0) {
+            debitRequestFor(decoded.node, decoded.remittanceId, decoded.totalTaxAmount)
+        } else {
+            null
+        }
+
         EventRetry.withRetry(log, "withholding remittance settlement", decoded.remittanceId) {
-            if (decoded.totalTaxAmount.signum() <= 0) {
+            if (debit == null) {
                 settleNilOrRefuse(decoded.remittanceId, decoded.totalTaxAmount, decoded.itemCount)
             } else {
-                bookAndSettle(
-                    decoded.remittanceId,
-                    debitRequestFor(decoded.node, decoded.remittanceId, decoded.totalTaxAmount),
-                )
+                bookAndSettle(decoded.remittanceId, debit)
             }
         }
     }
@@ -178,38 +186,44 @@ class WithholdingRemittanceSettlementConsumer(
             currencyCode = node.path("currency").asText(),
             description = "Withholding tax remittance ${node.path("periodYear").asText()}-" +
                 "${node.path("periodMonth").asText()} / ${node.path("authority").asText()}",
-            valueDate = node.path("dueDate").asText(),
+            valueDate = LocalDate.parse(node.path("dueDate").asText()),
             rail = "DOMESTIC",
             instructionType = "ONE_OFF",
         )
 
-    /** Books the debit and advances the batch to SETTLED; a 409 is an idempotent success (#999). */
+    /**
+     * Books the debit and advances the batch to SETTLED; a 409 is an idempotent success (#999).
+     *
+     * Only a PROVEN 2xx settles the batch ([TransactionCallOutcome.Booked]) - and then regardless of whether
+     * the response body can be read, because the money has moved. Any answer that proves nothing (5xx, a
+     * dropped connection) is thrown by [TransactionClient] untouched, so [EventRetry] retries it; the
+     * idempotency key makes the retry safe. It is never reported as "FAILED to book".
+     */
     private suspend fun bookAndSettle(remittanceId: UUID, request: InitiateTransactionRequest) {
-        val response = transactionClient.initiateTransaction(request).awaitSuspending()
-        when {
-            response.statusInfo.family == Response.Status.Family.SUCCESSFUL -> {
+        when (val outcome = transactions.initiate(request).awaitSuspending()) {
+            is TransactionCallOutcome.Booked -> {
                 remitUseCase.settle(remittanceId).awaitSuspending()
-                log.infof("[withholding-remittance] batch %s settled (HTTP %d)", remittanceId, response.status)
+                log.infof(
+                    "[withholding-remittance] batch %s settled (HTTP %d, transaction %s)",
+                    remittanceId,
+                    outcome.status,
+                    outcome.body?.id,
+                )
             }
-            response.status == HTTP_CONFLICT -> {
+            TransactionCallOutcome.Conflict -> {
                 remitUseCase.settle(remittanceId).awaitSuspending()
                 log.infof(
                     "[withholding-remittance] batch %s already booked (409) — idempotent settle",
                     remittanceId,
                 )
             }
-            else -> {
-                // This branch used to log and RETURN, and its own message promised "the batch stays
-                // PENDING for retry (a redelivery of this event...)" — which could not happen,
-                // because returning normally ACKS the event. There is no redelivery and no re-drive
-                // endpoint, so a refused booking meant the tax was never paid and the only trace was
-                // an ERROR line nothing pages on. Throwing is what makes that sentence true: the
-                // retry above gets its attempts, and the connector then dead-letters (#5698).
-                throw WithholdingRemittanceBookingFailedException(
-                    "[withholding-remittance] batch $remittanceId FAILED to book (HTTP ${response.status}) — " +
-                        "a due tax remittance did not move money",
-                )
-            }
+            // transaction-service refused the debit itself (400/422): retrying the same bytes cannot help.
+            // This branch used to log and RETURN, which ACKED the event: the tax was never paid and the
+            // only trace was an ERROR line nothing pages on. Throwing makes the connector dead-letter (#5698).
+            is TransactionCallOutcome.Rejected -> throw WithholdingRemittanceBookingFailedException(
+                "[withholding-remittance] batch $remittanceId REFUSED by transaction-service " +
+                    "(HTTP ${outcome.status}) — a due tax remittance did not move money",
+            )
         }
     }
 
