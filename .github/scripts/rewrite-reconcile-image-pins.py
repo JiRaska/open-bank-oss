@@ -53,7 +53,9 @@ def rewrite(root: Path, registry: str, tags_json: str, digests_json: str) -> dic
             + r"(?P=quote)(?P<suffix>[ \t]*(?:\#.*)?)$"
         )
 
-        def replace_image(match: re.Match[str]) -> str:
+        def replace_image(
+            match: re.Match[str], *, image: str = image, tag: str = tag, digest: str = digest
+        ) -> str:
             return (
                 f"{match.group('prefix')}{match.group('quote')}"
                 f"{image}:{tag}@{digest}{match.group('quote')}{match.group('suffix')}"
