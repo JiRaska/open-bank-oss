@@ -30,6 +30,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.UUID
 import java.util.function.Supplier
 
 /**
@@ -41,8 +42,8 @@ import java.util.function.Supplier
 class LendingWorkflowLivenessTest {
 
     private fun cycleRuns(unresolvedPriorDays: Long = 0): ProvisioningCycleRunRepository = mockk {
-        every { markStarted(any(), any()) } returns Uni.createFrom().item(Unit)
-        every { markResult(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+        every { markStarted(any(), any()) } returns Uni.createFrom().item(UUID.randomUUID())
+        every { markResult(any(), any(), any(), any()) } returns Uni.createFrom().item(Unit)
         every { countUnresolvedBefore(any()) } returns Uni.createFrom().item(unresolvedPriorDays)
     }
 

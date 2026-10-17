@@ -39,6 +39,10 @@
         "description": "Bank administrator"
       },
       {
+        "name": "ROLE_MERGE_RECORDER",
+        "description": "CI merge-record ingest only (ADR-0031 phase 3): the record-agent-merge pipeline client carries exactly this role — least privilege, one endpoint, no interactive use"
+      },
+      {
         "name": "ROLE_OPERATOR",
         "description": "Bank operator"
       },
@@ -786,6 +790,15 @@
     {
       "name": "catalog:read",
       "description": "Product Catalog read (issue #7324). product-catalog's CatalogScopeRoleMapper maps this scope to CATALOG_SCOPE_READ. Not a realm default: only a client that lists it receives it.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "fx:read",
+      "description": "FX rate sheet read (fx-rates-read journey, #12847). fx-service's FxScopeRoleMapper maps this scope to FX_SCOPE_READ, admitted by fx_rest_ext.rego on fx.list/fx.read only. Not a realm default: only a client that lists it receives it.",
       "protocol": "openid-connect",
       "attributes": {
         "include.in.token.scope": "true",
@@ -1619,6 +1632,26 @@
       "secret": "__SYNTHETIC_CATALOG_READ_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-synthetic-fx-read",
+      "name": "OpenBank Synthetic Journey: FX rate sheet read",
+      "description": "Synthetic-only identity for the fx-rates-read k6 journey (ADR-0252, #12847). No realm roles; its only grant is the fx:read client scope, which fx-service's FxScopeIdentityAugmentor maps to FX_SCOPE_READ and fx_rest_ext.rego admits on fx.list/fx.read only.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "fx:read"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__SYNTHETIC_FX_READ_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-grafana",
       "fullScopeAllowed": false,
       "name": "Grafana (observability single pane)",
@@ -2191,6 +2224,12 @@
       "username": "service-account-openbank-synthetic-catalog-read",
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-catalog-read",
+      "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-synthetic-fx-read",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-fx-read",
       "realmRoles": []
     },
     {
