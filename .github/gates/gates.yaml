@@ -2362,6 +2362,9 @@ gates:
     group: registry
     mode: enforced
     budget_seconds: 10
+    rationale: "The charter schedule (EU AI Act inventory) and the deployed *_CRON are two hand-kept copies of one fact; both stay individually valid, so only a comparison sees them drift."
+    review_after: "2027-04-17"
+    min_subjects: 4   # 8 deployed agent crons compared 2026-10-17
     selftest: python3 .github/scripts/check-agent-schedule-matches-charter.py --selftest
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-agent-schedule-matches-charter.py"]

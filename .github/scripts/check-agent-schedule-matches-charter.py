@@ -158,6 +158,7 @@ def main() -> int:
     level = "error" if args.enforce else "warning"
     for p in problems:
         print(f"::{level}::agent-schedule-charter: {p}")
+    print(f"SUBJECTS={compared}  # deployed agent crons compared")
     print(f"agent-schedule-charter: {compared} deployed cron(s) compared, {len(problems)} mismatch(es).")
     return 1 if problems and args.enforce else 0
 
