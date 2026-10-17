@@ -25,7 +25,7 @@ class RewriteReconcileImagePinsTest(unittest.TestCase):
             manifest = root / "openbank-infra/gitops/components/demo/workloads.yaml"
             manifest.parent.mkdir(parents=True)
             manifest.write_text(
-                "image: registry.invalid/openbank-demo-service:sandbox-oldtag\n"
+                "image: registry.invalid/openbank-demo-service:sandbox-oldtag # workload\n"
                 "other: registry.invalid/openbank-ledger-service:sandbox-ledger\n",
                 encoding="utf-8",
             )
@@ -38,7 +38,7 @@ class RewriteReconcileImagePinsTest(unittest.TestCase):
             )
             self.assertEqual(counts, {"openbank-demo-service": 1})
             self.assertIn(
-                f"registry.invalid/openbank-demo-service:sandbox-01234567@sha256:{'a' * 64}",
+                f"registry.invalid/openbank-demo-service:sandbox-01234567@sha256:{'a' * 64} # workload",
                 manifest.read_text(encoding="utf-8"),
             )
             self.assertIn(
@@ -78,6 +78,38 @@ class RewriteReconcileImagePinsTest(unittest.TestCase):
                     '{"openbank-demo-service":"sandbox-x","openbank-demo-service":"sandbox-y"}',
                     '{"openbank-demo-service":"sha256:' + "a" * 64 + '"}',
                 )
+
+    def test_rejects_missing_service_reference_without_partial_rewrites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root / "openbank-infra/gitops/components/demo/workloads.yaml"
+            manifest.parent.mkdir(parents=True)
+            original = (
+                "image: registry.invalid/openbank-demo-service:sandbox-oldtag\n"
+                "# image: registry.invalid/openbank-missing-service:sandbox-commented\n"
+                "other: registry.invalid/openbank-ledger-service:sandbox-ledger\n"
+            )
+            manifest.write_text(original, encoding="utf-8")
+            tags = (
+                '{"openbank-demo-service":"sandbox-01234567",'
+                '"openbank-missing-service":"sandbox-89abcdef"}'
+            )
+            digests = (
+                '{"openbank-demo-service":"sha256:'
+                + "a" * 64
+                + '","openbank-missing-service":"sha256:'
+                + "b" * 64
+                + '"}'
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "no GitOps sandbox image reference found for selected service "
+                "openbank-missing-service",
+            ):
+                rewrite(root, "registry.invalid", tags, digests)
+
+            self.assertEqual(manifest.read_text(encoding="utf-8"), original)
 
 
 if __name__ == "__main__":

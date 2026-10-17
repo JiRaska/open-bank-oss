@@ -30,6 +30,11 @@ def rewrite(root: Path, registry: str, tags_json: str, digests_json: str) -> dic
     if not gitops.is_dir():
         raise ValueError(f"GitOps component directory is missing: {gitops}")
 
+    manifests = sorted((*gitops.rglob("*.yaml"), *gitops.rglob("*.yml")))
+    original_contents = {
+        manifest: manifest.read_text(encoding="utf-8") for manifest in manifests
+    }
+    updated_contents = dict(original_contents)
     counts: dict[str, int] = {}
     for service, tag in tags.items():
         if not isinstance(service, str) or not re.fullmatch(r"openbank-[a-z0-9-]+", service):
@@ -41,16 +46,33 @@ def rewrite(root: Path, registry: str, tags_json: str, digests_json: str) -> dic
             raise ValueError(f"invalid pushed image digest for {service}")
 
         image = f"{registry}/{service}"
-        pattern = re.compile(re.escape(image) + r":sandbox-[A-Za-z0-9._-]+(?:@sha256:[0-9a-f]{64})?")
-        replacement = f"{image}:{tag}@{digest}"
+        pattern = re.compile(
+            r"(?m)^(?P<prefix>[ \t]*image:[ \t]*)(?P<quote>[\"']?)"
+            + re.escape(image)
+            + r":sandbox-[A-Za-z0-9._-]+(?:@sha256:[0-9a-f]{64})?"
+            + r"(?P=quote)(?P<suffix>[ \t]*(?:\#.*)?)$"
+        )
+
+        def replace_image(match: re.Match[str]) -> str:
+            return (
+                f"{match.group('prefix')}{match.group('quote')}"
+                f"{image}:{tag}@{digest}{match.group('quote')}{match.group('suffix')}"
+            )
+
         count = 0
-        for manifest in sorted((*gitops.rglob("*.yaml"), *gitops.rglob("*.yml"))):
-            original = manifest.read_text(encoding="utf-8")
-            updated, changed = pattern.subn(replacement, original)
+        for manifest, original in updated_contents.items():
+            updated, changed = pattern.subn(replace_image, original)
             if changed:
-                manifest.write_text(updated, encoding="utf-8")
+                updated_contents[manifest] = updated
                 count += changed
+        if count == 0:
+            raise ValueError(
+                f"no GitOps sandbox image reference found for selected service {service}"
+            )
         counts[service] = count
+    for manifest, updated in updated_contents.items():
+        if updated != original_contents[manifest]:
+            manifest.write_text(updated, encoding="utf-8")
     return counts
 
 
@@ -64,10 +86,7 @@ def main() -> int:
         print(f"reconcile image pin rewrite rejected: {exc}", file=sys.stderr)
         return 1
     for service, count in counts.items():
-        if count:
-            print(f"[{service}] pinned {count} manifest image(s) by exact digest")
-        else:
-            print(f"WARN: no GitOps manifest references {service}:sandbox-* — skip")
+        print(f"[{service}] pinned {count} manifest image(s) by exact digest")
     return 0
 
 
