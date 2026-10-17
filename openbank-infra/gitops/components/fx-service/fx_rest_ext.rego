@@ -41,7 +41,7 @@ allowed_reasons contains "viewer-fx-read" if {
 # own RBAC — mirrored here rather than granted via the wider payments-desk set.
 allowed_reasons contains "operator-fx-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
 	input.action == "fx.convert"
@@ -49,7 +49,7 @@ allowed_reasons contains "operator-fx-write" if {
 
 allowed_reasons contains "operator-fx-trigger" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "fx.trigger"
@@ -81,13 +81,13 @@ allowed_reasons contains "operator-fx-trigger" if {
 #     inline.
 allowed_reasons contains "service-fx-edge-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {"fx.read", "fx.list"}
 }
 
 allowed_reasons contains "service-fx-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in {"fx.read", "fx.list"}
 }
 
@@ -95,7 +95,7 @@ allowed_reasons contains "service-fx-shared-client-m2m" if {
 # fx.convert (issue #938 follow-up).
 allowed_reasons contains "operator-fx-approval-decide" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "fx.approval.decide"
@@ -110,7 +110,7 @@ allowed_reasons contains "operator-fx-approval-decide" if {
 # (base rest.rego gates its allow head on `not prohibited`); fx.trigger / fx.approval.decide
 # need no veto — absent from the matrix grant, the exclusion closes them outright.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action == "fx.convert"
 }
 

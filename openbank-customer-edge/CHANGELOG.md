@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.0...customer-edge-v1.3.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension,customer-edge:** replace deprecated JSON and query APIs ([#12947](https://github.com/JiRaska/open-bank-oss/issues/12947)) ([88dfa4f](https://github.com/JiRaska/open-bank-oss/commit/88dfa4f3d5e50111877c901ead84f48006692d27))
+
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.2.0...customer-edge-v1.3.0) (2026-10-16)
+
+
+### Features
+
+* **payment-batches:** persist company-scoped drafts ([#12259](https://github.com/JiRaska/open-bank-oss/issues/12259)) ([743987d](https://github.com/JiRaska/open-bank-oss/commit/743987d92e9b1ad076bccddcfbefce008ba81f5c))
+
 ## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.1.0...customer-edge-v1.2.0) (2026-10-14)
 
 

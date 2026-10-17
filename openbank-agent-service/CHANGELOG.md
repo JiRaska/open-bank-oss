@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.28.0...agent-service-v1.29.0) (2026-10-16)
+
+
+### Features
+
+* **agent-service:** record merges and stage gated development ([#12883](https://github.com/JiRaska/open-bank-oss/issues/12883)) ([86de551](https://github.com/JiRaska/open-bank-oss/commit/86de551e12b23564b6addce940508be73339e94c))
+
 ## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.4...agent-service-v1.28.0) (2026-10-14)
 
 

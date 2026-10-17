@@ -64,7 +64,7 @@ allowed_reasons contains "operator-party-write" if {
 # a caller here only with matching evidence (a real client method + call site), never speculatively.
 allowed_reasons contains "service-edge-party-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
         "party.create",
 		"party.consent.update",
@@ -77,7 +77,7 @@ allowed_reasons contains "service-edge-party-m2m" if {
 # without this rule the new @Authorize would log a "would DENY" for every KYC-created party.
 allowed_reasons contains "kyc-party-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_KYC" in input.principal.roles
 	input.action == "party.create"
 }
@@ -93,7 +93,7 @@ allowed_reasons contains "kyc-party-create" if {
 # (PartyCreateCallerGuardTest pins that the two agree).
 allowed_reasons contains "service-kyb-party-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-kyb"
+	machine_named("service-account-openbank-kyb")
 	input.action in {
 		"party.create",
 		"party.mandate.grant",
@@ -114,11 +114,26 @@ allowed_reasons contains "service-interest-party-m2m" if {
 	input.action == "party.amlProfile.read"
 }
 
+# tax-reporting-service's OWN machine principal (client `openbank-tax-reporting`, ROLE_API only),
+# ADR-0340 B1 — the CRS/FATCA TIN boundary. The ONLY reader of
+# GET /api/v1/reporting/parties/{id}/tax-facts; the route's in-code guard
+# (PartyTaxReportingResource) pins this same principal, and PartyTaxReportingResourceIT keeps the
+# two in lockstep. The action is deliberately NOT a read/list verb, so the generic read-any rules
+# in rest.rego can never admit anyone else; this identity-gated rule is the whole grant.
+allowed_reasons contains "service-tax-reporting-party-tax-facts" if {
+	input.principal.type == "HUMAN"
+
+	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+	not input.principal.service_account == null
+	machine_named("service-account-openbank-tax-reporting")
+	input.action == "party.reporting.taxFacts"
+}
+
 # #10486 batch 8: delegation-service's PartyMandateRestClient / PartyAuthorityRestClient read a grantor's mandates and acting-for relations to decide whether a delegation may be granted. It used to reach these reads on the shared
 # service-account-openbank-services principal's ROLE_OPERATOR; it now presents its own identity
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
 allowed_reasons contains "service-delegation-mandate-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-delegation"
+	machine_named("service-account-openbank-delegation")
 	input.action in {"party.mandate.read"}
 }
