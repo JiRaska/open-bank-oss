@@ -64,6 +64,15 @@ KWD/BHD 3 (`1500` = 1.500). The same `Money` drives the pacs.008 `IntrBkSttlmAmt
 transaction-service settlement amount, the `swift.message.status-changed` event `amount` and the
 `/messages` list `amount`; before #11604 all four shifted every currency by a fixed two places.
 
+**Settlement booking and the value date.** After the scheme confirms ACSC, the MT103 settlement debit is
+booked in transaction-service through its generated, typed client. `valueDate` is held and exposed here as
+MT103 basic ISO (`YYYYMMDD`), while transaction-service parses ISO-8601 (`YYYY-MM-DD`), so the adapter
+converts it before sending; previously the raw `YYYYMMDD` went on the wire and the booking could not be
+accepted. A stored value that no longer parses sends nothing and the message stays `SENT`. Only HTTP
+200/201/202 count as a booking; `409`, `400`/`422` and any other 2xx (including `204`) leave the message
+`SENT`; a `5xx` or dropped connection is raised as unavailable and retried by the caller. The API contract
+of this service (`valueDate` `^\d{8}$`) is unchanged.
+
 | Input | Answer |
 |---|---|
 | `amountMinorUnits` not a whole number (`150.5`) | `400` `AMOUNT_SCALE_EXCEEDED`, field `amountMinorUnits` |
