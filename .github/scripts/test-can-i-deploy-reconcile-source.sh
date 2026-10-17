@@ -301,6 +301,9 @@ printf 'plugins {}\n' > "$positive/openbank-demo-service/build.gradle.kts"
 printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
 (
   cd "$positive"
+  # run-gates.py exports a private checkout index to each gate. This throwaway repo must use
+  # its own index so an earlier fixture cannot leave blobs from another object database here.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
   git init -q
   git config user.email fixture@example.test
   git config user.name fixture

@@ -20,6 +20,10 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
+# run-gates.py gives each gate a private copy of the checkout index via GIT_INDEX_FILE.
+# These commits belong to this throwaway repo; do not let them mutate that shared gate index.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
+
 git init -q
 git config user.email test@example.com
 git config user.name test
