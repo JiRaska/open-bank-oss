@@ -74,6 +74,20 @@ describe('evidence posture projection (#13201)', () => {
     expect(() => componentPostureFromRun({ ...envelope(), schemaVersion: 9 }, opts())).toThrow(/not a v1\/v2 envelope/)
   })
 
+  it('declares which commit the tests ran on, and keys a tree-equivalent posture by the image commit', () => {
+    const { posture } = componentPostureFromRun(envelope(), opts())
+    expect(posture.evidenceSource).toEqual({ commit: SHA, equivalence: 'identical' })
+    const equivalent = componentPostureFromRun(envelope(), { ...opts(), keyCommit: OTHER, equivalence: 'tree-equivalent' })
+    expect(equivalent.posture.evidenceSource).toEqual({ commit: SHA, equivalence: 'tree-equivalent' })
+    expect(equivalent.posture.evidence.every(item => !item.run || item.run.commit === SHA)).toBe(true)
+  })
+
+  it('refuses an "identical" claim keyed by another commit, and unknown equivalence kinds', () => {
+    expect(() => componentPostureFromRun(envelope(), { ...opts(), keyCommit: OTHER })).toThrow(/identical evidence must be keyed/)
+    expect(() => componentPostureFromRun(envelope(), { ...opts(), keyCommit: OTHER, equivalence: 'probably' })).toThrow(/unknown equivalence/)
+    expect(() => componentPostureFromRun(envelope(), { ...opts(), keyCommit: 'abc', equivalence: 'tree-equivalent' })).toThrow(/full 40-hex/)
+  })
+
   it('keeps missing coverage explicit instead of inventing a zero', () => {
     const { posture } = componentPostureFromRun({ ...envelope(), coverage: null }, opts())
     expect(posture.coverage).toMatchObject({ state: 'not-run', lines: { percentage: null } })

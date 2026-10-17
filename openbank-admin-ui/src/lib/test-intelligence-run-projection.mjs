@@ -202,9 +202,21 @@ export function evidenceStoreKey(component, fullSha) {
  * Refuses (throws) rather than publish something the reader would reject or, worse, accept
  * about the wrong build: the envelope must be this component's and this commit's run, and
  * every projected observation that names a run must name this commit.
+ *
+ * `commit` is the commit the tests RAN on. `keyCommit` (default: `commit`) is the running
+ * image's commit the object is stored under. They may differ only when the caller has PROVEN
+ * the two byte-identical in every build input of the service (pact-version-tree-equivalent.sh)
+ * and says so with `equivalence: 'tree-equivalent'`; the posture then carries that claim in
+ * `evidenceSource` so the reader can tell "tested on this commit" from "tested on an
+ * equivalent one".
  */
-export function componentPostureFromRun(run, { component, commit, released, moneyPath, collectedAt, staleAfterMs }) {
+export function componentPostureFromRun(run, {
+  component, commit, keyCommit = commit, equivalence = 'identical', released, moneyPath, collectedAt, staleAfterMs,
+}) {
   evidenceStoreKey(component, commit)
+  evidenceStoreKey(component, keyCommit)
+  if (equivalence === 'identical' && keyCommit !== commit) throw new Error(`identical evidence must be keyed by its own commit, not ${keyCommit}`)
+  if (equivalence !== 'identical' && equivalence !== 'tree-equivalent') throw new Error(`unknown equivalence: ${equivalence}`)
   if (run?.run?.commit !== commit) throw new Error(`envelope is for commit ${run?.run?.commit ?? 'none'}, not ${commit}`)
   const warnings = []
   const projection = createRunProjection({ collectedAt, staleAfterMs, warn: message => warnings.push(message) })
@@ -222,6 +234,7 @@ export function componentPostureFromRun(run, { component, commit, released, mone
         branches: { covered: 0, missed: 0, percentage: null },
       },
       testInfrastructure: envelope.testInfrastructure,
+      evidenceSource: { commit, equivalence },
     },
     warnings,
   }

@@ -439,6 +439,7 @@ jobs:
           sparse-checkout: |
             openbank-admin-ui/scripts/publish-test-evidence.mjs
             openbank-admin-ui/src/lib/test-intelligence-run-projection.mjs
+            .github/scripts/publish-test-evidence.sh
             openbank-libs/governance/rules.yaml
             ${{ inputs.service }}/version.txt
           sparse-checkout-cone-mode: false
@@ -449,54 +450,19 @@ jobs:
           name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/evidence
 
-      - name: Project envelope to the component posture
-        id: project
-        env:
-          SERVICE: ${{ inputs.service }}
-        run: |
-          set -euo pipefail
-          released=false
-          [ -f "${SERVICE}/version.txt" ] && released=true
-          money_path="$(python3 - "${SERVICE}" <<'PY'
-          import sys, yaml
-          rules = yaml.safe_load(open("openbank-libs/governance/rules.yaml")) or {}
-          services = rules.get("money_path_services") or (rules.get("services") or {}).get("money_path") or []
-          print("true" if sys.argv[1] in services else "false")
-          PY
-          )"
-          key="$(node openbank-admin-ui/scripts/publish-test-evidence.mjs \
-            --run "${RUNNER_TEMP}/evidence/run.json" \
-            --component "${SERVICE}" --commit "${GITHUB_SHA}" \
-            --released "${released}" --money-path "${money_path}" \
-            --out "${RUNNER_TEMP}/posture.json")"
-          echo "key=${key}" >> "${GITHUB_OUTPUT}"
-
       - name: Assume the evidence-writer role (GitHub OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-test-evidence-writer
           aws-region: eu-north-1
 
+      # Same upload path as test-evidence-reconcile.yml: the tests ran on GITHUB_SHA itself.
       - name: Publish write-once
         env:
-          KEY: ${{ steps.project.outputs.key }}
-          BUCKET: openbank-sandbox-test-evidence
+          SERVICE: ${{ inputs.service }}
         run: |
-          set -uo pipefail
-          out="$(aws s3api put-object --bucket "${BUCKET}" --key "${KEY}" \
-            --body "${RUNNER_TEMP}/posture.json" --content-type application/json \
-            --cache-control 'public, max-age=31536000, immutable' \
-            --if-none-match '*' 2>&1)"
-          status=$?
-          if [ "${status}" -eq 0 ]; then
-            echo "Published s3://${BUCKET}/${KEY}"
-          elif printf '%s' "${out}" | grep -q 'PreconditionFailed'; then
-            echo "s3://${BUCKET}/${KEY} already published by an earlier attempt — kept (write-once)"
-          else
-            printf '%s\n' "${out}" >&2
-            echo "::warning::Test Intelligence evidence not published for ${KEY}"
-            exit 1
-          fi
+          bash .github/scripts/publish-test-evidence.sh "${SERVICE}" "${GITHUB_SHA}" "${GITHUB_SHA}" \
+            identical "${RUNNER_TEMP}/evidence/run.json"
 
   # ── contract: Pact provider verification + consumer-pact publishing ─────────────────────
   # In-cluster ARC pool only (the Pact Broker has no public ingress, ADR-0056) and only on the

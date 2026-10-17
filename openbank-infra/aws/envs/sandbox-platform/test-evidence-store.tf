@@ -12,8 +12,9 @@
 # conditional create (`If-None-Match: *`), and a second upload of the same key answers
 # 412 instead of replacing what the first run published.
 #
-# Writer: `_service-ci.yml`'s publish job on a push to main, via GitHub OIDC — no static
-# keys. PutObject only, and only through the reusable service workflow on main.
+# Writers: `_service-ci.yml`'s publish job (tests ran on the built commit) and
+# `test-evidence-reconcile.yml` (running image commit, tested on a commit proven build-identical),
+# both on main, via GitHub OIDC — no static keys. PutObject only.
 #
 # Reader: admin-ui, with NO credential. Access is granted to the VPC's existing S3
 # gateway endpoint (aws:SourceVpce), so the objects are readable from inside the VPC and
@@ -32,8 +33,12 @@
 
 locals {
   test_evidence_bucket = "${local.cluster_name}-test-evidence"
-  # The only workflow that may write: the reusable per-service CI, as run from main.
-  test_evidence_writer_workflow = "${local.ci_github_repo}/.github/workflows/_service-ci.yml@refs/heads/main"
+  # The only workflows that may write, as run from main. A reusable workflow's token names
+  # itself in job_workflow_ref; a top-level one names its own file.
+  test_evidence_writer_workflows = [
+    "${local.ci_github_repo}/.github/workflows/_service-ci.yml@refs/heads/main",
+    "${local.ci_github_repo}/.github/workflows/test-evidence-reconcile.yml@refs/heads/main",
+  ]
 }
 
 data "aws_vpc_endpoint" "s3_gateway" {
@@ -188,7 +193,7 @@ data "aws_iam_policy_document" "test_evidence_writer_assume" {
     condition {
       test     = "StringEqualsIfExists"
       variable = "${local.ci_oidc_host}:job_workflow_ref"
-      values   = [local.test_evidence_writer_workflow]
+      values   = local.test_evidence_writer_workflows
     }
   }
 }
