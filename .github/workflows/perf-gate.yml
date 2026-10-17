@@ -57,7 +57,8 @@ jobs:
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
-          # Engagement, Referral, Campaign and PID added as third through fortieth
+          # Engagement, Referral, Campaign, PID and Agent added as third through
+          # forty-first
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -105,6 +106,7 @@ jobs:
               "openbank-referral-service",
               "openbank-campaign-service",
               "openbank-pid-service",
+              "openbank-agent-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -178,6 +180,22 @@ jobs:
                   # "Found 2 deployment problems" — measured this PR)
                   "openbank-campaign-service",
               }
+              # Kafka dev-services: in dev mode Quarkus STARTS a kafka-native
+              # container (docker.io/apache/kafka-native, a ~590 MB pull) for any
+              # service whose yaml declares smallrye-kafka channels without a
+              # bootstrap-servers address and without devservices disabled. The
+              # first forty-one subjects configure one or the other (measured:
+              # none of them pulls an image at boot), so the gate never
+              # provisioned Kafka. openbank-agent-service is the first subject
+              # that would pull kafka-native on every runner boot (measured this
+              # PR: the pull starts during quarkusDev). The probe reads JDBC
+              # state, not messaging, so the broker stays unprovisioned and
+              # devservices is switched off instead — the SmallRye incoming
+              # connector logs connection-refused without one, which the
+              # disabled messaging health check already absorbs.
+              KAFKA_DEVSERVICES_OFF = {
+                  "openbank-agent-service",
+              }
               temporal = None
               if svc in NEEDS_TEMPORAL:
                   # The gap between the block header and `namespace:` varies per service
@@ -200,6 +218,7 @@ jobs:
                   "redis": "true" if needs_redis else "false",
                   "temporal": (temporal.group(1).strip() if temporal else ""),
                   "oidc_required": "true" if svc in OIDC_REQUIRED else "false",
+                  "kafka_devservices": "true" if svc in KAFKA_DEVSERVICES_OFF else "false",
               })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
@@ -274,6 +293,10 @@ jobs:
       # "true" only for the derive step's OIDC_REQUIRED declaration (constructor-injected
       # JsonWebToken — OIDC must stay enabled or ArC fails the boot; see the derive step).
       OIDC_REQUIRED: ${{ matrix.oidc_required }}
+      # "true" only for the derive step's KAFKA_DEVSERVICES_OFF declaration (smallrye-kafka
+      # channels without a configured broker — dev mode would otherwise pull kafka-native
+      # at boot; see the derive step).
+      KAFKA_DEVSERVICES: ${{ matrix.kafka_devservices }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -390,6 +413,15 @@ jobs:
           if [ "${SERVICE}" = "openbank-incentive-service" ]; then
             PEPPER_ARGS=(-DPROMO_CODE_PEPPER=perf-gate-pepper-0123456789abcdef)
           fi
+          # KAFKA_DEVSERVICES subjects declare smallrye-kafka channels with no
+          # broker address, so dev mode would pull and start kafka-native
+          # (~590 MB) at boot (measured on openbank-agent-service). The smoke
+          # reads JDBC state, not messaging — switch devservices off and let
+          # the disabled messaging health check absorb the brokerless channel.
+          KAFKA_ARGS=()
+          if [ "${KAFKA_DEVSERVICES}" = "true" ]; then
+            KAFKA_ARGS=(-Dquarkus.kafka.devservices.enabled=false)
+          fi
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
@@ -397,6 +429,7 @@ jobs:
             -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             "${OIDC_ARGS[@]}" \
             "${PEPPER_ARGS[@]}" \
+            "${KAFKA_ARGS[@]}" \
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
             -Dauthz.enforce=false \
             -Dquarkus.messaging.health.enabled=false \
