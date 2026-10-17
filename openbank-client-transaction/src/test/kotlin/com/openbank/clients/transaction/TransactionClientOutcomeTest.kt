@@ -9,7 +9,11 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.sun.net.httpserver.HttpServer
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.client.ClientBuilder
 import jakarta.ws.rs.client.Entity
@@ -22,6 +26,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.io.IOException
 import java.io.InputStream
 import java.lang.reflect.Type
 import java.net.InetSocketAddress
@@ -148,21 +153,6 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `a connection dropped before any status is thrown, not classified`() {
-        val dead = ServerSocket(0)
-        val port = dead.localPort
-        val acceptor = Thread {
-            dead.accept().close()
-            dead.close()
-        }.also { it.start() }
-
-        assertThatThrownBy {
-            TransactionClient.classify(post(port), TransactionResponse::class.java).await().indefinitely()
-        }.isNotInstanceOf(WebApplicationException::class.java)
-        acceptor.join()
-    }
-
-    @Test
     fun `the Quarkus shape - a WebApplicationException carrying the status - classifies the same`() {
         status = 409
         val real = Uni.createFrom().item<Response> { throw WebApplicationException(post().await().indefinitely()) }
@@ -172,13 +162,132 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `the Quarkus shape - a 503 WebApplicationException is rethrown unchanged`() {
+    fun `the Quarkus shape - a 503 WebApplicationException becomes TransactionHttpException`() {
         status = 503
-        val real = Uni.createFrom().item<Response> { throw WebApplicationException(post().await().indefinitely()) }
+        val wae = WebApplicationException(post().await().indefinitely())
+        val real = Uni.createFrom().item<Response> { throw wae }
 
         assertThatThrownBy {
             TransactionClient.classify(real, TransactionResponse::class.java).await().indefinitely()
-        }.isInstanceOfSatisfying(WebApplicationException::class.java) { assertThat(it.response.status).isEqualTo(503) }
+        }.isInstanceOfSatisfying(TransactionHttpException::class.java) {
+            assertThat(it.status).isEqualTo(503)
+            assertThat(it.cause).isSameAs(wae)
+        }
+    }
+
+    @Test
+    fun `401 404 and 304 are thrown as TransactionHttpException, never decided`() {
+        listOf(401, 404, 304).forEach { code ->
+            status = code
+            assertThatThrownBy { outcome() }
+                .describedAs("HTTP %d", code)
+                .isInstanceOfSatisfying(TransactionHttpException::class.java) { assertThat(it.status).isEqualTo(code) }
+        }
+    }
+
+    @Test
+    fun `the Quarkus shape - a WebApplicationException carrying a 2xx is Booked with that exception as bodyError`() {
+        status = 201
+        body = """{"id":"${UUID.randomUUID()}","status":"COMPLETED"}"""
+        val wae = WebApplicationException(post().await().indefinitely())
+        val real = Uni.createFrom().item<Response> { throw wae }
+
+        val result = TransactionClient.classify(real, TransactionResponse::class.java).await().indefinitely()
+
+        assertThat(result).isEqualTo(TransactionCallOutcome.Booked<TransactionResponse>(201, null, wae))
+    }
+
+    @Test
+    fun `a 201 with an EMPTY body is booked with no body and no error`() {
+        status = 201
+        body = null
+
+        val result = outcome() as TransactionCallOutcome.Booked
+
+        assertThat(result.body).isNull()
+        assertThat(result.bodyError).isNull()
+    }
+
+    @Test
+    fun `a reader that fails with a non-Jackson exception still leaves the 2xx Booked`() {
+        body = "EXPLODE"
+
+        val result = outcome() as TransactionCallOutcome.Booked
+
+        assertThat(result.body).isNull()
+        assertThat(result.bodyError).isNotNull()
+    }
+
+    @Test
+    fun `a connection dropped before any status is a ProcessingException with an IO cause`() {
+        val dead = ServerSocket(0)
+        val port = dead.localPort
+        val acceptor = Thread {
+            dead.accept().close()
+            dead.close()
+        }.also { it.start() }
+
+        assertThatThrownBy {
+            TransactionClient.classify(post(port), TransactionResponse::class.java).await().indefinitely()
+        }.isInstanceOf(ProcessingException::class.java).hasRootCauseInstanceOf(IOException::class.java)
+        acceptor.join()
+    }
+
+    // ---- close discipline and body-read failures on the refusal path, with a Response we can inspect ----
+
+    private fun fake(code: Int, entity: Boolean = false): Response {
+        val response = mockk<Response>(relaxed = true)
+        every { response.status } returns code
+        every { response.hasEntity() } returns entity
+        return response
+    }
+
+    @Test
+    fun `an unreadable 422 body leaves problem null and keeps the exception`() {
+        val response = fake(422, entity = true)
+        val boom = IllegalStateException("garbled")
+        every { response.readEntity(String::class.java) } throws boom
+
+        val result = TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
+            .await().indefinitely() as TransactionCallOutcome.Rejected
+
+        assertThat(result.problem).isNull()
+        assertThat(result.problemError).isSameAs(boom)
+    }
+
+    @Test
+    fun `every Response is closed exactly once on every path`() {
+        val cases = listOf(
+            201 to false,
+            204 to false,
+            409 to false,
+            422 to true,
+            400 to false,
+            503 to false,
+            403 to false,
+        )
+        cases.forEach { (code, entity) ->
+            val response = fake(code, entity)
+            every { response.readEntity(String::class.java) } returns "problem"
+            runCatching {
+                TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
+                    .await().indefinitely()
+            }
+            verify(exactly = 1) { response.close() }
+        }
+    }
+
+    @Test
+    fun `the Response inside a WebApplicationException is closed on every path too`() {
+        listOf(201, 409, 422, 503).forEach { code ->
+            val response = fake(code)
+            val wae = WebApplicationException(response)
+            runCatching {
+                TransactionClient.classify(Uni.createFrom().failure(wae), TransactionResponse::class.java)
+                    .await().indefinitely()
+            }
+            verify(exactly = 1) { response.close() }
+        }
     }
 
     /** Minimal JSON reader: the facade reads bodies through whatever the caller's client registers. */
