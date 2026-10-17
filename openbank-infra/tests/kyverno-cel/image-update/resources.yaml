@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: Apache-2.0
+# Synthetic old==new UPDATE fixtures; no live object data.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-metadata-update
+  namespace: default
+  annotations:
+    example.com/review: metadata-only
+spec:
+  restartPolicy: Never
+  containers:
+  - name: quay
+    image: quay.io/prometheus/prometheus:v3.0.0
+  - name: hub
+    image: docker.io/library/busybox:1.36
+  - name: k8s
+    image: registry.k8s.io/pause:3.10
+  - name: public
+    image: public.ecr.aws/docker/library/redis:7
+  - name: ghcr
+    image: ghcr.io/cloudnative-pg/postgresql:18.1
+  initContainers:
+  - name: init-quay
+    image: quay.io/prometheus/prometheus:v3.0.0
+  - name: init-hub
+    image: docker.io/library/busybox:1.36
+  - name: init-k8s
+    image: registry.k8s.io/pause:3.10
+  - name: init-public
+    image: public.ecr.aws/docker/library/redis:7
+  - name: init-ghcr
+    image: ghcr.io/cloudnative-pg/postgresql:18.1
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-metadata-update
+  namespace: default
+  annotations:
+    example.com/review: metadata-only
+  uid: 00000000-0000-0000-0000-000000000001
+  resourceVersion: '1'
+  deletionTimestamp: '2026-01-01T00:00:00Z'
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: quay
+        image: quay.io/prometheus/prometheus:v3.0.0
+      - name: hub
+        image: docker.io/library/busybox:1.36
+      - name: k8s
+        image: registry.k8s.io/pause:3.10
+      - name: public
+        image: public.ecr.aws/docker/library/redis:7
+      - name: ghcr
+        image: ghcr.io/cloudnative-pg/postgresql:18.1
+      initContainers:
+      - name: init-quay
+        image: quay.io/prometheus/prometheus:v3.0.0
+      - name: init-hub
+        image: docker.io/library/busybox:1.36
+      - name: init-k8s
+        image: registry.k8s.io/pause:3.10
+      - name: init-public
+        image: public.ecr.aws/docker/library/redis:7
+      - name: init-ghcr
+        image: ghcr.io/cloudnative-pg/postgresql:18.1
+status:
+  succeeded: 1
+  conditions:
+  - type: Complete
+    status: 'True'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deployment-metadata-update
+  namespace: default
+  annotations:
+    example.com/review: metadata-only
+spec:
+  selector:
+    matchLabels:
+      app: deployment-metadata-update
+  template:
+    metadata:
+      labels:
+        app: deployment-metadata-update
+    spec:
+      restartPolicy: Always
+      containers:
+      - name: quay
+        image: quay.io/prometheus/prometheus:v3.0.0
+      - name: hub
+        image: docker.io/library/busybox:1.36
+      - name: k8s
+        image: registry.k8s.io/pause:3.10
+      - name: public
+        image: public.ecr.aws/docker/library/redis:7
+      - name: ghcr
+        image: ghcr.io/cloudnative-pg/postgresql:18.1
+      initContainers:
+      - name: init-quay
+        image: quay.io/prometheus/prometheus:v3.0.0
+      - name: init-hub
+        image: docker.io/library/busybox:1.36
+      - name: init-k8s
+        image: registry.k8s.io/pause:3.10
+      - name: init-public
+        image: public.ecr.aws/docker/library/redis:7
+      - name: init-ghcr
+        image: ghcr.io/cloudnative-pg/postgresql:18.1
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cronjob-metadata-update
+  namespace: default
+  annotations:
+    example.com/review: metadata-only
+spec:
+  schedule: 0 0 * * *
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: quay
+            image: quay.io/prometheus/prometheus:v3.0.0
+          - name: hub
+            image: docker.io/library/busybox:1.36
+          - name: k8s
+            image: registry.k8s.io/pause:3.10
+          - name: public
+            image: public.ecr.aws/docker/library/redis:7
+          - name: ghcr
+            image: ghcr.io/cloudnative-pg/postgresql:18.1
+          initContainers:
+          - name: init-quay
+            image: quay.io/prometheus/prometheus:v3.0.0
+          - name: init-hub
+            image: docker.io/library/busybox:1.36
+          - name: init-k8s
+            image: registry.k8s.io/pause:3.10
+          - name: init-public
+            image: public.ecr.aws/docker/library/redis:7
+          - name: init-ghcr
+            image: ghcr.io/cloudnative-pg/postgresql:18.1

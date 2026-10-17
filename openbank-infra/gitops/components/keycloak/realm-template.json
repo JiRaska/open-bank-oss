@@ -39,12 +39,20 @@
         "description": "Bank administrator"
       },
       {
+        "name": "ROLE_MERGE_RECORDER",
+        "description": "CI merge-record ingest only (ADR-0031 phase 3): the record-agent-merge pipeline client carries exactly this role — least privilege, one endpoint, no interactive use"
+      },
+      {
         "name": "ROLE_OPERATOR",
         "description": "Bank operator"
       },
       {
         "name": "ROLE_VIEWER",
         "description": "Read-only access"
+      },
+      {
+        "name": "ROLE_MARKETING",
+        "description": "Marketing — manages referral/MGM program drafts (create), cannot attribute/qualify"
       },
       {
         "name": "ROLE_API",
@@ -1914,6 +1922,25 @@
         "ROLE_COMPLIANCE",
         "ROLE_VIEWER",
         "ROLE_COMMS_APPROVER"
+      ]
+    },
+    {
+      "username": "marketing@openbank.local",
+      "email": "marketing@openbank.local",
+      "firstName": "Marketing",
+      "lastName": "OpenBank",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__MARKETING_USER_PASSWORD__",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ROLE_MARKETING",
+        "ROLE_VIEWER"
       ]
     },
     {

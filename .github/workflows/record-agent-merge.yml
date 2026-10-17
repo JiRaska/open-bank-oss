@@ -1,0 +1,193 @@
+# -----------------------------------------------------------------------------
+# Record "a human merged an agent's PR" — ADR-0031 phase 3 evidence.
+#
+# WHY. Phase 3 of ADR-0031 needs recorded evidence that a HUMAN merged an agent-authored
+# PR, kept out-of-band of the agent's own telemetry (an agent self-reporting "a human
+# merged me" proves nothing). This workflow is the CI-side producer: on every PR closed
+# (merged) against main, .github/scripts/record-agent-merge.py decides whether the PR was
+# agent-authored (head branch under agent/ or codex/, or author declared in rules.yaml
+# autonomous_agent_prs.agent_accounts) and POSTs the record — mergedBy, merge commit,
+# head branch, title — to POST /api/v1/agent-merge-records in openbank-agent-service
+# (ROLE_MERGE_RECORDER-protected, ADR-0031 phase 3 backend).
+#
+# REQUIRED REPO CONFIGURATION (one-time, manual — the run FAILS CLOSED until done):
+#   * Repository variable AGENT_SERVICE_URL — base URL of openbank-agent-service, e.g.
+#     http://agent-service.platform.svc.cluster.local:8109. Reachable ONLY from the
+#     in-cluster ARC runner (see runs-on below); a GitHub-hosted runner cannot resolve
+#     cluster DNS, which is exactly why this job does not run on ubuntu-latest.
+#   * Repository variable AGENT_MERGE_RECORDER_ISSUER — OIDC issuer of the sandbox
+#     realm, e.g. http://keycloak.iam.svc:8080/realms/openbank. The standard
+#     /protocol/openid-connect/token path is appended by the mint step. Realm template
+#     sets accessTokenLifespan: 300, so a LONG-LIVED/static bearer JWT would silently
+#     die five minutes after provisioning — the token is therefore MINTED FRESH from a
+#     client_credentials pair on every run, never stored as a repo secret.
+#   * Repository secrets AGENT_MERGE_RECORDER_CLIENT_ID /
+#     AGENT_MERGE_RECORDER_CLIENT_SECRET — a CI-only Keycloak client_credentials pair
+#     whose client carries ROLE_MERGE_RECORDER (the POST endpoint is @RolesAllowed("ROLE_MERGE_RECORDER")).
+#     Provisioning the client is a Keycloak admin task (same shape as the
+#     AUDIT_ANCHOR_ATTESTATION_* client in runbook 0014 §8).
+#
+# FAIL CLOSED ON PURPOSE. This workflow fires on pull_request CLOSED — the merge has
+# ALREADY happened, so a red check here cannot block or un-do anything. The old fail-soft
+# design (::warning:: + exit 0 on every failure) therefore protected nothing and cost
+# everything: a green check with a missing record is the un-falsifiable state — it reads
+# exactly like "no agent PRs merged". Every failure (missing config, token endpoint down,
+# endpoint unreachable, non-2xx) now fails the run RED and opens/refresh one tracking
+# issue, so a silent gap in the merge-record evidence is visible the day it happens.
+#
+# Like record-deployment-on-merge.yml: `pull_request` (not `_target`) keeps same-repo
+# secrets; a fork PR gets no secrets and simply records nothing (soft warning).
+# -----------------------------------------------------------------------------
+name: Record agent PR merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One record per PR; a reopened/closed churn supersedes the earlier run.
+  group: record-agent-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Base URL of openbank-agent-service; the script appends /api/v1/agent-merge-records.
+  # In-cluster service DNS — ONLY the ARC runner resolves it.
+  AGENT_SERVICE_URL: ${{ vars.AGENT_SERVICE_URL }}
+  # OIDC issuer of the sandbox realm (accessTokenLifespan 300 — the mint step re-arms
+  # a fresh token every run, so expiry can never strand a record).
+  AGENT_MERGE_RECORDER_ISSUER: ${{ vars.AGENT_MERGE_RECORDER_ISSUER }}
+  # Optional override for the record's proposalId; normally the script reads a
+  # `Proposal-Id:` line from the PR body instead.
+  AGENT_MERGE_PROPOSAL_ID: ""
+  # Untrusted event data is passed as a FILE ($GITHUB_EVENT_PATH, set by the
+  # runner), never interpolated into the script.
+  GITHUB_EVENT_PATH: ${{ github.event_path }}
+
+jobs:
+  record:
+    name: record-agent-merge
+    env:
+      # Only the recorder job needs credentials for the authenticated POST.
+      AGENT_MERGE_RECORDER_CLIENT_ID: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_ID }}
+      AGENT_MERGE_RECORDER_CLIENT_SECRET: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET }}
+    # The workflow fires on every closed PR; only a MERGED one can produce a merge
+    # record, and the agent-authorship decision itself lives in the script (testable
+    # Python, thin YAML — repo convention).
+    if: github.event.pull_request.merged == true
+    # In-cluster ARC runner — the same lane as schema-registry-apply.yml (Apicurio),
+    # _service-ci.yml's Pact Broker publish and audit-anchor-attestation.yml: only it
+    # resolves the agent-service cluster-DNS name. ubuntu-latest would fail every POST
+    # at DNS resolution (fail-soft used to mask exactly that).
+    runs-on: openbank-build
+    timeout-minutes: 5
+    steps:
+      # The script and the rules.yaml it reads agent_accounts from. SHALLOW on purpose:
+      # nothing here needs history.
+      - name: Check out the recorder script and governance rules
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      # FAIL CLOSED, before anything else: an absent var/secret is a misconfigured
+      # control, and a misconfigured control must read as broken, not skip green.
+      - name: Fail closed on missing configuration
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${AGENT_SERVICE_URL:-}" ] || missing+=("vars.AGENT_SERVICE_URL")
+          [ -n "${AGENT_MERGE_RECORDER_ISSUER:-}" ] || missing+=("vars.AGENT_MERGE_RECORDER_ISSUER")
+          [ -n "${AGENT_MERGE_RECORDER_CLIENT_ID:-}" ] || missing+=("secrets.AGENT_MERGE_RECORDER_CLIENT_ID")
+          [ -n "${AGENT_MERGE_RECORDER_CLIENT_SECRET:-}" ] || missing+=("secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET")
+          if ((${#missing[@]})); then
+            echo "::error::record-agent-merge is UNCONFIGURED — missing: ${missing[*]}. A human merge of an agent PR will NOT be recorded until the sandbox CI client (client_credentials, ROLE_MERGE_RECORDER) and the vars above are provisioned. Absence of a record must NOT read as 'no agent PRs merged'."
+            exit 1
+          fi
+          echo "::notice::recorder configuration present (URL + issuer + client credentials)"
+
+      - name: Mint OIDC token (client_credentials)
+        env:
+          TOKEN_FILE: ${{ runner.temp }}/agent-merge-recorder-token
+        # The token lands in a 0600 header file under the runner temp dir and reaches the
+        # script via --token-file, so it never appears in the log or a process argv. The
+        # realm's accessTokenLifespan is 300 s — minting per run is what makes a 5-minute
+        # TTL a non-event. A non-2xx from the token endpoint fails the step: a recorder
+        # that cannot authenticate must read as an infrastructure failure, not skip green.
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          curl -sf --retry 3 --retry-delay 2 --max-time 15 \
+            -u "${AGENT_MERGE_RECORDER_CLIENT_ID}:${AGENT_MERGE_RECORDER_CLIENT_SECRET}" \
+            -d grant_type=client_credentials \
+            "${AGENT_MERGE_RECORDER_ISSUER}/protocol/openid-connect/token" -o "$tmp" \
+            || { echo "::error::token endpoint did not return 2xx — refusing to record an unauthenticated merge"; exit 1; }
+          tok="$(jq -r '.access_token // empty' "$tmp")"
+          [ -n "$tok" ] || { echo "::error::token response carried no access_token"; exit 1; }
+          umask 077
+          printf 'Authorization: Bearer %s' "$tok" > "$TOKEN_FILE"
+
+      - name: Record the human merge of an agent PR
+        env:
+          TOKEN_FILE: ${{ runner.temp }}/agent-merge-recorder-token
+        run: python3 .github/scripts/record-agent-merge.py --token-file "$TOKEN_FILE"
+
+  raise-issue:
+    name: Open the tracking issue on recorder failure
+    needs: record
+    # The merge already happened (pull_request closed) — a red run + tracking issue is
+    # the visible failure mode; it never blocks anything downstream.
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+    steps:
+      - name: Open or refresh the tracking issue
+        # Body written to a file, never passed via --body: backticks inside a
+        # double-quoted string are command substitution, and the failure is silent in
+        # the published text (same comment as audit-anchor-attestation.yml's raise-issue).
+        run: |
+          set -euo pipefail
+          TITLE="record-agent-merge failed — merge-record evidence gap (ADR-0031 phase 3)"
+          cat > "${RUNNER_TEMP}/body.md" <<EOF
+          The record-agent-merge workflow FAILED on a merged PR — the merge-record
+          evidence (ADR-0031 phase 3) has a gap.
+
+          - PR: ${PR_URL}
+          - Run: ${RUN_URL}
+
+          A green recorder run is the only positive signal that a human merge of an
+          agent PR was recorded out-of-band. This failure means the record is MISSING:
+          do not read the absence as "no agent PRs merged".
+
+          Triage, in order:
+          1. Missing vars/secrets — the run log lists exactly which (AGENT_SERVICE_URL,
+             AGENT_MERGE_RECORDER_ISSUER, AGENT_MERGE_RECORDER_CLIENT_ID/SECRET).
+          2. Token endpoint — is the sandbox Keycloak reachable from the ARC runner, and
+             is the CI client (ROLE_MERGE_RECORDER) provisioned?
+          3. Endpoint — POST /api/v1/agent-merge-records requires the deployed
+             agent-service to carry this PR's code; a 404 means deploy drift, not "no
+             records".
+
+          Keep this issue open until every referenced failed merge has been
+          backfilled and its merge record verified. A later successful run does
+          not repair an earlier gap.
+          EOF
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP}/body.md"
+          else
+            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/body.md" \
+              --label governance
+          fi

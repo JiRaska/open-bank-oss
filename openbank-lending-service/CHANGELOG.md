@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.0...lending-service-v0.43.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lending:** record provisioning-cycle attempts across restart and rollover ([#12315](https://github.com/JiRaska/open-bank-oss/issues/12315)) ([8fb8d99](https://github.com/JiRaska/open-bank-oss/commit/8fb8d994ae9d8987ca3750e1a6d1d15c5dec25b0))
+
 ## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.42.0...lending-service-v0.43.0) (2026-10-16)
 
 
