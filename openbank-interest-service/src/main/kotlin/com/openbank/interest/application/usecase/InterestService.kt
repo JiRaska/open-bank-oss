@@ -4,6 +4,7 @@
 
 package com.openbank.interest.application.usecase
 
+import com.openbank.interest.application.port.`in`.AccrualRunOutcome
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
 import com.openbank.interest.application.port.`in`.CapitalizationRunOutcome
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
@@ -176,21 +177,35 @@ class InterestService(
      * account to a no-op (0), never aborting the batch. Accounts are processed sequentially
      * (`concatenate`) to keep a bounded, polite load on account-service.
      */
-    override fun accrueAll(date: LocalDate): Uni<Int> {
+    override fun accrueAll(date: LocalDate): Uni<Int> = accrueAllWithOutcome(date).map { it.accrued }
+
+    override fun accrueAllWithOutcome(date: LocalDate): Uni<AccrualRunOutcome> {
         val accruableTypes = accruableAccountTypes.split(",").map {
             it.trim().uppercase()
         }.filter { it.isNotEmpty() }.toSet()
         return collectAccruableAccounts(cursor = null, acc = emptyList(), accruableTypes = accruableTypes)
             .flatMap { accounts ->
                 if (accounts.isEmpty()) {
-                    Uni.createFrom().item(0)
+                    Uni.createFrom().item(AccrualRunOutcome(0, 0, 0, null))
                 } else {
                     Multi.createFrom().iterable(accounts)
                         .onItem().transformToUniAndConcatenate { account -> accrueOneForDate(account, date) }
-                        .collect().with(java.util.stream.Collectors.summingInt { it })
+                        .collect().asList()
+                        .map { results ->
+                            AccrualRunOutcome(
+                                accrued = results.count { it.state == AccrualState.ACCRUED },
+                                failed = results.count { it.state == AccrualState.FAILED },
+                                unavailable = results.count { it.state == AccrualState.UNAVAILABLE },
+                                firstFailure = results.firstNotNullOfOrNull { it.reason },
+                            )
+                        }
                 }
             }
     }
+
+    private enum class AccrualState { ACCRUED, SKIPPED, FAILED, UNAVAILABLE }
+
+    private data class AccountAccrualResult(val state: AccrualState, val reason: String? = null)
 
     /** Walk account-service's cursor pages, keeping only the accruable account types, until the
      *  cursor is exhausted. Page count is small (fleet-wide ACTIVE set); recursion depth == pages. */
@@ -207,12 +222,17 @@ class InterestService(
         }
     }
 
-    /** Accrue one account for [date]; 1 if written, 0 if skipped (zero/negative balance, no rate
-     *  config, unavailable balance, or already accrued for [date]). Never fails the caller. */
-    private fun accrueOneForDate(account: AccountSnapshot, date: LocalDate): Uni<Int> =
+    /** Accrue one account for [date]. A zero/negative balance and a product with no rate are legitimate
+     *  no-ops; a missing balance (account-service unavailable) and an accrual that threw are NOT - they
+     *  are counted so the run cannot be reported as complete. Never fails the caller. */
+    private fun accrueOneForDate(account: AccountSnapshot, date: LocalDate): Uni<AccountAccrualResult> =
         accountDirectoryPort.bookedBalance(account.id).flatMap { balance ->
-            if (balance == null || balance.booked.signum() <= 0) {
-                Uni.createFrom().item(0)
+            if (balance == null) {
+                Uni.createFrom().item(
+                    AccountAccrualResult(AccrualState.UNAVAILABLE, "balance unavailable for account ${account.id}"),
+                )
+            } else if (balance.booked.signum() <= 0) {
+                Uni.createFrom().item(AccountAccrualResult(AccrualState.SKIPPED))
             } else {
                 accrue(
                     AccrualRequest(
@@ -222,8 +242,20 @@ class InterestService(
                         currency = balance.currency,
                         accrualDate = date,
                     ),
-                ).map { 1 }.onFailure().recoverWithItem(0)
+                ).map { AccountAccrualResult(AccrualState.ACCRUED) }
+                    .onFailure().recoverWithItem { e -> classifyAccrualFailure(account, e) }
             }
+        }
+
+    /** No rate for the product is a configuration fact, not a transient failure; anything else failed. */
+    private fun classifyAccrualFailure(account: AccountSnapshot, e: Throwable): AccountAccrualResult =
+        if (e is RateConfigNotFoundException) {
+            AccountAccrualResult(AccrualState.SKIPPED)
+        } else {
+            AccountAccrualResult(
+                AccrualState.FAILED,
+                "accrual failed for account ${account.id}: ${e.message ?: e.javaClass.simpleName}",
+            )
         }
 
     /**
@@ -611,13 +643,16 @@ class InterestService(
      * `interest-capitalization` workflow-liveness gauge stops reading "succeeded, 0 pairs" over a
      * wedge — which is how this went unnoticed for seven weeks.
      */
-    override fun recoverOutstandingClaims(): Uni<Int> =
+    override fun recoverOutstandingClaims(): Uni<Int> = recoverOutstandingClaimsCounted().map { it.recovered }
+
+    /** [recoverOutstandingClaims] with the claims that could NOT be completed counted. */
+    private fun recoverOutstandingClaimsCounted(): Uni<RecoveryCount> =
         accrualRepo.findOutstandingCapitalizationClaims().flatMap { claims ->
             if (claims.isEmpty()) {
                 // Report the zero explicitly: a gauge only ever written when something is wrong can
                 // never say "this is fixed now", which is the state an alert needs in order to clear.
                 capitalizationMetrics?.outstandingClaims(0)
-                Uni.createFrom().item(0)
+                Uni.createFrom().item(RecoveryCount(0, 0, null))
             } else {
                 log.warnf(
                     "capitalization recovery: %d outstanding claim(s) found; completing each at its claimed period",
@@ -627,7 +662,7 @@ class InterestService(
                 Multi.createFrom().iterable(claims)
                     .onItem().transformToUniAndConcatenate { (accountId, productId, claimedPeriodTo) ->
                         capitalize(accountId, productId, claimedPeriodTo)
-                            .map { 1 }
+                            .map { RecoveryCount(1, 0, null) }
                             .onItem().invoke { _ ->
                                 log.warnf(
                                     "capitalization recovery: completed stale claim account=%s product=%s period=%s",
@@ -652,16 +687,24 @@ class InterestService(
                                     capitalizationMetrics?.claimRecoveryFailed()
                                 }
                             }
-                            .onFailure().recoverWithItem(0)
+                            .onFailure().recoverWithItem { e -> RecoveryCount.failed(accountId, productId, e) }
                     }
-                    .collect().with(java.util.stream.Collectors.summingInt { it })
+                    .collect().with(
+                        java.util.stream.Collectors.reducing(RecoveryCount(0, 0, null)) { a, b ->
+                            RecoveryCount(
+                                a.recovered + b.recovered,
+                                a.failed + b.failed,
+                                a.firstFailure ?: b.firstFailure,
+                            )
+                        },
+                    )
                     // Re-report AFTER the pass, not just before it. Setting the gauge only from the
                     // pre-recovery count leaves it pinned at the wedged value even once every claim
                     // is completed — an alert that can never clear, which is the same class of
                     // silent-wrongness this whole change exists to remove. What remains outstanding
                     // is what was found minus what was completed.
-                    .onItem().invoke { recovered ->
-                        capitalizationMetrics?.outstandingClaims(claims.size - recovered)
+                    .onItem().invoke { counted ->
+                        capitalizationMetrics?.outstandingClaims(claims.size - counted.recovered)
                     }
             }
         }
@@ -669,7 +712,7 @@ class InterestService(
     override fun capitalizeAll(toDate: LocalDate): Uni<Int> = capitalizeAllWithOutcome(toDate).map { it.capitalized }
 
     override fun capitalizeAllWithOutcome(toDate: LocalDate): Uni<CapitalizationRunOutcome> =
-        recoverOutstandingClaims().flatMap { recovered ->
+        recoverOutstandingClaimsCounted().flatMap { recoveryCount ->
             accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
                 if (pairs.isEmpty()) {
                     Uni.createFrom().item(emptyList<PairResult>())
@@ -702,14 +745,27 @@ class InterestService(
                 val refused = results.mapNotNull { it.closedDayReason }
                 val failures = results.mapNotNull { it.failureReason }
                 CapitalizationRunOutcome(
-                    capitalized = recovered + results.count { it.capitalized },
+                    capitalized = recoveryCount.recovered + results.count { it.capitalized },
                     refusedClosedDay = refused.size,
                     refusalReason = refused.firstOrNull(),
-                    failed = failures.size,
-                    failureReason = failures.firstOrNull(),
+                    // A stranded claim that could not be completed is money frozen mid-credit: a failed
+                    // pair exactly like one that failed in the main loop.
+                    failed = failures.size + recoveryCount.failed,
+                    failureReason = failures.firstOrNull() ?: recoveryCount.firstFailure,
                 )
             }
         }
+
+    /** Outcome of one claim-recovery pass. */
+    private data class RecoveryCount(val recovered: Int, val failed: Int, val firstFailure: String?) {
+        companion object {
+            fun failed(accountId: UUID, productId: String, e: Throwable) = RecoveryCount(
+                0,
+                1,
+                "claim recovery account=$accountId product=$productId: ${e.message ?: e.javaClass.simpleName}",
+            )
+        }
+    }
 
     /** One pair's result inside [capitalizeAllWithOutcome]. */
     private data class PairResult(

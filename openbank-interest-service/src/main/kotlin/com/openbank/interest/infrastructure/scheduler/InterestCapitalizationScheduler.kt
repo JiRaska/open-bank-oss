@@ -50,6 +50,7 @@ class InterestCapitalizationScheduler(
     @Scheduled(
         cron = "{openbank.interest.capitalization-cron}",
         identity = "interest-monthly-capitalization",
+        timeZone = InterestCloseJobs.SCHEDULE_ZONE,
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runMonthlyCapitalization(): Uni<Void> {

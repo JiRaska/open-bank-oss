@@ -9,9 +9,23 @@ import io.smallrye.mutiny.Uni
 import java.time.LocalDate
 import java.util.UUID
 
+/**
+ * What one accrual run did (ADR-0342): accounts accrued, accounts whose accrual FAILED, and accounts
+ * whose balance was UNAVAILABLE (account-service down). A run with any failed/unavailable account
+ * must not be reported as RAN - the day would tie out with no interest for those accounts.
+ */
+data class AccrualRunOutcome(val accrued: Int, val failed: Int, val unavailable: Int, val firstFailure: String?) {
+    /** True when no account was left unaccrued for a reason other than a legitimate no-op. */
+    val complete: Boolean get() = failed == 0 && unavailable == 0
+}
+
 interface AccrueInterestUseCase {
     fun accrue(request: AccrualRequest): Uni<InterestAccrual>
     fun accrueAll(date: LocalDate): Uni<Int>
+
+    /** [accrueAll] with the failures counted. Defaulted so a stub implementing only [accrueAll] compiles. */
+    fun accrueAllWithOutcome(date: LocalDate): Uni<AccrualRunOutcome> =
+        accrueAll(date).map { AccrualRunOutcome(it, 0, 0, null) }
 }
 
 /**

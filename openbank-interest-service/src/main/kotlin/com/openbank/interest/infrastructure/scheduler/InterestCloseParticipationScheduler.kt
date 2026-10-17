@@ -66,6 +66,7 @@ class InterestCloseParticipationScheduler(
     @Scheduled(
         cron = "{openbank.interest.close.report-cron:0 30 * * * ?}",
         identity = "interest-close-participation",
+        timeZone = InterestCloseJobs.SCHEDULE_ZONE,
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun reportRecentDays(): Uni<Void> = reportDays(accountingClock.today())

@@ -4,6 +4,7 @@
 
 package com.openbank.interest.infrastructure.scheduler
 
+import com.openbank.interest.application.port.`in`.AccrualRunOutcome
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
 import com.openbank.interest.application.port.`in`.CapitalizationRunOutcome
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
@@ -14,6 +15,7 @@ import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseOutcome
 import com.openbank.libs.close.CloseParticipationReport
 import com.openbank.libs.close.CloseParticipationSink
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessMetrics
 import io.micrometer.core.instrument.MeterRegistry
@@ -230,5 +232,55 @@ class InterestCloseParticipationSchedulerTest {
         }, SimpleMeterRegistry(), pragueHalfPastMidnight)
             .reportRecentDays().await().indefinitely()
         assertThat(delivered.map { it.businessDate }).contains(LocalDate.of(2026, 10, 2))
+    }
+
+    @Test
+    fun `account-service unavailable for every account reports REFUSED and the day is not complete`() {
+        val stubbed = object : AccrueInterestUseCase {
+            override fun accrue(request: AccrualRequest): Uni<InterestAccrual> = error("unused")
+            override fun accrueAll(date: LocalDate): Uni<Int> =
+                error("the outcome variant is the one the scheduler uses")
+            override fun accrueAllWithOutcome(date: LocalDate): Uni<AccrualRunOutcome> =
+                Uni.createFrom().item(AccrualRunOutcome(0, 0, 3, "balance unavailable for account x"))
+        }
+        InterestAccrualScheduler(stubbed, pragueHalfPastMidnight, noOpDomainMetrics(), runs)
+            .runDailyAccrual().await().indefinitely()
+
+        val day = LocalDate.of(2026, 10, 3)
+        val run = runs.runs.getValue(day to InterestCloseJobs.ACCRUAL)
+        assertThat(run.refused).isEqualTo(3)
+        assertThat(run.refusalReason).contains("3 unavailable")
+
+        // Report it the way the participation tick does: accrual is the only job due that day.
+        val reportsFor = mutableListOf<CloseParticipationReport>()
+        InterestCloseParticipationScheduler(
+            closeJobRuns = runs,
+            sink = { _, r ->
+                reportsFor += r
+                Uni.createFrom().item(Unit)
+            },
+            meterRegistry = SimpleMeterRegistry(),
+            clock = Clock.fixed(Instant.parse("2026-10-03T22:30:00Z"), ZoneOffset.UTC),
+            domainMetrics = noOpDomainMetrics(),
+            accrualCron = "0 0 1 * * ?",
+            capitalizationCron = "off",
+            lookbackDays = 1,
+        ).reportRecentDays().await().indefinitely()
+        assertThat(reportsFor.single { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+    }
+
+    @Test
+    fun `every interest cron is evaluated in the zone the close reporter assumes`() {
+        assertThat(java.time.ZoneId.of(InterestCloseJobs.SCHEDULE_ZONE)).isEqualTo(AccountingClock.bank(clock).zone)
+        val pinned = listOf(
+            InterestAccrualScheduler::class.java.getMethod("runDailyAccrual"),
+            InterestCapitalizationScheduler::class.java.getMethod("runMonthlyCapitalization"),
+            InterestCloseParticipationScheduler::class.java.getMethod("reportRecentDays"),
+        )
+        for (method in pinned) {
+            val scheduled = method.getAnnotation(io.quarkus.scheduler.Scheduled::class.java)
+            assertThat(scheduled.timeZone).describedAs(method.declaringClass.simpleName)
+                .isEqualTo(InterestCloseJobs.SCHEDULE_ZONE)
+        }
     }
 }
