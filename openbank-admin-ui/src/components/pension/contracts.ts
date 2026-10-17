@@ -25,6 +25,7 @@ export const strategyElectionSchema = z.object({
 export const pensionContractSchema = z.object({
   contractId: z.string().min(1),
   participantPartyId: optionalText,
+  participantBirthDate: optionalText,
   productLine: z.string(),
   jurisdiction: z.string(),
   packVersion: z.number().int().nullable().optional(),

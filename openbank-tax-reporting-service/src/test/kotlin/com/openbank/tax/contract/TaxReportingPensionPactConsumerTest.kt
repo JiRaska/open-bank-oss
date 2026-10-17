@@ -119,7 +119,7 @@ class TaxReportingPensionPactConsumerTest {
                     "company",
                     ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-09-30")),
                 )
-        }
+        }.values
         assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         assertThat(definition.validate(values)).isEmpty()
     }
