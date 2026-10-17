@@ -256,8 +256,19 @@ class StateContributionReturnService(
 
     suspend fun reports(): List<ReturnReport> = returns.reports()
 
-    /** The deadline check behind the daily job (§16(2), §18(1)–(3)). It changes nothing. */
-    suspend fun deadlines(today: LocalDate = today()): StateContributionDeadlines {
+    /**
+     * The deadline check behind the daily job (§16(2), §18(1)–(3)). It changes nothing.
+     *
+     * No default parameter: a default would be evaluated by the static `deadlines$default`
+     * synthetic on the CDI client proxy that injection hands out, and the private [today] it
+     * calls is NOT overridden by the proxy — it would read the proxy's never-initialised field
+     * (NPE "this.clock is null", live on GET /state-contribution/deadlines). A delegating
+     * no-arg overload dispatches through the proxy to the real bean instead.
+     */
+    suspend fun deadlines(): StateContributionDeadlines = deadlines(today())
+
+    /** One pass for an explicit [today]; the daily job drives this with a chosen date. */
+    suspend fun deadlines(today: LocalDate): StateContributionDeadlines {
         val pastFiling = claims.byStatus(ClaimStatus.PENDING).count {
             today.isAfter(CzStateContributionCalendar.filingDeadline(it.period))
         }

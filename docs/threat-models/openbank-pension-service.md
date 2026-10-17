@@ -337,3 +337,30 @@ measurements on running pods or successful hosted CI on a later documentation-on
 this observation removes the counter call and metric wiring while retaining the replay scope and
 fingerprint checks. The separate pending staff-search assessment in #12943 is not part of this
 change; a future merge must preserve both independent threat-model additions.
+
+## Staff contract search and participant birth-date response — #12942
+
+The staff contract-list surface accepts an optional free-text `q` covering contract and participant
+identifiers, product line, participant birth date, and payment reference.
+`ContractResponse.participantBirthDate` is personal data. Existing contract-read authorization still
+runs before the use case; search does not introduce a new role grant. The use case ignores `q` for a
+participant caller and loads only that participant's contracts. Only the staff path can invoke the
+cross-contract search, while the existing status filter narrows results and the result limit remains
+capped at 100.
+
+The repository binds the search pattern and digit pattern as SQL parameters; the optional status
+fragment comes only from the `ContractStatus` enum. Payment-reference matching selects contract IDs
+before normal aggregate hydration. These controls address SQL injection and cross-participant
+disclosure; they do not establish indexed or constant-time search. Search input, birth dates,
+payment references, and returned records must remain confidential. This change adds no application
+logging of those values and no new retention or external data destination; operational access-log
+configuration requires its own assessment and is not proven by the source tests.
+
+Evidence: the real HTTP integration test exercises birth-date, identifier, product and reference
+matches plus status narrowing. Existing participant ownership checks remain in the read path; that
+scope is also enforced independently of the UI's request-ordering guard. The UI guard suppresses
+stale completions only and is not an authorization control. The deadline endpoint regression
+exercises the injected CDI bean and prevents the default-argument proxy failure; it changes no
+deadline rule or financial operation. These are source/test claims, not proof of deployment, access-
+log redaction or runtime enforcement. Rollback: revert the search parameter/response addition and UI
+changes together; no migration or stored-data rewrite is introduced.

@@ -23,7 +23,7 @@ This documentation is published by the service at the management endpoint `/q/op
 | `PUT /api/v2/pension/contracts/{id}/strategy` | Elect or change the strategy (history kept) |
 | `POST /api/v2/pension/contracts/{id}/suspend` / `resume` | Pause / resume contributions |
 | `POST /api/v2/pension/contracts/{id}/incentive-evaluation` | Incentives of the pinned pack for one contribution |
-| `GET /api/v2/pension/contracts` | The participant's own contracts (staff: by status) |
+| `GET /api/v2/pension/contracts` | The participant's own contracts (staff: by status, optional free-text `q`) |
 | `POST /api/v2/pension/simulations` | Illustrative projection per strategy (not advice) |
 | `PUT /api/v2/pension/contracts/{contractId}/exit/payouts/{payoutId}/account` | SCA-bound, held (3 days), notified payout-account change |
 | `GET /api/v2/pension/operator/payouts`, `GET /api/v2/pension/death-claims` | Staff queues |
@@ -40,6 +40,23 @@ The payout recovery sweep registers workflow `pension-payout-schedule-sweep` at 
 `openbank_workflow_success_recorded` distinguishes a registered workflow that has not completed from a successful run. `openbank_workflow_last_success_age_seconds` is seeded at registration, so its startup value alone is not proof that a sweep ran. The existing overdue-installment gauge measures workload; the heartbeat measures execution.
 
 An `off` or `disabled` interval disables the schedule and publishes no workflow heartbeat.
+
+## Staff contract search
+
+Staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) can pass a free-text `q` on
+`GET /api/v2/pension/contracts`. It matches, case-insensitively, a fragment of the contract
+id or participant party id, the product line, the participant birth date — both the ISO
+form (`1985-05-05`) and the digit-only form (`850505`) — and the payment reference
+(variabilní symbol) via `pension_contract_references`. The response carries
+`participantBirthDate` so same-named participants can be told apart. A participant caller
+without a staff role cannot use `q`; the parameter is ignored and only that party's own
+contracts are returned.
+
+`GET /api/v2/state-contributions/deadlines` returns the filing-deadline view of the state
+contribution return for a reference date. The resource calls a no-argument service method;
+resolving "today" inside the service (a default argument read on the CDI client proxy)
+NPE'd, so the method resolves the clock on the real bean and only the scheduler passes an
+explicit date.
 
 ## Participant reporting for the ČNB returns
 
