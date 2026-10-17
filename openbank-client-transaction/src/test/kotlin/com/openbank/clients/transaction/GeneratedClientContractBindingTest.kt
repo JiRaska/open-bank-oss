@@ -83,6 +83,26 @@ class GeneratedClientContractBindingTest {
         }
     }
 
+    // A booked 2xx must never turn into a client-side error because the provider grew: unknown
+    // properties are ignored (Quarkus' rest-client mapper) and the response-only vocabularies are
+    // plain strings in the spec, so a value this client has never seen still binds.
+    @Test
+    fun `a response with unknown fields and unknown vocabulary values still binds`() {
+        val json = """
+            {"id": "4f1d2a5e-0f7f-4c37-9a3c-1c7b1a2f9f01", "status": "COMPLETED", "somethingNew": {"a": 1},
+             "category": "GROCERIES", "categorySource": "A_SOURCE_ADDED_LATER",
+             "merchant": {"cleanName": "Alza.cz", "source": "ENRICHED_V2",
+                          "geo": {"lat": 50.1, "lon": 14.4, "precision": "STREET"}}}
+        """.trimIndent()
+        val lenient = mapper.copy().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+
+        val tx = lenient.readValue(json, TransactionResponse::class.java)
+
+        assertThat(tx.status).isEqualTo("COMPLETED")
+        assertThat(tx.categorySource).isEqualTo("A_SOURCE_ADDED_LATER")
+        assertThat(tx.merchant?.geo?.precision).isEqualTo("STREET")
+    }
+
     private fun recorded(httpMethod: String, status: Int): Map<String, JsonNode> {
         val dir = File(System.getProperty("openbank.pacts.dir") ?: error("openbank.pacts.dir not set by the build"))
         val out = linkedMapOf<String, JsonNode>()
