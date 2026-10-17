@@ -37,6 +37,7 @@ import java.time.OffsetDateTime
  * Assertions go through a recording [ApprovalStore] and the HTTP status, never the entity type, so
  * a service with its own wire DTO (sca) conforms on the same terms.
  */
+@Suppress("FunctionNaming") // one backticked @Test per conformance case, as OutboxDispatchConformanceIT
 abstract class ApprovalEndpointConformance {
 
     /** The two operations every approval resource serves, adapted from the service's own types. */
@@ -54,17 +55,17 @@ abstract class ApprovalEndpointConformance {
     fun `listPending serves the store's queue`(): Unit = runBlocking {
         val store = RecordingApprovalStore(pending = listOf(pending()))
 
-        val response = bind(store, identity("checker-1")).listPending(50)
+        val response = bind(store, identity("checker-1")).listPending(DEFAULT_LIMIT)
 
-        assertThat(response.status).isEqualTo(200)
-        assertThat(store.findPendingLimits).containsExactly(50)
+        assertThat(response.status).isEqualTo(Response.Status.OK.statusCode)
+        assertThat(store.findPendingLimits).containsExactly(DEFAULT_LIMIT)
     }
 
     @Test
     fun `listPending clamps a caller-controlled limit`(): Unit = runBlocking {
         val store = RecordingApprovalStore()
 
-        bind(store, identity("checker-1")).listPending(10_000)
+        bind(store, identity("checker-1")).listPending(OVERSIZED_LIMIT)
 
         assertThat(store.findPendingLimits.single()).isBetween(1, MAX_PENDING_LIMIT)
     }
@@ -75,7 +76,7 @@ abstract class ApprovalEndpointConformance {
 
         val response = bind(store, identity("checker-1")).decide(PENDING_ID, approve = true)
 
-        assertThat(response.status).isEqualTo(200)
+        assertThat(response.status).isEqualTo(Response.Status.OK.statusCode)
         assertThat(store.decisions).containsExactly(Triple(PENDING_ID, "checker-1", true))
     }
 
@@ -176,6 +177,8 @@ abstract class ApprovalEndpointConformance {
     private companion object {
         const val PENDING_ID = "appr-pending"
         const val MAKER = "maker"
+        const val DEFAULT_LIMIT = 50
+        const val OVERSIZED_LIMIT = 10_000
 
         /** Mirrors `ApprovalEndpointSupport.MAX_PENDING_LIMIT` (libs-runtime). */
         const val MAX_PENDING_LIMIT = 200
