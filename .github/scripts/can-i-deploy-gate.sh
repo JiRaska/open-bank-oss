@@ -54,12 +54,25 @@ SERVICES="${SERVICES:?}"
 reconcile_present='{}'
 block_class='{}'
 block_reason='{}'
+reconcile_blocked='[]'
+reconcile_source_blocked=0
+
+refuse_reconcile_source() {
+  local svc="$1"
+  local why="Broker has no Pacticipant and no verified Pact source"
+  echo "::error::reconcile source refused for ${svc}: ${why}"
+  reconcile_source_blocked=1
+  reconcile_blocked="$(jq -cn --argjson old "$reconcile_blocked" --arg svc "$svc" '$old + [$svc] | unique')"
+  block_class="$(jq -cn --argjson old "$block_class" --arg svc "$svc" '$old + {($svc): "NOT_ASKED"}')"
+  block_reason="$(jq -cn --argjson old "$block_reason" --arg svc "$svc" --arg why "$why" '$old + {($svc): $why}')"
+}
 
 # Reconcile builds the current workflow SHA, while its usable Pact may have been published by
 # an earlier path-scoped Services CI run. A Broker tag alone is not provenance. Resolve and
-# verify every service source as one batch: exact current SHA, or an older exact-main Services
-# CI SHA whose service tree is byte-identical to the image being built. Any missing/ambiguous
-# source, API failure, failed child job, or non-equivalent tree aborts before any Pact verdict
+# verify eligible service sources: exact current SHA, or an older exact-main Services
+# CI SHA whose service tree is byte-identical to the image being built. Known absent Pacticipants
+# are individually refused; ambiguous source, API failure, failed child job, or a non-equivalent
+# tree aborts before any Pact verdict
 # or Broker setup mutation. gitops-pr treats gate_ran=true + deployable=[] as fail-closed.
 if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
   source_failure=0
@@ -109,8 +122,7 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
             --arg svc "$svc" '$old + [$svc]')"
           ;;
         absent)
-          echo "::error::reconcile source refused for ${svc}: Broker has no Pacticipant and no verified Pact source"
-          source_failure=1
+          refuse_reconcile_source "$svc"
           ;;
         *)
           echo "::error::reconcile source refused for ${svc}: no exact or tree-equivalent Pact source (${present})"
@@ -138,6 +150,10 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
   fi
   if [ "$source_failure" -eq 0 ]; then
     for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      # Known absence refuses only this member; the full image-map keyset was checked above.
+      if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$reconcile_blocked"; then
+        continue
+      fi
       source_ci_verified=false
       if [ "$use_explicit_sources" = true ]; then
         source_sha="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$explicit_sources")"
@@ -159,8 +175,7 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
             # registered Pacticipant there is no durable contract verdict to bind
             # to this image; a later registration could make the same image unsafe
             # after this job has already handed its result to gitops-pr.
-            echo "::error::reconcile source refused for ${svc}: Broker has no Pacticipant and no verified Pact source"
-            source_failure=1
+            refuse_reconcile_source "$svc"
             continue
             ;;
           *)
@@ -209,7 +224,17 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     } >> "$GITHUB_STEP_SUMMARY"
     exit 1
   fi
-  echo "Verified exact build-push image evidence, successful exact-main Services CI build/contract evidence, and a verifiable Pact source for every reconcile service."
+  if [ "$reconcile_source_blocked" -eq 1 ] && {
+    [ "$(jq 'length' <<< "$reconcile_blocked")" -eq "$(jq 'length' <<< "$SERVICES")" ] ||
+    { [ "$EVENT_NAME" = workflow_dispatch ] && [ "${INPUT_CODEPLOY:-}" = true ]; }
+  }; then
+    # No eligible member, or an explicitly atomic co-deploy set cannot be proven in full.
+    echo "deployable=[]" >> "$GITHUB_OUTPUT"
+    echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+    echo "### Reconcile refused: no complete Pact source for the requested set" >> "$GITHUB_STEP_SUMMARY"
+    exit 1
+  fi
+  echo "Verified exact build-push image evidence for the full set and successful exact-main CI/Pact source for every eligible reconcile service."
 fi
 
 arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
@@ -381,6 +406,11 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
 fi
 
 for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+  if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$reconcile_blocked"; then
+    rc=1
+    printf '===SERVICE %s\tNOT_ASKED\n' "$svc" >> "$BLOCKS_FILE"
+    continue
+  fi
   # A service that has never published a contract is not a Pacticipant in the
   # broker; `can-i-deploy` then errors with "Pacticipant <svc> not found" (matrix
   # 400) and the verdict reads as "NOT deployable". But a service with NO contracts
@@ -395,6 +425,12 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     # A source that disappears or becomes unobservable after preflight cannot
     # inherit the successful source proof. Do not let 404, 5xx or network errors
     # turn into the ordinary no-contract deploy path for a reconcile.
+    if [ "$code" = 404 ]; then
+      refuse_reconcile_source "$svc"
+      rc=1
+      printf '===SERVICE %s\tNOT_ASKED\n' "$svc" >> "$BLOCKS_FILE"
+      continue
+    fi
     echo "::error::reconcile source refused for ${svc}: Pacticipant is missing or unavailable after source preflight (HTTP ${code})"
     echo "deployable=[]" >> "$GITHUB_OUTPUT"
     echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
@@ -614,7 +650,8 @@ fi
 # contract break — retried forever, reported never. A REGRESSION therefore fails the
 # scheduled run exactly as a money-path block does.
 if [ "${EVENT_NAME}" = "schedule" ] && [ "$rc" -ne 0 ] \
-   && [ "${mp_blocked:-0}" != "1" ] && [ "${regression_blocked:-0}" != "1" ]; then
+   && [ "${mp_blocked:-0}" != "1" ] && [ "${regression_blocked:-0}" != "1" ] \
+   && [ "$reconcile_source_blocked" != "1" ]; then
   echo "::notice::reconcile tick: ${BLOCKED_N:-0} service(s) still gate-blocked (non money-path, self-clearing classes only) — left for a later tick; the deployable subset deployed. Not failing the scheduled run."
   exit 0
 fi

@@ -67,6 +67,13 @@ if [ "$is_status" = true ]; then
   case "$url" in
     */versions/*)
       case "${BROKER_MODE:-known}" in
+        mixed|mixed-late-absent|mixed-late-unavailable)
+          if [[ "$url" == */pacticipants/openbank-good-service/* ]] || [ "$BROKER_MODE" != mixed ]; then
+            echo 200
+          else
+            echo 404
+          fi
+          ;;
         push-fails|verified) echo 200 ;;
         source-ready)
           if [[ "$url" == */versions/${RESOLVER_SHA:-unset} ]]; then echo 200; else echo 404; fi
@@ -76,6 +83,12 @@ if [ "$is_status" = true ]; then
       ;;
     */pacticipants/*)
       case "${BROKER_MODE:-known}" in
+        mixed|mixed-late-absent)
+          if [[ "$url" == */pacticipants/openbank-good-service ]]; then echo 200; else echo 404; fi
+          ;;
+        mixed-late-unavailable)
+          if [[ "$url" == */pacticipants/openbank-good-service ]]; then echo 200; else echo 503; fi
+          ;;
         absent) echo 404 ;;
         verified) echo 200 ;;
         appears)
@@ -248,6 +261,80 @@ if ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
   exit 1
 fi
 echo "PASS: co-deploy rejects absent Pacticipant before building its Pact matrix"
+
+# A known absent service is not evidence that an independently proven peer is unsafe.
+# Original full image-map coverage remains mandatory even when one source is refused.
+run_mixed_case() {
+  local order="$1" mode="$2" atomic="$3" trust_failure="$4"
+  export SERVICES="$order" BROKER_MODE="$mode" INPUT_CODEPLOY="$atomic"
+  export INPUT_CODEPLOY_PACT_VERSIONS='{}' RECONCILE_SOURCE_REQUIRED=true
+  export EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule GITHUB_SHA="$sha"
+  [ "$atomic" != true ] || export EVENT_NAME=workflow_dispatch GITHUB_EVENT_NAME=workflow_dispatch
+  export GH_TOKEN=fixture SERVICE_CI_MODE=success SERVICE_CI_EXPECTED_SOURCE="$sha"
+  export IMAGE_TAGS='{"openbank-good-service":"sandbox-01234567","openbank-absent-service":"sandbox-01234567"}'
+  export IMAGE_DIGESTS='{"openbank-good-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","openbank-absent-service":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  export BUILD_IMAGE_TAG=sandbox-01234567 PACT_CLI_MODE=success
+  export PACT_WAIT_PER_SERVICE_SECONDS=0 PACT_WAIT_BUDGET_SECONDS=0
+  case "$trust_failure" in
+    image) export IMAGE_TAGS='{"openbank-good-service":"sandbox-01234567"}' ;;
+    ci) export SERVICE_CI_MODE=failure ;;
+    pact) export PACT_CLI_MODE=failure ;;
+  esac
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"
+  : > "$SERVICE_CI_LOG"; : > "$PACT_CLI_LOG"
+  if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/mixed-log" 2>&1; then
+    echo "FAIL: source-refused reconcile must remain visibly unsuccessful" >&2
+    cat "$tmp/mixed-log" >&2; exit 1
+  fi
+  if [ "$atomic" = true ] || [ "$trust_failure" != none ] || [ "$mode" = absent ] || [ "$mode" = mixed-late-unavailable ]; then
+    if ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT"; then
+      echo "FAIL: atomic or hard trust failure did not empty the deployment set" >&2
+      cat "$GITHUB_OUTPUT" "$tmp/mixed-log" >&2; exit 1
+    fi
+    if [ "$mode" != mixed-late-unavailable ] && [ "$trust_failure" != pact ] && [ -s "$PACT_CLI_LOG" ]; then
+      echo "FAIL: atomic/source/image refusal reached Pact CLI" >&2
+      cat "$PACT_CLI_LOG" >&2; exit 1
+    fi
+    if [ "$trust_failure" = image ] && [ -s "$SERVICE_CI_LOG" ]; then
+      echo "FAIL: malformed full image map reached service source checks" >&2; exit 1
+    fi
+  else
+    if ! grep -q '^deployable=\["openbank-good-service"\]$' "$GITHUB_OUTPUT" || \
+       ! grep -q '^blocked=\["openbank-absent-service"\]$' "$GITHUB_OUTPUT" || \
+       ! grep -F -- "--pacticipant openbank-good-service --version $sha" "$PACT_CLI_LOG" >/dev/null || \
+       ! grep -F -- "verify-successful-service-ci.py openbank-good-service $sha" "$SERVICE_CI_LOG" >/dev/null || \
+       ! grep -q 'NOT_ASKED' "$GITHUB_STEP_SUMMARY"; then
+      echo "FAIL: absent Pacticipant starved its fully proven peer or lost refusal evidence" >&2
+      cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/mixed-log" >&2; exit 1
+    fi
+  fi
+  if [ "$mode" = mixed ] && grep -q 'verify-successful-service-ci.py openbank-absent-service' "$SERVICE_CI_LOG"; then
+    echo "FAIL: known absent service reached the successful-source verifier" >&2; exit 1
+  fi
+  if [ "$trust_failure" = pact ] && \
+     ! grep -F -- "--pacticipant openbank-good-service --version $sha" "$PACT_CLI_LOG" >/dev/null; then
+    echo "FAIL: independent peer bypassed its own failed Pact verdict" >&2; exit 1
+  fi
+  if grep -q -- '--pacticipant openbank-absent-service' "$PACT_CLI_LOG"; then
+    echo "FAIL: Pact CLI was asked about an unproven service" >&2; exit 1
+  fi
+  echo "PASS: mixed source case $mode / atomic=$atomic / trust=$trust_failure / $order"
+}
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed false none
+run_mixed_case '["openbank-absent-service","openbank-good-service"]' mixed false none
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed true none
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed false image
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed false ci
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed false pact
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' absent false none
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed-late-absent false none
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed-late-unavailable false none
+# Restore the original one-service fixture for the existing historical-source and push cases.
+export SERVICES='["openbank-demo-service"]'
+export INPUT_CODEPLOY=false EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule
+export IMAGE_TAGS='{"openbank-demo-service":"sandbox-01234567"}'
+export IMAGE_DIGESTS='{"openbank-demo-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+export SERVICE_CI_EXPECTED_SOURCE="" SERVICE_CI_MODE=success PACT_CLI_MODE=failure
 
 # Positive integration path for #13070: the Broker's latest main-tagged source has changed
 # service inputs and cannot describe this image, while an earlier successful Services CI
