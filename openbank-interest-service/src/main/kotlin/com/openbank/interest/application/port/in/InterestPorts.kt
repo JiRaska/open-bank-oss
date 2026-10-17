@@ -14,9 +14,16 @@ import java.util.UUID
  * whose balance was UNAVAILABLE (account-service down). A run with any failed/unavailable account
  * must not be reported as RAN - the day would tie out with no interest for those accounts.
  */
-data class AccrualRunOutcome(val accrued: Int, val failed: Int, val unavailable: Int, val firstFailure: String?) {
+data class AccrualRunOutcome(
+    val accrued: Int,
+    val failed: Int,
+    val unavailable: Int,
+    val firstFailure: String?,
+    /** The account LIST could not be read (account-service down on some page): no reliable account set. */
+    val listingFailed: Boolean = false,
+) {
     /** True when no account was left unaccrued for a reason other than a legitimate no-op. */
-    val complete: Boolean get() = failed == 0 && unavailable == 0
+    val complete: Boolean get() = failed == 0 && unavailable == 0 && !listingFailed
 }
 
 interface AccrueInterestUseCase {

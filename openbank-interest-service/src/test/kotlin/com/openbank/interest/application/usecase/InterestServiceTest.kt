@@ -610,6 +610,33 @@ class InterestServiceTest {
     }
 
     @Test
+    fun `a failed account listing - first page or page N - is never an empty successful run`() {
+        val date = LocalDate.of(2026, 1, 20)
+        val a = UUID.fromString("00000000-0000-0000-0000-0000000000d1")
+
+        // First page fails.
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns
+            Uni.createFrom().failure(IllegalStateException("account-service 503"))
+        val first = service.accrueAllWithOutcome(date).await().indefinitely()
+        assertThat(first.listingFailed).isTrue()
+        assertThat(first.complete).describedAs("an unreadable list is not 'no accounts'").isFalse()
+        assertThatThrownBy { service.accrueAll(date).await().indefinitely() }
+            .hasMessageContaining("account listing failed")
+
+        // Page 1 succeeds, page 2 (cursor) fails: nothing is accrued from a silently truncated list.
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(listOf(AccountSnapshot(a, "SAVINGS_PRODUCT", "SAVINGS", "CZK")), nextCursor = "c1"),
+        )
+        every { accountDirectoryPort.listActiveAccounts("c1", any()) } returns
+            Uni.createFrom().failure(IllegalStateException("account-service 503"))
+        val pageN = service.accrueAllWithOutcome(date).await().indefinitely()
+        assertThat(pageN.listingFailed).isTrue()
+        assertThat(pageN.accrued).isEqualTo(0)
+        assertThat(pageN.complete).isFalse()
+        verify(exactly = 0) { accountDirectoryPort.bookedBalance(any()) }
+    }
+
+    @Test
     fun `capitalizeAllWithOutcome counts a stranded claim that recovery could not complete as failed`() {
         val toDate = LocalDate.of(2026, 1, 20)
         val account = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd")

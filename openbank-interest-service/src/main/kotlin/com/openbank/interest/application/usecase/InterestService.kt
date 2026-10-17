@@ -177,15 +177,28 @@ class InterestService(
      * account to a no-op (0), never aborting the batch. Accounts are processed sequentially
      * (`concatenate`) to keep a bounded, polite load on account-service.
      */
-    override fun accrueAll(date: LocalDate): Uni<Int> = accrueAllWithOutcome(date).map { it.accrued }
+    override fun accrueAll(date: LocalDate): Uni<Int> = accrueAllWithOutcome(date).map {
+        // A manual run must not answer "processed 0" over an outage it could not even list accounts in.
+        check(!it.listingFailed) { it.firstFailure ?: "account listing failed" }
+        it.accrued
+    }
 
     override fun accrueAllWithOutcome(date: LocalDate): Uni<AccrualRunOutcome> {
         val accruableTypes = accruableAccountTypes.split(",").map {
             it.trim().uppercase()
         }.filter { it.isNotEmpty() }.toSet()
         return collectAccruableAccounts(cursor = null, acc = emptyList(), accruableTypes = accruableTypes)
+            .map<List<AccountSnapshot>?> { it }
+            .onFailure().recoverWithItem { e ->
+                log.errorf(e, "accrual for %s: account listing failed - the run is not complete", date)
+                null
+            }
             .flatMap { accounts ->
-                if (accounts.isEmpty()) {
+                if (accounts == null) {
+                    Uni.createFrom().item(
+                        AccrualRunOutcome(0, 0, 0, "account listing failed (account-service unavailable)", true),
+                    )
+                } else if (accounts.isEmpty()) {
                     Uni.createFrom().item(AccrualRunOutcome(0, 0, 0, null))
                 } else {
                     Multi.createFrom().iterable(accounts)

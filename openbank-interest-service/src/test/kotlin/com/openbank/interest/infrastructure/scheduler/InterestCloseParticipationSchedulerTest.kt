@@ -270,6 +270,35 @@ class InterestCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `an incomplete accrual tick does not refresh liveness (balances, listing, accruals)`() {
+        val outcomes = listOf(
+            AccrualRunOutcome(0, 0, 3, "balance unavailable"),
+            AccrualRunOutcome(0, 0, 0, "account listing failed", listingFailed = true),
+            AccrualRunOutcome(1, 2, 0, "accrual failed"),
+        )
+        for (outcome in outcomes) {
+            val stubbed = object : AccrueInterestUseCase {
+                override fun accrue(request: AccrualRequest): Uni<InterestAccrual> = error("unused")
+                override fun accrueAll(date: LocalDate): Uni<Int> = error("unused")
+                override fun accrueAllWithOutcome(date: LocalDate): Uni<AccrualRunOutcome> =
+                    Uni.createFrom().item(outcome)
+            }
+            val registry = SimpleMeterRegistry()
+            val accrualRuns = RecordingCloseJobRuns()
+            val scheduler =
+                InterestAccrualScheduler(stubbed, pragueHalfPastMidnight, metricsOver(registry), accrualRuns)
+            scheduler.onStart(StartupEvent())
+            scheduler.runDailyAccrual().await().indefinitely()
+
+            val gauge = registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+                .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "interest-accrual").gauge()?.value()
+            assertThat(gauge).describedAs("$outcome").isEqualTo(0.0)
+            val run = accrualRuns.runs.getValue(LocalDate.of(2026, 10, 3) to InterestCloseJobs.ACCRUAL)
+            assertThat(run.refused).describedAs("$outcome").isGreaterThan(0)
+        }
+    }
+
+    @Test
     fun `every interest cron is evaluated in the zone the close reporter assumes`() {
         assertThat(java.time.ZoneId.of(InterestCloseJobs.SCHEDULE_ZONE)).isEqualTo(AccountingClock.bank(clock).zone)
         val pinned = listOf(

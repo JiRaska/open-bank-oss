@@ -66,7 +66,11 @@ class InterestAccrualScheduler(
         return accrueInterestUseCase.accrueAllWithOutcome(date)
             .onItem().invoke { outcome ->
                 log.infof("interest accrual for %s wrote %d accrual(s)", date, outcome.accrued)
-                if (!outcome.complete) {
+                if (outcome.complete) {
+                    // Liveness means "the day's accrual completed", not "the tick ran": a tick that
+                    // could not read accounts or balances must keep the staleness alert climbing.
+                    liveness?.recordSuccess()
+                } else {
                     log.warnf(
                         "interest accrual for %s: %d account(s) FAILED, %d balance(s) UNAVAILABLE (first: %s) - " +
                             "the day is reported as not complete",
@@ -76,7 +80,6 @@ class InterestAccrualScheduler(
                         outcome.firstFailure,
                     )
                 }
-                liveness?.recordSuccess()
             }
             // ADR-0342: the evidence InterestCloseParticipationScheduler reports to the ledger. Only
             // a SUCCESSFUL run is recorded — a failed tick leaves the day unreported, so the ledger
@@ -90,11 +93,13 @@ class InterestAccrualScheduler(
                         journalsPosted = 0,
                         // Accounts that failed or could not be read accrued nothing: reported like a
                         // refusal so the day is held, not tied out over missing interest.
-                        refused = outcome.failed + outcome.unavailable,
+                        refused = outcome.failed + outcome.unavailable + if (outcome.listingFailed) 1 else 0,
                         refusalReason = if (outcome.complete) {
                             null
                         } else {
-                            "${outcome.failed} failed, ${outcome.unavailable} unavailable: ${outcome.firstFailure}"
+                            "${outcome.failed} failed, ${outcome.unavailable} unavailable" +
+                                (if (outcome.listingFailed) ", account listing failed" else "") +
+                                ": ${outcome.firstFailure}"
                         },
                         completedAt = clock.instant(),
                     ),
