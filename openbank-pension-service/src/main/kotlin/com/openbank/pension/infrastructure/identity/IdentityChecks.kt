@@ -9,6 +9,8 @@ import com.openbank.pension.application.exit.ScaOperation
 import com.openbank.pension.application.onboarding.IntegrationUnavailableException
 import com.openbank.pension.application.onboarding.KycProfile
 import com.openbank.pension.application.onboarding.KycStatus
+import com.openbank.pension.application.port.out.PensionMetrics
+import com.openbank.pension.application.port.out.ScaConsumeOutcome
 import jakarta.ws.rs.WebApplicationException
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -79,18 +81,31 @@ fun sha256Hex(value: String): String = MessageDigest.getInstance("SHA-256")
  * checked to BE an APPROVAL challenge of this party, COMPLETED and now consumed — a 2xx that is
  * anything else (e.g. a 202 parked for four-eyes approval) is a refusal.
  */
-class ScaConsumeGate(private val consume: suspend (UUID, ScaConsumeRequestDto) -> ScaChallengeDto) {
+class ScaConsumeGate(
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
+    private val consume: suspend (UUID, ScaConsumeRequestDto) -> ScaChallengeDto,
+) {
 
     suspend fun spend(partyId: UUID, challengeId: String, binding: ScaBinding?): Boolean {
-        if (binding == null || !ScaBinding.isReserved(binding.approvalRequestId)) return false
-        val id = runCatching { UUID.fromString(challengeId.trim()) }.getOrNull() ?: return false
-        val answer = call(id, ScaConsumeRequestDto(partyId, binding.approvalRequestId, binding.payloadSha256))
-            ?: return false
-        return answer.id == id &&
+        val id = runCatching { UUID.fromString(challengeId.trim()) }.getOrNull()
+        if (binding == null || !ScaBinding.isReserved(binding.approvalRequestId) || id == null) {
+            metrics.scaConsume(ScaConsumeOutcome.INVALID)
+            return false
+        }
+        val answer = try {
+            call(id, ScaConsumeRequestDto(partyId, binding.approvalRequestId, binding.payloadSha256))
+        } catch (e: IntegrationUnavailableException) {
+            metrics.scaConsume(ScaConsumeOutcome.UNAVAILABLE)
+            throw e
+        }
+        val consumed = answer != null &&
+            answer.id == id &&
             answer.partyId == partyId &&
             answer.purpose == REQUIRED_PURPOSE &&
             answer.status == "COMPLETED" &&
             !answer.consumedAt.isNullOrBlank()
+        metrics.scaConsume(if (consumed) ScaConsumeOutcome.CONSUMED else ScaConsumeOutcome.REFUSED)
+        return consumed
     }
 
     /** The provider's answer, or null when sca-service SAYS NO; unavailable when it cannot answer. */
