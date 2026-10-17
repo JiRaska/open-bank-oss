@@ -6,25 +6,113 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import unittest
+from collections import Counter
 from collections.abc import Callable
+from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from admin_ui_trace_ipc import Invocation
 
 PER_PAGE = 100
 MAX_PAGES = 5
+API_ORIGIN = "https://api.github.com"
+
+
+class SendTrace:
+    """Count http.client header sends without retaining request data."""
+
+    def __init__(self, stage: str, auth: str) -> None:
+        self.counts: Counter[str] = Counter()
+        self.incomplete = False
+        self.request_failed = False
+        self.installed = False
+        self.stage = stage
+        self.auth = auth
+        self.invocation: Invocation | None = None
+
+    def audit(self, event: str, args: tuple[object, ...]) -> None:
+        if event != "http.client.send":
+            return
+        try:
+            connection, data = args
+            if not isinstance(data, bytes):
+                self.incomplete = True
+                return
+            first_line = data.split(b"\r\n", 1)[0]
+            match = re.match(rb"^([A-Z]+)\s+(\S+)\s+HTTP/\S+$", first_line)
+            if not match:
+                # This GET-only collector sends no request bodies. An unexpected
+                # send shape cannot be treated as a complete zero-count trace.
+                self.incomplete = True
+                return
+            if match.group(1) == b"CONNECT":
+                return
+            request_target = match.group(2).decode("ascii", errors="ignore")
+            host = None
+            if request_target.startswith(("http://", "https://")):
+                host = urlsplit(request_target).hostname
+            if not host:
+                host = getattr(connection, "_tunnel_host", None) or getattr(connection, "host", None)
+            if not isinstance(host, str) or not host:
+                self.counts["unknown"] += 1
+                self.incomplete = True
+            else:
+                self.counts["api" if host.lower() == "api.github.com" else "non_api"] += 1
+        except Exception:
+            # Audit callbacks must never change the caller's request behavior.
+            self.incomplete = True
+
+    def install(self) -> None:
+        try:
+            self.invocation = Invocation(self.stage, "python_urllib", self.auth)
+            sys.addaudithook(self.audit)
+            self.installed = True
+        except Exception:
+            self.incomplete = True
+
+    def write(self, stage: str, auth: str) -> None:
+        if self.invocation is None:
+            return
+        total = sum(self.counts.values())
+        complete = (
+            self.installed
+            and self.invocation.started
+            and not self.incomplete
+            and total > 0
+        )
+        reason = None
+        if not self.installed:
+            reason = "hook_unavailable"
+        elif self.incomplete:
+            reason = "trace_parse_failure"
+        elif self.request_failed and total == 0:
+            reason = "pre_send_failure"
+        elif total == 0:
+            reason = "no_send_observed"
+        self.invocation.end(self.counts, complete=complete, reason=reason)
 
 
 class ArtifactApiError(RuntimeError):
     """The artifact inventory is unavailable, not empty."""
 
 
-def github_page(repo: str, token: str, artifact_name: str, page: int) -> list[dict]:
+def github_page(
+    repo: str,
+    token: str,
+    artifact_name: str,
+    page: int,
+    *,
+    api_origin: str = API_ORIGIN,
+) -> list[dict]:
     query = urlencode({"name": artifact_name, "per_page": PER_PAGE, "page": page})
     request = Request(
-        f"https://api.github.com/repos/{repo}/actions/artifacts?{query}",
+        f"{api_origin.rstrip('/')}/repos/{repo}/actions/artifacts?{query}",
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
@@ -184,6 +272,9 @@ def main() -> int:
     if not args.repo or not token or not args.artifact_names:
         parser.error("--repo, GH_TOKEN and at least one artifact name are required")
 
+    trace = SendTrace("service_ti", "github")
+    trace.install()
+    request_failed = False
     try:
         run_paths: dict[int, str] = {}
 
@@ -200,8 +291,15 @@ def main() -> int:
             )
             print(artifact_id or "")
     except ArtifactApiError as exc:
+        request_failed = True
         print(f"artifact lookup failed closed: {exc}", file=sys.stderr)
         return 2
+    except Exception:
+        request_failed = True
+        raise
+    finally:
+        trace.request_failed = request_failed
+        trace.write("service_ti", "github")
     return 0
 
 
