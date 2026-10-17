@@ -40,6 +40,8 @@ Tools are grouped by the charter capability they require (`McpToolRegistry`):
 
 A tool **not** present in the capability map has no capability and is **denied by default** — registering a new tool without a mapping fails closed, it does not silently bypass governance.
 
+The `sepa_instant_list`, `sepa_instant_get`, and `sepa_instant_list_by_debtor` read tools are contract-tested against the `openbank-sepa-instant` API. The consumer contract pins the response shape and verifies that an unknown payment ID fails closed.
+
 > Schema note: numeric tool arguments (`limit`, `size`) are declared as JSON `string` on purpose. The Groq llama backend frequently emits numeric arguments as strings and rejects an `integer` schema; the handler coerces with `asInt()`, so a string schema is both accepted and correct.
 
 ### Example — `tools/call`

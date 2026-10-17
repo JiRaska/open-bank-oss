@@ -25,3 +25,18 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** merge-record ingest is idempotent by `prNumber` (`ON CONFLICT DO NOTHING` — a redelivered webhook returns the stored record with `inserted=false`, no second audit row); assistant/tool calls are read-only and non-mutating
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); outbound MCP tool calls carry a `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)
 - **Governance:** every tool call passes the OPA-backed **AgentPolicyGate** (deny-by-default), bounded by the `ui-assistant` charter in `agents.yaml`; enforcement is `advisory` by default, flip to `block` (ADR-0031 D9)
+
+## SCT Inst read contracts
+
+The agent consumer contract uses the canonical provider name `openbank-sepa-instant`. Its
+consumer test lives in the discovered `contract` package and regenerates
+`pacts/openbank-agent-service-openbank-sepa-instant.json`. The four interactions cover the
+payment list, one settled payment, the debtor payment list and an unknown payment returning
+404. The consumer exercises real tool dispatch with a client bound to the Pact mock; a 404
+remains an exception rather than a fabricated payment.
+
+The SEPA Instant folder provider test replays all four interactions from `../pacts` against
+real HTTP and a JDBC-seeded test database. Missing committed JSON must fail. Broker
+verification remains conditional on `pactbroker.url`; the folder replay requires no broker.
+Test identities, disabled test OIDC and advisory authorization do not prove production
+JWT/OPA authorization. This adds no endpoint or runtime activation.

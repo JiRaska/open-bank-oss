@@ -1,0 +1,286 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the debtor payments behind the sepa_instant_list_by_debtor tool",
+      "providerStates": [
+        {
+          "name": "a settled SCT Inst payment exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sepa-instant/debtor/3a3a3a3a-3a3a-4a3a-8a3a-3a3a3a3a3a3a",
+        "query": {
+          "page": [
+            "0"
+          ],
+          "size": [
+            "20"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 100.0,
+            "currency": "string",
+            "paymentId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "status": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].currency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].paymentId": {
+              "type": "Uuid"
+            },
+            "$[*].status": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].paymentId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the payment behind the sepa_instant_get tool",
+      "providerStates": [
+        {
+          "name": "a settled SCT Inst payment exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sepa-instant/6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a"
+      },
+      "response": {
+        "body": {
+          "amount": 100.0,
+          "creditorIban": "DE89370400440532013000",
+          "currency": "EUR",
+          "debtorIban": "CZ6508000000192000145399",
+          "endToEndId": "PACT-E2E-SCTINST-001",
+          "paymentId": "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a",
+          "status": "SETTLED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the payment list behind the sepa_instant_list tool",
+      "providerStates": [
+        {
+          "name": "a settled SCT Inst payment exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sepa-instant"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 100.0,
+            "currency": "string",
+            "debtorIban": "string",
+            "endToEndId": "string",
+            "paymentId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "status": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].currency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].debtorIban": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].endToEndId": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].paymentId": {
+              "type": "Uuid"
+            },
+            "$[*].status": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].debtorIban": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].endToEndId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].paymentId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a payment sepa-instant does not hold, via the sepa_instant_get tool",
+      "providerStates": [
+        {
+          "name": "no SCT Inst payment exists with the requested id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sepa-instant/abababab-abab-4aba-8aba-babababababa"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sepa-instant"
+  }
+}
