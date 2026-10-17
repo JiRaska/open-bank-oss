@@ -104,7 +104,7 @@ def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None
         if len(after) < len(before):
             lowered.append(f"{path}: Kover floor(s) removed — base {before}, head {after} "
                            f"(a missing floor is a floor of 0)")
-        elif any(new < old for old, new in zip(before, after)):
+        elif any(new < old for old, new in zip(before, after, strict=False)):
             lowered.append(f"{path}: Kover floor lowered — base {before}, head {after}")
     if not lowered:
         return []
