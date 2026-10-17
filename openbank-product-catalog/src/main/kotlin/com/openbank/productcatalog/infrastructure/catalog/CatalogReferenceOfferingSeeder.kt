@@ -112,7 +112,7 @@ class CatalogReferenceOfferingSeeder(
         return fixture.groupBy { it["attributes"]["productLine"].asText() }.map { (line, rows) ->
             SpecificationPlan(
                 code = "CZ_${line}_PACK",
-                schema = SchemaRef("org.openbank.retirement.pension-savings", 3),
+                schema = SchemaRef(PENSION_SCHEMA_ID, PENSION_SCHEMA_VERSION),
                 offerings = rows.map { row -> pensionOffering(line, row) },
             )
         }.sortedBy { it.code }
@@ -167,6 +167,8 @@ class CatalogReferenceOfferingSeeder(
     companion object {
         const val SEED_ACTOR = "system:trusted-pack-seeder"
         private const val WORKFLOW_NAME = "catalog-reference-offering-seed"
+        private const val PENSION_SCHEMA_ID = "org.openbank.retirement.pension-savings"
+        private const val PENSION_SCHEMA_VERSION = 3
         private const val PENSION_RESOURCE = "/catalog-seeds/retirement/cz-illustrative-offerings.json"
         private const val OVERNIGHT_DAYS = 1
         private val EXPECTED_INTERVAL: Duration = Duration.ofSeconds(60)
