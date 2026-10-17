@@ -7,6 +7,8 @@ package com.openbank.ledger.application.usecase
 import com.openbank.ledger.application.port.`in`.ReportParticipationCommand
 import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
+import com.openbank.ledger.application.port.out.AppendGuard
+import com.openbank.ledger.application.port.out.AppendVerdict
 import com.openbank.ledger.application.port.out.CloseParticipationRepository
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
@@ -52,8 +54,22 @@ class CloseParticipationServiceTest {
     )
 
     init {
-        coEvery { repository.append(any()) } answers { firstArg() }
         coEvery { days.findByDate(any()) } returns null
+        coEvery { repository.findForDate(any()) } returns emptyList()
+        // An honest stand-in for the repository's atomic append: it reads the participant's latest row
+        // and the day status exactly as the real one does, then applies the service's own guard.
+        coEvery { repository.appendGuarded(any(), any()) } coAnswers {
+            val record = firstArg<CloseParticipationRecord>()
+            val guard = secondArg<AppendGuard>()
+            val latest = repository.findForDate(record.businessDate)
+                .filter { it.participant == record.participant }
+                .maxByOrNull { it.reportedAt }
+            when (val verdict = guard.check(latest, days.findByDate(record.businessDate)?.status)) {
+                AppendVerdict.Append -> record
+                AppendVerdict.KeepExisting -> latest!!
+                is AppendVerdict.Reject -> throw verdict.error
+            }
+        }
     }
 
     private fun command(
@@ -76,7 +92,7 @@ class CloseParticipationServiceTest {
                 .isInstanceOf(CloseParticipantForbiddenException::class.java)
             assertThatThrownBy { runBlocking { service.report(command(null)) } }
                 .isInstanceOf(CloseParticipantForbiddenException::class.java)
-            coVerify(exactly = 0) { repository.append(any()) }
+            coVerify(exactly = 0) { repository.appendGuarded(any(), any()) }
         }
 
     @Test
@@ -163,7 +179,7 @@ class CloseParticipationServiceTest {
             listOf(row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z"))
         val saved = service.waive(waive())
         assertThat(saved.outcome).isEqualTo(ParticipationOutcome.WAIVED)
-        coVerify(exactly = 1) { repository.append(match { it.outcome == ParticipationOutcome.WAIVED }) }
+        coVerify(exactly = 1) { repository.appendGuarded(match { it.outcome == ParticipationOutcome.WAIVED }, any()) }
     }
 
     @Test
@@ -179,7 +195,6 @@ class CloseParticipationServiceTest {
                 .describedAs(status.name)
                 .isInstanceOf(LedgerConflictException::class.java)
         }
-        coVerify(exactly = 0) { repository.append(any()) }
     }
 
     @Test
@@ -189,7 +204,37 @@ class CloseParticipationServiceTest {
         assertThatThrownBy { runBlocking { service.waive(waive()) } }
             .isInstanceOf(LedgerConflictException::class.java)
             .hasMessageContaining("RAN")
-        coVerify(exactly = 0) { repository.append(any()) }
+    }
+
+    @Test
+    fun `a participant's non-RAN report does not supersede an operator WAIVED row`(): Unit = runBlocking {
+        val waived = row(ParticipationOutcome.WAIVED, "2026-10-17T01:00:00Z")
+        coEvery { repository.findForDate(day) } returns listOf(waived)
+        for (outcome in listOf(ParticipationOutcome.REFUSED, ParticipationOutcome.SKIPPED)) {
+            val answer = service.report(
+                command("service-account-openbank-interest", outcome, "resent after restart").copy(journalsPosted = 0),
+            )
+            assertThat(answer).describedAs(outcome.name).isEqualTo(waived)
+        }
+        coVerify(exactly = 2) { repository.appendGuarded(any(), any()) }
+        // ...and nothing new was written: the guard returned the existing row, the stub never persisted.
+    }
+
+    @Test
+    fun `a RAN report after a waiver does supersede it - the work was really done`(): Unit = runBlocking {
+        coEvery { repository.findForDate(day) } returns listOf(row(ParticipationOutcome.WAIVED, "2026-10-17T01:00:00Z"))
+        val saved = service.report(command("service-account-openbank-interest", ParticipationOutcome.RAN))
+        assertThat(saved.outcome).isEqualTo(ParticipationOutcome.RAN)
+    }
+
+    @Test
+    fun `a waiver is judged on the LATEST row - RAN then a later REFUSED is waivable`(): Unit = runBlocking {
+        coEvery { days.findByDate(day) } returns cutoffDay()
+        coEvery { repository.findForDate(day) } returns listOf(
+            row(ParticipationOutcome.RAN, "2026-10-17T01:00:00Z"),
+            row(ParticipationOutcome.REFUSED, "2026-10-17T02:00:00Z"),
+        )
+        assertThat(service.waive(waive()).outcome).isEqualTo(ParticipationOutcome.WAIVED)
     }
 
     @Test

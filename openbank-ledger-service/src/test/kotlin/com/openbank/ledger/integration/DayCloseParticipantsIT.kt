@@ -192,6 +192,24 @@ class DayCloseParticipantsIT {
     }
 
     @Test
+    fun `a resent REFUSED after an operator waiver does not undo the waiver`() {
+        seedTiedOutEligibleDay(WAIVER_RESEND_DAY)
+        interestReports(WAIVER_RESEND_DAY, ParticipationOutcome.REFUSED, journals = 0, reason = "3 posting(s) refused")
+        onEventLoop {
+            participation.waive(WaiveParticipationCommand(WAIVER_RESEND_DAY, "interest", "accepted, INC-3", "op"))
+        }
+
+        // The reporter's per-process dedup cache resends the last days after a restart.
+        val answer = interestReports(WAIVER_RESEND_DAY, ParticipationOutcome.REFUSED, journals = 0, reason = "resent")
+
+        assertThat(answer.outcome).describedAs("the existing waiver is returned, nothing new is stored")
+            .isEqualTo(ParticipationOutcome.WAIVED)
+        val reported = onEventLoop { participation.completeness(WAIVER_RESEND_DAY) }.reported.getValue("interest")
+        assertThat(reported.outcome).isEqualTo(ParticipationOutcome.WAIVED)
+        assertThat(await { statusOf(WAIVER_RESEND_DAY) == AccountingDayStatus.TIED_OUT }).isTrue()
+    }
+
+    @Test
     fun `a report after the day tied out is stored as late and a foreign principal is refused`() {
         seedTiedOutEligibleDay(LATE_REPORT_DAY)
         interestReports(LATE_REPORT_DAY, ParticipationOutcome.RAN, journals = 1)
@@ -226,6 +244,7 @@ class DayCloseParticipantsIT {
         val LATE_REPORT_DAY: LocalDate = LocalDate.of(2019, 3, 10)
         val REFUSED_CONTROL_DAY: LocalDate = LocalDate.of(2019, 4, 9)
         val REFUSED_DAY: LocalDate = LocalDate.of(2019, 4, 10)
+        val WAIVER_RESEND_DAY: LocalDate = LocalDate.of(2019, 5, 10)
         const val SEED_ACTOR = "it-seed"
         const val BUDGET_NANOS = 60_000_000_000L
         const val POLL_INTERVAL_MILLIS = 250L

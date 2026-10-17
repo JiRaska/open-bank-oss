@@ -8,12 +8,14 @@ import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.ReportParticipationCommand
 import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
+import com.openbank.ledger.application.port.out.AppendGuard
+import com.openbank.ledger.application.port.out.AppendVerdict
 import com.openbank.ledger.application.port.out.CloseParticipationRepository
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseCompleteness
 import com.openbank.ledger.domain.model.CloseParticipationRecord
+import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.ParticipationOutcome
-import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.ledger.domain.model.requireValid
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
@@ -127,7 +129,16 @@ class CloseParticipationService(
             itemsProcessed = command.itemsProcessed,
             reason = command.reason,
             by = command.callerPrincipal,
+            guard = reportGuard(command.outcome),
         )
+        if (record.outcome == ParticipationOutcome.WAIVED && command.outcome != ParticipationOutcome.WAIVED) {
+            log.infof(
+                "Day-close participant %s reported %s for %s but an operator WAIVED it - the waiver stands",
+                command.participant,
+                command.outcome,
+                command.businessDate,
+            )
+        }
         if (record.late) {
             log.warnf(
                 "Day-close participant %s reported %s for %s AFTER the day left CUTOFF — stored as late, " +
@@ -150,23 +161,12 @@ class CloseParticipationService(
         // an existing CUTOFF day. An unknown day (never opened, hence also any future day) is 404,
         // and an OPEN/TIED_OUT/LOCKED day is a conflict - waiving ahead of time would pre-approve a
         // close, and waiving after it would only rewrite history.
-        val day = accountingDayRepository.findByDate(command.businessDate)
-            ?: throw AccountingDayNotFoundException(
-                "Accounting day ${command.businessDate} has not been opened - nothing to waive",
-            )
-        checkConflict(day.status == AccountingDayStatus.CUTOFF) {
-            "Participant '${command.participant}' can only be waived for a day in CUTOFF; " +
-                "${command.businessDate} is ${day.status}"
-        }
-        // Append-only: a waiver never rewrites a row, it supersedes the latest one. It may supersede
+        //
+        // Append-only: a waiver never rewrites a row, it supersedes the LATEST one. It may supersede
         // a REFUSED report (the owner's explicit decision to hold the day without that work), but a
-        // participant that already RAN has nothing to waive - the report stands.
-        val ran = repository.findForDate(command.businessDate)
-            .any { it.participant == command.participant && it.outcome == ParticipationOutcome.RAN }
-        checkConflict(!ran) {
-            "Participant '${command.participant}' already reported RAN for ${command.businessDate}; " +
-                "a RAN report cannot be waived"
-        }
+        // participant whose latest report is RAN has nothing to waive. Both checks run inside the
+        // repository's append transaction (see [waiveGuard]) so the status and the latest row they
+        // read are the ones the insert commits against.
         return record(
             businessDate = command.businessDate,
             participant = command.participant,
@@ -175,6 +175,7 @@ class CloseParticipationService(
             itemsProcessed = 0,
             reason = command.reason,
             by = command.waivedBy,
+            guard = waiveGuard(command.businessDate, command.participant),
         )
     }
 
@@ -189,6 +190,7 @@ class CloseParticipationService(
         itemsProcessed: Int,
         reason: String?,
         by: String,
+        guard: AppendGuard,
     ): CloseParticipationRecord {
         val dayStatus = accountingDayRepository.findByDate(businessDate)?.status
         val record = CloseParticipationRecord(
@@ -202,7 +204,9 @@ class CloseParticipationService(
             reportedAt = clock.instant(),
             late = dayStatus == AccountingDayStatus.TIED_OUT || dayStatus == AccountingDayStatus.LOCKED,
         )
-        val saved = repository.append(record)
+        val saved = repository.appendGuarded(record, guard)
+        // An existing WAIVED row was kept: nothing new was stored, so nothing is counted.
+        if (saved.outcome == ParticipationOutcome.WAIVED && outcome != ParticipationOutcome.WAIVED) return saved
         meterRegistry.counter(
             REPORTS_METRIC,
             "participant",
@@ -217,6 +221,43 @@ class CloseParticipationService(
 
     companion object {
         const val REPORTS_METRIC = "openbank.ledger.close.participation.reports"
+
+        /**
+         * A participant's non-RAN report must not supersede an operator WAIVED row: the reporter
+         * re-sends its last few days after every restart, and that would silently undo the waiver and
+         * re-hold the day. A RAN report does supersede it - the work really was done.
+         */
+        fun reportGuard(outcome: ParticipationOutcome) = AppendGuard { latest, _ ->
+            if (latest?.outcome == ParticipationOutcome.WAIVED && outcome != ParticipationOutcome.RAN) {
+                AppendVerdict.KeepExisting
+            } else {
+                AppendVerdict.Append
+            }
+        }
+
+        /** Day must exist and be in CUTOFF; the participant's LATEST report must not be RAN. */
+        fun waiveGuard(businessDate: LocalDate, participant: String) = AppendGuard { latest, dayStatus ->
+            when {
+                dayStatus == null -> AppendVerdict.Reject(
+                    AccountingDayNotFoundException(
+                        "Accounting day $businessDate has not been opened - nothing to waive",
+                    ),
+                )
+                dayStatus != AccountingDayStatus.CUTOFF -> AppendVerdict.Reject(
+                    LedgerConflictException(
+                        "Participant '$participant' can only be waived for a day in CUTOFF; " +
+                            "$businessDate is $dayStatus",
+                    ),
+                )
+                latest?.outcome == ParticipationOutcome.RAN -> AppendVerdict.Reject(
+                    LedgerConflictException(
+                        "Participant '$participant' already reported RAN for $businessDate; " +
+                            "a RAN report cannot be waived",
+                    ),
+                )
+                else -> AppendVerdict.Append
+            }
+        }
     }
 }
 
