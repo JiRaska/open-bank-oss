@@ -23,6 +23,11 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
+NODE_GATE_SPEC = importlib.util.spec_from_file_location("node_trace_gate", ROOT / ".github/scripts/run-admin-ui-node-trace-fixtures.py")
+assert NODE_GATE_SPEC is not None and NODE_GATE_SPEC.loader is not None
+NODE_GATE = importlib.util.module_from_spec(NODE_GATE_SPEC)
+NODE_GATE_SPEC.loader.exec_module(NODE_GATE)
+completed_node_subjects = NODE_GATE.completed_node_subjects
 CURL_TRACE = ROOT / ".github/scripts/trace-admin-ui-curl.py"
 ARTIFACT_SCRIPT = ROOT / ".github/scripts/find-latest-main-artifacts.py"
 AGGREGATOR_SCRIPT = ROOT / ".github/scripts/aggregate-admin-ui-http-trace.py"
@@ -787,6 +792,19 @@ class SupervisorTests(unittest.TestCase):
             )
             self.assertEqual(shell.returncode, 17)
             self.assertTrue((trace_dir / "admin-ui-stage-sbom.json").is_file())
+
+
+class NodeSubjectAccountingTest(unittest.TestCase):
+    def test_completed_summary_counts_executed_fixtures(self):
+        self.assertEqual(completed_node_subjects("# tests 3\n# pass 3\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0"), 3)
+
+    def test_missing_summary_fails_closed(self):
+        with self.assertRaises(ValueError):
+            completed_node_subjects("TAP version 13\n1..0")
+
+    def test_skipped_summary_is_not_executed_evidence(self):
+        with self.assertRaises(ValueError):
+            completed_node_subjects("# tests 3\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 1\n# todo 0")
 
 
 if __name__ == "__main__":
