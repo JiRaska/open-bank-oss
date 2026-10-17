@@ -107,3 +107,7 @@ erasure dimension because there is no personal data (see [06 — Compliance](./0
 ## Catalog object conversion
 
 Nested catalog objects retain their existing serialized field representation. The specialized object conversion keeps the same output contract; no catalog data migration or API version change is required.
+
+## Reference offerings and classification packs (ADR-0341)
+
+Treasury own-dealing instruments and the CZ DPS / DIP pension offerings are seeded as catalog offerings, each with an open DRAFT revision under a system maker, so a contract can pin a revision. Seeding never publishes: publication stays a separate human step by a different checker (maker-checker; dual approval for the pension offerings, whose values are illustrative until review). The seeder is idempotent and leaves an existing offering alone. The banking and retirement packs gain v3 schemas (deposit, loan, pension savings) and a treasury-instrument v1 schema that carry the accounting and regulatory class.

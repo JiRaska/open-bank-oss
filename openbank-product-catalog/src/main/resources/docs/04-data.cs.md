@@ -100,3 +100,7 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 ## Převod objektů katalogu
 
 Vnořené objekty katalogu zachovávají dosavadní serializovanou podobu polí. Specializovaný převod zachovává výstupní kontrakt; nevyžaduje migraci dat katalogu ani změnu verze API.
+
+## Referenční nabídky a klasifikační packy (ADR-0341)
+
+Treasury vlastní obchodní nástroje a české DPS / DIP penzijní nabídky se zakládají jako nabídky katalogu, každá s otevřenou DRAFT revizí pod systémovým makerem, aby smlouva mohla připnout revizi. Seedování nikdy nepublikuje: publikace zůstává samostatným lidským krokem jiného checkera (maker-checker; dvojí schválení u penzijních nabídek, jejichž hodnoty jsou ilustrativní do revize). Seeder je idempotentní a existující nabídku nechává být. Packy banking a retirement získávají schémata v3 (vklad, úvěr, penzijní spoření) a schéma treasury-instrument v1 nesoucí účetní a regulatorní třídu.
