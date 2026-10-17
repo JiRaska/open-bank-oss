@@ -230,7 +230,7 @@ class InterestService(
     /**
      * After a pin attempt. A resolvable pin wins. A pin written by this call that does not resolve fails
      * visibly. Nothing written and nothing pinned: an operator-managed rate stands; a catalog-sourced
-     * effective config with no pin is counted (it should not occur) and still answers.
+     * effective config with no resolvable pin is counted and fails closed.
      */
     private fun settle(
         request: AccrualRequest,
@@ -241,12 +241,15 @@ class InterestService(
     ): Uni<InterestRateConfig?> = when {
         reread != null -> Uni.createFrom().item<InterestRateConfig?>(reread)
         wrote -> Uni.createFrom().failure(unresolvable(request))
-        else -> pins.isCatalogSourced(effective.id).map { catalogSourced ->
+        else -> pins.isCatalogSourced(effective.id).flatMap { catalogSourced ->
             if (catalogSourced) {
-                log.warnf("catalog-sourced rate %s used for unpinned account %s", effective.id, request.accountId)
+                // A catalog-sourced rate with no resolvable pin: never accrue at "currently effective".
+                log.warnf("catalog rate %s has no resolvable pin for account %s", effective.id, request.accountId)
                 capitalizationMetrics?.catalogRateUnpinned()
+                Uni.createFrom().failure<InterestRateConfig?>(unresolvable(request))
+            } else {
+                Uni.createFrom().item<InterestRateConfig?>(effective)
             }
-            effective
         }
     }
 

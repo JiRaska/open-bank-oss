@@ -34,7 +34,7 @@ FROM (
     JOIN catalog_interest_rate_snapshots s
       ON s.config_id = ia.config_id AND s.outcome = 'APPLIED'
     WHERE ia.status <> 'REVERSED'
-    ORDER BY ia.account_id, ia.product_id, ia.currency, ia.accrual_date DESC
+    ORDER BY ia.account_id, ia.product_id, ia.currency, ia.accrual_date DESC, ia.created_at DESC, ia.id DESC
 ) l
 ON CONFLICT (account_id, product_id, currency) DO NOTHING;
 

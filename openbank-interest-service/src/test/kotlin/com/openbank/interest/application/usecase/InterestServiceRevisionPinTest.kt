@@ -193,4 +193,21 @@ class InterestServiceRevisionPinTest {
         verify(exactly = 0) { pins.pinIfCatalogSourced(any(), any(), any(), any()) }
         verify(exactly = 0) { accrualRepo.save(any()) }
     }
+
+    @Test
+    fun `a catalog-sourced effective rate with no resolvable pin fails closed even when nothing was written`() {
+        val effective = config("0.03")
+        every { accrualRepo.findByNaturalKey(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
+            Uni.createFrom().item(effective)
+        every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
+        every { pins.hasPin(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
+        every { pins.hasCatalogHistory(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
+        every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(false)
+        every { pins.isCatalogSourced(effective.id) } returns Uni.createFrom().item(true)
+
+        assertThatThrownBy { service.accrue(request).await().indefinitely() }
+            .isInstanceOf(CatalogRevisionUnresolvableException::class.java)
+        verify(exactly = 0) { accrualRepo.save(any()) }
+    }
 }
