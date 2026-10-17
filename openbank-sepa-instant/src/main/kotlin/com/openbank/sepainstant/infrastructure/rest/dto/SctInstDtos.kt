@@ -19,7 +19,7 @@ data class SubmitSctInstRequest(
     val amount: BigDecimal,
     val currency: String = "EUR",
     val remittanceInfo: String?,
-    val endToEndId: String,
+    val endToEndId: String
 )
 
 data class RecallRequest(val reason: String)
@@ -34,5 +34,5 @@ data class SctInstPaymentResponse(
     val endToEndId: String,
     val executionTimeoutAt: OffsetDateTime?,
     val settledAt: OffsetDateTime?,
-    val createdAt: OffsetDateTime,
+    val createdAt: OffsetDateTime
 )
