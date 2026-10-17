@@ -54,8 +54,8 @@ jobs:
           import json, os, pathlib, re
           # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
           # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment, SEPA
-          # Instant, Standing Order, Party, Notification, Account and Clearing added as
-          # third through eighteenth read-only subjects). Kept as a named constant so
+          # Instant, Standing Order, Party, Notification, Account, Clearing and SDD added
+          # as third through nineteenth read-only subjects). Kept as a named constant so
           # the summary can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
           # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
@@ -80,6 +80,7 @@ jobs:
               "openbank-notification-service",
               "openbank-account-service",
               "openbank-clearing-service",
+              "openbank-sdd-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
