@@ -15,7 +15,6 @@ import com.openbank.treasury.domain.model.PostingLine
 import com.openbank.treasury.domain.model.PostingRules
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.Side
-import com.openbank.treasury.domain.model.TreasuryChart
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -155,13 +154,6 @@ class PostingRulesTest {
                 ),
             )
         }.isInstanceOf(IllegalStateException::class.java)
-    }
-
-    @Test
-    fun `nostro reads address the seeded ledger id of each nostro code`() {
-        assertThat(TreasuryChart.nostroCodes).containsExactlyInAnyOrder("1001", "1002")
-        assertThat(TreasuryChart.nostroCode("EUR")).isEqualTo("1002")
-        assertThat(TreasuryChart.glAccountId("1001").toString()).isEqualTo("a0000000-0000-0000-0000-000000001001")
     }
 
     @Test

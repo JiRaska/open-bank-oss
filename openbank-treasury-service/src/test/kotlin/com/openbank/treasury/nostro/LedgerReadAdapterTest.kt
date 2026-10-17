@@ -6,6 +6,8 @@ package com.openbank.treasury.nostro
 
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.infrastructure.nostro.AccountBalanceView
+import com.openbank.treasury.infrastructure.nostro.AccountingClassMappingView
+import com.openbank.treasury.infrastructure.nostro.LedgerAccountingClassRestClient
 import com.openbank.treasury.infrastructure.nostro.LedgerReadAdapter
 import com.openbank.treasury.infrastructure.nostro.LedgerReadRestClient
 import io.mockk.every
@@ -29,7 +31,8 @@ class LedgerReadAdapterTest {
 
     private val date = LocalDate.parse("2026-09-25")
     private val client = mockk<LedgerReadRestClient>()
-    private val adapter = LedgerReadAdapter(client)
+    private val classes = mockk<LedgerAccountingClassRestClient>()
+    private val adapter = LedgerReadAdapter(client, classes)
 
     private fun answer404(body: String?) {
         val response = mockk<Response>(relaxed = true)
@@ -77,5 +80,44 @@ class LedgerReadAdapterTest {
             ),
         )
         assertThat(adapter.accountBalance("1001", "CZK", date)).isEqualByComparingTo("7")
+    }
+
+    @Test
+    fun `the nostro of a currency is whatever the ledger map says, not a literal`() = runBlocking<Unit> {
+        val moved = java.util.UUID.fromString("a0000000-0000-0000-0000-000000009001")
+        every { classes.list() } returns Uni.createFrom().item(
+            listOf(
+                AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", moved, "9001"),
+                AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "EUR", java.util.UUID.randomUUID(), "1002"),
+                // other classes and roles are not nostros
+                AccountingClassMappingView(
+                    "INTERBANK_PLACEMENT",
+                    "PRINCIPAL",
+                    "CZK",
+                    java.util.UUID.randomUUID(),
+                    "1500",
+                ),
+                AccountingClassMappingView(
+                    "NOSTRO_ACCOUNT",
+                    "ACCRUED_INTEREST",
+                    "USD",
+                    java.util.UUID.randomUUID(),
+                    "1999",
+                ),
+            ),
+        )
+        val nostros = adapter.nostroAccounts()
+        assertThat(nostros.keys).containsExactlyInAnyOrder("CZK", "EUR")
+        assertThat(nostros.getValue("CZK").glCode).isEqualTo("9001")
+        assertThat(nostros.getValue("CZK").glAccountId).isEqualTo(moved)
+    }
+
+    @Test
+    fun `a ledger that does not serve the class map is unavailable, never an empty nostro set`() {
+        val response = mockk<Response>(relaxed = true)
+        every { response.status } returns 404
+        every { classes.list() } returns Uni.createFrom().failure(WebApplicationException(response))
+        assertThatThrownBy { runBlocking { adapter.nostroAccounts() } }
+            .isInstanceOf(LedgerUnavailableException::class.java)
     }
 }

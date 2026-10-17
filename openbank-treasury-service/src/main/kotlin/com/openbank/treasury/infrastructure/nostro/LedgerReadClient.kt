@@ -8,9 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
+import com.openbank.treasury.application.port.out.NostroGl
 import com.openbank.treasury.domain.model.LedgerNostroLine
 import com.openbank.treasury.domain.model.Side
-import com.openbank.treasury.domain.model.TreasuryChart
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -57,6 +57,29 @@ interface LedgerReadRestClient {
     ): Uni<AccountBalanceView>
 }
 
+/**
+ * The ledger's accountingClass -> GL map (ADR-0341 D3), read-only: the ledger changes it only by
+ * reviewed migration. Same base URL and `m2m` identity as the clients above.
+ */
+@RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
+@OidcClientFilter("m2m")
+@Path("/api/v1/accounting-classes")
+@Produces(MediaType.APPLICATION_JSON)
+interface LedgerAccountingClassRestClient {
+    @GET
+    fun list(): Uni<List<AccountingClassMappingView>>
+}
+
+/** One row of the ledger's accountingClass -> GL map (`GET /api/v1/accounting-classes`). */
+data class AccountingClassMappingView(
+    val accountingClass: String,
+    val role: String,
+    val currencyCode: String,
+    val glAccountId: UUID,
+    val glCode: String,
+)
+
 data class JournalPage(val data: List<JournalView> = emptyList(), val pagination: PageView? = null)
 
 data class PageView(val hasNextPage: Boolean = false, val nextCursor: String? = null)
@@ -91,10 +114,28 @@ data class AccountBalanceView(
 )
 
 @ApplicationScoped
-class LedgerReadAdapter(@RestClient private val client: LedgerReadRestClient) : LedgerReadPort {
+class LedgerReadAdapter(
+    @RestClient private val client: LedgerReadRestClient,
+    @RestClient private val classes: LedgerAccountingClassRestClient,
+) : LedgerReadPort {
+
+    override suspend fun nostroAccounts(): Map<String, NostroGl> {
+        val rows = try {
+            classes.list().awaitSuspending()
+        } catch (e: WebApplicationException) {
+            throw LedgerUnavailableException(
+                "ledger answered ${e.response?.status} for GET /api/v1/accounting-classes; " +
+                    "is the ledger serving the accounting class map (ADR-0341)?",
+                e,
+            )
+        }
+        return rows.filter { it.accountingClass == NOSTRO_CLASS && it.role == PRINCIPAL_ROLE }
+            .associate { it.currencyCode to NostroGl(it.glCode, it.glAccountId) }
+    }
 
     override suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
-        val glId = TreasuryChart.glAccountId(glCode)
+        val glId = nostroAccounts().values.firstOrNull { it.glCode == glCode }?.glAccountId
+            ?: error("$glCode is not a nostro account in the ledger's accounting class map")
         val out = mutableListOf<LedgerNostroLine>()
         var cursor: String? = null
         var pages = 0
@@ -158,6 +199,8 @@ class LedgerReadAdapter(@RestClient private val client: LedgerReadRestClient) : 
         const val PAGE_SIZE = 200
         const val MAX_PAGES = 50
         const val NOT_FOUND = 404
+        const val NOSTRO_CLASS = "NOSTRO_ACCOUNT"
+        const val PRINCIPAL_ROLE = "PRINCIPAL"
         val BOOKED = setOf("POSTED", "REVERSED")
         private val JSON = ObjectMapper()
 
