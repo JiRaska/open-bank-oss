@@ -25,11 +25,11 @@ info:
   # Also additive: TransactionPage.pagination now declares the fields the server actually sends
   # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
   # never sent, is kept and labelled. No path, parameter or status code changes.
-  # ADR-0319 read tolerance: the response-only enums `TransactionResponse.categorySource`,
+  # 1.21.0 -> 1.22.0 (ADR-0319 read tolerance): the response-only enums `TransactionResponse.categorySource`,
   # `Merchant.source` and `MerchantGeo.precision` are declared as plain strings (values stay in the
   # descriptions). A generated client binds an enum strictly, so a value added later would turn a
   # booked 201 into a client-side error; a string cannot.
-  version: 1.21.0
+  version: 1.22.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
