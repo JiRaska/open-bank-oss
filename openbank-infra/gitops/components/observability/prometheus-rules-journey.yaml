@@ -181,4 +181,3 @@ spec:
               (IPR Art. 5c) is deleted, renamed, or has never completed successfully. Check the
               canary identity first (ADR-0331, provision-synthetic-customer.sh): a missing secret
               shows in the Job log as "credential absent".
-
