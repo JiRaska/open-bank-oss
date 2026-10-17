@@ -96,6 +96,21 @@ describe('commit-addressed evidence store', () => {
     expect(result.status).toBe('error')
   })
 
+  it('accepts runs from another commit ONLY when declared tree-equivalent, and rejects lies', async () => {
+    const tested = 'aaaaaaaa'.padEnd(40, '1')
+    const stored = (evidenceSource: unknown) => ({ ...posture('openbank-ab', tested), evidenceSource })
+    const read = async (body: unknown) => createCommitEvidenceReader({ baseUrl: 'https://store.example', fetchImpl: async () => json(body) }).read('openbank-ab', 'bbbbbbbb')
+    expect((await read(stored({ commit: tested, equivalence: 'tree-equivalent' }))).status).toBe('hit')
+    // undeclared: runs name another commit than the key
+    expect((await read(posture('openbank-ab', tested))).status).toBe('error')
+    // declared "identical" while the tested commit is not the keyed one
+    expect((await read(stored({ commit: tested, equivalence: 'identical' }))).status).toBe('error')
+    // unknown equivalence kind, short commit, runs naming a third commit
+    expect((await read(stored({ commit: tested, equivalence: 'probably' }))).status).toBe('error')
+    expect((await read(stored({ commit: 'aaaaaaaa', equivalence: 'tree-equivalent' }))).status).toBe('error')
+    expect((await read(stored({ commit: 'c'.repeat(40), equivalence: 'tree-equivalent' }))).status).toBe('error')
+  })
+
   it('remembers a miss for its TTL, then looks again', async () => {
     let t = 0
     const fetchImpl = vi.fn().mockImplementation(async () => new Response('', { status: 404 }))
@@ -167,6 +182,15 @@ describe('running commit join', () => {
     expect(read).toHaveBeenCalledTimes(2)
   })
 
+  it('labels a hit tested on a build-identical commit', async () => {
+    const tested = 'a'.repeat(40)
+    const report = { components: [posture('openbank-a', '1111111aaaa')] } as unknown as TestIntelligenceReport
+    const map = new Map([['openbank-a', { component: 'openbank-a', commit: '9999999', image: null }]])
+    const out = await overlayRunningEvidence(report, map, async () => ({ status: 'hit' as const,
+      posture: { ...posture('openbank-a', tested), evidenceSource: { commit: tested, equivalence: 'tree-equivalent' as const } } }))
+    expect(out.components[0].running).toMatchObject({ storeStatus: 'hit', runningCommit: '9999999', evidenceCommit: tested, equivalence: 'tree-equivalent' })
+  })
+
   it('keeps cross-source rows (Pact, Pitest, k6, simulation) on a store hit and drops the stale envelope rows', async () => {
     const snapshot = posture('openbank-a', '1111111aaaa')
     snapshot.evidence.push(
@@ -215,7 +239,7 @@ describe('GET /api/test-intelligence under load', () => {
     expect(tags.size).toBe(1)
     const body = await responses[0].json()
     expect(body.components[0].running).toMatchObject({ runningCommit: 'abc1234', match: true, source: 'snapshot', storeStatus: 'disabled' })
-    expect(body.evidence.runningCommits).toEqual({ known: 1, matchingSnapshot: 1, fromStore: 0 })
+    expect(body.evidence.runningCommits).toEqual({ known: 1, matchingSnapshot: 1, fromStore: 0, fromEquivalentBuild: 0 })
   })
 
   it('revalidates an unchanged poll as a bodyless 304', async () => {

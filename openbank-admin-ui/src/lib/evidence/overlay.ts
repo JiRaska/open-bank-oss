@@ -60,7 +60,11 @@ export async function overlayRunningEvidence(
       return {
         ...result.posture,
         evidence: [...result.posture.evidence, ...crossSourceEvidence(posture)],
-        running: { ...base, source: 'running-commit', snapshotCommit: runningCommit, match: true, storeStatus: 'hit' },
+        running: {
+          ...base, source: 'running-commit', snapshotCommit: runningCommit, match: true, storeStatus: 'hit',
+          evidenceCommit: result.posture.evidenceSource?.commit ?? runningCommit,
+          equivalence: result.posture.evidenceSource?.equivalence ?? 'identical',
+        },
       }
     }
     return { ...posture, running: { ...base, storeStatus: result.status } }
@@ -85,6 +89,7 @@ export function buildEvidenceMeta(report: TestIntelligenceReport, runningKnown: 
       known: runningKnown ? observations.filter(r => r.runningCommit).length : null,
       matchingSnapshot: observations.filter(r => r.match === true).length,
       fromStore,
+      fromEquivalentBuild: observations.filter(r => r.source === 'running-commit' && r.equivalence === 'tree-equivalent').length,
     },
   }
 }

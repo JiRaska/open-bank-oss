@@ -110,12 +110,29 @@ export interface RunningCommitObservation {
   match: boolean | null
   /** Why the evidence store was not used for this component. */
   storeStatus: 'hit' | 'miss' | 'error' | 'disabled' | 'not-running'
+  /**
+   * On a store hit: the commit the tests actually RAN on, and how it relates to the running
+   * one. `tree-equivalent` = a different commit, proven byte-identical in every build input
+   * of this service (pact-version-tree-equivalent.sh), so its tests describe the running image.
+   */
+  evidenceCommit?: string
+  equivalence?: EvidenceEquivalence
+}
+
+export type EvidenceEquivalence = 'identical' | 'tree-equivalent'
+
+/** Set by the evidence-store publisher: which commit the stored posture's runs are about. */
+export interface EvidenceSource {
+  commit: string
+  equivalence: EvidenceEquivalence
 }
 
 export interface ComponentTestPosture {
   component: string
   /** Added by the route at request time; absent in the on-disk/CI file. */
   running?: RunningCommitObservation
+  /** Present only on a posture served by the commit-addressed evidence store (#13201). */
+  evidenceSource?: EvidenceSource
   released: boolean
   moneyPath: boolean
   evidence: EvidenceObservation[]
@@ -486,5 +503,7 @@ export interface TestEvidenceMeta {
     known: number | null
     matchingSnapshot: number
     fromStore: number
+    /** Of `fromStore`: tested on a different but build-identical commit. */
+    fromEquivalentBuild: number
   }
 }

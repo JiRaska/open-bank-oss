@@ -41,6 +41,7 @@ export function EvidenceFreshness({ evidence, components }: { evidence?: TestEvi
         ? <span>{t('Běžící commity nejsou známé (mimo cluster).', 'Running commits unknown (off-cluster).')}</span>
         : <span data-testid="running-commit-match"><strong>{t('Odpovídá běžícímu kódu', 'Matches running code')}:</strong> {rc.matchingSnapshot}/{components}
           {rc.fromStore > 0 && <> · {t('ze store', 'from store')} {rc.fromStore}</>}
+          {rc.fromEquivalentBuild > 0 && <> ({t('z toho testováno na build-identickém commitu', 'of which tested on a build-identical commit')}: {rc.fromEquivalentBuild})</>}
         </span>}
     </div>
     {evidence.stale && <div role="alert" style={{ marginTop: 8, color: 'var(--warning-text)', display: 'flex', gap: 6, alignItems: 'center' }}>

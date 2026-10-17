@@ -61,14 +61,34 @@ export function storeBaseUrl(raw: string | undefined): string | null {
   } catch { return null }
 }
 
-/** Accept only a posture that is about this component AND this commit's run. */
+const FULL_SHA = /^[0-9a-f]{40}$/
+const samePrefix = (a: string, b: string) => a.startsWith(b) || b.startsWith(a)
+
+/**
+ * Accept only a posture that is about this component AND this commit's code. A posture's runs
+ * may name a DIFFERENT commit only when the publisher declared it (`evidenceSource`) as
+ * `tree-equivalent` — proven byte-identical in every build input of the service. `identical`
+ * must actually be the keyed commit; anything else declared is rejected outright.
+ */
 export function validPosture(body: unknown, component: string, commit: string): body is ComponentTestPosture {
   if (!body || typeof body !== 'object') return false
   const p = body as Partial<ComponentTestPosture>
   if (p.component !== component || !Array.isArray(p.evidence) || !p.coverage || !p.testInfrastructure) return false
-  // Every observation that names a run must name THIS commit — a posture from another build
-  // stored under the wrong key would otherwise be rendered as the running code's evidence.
-  return p.evidence.every(item => !item.run || item.run.commit.startsWith(commit) || commit.startsWith(item.run.commit))
+  let about = commit
+  if (p.evidenceSource !== undefined) {
+    const source = p.evidenceSource
+    if (!source || typeof source.commit !== 'string' || !FULL_SHA.test(source.commit)) return false
+    if (source.equivalence === 'identical') {
+      if (!samePrefix(source.commit, commit)) return false
+    } else if (source.equivalence !== 'tree-equivalent') {
+      return false
+    }
+    about = source.commit
+  }
+  // Every observation that names a run must name the commit it claims to be about — a posture
+  // from another build stored under the wrong key would otherwise be rendered as the running
+  // code's evidence.
+  return p.evidence.every(item => !item.run || samePrefix(item.run.commit, about))
 }
 
 export function createCommitEvidenceReader(opts: CommitEvidenceOptions = {}) {
