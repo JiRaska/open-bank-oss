@@ -52,17 +52,18 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared scope (ADR-0243, issue #3348; FX and Balance added as third and
-          # fourth read-only subjects). Kept as a named constant so the summary can say
-          # what the run was SUPPOSED to measure, not only what it did. All subjects are
-          # non-mutating reads booted against disposable PostgreSQL. Keep money-path
-          # flows out of this GitHub-hosted lane until their isolated target and synthetic
-          # identities exist (perf/scenarios.yaml).
+          # The declared scope (ADR-0243, issue #3348; FX, Balance and Sanctions added as
+          # third, fourth and fifth read-only subjects). Kept as a named constant so the
+          # summary can say what the run was SUPPOSED to measure, not only what it did.
+          # All subjects are non-mutating reads booted against disposable PostgreSQL.
+          # Keep money-path flows out of this GitHub-hosted lane until their isolated
+          # target and synthetic identities exist (perf/scenarios.yaml).
           DECLARED = [
               "openbank-product-catalog",
               "openbank-flaky-test-hunter",
               "openbank-fx-service",
               "openbank-balance-service",
+              "openbank-sanctions-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -217,6 +218,15 @@ jobs:
             docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
           fi
 
+          # Two advisory flags keep the boot green without provisioning OPA or Kafka, both
+          # measured on openbank-sanctions-service (fifth subject):
+          #   - authz.enforce=false is the ADR-0034 D5 advisory mode — the @Authorize
+          #     interceptor logs "PDP unavailable" and proceeds instead of 503ing the
+          #     route (same flag api-fuzz-authenticated boots with; OIDC is already off).
+          #   - quarkus.messaging.health.enabled=false drops the SmallRye messaging check:
+          #     without a broker it is DOWN for a service with outgoing channels
+          #     (sanctions), UP for one with only incoming (balance) — SmallRye is
+          #     asymmetric here, and the lane times HTTP read handlers, not messaging.
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
@@ -225,6 +235,8 @@ jobs:
             -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             -Dquarkus.oidc.enabled=false \
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
+            -Dauthz.enforce=false \
+            -Dquarkus.messaging.health.enabled=false \
             -Dquarkus.management.enabled=false \
             -Dquarkus.console.basic=true \
             --console=plain --quiet \
