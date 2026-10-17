@@ -145,11 +145,11 @@ class LedgerReadAdapterTest {
                 com.openbank.treasury.infrastructure.nostro.JournalPage(),
             )
             val legacy = LedgerReadAdapter(client, classes, postByClass = false)
-            assertThat(legacy.nostroLines("1001", date, date)).isEmpty()
+            assertThat(legacy.nostroLines(legacy.nostroAccounts().getValue("CZK"), date, date)).isEmpty()
         }
 
     @Test
-    fun `one reconcile reads the class map once`() = runBlocking<Unit> {
+    fun `one reconcile run reads the class map once and nothing is cached between runs`() = runBlocking<Unit> {
         every { classes.list() } returns Uni.createFrom().item(
             listOf(
                 AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", java.util.UUID.randomUUID(), "1001"),
@@ -158,9 +158,12 @@ class LedgerReadAdapterTest {
         every { client.list(any(), any(), any(), any()) } returns Uni.createFrom().item(
             com.openbank.treasury.infrastructure.nostro.JournalPage(),
         )
-        adapter.nostroAccounts()
-        adapter.nostroLines("1001", date, date)
-        adapter.nostroAccounts()
+        // run 1: resolve once, hand the account to the line read
+        val nostro = adapter.nostroAccounts().getValue("CZK")
+        adapter.nostroLines(nostro, date, date)
         io.mockk.verify(exactly = 1) { classes.list() }
+        // run 2 sees the ledger afresh
+        adapter.nostroAccounts()
+        io.mockk.verify(exactly = 2) { classes.list() }
     }
 }

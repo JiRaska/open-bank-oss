@@ -96,8 +96,12 @@ interface LedgerReadPort {
      */
     suspend fun nostroAccounts(): Map<String, NostroGl>
 
-    /** Booked (POSTED or REVERSED) real journal lines on [glCode] with entry date in [from]..[to]. */
-    suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine>
+    /**
+     * Booked (POSTED or REVERSED) real journal lines on [nostro] with entry date in [from]..[to]. The
+     * caller passes the account it already resolved with [nostroAccounts], so one reconcile run reads the
+     * ledger's map exactly once and nothing is cached between runs.
+     */
+    suspend fun nostroLines(nostro: NostroGl, from: LocalDate, to: LocalDate): List<LedgerNostroLine>
 
     /**
      * Net (debit − credit) of [glCode] in its NATIVE [currency] — the sum of the lines' own
