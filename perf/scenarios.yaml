@@ -23,9 +23,12 @@ scenarios:
 
   - id: security-abuse-smoke
     definition: perf/k6/security-abuse-smoke.js
-    execution_mode: manual-local-isolated
+    execution_mode: scheduled-ci-auth-on
     safety_boundary: Every request is invalid by construction (no valid token, no accepted body, nothing created), so the lane is safe against any stack — the rejection path IS the subject. A 200 or 5xx on any probe is a finding, not a pass.
-    blocker: Requires an auth-ENABLED disposable boot before it can join the scheduled perf gate — the current perf-gate harness boots with quarkus.oidc.enabled=false, which would make every identity probe a false 200. Wiring = a second boot profile in perf-gate.yml (auth on, disposable identity) reusing the same throwaway postgres; tracked in #8590 #4. Validated locally against a stub in both directions (exit 0 on a well-behaved target, exit 99 with breaches counted on a 200-answering one).
+    blocker: null  # Wired into .github/workflows/perf-gate.yml (security-abuse job): pinned Keycloak 26.8.0
+    # with the openbank realm + throwaway postgres boot product-catalog with quarkus.oidc.enabled=true,
+    # the no-token sanity check fails the leg loudly if the auth boundary is not measurable, and a
+    # security_contract_breaches>0 exits non-zero so the scheduled raise-issue alarm fires (ADR-0279 WS1 #4).
     assertions: no-token and malformed-token probes must 401/403; NUL-byte query param must 400/401/403 (NulByteGuards boundary, never 500); enumeration sweep must 401/403/404 (200 = IDOR) with a latency trend for the timing side-channel; oversized header must 400/401/431.
 
   # Per-module money-path read baselines (<module>/src/test/k6/*.js).
