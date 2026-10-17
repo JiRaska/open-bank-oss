@@ -54,8 +54,11 @@ ARTIFACT_RE = re.compile(r'<artifact name="([^"]*)"')
 # Both graphs matter. `testClasses` alone resolves only the test classpath, which
 # is exactly how the prod-side gap in #3017 stayed invisible; quarkusDependenciesBuild
 # resolves the Quarkus application model (prod runtime classpath + platform BOMs)
-# without the cost of a full quarkusBuild — see #3199.
-TASKS = ("testClasses", "quarkusDependenciesBuild")
+# without the cost of a full quarkusBuild — see #3199. cyclonedxBom resolves the
+# `.pom` of every component (for SBOM metadata) where the other two settle for the
+# Gradle `.module`, so a bump hashed only by them leaves those POMs unlisted — and
+# auto-deploy, which runs cyclonedxBom next to quarkusBuild, then fails every image.
+TASKS = ("testClasses", "quarkusDependenciesBuild", "cyclonedxBom")
 
 # `quarkusDependenciesBuild` only exists on modules applying the `openbank.quarkus-service`
 # convention plugin. Three do not — openbank-libs-{domain,runtime,temporal} — and naming
