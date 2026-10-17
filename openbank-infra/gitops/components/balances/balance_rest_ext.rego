@@ -13,6 +13,7 @@
 #   balance.overdraftLimit      — set the arranged overdraft limit (#accountId, supervisor-only)
 #   balance.reconciliation.read — latest control-account tie-out report
 #   balance.reconciliation.run  — on-demand tie-out re-run
+#   balance.alert.read/update  — customer-edge owner-scoped optional alert setting
 #   balance.approval.decide     — a DIFFERENT operator decides a paused credit/debit four-eyes
 #                                 approval (#id, ADR-0155). Granted via rules.yaml's
 #                                 role_action_matrix (ROLE_OPERATOR/ROLE_ADMIN) + base rest.rego's
@@ -52,8 +53,8 @@ import rego.v1
 # (balance.credit/debit) — an unbounded privilege escalation, the same class fixed for interest
 # in #3698 and documented verbatim in dispute_rest_ext.rego. The shared client's legitimate
 # writes keep their own identity-scoped rule below (service-balance-m2m); the edge client has NO
-# legitimate write caller (fleet audit: customer-edge only ever GETs /api/v1/balances/{id},
-# CustomerEdgeResource.kt) and is additionally vetoed by the prohibition at the bottom of this
+# legitimate money-moving write caller. Its optional alert setting uses a separate allow reason
+# and is additionally vetoed for other write actions by the prohibition at the bottom of this
 # file, which beats the rules.yaml role_action_matrix grant that would otherwise still admit it
 # via base matrix-allows.
 allowed_reasons contains "operator-balance-write" if {
@@ -160,6 +161,20 @@ allowed_reasons contains "service-balance-m2m" if {
 	}
 }
 
+# Customer-edge derives the party id from the customer JWT and passes it in the trusted header.
+# The resource rechecks account-service ownership. These actions change only an optional alert
+# preference; they confer no ability to move or reserve money.
+allowed_reasons contains "edge-owned-balance-alert" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-edge"
+    input.action in {"balance.alert.read", "balance.alert.update"}
+}
+
+prohibited if {
+    input.action in {"balance.alert.read", "balance.alert.update"}
+    input.principal.id != "service-account-openbank-edge"
+}
+
 # Fail-closed veto for the customer-edge M2M identity on every balance write (#3734). The
 # service-account exclusion on the rules above is NOT sufficient by itself: rules.yaml's
 # role_action_matrix grants balance.credit/debit/hold/holdRelease/initialize/reconciliation.run
@@ -197,6 +212,20 @@ allowed_reasons contains "service-settlement-balance-cover" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-settlement")
 	input.action == "balance.hold"
+}
+
+# ADR-0340 B — tax-reporting-service's own machine identity (client `openbank-tax-reporting`,
+# ROLE_API only) reads period-end booked balances for the CRS/FATCA assembly
+# (CrsFatcaReportingSources.bookedBalance -> GET /balances/{accountId}/{currency}?asOf=, the
+# statement point-in-time route). balance.read only: it moves nothing, holds nothing, and reads
+# nothing else.
+allowed_reasons contains "service-tax-reporting-balance-read" if {
+	input.principal.type == "HUMAN"
+
+	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+	not input.principal.service_account == null
+	machine_named("service-account-openbank-tax-reporting")
+	input.action == "balance.read"
 }
 
 prohibited if {

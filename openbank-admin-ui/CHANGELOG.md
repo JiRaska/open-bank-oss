@@ -1,5 +1,45 @@
 # Changelog
 
+## [3.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.2...admin-ui-v3.5.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+
+### Bug Fixes
+
+* **admin-ui:** request catalog:read so Product Studio can read the v2 catalog ([#12809](https://github.com/JiRaska/open-bank-oss/issues/12809)) ([1ea8f25](https://github.com/JiRaska/open-bank-oss/commit/1ea8f254a717b91dd301c3d11adede531dd30d19))
+
+## [3.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.1...admin-ui-v3.4.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension:** staff contract search and state-contribution deadlines NPE ([#12943](https://github.com/JiRaska/open-bank-oss/issues/12943)) ([a012019](https://github.com/JiRaska/open-bank-oss/commit/a012019c14d530e454bc1c4aa3a323294a31e7e0))
+
+## [3.4.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.0...admin-ui-v3.4.1) (2026-10-16)
+
+
+### Security
+
+* **admin-ui:** patch inherited KaTeX rendering trust ([#12551](https://github.com/JiRaska/open-bank-oss/issues/12551)) ([82e97b2](https://github.com/JiRaska/open-bank-oss/commit/82e97b24fef656fb83422f778b83e363580d3fba))
+
+## [3.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.3.0...admin-ui-v3.4.0) (2026-10-16)
+
+
+### Features
+
+* **agent-service:** record merges and stage gated development ([#12883](https://github.com/JiRaska/open-bank-oss/issues/12883)) ([86de551](https://github.com/JiRaska/open-bank-oss/commit/86de551e12b23564b6addce940508be73339e94c))
+
+## [3.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.2.0...admin-ui-v3.3.0) (2026-10-16)
+
+
+### Features
+
+* **referral,admin-ui,infra:** marketing self-serve MGM programs (create → approve → publish) ([#13000](https://github.com/JiRaska/open-bank-oss/issues/13000)) ([feee4f3](https://github.com/JiRaska/open-bank-oss/commit/feee4f3b3c751f7f38622d7a40062355b274d70f))
+
 ## [3.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.1.1...admin-ui-v3.2.0) (2026-10-16)
 
 

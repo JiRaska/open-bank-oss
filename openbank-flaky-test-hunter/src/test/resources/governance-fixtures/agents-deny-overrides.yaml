@@ -1,0 +1,14 @@
+# Test fixture: an explicit object-shaped deny entry beats the grant for the same (tier, resource)
+# pair — mirroring agents.rego's decision shape (ADR-0031 D9 phase 3).
+agents:
+  - id: flaky-test-hunter
+    enabled: true
+    tools:
+      allow:
+        - tier: write_proposal
+          resources:
+            - github-pr
+      deny:
+        - tier: write_proposal
+          resources:
+            - github-pr

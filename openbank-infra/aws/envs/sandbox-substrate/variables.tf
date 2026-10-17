@@ -9,8 +9,13 @@ variable "cluster_name" {
 }
 
 variable "kubernetes_version" {
-  type    = string
-  default = "1.37"
+  type = string
+  # Held at the LIVE control-plane version. This value is applied as-is by any
+  # substrate `tofu apply`, so declaring the target early would upgrade the
+  # control plane and all six managed add-ons as a side effect of an unrelated
+  # apply, out of the order the upgrade needs. The flip to 1.37 is step 4.0 of
+  # docs/runbooks/0029-eks-minor-version-upgrade.md, made inside the window.
+  default = "1.36"
 }
 
 variable "domain" {
