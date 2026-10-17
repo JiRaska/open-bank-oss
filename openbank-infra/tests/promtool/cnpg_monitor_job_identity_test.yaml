@@ -1,0 +1,55 @@
+# Authored regression for the CNPG monitor ownership migration.
+# The existing gate checks every replacement's first job relabeling. With that replacement,
+# old and new scrapes have one final label identity: the third case models that identity,
+# not a guarantee of zero scrape overlap, duplicate timestamps or convergence effects.
+# The second case preserves the counterexample: distinct jobs double a 50% numerator while
+# the denominator uses max, so the unchanged shipped alert pages after its existing 10m.
+rule_files:
+- prometheus-rules-db.yaml
+evaluation_interval: 1m
+tests:
+- name: original identity stays below threshold
+  interval: 1m
+  input_series:
+  - series: cnpg_backends_total{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db"}
+    values: 50+0x12
+  - series: cnpg_pg_settings_setting{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db",name="max_connections"}
+    values: 100+0x12
+  alert_rule_test:
+  - eval_time: 11m
+    alertname: PostgresConnectionsSaturated
+    exp_alerts: []
+- name: unsafe renamed identity can double count during overlap
+  interval: 1m
+  input_series:
+  - series: cnpg_backends_total{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db"}
+    values: 50+0x12
+  - series: cnpg_pg_settings_setting{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db",name="max_connections"}
+    values: 100+0x12
+  - series: cnpg_backends_total{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db-metrics"}
+    values: 50+0x12
+  - series: cnpg_pg_settings_setting{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db-metrics",name="max_connections"}
+    values: 100+0x12
+  alert_rule_test:
+  - eval_time: 11m
+    alertname: PostgresConnectionsSaturated
+    exp_alerts:
+    - exp_labels:
+        namespace: fixture
+        pod: fixture-db-1
+        severity: warning
+      exp_annotations:
+        summary: Postgres connections >80% on fixture/fixture-db-1
+        description: "Backends are above 80% of max_connections for >10m \u2014 raise\
+          \ the pool ceiling or fix a connection leak before clients are refused."
+- name: preserved original final identity stays below threshold
+  interval: 1m
+  input_series:
+  - series: cnpg_backends_total{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db"}
+    values: 50+0x12
+  - series: cnpg_pg_settings_setting{namespace="fixture",pod="fixture-db-1",job="fixture/fixture-db",name="max_connections"}
+    values: 100+0x12
+  alert_rule_test:
+  - eval_time: 11m
+    alertname: PostgresConnectionsSaturated
+    exp_alerts: []
