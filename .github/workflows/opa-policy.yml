@@ -161,11 +161,23 @@ jobs:
           for t in "${TESTS[@]}"; do
             ext="${t%_test.rego}.rego"
             echo "--- $t"
-            # Governance data is mounted as data.rules in live bundles. Unit tests load its
-            # generated source at data.authz so service tests can inject the real list when
-            # exercising rollout compatibility exclusions (tax-reporting #12547).
-            opa test openbank-libs/governance/policies/rest.rego "$ext" "$t" \
-              openbank-libs/governance/rules-opa-data.yaml || FAILED=1
+            # An instance ext that narrows another service's ext (treasury-pension-co, ADR-0337)
+            # is only meaningful composed as its bundle is: the test names the extra sources it
+            # needs with `# opa-test-with: <repo path>` lines, and `# opa-test-data: real` loads
+            # the derived rules/agents data the bundle mounts.
+            EXTRA=()
+            while IFS= read -r x; do EXTRA+=("$x"); done < <(sed -n 's/^# opa-test-with: *//p' "$t")
+            # Governance data is mounted as data.rules in live bundles. By default unit tests load
+            # its generated source so service tests can inject the real list when exercising
+            # rollout compatibility exclusions (tax-reporting #12547).
+            DATA=(openbank-libs/governance/rules-opa-data.yaml)
+            if grep -q '^# opa-test-data: real$' "$t"; then
+              D=$(mktemp -d); mkdir -p "$D/rules" "$D/agents"
+              cp openbank-libs/governance/rules-opa-data.yaml "$D/rules/data.yaml"
+              cp openbank-libs/governance/agents-opa-data.yaml "$D/agents/data.yaml"
+              DATA=("$D")
+            fi
+            opa test openbank-libs/governance/policies/rest.rego ${EXTRA[@]+"${EXTRA[@]}"} "$ext" "$t" ${DATA[@]+"${DATA[@]}"} || FAILED=1
           done
           [ "$FAILED" -eq 0 ] || { echo "::error::One or more rest_ext suites failed."; exit 1; }
           echo "All ${#TESTS[@]} rest_ext suites green."
