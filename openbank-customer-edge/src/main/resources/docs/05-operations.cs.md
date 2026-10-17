@@ -92,6 +92,10 @@ Symptom: každé proxované volání vrací `{"error":"upstream unavailable"}`.
 
 Toto je IDOR ochrana fungující dle návrhu: `accountId` se neresolvoval na party z JWT. Ověř, že účet patří volající party v account-service; vrací se 403 (ne 404) záměrně, aby se předešlo existenčnímu oraclu.
 
+## Pojmenování metrik
+
+Každý vlastní čítač Micrometeru se registruje s předponou `openbank.` (CI brána `metric-name-prefix` odmítne nové jméno bez předpony). Prometheus převádí tečky na podtržítka a k čítačům přidává `_total`: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` a `openbank_feedback_emit_failures_total`. Dřívější názvy bez předpony (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) se po nasazení této verze už nevydávají, takže dashboardy a alerty musí používat názvy s předponou; PrometheusRules v repozitáři to již dělají.
+
 ## Deploy / release
 
 - Per-service path-scoped CI buildí jen při změně `openbank-customer-edge/src/main/**`; verzi spravuje release-please (`version.txt` = `0.9.0`; ručně needitovat).
