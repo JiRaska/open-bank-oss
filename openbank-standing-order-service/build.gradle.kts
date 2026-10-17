@@ -40,6 +40,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.assertj)

@@ -5,12 +5,12 @@
 package com.openbank.standingorder.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
 import com.openbank.standingorder.infrastructure.client.CreateSepaPaymentRequest
-import com.openbank.standingorder.infrastructure.client.InitiateTransactionRequest
 import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
 import com.openbank.standingorder.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -188,21 +188,16 @@ class StandingOrderDueConsumer(
             amount = toMajorUnits(node.path("amountMinorUnits").asLong(), currency),
             currencyCode = currency,
             description = node.path("remittanceInfo").asText(null)?.takeIf { it.isNotBlank() },
-            valueDate = LocalDate.now(clock).toString(),
+            valueDate = LocalDate.now(clock),
         )
-        val txResponse = transactionClient.initiate(request).awaitSuspending()
-        if (txResponse.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
-            log.infof("[standing-order-exec] order %s internal transfer accepted (HTTP %d)", orderId, txResponse.status)
-            runCatching { useCase.confirmExecution(orderId) }
-                .onFailure { log.warnf(it, "[standing-order-exec] confirmExecution failed for order %s", orderId) }
-        } else {
-            log.warnf(
-                "[standing-order-exec] order %s internal transfer rejected (HTTP %d) — recording failure",
-                orderId,
-                txResponse.status,
-            )
-            recordFailureSafely(orderId)
-        }
+        // The REST client throws on a non-2xx answer (default response mapper - this client does not
+        // disable it), exactly as it did when this call returned a raw Response: a rejected transfer
+        // leaves through EventRetry/the connector, never through here. Reaching the next line IS the
+        // 2xx the previous `statusInfo.family` check re-tested.
+        val txResponse = transactionClient.initiateTransaction(request).awaitSuspending()
+        log.infof("[standing-order-exec] order %s internal transfer accepted (transaction %s)", orderId, txResponse.id)
+        runCatching { useCase.confirmExecution(orderId) }
+            .onFailure { log.warnf(it, "[standing-order-exec] confirmExecution failed for order %s", orderId) }
     }
 
     /**
