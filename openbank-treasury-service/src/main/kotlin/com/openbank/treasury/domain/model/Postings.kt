@@ -119,12 +119,12 @@ object PostingRules {
         val ccy = deal.currency
         val lines = when (deal.product) {
             ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> listOf(
-                principal(deal, Side.DEBIT, p),
+                leg(deal, LedgerRole.PRINCIPAL, Side.DEBIT, p),
                 nostro(ccy, Side.CREDIT, p),
             )
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOf(
                 nostro(ccy, Side.DEBIT, p),
-                principal(deal, Side.CREDIT, p),
+                leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
             )
             ProductType.FX_SPOT -> fxSpotSettlement(deal)
         }
@@ -187,13 +187,13 @@ object PostingRules {
         val lines = when (deal.product) {
             ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> listOfNotNull(
                 nostro(ccy, Side.DEBIT, p + i),
-                principal(deal, Side.CREDIT, p),
+                leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
                 optional(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, accrued),
                 optional(deal, LedgerRole.INTEREST_INCOME, Side.CREDIT, rest),
             )
             ProductType.FX_SPOT -> error("unreachable: FX spot has no maturity")
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOfNotNull(
-                principal(deal, Side.DEBIT, p),
+                leg(deal, LedgerRole.PRINCIPAL, Side.DEBIT, p),
                 optional(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, accrued),
                 optional(deal, LedgerRole.INTEREST_EXPENSE, Side.DEBIT, rest),
                 nostro(ccy, Side.CREDIT, p + i),
@@ -219,9 +219,6 @@ object PostingRules {
         }
         return JournalSpec(deal.id, PostingEvent.REVERSED, flipped + unwind)
     }
-
-    private fun principal(deal: Deal, side: Side, amount: BigDecimal) =
-        leg(deal, LedgerRole.PRINCIPAL, side, amount)
 
     private fun leg(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal) =
         PostingLine(deal.product.accountingClass, role, side, amount, deal.currency)

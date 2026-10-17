@@ -30,7 +30,7 @@ class PanacheAccountingClassMapRepository :
             .flatMap { row -> if (row == null) Uni.createFrom().nullItem() else withCode(row).map { it } }
     }.awaitSuspending()
 
-    override suspend fun listAll(): List<AccountingClassMapping> = Panache.withSession {
+    override suspend fun listMappings(): List<AccountingClassMapping> = Panache.withSession {
         list("order by accountingClass, role, currencyCode").flatMap { rows ->
             rows.fold(Uni.createFrom().item(emptyList<AccountingClassMapping>())) { acc, row ->
                 acc.flatMap { done -> withCode(row).map { done + it } }

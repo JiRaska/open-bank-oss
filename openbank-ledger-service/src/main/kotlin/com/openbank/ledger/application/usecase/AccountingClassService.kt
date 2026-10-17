@@ -32,5 +32,5 @@ class AccountingClassService(private val map: AccountingClassMapRepository) {
         return checkNotNull(mapping)
     }
 
-    suspend fun list(): List<AccountingClassMapping> = map.listAll()
+    suspend fun list(): List<AccountingClassMapping> = map.listMappings()
 }
