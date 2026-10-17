@@ -70,13 +70,15 @@ and alert already page. An operator may **waive** a missing participant
 a silent pass. The check ships in `shadow` (`openbank.ledger.close.participants-mode`), counting the
 days it *would* have held, for the same reason ADR-0207 shipped the day lock that way.
 
-**D4 — A refused post is a participation outcome.** Before posting, a participant asks the ledger
-once per run for the target day's state (one read per job run, not per posting — the hot-path
-concern of ADR-0207 D4 does not apply). If the day no longer accepts postings, or the ledger
-answers a posting with the closed-day conflict, the job does not post, reports `REFUSED` with the
-day's state as the reason, and increments `openbank_close_participation_reports_total{outcome="refused"}`.
-A report arriving for a day already `TIED_OUT` or `LOCKED` is stored and flagged `late`, and never
-moves the day.
+**D4 — A refused post is a participation outcome.** The ledger answers a posting into a day that
+no longer accepts postings with 409 and `"code": "ACCOUNTING_DAY_CLOSED"` in the body
+(`AccountingDayClosed.ERROR_CODE`). A participant recognises that code, does not count the posting
+as a failure of its own, and reports the day `REFUSED` with the ledger's reason; the metric
+`openbank_close_participation_reports_total{outcome="refused"}` and the day-end page carry it. The
+participant does not pre-read the day's state: that would need a `ledger.read` grant no participant
+holds today (`ledger_rest_ext.rego` gives interest exactly `ledger.create`), and the posting's own
+answer is the authoritative one anyway. A report arriving for a day already `TIED_OUT` or `LOCKED`
+is stored and flagged `late`, and never moves the day.
 
 **D5 — A shared primitive.** `openbank-libs-runtime` carries the participant side
 (`CloseParticipationReporter`, the record type, the metric) so the six participants differ only in
