@@ -110,4 +110,28 @@ class CloseParticipationTest {
                 .count(),
         ).isEqualTo(1.0)
     }
+
+    @Test
+    fun `a ledger 409 (clock skew) is a failed delivery that is retried, never cached`() {
+        val calls = AtomicInteger()
+        var conflict = true
+        val reporter = CloseParticipationReporter("interest", { _, _ ->
+            calls.incrementAndGet()
+            if (conflict) {
+                Uni.createFrom().failure(jakarta.ws.rs.ClientErrorException(409))
+            } else {
+                Uni.createFrom().item(Unit)
+            }
+        }, null)
+        val report = CloseParticipationReport(day, CloseOutcome.RAN, 1, 1)
+
+        assertThat(reporter.report(report).await().atMost(Duration.ofSeconds(1)))
+            .describedAs("not delivered - the tick reports it as not accepted, so liveness is not refreshed")
+            .isFalse()
+        conflict = false
+        assertThat(reporter.report(report).await().atMost(Duration.ofSeconds(1)))
+            .describedAs("the identical report is sent again on the next tick")
+            .isTrue()
+        assertThat(calls.get()).isEqualTo(2)
+    }
 }
