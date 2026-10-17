@@ -17,9 +17,6 @@ enum class AccountingRole {
     INTEREST_INCOME,
     INTEREST_EXPENSE,
     FEE_INCOME,
-
-    /** The customer-deposit control leg of a fee charge: 2100 in every currency, as billing always posted (V31). */
-    FEE_SETTLEMENT,
 }
 
 /** One row of the ledger-owned accountingClass -> GL account map (ADR-0341 D3). */

@@ -422,7 +422,7 @@ paths:
       operationId: resolveAccountingClass
       parameters:
         - { name: accountingClass, in: query, required: true, schema: { type: string } }
-        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, FEE_SETTLEMENT] } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] } }
         - { name: currency, in: query, required: true, schema: { type: string } }
       responses:
         '200':
@@ -1614,7 +1614,7 @@ components:
       required: [accountingClass, role, currencyCode, glAccountId, glCode]
       properties:
         accountingClass: { type: string }
-        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, FEE_SETTLEMENT] }
+        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] }
         currencyCode: { type: string }
         glAccountId: { type: string, format: uuid }
         glCode: { type: string }
@@ -1638,7 +1638,7 @@ components:
         accountingRole:
           type: string
           nullable: true
-          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME, FEE_SETTLEMENT]
+          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME]
         side:
           type: string
           enum: [DEBIT, CREDIT]
