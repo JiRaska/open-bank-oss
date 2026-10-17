@@ -13,6 +13,7 @@ import com.openbank.interest.infrastructure.persistence.entity.InterestCapitaliz
 import com.openbank.interest.infrastructure.persistence.entity.InterestOutboxEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
 import com.openbank.interest.infrastructure.persistence.mapper.InterestMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.common.WithSession
@@ -416,7 +417,7 @@ class RateRevisionPinRepositoryImpl @Inject constructor(
                         "WHERE ia.account_id = CAST(:a AS uuid) AND ia.product_id = CAST(:prod AS varchar) " +
                         "AND ia.currency = CAST(:ccy AS char(3))) " +
                         "ON CONFLICT (account_id, product_id, currency) DO NOTHING",
-                ).setParameter("id", UUID.randomUUID()).setParameter("a", accountId)
+                ).setParameter("id", Ids.newId()).setParameter("a", accountId)
                     .setParameter("prod", productId).setParameter("ccy", currency)
                     .setParameter("rev", revisionId).setParameter("at", OffsetDateTime.now(clock))
                     .executeUpdate().map { it > 0 }
