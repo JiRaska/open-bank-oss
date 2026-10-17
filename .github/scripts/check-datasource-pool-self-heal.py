@@ -98,11 +98,43 @@ def child_keys(lines: list[str], block_idx: int, indent: int) -> dict[str, int]:
     return keys
 
 
-def find_violations(lines: list[str]) -> list[str]:
+BASE_RELPATH = pathlib.Path("openbank-libs-runtime/src/main/resources/application.yaml")
+
+
+def inherited_keys(root: pathlib.Path) -> set[str]:
+    """Self-heal keys the libs-runtime base supplies to every service on the classpath.
+
+    A service file may omit a bound the base already carries: the base sits on every
+    service's classpath, and a service key (same name, any value) still overrides it. Only
+    the un-profiled `quarkus.datasource.reactive` block counts, because a `%profile` key
+    would not reach prod. Returns the empty set if the base is absent, so deleting it makes
+    every service violate again instead of silently passing."""
+    base = root / BASE_RELPATH
+    if not base.is_file():
+        return set()
+    lines = base.read_text(encoding="utf-8").splitlines(keepends=True)
+    keys: set[str] = set()
+    for block_idx, indent in reactive_pool_blocks(lines):
+        # reactive_pool_blocks walks profile sections too; only a block at indent 4 under
+        # a top-level `quarkus:` is un-profiled.
+        if indent == INDENT_STEP * 2 and not _under_profile(lines, block_idx):
+            keys |= set(child_keys(lines, block_idx, indent))
+    return keys & set(REQUIRED_KEYS)
+
+
+def _under_profile(lines: list[str], idx: int) -> bool:
+    for probe in range(idx - 1, -1, -1):
+        line = lines[probe]
+        if line.strip() and not line.startswith((" ", "#")):
+            return line.lstrip().startswith(('"%', "'%", "%"))
+    return False
+
+
+def find_violations(lines: list[str], inherited: frozenset[str] | set[str] = frozenset()) -> list[str]:
     findings: list[str] = []
     for block_idx, indent in reactive_pool_blocks(lines):
         children = child_keys(lines, block_idx, indent)
-        missing = [key for key in REQUIRED_KEYS if key not in children]
+        missing = [key for key in REQUIRED_KEYS if key not in children and key not in inherited]
         if missing:
             findings.append(
                 f"reactive datasource pool (line {block_idx + 1}): missing {', '.join(missing)}",
@@ -144,6 +176,7 @@ def run(root: pathlib.Path, enforce: bool, apply_fix: bool) -> int:
     findings_total = 0
     fixed_total = 0
     subjects_total = 0
+    inherited = inherited_keys(root)
     for yaml_path in sorted(root.glob("openbank-*/src/main/resources/application.yaml")):
         lines = yaml_path.read_text(encoding="utf-8").splitlines(keepends=True)
         if apply_fix:
@@ -152,7 +185,7 @@ def run(root: pathlib.Path, enforce: bool, apply_fix: bool) -> int:
                 yaml_path.write_text("".join(out), encoding="utf-8")
                 fixed_total += fixed
                 lines = out
-        findings = find_violations(lines)
+        findings = find_violations(lines, inherited)
         subjects_total += count_subjects(lines)
         for finding in findings:
             annotation = "error" if enforce else "warning"
@@ -223,6 +256,28 @@ quarkus:
     )
     if find_violations(other_parent):
         fails.append("a scalar `reactive:` under a non-datasource parent was flagged")
+
+    # A bound the base supplies is inherited; one it does not supply still fails.
+    if find_violations(missing, {"idle-timeout", "max-lifetime", "max-size"}):
+        fails.append("a pool whose bounds all come from the base was flagged")
+    partial = find_violations(missing, {"max-size"})
+    if len(partial) != 1 or "max-size" in partial[0]:
+        fails.append(f"a partially inherited pool was not flagged for exactly the rest: {partial}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = pathlib.Path(tmp) / "openbank-libs-runtime" / "src" / "main" / "resources"
+        base_dir.mkdir(parents=True)
+        base_file = base_dir / "application.yaml"
+        base_file.write_text(
+            "".join(clean).replace("      url: postgresql://localhost:5432/x\n", ""), encoding="utf-8")
+        if inherited_keys(pathlib.Path(tmp)) != set(REQUIRED_KEYS):
+            fails.append(f"base keys not read: {inherited_keys(pathlib.Path(tmp))}")
+        base_file.write_text('"%test":\n' + "".join("  " + ln for ln in clean), encoding="utf-8")
+        if inherited_keys(pathlib.Path(tmp)):
+            fails.append("a %test-profile block in the base was counted as inherited")
+        base_file.unlink()
+        if inherited_keys(pathlib.Path(tmp)):
+            fails.append("a missing base yielded inherited keys")
 
     with tempfile.TemporaryDirectory() as tmp:
         service = pathlib.Path(tmp) / "openbank-demo-service" / "src" / "main" / "resources"

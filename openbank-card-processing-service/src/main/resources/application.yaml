@@ -15,9 +15,6 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_card_processing
-      idle-timeout: 5M
-      max-lifetime: 30M
-      max-size: 20
     # Flyway migrates the DEFAULT (Agroal/JDBC) datasource, so a literal jdbc url must be here: a
     # service that only boots because the environment supplied one cannot start from this repo
     # alone (check-flyway-default-datasource.py, #3080).

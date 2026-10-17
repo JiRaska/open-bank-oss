@@ -100,3 +100,5 @@ Cron `MandateExpiryScheduler` je **defaultně vypnutý** (`openbank.sdd.expiry.e
 ## Sdílené výchozí konfigurace
 
 Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+Meze poolu reaktivního datasource (`quarkus.datasource.reactive.idle-timeout` 5M, `max-lifetime` 30M, `max-size` 20) se zde také již nedeklarují; pocházejí ze stejné výchozí konfigurace flotily a odpovídají hodnotám, které služba dříve deklarovala sama. Nastavení kteréhokoli z nich v `application.yaml` služby výchozí hodnotu stále přepíše.

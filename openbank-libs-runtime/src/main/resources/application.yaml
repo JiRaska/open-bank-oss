@@ -19,6 +19,15 @@ quarkus:
         value: "default-src 'self'"
       Strict-Transport-Security:
         value: "max-age=31536000; includeSubDomains"
+  datasource:
+    reactive:
+      # Pool self-heal (#1682). Quarkus leaves all three levers OFF, so a DB blip that poisons
+      # pooled connections leaves them dead until a pod restart. idle-timeout evicts a dead idle
+      # connection, max-lifetime caps how long any wedge survives, max-size bounds a reconnect
+      # storm. Enforced by check-datasource-pool-self-heal.py, which reads this file.
+      idle-timeout: 5M
+      max-lifetime: 30M
+      max-size: 20
   management:
     enabled: true
     port: 8085

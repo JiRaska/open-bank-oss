@@ -14,9 +14,6 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_loyalty}
-      idle-timeout: 5M
-      max-lifetime: 30M
-      max-size: 20
     jdbc:
       # A literal jdbc url has to be here, not only in the environment: Flyway migrates the
       # DEFAULT (Agroal/JDBC) datasource, and a service that only boots because the cluster

@@ -7,9 +7,6 @@ quarkus:
     db-kind: postgresql
     reactive:
       url: "${QUARKUS_DATASOURCE_REACTIVE_URL:vertx-reactive:postgresql://localhost:5432/settlement}"
-      idle-timeout: 5M
-      max-lifetime: 30M
-      max-size: 20
     username: "${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"
     password: "${QUARKUS_DATASOURCE_PASSWORD:settlement}"
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Without it `migrate-at-start` kills

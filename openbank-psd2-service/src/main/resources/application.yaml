@@ -86,9 +86,6 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_psd2}
-      idle-timeout: 5M
-      max-lifetime: 30M
-      max-size: 20
     jdbc:
       url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_psd2}
 

@@ -42,3 +42,7 @@ Upsert zachovává ID existujícího řádku. Podmínky vlastnictví zdroje a je
 který důkaz smí nahradit zástupný uzel nebo aktualizovat jeho obsah; opakované zpracování
 nevytváří další uzel. Stabilní ID hran a událostí se nemění. ID řádku slouží pouze pro interní
 uložení a není veřejným klíčem uzlu grafu.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje meze poolu reaktivního datasource. Pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml` (idle-timeout 5M, max-lifetime 30M, max-size 20), která je na classpath každé služby s nižší prioritou než vlastní soubor služby, a odpovídají tomu, co služba dříve deklarovala sama. Hodnota v `application.yaml` služby má přednost.

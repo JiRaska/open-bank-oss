@@ -28,9 +28,6 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_treasury
-      idle-timeout: 5M
-      max-lifetime: 30M
-      max-size: 20
     # A LITERAL jdbc url: Flyway migrates the DEFAULT (Agroal/JDBC) datasource (#3080).
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_treasury

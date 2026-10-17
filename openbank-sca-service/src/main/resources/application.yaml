@@ -21,9 +21,6 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_sca
-      idle-timeout: 5M
-      max-lifetime: 30M
-      max-size: 20
     # The DEFAULT (Agroal/JDBC) datasource Flyway migrates. Declaring only the reactive URL leaves
     # it unconfigured, and `migrate-at-start` then kills the boot with "Unable to find datasource
     # '<default>' … Bean is not active: SYNTHETIC bean [class=AgroalDataSource]" — so the service

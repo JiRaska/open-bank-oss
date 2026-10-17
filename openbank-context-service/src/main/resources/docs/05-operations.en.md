@@ -43,3 +43,7 @@ An upsert retains the existing row identifier. Source ownership and source-versi
 still determine which evidence may replace a placeholder or update a node; replay does not
 create another node. Stable edge and event identifiers are unchanged. The row identifier is
 internal persistence identity, not the graph's public node key.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the reactive datasource pool bounds. They come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml` (idle-timeout 5M, max-lifetime 30M, max-size 20), which is on every service classpath at a lower precedence than the service's own file, and equal what this service used to declare. A value set in this service's `application.yaml` takes precedence.
