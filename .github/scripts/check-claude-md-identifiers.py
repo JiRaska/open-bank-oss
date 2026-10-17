@@ -147,6 +147,7 @@ def main() -> int:
     level = "error" if a.enforce else "warning"
     for f in out:
         print(f"::{level}::claude-md-identifiers: {f}")
+    print(f"SUBJECTS={nfiles}  # per-service CLAUDE.md files scanned")
     print(f"claude-md-identifiers: {checked} identifier(s) in {nfiles} per-service CLAUDE.md file(s), {len(out)} not found.")
     return 1 if out and a.enforce else 0
 
