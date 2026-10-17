@@ -327,13 +327,14 @@ def self_test() -> int:
         def _broken(path):
             raise RuntimeError("gh api exploded")
 
-        # 1. API error: could-not-check, with the error text, and NO invented actor.
+        # 1. API error: a broken API call must still exit 1, reported as could-not-check with the
+        #    error text, and NO invented actor.
         run_case(
-            "api-error",
+            "api-error (a broken API call must still exit 1)",
             _broken,
-            0,
+            1,
             must_contain=["could not check ruleset bypass actors: gh api exploded"],
-            must_not=["Team#", "RepositoryRole#", "NOT declared", "::error"],
+            must_not=["Team#", "RepositoryRole#", "NOT declared"],
         )
 
         # 2. Real undeclared actor (fixture id 999): must fail under --enforce.
@@ -517,16 +518,11 @@ def main() -> int:
         )
         return 0
     except RuntimeError as exc:
-        # A failed API call is "could not check", never a finding: no actor was read, so none can
-        # be reported. Exit 0 = UNRESOLVED, the same contract as Unreadable above (gate mode is
-        # enforced; a transient API error must not redden every PR, and a pass is never claimed).
-        gatelib.subjects_unresolved("the rulesets API call failed — no bypass actor was read")
-        print(f"::warning::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}")
-        print(
-            "ruleset-bypass-actors: NOT EVALUATED on this run (API error). Nothing was read, so "
-            "this is neither a pass nor a finding."
-        )
-        return 0
+        # A failed API call is reported as "could not check", never as an invented actor, but it
+        # stays a HARD failure (exit 1): gh missing, a network error, repeated timeouts or a non-JSON
+        # body mean the enforced gate read nothing, and an expired token must not leave it green.
+        sys.stderr.write(f"::error::ruleset-bypass-actors: could not check ruleset bypass actors: {exc}\n")
+        return 1
 
     undeclared, stale = findings(live, DECLARED_BYPASS_ACTORS)
     level = "error" if args.enforce else "warning"
