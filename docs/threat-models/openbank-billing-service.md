@@ -233,7 +233,7 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 - **2026-10-03** — **Fleet SENT retention excludes billing pending #12311** (ADR-0329, #12187). The shared `OutboxSentRetentionJob` can purge other services, but `BillingOutboxRepositoryImpl.sentRetentionExempt=true` preserves billing's annual-summary rerun guard. `billing_outbox` SENT payloads therefore remain until a durable account/year issuance key is deployed. The exemption is paired with a reason in the enforced fleet gate; remove both only after the migration and real-DB purge/rerun tests in #12311 are merged. No billing endpoint, caller or privilege changes in this phase.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set

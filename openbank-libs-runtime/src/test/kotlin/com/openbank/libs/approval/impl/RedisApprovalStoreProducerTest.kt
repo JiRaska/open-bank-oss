@@ -4,27 +4,18 @@
 
 package com.openbank.libs.approval.impl
 
-import io.mockk.mockk
 import io.quarkus.arc.properties.IfBuildProperty
-import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.time.Clock
 
 /**
- * Replaces the per-service `ApprovalConfigTest` copies. The real wiring proof is each opted-in
+ * Replaces the per-service `ApprovalConfigTest` copies. Constructing a [RedisApprovalStore] reads
+ * MicroProfile Config, which a plain unit test does not have, so the real wiring proof is each opted-in
  * service's `quarkusBuild` (an `ApprovalResource` constructor-injects the store, so a missing
  * opt-in is an unsatisfied dependency) plus notification-service's `ApprovalStoreWiringIT`
  * round-tripping a real approval through real Redis.
  */
 class RedisApprovalStoreProducerTest {
-
-    @Test
-    fun `produces a RedisApprovalStore wired with the given redis and clock`() {
-        val store = RedisApprovalStoreProducer().approvalStore(mockk<ReactiveRedisDataSource>(), Clock.systemUTC())
-
-        assertThat(store).isInstanceOf(RedisApprovalStore::class.java)
-    }
 
     @Test
     fun `the bean is opt-in - absent unless openbank approval store is exactly redis`() {
