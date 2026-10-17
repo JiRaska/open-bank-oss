@@ -38,7 +38,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "f33f333df2514afd"
+        openbank.tech/policy-checksum: "76963d3d9057e6e6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ledger-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-bc607f53
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ledger-service:sandbox-9e765663
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

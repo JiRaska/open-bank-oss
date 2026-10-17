@@ -119,6 +119,15 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-15** — **Outbound account-service edge: request-derived values no longer reach logs** (CodeQL
+  505/506, PR #12717). `AccountServiceClient` — the outbound client edge to account-service — logged the
+  IBAN or account id, plus the full throwable, whenever a party/account lookup failed. The warn lines now
+  carry only the HTTP status or the exception class name, so a log reader at this trust boundary no longer
+  sees a debtor/creditor identifier or a stack trace that embeds one. **STRIDE-I:** shrinks information
+  disclosure at the outbound edge; the failure semantics (404 → `null`, other faults → external) are
+  unchanged, so no surface, caller, principal or privilege moved. Mitigated by
+  `AccountServiceClientLogPrivacyTest`.
+
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `domestic_payment_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
@@ -661,6 +670,28 @@ its Ingress and NetworkPolicy peer remain until Phase 5.
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
 
+## Business payment draft API (slice 6, draft storage only)
+
+The new company batch API stores unsubmitted domestic CZK instructions. Customer-edge derives the
+company from a verified human `X-Acting-For` mandate and forwards it under its own service token.
+The domestic service accepts this route only from that edge service identity; it uses the company
+scope in every read and update query and stores the human actor for audit attribution. A guessed
+batch UUID under another company returns 404. The company and actor are never accepted from the
+request body. At most 100 items and 20 returned items per detail page bound resource use. Unique
+company-scoped idempotency keys and a durable request hash prevent altered replay after restart;
+revisions prevent a concurrent replacement from silently overwriting another edit.
+
+This route cannot submit, sign, release, or call a payment rail. The later money-moving slice must
+freeze the ordered snapshot, check debtor-account ownership and the live mandate at submit and
+release, bind SCA and co-signatures to that hash, persist an outbox dispatch key per item, and
+reconcile ambiguous rail responses. Those controls are not implied by the draft state.
+
+Rollback: remove the edge route, then the domestic route. Keep the table while draft retention is
+resolved; do not drop customer drafts during code rollback.
+
+Draft item replacement records the verified editing human alongside the company and revision. A
+replayed creation key is checked against its persisted fingerprint before item validation, so an
+altered parseable body cannot change a conflict into an unrelated validation response.
 
 ## Pension integration boundary (ADR-0334/0335, #12435)
 

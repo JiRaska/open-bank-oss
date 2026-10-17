@@ -43,7 +43,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match agent-opa-bundle's openbank.tech/policy-checksum (CI verifies, no drift).
-        openbank.tech/policy-checksum: "14923416af6f7904"
+        openbank.tech/policy-checksum: "f7f0f01ea6db0a93"
     spec:
       # ADR-0177 Phase 1: workload identity pilot. The projected SA token
       # (volume below) is what Keycloak's 'kubernetes' IdP exchanges; the
@@ -58,7 +58,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-27b8619a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-5cc84e19
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -190,6 +190,26 @@ spec:
               value: http://interest-service.interest.svc:8125
             - name: QUARKUS_REST_CLIENT_DISPUTE_SERVICE_URL
               value: http://dispute-service.dispute.svc:8135
+            # ADR-0031 phase 3 "recorded human merge" (DOCUMENTATION ONLY — no pod env here).
+            # The CI producer (.github/workflows/record-agent-merge.yml) POSTs merge records to
+            # POST /api/v1/agent-merge-records on this service (ROLE_MERGE_RECORDER-protected). It consumes:
+            #   * repo variable AGENT_SERVICE_URL — base URL of this service as reachable from the
+            #     CI runner; the job runs on the in-cluster ARC runner (runs-on: openbank-build),
+            #     so cluster DNS (http://agent-service.platform.svc:8109) resolves — a GitHub-hosted
+            #     runner cannot reach this name at all;
+            #   * repo variable AGENT_MERGE_RECORDER_ISSUER + repo secrets
+            #     AGENT_MERGE_RECORDER_CLIENT_ID/AGENT_MERGE_RECORDER_CLIENT_SECRET — a CI-only
+            #     Keycloak client_credentials pair (client carries the dedicated least-privilege
+            #     ROLE_MERGE_RECORDER — never ROLE_ADMIN) from which the
+            #     workflow MINTS a fresh bearer token per run. A static JWT is unusable here:
+            #     the realm template's accessTokenLifespan is 300 s, so a provisioned token dies
+            #     minutes after it is created.
+            # The recorder FAILS CLOSED: it fires on pull_request closed (the merge has already
+            # happened, so red blocks nothing), and any missing config / mint / POST failure is
+            # red + one tracking issue — a green run with a missing record would read exactly
+            # like "no agent PRs merged", the un-falsifiable state phase 3 exists to eliminate.
+            # All of these are GitHub repo settings, NOT workload env; they are documented here so
+            # the endpoint's credential/URL contract lives next to the service that enforces it.
             # Observability stack (anonymous in-cluster read) — query.observability.readonly tools.
             - name: QUARKUS_REST_CLIENT_PROMETHEUS_URL
               value: http://kube-prometheus-stack-prometheus.observability.svc:9090
