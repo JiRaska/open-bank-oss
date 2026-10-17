@@ -4,16 +4,18 @@
 
 package com.openbank.swift.infrastructure.client
 
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.util.UUID
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /**
  * Books settled MT103 funds via transaction-service (ADR-0108).
@@ -35,43 +37,37 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
                 )
             }
 
-        val request = InitiateSettlementRequest(
+        val request = InitiateTransactionRequest(
             idempotencyKey = "swift-settlement-${message.id}",
             type = "DEBIT",
             sourceAccountId = sourceAccountId,
             amount = message.amount.amount,
             currencyCode = message.currency,
             description = "MT103 ${message.remittanceInfo ?: message.transactionReference}",
-            valueDate = message.valueDate,
+            // SwiftMessage.valueDate is MT103 basic ISO (YYYYMMDD); transaction-service parses ISO-8601
+            // (LocalDate.parse(request.valueDate)), so the raw value was never accepted. The generated
+            // client types the field as a date, which forces the conversion to happen here.
+            valueDate = LocalDate.parse(message.valueDate, DateTimeFormatter.BASIC_ISO_DATE),
             rail = "SWIFT",
             instructionType = "ONE_OFF",
         )
 
         return try {
-            val response: Response = client.initiateTransaction(request).awaitSuspending()
-            if (response.status in ACCEPTED_STATUSES) {
-                val transactionId = runCatching {
-                    UUID.fromString(response.readEntity(Map::class.java)["id"]?.toString())
-                }.getOrNull()
-                SettlementOutcome(settled = true, transactionId = transactionId)
-            } else {
-                log.warnf(
-                    "transaction-service returned HTTP %d for SWIFT message %s settlement; " +
-                        "message stays SENT",
-                    response.status,
-                    message.id,
-                )
-                SettlementOutcome(settled = false, transactionId = null)
-            }
+            val response = client.initiateTransaction(request).awaitSuspending()
+            SettlementOutcome(settled = true, transactionId = response?.id)
+        } catch (ex: WebApplicationException) {
+            // The REST client throws on a non-2xx answer: transaction-service WAS reached and refused.
+            log.warnf(
+                "transaction-service returned HTTP %d for SWIFT message %s settlement; message stays SENT",
+                ex.response.status,
+                message.id,
+            )
+            SettlementOutcome(settled = false, transactionId = null)
         } catch (ex: Exception) {
             throw SettlementUnavailableException(
                 "transaction-service unreachable for SWIFT message ${message.id}",
                 ex,
             )
         }
-    }
-
-    private companion object {
-        val ACCEPTED_STATUSES = setOf(200, 201, 202)
     }
 }
