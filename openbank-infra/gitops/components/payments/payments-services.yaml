@@ -1595,6 +1595,11 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Redis for the four-eyes ApprovalStore (ADR-0155), the payments namespace's shared
+            # instance (redis.yaml). Without it the store dials the application.yaml default
+            # localhost:6379 and the approval queue endpoints answer 500 "Connection refused".
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://clearing-db-rw.payments.svc:5432/openbank_clearing
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -3260,6 +3265,11 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # Redis for the four-eyes ApprovalStore (ADR-0155), the payments namespace's shared
+            # instance (redis.yaml). Without it the store dials the application.yaml default
+            # localhost:6379 and the approval queue endpoints answer 500 "Connection refused".
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.payments.svc:6379
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://swift-service-db-rw.payments.svc:5432/openbank_swift
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
