@@ -22,3 +22,7 @@ The frozen closing balance sums hash-verified `FROZEN`/`LINES_V1` monthly eviden
 F02.00 follows a separate source: `/frozen-trial-balance` for frozen evidence and `/trial-balance` for live preview. These return the selected month's movements. The current F02 implementation does not assemble calendar-year-to-date movements. A cumulative closing balance must not be substituted for this flow source.
 
 Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

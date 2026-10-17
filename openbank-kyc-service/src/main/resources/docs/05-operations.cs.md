@@ -78,3 +78,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ## Observabilita
 
 OpenTelemetry OTLP traces na `:4317` (`service.name=openbank-kyc-service`), Micrometer/Prometheus metriky na `/q/metrics`, JSON console logging. Build metadata (`gitCommit`, `buildTime`, verze) na `/api/v1/info` (identifikace dle DORA čl. 9).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

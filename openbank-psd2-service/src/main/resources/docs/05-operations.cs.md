@@ -104,3 +104,7 @@ Migrace jsou po aplikaci neměnné. Pokud checksum mismatch blokuje start na ži
 
 - Per-service path-scoped CI buildy jen změněné služby. Release je automatický přes **release-please** z Conventional Commits — nikdy ručně needitujte `version.txt` ani `CHANGELOG.md`. Aktuální release verze: `version.txt = 0.3.0`.
 - Build/push image přes `openbank-infra/scripts/build-push-service.sh openbank-psd2-service` (host-side `quarkusBuild`, fast-jar). GitOps image tagy: při merge konfliktech berte `--ours` pro image řádky.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

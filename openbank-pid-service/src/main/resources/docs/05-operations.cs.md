@@ -120,3 +120,7 @@ Verze jsou pinovány centrálně v `libs.versions.toml` (Quarkus BOM) a vystaven
 - **Verzování:** `version.txt` (aktuálně `0.3.0`) vlastní release-please; conventional commits řídí bump. Release osa je nezávislá na `openapi.yaml:info.version` (ADR-0048).
 - **CI:** path-scoped per-service pipeline (build jen při změnách pod `openbank-pid-service/src/main/**`); `detekt`, `ktlintCheck`, `koverVerify`, testy, SBOM, image build.
 - **CD:** ArgoCD vyzvedne nový image tag z GitOps manifestu.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

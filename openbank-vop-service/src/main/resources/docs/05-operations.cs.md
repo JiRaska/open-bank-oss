@@ -83,3 +83,7 @@ V rámci návrhu očekávané: `close_match` skutečné jméno vracet **má**, a
 ### Podezření na enumeraci jmen
 
 `requested_by` + `verified_at` v `vop_verification` jsou indexované právě na tohle. Principal s vysokým podílem `no_match` hádá, neplatí. **Automatický detektor zatím není** — otevřená položka v threat modelu.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

@@ -124,3 +124,7 @@ Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey per JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, image build/push, ArgoCD picks up the tag.
 - **Release axis** (release-please) is driven by `version.txt` + Conventional Commits; **API-contract axis** is `openapi.yaml: info.version` (ADR-0048). Do not force them equal.
 - GitOps: for image-tag merge conflicts take `--ours` (the freshly-built tag); for RBAC/config take `--theirs` or resolve manually.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

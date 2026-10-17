@@ -78,3 +78,7 @@ Přesná čísla latence SLO jsou TBD do změření v sandboxu; downstream volá
 ## Deploy
 
 GitOps přes ArgoCD (sandbox sleduje deploy branch). U konfliktů image-tagů v gitops manifestech ber `--ours` (čerstvě sestavený tag), nikdy slepě `--theirs`. Ruleset ověřených podpisů vyžaduje, aby commit email odpovídal registrovanému GPG klíči.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
