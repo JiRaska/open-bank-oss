@@ -9,7 +9,7 @@
 
 - **Balení:** fast-jar (nikdy uber-jar — runtime stage COPYuje `quarkus-app/`). Generický build/push: `openbank-infra/scripts/build-push-service.sh openbank-agent-service` (host-side `quarkusBuild`, ne Gradle v Dockeru).
 - **Image:** viz [`Dockerfile`](../../../../openbank-agent-service/Dockerfile) — fast-jar runtime stage.
-- **Bez DB:** neexistují Flyway migrace k aplikaci při startu, takže obvyklé Flyway checksum/repair runbooky se zde neuplatní.
+- **DB:** Flyway migrace `V1`–`V6` se aplikují při startu (fronta návrhů, kill-switch, audit outbox, merge záznamy — viz [04 — Data](./04-data.md)); obvyklé Flyway checksum/repair runbooky platí jako u jakékoliv JDBC služby.
 
 ## Konfigurace (prostředí)
 
@@ -31,7 +31,7 @@ Commitovaná konfigurace dodává pouze **offline `mock-echo`** provider, takže
 
 | Port | Účel |
 |---|---|
-| 8109 | aplikační HTTP (`/mcp`, `/agent/*`) |
+| 8109 | aplikační HTTP (`/mcp`, `/agent/*`, `/api/v1/agent-merge-records`) |
 | 8085 | management — `/q/health/*`, `/q/metrics`, `/q/openapi`, `/q/openbank/docs` (root-path `/q`) |
 
 ## Health probes
@@ -50,7 +50,7 @@ Commitovaná konfigurace dodává pouze **offline `mock-echo`** provider, takže
 
 - Cloud-agnostický substrát, GitOps přes ArgoCD, scale-to-zero defaultně pro nejnižší tier, který spouštěč služby dovolí ([ADR-0057](../../../../docs/adr/0057-scale-to-zero-workload-tiers-and-finops-classifier.md)).
 - agent-service **není** money-path služba, takže **není** připnuta k vždy-zapnutému T0 tieru. Je spouštěna na požadavek (admin UI / MCP klient) bez závislosti na event-loopu, takže je kandidátem na **scale-to-zero** tier; skutečný tier je **odvozen z naměřeného provozu**, ne ručně přidělen, a brána declared-vs-measured to drží poctivé. (Přesný tier: odvozen v CI — zde TBD.)
-- Bezstavová + bez DB ⇒ studený start je levný a bezpečný; není žádná data k obnově, takže RPO je pro tuto službu fakticky N/A.
+- Bezstavová vrstva uvažování + žádný bankovní stav ⇒ studený start je levný; vlastní důkazní tabulky ([04 — Data](./04-data.md)) jsou obyčejná Postgres data bez doménového stavu, který by bylo po restartu třeba sladit.
 
 ## SLO (návrh)
 
@@ -79,9 +79,12 @@ Očekávané pod `advisory` jen pokud je nástroj nenamapovaný (deny-by-default
 ### Zapnutí vynucení
 Nastavte `AGENT_POLICY_ENFORCEMENT=block` v env deploye, jakmile je v cíli přítomen OPA sidecar. Není třeba redeploy kódu; kill-switch / charter změny žijí v `agents.yaml` + OPA bundle.
 
+### Ingest zaznamenaného lidského merge (ADR-0031 fáze 3)
+GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta na `POST /api/v1/agent-merge-records` se servisním credential `ROLE_MERGE_RECORDER`. Ingest je idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a vrátí `200` s původním záznamem a `inserted=false`, **bez druhého auditního eventu**. Chybí-li merge v důkazech: nejdřív zkontrolujte log běhu workflow (zamítnutý nebo neautentizovaný POST tam selhává hlasitě), pak roli ingest credential a dosažitelnost Postgres služby.
+
 ## Verze & release
 
-Vydávaná komponenta (přítomen `version.txt`) — aktuálně `1.5.0`. Verzování vlastní release-please z Conventional Commits; neupravujte ručně `version.txt` ani `CHANGELOG.md`. API-kontraktové bumpy (`openapi.yaml: info.version`) se klasifikují z OpenAPI diffu, nezávisle na release verzi (ADR-0048).
+Vydávaná komponenta (přítomen `version.txt`) — aktuálně `1.27.4`. Verzování vlastní release-please z Conventional Commits; neupravujte ručně `version.txt` ani `CHANGELOG.md`. API-kontraktové bumpy (`openapi.yaml: info.version`) se klasifikují z OpenAPI diffu, nezávisle na release verzi (ADR-0048).
 
 ## Produkční mTLS volání AML služby
 
