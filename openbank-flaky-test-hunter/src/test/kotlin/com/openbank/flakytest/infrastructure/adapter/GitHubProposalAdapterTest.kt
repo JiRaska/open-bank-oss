@@ -353,6 +353,24 @@ class GitHubProposalAdapterTest {
     }
 
     @Test
+    fun `a multi-line hostile diagnosis cannot indent the fences or smuggle markup`() {
+        val baseUrl = startIssuesStub()
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+        val hostile = "line one\n```\n# Heading <img src=x>\nwww.evil.test\n~~~\n[x](javascript:alert(1))"
+
+        runBlocking { adapter.openTicket(ticketOnlyFinding.copy(component = "evil`\n@x"), hostile) }
+
+        val issue = objectMapper.readTree(lastIssueRequestBody)
+        assertThat(issue.path("title").asText())
+            .isEqualTo("flaky-test-hunter: TEST_COUNT_DRIFT in (unrecognised component)")
+        val lines = issue.path("body").asText().lines()
+        // Every fence line starts at column 0, and the hostile payload lies between them.
+        assertThat(lines.filter { it.startsWith("```") }).hasSize(4)
+        assertThat(lines.filter { it.trimStart().startsWith("```") && !it.startsWith("```") }).isEmpty()
+        assertThat(issue.path("body").asText()).doesNotContain("<img").contains("www(dot)evil.test")
+    }
+
+    @Test
     fun `an open issue with the same title is reused instead of duplicated`() {
         val baseUrl = startIssuesStub(
             openIssues = listOf(

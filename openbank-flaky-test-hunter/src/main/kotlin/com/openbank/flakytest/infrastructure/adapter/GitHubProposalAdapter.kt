@@ -239,53 +239,69 @@ internal class GitHubTicketWriter(
     }
 
     /**
-     * Structured fields only: the title never carries the finding's free text, so a
-     * model-influenced string cannot become the headline of a public issue, and dedupe collapses
-     * to one open issue per (check type, component).
+     * Structured fields only: the title never carries the finding's free text, and `component` must
+     * look like a module path or it is replaced, so a model-influenced string cannot become the
+     * headline of a public issue. Dedupe collapses to one open issue per (check type, component).
      */
     private fun title(finding: FlakyTestFinding): String =
-        "$TICKET_TITLE_PREFIX${finding.checkType} in ${neutralise(finding.component)}".take(TITLE_MAX_CHARS)
+        "$TICKET_TITLE_PREFIX${finding.checkType} in ${safeComponent(finding.component)}".take(TITLE_MAX_CHARS)
+
+    private fun safeComponent(component: String): String =
+        if (COMPONENT_ALLOWLIST.matches(component)) component else "(unrecognised component)"
 
     /**
-     * The diagnosis is LLM output and the finding title is derived from scanned test text; both
-     * are untrusted and this issue lands on a PUBLIC tracker. They go inside a fenced block with
-     * backticks removed, `@` mentions and links neutralised, so nothing in them can ping a user,
-     * render as a link, or escape the block into issue markdown.
+     * The finding text and the diagnosis are untrusted (LLM output; text scanned from test files) and
+     * this issue lands on a PUBLIC tracker. Built line by line with NO indentation-sensitive template:
+     * a `trimIndent` raw string takes its common indent from the interpolated text, so a multi-line
+     * payload could leave the fences indented (rendered as code, not as a fence). Each untrusted block
+     * is contained by a fence longer than any backtick run it holds (backticks are also removed),
+     * with `@` mentions and link schemes neutralised as defence in depth.
      */
-    private fun body(finding: FlakyTestFinding, diagnosis: String): String = """
-        Finding `${finding.id}` (`${finding.checkType}`, ${finding.severity}) detected at ${finding.detectedAt}
-        on `${neutralise(finding.component)}`.
+    private fun body(finding: FlakyTestFinding, diagnosis: String): String = buildString {
+        appendLine("Finding `${finding.id}` (`${finding.checkType}`, ${finding.severity})")
+        appendLine("detected at ${finding.detectedAt}")
+        appendLine("on `${safeComponent(finding.component)}`.")
+        appendLine()
+        appendLine("**Finding**")
+        appendLine()
+        appendFenced(finding.title)
+        appendLine()
+        appendLine("**Diagnosis** (model output, quoted verbatim as untrusted text)")
+        appendLine()
+        appendFenced(diagnosis.take(DIAGNOSIS_MAX_CHARS))
+        appendLine()
+        appendLine("**Measurement**: ${finding.rawMetricValue.toPlainString()} against threshold")
+        appendLine("${finding.threshold.toPlainString()}.")
+        appendLine()
+        appendLine("No bounded mechanical repair exists for this check type, so the agent opened a tracking")
+        appendLine("issue instead of a pull request. A human must read the test's intent before anything")
+        appendLine("changes; the agent never edits a test file (ADR-0168, ADR-0031 D9).")
+    }
 
-        **Finding**
+    private fun StringBuilder.appendFenced(untrusted: String) {
+        val clean = neutralise(untrusted)
+        val fence = "`".repeat(maxOf(FENCE_MIN, longestBacktickRun(clean) + 1))
+        appendLine("${fence}text")
+        appendLine(clean)
+        appendLine(fence)
+    }
 
-        ```text
-        ${neutralise(finding.title)}
-        ```
-
-        **Diagnosis** (model output, quoted verbatim as untrusted text)
-
-        ```text
-        ${neutralise(diagnosis.take(DIAGNOSIS_MAX_CHARS))}
-        ```
-
-        **Measurement**: ${finding.rawMetricValue.toPlainString()} against threshold
-        ${finding.threshold.toPlainString()}.
-
-        No bounded mechanical repair exists for this check type, so the agent opened a tracking
-        issue instead of a pull request. A human must read the test's intent before anything
-        changes; the agent never edits a test file (ADR-0168, ADR-0031 D9).
-    """.trimIndent()
+    private fun longestBacktickRun(text: String): Int = Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0
 
     private fun neutralise(text: String): String = text
         .replace("`", "'")
         .replace("@", "(at)")
-        .replace(Regex("(?i)https?://"), "hxxp://")
+        .replace(Regex("(?i)\\b(?:https?|ftp|file)://"), "hxxp://")
+        .replace(Regex("(?i)\\bwww\\."), "www(dot)")
+        .replace("<", "&lt;")
 
     private companion object {
         const val TICKET_LABEL = "flaky-test"
         const val TICKET_TITLE_PREFIX = "flaky-test-hunter: "
         const val TITLE_MAX_CHARS = 200
         const val DIAGNOSIS_MAX_CHARS = 4000
+        const val FENCE_MIN = 3
+        val COMPONENT_ALLOWLIST = Regex("[A-Za-z0-9._/-]{1,200}")
         val OK_RANGE = 200..299
     }
 }
