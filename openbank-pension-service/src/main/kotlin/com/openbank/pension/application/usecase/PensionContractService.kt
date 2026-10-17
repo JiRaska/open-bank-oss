@@ -120,9 +120,18 @@ class PensionContractService(
         return transition(caller, id, ContractStatus.PENDING_ACTIVATION) { it.submit(clock.instant()) }
     }
 
-    override suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract> {
+    override suspend fun list(
+        caller: Caller,
+        status: ContractStatus?,
+        limit: Int,
+        query: String?,
+    ): List<PensionContract> {
         val page = limit.coerceIn(1, MAX_LIST)
-        val party = caller.customerPartyId ?: return contracts.findByStatus(status, page)
+        val party = caller.customerPartyId ?: return if (query.isNullOrBlank()) {
+            contracts.findByStatus(status, page)
+        } else {
+            contracts.search(query, status, page)
+        }
         // The participant's own rows only; the status filter narrows, it never widens.
         return contracts.findByParticipant(party, page).filter { status == null || it.status == status }
     }
