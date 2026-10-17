@@ -83,8 +83,8 @@ quarkus:
       verification: ${OIDC_TLS_VERIFICATION:required}
 
 # OPA sidecar (ADR-0034) for the AI-agent read bridge (query.catalog.readonly). Advisory by
-# default — a denied/unreachable decision is logged at WARN and the request proceeds; product
-# catalog has no sidecar yet, so this stays advisory until one is deployed and AUTHZ_ENFORCE=true.
+# default — a denied/unreachable decision is logged at WARN and the request proceeds. The GitOps
+# Deployment runs the sidecar (product-catalog-opa-bundle); this stays advisory until AUTHZ_ENFORCE=true.
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
@@ -93,6 +93,11 @@ authz:
   enforce: "${AUTHZ_ENFORCE:false}"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (BUILD-time property).
+  # Without it @Authorize has no decision point at all, so enforcement could never be switched on.
+  authz:
+    opa-pdp-producer:
+      enabled: true
   catalog:
     # Current OpenBank deployment enables all reference packs (retirement: ADR-0334). Standalone charts override this to
     # an empty value and let the operator opt in explicitly.
