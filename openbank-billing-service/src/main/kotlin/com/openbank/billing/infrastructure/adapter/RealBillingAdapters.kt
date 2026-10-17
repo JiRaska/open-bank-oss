@@ -12,6 +12,7 @@ import com.openbank.billing.application.port.out.BillableAccountDiscoveryPort
 import com.openbank.billing.application.port.out.BillableAccountsPage
 import com.openbank.billing.application.port.out.ProductRevisionPort
 import com.openbank.billing.application.port.out.RevisionTerms
+import com.openbank.billing.application.port.out.RevisionTermsUnreadableException
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.infrastructure.client.AccountRestClient
 import com.openbank.billing.infrastructure.client.BalanceRestClient
@@ -153,30 +154,22 @@ class RestProductRevisionPort(
     private fun toTerms(revision: RevisionDto): RevisionTerms {
         val attributes = revision.content.attributes
         val explicit = (attributes["accountingClass"] as? String)?.takeIf(String::isNotBlank)
-        val derived = if (explicit ==
-            null
-        ) {
+        val derived = if (explicit == null) {
             LegacyProductTypes.accountingClassOf(attributes["productType"] as? String)
         } else {
             null
         }
-        val legacyFees = LegacyFees.byPriceCode(attributes[LEGACY_DOCUMENT] as? String)
-        val usable = revision.content.prices.filter { it.kind == "AMOUNT" && it.currency != null }
-        // A component billing cannot price is DROPPED, never silently: counted and logged by reason, so a
-        // percentage fee or a currency-less amount is visible instead of becoming a smaller bill.
-        (revision.content.prices - usable.toSet()).forEach { price ->
-            val reason = if (price.kind != "AMOUNT") "NON_AMOUNT_KIND" else "NULL_CURRENCY"
-            meters.counter("billing.fee.component.dropped", "reason", reason).increment()
-            log.warnf(
-                "revision %s: price component %s (kind=%s) is not billable: %s",
-                revision.id,
-                price.code,
-                price.kind,
-                reason,
-            )
-        }
-        val feeBearing = revision.content.prices.any { it.kind == "AMOUNT" || it.code.startsWith("FEE_") } ||
-            legacyFees.isNotEmpty()
+        val legacyFees = legacyFeesOf(revision)
+        // The catalog's PriceComponent has NO role/type field: nothing in the schema says that an AMOUNT is a
+        // fee rather than a minimum balance or a limit. A price component is therefore a fee only when it is
+        // one of the revision's legacy v1 fees (matched by the price code the catalog derives from the fee
+        // id) -- the only place a fee is identified. Every other component is not billed, and is not
+        // reported as dropped either, because it was never a fee. A FEE_-coded component without an
+        // identity in the document IS reported (it looks like a fee billing cannot place).
+        val prices = revision.content.prices
+        val usable = prices.filter { it.code in legacyFees && it.kind == "AMOUNT" && it.currency != null }
+        val dropped = prices.filter { it !in usable && (it.code in legacyFees || it.code.startsWith("FEE_")) }
+        reportDropped(revision.id, dropped, legacyFees.keys)
         return RevisionTerms(
             revisionId = revision.id,
             accountingClass = explicit ?: derived,
@@ -186,8 +179,34 @@ class RestProductRevisionPort(
                 else -> AccountingClassSource.NONE
             },
             fees = usable.map { price -> toFee(price, legacyFees[price.code]) },
-            feeBearing = feeBearing,
+            feeBearing = legacyFees.isNotEmpty() || dropped.isNotEmpty(),
+            droppedFeeComponents = dropped.size,
         )
+    }
+
+    private fun legacyFeesOf(revision: RevisionDto): Map<String, LegacyFees.LegacyFee> = try {
+        LegacyFees.byPriceCode(revision.content.attributes[LEGACY_DOCUMENT] as? String)
+    } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
+        throw RevisionTermsUnreadableException("revision ${revision.id}: embedded v1 document unreadable", e)
+    }
+
+    /** A component billing cannot price is DROPPED, never silently: counted and logged by reason. */
+    private fun reportDropped(revisionId: String, dropped: List<PriceComponentDto>, legacyCodes: Set<String>) {
+        dropped.forEach { price ->
+            val reason = when {
+                price.code !in legacyCodes -> "NOT_IN_LEGACY_DOCUMENT"
+                price.kind != "AMOUNT" -> "NON_AMOUNT_KIND"
+                else -> "NULL_CURRENCY"
+            }
+            meters.counter("billing.fee.component.dropped", "reason", reason).increment()
+            log.warnf(
+                "revision %s: fee component %s (kind=%s) is not billable: %s",
+                revisionId,
+                price.code,
+                price.kind,
+                reason,
+            )
+        }
     }
 
     private fun toFee(price: PriceComponentDto, meta: LegacyFees.LegacyFee?) = BillableFee(

@@ -57,7 +57,20 @@ data class RevisionTerms(
      * [fees] come out empty for the account's currency is a defect to surface (skip), never "zero fees".
      */
     val feeBearing: Boolean = false,
+    /**
+     * Fee price components of this revision that billing cannot price (a fee of the wrong kind or with no
+     * currency, or fee-coded with no identity in the revision's v1 document). Each makes the assessment
+     * charge LESS than the product declares, so the assessment counts it
+     * (`billing.assessment.dropped_components`) every time, not only when the revision is first read.
+     */
+    val droppedFeeComponents: Int = 0,
 )
+
+/**
+ * The revision's embedded v1 document could not be read, so its fee identities are unknown. Distinct from
+ * a catalog outage: the catalog answered, the content is what is wrong, and retrying will not fix it.
+ */
+class RevisionTermsUnreadableException(message: String, cause: Throwable) : RuntimeException(message, cause)
 
 /** Where [RevisionTerms.accountingClass] came from. */
 enum class AccountingClassSource {

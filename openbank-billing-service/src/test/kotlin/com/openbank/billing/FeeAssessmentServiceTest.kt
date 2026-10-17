@@ -251,4 +251,81 @@ class FeeAssessmentServiceTest {
         assertThat(pins.pins).isEmpty()
         assertThat(skipCount("ACCOUNT_OPENING_UNKNOWN")).isEqualTo(1.0)
     }
+
+    private fun billing() = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
+
+    private fun serviceWith(revisions: FakeRevisions, pins: InMemoryPins = this.pins) =
+        FeeAssessmentService(accounts(billing()), revisions, pins, meters)
+
+    @Test
+    fun `a pin-store failure on write is its own skip, not a catalog outage`(): Unit = runBlocking {
+        val failing = InMemoryPins(pinFailure = IllegalStateException("db down"))
+        val a = serviceWith(FakeRevisions(listOf(fee("f1", "5"))), failing).assess("c", "acc", "CZK")
+        assertThat(a.skipReason).isEqualTo("REVISION_PIN_STORE_UNAVAILABLE")
+        assertThat(skipCount("PRODUCT_CATALOG_UNREACHABLE")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a pin-store failure on read is its own skip, not a catalog outage`(): Unit = runBlocking {
+        val failing = InMemoryPins(findFailure = IllegalStateException("db down"))
+        val a = serviceWith(FakeRevisions(listOf(fee("f1", "5"))), failing).assess("c", "acc", "CZK")
+        assertThat(a.skipReason).isEqualTo("REVISION_PIN_STORE_UNAVAILABLE")
+    }
+
+    @Test
+    fun `an unreadable embedded document is its own skip, not a catalog outage`(): Unit = runBlocking {
+        val revisions = FakeRevisions(
+            listOf(fee("f1", "5")),
+            termsFailure = com.openbank.billing.application.port.out.RevisionTermsUnreadableException(
+                "bad document",
+                IllegalArgumentException("x"),
+            ),
+        )
+        val a = serviceWith(revisions).assess("c", "acc", "CZK")
+        assertThat(a.skipReason).isEqualTo("LEGACY_DOCUMENT_UNREADABLE")
+        assertThat(skipCount("PRODUCT_CATALOG_UNREACHABLE")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a catalog failure on the lookup or the terms read is still the catalog outage`(): Unit = runBlocking {
+        val lookup = serviceWith(FakeRevisions(emptyList(), failure = RuntimeException("503"))).assess("c", "a1", "CZK")
+        val terms = serviceWith(FakeRevisions(listOf(fee("f1", "5")), termsFailure = RuntimeException("503")))
+            .assess("c", "a2", "CZK")
+        assertThat(lookup.skipReason).isEqualTo("PRODUCT_CATALOG_UNREACHABLE")
+        assertThat(terms.skipReason).isEqualTo("PRODUCT_CATALOG_UNREACHABLE")
+    }
+
+    @Test
+    fun `a cancelled coroutine is never turned into a skip`() {
+        listOf(
+            serviceWith(FakeRevisions(emptyList(), failure = kotlinx.coroutines.CancellationException("cancelled"))),
+            serviceWith(
+                FakeRevisions(listOf(fee("f1", "5")), termsFailure = kotlinx.coroutines.CancellationException("c")),
+            ),
+            serviceWith(
+                FakeRevisions(listOf(fee("f1", "5"))),
+                InMemoryPins(pinFailure = kotlinx.coroutines.CancellationException("c")),
+            ),
+            serviceWith(
+                FakeRevisions(listOf(fee("f1", "5"))),
+                InMemoryPins(findFailure = kotlinx.coroutines.CancellationException("c")),
+            ),
+        ).forEach {
+            org.assertj.core.api.Assertions.assertThatThrownBy { runBlocking { it.assess("c", "acc", "CZK") } }
+                .isInstanceOf(kotlinx.coroutines.CancellationException::class.java)
+        }
+    }
+
+    @Test
+    fun `every assessment that charges less than the product declares is counted, not only the first read`(): Unit =
+        runBlocking {
+            val revisions = FakeRevisions(listOf(fee("f1", "5")), dropped = 1)
+            val service = serviceWith(revisions)
+            service.assess("c", "acc-1", "CZK")
+            service.assess("c", "acc-2", "CZK")
+            assertThat(meters.counter("billing.assessment.dropped_components").count()).isEqualTo(2.0)
+            // and an assessment with nothing dropped does not count
+            serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
+            assertThat(meters.counter("billing.assessment.dropped_components").count()).isEqualTo(2.0)
+        }
 }

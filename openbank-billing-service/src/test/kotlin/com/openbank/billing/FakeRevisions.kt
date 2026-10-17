@@ -22,6 +22,9 @@ class FakeRevisions(
     private val history: List<Pair<Instant, String>>? = null,
     private val allFees: List<BillableFee> = fees,
     private val feeBearing: Boolean = allFees.isNotEmpty(),
+    private val dropped: Int = 0,
+    /** Fails ONLY the terms read (the lookup still works), to tell the failure kinds apart. */
+    private val termsFailure: Exception? = null,
 ) : ProductRevisionPort {
     val termsReads = mutableListOf<String>()
     val lookups = mutableListOf<Instant?>()
@@ -36,6 +39,7 @@ class FakeRevisions(
 
     override suspend fun terms(revisionId: String, currency: String): RevisionTerms {
         failure?.let { throw it }
+        termsFailure?.let { throw it }
         termsReads += revisionId
         return RevisionTerms(
             revisionId,
@@ -43,6 +47,7 @@ class FakeRevisions(
             source,
             fees.filter { it.currency == currency },
             feeBearing = feeBearing,
+            droppedFeeComponents = dropped,
         )
     }
 
@@ -55,11 +60,17 @@ class FakeRevisions(
 /** When the fake accounts were opened (an arbitrary instant, long before any test republication). */
 val OPENED: Instant = Instant.parse("2026-01-15T10:00:00Z")
 
-class InMemoryPins : AccountRevisionPinPort {
+class InMemoryPins(private val findFailure: Exception? = null, private val pinFailure: Exception? = null) :
+    AccountRevisionPinPort {
     val pins = mutableMapOf<String, String>()
 
-    override suspend fun find(accountId: String): String? = pins[accountId]
+    override suspend fun find(accountId: String): String? {
+        findFailure?.let { throw it }
+        return pins[accountId]
+    }
 
-    override suspend fun pinIfAbsent(accountId: String, revisionId: String): String =
-        pins.getOrPut(accountId) { revisionId }
+    override suspend fun pinIfAbsent(accountId: String, revisionId: String): String {
+        pinFailure?.let { throw it }
+        return pins.getOrPut(accountId) { revisionId }
+    }
 }

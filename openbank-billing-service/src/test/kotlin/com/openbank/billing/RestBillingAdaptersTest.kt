@@ -164,8 +164,12 @@ class RestBillingAdaptersTest {
         val catalog = mockk<ProductCatalogRestClient>()
         every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
             revision(
-                attributes = mapOf("productType" to "CURRENT", "accountingClass" to "CUSTOMER_DEPOSIT_TERM"),
-                prices = arrayOf(price("MAINTENANCE", "9", "CZK")),
+                attributes = mapOf(
+                    "productType" to "CURRENT",
+                    "accountingClass" to "CUSTOMER_DEPOSIT_TERM",
+                    "legacyDocument" to legacyDocument("f1"),
+                ),
+                prices = arrayOf(price("FEE_F1_3F524CDC07A11D7C6220", "9", "CZK")),
             ),
         )
 
@@ -173,10 +177,43 @@ class RestBillingAdaptersTest {
 
         assertThat(terms.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_TERM")
         assertThat(terms.accountingClassSource).isEqualTo(AccountingClassSource.REVISION)
-        // No embedded v1 fee to match: charged fail-closed (not waivable) under the price code.
-        assertThat(terms.fees.single().feeId).isEqualTo("MAINTENANCE")
-        assertThat(terms.fees.single().waivable).isFalse()
+        assertThat(terms.fees.single().feeId).isEqualTo("f1")
         assertThat(meters.find("billing.accounting_class.derived").counter()).isNull()
+    }
+
+    @Test
+    fun `only the revision's legacy v1 fees are fees - a minimum balance or a limit is never billed`(): Unit =
+        runBlocking {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+                revision(
+                    attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
+                    prices = arrayOf(
+                        price("MINIMUM_BALANCE", "1000", "CZK"),
+                        price("DAILY_WITHDRAWAL_LIMIT", "50000", "CZK"),
+                    ),
+                ),
+            )
+            val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+            assertThat(terms.fees).isEmpty()
+            assertThat(terms.feeBearing).isFalse()
+            assertThat(terms.droppedFeeComponents).isEqualTo(0)
+            assertThat(meters.find("billing.fee.component.dropped").counter()).isNull()
+        }
+
+    @Test
+    fun `an unreadable embedded v1 document is reported as such, not as a catalog fault`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+            revision(
+                attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND", "legacyDocument" to "{not json"),
+            ),
+        )
+        val thrown = runCatching { RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK") }.exceptionOrNull()
+        assertThat(
+            thrown,
+        ).isInstanceOf(com.openbank.billing.application.port.out.RevisionTermsUnreadableException::class.java)
     }
 
     @Test
@@ -265,16 +302,21 @@ class RestBillingAdaptersTest {
     }
 
     @Test
-    fun `a component billing cannot price is dropped LOUDLY, by reason, and the revision still reports fee-bearing`():
-        Unit =
+    fun `a fee component billing cannot price is dropped loudly by reason and the revision stays fee-bearing`(): Unit =
         runBlocking {
             val catalog = mockk<ProductCatalogRestClient>()
+            val pct = com.openbank.billing.infrastructure.adapter.LegacyFees.priceCode("f1")
+            val noCcy = com.openbank.billing.infrastructure.adapter.LegacyFees.priceCode("f2")
             every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
                 revision(
-                    attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
+                    attributes = mapOf(
+                        "accountingClass" to "CUSTOMER_DEPOSIT_DEMAND",
+                        "legacyDocument" to legacyDocument("f1", "f2"),
+                    ),
                     prices = arrayOf(
-                        price("FEE_PCT", "0.01", "CZK", kind = "RATE"),
-                        PriceComponentDto("FEE_NOCCY", "AMOUNT", BigDecimal("3"), null, "monthly", "MONTHLY"),
+                        price(pct, "0.01", "CZK", kind = "RATE"),
+                        PriceComponentDto(noCcy, "AMOUNT", BigDecimal("3"), null, "monthly", "MONTHLY"),
+                        price("FEE_UNKNOWN_DEADBEEF", "7", "CZK"),
                     ),
                 ),
             )
@@ -282,9 +324,14 @@ class RestBillingAdaptersTest {
 
             assertThat(terms.fees).isEmpty()
             assertThat(terms.feeBearing).isTrue()
+            assertThat(terms.droppedFeeComponents).isEqualTo(3)
             assertThat(meters.get("billing.fee.component.dropped").tag("reason", "NON_AMOUNT_KIND").counter().count())
                 .isEqualTo(1.0)
             assertThat(meters.get("billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count())
+                .isEqualTo(1.0)
+            assertThat(
+                meters.get("billing.fee.component.dropped").tag("reason", "NOT_IN_LEGACY_DOCUMENT").counter().count(),
+            )
                 .isEqualTo(1.0)
         }
 
@@ -308,8 +355,11 @@ class RestBillingAdaptersTest {
             val catalog = mockk<ProductCatalogRestClient>()
             every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
                 revision(
-                    attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
-                    prices = arrayOf(price("MAINTENANCE", "9", "CZK")),
+                    attributes = mapOf(
+                        "accountingClass" to "CUSTOMER_DEPOSIT_DEMAND",
+                        "legacyDocument" to legacyDocument("f1"),
+                    ),
+                    prices = arrayOf(price("FEE_F1_3F524CDC07A11D7C6220", "9", "CZK")),
                 ),
             )
             val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "EUR")

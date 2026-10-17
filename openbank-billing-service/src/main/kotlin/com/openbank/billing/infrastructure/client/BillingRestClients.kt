@@ -5,6 +5,7 @@
 package com.openbank.billing.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
@@ -152,8 +153,10 @@ interface BalanceRestClient {
  * (see `LedgerResource.PostJournalLineRequest`).
  */
 data class LedgerJournalLineRequest(
-    val accountingClass: String,
-    val accountingRole: String,
+    /** Explicit GL account (the pre-ADR-0341 payload); absent when the leg names a class instead. */
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val glAccountId: UUID? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val accountingClass: String? = null,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL) val accountingRole: String? = null,
     val side: String,
     val amount: BigDecimal,
     val currencyCode: String,

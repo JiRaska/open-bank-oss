@@ -189,6 +189,13 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
   billing:
+    ledger:
+      # ADR-0341 D3 rollout switch. false (default): fee legs carry the explicit GL accounts the ledger has
+      # always accepted (2100 / 4003), so deploying billing BEFORE the ledger that serves accounting
+      # classes (migration V32) cannot make the ledger refuse every fee. true: legs name an
+      # accountingClass and the ledger resolves the account. Flip only after that ledger is live, then
+      # delete the two literal ids in BillingJournalFactory.
+      post-by-class: ${OPENBANK_BILLING_LEDGER_POST_BY_CLASS:false}
     scheduler:
       # Disabled by default — the scheduler cannot charge anyone on default config.
       # Batch source (BillingCycleScheduler KDoc, ADR-0143 / issue #548): account-ids CSV set

@@ -74,7 +74,7 @@ class FeeJournalsUnchangedTest {
 
     private fun resolved(lines: List<LedgerJournalLineRequest>) = lines.map {
         Landed(
-            LedgerMap.resolve(it.accountingClass, it.accountingRole, it.currencyCode),
+            LedgerMap.resolve(checkNotNull(it.accountingClass), checkNotNull(it.accountingRole), it.currencyCode),
             it.side,
             it.amount,
             it.currencyCode,
@@ -144,14 +144,22 @@ class FeeJournalsUnchangedTest {
         for (ccy in nonCzk) {
             for (cls in classes) {
                 val debit = BillingJournalFactory.buildLines(charge(ccy, cls)).single { it.side == "DEBIT" }
-                val account = LedgerMap.resolve(debit.accountingClass, debit.accountingRole, debit.currencyCode)
+                val account = LedgerMap.resolve(
+                    checkNotNull(debit.accountingClass),
+                    checkNotNull(debit.accountingRole),
+                    debit.currencyCode,
+                )
                 assertThat(account).describedAs("$cls $ccy").isEqualTo(LedgerMap.idOf(expectedControl.getValue(ccy)))
                 // and the ledger would ACCEPT that leg: the currency is the account's
                 assertThat(LedgerRules.accountCurrency(account)).isEqualTo(ccy)
             }
             val credit = BillingJournalFactory.buildLines(charge(ccy, classes.first())).single { it.side == "CREDIT" }
             val thrown = runCatching {
-                LedgerMap.resolve(credit.accountingClass, credit.accountingRole, credit.currencyCode)
+                LedgerMap.resolve(
+                    checkNotNull(credit.accountingClass),
+                    checkNotNull(credit.accountingRole),
+                    credit.currencyCode,
+                )
             }
             assertThat(thrown.exceptionOrNull())
                 .describedAs("fee income in $ccy")

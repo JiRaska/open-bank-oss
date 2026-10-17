@@ -4,11 +4,13 @@
 
 package com.openbank.billing.application.usecase
 
+import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
 import com.openbank.billing.application.port.out.AccountRevisionPinPort
 import com.openbank.billing.application.port.out.AccountingClassSource
 import com.openbank.billing.application.port.out.ProductRevisionPort
 import com.openbank.billing.application.port.out.RevisionTerms
+import com.openbank.billing.application.port.out.RevisionTermsUnreadableException
 import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.domain.BillingAssessment
@@ -17,6 +19,7 @@ import com.openbank.libs.product.WaiveReason
 import com.openbank.libs.product.WaiverEvaluator
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import java.math.BigDecimal
 
 /**
@@ -46,28 +49,24 @@ class FeeAssessmentService(
         val billing = accounts.resolve(accountId, currency)
             ?: return skipped(cycleId, accountId, currency, "ACCOUNT_CONTEXT_UNRESOLVED")
 
-        // Fail-closed, same as the account-context branch above: a catalog or pin-store fault
-        // (unreachable, timeout, unexpected 5xx) must be a visible, explicit skip -- not a silent "zero
-        // fees" that looks identical to a product that genuinely has none. Confirmed live during
-        // real-environment verification (ADR-0143) that swallowing the exception made the two cases
-        // indistinguishable.
-        // TooGenericExceptionCaught/SwallowedException: deliberately catch ANY fault -- narrowing this
-        // would leave a class of faults unhandled and silently billing on absent data.
-        @Suppress("TooGenericExceptionCaught", "SwallowedException")
-        val terms: RevisionTerms = try {
-            val pinned = pins.find(accountId) ?: run {
-                // The terms an account is billed under are the ones in force when it was OPENED, not
-                // the ones in force the first time billing looks at it (ADR-0341 D1): resolving "now"
-                // would silently reprice every account older than the latest republication.
-                val openedAt = billing.openedAt
-                    ?: return skipped(cycleId, accountId, currency, "ACCOUNT_OPENING_UNKNOWN")
-                val published = revisions.publishedRevisionIdFor(billing.productId, openedAt)
-                    ?: return skipped(cycleId, accountId, currency, "PRODUCT_REVISION_UNRESOLVED")
-                pins.pinIfAbsent(accountId, published)
+        // Fail-closed, same as the account-context branch above: a catalog or pin-store fault must be a
+        // visible, explicit skip -- not a silent "zero fees" that looks identical to a product that
+        // genuinely has none. The REASON says which part failed, because the remedies differ: the catalog
+        // being down, the pin store (our own database) failing, and a revision whose embedded document is
+        // unreadable (retrying never fixes it) must not all read PRODUCT_CATALOG_UNREACHABLE. A cancelled
+        // coroutine is never a skip: it propagates.
+        val pinned = when (val pin = resolvePin(accountId, billing)) {
+            is Pin.Skip -> return skipped(cycleId, accountId, currency, pin.reason)
+            is Pin.Found -> pin.revisionId
+        }
+        val terms: RevisionTerms = attempt { revisions.terms(pinned, currency) }.getOrElse {
+            val reason = if (it is RevisionTermsUnreadableException) {
+                "LEGACY_DOCUMENT_UNREADABLE"
+            } else {
+                "PRODUCT_CATALOG_UNREACHABLE"
             }
-            revisions.terms(pinned, currency)
-        } catch (e: Exception) {
-            return skipped(cycleId, accountId, currency, "PRODUCT_CATALOG_UNREACHABLE")
+            log.warnf(it, "terms of revision %s for account %s unavailable: %s", pinned, accountId, reason)
+            return skipped(cycleId, accountId, currency, reason)
         }
         // A fee with no accounting class has no ledger account to land in; charging it anyway would
         // mean guessing one (ADR-0341 D3).
@@ -81,6 +80,17 @@ class FeeAssessmentService(
         if (terms.feeBearing && terms.fees.isEmpty()) {
             return skipped(cycleId, accountId, currency, "FEE_COMPONENT_UNRESOLVED")
         }
+        if (terms.droppedFeeComponents > 0) {
+            // This assessment charges less than the product declares; a persistent gap must be visible to
+            // an alert, which a once-per-revision counter (the revision is cached) cannot give.
+            meters.counter("billing.assessment.dropped_components").increment()
+            log.warnf(
+                "assessment %s/%s charges without %d dropped fee component(s)",
+                cycleId,
+                accountId,
+                terms.droppedFeeComponents,
+            )
+        }
         val assessed = terms.fees.map { fee ->
             assessOne(cycleId, accountId, currency, fee, billing.context, terms.revisionId, accountingClass)
         }
@@ -93,6 +103,49 @@ class FeeAssessmentService(
             assessedFees = assessed,
         )
     }
+
+    private sealed interface Pin {
+        data class Found(val revisionId: String) : Pin
+        data class Skip(val reason: String) : Pin
+    }
+
+    /**
+     * Runs [block]; any failure other than cancellation comes back as a value so the caller can map it to
+     * a reason. A cancelled coroutine is rethrown: it is never a skip.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private inline fun <T> attempt(block: () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** The account's pinned revision, pinning it as of the account's opening on first sight. */
+    private suspend fun resolvePin(accountId: String, billing: AccountBilling): Pin {
+        val existing = attempt { pins.find(accountId) }.getOrElse {
+            log.warnf(it, "pin store read failed for account %s", accountId)
+            return Pin.Skip("REVISION_PIN_STORE_UNAVAILABLE")
+        }
+        if (existing != null) return Pin.Found(existing)
+        // The terms an account is billed under are the ones in force when it was OPENED, not the ones in
+        // force the first time billing looks at it (ADR-0341 D1).
+        val openedAt = billing.openedAt ?: return Pin.Skip("ACCOUNT_OPENING_UNKNOWN")
+        val published = attempt { revisions.publishedRevisionIdFor(billing.productId, openedAt) }.getOrElse {
+            log.warnf(it, "catalog lookup failed for product %s", billing.productId)
+            return Pin.Skip("PRODUCT_CATALOG_UNREACHABLE")
+        } ?: return Pin.Skip("PRODUCT_REVISION_UNRESOLVED")
+        return attempt { pins.pinIfAbsent(accountId, published) }.fold(
+            onSuccess = { Pin.Found(it) },
+            onFailure = {
+                log.warnf(it, "pin store write failed for account %s", accountId)
+                Pin.Skip("REVISION_PIN_STORE_UNAVAILABLE")
+            },
+        )
+    }
+
+    private val log = org.jboss.logging.Logger.getLogger(FeeAssessmentService::class.java)
 
     /** Every skip is COUNTED by reason: a skip is a fee not charged, and must never be invisible. */
     private fun skipped(cycleId: String, accountId: String, currency: String, reason: String): BillingAssessment {

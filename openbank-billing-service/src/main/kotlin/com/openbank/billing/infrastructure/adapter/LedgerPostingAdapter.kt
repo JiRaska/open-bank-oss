@@ -15,6 +15,7 @@ import com.openbank.billing.infrastructure.client.LedgerRestClient
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
@@ -43,6 +44,13 @@ class LedgerPostingAdapter(
     @RestClient private val ledgerClient: LedgerRestClient,
     private val config: BillingLedgerConfig,
     private val clock: Clock,
+    /**
+     * `openbank.billing.ledger.post-by-class`. FALSE (default) posts the explicit GL accounts every ledger
+     * understands (2100 / 4003), so deploying billing before the ledger carrying the accounting class map
+     * cannot make the ledger refuse every fee. Set TRUE once that ledger is live (ADR-0341 D3).
+     */
+    @ConfigProperty(name = "openbank.billing.ledger.post-by-class", defaultValue = "false")
+    private val postByClass: Boolean,
 ) : LedgerPostingPort {
 
     private val log = Logger.getLogger(LedgerPostingAdapter::class.java)
@@ -52,6 +60,7 @@ class LedgerPostingAdapter(
             command = command,
             systemActorId = config.systemActorId(),
             date = LocalDate.now(clock),
+            postByClass = postByClass,
         )
         val response = postWithResilience(request = request).awaitSuspending()
         log.debugf(
@@ -68,6 +77,7 @@ class LedgerPostingAdapter(
             command = command,
             systemActorId = config.systemActorId(),
             date = LocalDate.now(clock),
+            postByClass = postByClass,
         )
         val response = postReversalWithResilience(request = request).awaitSuspending()
         log.debugf(
