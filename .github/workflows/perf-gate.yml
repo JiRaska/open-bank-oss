@@ -57,8 +57,8 @@ jobs:
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
-          # Engagement and Referral added as third through thirty-eighth read-only
-          # subjects). Kept as a named constant so the summary
+          # Engagement, Referral and Campaign added as third through thirty-ninth
+          # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
           # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
@@ -103,6 +103,7 @@ jobs:
               "openbank-loyalty-service",
               "openbank-engagement-service",
               "openbank-referral-service",
+              "openbank-campaign-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -153,6 +154,11 @@ jobs:
                   # runner is ubuntu, so a server is sufficient there; a macOS dev
                   # boot additionally needs -Dopenbank.lending.worker.enabled=false.
                   "openbank-lending-service",
+                  # its campaign scheduler worker registers against Temporal at BOOT and
+                  # quarkusDev dies with gRPC UNAVAILABLE without a server (measured this
+                  # PR: Connection refused localhost:7233); namespace openbank from its
+                  # own config (OPENBANK_TEMPORAL_NAMESPACE default)
+                  "openbank-campaign-service",
               }
               # openbank-incentive-service injects JsonWebToken as a CONSTRUCTOR parameter
               # (IncentiveResource), so quarkus.oidc.enabled=false leaves the bean
@@ -167,6 +173,9 @@ jobs:
               # @RolesAllowed permissive, as measured locally).
               OIDC_REQUIRED = {
                   "openbank-incentive-service",
+                  # same constructor-injected JsonWebToken (two injection points,
+                  # "Found 2 deployment problems" — measured this PR)
+                  "openbank-campaign-service",
               }
               temporal = None
               if svc in NEEDS_TEMPORAL:
