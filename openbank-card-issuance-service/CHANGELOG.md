@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.3...card-issuance-service-v0.28.4) (2026-10-16)
+
+
+### Bug Fixes
+
+* **card-issuance:** narrow secure-details to its customer channel ([#12937](https://github.com/JiRaska/open-bank-oss/issues/12937)) ([e9dd7b1](https://github.com/JiRaska/open-bank-oss/commit/e9dd7b1f56459b5a1bdeea1a2b640d5a10ca6670))
+
 ## [0.28.3](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.2...card-issuance-service-v0.28.3) (2026-10-16)
 
 

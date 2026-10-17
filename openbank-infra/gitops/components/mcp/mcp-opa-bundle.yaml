@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "8210f26e8c40ee82"
+    openbank.tech/policy-checksum: "9a7ef0fd97ffe08f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1730,6 +1730,9 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
+        # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
+        - card.details.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:
