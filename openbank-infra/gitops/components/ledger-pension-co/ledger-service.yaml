@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-ledger-pension-co-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "033f6103bea8e9d0"
+        openbank.tech/policy-checksum: "0a03a35d3faafb1a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -122,9 +122,14 @@ spec:
             # …so the day lock has no calendar to read: off, not shadow/enforce.
             - name: LEDGER_DAY_LOCK_MODE
               value: "off"
-            # OIDC resource server: same realm and client as the bank instance.
+            # OIDC resource server: same realm as the bank instance.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
+            # Outbound oidc-client: this instance's OWN client, not the shared openbank-services
+            # (oidc-externalsecret.yaml). The resource-server block keeps its client id: it
+            # validates bearer tokens against the realm JWKS and never presents the secret.
+            - name: QUARKUS_OIDC_CLIENT_CLIENT_ID
+              value: openbank-ledger-pension-co
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4744f225e156c2db"
+        openbank.tech/policy-checksum: "e7611018d967cf85"
     spec:
       securityContext:
         runAsNonRoot: true

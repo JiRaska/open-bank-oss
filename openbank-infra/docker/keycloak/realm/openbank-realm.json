@@ -1314,6 +1314,7 @@
       "fullScopeAllowed": false,
       "defaultClientScopes": [
         "basic",
+        "profile",
         "fx:read"
       ],
       "optionalClientScopes": [],
@@ -1343,6 +1344,7 @@
         "roles"
       ],
       "optionalClientScopes": [
+        "catalog:read",
         "pension:legal-approve",
         "pension:product-approve"
       ],

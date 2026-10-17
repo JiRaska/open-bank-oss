@@ -104,8 +104,9 @@ test_synthetic_journey_lists_rates if {
 		with data.rules as rules_mock
 }
 
-test_synthetic_journey_reads_rate if {
-	rest.allow with input as {"principal": synthetic_fx, "action": "fx.read"}
+# The journey calls only GET /api/v1/fx/rates (fx.list); fx.read is not its action.
+test_synthetic_journey_denied_read if {
+	not rest.allow with input as {"principal": synthetic_fx, "action": "fx.read"}
 		with data.rules as rules_mock
 }
 
@@ -121,5 +122,55 @@ test_synthetic_journey_denied_trigger if {
 
 test_synthetic_journey_role_absent_without_scope if {
 	not rest.allow with input as {"principal": synthetic_fx_no_scope, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+# --- the role alone is not the journey's identity (security review of #12850) ---
+
+synthetic_fx_marked := {
+	"type": "HUMAN", "id": "service-account-openbank-synthetic-fx-read",
+	"service_account": true, "client_id": "openbank-synthetic-fx-read", "roles": ["FX_SCOPE_READ"],
+}
+
+other_client_with_scope := {
+	"type": "HUMAN", "id": "service-account-openbank-other",
+	"service_account": true, "client_id": "openbank-other", "roles": ["FX_SCOPE_READ"],
+}
+
+human_with_scope_role := {"type": "HUMAN", "id": "alice", "service_account": false, "roles": ["FX_SCOPE_READ"]}
+
+# A renamed machine cannot borrow the journey's name: id says journey, client_id does not.
+spoofed_journey_id := {
+	"type": "HUMAN", "id": "service-account-openbank-synthetic-fx-read",
+	"service_account": true, "client_id": "openbank-other", "roles": ["FX_SCOPE_READ"],
+}
+
+test_journey_marked_allowed_on_list if {
+	rest.allow with input as {"principal": synthetic_fx_marked, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+test_other_client_with_fx_scope_denied_list if {
+	not rest.allow with input as {"principal": other_client_with_scope, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+test_other_client_with_fx_scope_denied_read if {
+	not rest.allow with input as {"principal": other_client_with_scope, "action": "fx.read"}
+		with data.rules as rules_mock
+}
+
+test_human_with_fx_scope_role_denied if {
+	not rest.allow with input as {"principal": human_with_scope_role, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+test_spoofed_journey_id_denied if {
+	not rest.allow with input as {"principal": spoofed_journey_id, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+test_journey_marked_denied_read if {
+	not rest.allow with input as {"principal": synthetic_fx_marked, "action": "fx.read"}
 		with data.rules as rules_mock
 }
