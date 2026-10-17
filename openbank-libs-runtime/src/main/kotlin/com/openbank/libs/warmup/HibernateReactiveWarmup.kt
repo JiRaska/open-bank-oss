@@ -56,7 +56,9 @@ internal object HibernateReactiveWarmup {
         if (!handle.isAvailable) return "no Mutiny.SessionFactory bean"
         val factory = handle.get()
         val all = factory.metamodel.entities.mapNotNull { e -> e.javaType?.let { e.name to it } }
-        val entities = all.filter { (_, type) -> shouldWarm(type) { owner -> Arc.container().beanManager().getBeans(owner).isNotEmpty() } }
+        val entities = all.filter { (_, type) ->
+            shouldWarm(type) { owner -> Arc.container().beanManager().getBeans(owner).isNotEmpty() }
+        }
         val inactive = all.size - entities.size
         var ok = 0
         var failed = 0
