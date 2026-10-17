@@ -38,3 +38,7 @@ That relationship is a Pact contract (`pacts/openbank-customer-edge-openbank-wea
 - `WealthPactFolderProviderVerificationTest` replays it on every PR against a real Postgres.
 - `WealthNegativeAuthProviderVerificationTest` proves that a caller with no identity gets 401.
 - `WealthPactBrokerProviderVerificationTest` publishes the verification on main-push, so `can-i-deploy` can answer about customer-edge.
+
+## Build-time wiring
+
+- **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.

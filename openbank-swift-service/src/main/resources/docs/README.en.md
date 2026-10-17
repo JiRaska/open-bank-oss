@@ -24,3 +24,7 @@ This documentation is published directly by the service at the management endpoi
 - **Idempotency:** client-supplied `idempotencyKey` field on the send command, deduplicated by a `UNIQUE` constraint in `swift_messages` (a Redis client is also wired)
 - **Auth:** Keycloak OIDC (client `openbank-services`); OPA sidecar authorization (ADR-0034) in advisory mode by default (`authz.enforce=false`), `@Authorize` on the acknowledge action
 - **Classification:** **money-path** service (`rules.yaml: money_path_services`) — 2 approvals + threat model required ([threat model](../../../../docs/threat-models/openbank-swift-service.md))
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

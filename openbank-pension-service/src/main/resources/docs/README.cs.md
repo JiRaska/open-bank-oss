@@ -131,3 +131,7 @@ a položky map s hodnotou null; neposílají místo nich JSON null. Odpověď pa
 pole bez porušení zpracování; desetinné částky a data zachovávají protokolový
 kontrakt. Kontraktové testy ověřují odchozí požadavky a načítají dokumentované
 příklady nabídek.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.

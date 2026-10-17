@@ -105,3 +105,7 @@ obnovuje každou minutu plánovaná úloha; neúspěšné obnovení ponechá př
 hodnoty a nezaznamená úspěch, takže gauge živosti workflow zestárne a spustí
 alert. Pravidla alertů jsou v `prometheus-rules-pension-fund.yaml`, runbook v
 `docs/runbooks/pension-alerts.md`.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.
