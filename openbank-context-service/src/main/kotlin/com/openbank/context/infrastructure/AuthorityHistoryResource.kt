@@ -7,7 +7,6 @@ import com.openbank.context.application.ContextDisclosure
 import com.openbank.context.application.ContextQueryService
 import com.openbank.context.application.ContextReadResult
 import com.openbank.context.domain.InvestigationContext
-import com.openbank.context.domain.Investigator
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
@@ -53,7 +52,7 @@ class AuthorityHistoryResource(
         return try {
             queries.authorizationEvidence(
                 id.toString(),
-                Investigator(identity.principal.name, identity.roles.sorted()),
+                identity.investigator(),
                 InvestigationContext(case, purpose, effective, known),
             ) {
                 val selected = history.history(id, effective, known ?: history.databaseNow())

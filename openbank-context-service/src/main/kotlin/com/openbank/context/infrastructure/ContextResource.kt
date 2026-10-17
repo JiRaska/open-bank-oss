@@ -5,7 +5,6 @@ import com.openbank.context.application.ContextAccessDenied
 import com.openbank.context.application.ContextAuthorizationUnavailable
 import com.openbank.context.application.ContextQueryService
 import com.openbank.context.domain.InvestigationContext
-import com.openbank.context.domain.Investigator
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -54,7 +53,7 @@ class ContextResource(
         Response.ok(queries.incident(reference, actor(), context(caseId, purpose, asOf))).build()
     }
 
-    private fun actor() = Investigator(identity.principal.name, identity.roles.sorted())
+    private fun actor() = identity.investigator()
     private fun context(caseId: String?, purpose: String?, asOf: String?) = InvestigationContext(
         requireNotNull(caseId?.takeIf { it.isNotBlank() && it.length <= MAX_CASE_LENGTH }) {
             "X-Investigation-Case-Id is required and must not exceed $MAX_CASE_LENGTH characters"
