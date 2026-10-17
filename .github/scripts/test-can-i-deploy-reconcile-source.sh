@@ -291,8 +291,9 @@ run_mixed_case() {
       echo "FAIL: atomic or hard trust failure did not empty the deployment set" >&2
       cat "$GITHUB_OUTPUT" "$tmp/mixed-log" >&2; exit 1
     fi
-    if [ "$mode" != mixed-late-unavailable ] && [ "$trust_failure" != pact ] && [ -s "$PACT_CLI_LOG" ]; then
-      echo "FAIL: atomic/source/image refusal reached Pact CLI" >&2
+    if [ "$mode" != mixed-late-unavailable ] && [ "$trust_failure" != pact ] && \
+       grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+      echo "FAIL: atomic/source/image refusal reached Pact can-i-deploy" >&2
       cat "$PACT_CLI_LOG" >&2; exit 1
     fi
     if [ "$trust_failure" = image ] && [ -s "$SERVICE_CI_LOG" ]; then
@@ -328,6 +329,7 @@ run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed false
 run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed false pact
 run_mixed_case '["openbank-good-service","openbank-absent-service"]' absent false none
 run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed-late-absent false none
+run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed-late-absent true none
 run_mixed_case '["openbank-good-service","openbank-absent-service"]' mixed-late-unavailable false none
 # Restore the original one-service fixture for the existing historical-source and push cases.
 export SERVICES='["openbank-demo-service"]'

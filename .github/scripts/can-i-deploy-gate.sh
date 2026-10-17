@@ -371,6 +371,31 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
     fi
     CODEPLOY_ARGS+=(--pacticipant "$svc" "${CID_SELECTOR[@]}")
   done
+  if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
+    # Source preflight is a snapshot. The Broker participant can disappear before
+    # this atomic co-deploy verdict, so revalidate the whole requested set immediately
+    # before asking Pact. A late absence or an uncertain response invalidates the
+    # atomic set; never carry a cached source proof into a verdict for changed state.
+    for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+      code="$(curl -s -o /dev/null -w '%{http_code}' \
+        -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+        "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
+      if [ "$code" != "200" ]; then
+        if [ "$code" = "404" ]; then
+          echo "::error::reconcile co-deploy refused: Pacticipant ${svc} disappeared after source preflight"
+        else
+          echo "::error::reconcile co-deploy refused: Pacticipant ${svc} is unavailable after source preflight (HTTP ${code})"
+        fi
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        echo "blocked=${SERVICES}" >> "$GITHUB_OUTPUT"
+        {
+          echo "### can-i-deploy: reconcile co-deploy participant state changed"
+          echo "The Broker did not confirm every Pacticipant immediately before the atomic verdict; no member of the requested set may proceed."
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit 1
+      fi
+    done
+  fi
   if [ "${#CODEPLOY_ARGS[@]}" -eq 0 ]; then
     # Every requested service turned out to have no contracts in the broker. There is no
     # matrix to ask, and asking `can-i-deploy` with zero pacticipants is a CLI error that
