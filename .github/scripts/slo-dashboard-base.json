@@ -93,7 +93,7 @@
       },
       "targets": [
         {
-          "expr": "1 - ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) )",
+          "expr": "1 - ( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
           "legendFormat": "{{service}}",
           "refId": "A"
         }
@@ -149,7 +149,7 @@
       },
       "targets": [
         {
-          "expr": "1 - ( ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) ) / (1 - $slo) )",
+          "expr": "1 - ( ( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) ) / (1 - $slo) )",
           "legendFormat": "{{service}}",
           "refId": "A"
         }
@@ -210,12 +210,12 @@
       },
       "targets": [
         {
-          "expr": "( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])), 0.001) ) / (1 - $slo)",
+          "expr": "( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[1h])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[1h])) ) / (1 - $slo)",
           "legendFormat": "1h burn {{service}}",
           "refId": "A"
         },
         {
-          "expr": "( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[6h])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])), 0.001) ) / (1 - $slo)",
+          "expr": "( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[6h])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[6h])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[6h])) ) / (1 - $slo)",
           "legendFormat": "6h burn {{service}}",
           "refId": "B"
         }

@@ -79,11 +79,12 @@ def service_panel(panel_id: int, index: int, svc: dict) -> dict:
     name = svc["service"]
     target = svc["availability_target"] / 100
     sel = f'service=\\"{name}\\",span_kind=\\"SPAN_KIND_SERVER\\",span_name!~\\"GET /|GET /api/v1/info\\"'
-    expr = (
-        f"1 - ( ( sum(rate(traces_spanmetrics_calls_total{{{sel},status_code=\\\"STATUS_CODE_ERROR\\\"}}[30d])) "
-        f"or ( sum(rate(traces_spanmetrics_calls_total{{{sel}}}[30d])) * 0 ) ) "
-        f"/ clamp_min(sum(rate(traces_spanmetrics_calls_total{{{sel}}}[30d])), 0.001) )"
-    )
+    # Ratio of increase() values over the window, with NO denominator clamp: clamp_min(..., 0.001)
+    # on a rate is ~0.001 calls/s ~ 2,600 calls per 30d, so a low-traffic service (1 error in 4
+    # calls) showed ~98.8% instead of 75%. An empty denominator must render "No data" instead.
+    denom = f"sum(increase(traces_spanmetrics_calls_total{{{sel}}}[30d]))"
+    errors = f"sum(increase(traces_spanmetrics_calls_total{{{sel},status_code=\\\"STATUS_CODE_ERROR\\\"}}[30d]))"
+    expr = f"1 - ( ( {errors} or ( {denom} * 0 ) ) / {denom} )"
     return {
         "id": panel_id,
         "title": name.removeprefix("openbank-"),
@@ -153,6 +154,15 @@ def self_test() -> int:
            len(dash["panels"]) == len(json.loads(BASE.read_text())["panels"]) + 2)
     expect("panel threshold is the service's own target",
            dash["panels"][-1]["fieldConfig"]["defaults"]["thresholds"]["steps"][1]["value"] == 0.995)
+    expr = dash["panels"][-1]["targets"][0]["expr"]
+    expect("per-service availability has no clamp_min denominator floor", "clamp_min" not in expr)
+    expect("per-service availability compares increase() values", expr.count("increase(") == 3 and "rate(" not in expr)
+    fleet = [p for p in dash["panels"][:-2] if p.get("targets")]
+    fleet_exprs = [tg["expr"] for p in fleet for tg in p["targets"] if "traces_spanmetrics" in tg.get("expr", "")]
+    expect("fleet panels exist and none uses clamp_min", bool(fleet_exprs) and all("clamp_min" not in x for x in fleet_exprs))
+    expect("every fleet selector is SERVER-span and probe-excluding",
+           all(x.count("traces_spanmetrics_calls_total{") == x.count('span_kind="SPAN_KIND_SERVER"')
+               == x.count('span_name!~"GET /|GET /api/v1/info"') for x in fleet_exprs))
     expect("a new service changes the output (the gate can fail)", render(services[:1]) != out)
     real = load_services()
     expect("the real Pyrra file yields more services than the old four-rail regex",

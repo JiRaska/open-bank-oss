@@ -122,7 +122,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "{{service}}",
               "refId": "A"
             }
@@ -178,7 +178,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[30d])), 0.001) ) / (1 - $slo) )",
+              "expr": "1 - ( ( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) ) / (1 - $slo) )",
               "legendFormat": "{{service}}",
               "refId": "A"
             }
@@ -239,12 +239,12 @@ data:
           },
           "targets": [
             {
-              "expr": "( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[1h])), 0.001) ) / (1 - $slo)",
+              "expr": "( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[1h])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[1h])) ) / (1 - $slo)",
               "legendFormat": "1h burn {{service}}",
               "refId": "A"
             },
             {
-              "expr": "( ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\",status_code=\"STATUS_CODE_ERROR\"}[6h])) or ( sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])) * 0 ) ) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"$rail\"}[6h])), 0.001) ) / (1 - $slo)",
+              "expr": "( ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[6h])) or ( sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[6h])) * 0 ) ) / sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"$rail\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[6h])) ) / (1 - $slo)",
               "legendFormat": "6h burn {{service}}",
               "refId": "B"
             }
@@ -297,7 +297,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-account-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-account-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-account-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-account-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-account-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-account-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-account-service",
               "refId": "A"
             }
@@ -350,7 +350,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-balance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-balance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-balance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-balance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-balance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-balance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-balance-service",
               "refId": "A"
             }
@@ -403,7 +403,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-billing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-billing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-billing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-billing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-billing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-billing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-billing-service",
               "refId": "A"
             }
@@ -456,7 +456,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-card-issuance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-card-issuance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-card-issuance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-card-issuance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-card-issuance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-card-issuance-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-card-issuance-service",
               "refId": "A"
             }
@@ -509,7 +509,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-card-processing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-card-processing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-card-processing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-card-processing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-card-processing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-card-processing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-card-processing-service",
               "refId": "A"
             }
@@ -562,7 +562,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-clearing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-clearing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-clearing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-clearing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-clearing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-clearing-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-clearing-service",
               "refId": "A"
             }
@@ -615,7 +615,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-consent-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-consent-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-consent-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-consent-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-consent-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-consent-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-consent-service",
               "refId": "A"
             }
@@ -668,7 +668,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-delegation-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-delegation-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-delegation-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-delegation-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-delegation-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-delegation-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-delegation-service",
               "refId": "A"
             }
@@ -721,7 +721,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-domestic-payment",
               "refId": "A"
             }
@@ -774,7 +774,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-fraud-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-fraud-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-fraud-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-fraud-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-fraud-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-fraud-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-fraud-service",
               "refId": "A"
             }
@@ -827,7 +827,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-fx-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-fx-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-fx-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-fx-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-fx-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-fx-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-fx-service",
               "refId": "A"
             }
@@ -880,7 +880,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-interest-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-interest-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-interest-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-interest-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-interest-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-interest-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-interest-service",
               "refId": "A"
             }
@@ -933,7 +933,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-ledger-service",
               "refId": "A"
             }
@@ -986,7 +986,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-lending-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-lending-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-lending-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-lending-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-lending-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-lending-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-lending-service",
               "refId": "A"
             }
@@ -1039,7 +1039,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-fund-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-fund-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-fund-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-pension-fund-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-pension-fund-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-pension-fund-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-pension-fund-service",
               "refId": "A"
             }
@@ -1092,7 +1092,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-pension-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-pension-service",
               "refId": "A"
             }
@@ -1145,7 +1145,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-psd2-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-psd2-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-psd2-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-psd2-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-psd2-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-psd2-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-psd2-service",
               "refId": "A"
             }
@@ -1198,7 +1198,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sanctions-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sanctions-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sanctions-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sanctions-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sanctions-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sanctions-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-sanctions-service",
               "refId": "A"
             }
@@ -1251,7 +1251,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sca-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sca-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sca-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sca-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sca-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sca-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-sca-service",
               "refId": "A"
             }
@@ -1304,7 +1304,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sdd-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sdd-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sdd-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sdd-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sdd-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sdd-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-sdd-service",
               "refId": "A"
             }
@@ -1357,7 +1357,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-sepa-instant",
               "refId": "A"
             }
@@ -1410,7 +1410,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sepa-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sepa-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-sepa-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sepa-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sepa-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-sepa-payment\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-sepa-payment",
               "refId": "A"
             }
@@ -1463,7 +1463,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-settlement-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-settlement-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-settlement-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-settlement-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-settlement-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-settlement-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-settlement-service",
               "refId": "A"
             }
@@ -1516,7 +1516,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-standing-order-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-standing-order-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-standing-order-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-standing-order-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-standing-order-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-standing-order-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-standing-order-service",
               "refId": "A"
             }
@@ -1569,7 +1569,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-swift-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-swift-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-swift-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-swift-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-swift-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-swift-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-swift-service",
               "refId": "A"
             }
@@ -1622,7 +1622,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-transaction-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-transaction-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-transaction-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-transaction-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-transaction-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-transaction-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-transaction-service",
               "refId": "A"
             }
@@ -1675,7 +1675,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-treasury-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-treasury-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-treasury-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-treasury-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-treasury-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-treasury-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-treasury-service",
               "refId": "A"
             }
@@ -1728,7 +1728,7 @@ data:
           },
           "targets": [
             {
-              "expr": "1 - ( ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-vop-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(rate(traces_spanmetrics_calls_total{service=\"openbank-vop-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-vop-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])), 0.001) )",
+              "expr": "1 - ( ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-vop-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\",status_code=\"STATUS_CODE_ERROR\"}[30d])) or ( sum(increase(traces_spanmetrics_calls_total{service=\"openbank-vop-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) * 0 ) ) / sum(increase(traces_spanmetrics_calls_total{service=\"openbank-vop-service\",span_kind=\"SPAN_KIND_SERVER\",span_name!~\"GET /|GET /api/v1/info\"}[30d])) )",
               "legendFormat": "openbank-vop-service",
               "refId": "A"
             }
