@@ -75,6 +75,9 @@ Exact latency SLO numbers are TBD until measured in the sandbox; the saga's down
 ### FX rate unavailable
 - Cross-currency initiate fails with `FxRateUnavailableException` when fx-service has no quote. Confirm `FX_SERVICE_URL` and fx-service health; same-currency settlements are unaffected (no FX leg).
 
+### Rail settlement has no Kafka path
+- Settlement from the payment rails reaches this service only over REST (sepa-payment `SettlementAdapter` calls transaction-service, ADR-0108). The former `payment.scheme-accepted` consumer, its channel, topic, DLQ and msg-override ConfigMap were removed on 2026-10-17 because no service ever produced to that topic. If a settlement is missing, look at the calling rail's REST client and the OIDC/OPA decision, not at Kafka lag or a DLQ.
+
 ## Deploy
 
 GitOps via ArgoCD (sandbox tracks the deploy branch). For image-tag merge conflicts in gitops manifests, take `--ours` (the freshly-built tag), never blind `--theirs`. Verified-signature ruleset requires the commit email match the registered GPG key.
