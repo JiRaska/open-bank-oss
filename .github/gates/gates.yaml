@@ -6608,3 +6608,24 @@ gates:
     selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]
+
+  # #13172: an ExternalSecret reading `creds/<role>` for a role the openbao-config CronJob never
+  # creates fails every reconcile with `unknown role` and nothing pages (the service keeps its
+  # static secret). The declared set is derived from configure.sh, not listed a second time.
+  - id: dynamic-db-roles-declared
+    name: "ExternalSecret dynamic-db roles are declared in gitops (#13172, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      A role read by an ExternalSecret but absent from configure_service in
+      dynamic-db-credentials.yaml is never created by the CronJob; the secret then fails with
+      `unknown role` on every reconcile while the pod runs on a static secret. Derived, so the
+      two files cannot drift.
+    review_after: '2027-04-17'
+    min_subjects: 4   # 8 measured 2026-10-17
+    selftest: python3 .github/scripts/check-dynamic-db-roles-declared.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-dynamic-db-roles-declared.py"]
+    run: |
+      python3 .github/scripts/check-dynamic-db-roles-declared.py --root .
