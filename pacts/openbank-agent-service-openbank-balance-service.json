@@ -4,6 +4,100 @@
   },
   "interactions": [
     {
+      "description": "GET the holds the agent's get_balance_holds tool returns verbatim",
+      "providerStates": [
+        {
+          "name": "an active CZK hold exists for the agent holds account"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/balances/d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2/holds"
+      },
+      "response": {
+        "body": {
+          "holds": [
+            {
+              "accountId": "d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2",
+              "amount": 100.0,
+              "currency": "CZK",
+              "id": "e2e2e2e2-e2e2-42e2-82e2-e2e2e2e2e2e2",
+              "reason": "payment-cover",
+              "referenceId": "pact-agent-hold-0001"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.holds": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.holds[*].accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holds[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.holds[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holds[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holds[*].reason": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.holds[*].referenceId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the balances the agent's get_account_balance tool returns verbatim",
       "providerStates": [
         {
