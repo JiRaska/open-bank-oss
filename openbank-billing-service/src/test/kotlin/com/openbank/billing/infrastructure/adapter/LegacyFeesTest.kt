@@ -34,15 +34,12 @@ class LegacyFeesTest {
     }
 
     @Test
-    fun `every v1 product type implies a deposit class, and only an unknown one implies none`() {
+    fun `only the deposit product types imply a class, every other type implies none`() {
         assertThat(LegacyProductTypes.accountingClassOf("CURRENT")).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
         assertThat(LegacyProductTypes.accountingClassOf("SAVINGS")).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
         assertThat(LegacyProductTypes.accountingClassOf("TERM_DEPOSIT")).isEqualTo("CUSTOMER_DEPOSIT_TERM")
-        // Billed against the customer's current account before ADR-0341, so still billed (not silently skipped).
-        listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT").forEach {
-            assertThat(LegacyProductTypes.accountingClassOf(it)).describedAs(it).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
-        }
-        listOf("FUTURE_TYPE", "TERM_LIFE", "", null).forEach {
+        // No class may be guessed for a non-deposit product: it is a counted ACCOUNTING_CLASS_UNRESOLVED skip.
+        listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT", "FUTURE_TYPE", "TERM_LIFE", "", null).forEach {
             assertThat(LegacyProductTypes.accountingClassOf(it)).isNull()
         }
     }

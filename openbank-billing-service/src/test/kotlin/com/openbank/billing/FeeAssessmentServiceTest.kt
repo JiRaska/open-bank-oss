@@ -155,6 +155,7 @@ class FeeAssessmentServiceTest {
         assertThat(a.skipped).isTrue()
         assertThat(a.skipReason).isEqualTo("ACCOUNTING_CLASS_UNRESOLVED")
         assertThat(a.journalCommands()).isEmpty()
+        assertThat(skipCount("ACCOUNTING_CLASS_UNRESOLVED")).isEqualTo(1.0)
     }
 
     @Test

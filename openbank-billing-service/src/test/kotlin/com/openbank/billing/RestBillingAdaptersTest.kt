@@ -252,10 +252,15 @@ class RestBillingAdaptersTest {
     }
 
     @Test
-    fun `every v1 product type derives a class, so no previously billed product silently stops being billed`() {
-        com.openbank.billing.infrastructure.adapter.LegacyProductTypes.KNOWN.forEach {
-            assertThat(com.openbank.billing.infrastructure.adapter.LegacyProductTypes.accountingClassOf(it))
-                .describedAs(it).startsWith("CUSTOMER_DEPOSIT_")
+    fun `a non-deposit v1 product type reports no class, so its assessment is a counted skip`(): Unit = runBlocking {
+        for (type in listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT")) {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+                revision(attributes = mapOf("productType" to type), prices = arrayOf(price("X", "1", "CZK"))),
+            )
+            val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+            assertThat(terms.accountingClass).describedAs(type).isNull()
+            assertThat(terms.accountingClassSource).isEqualTo(AccountingClassSource.NONE)
         }
     }
 
