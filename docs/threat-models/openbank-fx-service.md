@@ -157,7 +157,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   correctly, which is what makes this one identifiable as a typo rather than a renamed control.
 
 - **2026-05-30** — Added `fx_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
-  boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `fx-service → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.

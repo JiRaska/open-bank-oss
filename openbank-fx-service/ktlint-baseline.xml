@@ -391,8 +391,4 @@
         <error line="66" column="51" source="standard:trailing-comma-on-call-site" />
         <error line="66" column="52" source="standard:no-multi-spaces" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
 </baseline>
