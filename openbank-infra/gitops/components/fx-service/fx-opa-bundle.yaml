@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "f57fca403944100f"
+    openbank.tech/policy-checksum: "141d978820f25dc6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -327,6 +327,22 @@ data:
     	role in input.principal.roles
     	not principal_is_machine
     	input.action == "opsmessage.approval.decide"
+    }
+
+    # ADR-0333 D6: reviewed customer notification copy is edited and published by staff.
+    # Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+    # identity must never be able to change copy shown to a customer.
+    allowed_reasons contains "operator-manage-notification-template" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {
+            "commstemplate.create",
+            "commstemplate.read",
+            "commstemplate.preview",
+            "commstemplate.publish",
+        }
     }
 
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
@@ -755,6 +771,23 @@ data:
     	input.action in {"fx.read", "fx.list"}
     }
 
+    # Synthetic journey fx-rates-read (ADR-0252, mirrors product-catalog-read #7324): the
+    # journey's own Keycloak client `openbank-synthetic-fx-read` holds NO realm role. Its
+    # FxScopeIdentityAugmentor derives FX_SCOPE_READ from the `fx:read` client scope.
+    #
+    # The role alone is NOT an identity: which clients may request `fx:read` is a Keycloak
+    # realm setting, outside this policy, so a role-only rule would admit any client later
+    # given the scope. The grant is therefore bound to the journey's own service account
+    # (machine_named binds id + client_id from verified JWT claims) and narrowed to the one
+    # action the journey calls: its CronJob issues only GET /api/v1/fx/rates (fx.list).
+    # fx.read / fx.convert / fx.trigger stay unreachable for it.
+    allowed_reasons contains "synthetic-fx-read-journey" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-synthetic-fx-read")
+    	"FX_SCOPE_READ" in input.principal.roles
+    	input.action == "fx.list"
+    }
+
     # Human FX-desk writes: operators, admins and the dedicated payments role may execute a
     # conversion (POST /convert) — ROLE_PAYMENTS is included because the resource's own
     # RBAC already treats it as an equal alternative to operator on that endpoint; enforcing
@@ -916,6 +949,49 @@ data:
     	glob_match(pattern, input.tool)
     }
 
+    # ADR-0031 D9 phase 3: object-shaped charter grants ({tier, resources}). The background/
+    # control-plane agents (flaky-test-hunter, finops-agent, ...) declare tools.allow / tools.deny
+    # this way, which the string-pattern rules above can never match (see the schema note on
+    # allowed_or_denied_patterns). Those agents are not fronted by the MCP gateway, but
+    # flaky-test-hunter's GitHub PR path queries THIS package directly as its PDP. The caller
+    # declares its intended action's tier as input.tier (its own in-process charter check binds
+    # tool -> tier before querying, so this rule re-validates only the (tier, resource) grant
+    # against the served charter data). No input.tier, no grant: deny-by-default is preserved,
+    # and the MCP / REST paths above are unchanged because they never send input.tier.
+    charter_allowed if tier_resource_charter_allowed
+
+    charter_denied if tier_resource_charter_denied
+
+    tier_resource_charter_allowed if {
+    	some entry in tier_resource_allow_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    }
+
+    tier_resource_charter_denied if {
+    	some entry in tier_resource_deny_entries
+    	entry.tier == input.tier
+    	tier_resource_resources_granted(entry.resources)
+    }
+
+    # Only OBJECT-shaped entries carry .tier; for a plain-string entry `entry.tier` is undefined
+    # and the body fails, so string-pattern charters are never collected here.
+    tier_resource_allow_entries contains entry if {
+    	some a in charter
+    	some entry in a.tools.allow
+    	entry.tier
+    }
+
+    tier_resource_deny_entries contains entry if {
+    	some a in charter
+    	some entry in a.tools.deny
+    	entry.tier
+    }
+
+    tier_resource_resources_granted(resources) if input.resource in resources
+
+    tier_resource_resources_granted(resources) if "*" in resources
+
     # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
     # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
     # an @Authorize-annotated endpoint declares (e.g. "ledger.list", "account.read"). Charters
@@ -1000,6 +1076,8 @@ data:
     }
 
     reason := "hard-denied tool tier" if hard_denied
+
+    else := "denied by charter tier/resource grant" if tier_resource_charter_denied
 
     else := "denied by charter" if charter_denied
 
@@ -1802,6 +1880,10 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        - commstemplate.read
+        # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
+        # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
+        - card.details.read
       role_action_matrix:
         ROLE_OPERATOR:
           grant:

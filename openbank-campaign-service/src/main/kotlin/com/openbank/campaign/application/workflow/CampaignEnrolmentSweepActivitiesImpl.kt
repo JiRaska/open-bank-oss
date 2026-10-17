@@ -5,7 +5,7 @@
 package com.openbank.campaign.application.workflow
 
 import com.openbank.campaign.application.port.out.CampaignRepository
-import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.application.usecase.BulkAdmissionService
 import com.openbank.campaign.domain.model.CampaignState
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -18,13 +18,13 @@ import java.time.Clock
 import java.util.UUID
 
 /**
- * The scheduled enrolment pass. Reuses [CampaignService.enrol] rather than reimplementing it, so a
- * scheduled run and a manual `POST /{id}/enrol` cannot drift apart in what they consider enrolable.
+ * The scheduled enrolment pass uses the same global capacity lease and synchronous audience bound
+ * as the compatibility operator endpoint. Larger audiences require a durable bulk run.
  */
 @ApplicationScoped
 open class CampaignEnrolmentSweepActivitiesImpl(
     private val campaigns: CampaignRepository,
-    private val service: CampaignService,
+    private val admission: BulkAdmissionService,
     private val clock: Clock,
 ) : CampaignEnrolmentSweepActivities {
 
@@ -53,7 +53,7 @@ open class CampaignEnrolmentSweepActivitiesImpl(
             )
             return@runBlockingOnWorker SweepOutcome(0, 0, SweepSkip.SCHEDULE_EXPIRED)
         }
-        val outcome = service.enrol(campaignId)
+        val outcome = admission.enrolSmall(campaignId)
         log.infof(
             "Scheduled sweep for campaign %s enrolled=%d failed=%d",
             campaignId,

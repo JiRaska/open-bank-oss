@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "14283a7e436b07ce"
+        openbank.tech/policy-checksum: "00ea67552ad0cffe"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -193,6 +193,11 @@ spec:
             # check (dnsNames pension-service.pension.svc). Cleartext 8171 is not used.
             - name: PENSION_SERVICE_URL
               value: https://pension-service.pension.svc:8443
+            # Must equal pension-service's OPENBANK_PENSION_PROVIDER_ENTITY_ID
+            # (components/pension/pension-service.yaml); the edge answers 503
+            # PENSION_PROVIDER_NOT_CONFIGURED without it. DEV-ONLY synthetic entity.
+            - name: OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID
+              value: "00000000-0000-4000-8000-000000000001"
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
             # ADR-0104 P2 currency pockets: the edge queries product-catalog (accounts ns,

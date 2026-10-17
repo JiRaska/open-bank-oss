@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d59482c8af31269f"
+        openbank.tech/policy-checksum: "4744f225e156c2db"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: account-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-7f966f31
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -183,6 +183,11 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0331 / ADR-0252: trust the taint only from customer-edge, which forwards it
+            # after its own trusted-principal decision (UpstreamClient). Held to that one
+            # relay identity by check-synthetic-customer-identity.py.
+            - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
+              value: "service-account-openbank-edge"
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
