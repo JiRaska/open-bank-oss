@@ -25,3 +25,18 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 - **Idempotence:** ingest merge záznamů je idempotentní podle `prNumber` (`ON CONFLICT DO NOTHING` — znovu doručený webhook vrátí uložený záznam s `inserted=false`, bez druhého auditního řádku); volání asistenta/nástrojů jsou read-only a neměnící stav
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); odchozí MCP volání nesou `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)
 - **Governance:** každé volání nástroje prochází OPA-backed **AgentPolicyGate** (deny-by-default), ohraničeno charterem `ui-assistant` v `agents.yaml`; vynucení je defaultně `advisory`, přepíná se na `block` (ADR-0031 D9)
+
+## Kontrakty čtení SCT Inst
+
+Konzumentský kontrakt agenta používá kanonický název poskytovatele `openbank-sepa-instant`.
+Test konzumenta je v automaticky vyhledávaném balíčku `contract` a regeneruje
+`pacts/openbank-agent-service-openbank-sepa-instant.json`. Čtyři interakce pokrývají seznam
+plateb, jednu vypořádanou platbu, seznam plateb plátce a odpověď 404 pro neznámou platbu.
+Konzument prověřuje skutečné směrování nástrojů s klientem připojeným k Pact mocku; 404
+zůstává výjimkou místo vymyšlené platby.
+
+Adresářový test poskytovatele SEPA Instant přehrává všechny čtyři interakce z `../pacts`
+proti skutečnému HTTP a testovací databázi připravené přes JDBC. Chybějící uložený JSON musí
+selhat. Ověření přes broker zůstává podmíněné nastavením `pactbroker.url`; adresářové přehrání
+broker nepotřebuje. Testovací identity, vypnuté testovací OIDC a poradní autorizace
+neprokazují produkční autorizaci JWT/OPA. Změna nepřidává endpoint ani aktivaci za běhu.

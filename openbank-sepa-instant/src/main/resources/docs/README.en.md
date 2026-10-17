@@ -27,3 +27,18 @@ The outbox sections describe the #12181 source candidate. They do not establish 
 - **Auth:** Keycloak OIDC (client `openbank-services`); OPA authz (ADR-0034) advisory by default; `@Authorize` on recall
 - **Money-path:** YES — listed in `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model at `docs/threat-models/openbank-sepa-instant.md`
 - **Screening gate:** synchronous sanctions screening of debtor + creditor names on submit (ADR-0032), fail-closed
+
+## SCT Inst read contracts
+
+The agent consumer contract uses the canonical provider name `openbank-sepa-instant`. Its
+consumer test lives in the discovered `contract` package and regenerates
+`pacts/openbank-agent-service-openbank-sepa-instant.json`. The four interactions cover the
+payment list, one settled payment, the debtor payment list and an unknown payment returning
+404. The consumer exercises real tool dispatch with a client bound to the Pact mock; a 404
+remains an exception rather than a fabricated payment.
+
+The SEPA Instant folder provider test replays all four interactions from `../pacts` against
+real HTTP and a JDBC-seeded test database. Missing committed JSON must fail. Broker
+verification remains conditional on `pactbroker.url`; the folder replay requires no broker.
+Test identities, disabled test OIDC and advisory authorization do not prove production
+JWT/OPA authorization. This adds no endpoint or runtime activation.

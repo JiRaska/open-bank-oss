@@ -7,7 +7,6 @@ package com.openbank.sepainstant.contract
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
-import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
@@ -49,8 +48,7 @@ import javax.sql.DataSource
  * and commit `pacts/openbank-agent-service-openbank-sepa-instant.json` in the same PR,
  * or this test verifies a stale contract. `pact-drift-check.yml` gates that.
  *
- * [IgnoreNoPactsToVerify] makes a missing/unreadable pact folder a skip rather than a failure —
- * relevant only if `pacts/` is ever emptied ahead of a broker migration.
+ * Missing or unreadable committed Pact JSON must fail this folder replay rather than skip it.
  *
  * Any `@State` added here MUST be added to [SepaInstantPactBrokerProviderVerificationTest] too —
  * the broker serves every consumer's pact for this provider, and a missing state fails with
@@ -64,7 +62,6 @@ import javax.sql.DataSource
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-sepa-instant")
 @PactFolder("../pacts")
-@IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class SepaInstantPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")

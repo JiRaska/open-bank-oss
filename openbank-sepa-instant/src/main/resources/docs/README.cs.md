@@ -27,3 +27,18 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Auth:** Keycloak OIDC (klient `openbank-services`); OPA autorizace (ADR-0034) ve výchozím stavu advisory; `@Authorize` na recallu
 - **Money-path:** ANO — uvedeno v `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model v `docs/threat-models/openbank-sepa-instant.md`
 - **Sankční brána:** synchronní sankční prověrka jmen plátce + příjemce při submitu (ADR-0032), fail-closed
+
+## Kontrakty čtení SCT Inst
+
+Konzumentský kontrakt agenta používá kanonický název poskytovatele `openbank-sepa-instant`.
+Test konzumenta je v automaticky vyhledávaném balíčku `contract` a regeneruje
+`pacts/openbank-agent-service-openbank-sepa-instant.json`. Čtyři interakce pokrývají seznam
+plateb, jednu vypořádanou platbu, seznam plateb plátce a odpověď 404 pro neznámou platbu.
+Konzument prověřuje skutečné směrování nástrojů s klientem připojeným k Pact mocku; 404
+zůstává výjimkou místo vymyšlené platby.
+
+Adresářový test poskytovatele SEPA Instant přehrává všechny čtyři interakce z `../pacts`
+proti skutečnému HTTP a testovací databázi připravené přes JDBC. Chybějící uložený JSON musí
+selhat. Ověření přes broker zůstává podmíněné nastavením `pactbroker.url`; adresářové přehrání
+broker nepotřebuje. Testovací identity, vypnuté testovací OIDC a poradní autorizace
+neprokazují produkční autorizaci JWT/OPA. Změna nepřidává endpoint ani aktivaci za běhu.
