@@ -6,8 +6,15 @@
 //
 // GENERATED from the provider's own src/main/resources/openapi.yaml with the same generator
 // settings as openbank-client-product-catalog (plugin 7.24.0, `kotlin-server` / `jaxrs-spec`,
-// interfaceOnly, typed bodies, Mutiny). Only the `Transactions` API tag is generated: the
-// `Merchant catalogue` tag is operator-only and no service consumes it.
+// interfaceOnly, Mutiny). Only the `Transactions` API tag is generated: the `Merchant catalogue`
+// tag is operator-only and no service consumes it.
+//
+// `returnResponse=true` (not the pilot's typed bodies): every operation returns
+// `Uni<jakarta.ws.rs.core.Response>` so the HTTP status is explicit and the body is read lazily.
+// A typed `Uni<T>` fails on an unreadable 2xx body WITHOUT a status, which on a money path turns a
+// booked debit into an error. The raw Response must not reach callers: `TransactionClient` is the
+// single place that classifies it (Booked / Conflict / Rejected / throw) - see its KDoc. Consumers must
+// NOT call the generated TransactionsApi directly.
 //
 // VERSIONING (ADR-0319 D2, ADR-0048): the artifact version is the provider's API-CONTRACT version,
 // `info.version` of the spec, read at configuration time - never the provider's release version.
@@ -61,7 +68,7 @@ openApiGenerate {
     configOptions.set(
         mapOf(
             "interfaceOnly" to "true",
-            "returnResponse" to "false",
+            "returnResponse" to "true",
             "useMutiny" to "true",
             "useJakartaEe" to "true",
             "useBeanValidation" to "false",
@@ -106,11 +113,14 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api")
     testImplementation("jakarta.annotation:jakarta.annotation-api")
     testImplementation("io.smallrye.reactive:mutiny")
+    // A real JAX-RS client implementation, so the facade tests run against real sockets and real Responses.
+    testImplementation("io.quarkus.resteasy.reactive:resteasy-reactive-client")
     testImplementation(libs.jackson.module.kotlin)
     testImplementation(libs.jackson.datatype.jsr310)
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
