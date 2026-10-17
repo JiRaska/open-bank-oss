@@ -2351,6 +2351,26 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  # The charter schedule in agents.yaml (EU AI Act inventory, admin-ui snapshot) and the *_CRON the
+  # pod actually runs are two hand-kept copies of one fact. Measured 2026-10-17: 5 of 9 scheduled
+  # agents disagreed — the crons were deliberate 15-minute offsets (shared LiteLLM gateway) and the
+  # charter was never updated, so the governed record described times nothing runs at. Both files
+  # stay individually valid, so only a comparison sees it. ENFORCED: green on the corrected tree,
+  # and --selftest feeds it the pre-fix drift shape.
+  - id: agent-schedule-matches-charter
+    name: "agent charter schedule equals deployed cron (#13168, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10
+    rationale: "The charter schedule (EU AI Act inventory) and the deployed *_CRON are two hand-kept copies of one fact; both stay individually valid, so only a comparison sees them drift."
+    review_after: "2027-04-17"
+    min_subjects: 4   # 8 deployed agent crons compared 2026-10-17
+    selftest: python3 .github/scripts/check-agent-schedule-matches-charter.py --selftest
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-schedule-matches-charter.py"]
+    run: |
+      python3 .github/scripts/check-agent-schedule-matches-charter.py --enforce
+
   # ADR-0031 D9 phase 3 (issue #5281): flaky-test-hunter is the only chartered agent with a real
   # GitHub write path. The two properties that make that acceptable — the write is confined to one
   # NON-money-path module's own test tree, and the agent opens a PR but never merges or approves —
