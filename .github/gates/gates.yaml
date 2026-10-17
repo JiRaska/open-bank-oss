@@ -2574,13 +2574,13 @@ gates:
       python3 .github/scripts/check-gates-not-deregistered.py --enforce
 
   - id: dockerfile-runtime-only
-    name: "Dockerfiles are runtime-only, declare EXPOSE, share the deploy base (#3016/#3354, enforced)"
+    name: "Dockerfiles are runtime-only, share the deploy base, port from application.yaml (#3016/#3354, enforced)"
     group: registry
     mode: enforced
     selftest: |
       python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py"]
+    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py", ".github/scripts/service-port.py"]
     run: |
       # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
       # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
