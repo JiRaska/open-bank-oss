@@ -375,6 +375,35 @@ journeys:
       read-only k6 pod has no Chromium runtime; adding one without a separate security and
       credential boundary would turn a monitoring gap into a privileged browser foothold.
 
+  - id: vop-verify-payee
+    title: "Verification of Payee answers through the public edge"
+    capability: >-
+      An authenticated customer can verify a payee name against an IBAN before confirming a
+      SEPA transfer (IPR Art. 5c): the check returns a well-formed no_data with reason
+      account_not_found for an IBAN the bank holds no name for, proving the full
+      edge → vop-service → account lookup path a payer's app takes.
+    status: active
+    severity: ticket
+    money_moving: false
+    covers:
+      - openbank-vop-service
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-vop-verify-payee.yaml
+    schedule: "4,19,34,49 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and the public customer edge — the same identity
+      wealth-declared-holding drives, reading the same OpenBao KV entry through its own
+      ExternalSecret. Should the secret ever be missing, the script logs "credential absent"
+      and fails every check, which is missing identity evidence and not a vop or edge result.
+      Each run writes one vop_verification evidence row (ibanHash/nameHash only, no party
+      link); the rate limiter at 60 req/min per requester is never near.
+    falsification: >-
+      Point the customer edge's vop-service URL at a dead host, or set CUSTOMER_BASE to
+      vop-service's ClusterIP: the journey must fail on the 5xx/timeout, not pass because a
+      service answered somewhere. Asserting only "HTTP 200" would pass a vop that lost its
+      account lookup — the checks pin the wire contract no_data + account_not_found, so a
+      vop that starts fabricating MATCH answers also goes red.
+
   - id: wealth-declared-holding
     title: "Declared holding appears in net worth"
     capability: >-
@@ -466,6 +495,10 @@ money_path_accountability:
         A control path, so a journey must prove it RUNS for synthetic traffic rather than
         being skipped for it — the one place where the taint must never suppress anything.
     - service: openbank-vop-service
+      note: >-
+        Covered by the active vop-verify-payee journey (no_data/account_not_found through the
+        public edge). A positive MATCH answer still needs a synthetic account fixture —
+        ADR-0252 phase 1 — so the happy path stays unwatched until then.
     - service: openbank-standing-order-service
     - service: openbank-psd2-service
       note: >-
