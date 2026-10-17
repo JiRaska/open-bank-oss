@@ -4061,6 +4061,44 @@ gates:
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
 
+  # Issue #11685. The release-time postcondition below checks only tags cut in THAT run;
+  # the old weekly verifier checked one newest tag across the whole fleet. This advisory
+  # gate reads all published releases and checks every versioned component's latest tag
+  # for the complete asset set. The scheduled verifier consumes that same inventory and
+  # cryptographically verifies each bundle. A missing release or unreadable API is red,
+  # so an empty inventory cannot look like an observed clean window.
+  - id: provenance
+    name: "latest release evidence across the fleet (issue #11685, advisory)"
+    verified: "2026-10-16 — inventory and identity negative controls pass; hosted cryptographic fleet observation remains required before enforcement."
+    group: supplychain
+    mode: advisory
+    rationale: "Graduation requires every deployable component's latest release to carry a complete, independently verified evidence bundle; a single newest-tag check cannot prove fleet coverage."
+    review_after: "2027-03-31"
+    budget_seconds: 90
+    min_subjects: 60
+    selftest_inputs:
+      - ".github/scripts/check-fleet-release-evidence.py"
+      - ".github/scripts/test-fleet-release-evidence.py"
+      - ".github/scripts/release_evidence_assets.py"
+      - ".github/scripts/verify-release-evidence-manifest.py"
+      - ".github/scripts/test-verify-release-evidence-manifest.py"
+      - ".github/scripts/tests/test_release_identity_workflow.py"
+      - ".github/workflows/verify-release-evidence.yml"
+      - "release-please-config.json"
+    selftest: |
+      python3 .github/scripts/check-fleet-release-evidence.py --self-test
+      python3 .github/scripts/test-verify-release-evidence-manifest.py
+      python3 -m unittest discover -s .github/scripts/tests -p test_release_identity_workflow.py
+    run: |
+      # Live remote state is observed on main and by the scheduled verifier. A PR
+      # checks its local denominator but must not claim that remote releases passed.
+      case "${GITHUB_EVENT_NAME:-}" in
+        push|schedule|workflow_dispatch)
+          python3 .github/scripts/check-fleet-release-evidence.py ;;
+        *)
+          python3 .github/scripts/check-fleet-release-evidence.py --local-only ;;
+      esac
+
   # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
   # from release-please-config.json's per-package `component` field; a package with a version.txt
   # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that
@@ -4088,6 +4126,7 @@ gates:
     min_subjects: 60
     selftest_inputs:
       - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/scripts/release_evidence_assets.py"
       - ".github/scripts/test-release-evidence-upload.py"
       - ".github/scripts/verify-release-evidence-manifest.py"
       - ".github/scripts/test-verify-release-evidence-manifest.py"
