@@ -25,11 +25,7 @@ info:
   # Also additive: TransactionPage.pagination now declares the fields the server actually sends
   # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
   # never sent, is kept and labelled. No path, parameter or status code changes.
-  # 1.21.0 -> 1.22.0 (ADR-0319 read tolerance): the response-only enums `TransactionResponse.categorySource`,
-  # `Merchant.source` and `MerchantGeo.precision` are declared as plain strings (values stay in the
-  # descriptions). A generated client binds an enum strictly, so a value added later would turn a
-  # booked 201 into a client-side error; a string cannot.
-  version: 1.22.0
+  version: 1.21.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -1066,6 +1062,7 @@ components:
         categorySource:
           type: string
           nullable: true
+          enum: [CUSTOMER, MCC, CATALOGUE]
           description: >-
             Whose category `category` is. CUSTOMER means the customer set it and can undo it;
             a client showing an undo affordance keys off this rather than guessing. Absent
@@ -1123,6 +1120,7 @@ components:
           nullable: true
         source:
           type: string
+          enum: [ENRICHED]
           description: >
             Always ENRICHED when this object is present. The field exists so a client never has to
             infer whether a name came from the bank or from the acquirer.
@@ -1158,6 +1156,7 @@ components:
           description: ISO-3166 alpha-2.
         precision:
           type: string
+          enum: [EXACT, CITY]
           description: >
             EXACT = where the money was spent. CITY = the merchant trades in this town and the pin
             is representative.
