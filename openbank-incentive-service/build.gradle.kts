@@ -14,6 +14,7 @@ dependencies {
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
+    implementation(libs.quarkus.opentelemetry)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
