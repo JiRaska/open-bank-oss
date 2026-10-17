@@ -3,8 +3,9 @@
 // Runs a short read-only load against the pending-approvals queue with lenient CI
 // thresholds.
 //
-// READ-ONLY BY CONSTRUCTION: a single GET against the operator read path; nothing is
-// created, mutated or deleted. The approvals queue is the one SEPA-payment read that
+// A single GET lists pending approvals without posting payments or making approval
+// decisions. Redis may prune expired entries from its pending index.
+// The approvals queue is the one SEPA-payment read that
 // answers 200 on a fresh database — the payment rows themselves are id-scoped and 404
 // with no seeded fixtures, which the perf-gate pre-flight probe rightly refuses to
 // time.
