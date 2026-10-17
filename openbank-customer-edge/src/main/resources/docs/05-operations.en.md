@@ -92,6 +92,10 @@ Symptom: every proxied call returns `{"error":"upstream unavailable"}`.
 
 This is the IDOR guard working as designed: the `accountId` did not resolve to the JWT party. Confirm the account belongs to the calling party in account-service; a 403 is returned (not 404) deliberately, to avoid an existence oracle.
 
+## Metric naming
+
+Every custom Micrometer counter is registered with the `openbank.` prefix (the `metric-name-prefix` CI gate rejects a new unprefixed name). Prometheus scrapes dots as underscores and appends `_total` to counters: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` and `openbank_feedback_emit_failures_total`. Older unprefixed names (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) are no longer emitted once this version is deployed, so dashboards and alerts must use the prefixed names; the in-repo PrometheusRules already do.
+
 ## Deploy / release
 
 - Per-service path-scoped CI builds only when `openbank-customer-edge/src/main/**` changes; version is managed by release-please (`version.txt` = `0.9.0`; do not hand-edit).

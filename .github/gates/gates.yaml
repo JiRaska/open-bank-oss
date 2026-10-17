@@ -4961,6 +4961,24 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: metric-name-prefix
+    name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      An unprefixed Micrometer name escapes every openbank_* selector and is invisible to
+      check-alert-metric-emitted.py. Seven existed on 2026-10-17 (three found by the audit, two
+      more by this gate itself); all were renamed with their readers, so the baseline is empty
+      and the gate is prevention only.
+    review_after: '2027-04-17'
+    min_subjects: 100   # 198 literal metric names measured 2026-10-17
+    selftest: python3 .github/scripts/check-metric-name-prefix.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-metric-name-prefix.py"]
+    run: |
+      python3 .github/scripts/check-metric-name-prefix.py --root .
+
   # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
   # image, so every scheduler and outbound edge in it is live by default. The switch list is
   # derived from the ledger source; a new scheduler without a switch is red until the instance
