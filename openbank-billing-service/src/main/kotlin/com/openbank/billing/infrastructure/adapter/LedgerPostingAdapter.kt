@@ -50,7 +50,6 @@ class LedgerPostingAdapter(
     override suspend fun post(command: FeeJournalCommand): UUID {
         val request = BillingJournalFactory.buildRequest(
             command = command,
-            accounts = config.gl(),
             systemActorId = config.systemActorId(),
             date = LocalDate.now(clock),
         )
@@ -67,7 +66,6 @@ class LedgerPostingAdapter(
     override suspend fun postReversal(command: FeeReversalCommand): UUID {
         val request = BillingJournalFactory.buildReversalRequest(
             command = command,
-            accounts = config.gl(),
             systemActorId = config.systemActorId(),
             date = LocalDate.now(clock),
         )

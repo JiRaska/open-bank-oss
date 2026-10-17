@@ -6,7 +6,7 @@ package com.openbank.billing
 
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
-import com.openbank.billing.application.port.out.ProductCatalogPort
+import com.openbank.billing.application.port.out.AccountingClassSource
 import com.openbank.billing.application.usecase.FeeAssessmentService
 import com.openbank.billing.domain.BillableFee
 import com.openbank.libs.product.FeeContext
@@ -23,24 +23,20 @@ import java.math.BigDecimal
  */
 class FeeAssessmentServiceTest {
 
-    private fun service(billing: AccountBilling?, fees: List<BillableFee>) = FeeAssessmentService(
-        object : AccountContextPort {
-            override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
-        },
-        object : ProductCatalogPort {
-            override suspend fun billableFees(productId: String, currency: String): List<BillableFee> = fees
-        },
-    )
+    private val pins = InMemoryPins()
 
+    private fun accounts(billing: AccountBilling?) = object : AccountContextPort {
+        override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
+    }
+
+    private fun service(billing: AccountBilling?, fees: List<BillableFee>, revisions: FakeRevisions = FakeRevisions(fees)) =
+        FeeAssessmentService(accounts(billing), revisions, pins)
+
+    @Suppress("TooGenericExceptionThrown")
     private fun serviceWithUnreachableCatalog(billing: AccountBilling?) = FeeAssessmentService(
-        object : AccountContextPort {
-            override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
-        },
-        object : ProductCatalogPort {
-            @Suppress("TooGenericExceptionThrown")
-            override suspend fun billableFees(productId: String, currency: String): List<BillableFee> =
-                throw RuntimeException("product-catalog unreachable")
-        },
+        accounts(billing),
+        FakeRevisions(emptyList(), failure = RuntimeException("product-catalog unreachable")),
+        pins,
     )
 
     private fun fee(
@@ -97,5 +93,73 @@ class FeeAssessmentServiceTest {
         assertThat(a.skipReason).isEqualTo("PRODUCT_CATALOG_UNREACHABLE")
         assertThat(a.assessedFees).isEmpty()
         assertThat(a.journalCommands()).isEmpty()
+    }
+
+    @Test
+    fun `the first assessment pins the published revision and prices the fee from it`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val revisions = FakeRevisions(listOf(fee("f1", "5")))
+        val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+
+        assertThat(pins.pins).containsEntry("acc", FakeRevisions.PUBLISHED_ID)
+        assertThat(revisions.termsReads).containsExactly(FakeRevisions.PUBLISHED_ID)
+        val fee = a.assessedFees.single()
+        assertThat(fee.productRevisionId).isEqualTo(FakeRevisions.PUBLISHED_ID)
+        assertThat(fee.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+        assertThat(a.journalCommands().single().accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+    }
+
+    @Test
+    fun `a pinned account keeps its revision when the product is later re-published`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        pins.pins["acc"] = FakeRevisions.PUBLISHED_ID
+        val revisions = FakeRevisions(listOf(fee("f1", "5")), published = FakeRevisions.OTHER_ID)
+
+        val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+
+        // Terms come from the pinned revision, never from "the product as currently published".
+        assertThat(revisions.termsReads).containsExactly(FakeRevisions.PUBLISHED_ID)
+        assertThat(a.assessedFees.single().productRevisionId).isEqualTo(FakeRevisions.PUBLISHED_ID)
+        assertThat(pins.pins["acc"]).isEqualTo(FakeRevisions.PUBLISHED_ID)
+    }
+
+    @Test
+    fun `a product with no published revision is skipped and nothing is pinned`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val a = service(billing, emptyList(), FakeRevisions(listOf(fee("f1", "5")), published = null))
+            .assess("c", "acc", "CZK")
+
+        assertThat(a.skipped).isTrue()
+        assertThat(a.skipReason).isEqualTo("PRODUCT_REVISION_UNRESOLVED")
+        assertThat(a.journalCommands()).isEmpty()
+        assertThat(pins.pins).isEmpty()
+    }
+
+    @Test
+    fun `a revision with no accounting class is skipped, never posted to a guessed account`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val revisions = FakeRevisions(
+            listOf(fee("f1", "5")),
+            accountingClass = null,
+            source = AccountingClassSource.NONE,
+        )
+        val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+
+        assertThat(a.skipped).isTrue()
+        assertThat(a.skipReason).isEqualTo("ACCOUNTING_CLASS_UNRESOLVED")
+        assertThat(a.journalCommands()).isEmpty()
+    }
+
+    @Test
+    fun `a class derived from a legacy product type still assesses`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val revisions = FakeRevisions(
+            listOf(fee("f1", "5")),
+            accountingClass = "CUSTOMER_DEPOSIT_SAVINGS",
+            source = AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE,
+        )
+        val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+        assertThat(a.skipped).isFalse()
+        assertThat(a.journalCommands().single().accountingClass).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
     }
 }

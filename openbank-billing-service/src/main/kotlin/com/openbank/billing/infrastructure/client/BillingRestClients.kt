@@ -22,18 +22,6 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import java.math.BigDecimal
 import java.util.UUID
 
-/** A product's fee definition as returned by product-catalog `GET /api/v1/products/{id}/fees`. */
-@JsonIgnoreProperties(ignoreUnknown = true)
-data class FeeDto(
-    val id: String,
-    val name: String,
-    val type: String,
-    val amount: BigDecimal,
-    val currency: String,
-    val waivable: Boolean = false,
-    val waiveCondition: String? = null,
-)
-
 /**
  * The subset of account-service `GET /api/v1/accounts/{id}` the billing read path needs.
  * [partyId] was added for the ADR-0248 annual fee-summary's `partyRef` field — account-service's
@@ -71,22 +59,54 @@ data class AccountPageDto(
 )
 
 /**
- * Product-catalog fee definitions (the catalog is the fee source-of-truth). product-catalog now
- * authenticates its callers (issue #401), so propagate an openbank-services bearer like the other
- * clients below — a fee assessment cannot silently fall back to "no fees" on a 401.
+ * Product-catalog revisions (ADR-0341): the catalog is the source of truth for fee amounts and the
+ * accounting class, read by PINNED REVISION through the v2 API. product-catalog authenticates its
+ * callers (issue #401), so propagate an openbank-services bearer like the other clients below -- a
+ * fee assessment cannot silently fall back to "no fees" on a 401.
  */
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
-@Path("/api/v1")
+@Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 interface ProductCatalogRestClient {
+    /** The revision effective now for a v1 product id; 404 when none is published. */
     @GET
-    @Path("/products/{id}/fees")
-    fun getProductFees(@PathParam("id") productId: String): Uni<List<FeeDto>>
+    @Path("/legacy-products/{productId}/published-revision")
+    fun getPublishedRevisionForLegacyProduct(@PathParam("productId") productId: String): Uni<RevisionDto>
+
+    /** One immutable revision by its durable id. */
+    @GET
+    @Path("/revisions/{id}")
+    fun getRevision(@PathParam("id") revisionId: String): Uni<RevisionDto>
 }
+
+/** The subset of a catalog `ProductRevision` billing reads (`GET /api/v2/revisions/{id}`). */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class RevisionDto(
+    val id: String,
+    val state: String,
+    val content: RevisionContentDto = RevisionContentDto(),
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class RevisionContentDto(
+    val attributes: Map<String, Any?> = emptyMap(),
+    val prices: List<PriceComponentDto> = emptyList(),
+)
+
+/** One price component; [value] is an exact decimal STRING in v2, never a binary float. */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PriceComponentDto(
+    val code: String,
+    val kind: String,
+    val value: BigDecimal,
+    val currency: String? = null,
+    val unit: String? = null,
+    val cadence: String? = null,
+)
 
 /** Account read — carries account PII, so the call propagates an OIDC service token. */
 @RegisterRestClient(configKey = "account-service")
@@ -128,7 +148,8 @@ interface BalanceRestClient {
  * (see `LedgerResource.PostJournalLineRequest`).
  */
 data class LedgerJournalLineRequest(
-    val glAccountId: UUID,
+    val accountingClass: String,
+    val accountingRole: String,
     val side: String,
     val amount: BigDecimal,
     val currencyCode: String,

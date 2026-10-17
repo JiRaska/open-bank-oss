@@ -7,7 +7,9 @@ package com.openbank.billing.integration
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
-import com.openbank.billing.application.port.out.ProductCatalogPort
+import com.openbank.billing.application.port.out.AccountingClassSource
+import com.openbank.billing.application.port.out.ProductRevisionPort
+import com.openbank.billing.application.port.out.RevisionTerms
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.it.PostgresRedisTestResource
 import com.openbank.libs.product.FeeContext
@@ -120,16 +122,23 @@ class BillingOutboxAtomicityIT {
      */
     @Alternative
     @ApplicationScoped
-    class OneChargeableFeeCatalog : ProductCatalogPort {
-        override suspend fun billableFees(productId: String, currency: String) = listOf(
-            BillableFee(
-                feeId = FEE_ID,
-                name = "Monthly maintenance",
-                type = "MAINTENANCE",
-                amount = BigDecimal("150.00"),
-                currency = currency,
-                waivable = false,
-                waiveCondition = null,
+    class OneChargeableFeeCatalog : ProductRevisionPort {
+        override suspend fun publishedRevisionIdFor(productId: String): String = REVISION_ID
+
+        override suspend fun terms(revisionId: String, currency: String) = RevisionTerms(
+            revisionId = revisionId,
+            accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
+            accountingClassSource = AccountingClassSource.REVISION,
+            fees = listOf(
+                BillableFee(
+                    feeId = FEE_ID,
+                    name = "Monthly maintenance",
+                    type = "MAINTENANCE",
+                    amount = BigDecimal("150.00"),
+                    currency = currency,
+                    waivable = false,
+                    waiveCondition = null,
+                ),
             ),
         )
     }
@@ -297,6 +306,7 @@ class BillingOutboxAtomicityIT {
         const val ACTOR_ID = "00000000-0000-0000-0000-000000000099"
         const val PRODUCT_ID = "CURRENT_CZK"
         const val FEE_ID = "maintenance-monthly"
+        const val REVISION_ID = "0191c0de-0000-7000-8000-0000000000a1"
         const val CURRENCY = "CZK"
 
         /** The wire values `BillingAssessmentRepositoryImpl` stamps on the two rows — the subject. */

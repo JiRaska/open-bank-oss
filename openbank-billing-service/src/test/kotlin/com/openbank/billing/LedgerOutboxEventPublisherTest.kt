@@ -17,6 +17,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.MutinyEmitter
 import kotlinx.coroutines.runBlocking
@@ -56,7 +57,7 @@ class LedgerOutboxEventPublisherTest {
     private fun payload(idempotencyKey: String = "fee-2026-07-acc-1-f1-CZK") =
         "{\"schemaVersion\":1,\"idempotencyKey\":\"$idempotencyKey\",\"cycleId\":\"2026-07\"," +
             "\"accountId\":\"acc-1\",\"feeId\":\"f1\",\"amount\":\"150.00\",\"currency\":\"CZK\"," +
-            "\"description\":\"Fee charge: Maintenance\"}"
+            "\"description\":\"Fee charge: Maintenance\",\"accountingClass\":\"CUSTOMER_DEPOSIT_SAVINGS\"}"
 
     @Test
     fun `publish posts the deserialized command to the ledger and marks the fee POSTED with the journal id`(): Unit =
@@ -68,7 +69,7 @@ class LedgerOutboxEventPublisherTest {
             coEvery { ledger.post(capture(commandSlot)) } returns journalId
             coEvery { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(entry(payload()))
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(entry(payload()))
 
             coVerify(exactly = 1) { ledger.post(any()) }
             coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
@@ -81,13 +82,47 @@ class LedgerOutboxEventPublisherTest {
         }
 
     @Test
+    fun `the accounting class in the payload reaches the ledger command and the legacy counter stays zero`(): Unit =
+        runBlocking {
+            val ledger = mockk<LedgerPostingPort>()
+            val assessments = mockk<BillingAssessmentRepository>()
+            val meters = SimpleMeterRegistry()
+            val commandSlot: CapturingSlot<FeeJournalCommand> = slot()
+            coEvery { ledger.post(capture(commandSlot)) } returns UUID.randomUUID()
+            coEvery { assessments.markPosted(any(), any()) } returns Unit
+
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(payload()))
+
+            assertThat(commandSlot.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
+            assertThat(meters.find("billing.fee.post.legacy_payload").counter()).isNull()
+        }
+
+    @Test
+    fun `a row written before accounting classes still posts, as the demand deposit class, and is counted`(): Unit =
+        runBlocking {
+            val ledger = mockk<LedgerPostingPort>()
+            val assessments = mockk<BillingAssessmentRepository>()
+            val meters = SimpleMeterRegistry()
+            val commandSlot: CapturingSlot<FeeJournalCommand> = slot()
+            coEvery { ledger.post(capture(commandSlot)) } returns UUID.randomUUID()
+            coEvery { assessments.markPosted(any(), any()) } returns Unit
+            val legacy = payload().replace(",\"accountingClass\":\"CUSTOMER_DEPOSIT_SAVINGS\"", "")
+            assertThat(legacy).doesNotContain("accountingClass")
+
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(legacy))
+
+            assertThat(commandSlot.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+            assertThat(meters.get("billing.fee.post.legacy_payload").counter().count()).isEqualTo(1.0)
+        }
+
+    @Test
     fun `a ledger failure propagates and does not mark the fee posted`() {
         val ledger = mockk<LedgerPostingPort>()
         val assessments = mockk<BillingAssessmentRepository>()
         coEvery { ledger.post(any()) } throws RuntimeException("ledger down")
 
         assertThatThrownBy {
-            runBlocking { LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(entry(payload())) }
+            runBlocking { LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(entry(payload())) }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
         coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
@@ -126,7 +161,7 @@ class LedgerOutboxEventPublisherTest {
                 assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId)
             } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(reversalEntry(reversalPayload()))
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(reversalEntry(reversalPayload()))
 
             coVerify(exactly = 1) { ledger.postReversal(any()) }
             coVerify(exactly = 1) { assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId) }
@@ -146,7 +181,7 @@ class LedgerOutboxEventPublisherTest {
 
         assertThatThrownBy {
             runBlocking {
-                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(reversalEntry(reversalPayload()))
+                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry()).publish(reversalEntry(reversalPayload()))
             }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
@@ -175,7 +210,7 @@ class LedgerOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(messageSlot)) } returns Uni.createFrom().voidItem()
         val payload = "{\"eventType\":\"AnnualFeeSummaryReady\",\"accountId\":\"acc-1\"}"
 
-        LedgerOutboxEventPublisher(ledger, assessments, emitter).publish(annualSummaryEntry(payload))
+        LedgerOutboxEventPublisher(ledger, assessments, emitter, SimpleMeterRegistry()).publish(annualSummaryEntry(payload))
 
         coVerify(exactly = 0) { ledger.post(any()) }
         coVerify(exactly = 0) { ledger.postReversal(any()) }

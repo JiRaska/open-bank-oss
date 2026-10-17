@@ -14,16 +14,23 @@ import java.util.UUID
  * ledger-service (ADR-0143 step 2). Pure and side-effect-free so the accounting is fully
  * unit-tested without any HTTP — mirrors `openbank-lending-service`'s `LendingJournalFactory`.
  *
- * Fees are single-currency (no FX in phase 2, ADR-0143): DEBIT the customer's deposit-control GL
- * with `subAccountId = accountId` for the sub-ledger tie-out (ADR-0039 Phase B — the only GL
- * account class that accepts `subAccountId`), CREDIT the bank fee-income GL, both in the fee's
- * own currency (`baseAmount == amount`).
+ * Fees are single-currency (no FX in phase 2, ADR-0143): DEBIT the customer's deposit-control
+ * leg with `subAccountId = accountId` for the sub-ledger tie-out (ADR-0039 Phase B — the only GL
+ * account class that accepts `subAccountId`), CREDIT the bank fee-income leg, both in the fee's
+ * own currency (`baseAmount == amount`). Legs name an accounting class and role, never a GL
+ * account (ADR-0341 D3): the ledger resolves them with the leg's currency.
  */
 object BillingJournalFactory {
 
+    /** The customer leg's class comes from the pinned revision; the ledger maps it to the deposit-control GL. */
+    private const val CUSTOMER_ROLE = "PRINCIPAL"
+
+    /** The bank's fee income, a class of its own that no product revision carries (ADR-0341 D3). */
+    private const val FEE_INCOME_CLASS = "FEE_INCOME_ACCOUNT"
+    private const val FEE_INCOME_ROLE = "FEE_INCOME"
+
     fun buildRequest(
         command: FeeJournalCommand,
-        accounts: BillingLedgerConfig.Gl,
         systemActorId: UUID,
         date: LocalDate,
     ): LedgerPostJournalRequest = LedgerPostJournalRequest(
@@ -36,15 +43,16 @@ object BillingJournalFactory {
         valueDate = date.toString(),
         description = command.description,
         createdBy = systemActorId,
-        lines = buildLines(command, accounts),
+        lines = buildLines(command),
     )
 
-    fun buildLines(command: FeeJournalCommand, accounts: BillingLedgerConfig.Gl): List<LedgerJournalLineRequest> {
+    fun buildLines(command: FeeJournalCommand): List<LedgerJournalLineRequest> {
         val ccy = command.currency
         val value = command.amount
         return listOf(
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeReceivable(),
+                accountingClass = command.accountingClass,
+                accountingRole = CUSTOMER_ROLE,
                 side = "DEBIT",
                 amount = value,
                 currencyCode = ccy,
@@ -53,7 +61,8 @@ object BillingJournalFactory {
                 subAccountId = accountIdAsUuidOrNull(command.accountId),
             ),
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeIncome(),
+                accountingClass = FEE_INCOME_CLASS,
+                accountingRole = FEE_INCOME_ROLE,
                 side = "CREDIT",
                 amount = value,
                 currencyCode = ccy,
@@ -83,7 +92,6 @@ object BillingJournalFactory {
      */
     fun buildReversalRequest(
         command: FeeReversalCommand,
-        accounts: BillingLedgerConfig.Gl,
         systemActorId: UUID,
         date: LocalDate,
     ): LedgerPostJournalRequest = LedgerPostJournalRequest(
@@ -93,18 +101,16 @@ object BillingJournalFactory {
         valueDate = date.toString(),
         description = "Reversal of fee charge (${command.reason})",
         createdBy = systemActorId,
-        lines = buildReversalLines(command, accounts),
+        lines = buildReversalLines(command),
     )
 
-    fun buildReversalLines(
-        command: FeeReversalCommand,
-        accounts: BillingLedgerConfig.Gl,
-    ): List<LedgerJournalLineRequest> {
+    fun buildReversalLines(command: FeeReversalCommand): List<LedgerJournalLineRequest> {
         val ccy = command.currency
         val value = command.amount
         return listOf(
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeReceivable(),
+                accountingClass = command.accountingClass,
+                accountingRole = CUSTOMER_ROLE,
                 side = "CREDIT",
                 amount = value,
                 currencyCode = ccy,
@@ -113,7 +119,8 @@ object BillingJournalFactory {
                 subAccountId = accountIdAsUuidOrNull(command.accountId),
             ),
             LedgerJournalLineRequest(
-                glAccountId = accounts.feeIncome(),
+                accountingClass = FEE_INCOME_CLASS,
+                accountingRole = FEE_INCOME_ROLE,
                 side = "DEBIT",
                 amount = value,
                 currencyCode = ccy,

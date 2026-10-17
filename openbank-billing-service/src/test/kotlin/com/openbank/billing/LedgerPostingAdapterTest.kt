@@ -40,10 +40,6 @@ class LedgerPostingAdapterTest {
 
     private val config = object : BillingLedgerConfig {
         override fun systemActorId(): UUID = UUID.fromString("00000000-0000-0000-0000-0000000000bb")
-        override fun gl(): BillingLedgerConfig.Gl = object : BillingLedgerConfig.Gl {
-            override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
-            override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
-        }
     }
 
     private val adapter = LedgerPostingAdapter(ledgerClient, config, clock)
@@ -56,10 +52,11 @@ class LedgerPostingAdapterTest {
         amount = BigDecimal("150.00"),
         currency = "CZK",
         description = "Fee charge: Maintenance",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     @Test
-    fun `posts a clock-dated balanced journal built from the configured GL accounts and returns the journal id`() {
+    fun `posts a clock-dated balanced journal whose legs name accounting classes and returns the journal id`() {
         val requestSlot: CapturingSlot<LedgerPostJournalRequest> = slot()
         val journalId = UUID.randomUUID()
         every { ledgerClient.postJournal(capture(requestSlot)) } returns Uni.createFrom().item(
@@ -96,6 +93,7 @@ class LedgerPostingAdapterTest {
         amount = BigDecimal("150.00"),
         currency = "CZK",
         reason = "waiver bug",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     @Test

@@ -7,7 +7,6 @@ package com.openbank.billing
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
-import com.openbank.billing.application.port.out.ProductCatalogPort
 import com.openbank.billing.application.usecase.BillingCycleService
 import com.openbank.billing.application.usecase.FeeAssessmentService
 import com.openbank.billing.domain.BillableFee
@@ -33,9 +32,8 @@ class BillingCycleServiceTest {
         object : AccountContextPort {
             override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
         },
-        object : ProductCatalogPort {
-            override suspend fun billableFees(productId: String, currency: String): List<BillableFee> = fees
-        },
+        FakeRevisions(fees),
+        InMemoryPins(),
     )
 
     private fun fee(id: String, amount: String) =

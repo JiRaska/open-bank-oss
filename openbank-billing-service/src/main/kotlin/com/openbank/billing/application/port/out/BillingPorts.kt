@@ -31,11 +31,58 @@ interface AccountContextPort {
 }
 
 /**
- * Reads the billable fee definitions for a product/currency from the product catalogue
- * (`GET /api/v1/fees`). Backed by a reactive REST client in phase 2c.
+ * One published catalog revision's billable terms (ADR-0341 D2/D3). [accountingClass] is the class
+ * the revision carries, or null when it carries none and cannot be derived; [accountingClassSource]
+ * says which. [fees] are the revision's AMOUNT price components in a currency, never the product's
+ * "currently published" fees: a revision is immutable, so these terms never change under a contract
+ * that pinned it.
  */
-interface ProductCatalogPort {
-    suspend fun billableFees(productId: String, currency: String): List<BillableFee>
+data class RevisionTerms(
+    val revisionId: String,
+    val accountingClass: String?,
+    val accountingClassSource: AccountingClassSource,
+    val fees: List<BillableFee>,
+)
+
+/** Where [RevisionTerms.accountingClass] came from. */
+enum class AccountingClassSource {
+    /** The revision's own `accountingClass` attribute (catalog banking pack v3 and later). */
+    REVISION,
+
+    /**
+     * Derived from the `productType` of a lossless v1 projection (`legacy-product`), which predates
+     * the attribute. Transitional and COUNTED (`billing.accounting_class.derived`): it disappears
+     * when those revisions are re-published under a schema that carries the class.
+     */
+    DERIVED_FROM_LEGACY_PRODUCT_TYPE,
+
+    /** No class on the revision and none derivable. */
+    NONE,
+}
+
+/**
+ * Reads billing terms from the catalog by published revision (ADR-0341 D2). Fail-closed like every
+ * read port here: a failure throws and the caller turns it into an explicit skip.
+ */
+interface ProductRevisionPort {
+    /** The id of the revision effective now for a v1 product id, or null when none is published. */
+    suspend fun publishedRevisionIdFor(productId: String): String?
+
+    /** The terms of [revisionId] in [currency]; cached by revision id, since a revision is immutable. */
+    suspend fun terms(revisionId: String, currency: String): RevisionTerms
+}
+
+/**
+ * The account's pinned catalog revision (ADR-0341 D1). Billing pins at the account's first
+ * assessment -- the earliest moment billing sees the account -- until account-service records the
+ * pin at opening (the last adoption step) and billing can read it from there. Once pinned the
+ * revision is never silently replaced; a change of terms is an explicit re-pin.
+ */
+interface AccountRevisionPinPort {
+    suspend fun find(accountId: String): String?
+
+    /** Pins [revisionId] unless a pin already exists; returns the pin that stands afterwards. */
+    suspend fun pinIfAbsent(accountId: String, revisionId: String): String
 }
 
 /**
