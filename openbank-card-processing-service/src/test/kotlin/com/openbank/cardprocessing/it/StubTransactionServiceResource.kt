@@ -50,6 +50,10 @@ class StubTransactionServiceResource : QuarkusTestResourceLifecycleManager {
             "stub-422" -> reply(ex, 422, """{"code":"INSUFFICIENT_FUNDS","message":"no"}""")
             "stub-503" -> reply(ex, 503, """{"message":"unavailable"}""")
             "stub-429" -> reply(ex, 429, """{"message":"slow down"}""")
+            "stub-403" -> reply(ex, 403, """{"message":"forbidden"}""")
+            "stub-409" -> reply(ex, 409, """{"message":"conflict"}""")
+            // No status line at all: the connection is cut after the request was read.
+            "stub-drop" -> ex.close()
             // 2xx whose body carries a field the generated type does not know and omits every other one.
             "stub-extra" -> reply(
                 ex,
@@ -70,6 +74,15 @@ class StubTransactionServiceResource : QuarkusTestResourceLifecycleManager {
     }
 
     private companion object {
-        val MARKERS = listOf("stub-422", "stub-503", "stub-429", "stub-extra", "stub-unbindable")
+        val MARKERS = listOf(
+            "stub-422",
+            "stub-503",
+            "stub-429",
+            "stub-403",
+            "stub-409",
+            "stub-drop",
+            "stub-extra",
+            "stub-unbindable",
+        )
     }
 }

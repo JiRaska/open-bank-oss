@@ -153,6 +153,31 @@ class TransactionClientOutcomeIT {
     }
 
     @Test
+    fun `403 and 409 are not business rejections - retried and rethrown, never recorded`(): Unit = runBlocking {
+        val consumer = consumer()
+        listOf("stub-403", "stub-409").forEach { marker ->
+            assertThatThrownBy { runBlocking { consumer.consume(dueEvent(marker)) } }
+                .describedAs(marker)
+                .isInstanceOf(WebApplicationException::class.java)
+            assertThat(posts(marker)).describedAs(marker).isEqualTo(3)
+        }
+        coVerify(exactly = 0) { useCase.recordFailure(any()) }
+        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+    }
+
+    @Test
+    fun `a connection cut with no status is NOT a success - retried and rethrown`(): Unit = runBlocking {
+        val consumer = consumer()
+
+        assertThatThrownBy { runBlocking { consumer.consume(dueEvent("stub-drop")) } }
+            .isInstanceOf(Exception::class.java)
+
+        assertThat(posts("stub-drop")).isEqualTo(3)
+        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+        coVerify(exactly = 0) { useCase.recordFailure(any()) }
+    }
+
+    @Test
     fun `a 2xx body with an unknown field and every optional field missing is a success`(): Unit = runBlocking {
         consumer().consume(dueEvent("stub-extra"))
 
@@ -162,11 +187,14 @@ class TransactionClientOutcomeIT {
     }
 
     @Test
-    fun `a 2xx body that cannot bind at all is still a success - the transfer is committed`(): Unit = runBlocking {
-        consumer().consume(dueEvent("stub-unbindable"))
+    fun `a 2xx body that cannot bind is NOT confirmed - rethrown so the retry converges`(): Unit = runBlocking {
+        val consumer = consumer()
 
-        coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
+        assertThatThrownBy { runBlocking { consumer.consume(dueEvent("stub-unbindable")) } }
+            .isInstanceOf(Exception::class.java)
+
+        assertThat(posts("stub-unbindable")).describedAs("retried with the same idempotency key").isEqualTo(3)
+        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
         coVerify(exactly = 0) { useCase.recordFailure(any()) }
-        assertThat(posts("stub-unbindable")).describedAs("no retry of a committed transfer").isEqualTo(1)
     }
 }

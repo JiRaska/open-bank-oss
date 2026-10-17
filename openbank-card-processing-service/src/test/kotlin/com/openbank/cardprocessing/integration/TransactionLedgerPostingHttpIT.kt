@@ -89,11 +89,11 @@ class TransactionLedgerPostingHttpIT {
     }
 
     @Test
-    fun `a 2xx body that cannot bind at all is still POSTED - the debit is in the books`(): Unit = runBlocking {
-        val result = adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2")
+    fun `a 2xx body that cannot bind is rethrown - neither POSTED nor FAILED`(): Unit = runBlocking {
+        val failure = runCatching { adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2") }
+            .exceptionOrNull()
 
-        assertThat(result.outcome).isEqualTo(PostingOutcome.POSTED)
-        assertThat(result.transactionId).isNull()
+        assertThat(failure).describedAs("an unreadable answer proves no 2xx").isNotNull
     }
 
     @Test
@@ -110,5 +110,22 @@ class TransactionLedgerPostingHttpIT {
 
         assertThat(result.outcome).isEqualTo(PostingOutcome.FAILED)
         assertThat(result.detail).describedAs("the stub's status, not an auth/connect error").contains("503")
+    }
+
+    @Test
+    fun `403 and 409 are FAILED, never POSTED`(): Unit = runBlocking {
+        listOf("stub-403" to "403", "stub-409" to "409").forEach { (marker, status) ->
+            val result = adapter().postClearedSpend(authorization(marker), 12_345, "clr-$marker")
+
+            assertThat(result.outcome).describedAs(marker).isEqualTo(PostingOutcome.FAILED)
+            assertThat(result.detail).describedAs(marker).contains(status)
+        }
+    }
+
+    @Test
+    fun `a connection cut with no status is never POSTED`(): Unit = runBlocking {
+        val result = runCatching { adapter().postClearedSpend(authorization("stub-drop"), 12_345, "clr-drop") }
+
+        assertThat(result.getOrNull()?.outcome).isNotEqualTo(PostingOutcome.POSTED)
     }
 }
