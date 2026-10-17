@@ -7,7 +7,11 @@ info:
   #        correction route — additive; income/expenses stay as deprecated fields.
   # 1.2.1: clarify same-currency fund switch validation (this branch's 1.1.1, re-taken on 1.2.0);
   #        no schema change.
-  version: 1.2.1
+  # 1.3.0: ADR-0341 - a fund is created against a published catalog revision (`productRevisionId`,
+  #        optional in the schema, enforced by the server) and its management fee is read from it.
+  #        `managementFeeRate` stays in the request schema, deprecated; a differing value is rejected.
+  #        A behavioural tightening announced under ADR-0145, not a schema break.
+  version: 1.3.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -408,7 +412,7 @@ components:
         error: { type: string }
     FundRequest:
       type: object
-      required: [name, isin, lei, depositaryReference, custodyAccountReference, currency, riskClass, managementFeeRate]
+      required: [name, isin, lei, depositaryReference, custodyAccountReference, currency, riskClass]
       properties:
         name: { type: string }
         isin: { type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' }
@@ -418,7 +422,8 @@ components:
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         riskClass: { type: integer, minimum: 1, maximum: 7 }
         mandatoryConservative: { type: boolean, default: false }
-        managementFeeRate: { type: number, description: Annual fraction of net assets, e.g. 0.008 }
+        managementFeeRate: { type: number, deprecated: true, description: "Deprecated (ADR-0341). Ignored as an input: if supplied it must equal the pinned revision's fee, otherwise the request is rejected with 400. Read the fee from the Fund response." }
+        productRevisionId: { type: string, format: uuid, description: "The published catalog revision whose feeSchedule prices this fund (ADR-0341). Required on create (the service answers 400 without it) but optional in this shared create/amend schema: on amend it must be absent or equal to the pinned revision. Not marked `required` because the create-time requirement is enforced by the service, and a schema-level required property would be a breaking change under ADR-0048 for an internal contract that has no /api/v2." }
         launchNavPerUnit: { type: number, default: 1 }
     Fund:
       type: object
@@ -432,7 +437,8 @@ components:
         currency: { type: string }
         riskClass: { type: integer }
         mandatoryConservative: { type: boolean }
-        managementFeeRate: { type: number }
+        managementFeeRate: { type: number, readOnly: true, description: Annual fraction of net assets - the cached derivation of the pinned revision's fee (null revision = grandfathered stored rate) }
+        productRevisionId: { type: [string, 'null'], format: uuid, readOnly: true }
         launchNavPerUnit: { type: number }
         status: { type: string, enum: [ACTIVE, CLOSED] }
         createdAt: { type: string, format: date-time }

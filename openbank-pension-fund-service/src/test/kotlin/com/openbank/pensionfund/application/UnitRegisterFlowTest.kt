@@ -4,6 +4,7 @@
 
 package com.openbank.pensionfund.application
 
+import com.openbank.pensionfund.FixedFundTerms
 import com.openbank.pensionfund.application.port.MarketPricePort
 import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.usecase.FundAdministrationService
@@ -47,7 +48,7 @@ class UnitRegisterFlowTest {
         override suspend fun price(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal? =
             if (instrumentId == "KNOWN") BigDecimal("10") else null
     }
-    private val admin = FundAdministrationService(store, clock, 30, PensionFundMetrics.NONE)
+    private val admin = FundAdministrationService(store, clock, 30, PensionFundMetrics.NONE, FixedFundTerms())
     private val navs = NavService(store, prices, clock, PensionFundMetrics.NONE)
     private val register = UnitRegisterService(store, clock, PensionFundMetrics.NONE)
     private val contract = UUID.randomUUID()
@@ -57,7 +58,7 @@ class UnitRegisterFlowTest {
     private fun definition(isin: String) = FundDefinition(
         name = "Fund $isin", isin = isin, lei = "315700ABCDEF12345678", depositaryReference = "DEP",
         custodyAccountReference = "CUST-$isin", currency = "CZK", riskClass = 3, mandatoryConservative = false,
-        managementFeeRate = BigDecimal.ZERO, launchNavPerUnit = BigDecimal.ONE,
+        productRevisionId = FixedFundTerms.ZERO_FEE, launchNavPerUnit = BigDecimal.ONE,
     )
 
     private fun later(seconds: Long = 3600) {

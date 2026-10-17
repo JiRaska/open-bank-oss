@@ -58,6 +58,9 @@ class FundEntity : PanacheEntityBase {
     @Column(name = "management_fee_rate", nullable = false)
     lateinit var managementFeeRate: BigDecimal
 
+    @Column(name = "product_revision_id")
+    var productRevisionId: java.util.UUID? = null
+
     @Column(name = "launch_nav_per_unit", nullable = false)
     lateinit var launchNavPerUnit: BigDecimal
 

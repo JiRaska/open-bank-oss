@@ -128,7 +128,7 @@ survives in it.
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
    SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... SYNTHETIC_FX_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
-   TAX_REPORTING_CLIENT_SECRET=... LEDGER_PENSION_CO_CLIENT_SECRET=... \
+   TAX_REPORTING_CLIENT_SECRET=... LEDGER_PENSION_CO_CLIENT_SECRET=... PENSION_FUND_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    MARKETING_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
@@ -373,6 +373,7 @@ for this instance, so the service account holds no realm role and is granted not
 | Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
 |---|---|---|---|
 | `openbank-ledger-pension-co` | `keycloak/ledger-pension-co` | `ledger-service-oidc` (ledger-pension-co) | `LEDGER_PENSION_CO_CLIENT_SECRET` |
+| `openbank-pension-fund` | `keycloak/pension-fund-service` | `pension-fund-service-m2m-oidc` (pension-fund) | `PENSION_FUND_CLIENT_SECRET` |
 
 ```sh
 jq '.clients[] | select(.clientId=="openbank-ledger-pension-co") | del(.secret)' \

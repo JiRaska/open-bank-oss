@@ -60,6 +60,23 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  # ADR-0341: pension-fund-service's OWN machine identity for the one outbound call it makes - the
+  # pinned catalog revision read at fund creation. Keycloak client `openbank-pension-fund`
+  # (catalog:read scope, no realm role); never the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-pension-fund
+    credentials:
+      secret: ${OIDC_PENSION_FUND_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    product-catalog:
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
+
 
   shutdown:
     timeout: 30S
@@ -124,6 +141,8 @@ authz:
       tls:
         verification: none
       enabled: false
+    oidc-client:
+      enabled: false
   authz:
     enforce: "false"
 
@@ -139,11 +158,27 @@ authz:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
   authz:
     enforce: "false"
 
 "%prod":
   quarkus:
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority
     http:
       # Client authentication is fixed during Quarkus augmentation, not by deployment env.
       ssl:

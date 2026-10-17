@@ -31,8 +31,11 @@ data class FundRequest(
     val currency: String? = null,
     val riskClass: Int? = null,
     val mandatoryConservative: Boolean? = null,
-    val managementFeeRate: BigDecimal? = null,
+    /** ADR-0341: the published catalog revision whose fee schedule prices this fund. Required on create. */
+    val productRevisionId: UUID? = null,
     val launchNavPerUnit: BigDecimal? = null,
+    /** Deprecated: the fee comes from [productRevisionId]'s revision; a supplied value must equal it. */
+    val managementFeeRate: BigDecimal? = null,
 ) {
     fun toDefinition() = FundDefinition(
         name = req(name, "name"),
@@ -43,8 +46,9 @@ data class FundRequest(
         currency = req(currency, "currency"),
         riskClass = req(riskClass, "riskClass"),
         mandatoryConservative = mandatoryConservative ?: false,
-        managementFeeRate = req(managementFeeRate, "managementFeeRate"),
+        productRevisionId = productRevisionId,
         launchNavPerUnit = launchNavPerUnit ?: BigDecimal.ONE,
+        managementFeeRate = managementFeeRate,
     )
 }
 

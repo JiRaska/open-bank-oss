@@ -145,4 +145,7 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @State("a published DIP strategy revision has separate legal and product approvals")
     fun publishedPensionStrategyApprovalsExist() = catalogFixtures.publishedPensionStrategyApprovalsExist()
+
+    @State("a published pension-savings revision with a 0.80 percent management fee exists")
+    fun publishedPensionFundFeeRevisionExists() = catalogFixtures.publishedPensionFundFeeRevisionExists()
 }

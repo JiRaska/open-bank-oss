@@ -46,7 +46,7 @@ class DelayedNavEligibilityIT {
                 """{"name":"Delayed NAV test","isin":"$isin","lei":"315700ABCDEF12345678",
                     "depositaryReference":"TEST-DEP","custodyAccountReference":"TEST-CUST",
                     "currency":"CZK","riskClass":3,"mandatoryConservative":false,
-                    "managementFeeRate":0,"launchNavPerUnit":1}""",
+                    "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}""",
             ).post("/api/v1/funds").then().statusCode(201).extract().path("id")
         oldOrder = subscribe("old-day", 100)
         laterOrder = subscribe("later-day", 200)

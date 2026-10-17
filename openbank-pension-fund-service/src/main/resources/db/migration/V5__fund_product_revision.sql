@@ -1,0 +1,12 @@
+-- SPDX-License-Identifier: Apache-2.0
+-- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+--
+-- ADR-0341: a fund's management fee comes from the published catalog revision it is pinned to.
+-- Nullable on purpose: funds created before pinning keep their stored rate (grandfathered, read-only
+-- through the API) until a maker-checker grandfathering revision is created and they are re-pinned.
+-- New funds always carry a revision; management_fee_rate for them is the cached derivation of it.
+-- Purely additive: older binaries neither read nor write the column.
+--
+-- Rollback: ALTER TABLE funds DROP COLUMN product_revision_id;
+-- Dropping it loses which revision priced each fund; management_fee_rate stays correct as cached.
+ALTER TABLE funds ADD COLUMN product_revision_id UUID;
