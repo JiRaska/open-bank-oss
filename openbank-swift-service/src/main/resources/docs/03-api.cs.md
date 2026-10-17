@@ -65,6 +65,15 @@ jednotkou a `amountMinorUnits` se čte v minoritní jednotce **dané měny** —
 `swift.message.status-changed` i `amount` ve výpisu `/messages`; před #11604 všechny čtyři posouvaly
 každou měnu pevně o dvě místa.
 
+**Zaúčtování vypořádání a datum valuty.** Po potvrzení ACSC schématem se vypořádací debet MT103 zaúčtuje
+v transaction-service přes jeho generovaného, typovaného klienta. `valueDate` se zde drží a vystavuje
+v základním ISO tvaru MT103 (`YYYYMMDD`), zatímco transaction-service parsuje ISO-8601 (`YYYY-MM-DD`),
+proto adaptér hodnotu před odesláním převede; dříve odcházelo surové `YYYYMMDD` a zaúčtování nemohlo být
+přijato. Uložená hodnota, která už nejde parsovat, nic neodešle a zpráva zůstane `SENT`. Za zaúčtování se
+počítá jen HTTP 200/201/202; `409`, `400`/`422` a jakékoli jiné 2xx (včetně `204`) nechají zprávu
+ve stavu `SENT`; `5xx` nebo přerušené spojení se ohlásí jako nedostupnost a volající ho zopakuje.
+API kontrakt této služby (`valueDate` `^\d{8}$`) se nemění.
+
 | Vstup | Odpověď |
 |---|---|
 | `amountMinorUnits` není celé číslo (`150.5`) | `400` `AMOUNT_SCALE_EXCEEDED`, pole `amountMinorUnits` |
