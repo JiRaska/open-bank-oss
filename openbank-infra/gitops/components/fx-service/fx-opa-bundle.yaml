@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fx-service
     app.kubernetes.io/part-of: fx
   annotations:
-    openbank.tech/policy-checksum: "d5950b2a92dcb481"
+    openbank.tech/policy-checksum: "141d978820f25dc6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -773,13 +773,19 @@ data:
 
     # Synthetic journey fx-rates-read (ADR-0252, mirrors product-catalog-read #7324): the
     # journey's own Keycloak client `openbank-synthetic-fx-read` holds NO realm role. Its
-    # FxScopeIdentityAugmentor derives FX_SCOPE_READ from the `fx:read` client scope — the
-    # scope is the ONLY path to the role, so a token carrying FX_SCOPE_READ is by construction
-    # the journey's read-only identity. Rate sheet reads only; fx.convert / fx.trigger stay
-    # unreachable (absent from this rule and from the role's @RolesAllowed sites).
+    # FxScopeIdentityAugmentor derives FX_SCOPE_READ from the `fx:read` client scope.
+    #
+    # The role alone is NOT an identity: which clients may request `fx:read` is a Keycloak
+    # realm setting, outside this policy, so a role-only rule would admit any client later
+    # given the scope. The grant is therefore bound to the journey's own service account
+    # (machine_named binds id + client_id from verified JWT claims) and narrowed to the one
+    # action the journey calls: its CronJob issues only GET /api/v1/fx/rates (fx.list).
+    # fx.read / fx.convert / fx.trigger stay unreachable for it.
     allowed_reasons contains "synthetic-fx-read-journey" if {
+    	input.principal.type == "HUMAN"
+    	machine_named("service-account-openbank-synthetic-fx-read")
     	"FX_SCOPE_READ" in input.principal.roles
-    	input.action in {"fx.read", "fx.list"}
+    	input.action == "fx.list"
     }
 
     # Human FX-desk writes: operators, admins and the dedicated payments role may execute a
