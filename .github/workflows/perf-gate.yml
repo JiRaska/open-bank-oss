@@ -53,12 +53,12 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib, re
           # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
-          # Ledger, Interest, KYC, Transaction and SEPA Payment added as third through
-          # eleventh read-only subjects). Kept as a named constant so the summary can
-          # say what the run was SUPPOSED to measure, not only what it did. All
-          # subjects are non-mutating reads booted against disposable PostgreSQL.
-          # Keep money-path WRITES out of this GitHub-hosted lane until their isolated
-          # target and synthetic identities exist (perf/scenarios.yaml).
+          # Ledger, Interest, KYC, Transaction, SEPA Payment and Domestic Payment added
+          # as third through twelfth read-only subjects). Kept as a named constant so
+          # the summary can say what the run was SUPPOSED to measure, not only what it
+          # did. All subjects are non-mutating reads booted against disposable
+          # PostgreSQL. Keep money-path WRITES out of this GitHub-hosted lane until
+          # their isolated target and synthetic identities exist (perf/scenarios.yaml).
           DECLARED = [
               "openbank-product-catalog",
               "openbank-flaky-test-hunter",
@@ -71,6 +71,7 @@ jobs:
               "openbank-kyc-service",
               "openbank-transaction-service",
               "openbank-sepa-payment",
+              "openbank-domestic-payment",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -95,13 +96,39 @@ jobs:
               # /q/health/ready stayed 503 — the Redis check was DOWN with no broker). Boot a
               # throwaway redis alongside postgres so the readiness gate can ever go green.
               needs_redis = bool(re.search(r"^  redis:\n(?:.*\n)?\s*hosts:", raw, re.M))
-              # A declared `temporal:` block means a worker registers against Temporal at BOOT
-              # (measured on openbank-transaction-service: quarkusDev dies with gRPC
-              # UNAVAILABLE / connection refused on localhost:7233 with no server). The
-              # namespace is read from the service's own config, never a list kept here —
-              # the api-fuzz-authenticated derivation, same shape as the redis probe above.
-              temporal = re.search(r"^  temporal:\n(?:.*\n)?\s*namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M) \
-                  or re.search(r"^  temporal:\n(?:.*\n)?\s*namespace:\s*([^\s${]+)", raw, re.M)
+              # Temporal is needed only where a worker registers at boot BY DEFAULT, and the
+              # gate key is NOT uniform across the fleet — measured, per service:
+              #   transaction / sepa-payment  no enabled key → unconditional → dies without
+              #                               a server (gRPC UNAVAILABLE at boot, #13104)
+              #   domestic-payment            gate is openbank.domestic.worker.enabled
+              #                               (default TRUE) → dies without a server;
+              #                               its `temporal.enabled: false` key is UNREAD
+              #                               (measured this PR: boot fails without Temporal
+              #                               despite that key)
+              #   fx-service                  gate openbank.temporal.enabled defaults false
+              #                               → boots fine without (pilot subject)
+              #   flaky-test-hunter           gate TEMPORAL_ENABLED defaults false → same
+              # A grep for `enabled:` in the temporal block cannot decide this (domestic
+              # proves it), so NEED is a measured declaration; the NAMESPACE still comes
+              # from each service's own config — never a list kept here.
+              NEEDS_TEMPORAL = {
+                  "openbank-transaction-service",
+                  "openbank-sepa-payment",
+                  "openbank-domestic-payment",
+              }
+              temporal = None
+              if svc in NEEDS_TEMPORAL:
+                  # The gap between the block header and `namespace:` varies per service
+                  # (transaction: 1 line, domestic-payment: 2) — allow up to four indented
+                  # continuation lines, so a sibling `task-queue:` cannot satisfy the match.
+                  temporal = re.search(
+                      r"^  temporal:\n(?:[ \t]+.*\n){0,4}?[ \t]+namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M
+                  ) or re.search(
+                      r"^  temporal:\n(?:[ \t]+.*\n){0,4}?[ \t]+namespace:\s*([^\s${]+)", raw, re.M
+                  )
+                  if not temporal:
+                      skipped.append((svc, "NEEDS_TEMPORAL but no namespace derivable"))
+                      continue
               matrix.append({
                   "service": svc,
                   "port": int(port.group(1)),
@@ -174,9 +201,10 @@ jobs:
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
       NEEDS_REDIS: ${{ matrix.redis }}
-      # Set by the derive step when the service's application.yaml declares a `temporal:`
-      # block (namespace read from the service's own config). Empty for subjects without
-      # a Temporal worker — the boot skips the server entirely.
+      # Non-empty only for the derive step's NEEDS_TEMPORAL declaration (the three payment
+      # rails whose workers register at boot by default — see the derive step for the
+      # measured per-service gate keys). Namespace read from the service's own config;
+      # every other subject gets an empty value and the boot skips the server entirely.
       TEMPORAL_NS: ${{ matrix.temporal }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
@@ -237,9 +265,9 @@ jobs:
             docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
           fi
 
-          # Only services whose application.yaml declares a `temporal:` block get a dev
-          # server: their worker registers against Temporal at BOOT and quarkusDev dies
-          # with gRPC UNAVAILABLE without one (measured on openbank-transaction-service,
+          # Only the NEEDS_TEMPORAL subjects (the three payment rails — see the derive
+          # step) get a dev server: their workers register against Temporal at BOOT and
+          # quarkusDev dies with gRPC UNAVAILABLE without one (measured on all three:
           # connection refused on localhost:7233). temporalio/temporal:1.8.2
           # `server start-dev` is IN-MEMORY (no extra database) and creates the namespace
           # it is given — the api-fuzz-authenticated harness's image and readiness probe.
