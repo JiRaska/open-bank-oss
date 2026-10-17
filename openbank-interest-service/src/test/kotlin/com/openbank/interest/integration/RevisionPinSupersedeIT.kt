@@ -117,6 +117,42 @@ internal class RevisionPinSupersedeIT {
     }
 
     @Test
+    fun `account whose history is only operator-config is pinned at its first catalog accrual`() {
+        val legacy = UUID.randomUUID()
+        // History under an operator-managed config: seed one directly for this specification.
+        val operatorConfig = UUID.randomUUID()
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "INSERT INTO interest_rate_configs (id, product_id, currency, annual_rate, day_count, " +
+                    "effective_from, effective_to, active, created_at, updated_at) " +
+                    "VALUES (?, ?, 'EUR', 0.010000, 'ACT_365', " +
+                    "DATE '2027-04-01', DATE '2027-04-04', true, NOW(), NOW())",
+            ).use {
+                it.setObject(1, operatorConfig)
+                it.setString(2, specification.toString())
+                it.executeUpdate()
+            }
+            c.prepareStatement(
+                "INSERT INTO interest_accruals (id, account_id, product_id, config_id, accrual_date, balance, " +
+                    "daily_rate, accrued_amount, currency) VALUES (gen_random_uuid(), ?, ?, ?, DATE '2027-04-02', " +
+                    "1000, 0.0000273973, 0.027397, 'EUR')",
+            ).use {
+                it.setObject(1, legacy)
+                it.setString(2, specification.toString())
+                it.setObject(3, operatorConfig)
+                it.executeUpdate()
+            }
+        }
+        publish("0.020000000000000000", LocalDate.of(2027, 4, 5), "c-f")
+        val first = accrueOn(legacy, LocalDate.of(2027, 4, 20))
+        publish("0.030000000000000000", LocalDate.of(2027, 4, 25), "c-g")
+        val later = accrueOn(legacy, LocalDate.of(2027, 4, 30))
+
+        assertThat(later.configId).isEqualTo(first.configId)
+        assertThat(later.accruedAmount).isEqualByComparingTo("0.054795")
+    }
+
+    @Test
     fun `admin API refuses to deactivate a catalog-sourced rate row`() {
         publish("0.020000000000000000", LocalDate.of(2027, 3, 1), "c-c")
         val cached = onEventLoop { rates.listConfigs(specification.toString()) }.first()

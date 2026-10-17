@@ -83,7 +83,13 @@ class InterestCapitalizationMetrics @Inject constructor(private val registryInst
         reg()?.counter(REVISION_UNRESOLVED_COUNTER)?.increment()
     }
 
+    /** One accrual used a catalog-sourced effective rate for an account that has no pin (ADR-0341). */
+    fun catalogRateUnpinned() {
+        reg()?.counter(UNPINNED_COUNTER)?.increment()
+    }
+
     internal companion object {
+        const val UNPINNED_COUNTER = "openbank.interest.accrual.catalog.rate.unpinned"
         const val REVISION_UNRESOLVED_COUNTER = "openbank.interest.accrual.catalog.revision.unresolved"
         const val RECOVERED_COUNTER = "openbank.interest.capitalization.claims.recovered"
         const val FAILED_COUNTER = "openbank.interest.capitalization.claims.recovery.failed"

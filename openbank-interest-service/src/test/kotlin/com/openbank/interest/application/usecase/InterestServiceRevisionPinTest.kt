@@ -94,6 +94,7 @@ class InterestServiceRevisionPinTest {
         val saved = stubAccrual()
         every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
             Uni.createFrom().item(effective)
+        every { pins.hasPin(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
         every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returnsMany
             listOf(Uni.createFrom().nullItem(), Uni.createFrom().item(effective))
         every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(true)
@@ -134,6 +135,7 @@ class InterestServiceRevisionPinTest {
         every { accrualRepo.findByNaturalKey(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
         every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
             Uni.createFrom().item(effective)
+        every { pins.hasPin(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
         every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
         every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(true)
 
@@ -148,11 +150,28 @@ class InterestServiceRevisionPinTest {
         val saved = stubAccrual()
         every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
             Uni.createFrom().item(effective)
+        every { pins.hasPin(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
+        every { pins.isCatalogSourced(effective.id) } returns Uni.createFrom().item(false)
         every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
         every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(false)
 
         service.accrue(request).await().indefinitely()
 
         assertThat(saved.captured.configId).isEqualTo(effective.id)
+    }
+
+    @Test
+    fun `an existing pin whose snapshot is missing fails and never reaches the effective rate`() {
+        val effective = config("0.03")
+        every { accrualRepo.findByNaturalKey(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
+            Uni.createFrom().item(effective)
+        every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
+        every { pins.hasPin(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(true)
+
+        assertThatThrownBy { service.accrue(request).await().indefinitely() }
+            .isInstanceOf(CatalogRevisionUnresolvableException::class.java)
+        verify(exactly = 0) { pins.pinIfCatalogSourced(any(), any(), any(), any()) }
+        verify(exactly = 0) { accrualRepo.save(any()) }
     }
 }

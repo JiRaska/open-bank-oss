@@ -187,42 +187,59 @@ class InterestService(
                     Uni.createFrom().item(effective)
                 } else {
                     pins.findPinnedConfig(request.accountId, request.productId, request.currency).flatMap { pinned ->
-                        when {
-                            pinned != null -> Uni.createFrom().item<InterestRateConfig?>(pinned)
-                            effective == null -> Uni.createFrom().item<InterestRateConfig?>(null)
-                            else -> pins.pinIfCatalogSourced(
-                                request.accountId,
-                                request.productId,
-                                request.currency,
-                                effective,
-                            ).flatMap { wrote ->
-                                // First writer wins: re-read so a concurrent pin is honoured.
-                                pins.findPinnedConfig(request.accountId, request.productId, request.currency)
-                                    .flatMap { reread -> settle(request, effective, wrote, reread) }
-                            }
+                        if (pinned != null) {
+                            Uni.createFrom().item<InterestRateConfig?>(pinned)
+                        } else {
+                            // A pin ROW that does not resolve is a missing snapshot: it must fail here,
+                            // before the effective-rate fallback is reachable (ADR-0341).
+                            pins.hasPin(request.accountId, request.productId, request.currency)
+                                .flatMap { exists -> unpinned(request, effective, pins, exists) }
                         }
                     }
                 }
             }
     }
 
+    private fun unpinned(
+        request: AccrualRequest,
+        effective: InterestRateConfig?,
+        pins: RateRevisionPinRepository,
+        pinRowExists: Boolean,
+    ): Uni<InterestRateConfig?> = when {
+        pinRowExists -> Uni.createFrom().failure(unresolvable(request))
+        effective == null -> Uni.createFrom().item<InterestRateConfig?>(null)
+        else -> pins.pinIfCatalogSourced(request.accountId, request.productId, request.currency, effective)
+            .flatMap { wrote ->
+                // First writer wins: re-read so a concurrent pin is honoured.
+                pins.findPinnedConfig(request.accountId, request.productId, request.currency)
+                    .flatMap { reread -> settle(request, effective, wrote, reread, pins) }
+            }
+    }
+
+    private fun unresolvable(request: AccrualRequest) =
+        CatalogRevisionUnresolvableException(request.accountId, request.productId, request.currency)
+
     /**
-     * After a pin attempt. A resolvable pin wins. If this call just wrote a pin that cannot be resolved,
-     * the revision's snapshot is missing: fail visibly rather than fall back to "currently effective",
-     * which would silently reprice the contract. Nothing written means no catalog pin applies here
-     * (operator-managed rate, or pre-sync history), so the effective operator rate stands.
+     * After a pin attempt. A resolvable pin wins. A pin written by this call that does not resolve fails
+     * visibly. Nothing written and nothing pinned: an operator-managed rate stands; a catalog-sourced
+     * effective config with no pin is counted (it should not occur) and still answers.
      */
     private fun settle(
         request: AccrualRequest,
         effective: InterestRateConfig,
         wrote: Boolean,
         reread: InterestRateConfig?,
+        pins: RateRevisionPinRepository,
     ): Uni<InterestRateConfig?> = when {
         reread != null -> Uni.createFrom().item<InterestRateConfig?>(reread)
-        wrote -> Uni.createFrom().failure(
-            CatalogRevisionUnresolvableException(request.accountId, request.productId, request.currency),
-        )
-        else -> Uni.createFrom().item<InterestRateConfig?>(effective)
+        wrote -> Uni.createFrom().failure(unresolvable(request))
+        else -> pins.isCatalogSourced(effective.id).map { catalogSourced ->
+            if (catalogSourced) {
+                log.warnf("catalog-sourced rate %s used for unpinned account %s", effective.id, request.accountId)
+                capitalizationMetrics?.catalogRateUnpinned()
+            }
+            effective
+        }
     }
 
     /**
