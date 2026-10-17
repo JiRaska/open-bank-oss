@@ -6,14 +6,14 @@ package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
-import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.WebApplicationException
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -21,6 +21,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -178,39 +179,40 @@ class WithholdingRemittanceSettlementConsumer(
             currencyCode = node.path("currency").asText(),
             description = "Withholding tax remittance ${node.path("periodYear").asText()}-" +
                 "${node.path("periodMonth").asText()} / ${node.path("authority").asText()}",
-            valueDate = node.path("dueDate").asText(),
+            valueDate = LocalDate.parse(node.path("dueDate").asText()),
             rail = "DOMESTIC",
             instructionType = "ONE_OFF",
         )
 
     /** Books the debit and advances the batch to SETTLED; a 409 is an idempotent success (#999). */
     private suspend fun bookAndSettle(remittanceId: UUID, request: InitiateTransactionRequest) {
-        val response = transactionClient.initiateTransaction(request).awaitSuspending()
-        when {
-            response.statusInfo.family == Response.Status.Family.SUCCESSFUL -> {
-                remitUseCase.settle(remittanceId).awaitSuspending()
-                log.infof("[withholding-remittance] batch %s settled (HTTP %d)", remittanceId, response.status)
-            }
-            response.status == HTTP_CONFLICT -> {
+        val response = try {
+            transactionClient.initiateTransaction(request).awaitSuspending()
+        } catch (e: WebApplicationException) {
+            // The REST client throws on a non-2xx answer, so the rail's refusal arrives here as an
+            // exception rather than as a Response to inspect.
+            if (e.response.status == HTTP_CONFLICT) {
                 remitUseCase.settle(remittanceId).awaitSuspending()
                 log.infof(
                     "[withholding-remittance] batch %s already booked (409) — idempotent settle",
                     remittanceId,
                 )
+                return
             }
-            else -> {
-                // This branch used to log and RETURN, and its own message promised "the batch stays
-                // PENDING for retry (a redelivery of this event...)" — which could not happen,
-                // because returning normally ACKS the event. There is no redelivery and no re-drive
-                // endpoint, so a refused booking meant the tax was never paid and the only trace was
-                // an ERROR line nothing pages on. Throwing is what makes that sentence true: the
-                // retry above gets its attempts, and the connector then dead-letters (#5698).
-                throw WithholdingRemittanceBookingFailedException(
-                    "[withholding-remittance] batch $remittanceId FAILED to book (HTTP ${response.status}) — " +
-                        "a due tax remittance did not move money",
-                )
-            }
+            // This branch used to log and RETURN, and its own message promised "the batch stays
+            // PENDING for retry (a redelivery of this event...)" — which could not happen,
+            // because returning normally ACKS the event. There is no redelivery and no re-drive
+            // endpoint, so a refused booking meant the tax was never paid and the only trace was
+            // an ERROR line nothing pages on. Throwing is what makes that sentence true: the
+            // retry above gets its attempts, and the connector then dead-letters (#5698).
+            throw WithholdingRemittanceBookingFailedException(
+                "[withholding-remittance] batch $remittanceId FAILED to book (HTTP ${e.response.status}) — " +
+                    "a due tax remittance did not move money",
+                e,
+            )
         }
+        remitUseCase.settle(remittanceId).awaitSuspending()
+        log.infof("[withholding-remittance] batch %s settled (transaction %s)", remittanceId, response?.id)
     }
 
     /**
@@ -234,4 +236,5 @@ class WithholdingRemittanceSettlementConsumer(
  * not IllegalState/IllegalArgument: [EventRetry.RETRY_UNLESS_DETERMINISTIC] treats those two as
  * non-retryable, and a refused rail call is exactly the transient case worth another attempt.
  */
-class WithholdingRemittanceBookingFailedException(message: String) : RuntimeException(message)
+class WithholdingRemittanceBookingFailedException(message: String, cause: Throwable? = null) :
+    RuntimeException(message, cause)

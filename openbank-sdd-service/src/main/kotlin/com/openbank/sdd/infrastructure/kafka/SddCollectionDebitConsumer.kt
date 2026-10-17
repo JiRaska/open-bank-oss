@@ -5,16 +5,17 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.messaging.EventRetry
-import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
+import java.time.LocalDate
 
 /**
  * Books the debtor-side debit for an authorised SEPA Direct Debit collection (#1000).
@@ -69,30 +70,31 @@ class SddCollectionDebitConsumer(
             val request = debitRequestFrom(node, mandateId, umr)
 
             EventRetry.withRetry(log, "SDD collection debit", "$mandateId/$umr") {
-                val response = transactionClient.initiateTransaction(request).awaitSuspending()
-                when {
-                    response.statusInfo.family == Response.Status.Family.SUCCESSFUL -> {
-                        log.infof(
-                            "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d)",
-                            mandateId,
-                            umr,
-                            response.status,
-                        )
-                    }
-                    response.status == HTTP_CONFLICT -> {
+                try {
+                    val response = transactionClient.initiateTransaction(request).awaitSuspending()
+                    log.infof(
+                        "[sdd-collection-debit] mandate=%s umr=%s debited (transaction %s)",
+                        mandateId,
+                        umr,
+                        response?.id,
+                    )
+                } catch (e: WebApplicationException) {
+                    // The REST client throws on a non-2xx answer, so the rail's refusal arrives here
+                    // as an exception rather than as a Response to inspect.
+                    if (e.response.status == HTTP_CONFLICT) {
                         log.infof(
                             "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
                             mandateId,
                             umr,
                         )
-                    }
-                    else -> {
+                    } else {
                         // A non-2xx-non-409 is the rail refusing an AUTHORISED collection. Throwing
                         // rather than logging is the whole point: R-transaction/return generation is
                         // not built (#1000), so the only way this reaches a human is the DLQ.
                         throw SddDebitFailedException(
                             "[sdd-collection-debit] mandate=$mandateId umr=$umr FAILED to debit " +
-                                "(HTTP ${response.status}) — an authorised collection did not move money",
+                                "(HTTP ${e.response.status}) — an authorised collection did not move money",
+                            e,
                         )
                     }
                 }
@@ -129,7 +131,9 @@ class SddCollectionDebitConsumer(
             description = "SEPA Direct Debit ${node.path(
                 "creditorIdentifier",
             ).asText()} / $umr".take(MAX_DESCRIPTION),
-            valueDate = dueDate,
+            // A non-ISO date throws DateTimeParseException (not the poison-pill IllegalArgumentException):
+            // it surfaces for dead-lettering, as the 400 it used to earn from transaction-service did.
+            valueDate = LocalDate.parse(dueDate),
             rail = "SEPA_CT",
             instructionType = "DIRECT_DEBIT",
         )
@@ -143,4 +147,4 @@ class SddCollectionDebitConsumer(
 }
 
 /** The rail refused an authorised collection. Rethrown so the connector dead-letters it (#5698). */
-class SddDebitFailedException(message: String) : RuntimeException(message)
+class SddDebitFailedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)

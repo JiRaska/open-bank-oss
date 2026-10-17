@@ -5,15 +5,16 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.libs.messaging.EventRetry
-import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.WebApplicationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -54,7 +55,7 @@ class SddCollectionDebitConsumerTest {
     fun `books the debtor debit for a collection-authorised event and swallows a 2xx as success`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
 
         consumer.consume(collectionAuthorisedEvent())
 
@@ -70,7 +71,7 @@ class SddCollectionDebitConsumerTest {
     @Test
     fun `a 409 from transaction-service is treated as an idempotent success, no error logged`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(409).build())
+            Uni.createFrom().failure(WebApplicationException(409))
 
         // Must not throw — the poison-pill boundary swallows nothing here because 409 is a
         // recognized, non-exceptional outcome.
@@ -87,7 +88,7 @@ class SddCollectionDebitConsumerTest {
         // that did. R-transaction/return generation is not built (#1000), so the DLQ is the only
         // path by which a human learns the money did not move.
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(500).build())
+            Uni.createFrom().failure(WebApplicationException(500))
 
         assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }
             .isInstanceOf(SddDebitFailedException::class.java)
@@ -115,7 +116,7 @@ class SddCollectionDebitConsumerTest {
     fun `amount scale is normalised to the currency's fraction digits`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
 
         consumer.consume(collectionAuthorisedEvent(amount = "2200.000000"))
 
@@ -127,7 +128,7 @@ class SddCollectionDebitConsumerTest {
     fun `a tie in the dropped digits rounds half-up, never half-even`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
 
         consumer.consume(collectionAuthorisedEvent(amount = "10.125"))
 

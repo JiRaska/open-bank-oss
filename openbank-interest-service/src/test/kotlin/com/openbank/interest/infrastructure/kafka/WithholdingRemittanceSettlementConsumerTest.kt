@@ -5,8 +5,9 @@
 package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
-import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -15,7 +16,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.WebApplicationException
 import kotlinx.coroutines.runBlocking
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.assertj.core.api.Assertions.assertThat
@@ -76,7 +77,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     fun `books the remittance debit and settles the batch on a 2xx`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
         consumer.consume(record())
@@ -96,7 +97,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     fun `a numeric totalTaxAmount encoding is accepted too`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
         consumer.consume(record(payload = remittedPayload(totalTaxAmount = "1234.00")))
@@ -108,7 +109,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     @Test
     fun `a 409 from transaction-service still settles the batch (idempotent success)`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(409).build())
+            Uni.createFrom().failure(WebApplicationException(409))
         every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
         consumer.consume(record())
@@ -126,7 +127,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     @Test
     fun `a non-2xx-non-409 response is retried and rethrown, never settled or acked`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(500).build())
+            Uni.createFrom().failure(WebApplicationException(500))
 
         assertThatThrownBy { runBlocking { consumer.consume(record()) } }
             .isInstanceOf(WithholdingRemittanceBookingFailedException::class.java)
