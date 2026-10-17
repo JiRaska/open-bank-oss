@@ -20,7 +20,8 @@ import org.eclipse.microprofile.reactive.messaging.Message
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors
  * notification-service's `NotificationRequest` (partyId, channel, template, recipient, variables,
- * correlationId, interactionRef); the template name resolves against the notification-service catalogue there, so an
+ * correlationId, deduplicationKey, interactionRef); the template name resolves against the notification-service
+ * catalogue there, so an
  * unknown template fails closed at the choke point, not here.
  *
  * The payload is hand-built as a map rather than shared as a type — the two services do not share a
@@ -48,6 +49,9 @@ class KafkaNotificationSendAdapter(
             // `openbank.notification.outcomes.v1`, which is the only way this service can learn
             // that a send it recorded as SENT was in fact suppressed or never delivered (#3663).
             "correlationId" to request.correlationId.toString(),
+            // The send-log row is one logical handoff. Kafka replay must resolve against that
+            // durable fact rather than minting another notification (ADR-0333 D1/D4).
+            "deduplicationKey" to request.deduplicationKey.toString(),
         )
         // This is transport metadata, never a template variable. The notification renderer's
         // closed variable schema therefore cannot accidentally interpolate a navigation route.
