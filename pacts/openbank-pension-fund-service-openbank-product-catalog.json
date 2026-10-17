@@ -15,6 +15,55 @@
       "response": {
         "status": 404
       }
+    },
+    {
+      "description": "GET the published pension-savings revision a fund pins",
+      "providerStates": [
+        {
+          "name": "a published pension-savings revision with a 0.80 percent management fee exists"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/revisions/30000000-0000-0000-0000-000000000341"
+      },
+      "response": {
+        "body": {
+          "content": {
+            "attributes": {
+              "feeSchedule": {
+                "managementFeeAnnualPercent": "0.80",
+                "performanceFeePercent": "0"
+              }
+            }
+          },
+          "id": "30000000-0000-0000-0000-000000000341",
+          "schemaRef": {
+            "id": "org.openbank.retirement.pension-savings",
+            "version": 2
+          },
+          "state": "PUBLISHED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.schemaRef.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {
