@@ -48,4 +48,8 @@ class CloseParticipationEntity : PanacheEntityBase {
 
     @Column(name = "late", nullable = false)
     var late: Boolean = false
+
+    /** Database-assigned insertion order; never written by the application. */
+    @Column(name = "seq", insertable = false, updatable = false)
+    var seq: Long = 0
 }

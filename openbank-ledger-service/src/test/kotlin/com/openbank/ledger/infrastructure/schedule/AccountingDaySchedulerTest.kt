@@ -14,6 +14,7 @@ import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseCompleteness
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
 import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
@@ -79,6 +80,10 @@ class AccountingDaySchedulerTest {
         tieOutScheduler = tieOutRunner
         closeParticipation = participation
         closeParticipantsConfig = participantsConfig
+    }
+
+    init {
+        every { participation.declaredParticipants() } returns setOf("interest")
     }
 
     private fun noOpDomainMetrics(): DomainMetrics {
@@ -262,6 +267,66 @@ class AccountingDaySchedulerTest {
             ).count(),
         ).isEqualTo(1.0)
     }
+
+    @Test
+    fun `ENFORCE hands the declared participants to the transition so completeness is re-judged in its transaction`():
+        Unit =
+        runBlocking {
+            participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+            val yesterday = yesterdayEligibleForTieOut()
+            coEvery { participation.completeness(yesterday) } returns
+                CloseCompleteness(yesterday, setOf("interest"), emptyMap()).let { empty ->
+                    empty.copy(
+                        reported = mapOf(
+                            "interest" to CloseParticipationRecord(
+                                yesterday, "interest", ParticipationOutcome.RAN, 0, 1, null,
+                                "service-account-openbank-interest", Instant.parse("2026-08-07T01:30:00Z"), false,
+                            ),
+                        ),
+                    )
+                }
+
+            scheduler.reconcile()
+
+            coVerify(exactly = 1) {
+                useCase.transition(
+                    match {
+                        it.businessDate == yesterday && it.requiredParticipants == setOf("interest")
+                    },
+                )
+            }
+        }
+
+    @Test
+    fun `a REFUSED report landing between the check and the transition holds the day and is counted`(): Unit =
+        runBlocking {
+            participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+            val yesterday = yesterdayEligibleForTieOut()
+            coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+                yesterday,
+                setOf("interest"),
+                mapOf(
+                    "interest" to CloseParticipationRecord(
+                        yesterday, "interest", ParticipationOutcome.RAN, 0, 1, null,
+                        "service-account-openbank-interest", Instant.parse("2026-08-07T01:30:00Z"), false,
+                    ),
+                ),
+            )
+            // The repository's in-transaction re-read found the REFUSED row that overtook the check.
+            coEvery { useCase.transition(any()) } throws CloseParticipantsPendingException(setOf("interest"))
+
+            scheduler.reconcile()
+
+            assertThat(
+                scheduler.meterRegistry.counter(
+                    AccountingDayScheduler.PARTICIPANTS_DECISIONS,
+                    "outcome",
+                    "held",
+                    "mode",
+                    "enforce",
+                ).count(),
+            ).isEqualTo(1.0)
+        }
 
     @Test
     fun `CUTOFF day stays put on a BREAK verdict and on a pre-cutoff OK`(): Unit = runBlocking {

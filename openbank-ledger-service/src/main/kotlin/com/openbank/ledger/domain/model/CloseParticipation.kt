@@ -61,6 +61,29 @@ data class CloseParticipationRecord(
 }
 
 /**
+ * Seals a record at the moment it is appended, from state read UNDER the append lock: the day's
+ * status then (so `late` cannot describe a day that has since moved) and the instant then (so a
+ * later row never carries an older `reportedAt` than the row it follows). Refuses an instant that
+ * would run backwards past the participant's latest row - clock skew between pods must not reorder
+ * decisions - rather than silently storing an out-of-order row.
+ */
+fun CloseParticipationRecord.sealedAt(
+    now: Instant,
+    dayStatus: AccountingDayStatus?,
+    latest: CloseParticipationRecord?,
+): CloseParticipationRecord {
+    checkConflict(latest == null || !now.isBefore(latest.reportedAt)) {
+        "Refusing to append $outcome for $participant on $businessDate at $now: the participant's latest " +
+            "row is at ${latest?.reportedAt}. A report must not be ordered before one already recorded; " +
+            "retry."
+    }
+    return copy(
+        reportedAt = now,
+        late = dayStatus == AccountingDayStatus.TIED_OUT || dayStatus == AccountingDayStatus.LOCKED,
+    )
+}
+
+/**
  * The completeness verdict for one day over the declared participants (ADR-0342 D3). A participant
  * with no record is [missing]. A participant whose latest record is `REFUSED` is [refused]: the
  * ledger turned its postings away, so the work (e.g. interest capitalization) was NOT done, and the
@@ -87,14 +110,14 @@ data class CloseCompleteness(
         fun of(
             businessDate: LocalDate,
             expected: Set<String>,
-            records: Collection<CloseParticipationRecord>,
+            records: List<CloseParticipationRecord>,
         ): CloseCompleteness = CloseCompleteness(
             businessDate = businessDate,
             expected = expected,
             reported = records
                 .filter { it.businessDate == businessDate }
                 .groupBy { it.participant }
-                .mapValues { (_, rows) -> rows.maxBy { it.reportedAt } },
+                .mapValues { (_, rows) -> rows.last() }, // [records] is oldest first (insertion order): the last wins
         )
     }
 }

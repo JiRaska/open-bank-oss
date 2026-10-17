@@ -16,6 +16,7 @@ import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.ledger.domain.model.ParticipationOutcome
+import com.openbank.ledger.domain.model.sealedAt
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -48,7 +49,6 @@ class CloseParticipationServiceTest {
     private val service = CloseParticipationService(
         config,
         repository,
-        days,
         SimpleMeterRegistry(),
         Clock.fixed(Instant.parse("2026-10-17T01:30:00Z"), ZoneOffset.UTC),
     )
@@ -63,9 +63,14 @@ class CloseParticipationServiceTest {
             val guard = secondArg<AppendGuard>()
             val latest = repository.findForDate(record.businessDate)
                 .filter { it.participant == record.participant }
-                .maxByOrNull { it.reportedAt }
-            when (val verdict = guard.check(latest, days.findByDate(record.businessDate)?.status)) {
-                AppendVerdict.Append -> record
+                .lastOrNull() // findForDate is oldest first: the last row is the latest
+            val dayStatus = days.findByDate(record.businessDate)?.status
+            when (val verdict = guard.check(latest, dayStatus)) {
+                AppendVerdict.Append -> {
+                    // The real repository stamps the clock after the lock; fixtures here carry future instants.
+                    val now = maxOf(Instant.parse("2026-10-17T01:30:00Z"), latest?.reportedAt ?: Instant.MIN)
+                    record.sealedAt(now, dayStatus, latest)
+                }
                 AppendVerdict.KeepExisting -> latest!!
                 is AppendVerdict.Reject -> throw verdict.error
             }
@@ -235,6 +240,39 @@ class CloseParticipationServiceTest {
             row(ParticipationOutcome.REFUSED, "2026-10-17T02:00:00Z"),
         )
         assertThat(service.waive(waive()).outcome).isEqualTo(ParticipationOutcome.WAIVED)
+    }
+
+    @Test
+    fun `lateness and the stored instant are sealed from the state at append time, not from before the lock`() {
+        val tiedOut = AccountingDayStatus.TIED_OUT
+        val first = row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z")
+        val draft = row(ParticipationOutcome.RAN, "2026-10-17T00:00:00Z").copy(late = false)
+
+        // The day was CUTOFF when the report was built and TIED_OUT when the lock was acquired.
+        val sealed = draft.sealedAt(Instant.parse("2026-10-17T02:00:00Z"), tiedOut, first)
+        assertThat(sealed.late).describedAs("late follows the status read under the lock").isTrue()
+        assertThat(sealed.reportedAt).describedAs("the instant is taken after the lock").isEqualTo(
+            Instant.parse("2026-10-17T02:00:00Z"),
+        )
+        assertThat(draft.sealedAt(Instant.parse("2026-10-17T02:00:00Z"), AccountingDayStatus.CUTOFF, first).late)
+            .isFalse()
+        // The same instant as the latest row is fine (insertion order breaks the tie); an older one is not.
+        assertThat(draft.sealedAt(first.reportedAt, AccountingDayStatus.CUTOFF, first).reportedAt)
+            .isEqualTo(first.reportedAt)
+        assertThatThrownBy { draft.sealedAt(Instant.parse("2026-10-17T00:59:59Z"), AccountingDayStatus.CUTOFF, first) }
+            .isInstanceOf(LedgerConflictException::class.java)
+    }
+
+    @Test
+    fun `the latest row is the last in insertion order even when instants tie`(): Unit = runBlocking {
+        val waived = row(ParticipationOutcome.WAIVED, "2026-10-17T01:00:00Z")
+        val refused = row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z")
+        coEvery { repository.findForDate(day) } returns listOf(refused, waived)
+        assertThat(service.completeness(day).let { it.reported.getValue("interest").outcome })
+            .isEqualTo(ParticipationOutcome.WAIVED)
+        coEvery { repository.findForDate(day) } returns listOf(waived, refused)
+        assertThat(service.completeness(day).let { it.reported.getValue("interest").outcome })
+            .isEqualTo(ParticipationOutcome.REFUSED)
     }
 
     @Test

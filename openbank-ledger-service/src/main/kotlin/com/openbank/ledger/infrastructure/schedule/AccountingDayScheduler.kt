@@ -13,6 +13,7 @@ import com.openbank.ledger.application.port.out.TieOutRunRepository
 import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
@@ -249,6 +250,13 @@ class AccountingDayScheduler(
                             businessDate = day.businessDate,
                             to = AccountingDayStatus.TIED_OUT,
                             transitionedBy = SYSTEM_ACTOR,
+                            // Re-judged inside the transition's transaction (enforce only): the check
+                            // above is advisory and can be overtaken by a REFUSED report.
+                            requiredParticipants = closeParticipation.declaredParticipants()
+                                .takeIf {
+                                    closeParticipantsConfig.participantsMode() ==
+                                        CloseParticipantsConfig.MODE_ENFORCE
+                                },
                         ),
                     )
                     log.infof(
@@ -352,6 +360,13 @@ class AccountingDayScheduler(
     private suspend fun runStep(step: String, date: LocalDate, block: suspend () -> Unit) {
         try {
             block()
+        } catch (held: CloseParticipantsPendingException) {
+            meterRegistry.counter(PARTICIPANTS_DECISIONS, "outcome", "held", "mode", "enforce").increment()
+            log.warnf(
+                "Accounting day %s: a participant report landed during the tie-out - %s; day stays in CUTOFF",
+                date,
+                held.message,
+            )
         } catch (ex: Exception) {
             log.errorf(ex, "Accounting-day reconcile step '%s' failed for %s: %s", step, date, ex.message)
         }

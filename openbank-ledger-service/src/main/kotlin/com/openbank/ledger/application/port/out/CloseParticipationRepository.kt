@@ -39,10 +39,16 @@ interface CloseParticipationRepository {
      * and against the day's own transitions (a check-then-append across two transactions lets a
      * concurrent report or a CUTOFF -> TIED_OUT slip between them). Returns the saved row, or the
      * existing latest row on [AppendVerdict.KeepExisting]; throws the rejection's error otherwise.
+     *
+     * The stored row's `reportedAt` and `late` are set HERE, after the locks are held, from the
+     * database transaction's own view of the day (see
+     * [com.openbank.ledger.domain.model.sealedAt]); the values on [record] are placeholders. A day
+     * can move to TIED_OUT between the caller's read and the insert, so anything derived from the
+     * day's status before the lock describes a world that no longer exists.
      * History is never rewritten; the latest row per participant wins on read.
      */
     suspend fun appendGuarded(record: CloseParticipationRecord, guard: AppendGuard): CloseParticipationRecord
 
-    /** Every report for [businessDate], oldest first. */
+    /** Every report for [businessDate], oldest first - in insertion order, not by timestamp. */
     suspend fun findForDate(businessDate: LocalDate): List<CloseParticipationRecord>
 }

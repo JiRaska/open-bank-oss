@@ -26,11 +26,15 @@ CREATE TABLE ledger_close_participation (
     reported_by      VARCHAR(255) NOT NULL,
     reported_at      TIMESTAMPTZ  NOT NULL,
     late             BOOLEAN      NOT NULL DEFAULT FALSE,
+    -- Insertion order, the ONLY definition of "latest": two reports can carry the same instant, and a
+    -- clock is not an ordering. Rows are appended under a per-day advisory lock, so seq order is the
+    -- true order of decisions.
+    seq              BIGINT       GENERATED ALWAYS AS IDENTITY,
     CONSTRAINT chk_close_participation_reason CHECK (outcome = 'RAN' OR reason IS NOT NULL)
 );
 
 CREATE INDEX idx_close_participation_day
-    ON ledger_close_participation (business_date, participant, reported_at DESC);
+    ON ledger_close_participation (business_date, participant, seq DESC);
 
 -- Rollback:
 --   DROP INDEX IF EXISTS idx_close_participation_day;

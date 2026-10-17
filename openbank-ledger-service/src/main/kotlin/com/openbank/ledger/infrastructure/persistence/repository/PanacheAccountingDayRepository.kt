@@ -7,11 +7,13 @@ package com.openbank.ledger.infrastructure.persistence.repository
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
 import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.ledger.infrastructure.persistence.entity.AccountingDayEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -69,27 +71,58 @@ class PanacheAccountingDayRepository(
         record: AccountingDayRecord,
         expectedVersion: Long,
         outbox: OutboxMessage,
+        requiredParticipants: Set<String>?,
     ): AccountingDayRecord = Panache.withTransaction {
-        update(
-            "status = ?1, cutoffAt = ?2, tiedOutAt = ?3, lockedAt = ?4, lastTransitionBy = ?5, " +
-                "version = ?6, updatedAt = ?7 where id = ?8 and version = ?9",
-            record.status.name,
-            record.cutoffAt,
-            record.tiedOutAt,
-            record.lockedAt,
-            record.lastTransitionBy,
-            record.version,
-            Instant.now(clock),
-            record.id,
-            expectedVersion,
-        ).flatMap { updated ->
-            checkConflict(updated == 1) {
-                "Accounting day ${record.businessDate} changed concurrently (expected version " +
-                    "$expectedVersion) — retry against the current state"
+        requireParticipantsComplete(record, requiredParticipants).flatMap {
+            update(
+                "status = ?1, cutoffAt = ?2, tiedOutAt = ?3, lockedAt = ?4, lastTransitionBy = ?5, " +
+                    "version = ?6, updatedAt = ?7 where id = ?8 and version = ?9",
+                record.status.name,
+                record.cutoffAt,
+                record.tiedOutAt,
+                record.lockedAt,
+                record.lastTransitionBy,
+                record.version,
+                Instant.now(clock),
+                record.id,
+                expectedVersion,
+            ).flatMap { updated ->
+                checkConflict(updated == 1) {
+                    "Accounting day ${record.businessDate} changed concurrently (expected version " +
+                        "$expectedVersion) — retry against the current state"
+                }
+                outboxRepository.persistInTransaction(outbox).replaceWith(record)
             }
-            outboxRepository.persistInTransaction(outbox).replaceWith(record)
         }
     }.awaitSuspending()
+
+    /**
+     * Re-judges day-close completeness inside the transition's transaction. Takes the same per-day
+     * advisory lock as reports and waivers, so a REFUSED report either committed before this read
+     * (and holds the day) or waits until this transaction ends (and lands on a day that already
+     * tied out, as `late`). Latest = highest `seq`, never a timestamp.
+     */
+    private fun requireParticipantsComplete(record: AccountingDayRecord, required: Set<String>?): Uni<Unit> {
+        if (required == null) return Uni.createFrom().item(Unit)
+        return Panache.getSession().flatMap { session ->
+            CloseParticipationLocks.lockDay(session, record.businessDate).flatMap {
+                session.createNativeQuery<Array<Any>>(LATEST_OUTCOMES_SQL)
+                    .setParameter("d", record.businessDate)
+                    .resultList
+            }
+        }.map { rows ->
+            val latest = rows.associate { it[0].toString() to it[1].toString() }
+            val pending = required.filterTo(linkedSetOf()) { latest[it] == null || latest[it] == REFUSED }
+            if (pending.isNotEmpty()) throw CloseParticipantsPendingException(pending)
+        }
+    }
+
+    private companion object {
+        const val REFUSED = "REFUSED"
+        const val LATEST_OUTCOMES_SQL =
+            "SELECT DISTINCT ON (participant) participant, outcome FROM ledger_close_participation " +
+                "WHERE business_date = :d ORDER BY participant, seq DESC"
+    }
 
     private fun AccountingDayRecord.toEntity() = AccountingDayEntity().also {
         it.id = id

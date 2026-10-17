@@ -10,17 +10,19 @@ import com.openbank.ledger.application.port.out.CloseParticipationRepository
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
+import com.openbank.ledger.domain.model.sealedAt
 import com.openbank.ledger.infrastructure.persistence.entity.CloseParticipationEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
-class PanacheCloseParticipationRepository :
+class PanacheCloseParticipationRepository(private val clock: Clock) :
     CloseParticipationRepository,
     PanacheRepositoryBase<CloseParticipationEntity, UUID> {
 
@@ -35,9 +37,7 @@ class PanacheCloseParticipationRepository :
     override suspend fun appendGuarded(record: CloseParticipationRecord, guard: AppendGuard): CloseParticipationRecord =
         Panache.withTransaction {
             Panache.getSession().flatMap { session ->
-                session.createNativeQuery<Any>(LOCK_SQL)
-                    .setParameter("k", "close-participation:${record.businessDate}:${record.participant}")
-                    .singleResult
+                CloseParticipationLocks.lockDay(session, record.businessDate)
                     .flatMap {
                         session.createNativeQuery<Any>(DAY_STATUS_SQL)
                             .setParameter("d", record.businessDate)
@@ -46,13 +46,15 @@ class PanacheCloseParticipationRepository :
                     .flatMap { statusRows ->
                         val dayStatus = statusRows.firstOrNull()?.let { AccountingDayStatus.valueOf(it.toString()) }
                         find(
-                            "businessDate = ?1 and participant = ?2 order by reportedAt desc",
+                            "businessDate = ?1 and participant = ?2 order by seq desc",
                             record.businessDate,
                             record.participant,
                         ).firstResult().flatMap { latestEntity ->
                             val latest = latestEntity?.toDomain()
                             when (val verdict = guard.check(latest, dayStatus)) {
-                                AppendVerdict.Append -> persist(record.toEntity()).map { it.toDomain() }
+                                AppendVerdict.Append -> persist(
+                                    record.sealedAt(clock.instant(), dayStatus, latest).toEntity(),
+                                ).map { it.toDomain() }
                                 AppendVerdict.KeepExisting ->
                                     Uni.createFrom().item(checkNotNull(latest) { "KeepExisting needs a latest row" })
                                 is AppendVerdict.Reject -> Uni.createFrom().failure(verdict.error)
@@ -63,7 +65,7 @@ class PanacheCloseParticipationRepository :
         }.awaitSuspending()
 
     override suspend fun findForDate(businessDate: LocalDate): List<CloseParticipationRecord> = Panache.withSession {
-        find("businessDate = ?1 order by reportedAt asc", businessDate).list()
+        find("businessDate = ?1 order by seq asc", businessDate).list()
     }.awaitSuspending().map { it.toDomain() }
 
     private fun CloseParticipationRecord.toEntity() = CloseParticipationEntity().also {
@@ -91,8 +93,6 @@ class PanacheCloseParticipationRepository :
     )
 
     private companion object {
-        /** Void-returning advisory lock wrapped so the driver gets a plain integer column back. */
-        const val LOCK_SQL = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(:k))) AS l"
         const val DAY_STATUS_SQL = "SELECT status FROM ledger_accounting_day WHERE business_date = :d FOR SHARE"
     }
 }

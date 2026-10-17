@@ -7,7 +7,6 @@ package com.openbank.ledger.application.usecase
 import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.ReportParticipationCommand
 import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
-import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.AppendGuard
 import com.openbank.ledger.application.port.out.AppendVerdict
 import com.openbank.ledger.application.port.out.CloseParticipationRepository
@@ -98,7 +97,6 @@ class CloseParticipantsModeValidator(private val config: CloseParticipantsConfig
 class CloseParticipationService(
     private val config: CloseParticipantsConfig,
     private val repository: CloseParticipationRepository,
-    private val accountingDayRepository: AccountingDayRepository,
     private val meterRegistry: MeterRegistry,
     private val clock: Clock,
 ) : CloseParticipationUseCase {
@@ -192,7 +190,6 @@ class CloseParticipationService(
         by: String,
         guard: AppendGuard,
     ): CloseParticipationRecord {
-        val dayStatus = accountingDayRepository.findByDate(businessDate)?.status
         val record = CloseParticipationRecord(
             businessDate = businessDate,
             participant = participant,
@@ -201,8 +198,9 @@ class CloseParticipationService(
             itemsProcessed = itemsProcessed,
             reason = reason?.trim()?.takeIf { it.isNotEmpty() },
             reportedBy = by,
+            // Placeholders: the repository seals the real instant and `late` under its lock.
             reportedAt = clock.instant(),
-            late = dayStatus == AccountingDayStatus.TIED_OUT || dayStatus == AccountingDayStatus.LOCKED,
+            late = false,
         )
         val saved = repository.appendGuarded(record, guard)
         // An existing WAIVED row was kept: nothing new was stored, so nothing is counted.
