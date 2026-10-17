@@ -9,7 +9,7 @@
 # file (see scripts-selftest.yml / rules.yaml: deploy_reconcile).
 #
 # The probe's notion of "same artifact" is pact-version-tree-equivalent.sh, which has its own
-# 17-case self-test. This suite asserts the probe WIRES it in, with the case that motivated it
+# self-test. This suite asserts the probe WIRES it in, with the case that motivated it
 # (#11597) as a known-positive and the cases it must not over-fire on as known-negatives.
 set -euo pipefail
 
@@ -19,6 +19,10 @@ PROBE="${SCRIPT_DIR}/auto-deploy-reconcile-lag.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
+
+# run-gates.py gives each gate a private copy of the checkout index via GIT_INDEX_FILE.
+# These commits belong to this throwaway repo; do not let them mutate that shared gate index.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
 
 git init -q
 git config user.email test@example.com
@@ -40,12 +44,15 @@ for s in current-svc stale-svc placeholder-svc testonly-svc release-svc lib-svc 
   printf 'implementation(project(":openbank-libs-domain"))\n' > "openbank-${s}/build.gradle.kts"
 done
 mkdir -p openbank-libs-domain/src/main/kotlin openbank-py-svc docs build-logic
+mkdir -p .github/workflows
 echo "v1" > openbank-libs-domain/src/main/kotlin/Lib.kt
 echo "x" > openbank-libs-domain/build.gradle.kts
 echo "x" > build-logic/build.gradle.kts
 echo "x" > settings.gradle.kts
 echo "v1" > openbank-py-svc/app.py
 echo "v1" > docs/README.md
+printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' \
+  > .github/workflows/auto-deploy.yml
 commit "c0: seed services"
 C0="$(short HEAD)"
 

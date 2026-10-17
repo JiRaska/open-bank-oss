@@ -1803,10 +1803,11 @@ gates:
     run: |
       bash .github/scripts/check-deploy-coverage.sh
 
-  # Reconcile probe unit test (rules.yaml: deploy_reconcile, issue #2020). Guards the
+  # Reconcile probe + source-provenance unit tests (rules.yaml: deploy_reconcile, issue #13070).
+  # Guards the
   # self-heal detection that re-drives a service stranded when the one-shot per-push
   # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
-  # jq against a throwaway fixture repo — no Gradle, no network.
+  # jq/Python fixtures against throwaway data — no Gradle or network.
   - id: auto-deploy-reconcile-probe-unit-test
     selftest_exempt: "is-a-test-suite"
     name: "auto-deploy reconcile probe unit test"
@@ -1814,6 +1815,10 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+      bash .github/scripts/test-can-i-deploy-reconcile-source.sh
+      python3 .github/scripts/test-verify-successful-service-ci.py
+      python3 .github/scripts/test-verify-reconcile-image-map.py
+      python3 .github/scripts/test-rewrite-reconcile-image-pins.py
 
   # Deployed-code-lag report unit test. Guards the
   # hours-scale "code on main is not running in sandbox" report that feeds the

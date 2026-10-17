@@ -142,6 +142,8 @@ selftest() {
     printf 'libs P\n' > openbank-libs-domain/src/main/Domain.kt
     printf 'pact P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
     printf 'workflow P\n' > .github/workflows/provider.yml
+    printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' \
+      > .github/workflows/auto-deploy.yml
     printf 'config P\n' > config/detekt.yml
     printf 'plugins {}\n' > openbank-ledger-service/build.gradle.kts
     git add openbank-ledger-service openbank-balance-service openbank-libs-domain pacts .github config
@@ -235,7 +237,7 @@ selftest() {
     git config user.email selftest@example.invalid
     git config user.name selftest
     git config commit.gpgsign false
-    mkdir -p "$D/src/main" "$D/src/test" openbank-libs-domain/src/main build-logic docs
+    mkdir -p "$D/src/main" "$D/src/test" openbank-libs-domain/src/main build-logic docs .github/workflows
     printf 'implementation(project(":openbank-libs-domain"))\n' > "$D/build.gradle.kts"
     printf 'runtime P\n' > "$D/src/main/A.kt"
     printf 'old\n' > "$D/src/test/Old.kt"
@@ -246,6 +248,8 @@ selftest() {
     printf 'x\n' > build-logic/build.gradle.kts
     printf 'x\n' > settings.gradle.kts
     printf 'x\n' > docs/a.md
+    printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' \
+      > .github/workflows/auto-deploy.yml
     git add -A && git commit -qm P
   ) || { echo 'selftest FAIL: generic fixture setup failed' >&2; return 1; }
   gp="$(git -C "$g" rev-parse HEAD)"
