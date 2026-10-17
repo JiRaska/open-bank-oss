@@ -200,6 +200,21 @@ pre-contractual documents are not yet attached to offers (docs/compliance/pensio
 legal review pending). Withholding tax already remitted on a premium returned to the contract is
 not reversed automatically.
 
+## 4f. Trust boundary — tax-reporting-service → pension-service (participant aggregates)
+
+tax-reporting-service reads the participant-aggregates endpoint (added by #12465) to assemble the ČNB
+pension returns (#12425, #12468). The edge is a real cross-namespace boundary: NetworkPolicy in
+`pension` admits the `tax-reporting` namespace (derived from tax-reporting's
+`PENSION_SERVICE_URL`). The call goes to the private-CA TLS listener (8443, cert-manager
+`pension-service-internal-tls`, TLSv1.3) added for it; the caller trusts only the fleet CA and
+verifies the hostname. Plain 8171 stays open for the existing callers until their cutover.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| S | Another workload in `tax-reporting`, or any service reusing the shared client, reads the aggregates | The grant that ships with the aggregates endpoint (#12465) keys on principal id service-account-openbank-tax-reporting + ROLE_API; its action is a dedicated aggregate verb, deliberately not a read verb, so `operator-read-any` does not grant it to the shared ROLE_OPERATOR account |
+| T / I | Bearer token or figures read or altered in-cluster | TLS 1.3 to 8443, server cert for `pension-service.pension.svc` from `openbank-ca`, hostname verification on at the caller; the `peer-url-tls` gate fails any new plaintext URL to a TLS-capable provider. The configured TLS listener requires a trusted client certificate; API access independently requires the OIDC bearer identity. Live certificate issuance and listener readiness still require deployment verification |
+| I | Participant-level data leaks to the tax side | The surface returns counts and sums only — no contract ids, party ids or balances per participant |
+| E | The caller widens to writes | No write action is granted to this principal; every other rule excludes `service-account-*` |
 ## 4e. Reporting read model (#12425)
 
 `GET /api/v2/pension/reporting/participant-aggregates` serves the participant aggregates
@@ -232,6 +247,7 @@ history table.
 ## 6. Change log
 
 - 2026-10-10 — §3: pension reads renamed `*.read` → `*.inspect` so the shared M2M account no longer reaches them through base `operator-read-any`/`compliance-read-any` (#12371).
+- 2026-10-10 — §4f: tax-reporting → pension trust boundary (ČNB returns read edge over a new private-CA TLS listener on 8443, NetworkPolicy ingress from `tax-reporting`).
 - 2026-10-10 — §4a: pension → pension-fund trust boundary (fund-administration port, #12355).
 - 2026-10-09 — initial model with the S1 bootstrap (ADR-0334, #12350).
 - 2026-10-09 — S5 exits: termination, payout, death claims (§4b).
@@ -301,11 +317,11 @@ OIDC, request bindings and each provider's business authorization remain indepen
 
 The fund adapter additionally prepares `fund-authority` with explicit private-CA
 trust and pension's client-auth identity from `/mnt/fund-tls`. Its provider already
-declares a TLS 1.3 listener and exact Service DNS certificate SANs, but current
-server configuration does not require client certificates. Client preparation does
-not establish server-side mTLS enforcement. Verify TLS readiness and independent
-OIDC/business authorization before the staged HTTPS URL cutover; require provider
-client authentication only with verified compatibility for its other callers.
+declares a TLS 1.3 listener and exact Service DNS certificate SANs. Its production
+server configuration requires client certificates and independently requires bearer
+authentication for API access. Local listener tests verify both controls; they do
+not establish live certificate issuance or deployment readiness. Verify TLS readiness,
+caller compatibility and independent OIDC/business authorization before rollout.
 
 ## Receiving-provider identity binding
 

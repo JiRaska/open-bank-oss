@@ -28,6 +28,10 @@ For fund PSP 20-12, the return uses the provider's year-to-date revaluation gain
 
 Fund PEF 13-04 uses the closing portfolio's `loansOutstanding`. The provider reports it as unknown while any closing position is `UNCLASSIFIED`, because that position may be a loan; tax-reporting then refuses assembly with HTTP 503 and identifies the number of unclassified positions and the four-eyes classification path. A period from before position recording is also unavailable. Missing loan data is never converted to zero; zero is reported only when the provider has a known closing portfolio and no classified loans.
 
+## Outbound transport
+
+In production the calls to pension-service and pension-fund-service go to their private-CA TLS listeners (8443), which require a client certificate. Both REST clients use the `internal-authority` TLS bucket: client identity `tax-reporting-internal-tls` and the `openbank-ca` trust store mounted at `/mnt/internal-tls`, TLS 1.3, with hostname verification. The certificate is transport authentication only; each call still carries this service's own OIDC bearer token, and the providers authorize it by that identity.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.

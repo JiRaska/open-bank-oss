@@ -78,8 +78,11 @@ Nejprve nasaďte Certificate a serverový listener. Před přepnutím klienta ov
 Certificate Ready, DNS SAN služby, důvěryhodný TLS handshake a síťové politiky pro
 port 8443. HTTP zachovejte během souběhu verzí; jeho odstranění vyžaduje samostatnou
 inventuru klientů a nasazení. Při chybě nového listeneru ponechte původní klientskou
-URL a vraťte přidanou serverovou konfiguraci. Tato fáze ověřuje identitu serveru,
-neposkytuje vzájemné TLS.
+URL a vraťte přidanou serverovou konfiguraci. Produkční listener 8443 vyžaduje
+důvěryhodný klientský certifikát; API navíc nezávisle ověřuje bearer token.
+Tax-reporting používá vlastní klientský certifikát a trust store interní CA.
+`ListenerAuthParityIT` lokálně ověřuje certifikát i bearer autentizaci na obou
+listenerech; neprokazuje připravenost certifikátů ani kompatibilitu klientů v clusteru.
 
 `ServerTlsIT` ověřuje načtení PEM, vyjednání TLS 1.3, odmítnutí nedůvěryhodného
 certifikátu a zachování HTTP s dočasnými testovacími klíči. Deklarace ani tento
