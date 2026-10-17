@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Validate that reconcile services map to this run's actual build-push image tag."""
+"""Validate that reconcile services map to this run's pushed image tags and digests."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def verify(services_json: str, tags_json: str, build_tag: str, sha: str) -> None:
+def verify(services_json: str, tags_json: str, digests_json: str, build_tag: str, sha: str) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("workflow SHA must be a full lowercase 40-hex commit")
     if build_tag != f"sandbox-{sha[:8]}":
@@ -44,11 +44,18 @@ def verify(services_json: str, tags_json: str, build_tag: str, sha: str) -> None
     if any(not isinstance(tag, str) or tag != build_tag for tag in tags.values()):
         raise ValueError("every service tag must equal the actual build-push tag")
 
+    digests = json.loads(digests_json, object_pairs_hook=_unique_object)
+    if not isinstance(digests, dict) or set(digests) != set(services):
+        raise ValueError("image digest map must cover exactly the requested services")
+    if any(not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+           for digest in digests.values()):
+        raise ValueError("every image digest must be a full sha256 digest")
+
 
 def main() -> int:
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 6:
         print(
-            f"usage: {sys.argv[0]} <services-json> <image-tags-json> <build-push-tag> <workflow-sha>",
+            f"usage: {sys.argv[0]} <services-json> <image-tags-json> <image-digests-json> <build-push-tag> <workflow-sha>",
             file=sys.stderr,
         )
         return 2
@@ -57,7 +64,7 @@ def main() -> int:
     except (DuplicateKeyError, ValueError, json.JSONDecodeError) as exc:
         print(f"reconcile image evidence rejected: {exc}", file=sys.stderr)
         return 1
-    print("reconcile image evidence matches this run's exact build-push output")
+    print("reconcile image evidence matches this run's exact build-push output and pushed digests")
     return 0
 
 

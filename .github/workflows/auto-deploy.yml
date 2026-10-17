@@ -550,6 +550,7 @@ jobs:
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
+      image_digests: ${{ steps.collect.outputs.image_digests }}
       image_tag: ${{ steps.build.outputs.tag }}
       # Only the services whose image actually reached the registry. Everything after
       # the push keys off this, never off the changed set (#9714).
@@ -674,13 +675,17 @@ jobs:
 
           push_one() {
             local svc="$1"
+            local metadata="${RUNNER_TEMP}/buildx-metadata-${svc}.json"
             case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*)
               bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
                 2>&1 | sed "s/^/[${svc}] /" || return 1
               echo "==> [${svc}] self-built docker push → ${ECR_REGISTRY}/${svc}:${TAG}"
               docker buildx build --platform linux/arm64 --provenance=false --sbom=false \
-                -f "${svc}/Dockerfile" -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
+                --metadata-file "$metadata" -f "${svc}/Dockerfile" \
+                -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
                 "${svc}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+              jq -er '.["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' \
+                "$metadata" > "${RUNNER_TEMP}/image-digest-${svc}" || return 1
               return 0 ;;
             esac
             local qa="${svc}/build/quarkus-app"
@@ -738,9 +743,12 @@ jobs:
               --platform linux/arm64 \
               --provenance=false \
               --sbom=false \
+              --metadata-file "$metadata" \
               -t "${image}" \
               --push \
               "${ctx}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+            jq -er '.["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' \
+              "$metadata" > "${RUNNER_TEMP}/image-digest-${svc}" || return 1
           }
 
           MAX_PARALLEL=3   # limit concurrent buildx to avoid OOM on 16GB Docker host
@@ -750,12 +758,28 @@ jobs:
             push_one "$svc" &
             PIDS+=($!); SVCS+=("$svc"); RUNNING=$(( RUNNING + 1 ))
             if [ "$RUNNING" -ge "$MAX_PARALLEL" ]; then
-              if wait "${PIDS[0]}"; then PUSHED+=("${SVCS[0]}"); else echo "FAIL: ${SVCS[0]}"; FAILED_SVCS+=("${SVCS[0]}"); FAILED=1; fi
+              if wait "${PIDS[0]}"; then
+                if [ -f "${RUNNER_TEMP}/image-digest-${SVCS[0]}" ]; then
+                  PUSHED+=("${SVCS[0]}")
+                else
+                  echo "SKIP: ${SVCS[0]} did not produce a pushed image"
+                fi
+              else
+                echo "FAIL: ${SVCS[0]}"; FAILED_SVCS+=("${SVCS[0]}"); FAILED=1
+              fi
               PIDS=("${PIDS[@]:1}"); SVCS=("${SVCS[@]:1}"); RUNNING=$(( RUNNING - 1 ))
             fi
           done
           for idx in "${!PIDS[@]}"; do
-            if wait "${PIDS[$idx]}"; then PUSHED+=("${SVCS[$idx]}"); else echo "FAIL: ${SVCS[$idx]}"; FAILED_SVCS+=("${SVCS[$idx]}"); FAILED=1; fi
+            if wait "${PIDS[$idx]}"; then
+              if [ -f "${RUNNER_TEMP}/image-digest-${SVCS[$idx]}" ]; then
+                PUSHED+=("${SVCS[$idx]}")
+              else
+                echo "SKIP: ${SVCS[$idx]} did not produce a pushed image"
+              fi
+            else
+              echo "FAIL: ${SVCS[$idx]}"; FAILED_SVCS+=("${SVCS[$idx]}"); FAILED=1
+            fi
           done
 
           # A push that fails for ONE service must not strand the deploy of every other
@@ -773,6 +797,13 @@ jobs:
           # everyone else's.
           printf '%s\n' ${PUSHED[@]+"${PUSHED[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/pushed.json"
           printf '%s\n' ${FAILED_SVCS[@]+"${FAILED_SVCS[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/failed.json"
+          DIGESTS='{}'
+          for svc in "${PUSHED[@]}"; do
+            digest="$(cat "${RUNNER_TEMP}/image-digest-${svc}")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::invalid buildx digest for ${svc}"; exit 1; }
+            DIGESTS="$(jq -cn --argjson old "$DIGESTS" --arg k "$svc" --arg v "$digest" '$old + {($k): $v}')"
+          done
+          echo "digests=${DIGESTS}" >> "$GITHUB_OUTPUT"
           {
             echo "pushed=$(cat "$RUNNER_TEMP/pushed.json")"
             echo "failed=$(cat "$RUNNER_TEMP/failed.json")"
@@ -792,7 +823,6 @@ jobs:
         run: |
           set -uo pipefail
           SERVICES='${{ steps.push.outputs.pushed }}'
-          TAG="${{ steps.build.outputs.tag }}"
           # `resolve_cosign_v2` and the v2 pin live in the shared helper — this step used to
           # carry its own copy of both. Sign and attest stay two steps because the trivy CVE
           # gate runs between them, so this uses the resolver directly rather than
@@ -805,7 +835,9 @@ jobs:
           fi
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-            img="${ECR_REGISTRY}/${svc}:${TAG}"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< '${{ steps.push.outputs.digests }}')"
+            [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; rc=1; continue; }
+            img="${ECR_REGISTRY}/${svc}@${digest}"
             # Refuse an OCI index before it is signed (#11573) — the helper's guard.
             assert_single_image_manifest "$img" || { echo "::error::${svc} was pushed as an OCI index"; rc=1; continue; }
             echo "==> cosign sign ${img}"
@@ -849,7 +881,7 @@ jobs:
         run: |
           set -euo pipefail
           SERVICES='${{ steps.push.outputs.pushed }}'
-          TAG="${{ steps.build.outputs.tag }}"
+          DIGESTS='${{ steps.push.outputs.digests }}'
           FAILED=0
           DEPLOYABLE=(); BLOCKED=()
 
@@ -858,7 +890,9 @@ jobs:
             case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
               [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
             esac
-            image="${ECR_REGISTRY}/${svc}:${TAG}"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$DIGESTS")"
+            [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; FAILED=1; BLOCKED+=("$svc"); continue; }
+            image="${ECR_REGISTRY}/${svc}@${digest}"
 
             echo "==> [${svc}] trivy image ${image}"
             # Advisory report — full HIGH+CRITICAL table in the job log.
@@ -928,7 +962,7 @@ jobs:
         run: |
           set -uo pipefail
           SERVICES='${{ steps.scan.outputs.deployable }}'
-          TAG="${{ steps.build.outputs.tag }}"
+          DIGESTS='${{ steps.push.outputs.digests }}'
           # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
           # post-attest proof all live in the shared helper, which every build-push-*.sh
           # already uses. This step carried its own copy and so missed the hardening added
@@ -943,7 +977,9 @@ jobs:
             case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
               [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
             esac
-            image="${ECR_REGISTRY}/${svc}:${TAG}"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$DIGESTS")"
+            [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; rc=1; continue; }
+            image="${ECR_REGISTRY}/${svc}@${digest}"
             # Per-service rc rather than an early exit: report EVERY broken image in one run,
             # so a second failure is not hidden behind the first.
             if ! cosign_attest_sbom "$image" "linux/arm64"; then
@@ -1021,10 +1057,15 @@ jobs:
           # `key=value` $GITHUB_OUTPUT format ("Invalid format") — this step never ran
           # before the credentials fix let the pipeline reach it.
           MAP="{}"
+          DIGEST_MAP="{}"
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             MAP="$(echo "$MAP" | jq -c --arg k "$svc" --arg v "$TAG" '. + {($k): $v}')"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< '${{ steps.push.outputs.digests }}')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::missing or invalid pushed digest for ${svc}"; exit 1; }
+            DIGEST_MAP="$(echo "$DIGEST_MAP" | jq -c --arg k "$svc" --arg v "$digest" '. + {($k): $v}')"
           done
           echo "image_tags=${MAP}" >> "$GITHUB_OUTPUT"
+          echo "image_digests=${DIGEST_MAP}" >> "$GITHUB_OUTPUT"
 
   # ── 2b. Contract gate: can-i-deploy (ADR-0092) ───────────────────────────────
   # For each changed service, ask the Pact Broker whether the version about to ship
@@ -1112,6 +1153,7 @@ jobs:
           # such ceiling.
           SERVICES: ${{ needs.build-push.outputs.deployable_services }}
           IMAGE_TAGS: ${{ needs.build-push.outputs.image_tags }}
+          IMAGE_DIGESTS: ${{ needs.build-push.outputs.image_digests }}
           BUILD_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
@@ -1238,6 +1280,7 @@ jobs:
           git fetch --depth=100 origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
+          IMAGE_DIGESTS='${{ needs.build-push.outputs.image_digests }}'
           # Read the hold from the newly fetched main, before assembling a bot PR.
           # Filter per service so a held sanctions image cannot strand unrelated
           # images in the same deploy batch. A malformed or unknown hold fails this
@@ -1246,6 +1289,8 @@ jobs:
           IMAGE_TAGS="$(printf '%s' "$IMAGE_TAGS" | \
             "${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
               .github/scripts/check-deploy-holds.py --root . --filter-tags)"
+          IMAGE_DIGESTS="$(jq -cn --argjson tags "$IMAGE_TAGS" --argjson digests "$IMAGE_DIGESTS" \
+            '$digests | with_entries(select(.key as $k | $tags | has($k)))')"
           # A held image remains at its old pin. The scheduled reconcile derives
           # lag from that pin, so it re-offers the service after the hold is removed.
           UPDATED=()
@@ -1264,38 +1309,26 @@ jobs:
             exit 0
           fi
 
+          SELECTED_TAGS='{}'
+          SELECTED_DIGESTS='{}'
           for svc in $(echo "$IMAGE_TAGS" | jq -r 'keys[]'); do
             # DEPLOYABLE_SERVICES empty/unset = can-i-deploy didn't run at all (no filter,
-            # process everything, matching pre-fix behavior). Otherwise it's an explicit JSON
-            # array (possibly []) — only services can-i-deploy actually confirmed get their
-            # manifest rewritten (issue #846: a batch-mate's failure must not block this one).
+            # process everything, matching pre-fix behavior). Otherwise it is the explicit
+            # set of services confirmed by can-i-deploy.
             if [ -n "${DEPLOYABLE_SERVICES}" ] && \
                ! echo "${DEPLOYABLE_SERVICES}" | jq -e --arg s "$svc" 'index($s) != null' >/dev/null; then
               echo "  [${svc}] blocked by can-i-deploy this run — skipping manifest update"
               continue
             fi
-            tag="$(echo "$IMAGE_TAGS" | jq -r --arg k "$svc" '.[$k]')"
-            image="${ECR_REGISTRY}/${svc}"
-
-            # Find the gitops manifest that references this service's ECR image.
-            manifests="$(grep -rl "${image}:sandbox-" openbank-infra/gitops/components 2>/dev/null || true)"
-            if [ -z "$manifests" ]; then
-              echo "WARN: no gitops manifest references ${image}:sandbox-* — skip"
-              continue
-            fi
-
-            for f in $manifests; do
-              old_tag="$(grep -oE "${image}:sandbox-[A-Za-z0-9._-]+" "$f" | head -1 | cut -d: -f2 || true)"
-              if [ "$old_tag" = "$tag" ]; then
-                echo "  [${svc}] already at ${tag} in ${f}"
-                continue
-              fi
-              sed -i.bak "s|${image}:sandbox-[A-Za-z0-9._-]*|${image}:${tag}|g" "$f"
-              rm -f "${f}.bak"
-              echo "  [${svc}] ${old_tag:-?} → ${tag} in ${f}"
-              UPDATED+=("$f")
-            done
+            digest="$(echo "$IMAGE_DIGESTS" | jq -r --arg k "$svc" '.[$k] // empty')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::missing digest pin for ${svc}"; exit 1; }
+            SELECTED_TAGS="$(jq -cn --argjson m "$SELECTED_TAGS" --argjson src "$IMAGE_TAGS" --arg k "$svc" '$m + {($k): $src[$k]}')"
+            SELECTED_DIGESTS="$(jq -cn --argjson m "$SELECTED_DIGESTS" --argjson src "$IMAGE_DIGESTS" --arg k "$svc" '$m + {($k): $src[$k]}')"
           done
+          python3 .github/scripts/rewrite-reconcile-image-pins.py \
+            . "$ECR_REGISTRY" "$SELECTED_TAGS" "$SELECTED_DIGESTS"
+          while IFS= read -r f; do UPDATED+=("$f"); done \
+            < <(git diff --name-only -- openbank-infra/gitops/components)
 
           # Deploy window (deploy-window.py): carry forward the pins of open, non-draft, UNARMED
           # older gitops deploy PR, so this PR covers every pending service and

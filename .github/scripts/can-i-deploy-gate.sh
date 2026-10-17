@@ -27,6 +27,7 @@
 #
 # INPUTS (environment, supplied by the calling step)
 #   SERVICES                 JSON array of changed service names        (required)
+#   IMAGE_TAGS/IMAGE_DIGESTS  maps produced by the exact build-push step
 #   EVENT_NAME               github.event_name                          (required)
 #   INPUT_CODEPLOY           github.event.inputs.codeploy, may be empty
 #   INPUT_CODEPLOY_PACT_VERSIONS
@@ -62,6 +63,10 @@ block_reason='{}'
 # or Broker setup mutation. gitops-pr treats gate_ran=true + deployable=[] as fail-closed.
 if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
   source_failure=0
+  if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+    echo "::error::reconcile source proof is valid only for a workflow run on refs/heads/main"
+    source_failure=1
+  fi
   explicit_sources="${INPUT_CODEPLOY_PACT_VERSIONS:-}"
   use_explicit_sources=false
   if ! jq -e '
@@ -72,12 +77,11 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     echo "::error::reconcile service list is malformed or ambiguous"
     source_failure=1
   fi
-  # `IMAGE_TAGS` and `BUILD_IMAGE_TAG` are outputs of the successful build-push job;
-  # that job's `needs` edge makes this gate wait for build, push, signature, scan, SBOM
-  # and provenance gates. The verifier rejects duplicate JSON keys and requires an exact
-  # service-key set whose values all equal that actual build output tag.
+  # These maps are outputs of the successful build-push job. The gate waits for push,
+  # signature, scan, SBOM and provenance; the verifier requires exact service coverage and
+  # full pushed digests so an overwritten mutable tag cannot change what gets selected.
   if ! python3 .github/scripts/verify-reconcile-image-map.py \
-      "$SERVICES" "${IMAGE_TAGS:-}" "${BUILD_IMAGE_TAG:-}" "$GITHUB_SHA"; then
+      "$SERVICES" "${IMAGE_TAGS:-}" "${IMAGE_DIGESTS:-}" "${BUILD_IMAGE_TAG:-}" "$GITHUB_SHA"; then
     echo "::error::reconcile image evidence is missing, ambiguous, or not built from ${GITHUB_SHA}"
     source_failure=1
   fi

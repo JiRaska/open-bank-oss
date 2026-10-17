@@ -26,6 +26,10 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
     echo "::error::exact-main Services CI evidence is unavailable" >&2
     exit 1
   fi
+  if [ -n "${SERVICE_CI_EXPECTED_SOURCE:-}" ] && [ "${3:-}" != "$SERVICE_CI_EXPECTED_SOURCE" ]; then
+    echo "::error::Services CI was not checked for the expected source SHA" >&2
+    exit 1
+  fi
   echo "verified exact-main service build and contract"
   exit 0
 fi
@@ -59,6 +63,7 @@ if [ "$is_status" = true ]; then
 else
   case "$url" in
     */environments) echo '{"_embedded":{"environments":[{"name":"sandbox"}]}}' ;;
+    */latest-version/main) echo "{\"number\":\"${OLDER_SHA:-}\"}" ;;
     *) echo '{}' ;;
   esac
 fi
@@ -69,6 +74,7 @@ cat > "$tmp/bin/pact-broker" <<'STUB'
 echo "$*" >> "$PACT_CLI_LOG"
 if [ "$1" = "can-i-deploy" ]; then
   echo "pact verification failed"
+  [ "${PACT_CLI_MODE:-failure}" = "success" ] && exit 0
   exit 1
 fi
 exit 0
@@ -82,7 +88,9 @@ export EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule
 export GITHUB_SHA="$sha" GITHUB_REPOSITORY=JiRaska/open-bank-oss
 export SERVICES='["openbank-demo-service"]'
 export IMAGE_TAGS='{"openbank-demo-service":"sandbox-01234567"}'
+export IMAGE_DIGESTS='{"openbank-demo-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
 export BUILD_IMAGE_TAG=sandbox-01234567
+export GITHUB_REF=refs/heads/main
 export INPUT_CODEPLOY=false INPUT_CODEPLOY_PACT_VERSIONS='{}'
 export PACT_BROKER_URL=http://broker.invalid PACT_BROKER_USERNAME=fixture PACT_BROKER_PASSWORD=fixture
 export GITHUB_OUTPUT="$tmp/output" GITHUB_STEP_SUMMARY="$tmp/summary"
@@ -109,6 +117,25 @@ if grep -q 'can-i-deploy (' "$tmp/log"; then
   exit 1
 fi
 echo "PASS: missing reconcile source emits deployable=[] and exits before Pact can-i-deploy"
+
+# Reconcile is intentionally main-only. Even if an off-main dispatch has a valid-looking
+# tag/digest map, it must not request Pact or emit deployable services.
+: > "$GITHUB_OUTPUT"
+: > "$GITHUB_STEP_SUMMARY"
+export GITHUB_REF=refs/heads/codex/feature
+if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/off-main-log" 2>&1; then
+  echo "FAIL: off-main reconcile was accepted" >&2
+  exit 1
+fi
+if ! grep -q 'only for a workflow run on refs/heads/main' "$tmp/off-main-log" || \
+   ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+   grep -q 'can-i-deploy (' "$tmp/off-main-log"; then
+  echo "FAIL: off-main reconcile was not refused before a Pact verdict" >&2
+  cat "$GITHUB_OUTPUT" "$tmp/off-main-log" >&2
+  exit 1
+fi
+export GITHUB_REF=refs/heads/main
+echo "PASS: off-main reconcile fails closed before Pact can-i-deploy"
 
 # Duplicate JSON keys would otherwise be silently collapsed by jq while validating coverage.
 # The strict image-source verifier must reject that proof before it probes Pact or can deploy.
@@ -255,6 +282,64 @@ if ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
   exit 1
 fi
 echo "PASS: co-deploy fails closed if an absent Pacticipant appears after preflight"
+
+# Positive integration path: a registered Pacticipant has no version for the current
+# workflow SHA, but does have an older main-tagged version. The real Git tree comparator
+# proves that only irrelevant docs changed; exact-main Services CI is checked for that
+# older SHA, and the real selector must pass that exact version to the Pact CLI.
+positive="$tmp/positive-repo"
+mkdir -p "$positive/.github/scripts" "$positive/.github/workflows" \
+  "$positive/openbank-demo-service/src/main"
+for script in can-i-deploy-gate.sh probe-pact-version.sh pact-version-tree-equivalent.sh \
+  resolve-can-i-deploy-selector.sh classify-can-i-deploy-block.sh verify-reconcile-image-map.py; do
+  cp "$root/.github/scripts/$script" "$positive/.github/scripts/$script"
+done
+printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' \
+  > "$positive/.github/workflows/auto-deploy.yml"
+printf 'x\n' > "$positive/.github/workflows/Dockerfile.deploy"
+printf 'plugins {}\n' > "$positive/openbank-demo-service/build.gradle.kts"
+printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
+(
+  cd "$positive"
+  git init -q
+  git config user.email fixture@example.test
+  git config user.name fixture
+  git config commit.gpgsign false
+  git add .github openbank-demo-service
+  git commit -qm 'base build with published pact'
+  OLDER_SHA="$(git rev-parse HEAD)"
+  mkdir -p docs
+  printf 'operational note\n' > docs/note.md
+  git add docs/note.md
+  git commit -qm 'unrelated documentation change'
+  CURRENT_SHA="$(git rev-parse HEAD)"
+
+  : > "$GITHUB_OUTPUT"
+  : > "$GITHUB_STEP_SUMMARY"
+  : > "$PACT_CLI_LOG"
+  : > "$SERVICE_CI_LOG"
+  export OLDER_SHA CURRENT_SHA
+  export GITHUB_SHA="$CURRENT_SHA" GITHUB_REF=refs/heads/main
+  export EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule
+  export BROKER_MODE=known SERVICE_CI_MODE=success SERVICE_CI_EXPECTED_SOURCE="$OLDER_SHA"
+  export PACT_CLI_MODE=success
+  export IMAGE_TAGS="{\"openbank-demo-service\":\"sandbox-${CURRENT_SHA:0:8}\"}"
+  export IMAGE_DIGESTS='{"openbank-demo-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+  export BUILD_IMAGE_TAG="sandbox-${CURRENT_SHA:0:8}"
+  if ! bash .github/scripts/can-i-deploy-gate.sh >"$tmp/positive-log" 2>&1; then
+    echo "FAIL: equivalent older-Pact source did not complete the positive gate" >&2
+    cat "$tmp/positive-log" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" >&2
+    exit 1
+  fi
+  if ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+     ! grep -F "verify-successful-service-ci.py openbank-demo-service $OLDER_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
+    echo "FAIL: positive gate did not carry the exact equivalent Pact/CI SHA through" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/positive-log" >&2
+    exit 1
+  fi
+)
+echo "PASS: registered Pacticipant + equivalent older SHA + exact-main CI selects the exact Pact version"
 
 # The push lane shares the block-classification/reporting path. Exercise it on Bash 3.2 too:
 # the JSON-backed class/reason maps must preserve the REGRESSION label without associative arrays.

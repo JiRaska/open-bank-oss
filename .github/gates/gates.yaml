@@ -1818,6 +1818,7 @@ gates:
       bash .github/scripts/test-can-i-deploy-reconcile-source.sh
       python3 .github/scripts/test-verify-successful-service-ci.py
       python3 .github/scripts/test-verify-reconcile-image-map.py
+      python3 .github/scripts/test-rewrite-reconcile-image-pins.py
 
   # Deployed-code-lag report unit test. Guards the
   # hours-scale "code on main is not running in sandbox" report that feeds the

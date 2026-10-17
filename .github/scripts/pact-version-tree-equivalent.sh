@@ -27,7 +27,8 @@
 #   * `<svc>/build/reports/bom.json` — the output of `:<svc>:cyclonedxBom`
 #   * `.github/workflows/Dockerfile.deploy` — copied in verbatim as the Dockerfile
 #   * an `EXPOSE` line grepped out of `<svc>/Dockerfile`
-# So the in-scope set is the Gradle build inputs of that module plus those two files.
+# The workflow also supplies augmentation-time build inputs (including ANALYTICS_SINK_TYPE and
+# AGENT_SVID_NONCE_STORE); those values are compared separately below.
 #
 # THE DEFAULT IS THE DESIGN: UNRECOGNISED ⇒ NOT EQUIVALENT
 # An include-list of "things that matter" fails silently in the dangerous direction — a shared
@@ -45,8 +46,9 @@
 #                    excluded is that it is not a build input, not that excluding it is
 #                    convenient. Runtime CONFIG has never been within can-i-deploy's scope on any
 #                    path, push included; this does not narrow the gate.
-#   .github/         CI definitions. The two files that DO reach the image — Dockerfile.deploy
-#                    and auto-deploy.yml, which carries the Gradle flags — are in scope by name.
+#   .github/         CI definitions. Dockerfile.deploy is in scope; augmentation-time build
+#                    properties in auto-deploy.yml are compared separately. Other workflow
+#                    orchestration edits do not change those properties.
 #   docs/ pacts/ perf/ fuzz/ scripts/ LICENSES/ .security/ .devcontainer/ .clusterfuzzlite/
 #                    documentation, committed pact artefacts, load tests, fuzz harnesses,
 #                    operator scripts, licence texts — none is read by `:<svc>:quarkusBuild`.
@@ -108,13 +110,8 @@ ROOT_IGNORE_RE='^([^/]+\.md|LICENSE|NOTICE|REUSE\.toml|CITATION\.cff|CODEOWNERS|
 # Top-level directories that cannot reach a service image. Justified one by one in the header.
 IGNORED_DIR_RE='^(docs|pacts|perf|fuzz|scripts|LICENSES|openbank-contracts|openbank-infra|openbank-admin-ui|openbank-api-gateway|openbank-developer-portal|openbank-document-renderer|\.security|\.devcontainer|\.clusterfuzzlite|\.github)/'
 
-# The one `.github/` file that is literally COPY'd into the image, so it is re-admitted by name.
-# auto-deploy.yml itself is deliberately NOT here even though it carries the Gradle flags: the
-# image is built by the DISPATCH run under the dispatch sha's workflow either way, and the pact
-# verification never ran under auto-deploy.yml at all (that is _service-ci.yml's job). Demanding
-# it be unchanged would be asking for a guarantee the ordinary push path does not provide either —
-# and it is the single most-edited file in this pipeline, so it refused all 32 services on its own
-# when it was in scope (measured 2026-08-03).
+# The Dockerfile is copied into every image. Workflow build properties are compared separately
+# below so unrelated orchestration edits do not strand older Pact versions.
 GITHUB_IN_SCOPE=(.github/workflows/Dockerfile.deploy)
 
 # Non-module directories that ARE build inputs for every module.
@@ -216,6 +213,27 @@ equivalent() {
   git merge-base --is-ancestor "$pact_sha" "$dispatch_sha" 2>/dev/null \
     || differs "pact version ${pact_sha} is not an ancestor of ${dispatch_sha} — history diverged or was rewritten, so 'main moved forward without touching this service' is not what happened"
 
+  # These values are read by @IfBuildProperty during augmentation. Compare the values from
+  # both workflow revisions rather than the whole workflow blob: orchestration-only edits do
+  # not change the build, but changing either property invalidates older-Pact reuse.
+  workflow_build_inputs_at() {
+    local rev="$1" key matches count
+    for key in ANALYTICS_SINK_TYPE AGENT_SVID_NONCE_STORE; do
+      matches="$(git show "$rev:.github/workflows/auto-deploy.yml" 2>/dev/null \
+        | grep -E "^[[:space:]]+${key}:[[:space:]]*" | sed -E 's/^[[:space:]]*//' || true)"
+      count="$(printf '%s\n' "$matches" | grep -c . || true)"
+      [ "$count" -eq 1 ] || return 1
+      printf '%s\n' "$matches"
+    done
+  }
+  local old_build_inputs new_build_inputs
+  old_build_inputs="$(workflow_build_inputs_at "$pact_sha")" \
+    || differs "cannot unambiguously read augmentation-time build properties from Pact workflow"
+  new_build_inputs="$(workflow_build_inputs_at "$dispatch_sha")" \
+    || differs "cannot unambiguously read augmentation-time build properties from reconcile workflow"
+  [ "$old_build_inputs" = "$new_build_inputs" ] \
+    || differs "augmentation-time service build properties changed between ${pact_sha:0:8} and ${dispatch_sha:0:8}"
+
   # 1. Build the list of in-scope PATHS: this service whole, each dependency module's compile
   #    inputs, the global build directories, and the two `.github/` files that reach the image.
   local scope="" m d a b
@@ -310,7 +328,7 @@ selftest() {
     printf 'x\n' > build-logic/build.gradle.kts
     printf 'x\n' > openbank-contracts/api.yaml
     printf 'x\n' > .github/workflows/Dockerfile.deploy
-    printf 'x\n' > .github/workflows/auto-deploy.yml
+    printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n  OTHER_SETTING: one\n' > .github/workflows/auto-deploy.yml
     printf 'x\n' > svc-a/src/main/A.kt
     printf 'x\n' > svc-b/src/main/B.kt
     printf 'x\n' > openbank-libs-domain/src/main/D.kt
@@ -393,10 +411,20 @@ selftest() {
   # 6. The Dockerfile that is copied into the image.
   local s6; s6="$(_commit .github/workflows/Dockerfile.deploy changed)"
   _expect "Dockerfile.deploy changed" DIFFERENT svc-a "$s5" "$s6"
+  local s6b
+  s6b="$(cd "$tmp" && printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n  OTHER_SETTING: two\n' > .github/workflows/auto-deploy.yml \
+      && git add .github/workflows/auto-deploy.yml && git commit -qm 'workflow orchestration changed' \
+      && git rev-parse HEAD)"
+  _expect "unrelated auto-deploy orchestration changed" EQUIVALENT svc-a "$s6" "$s6b"
+  local s6c
+  s6c="$(cd "$tmp" && printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: memory\n  OTHER_SETTING: two\n' > .github/workflows/auto-deploy.yml \
+      && git add .github/workflows/auto-deploy.yml && git commit -qm 'augmentation input changed' \
+      && git rev-parse HEAD)"
+  _expect "augmentation-time build input changed" DIFFERENT svc-a "$s6b" "$s6c"
 
   # 7. A `.github/` path that is NOT a build input must not block.
   local s7; s7="$(_commit .github/workflows/security.yml changed)"
-  _expect "an unrelated workflow changed" EQUIVALENT svc-a "$s6" "$s7"
+  _expect "an unrelated workflow changed" EQUIVALENT svc-a "$s6c" "$s7"
 
   # 8. A top-level directory this script has never heard of — the default that keeps an
   #    include-list from failing silently.
@@ -440,7 +468,7 @@ selftest() {
   local o7; o7="$(_commit 'svc-a/Prod Config.txt' changed)"
   _expect "overlay: production file with a spaced name is refused" DIFFERENT --own-test-overlay svc-a "$o6" "$o7"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 25 cases (17 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, unrelated workflow, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 27 cases (19 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs, unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 
