@@ -238,15 +238,35 @@ internal class GitHubTicketWriter(
         return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
     }
 
-    private fun title(finding: FlakyTestFinding): String = "$TICKET_TITLE_PREFIX${finding.title}".take(TITLE_MAX_CHARS)
+    /**
+     * Structured fields only: the title never carries the finding's free text, so a
+     * model-influenced string cannot become the headline of a public issue, and dedupe collapses
+     * to one open issue per (check type, component).
+     */
+    private fun title(finding: FlakyTestFinding): String =
+        "$TICKET_TITLE_PREFIX${finding.checkType} in ${neutralise(finding.component)}".take(TITLE_MAX_CHARS)
 
+    /**
+     * The diagnosis is LLM output and the finding title is derived from scanned test text; both
+     * are untrusted and this issue lands on a PUBLIC tracker. They go inside a fenced block with
+     * backticks removed, `@` mentions and links neutralised, so nothing in them can ping a user,
+     * render as a link, or escape the block into issue markdown.
+     */
     private fun body(finding: FlakyTestFinding, diagnosis: String): String = """
         Finding `${finding.id}` (`${finding.checkType}`, ${finding.severity}) detected at ${finding.detectedAt}
-        on `${finding.component}`.
+        on `${neutralise(finding.component)}`.
 
-        **Diagnosis**
+        **Finding**
 
-        ${diagnosis.take(DIAGNOSIS_MAX_CHARS)}
+        ```text
+        ${neutralise(finding.title)}
+        ```
+
+        **Diagnosis** (model output, quoted verbatim as untrusted text)
+
+        ```text
+        ${neutralise(diagnosis.take(DIAGNOSIS_MAX_CHARS))}
+        ```
 
         **Measurement**: ${finding.rawMetricValue.toPlainString()} against threshold
         ${finding.threshold.toPlainString()}.
@@ -255,6 +275,11 @@ internal class GitHubTicketWriter(
         issue instead of a pull request. A human must read the test's intent before anything
         changes; the agent never edits a test file (ADR-0168, ADR-0031 D9).
     """.trimIndent()
+
+    private fun neutralise(text: String): String = text
+        .replace("`", "'")
+        .replace("@", "(at)")
+        .replace(Regex("(?i)https?://"), "hxxp://")
 
     private companion object {
         const val TICKET_LABEL = "flaky-test"
