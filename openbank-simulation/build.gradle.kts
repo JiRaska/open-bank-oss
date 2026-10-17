@@ -90,6 +90,14 @@ dependencies {
     // established convention here (only the domain POJOs are referenced from this module).
     implementation(project(":openbank-sdd-service"))
 
+    // Money-path SWIFT adoption: the harness drives the REAL swift-service domain — the
+    // `SwiftMessage` aggregate, its real `validate()` admission (BIC/reference/amount/charge-code/
+    // value-date) and the real `moneyOfMinorUnits` currency-scale factory — so SwiftMessageScenario
+    // exercises production cross-border semantics rather than a re-model. The domain package is
+    // framework-free (ADR-0002); pulling the whole project(...) is the established convention here
+    // (only the domain POJOs are referenced from this module).
+    implementation(project(":openbank-swift-service"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

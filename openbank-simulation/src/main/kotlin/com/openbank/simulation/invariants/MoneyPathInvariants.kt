@@ -16,6 +16,7 @@ import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.ClearingSettlementPosting
 import com.openbank.simulation.model.SddCollectionStatus
 import com.openbank.simulation.runner.World
+import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 
@@ -481,6 +482,91 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Money-path SWIFT adoption: every `SwiftMessage` driven by
+     * [com.openbank.simulation.scenario.SwiftMessageScenario] must reach a terminal status
+     * (COMPLETED / ACKNOWLEDGED / REJECTED / FAILED) by the time a step has fully settled — the
+     * cross-border analogue of [sepaPaymentCompleteness]. A message stuck PENDING/VALIDATED/SENT
+     * after the drain means a scheme, settlement or operator path failed to fire, exactly the
+     * "mid-flight money" defect class the scenario's fault injection exists to surface.
+     */
+    val swiftCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SwiftStatus.COMPLETED,
+            SwiftStatus.ACKNOWLEDGED,
+            SwiftStatus.REJECTED,
+            SwiftStatus.FAILED,
+        )
+
+        override val name = "swift-completeness"
+        override fun check(world: World): Violation? {
+            world.swift.messages.forEach { message ->
+                if (message.status !in terminal) {
+                    return Violation(name, "swift message ${message.id} stuck in ${message.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path SWIFT adoption: the message-to-settlement-journal correspondence. A COMPLETED
+     * (or operator-ACKNOWLEDGED) message has exactly its one live settlement journal — same
+     * amount, same currency, never reversed — and idempotency keys are unique across the book
+     * (a replay must never create a second message); a REJECTED message moved no money (the
+     * scheme-verdict and pre-money fault rejects must never book a leg); a FAILED message's
+     * journal was unwound by the post-commit-conflict reversal. The cross-entry drift itself is
+     * covered by conservationOfMoney.
+     */
+    val swiftMoneyConservation = object : Invariant {
+        override val name = "swift-money-conservation"
+        override fun check(world: World): Violation? {
+            val byKey = world.swift.messages.groupingBy { it.idempotencyKey }.eachCount()
+            byKey.forEach { (key, count) ->
+                if (count > 1) {
+                    return Violation(name, "idempotency key $key replayed into $count swift messages")
+                }
+            }
+            world.swift.messages.forEach { message ->
+                val posting = world.swift.postingOf(message.id)
+                when (message.status) {
+                    SwiftStatus.COMPLETED, SwiftStatus.ACKNOWLEDGED -> {
+                        if (posting == null || posting.reversed) {
+                            return Violation(name, "settled swift message ${message.id} has no live settlement journal")
+                        }
+                        if (posting.amount.compareTo(message.amount.amount) != 0 ||
+                            posting.currency != message.currency
+                        ) {
+                            return Violation(
+                                name,
+                                "swift message ${message.id} journal ${posting.amount} ${posting.currency} " +
+                                    "!= message ${message.amount.amount} ${message.currency}",
+                            )
+                        }
+                    }
+                    SwiftStatus.REJECTED -> {
+                        if (posting != null) {
+                            return Violation(
+                                name,
+                                "rejected swift message ${message.id} booked a journal: money moved for a dead message",
+                            )
+                        }
+                    }
+                    SwiftStatus.FAILED -> {
+                        if (posting == null || !posting.reversed) {
+                            return Violation(
+                                name,
+                                "failed swift message ${message.id}: settlement journal not reversed (money not unwound)",
+                            )
+                        }
+                    }
+                    else -> return Violation(name, "swift message ${message.id} in non-terminal ${message.status}")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -495,6 +581,8 @@ object MoneyPathInvariants {
         clearingBatchConservation,
         sddCompleteness,
         sddMoneyConservation,
+        swiftCompleteness,
+        swiftMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

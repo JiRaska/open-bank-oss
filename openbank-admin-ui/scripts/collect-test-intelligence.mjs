@@ -270,6 +270,10 @@ const simulationScenarios = [
   // the real MandateLifecycle state machine, the real CollectionAuthorisationPolicy decisions and
   // the real RefundPolicy windows under the fault injector (EUR debit/refund legs).
   { classname: 'com.openbank.simulation.scenario.SddCollectionScenarioTest', components: ['openbank-sdd-service'], scope: 'SEPA Direct Debit mandate lifecycle, collection authorisation, EUR debit/refund and idle-expiry scenario (pure JVM, EUR scheme legs)' },
+  // Money-path SWIFT adoption: drives the real swift-service SwiftMessage aggregate through the
+  // real validate() admission and the production scheme → settlement → operator transition
+  // mapping under the fault injector (multi-currency correspondent settlement legs).
+  { classname: 'com.openbank.simulation.scenario.SwiftMessageScenarioTest', components: ['openbank-swift-service'], scope: 'SWIFT cross-border message admission, scheme verdict, correspondent settlement, conflict reversal and operator acknowledgement scenario (pure JVM, multi-currency legs)' },
 ]
 
 async function simulationScenarioEvidence() {

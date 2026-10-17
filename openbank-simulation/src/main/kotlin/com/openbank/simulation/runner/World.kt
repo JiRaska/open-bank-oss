@@ -20,6 +20,7 @@ import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SddCollectionBook
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.model.StatementCloseBook
+import com.openbank.simulation.model.SwiftMessageBook
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -72,6 +73,13 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // per-collection record the money-side invariants assert over (production has no collection
     // aggregate — the debit goes straight through the transaction path).
     val sdd = SddCollectionBook()
+
+    // Money-path SWIFT adoption: the REAL `SwiftMessage` aggregates (swift-service) driven through
+    // the real validate() admission and the production transition mapping (scheme verdict →
+    // settlement → operator ack/reject) by SwiftMessageScenario, plus the per-message settlement
+    // posting the money-side invariants assert over (production persists no settlement record —
+    // the booking is a transaction-service journal keyed by the message, ADR-0108).
+    val swift = SwiftMessageBook()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every

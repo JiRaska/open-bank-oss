@@ -16,6 +16,7 @@ import com.openbank.simulation.scenario.SctInstPaymentScenario
 import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
+import com.openbank.simulation.scenario.SwiftMessageScenario
 
 /**
  * The seed-driven exhaustion loop (ADR-0100 Layer 2 — runner). For each seed it builds a fresh
@@ -81,6 +82,15 @@ class SimulationRunner(
             // balance projection is untouched; the drain is a no-op today but kept for the same
             // "settled before the invariant sweep" convention as every other scenario above.
             SddCollectionScenario.step(world)
+            context.scheduler.drain()
+            // Money-path SWIFT adoption: interleave the cross-border message path (real
+            // SwiftMessage aggregate, real validate() admission, production scheme → settlement →
+            // operator transition mapping) so its multi-currency correspondent legs share the
+            // fault profile and are checked by the same invariant sweep every step. The EUR/USD/
+            // GBP legs land on GL accounts with no opened balance, so the CZK balance projection
+            // is untouched; the drain is a no-op today but kept for the same "settled before the
+            // invariant sweep" convention as every other scenario above.
+            SwiftMessageScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
