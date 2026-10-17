@@ -75,7 +75,7 @@ internal fun normalizeIdentifier(term: String): String? {
 
 // Date of birth as one token of the term. Day-first with `.`/`/`/`-` (most of the world), ISO
 // year-first, and month-first only where it is the sole valid reading (`12/31/1985`). An ambiguous
-// `03/04/1985` yields BOTH dates: the name part still has to match, so this widens nothing.
+// `03/04/1985` (slashes only) yields BOTH dates: the name part still has to match, so this widens nothing.
 private val YEAR_FIRST = Regex("""(?<!\d)(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?!\d)""")
 private val YEAR_LAST_STRICT = Regex("""(?<!\d)(\d{1,2})(?:\.\s?|[/-])(\d{1,2})(?:\.\s?|[/-])(\d{4})(?!\d)""")
 
@@ -91,7 +91,8 @@ internal fun splitBirthDate(term: String): Pair<List<String>, String> {
     } else {
         val y = third.toInt()
         val dayFirst = dateOrNull(y, second.toInt(), first.toInt())
-        val monthFirst = dateOrNull(y, first.toInt(), second.toInt())
+        // Month-first is a slash-only convention (US); dotted and dashed dates are day-first.
+        val monthFirst = if ('/' in match.value) dateOrNull(y, first.toInt(), second.toInt()) else null
         listOfNotNull(dayFirst, monthFirst).distinct()
     }
     if (dates.isEmpty()) return emptyList<String>() to term
@@ -476,7 +477,12 @@ class PartyService : PartyUseCase {
                 val hits = (listOfNotNull(byIndex) + partyRepo.findByIdentifier(id, limit)).distinctBy {
                     it.id
                 }.take(limit)
-                return CursorPage(data = hits, pagination = PageInfo(limit = limit, hasNextPage = false))
+                // An alphanumeric fragment can be a name/email/registration-number fragment too: with
+                // no exact identifier hit, fall through to the substring search (which never touches
+                // the tax id, so identifiers stay non-enumerable).
+                if (hits.isNotEmpty()) {
+                    return CursorPage(data = hits, pagination = PageInfo(limit = limit, hasNextPage = false))
+                }
             }
         }
         val req = SearchRequest.of(if (birthDates.isNotEmpty()) nameTerm else query.q, query.limit, query.cursor)

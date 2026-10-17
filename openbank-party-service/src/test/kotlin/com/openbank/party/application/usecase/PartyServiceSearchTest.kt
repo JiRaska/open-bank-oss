@@ -65,17 +65,17 @@ class PartyServiceSearchTest {
 
     @Test
     fun `a czech birth number resolves through the blind index and the exact identifier match`(): Unit = runBlocking {
-        val rc = "8506150005"
+        val rc = "8506150004"
         val party = mockk<Party>()
         val canonical = (RodneCislo.parse(rc) as RodneCislo.Parsed).canonical
         val index = BlindIndex.compute(pepper.toByteArray(Charsets.UTF_8), canonical)
         every { party.id } returns java.util.UUID.randomUUID()
         val repo = mockk<PartyRepository> {
             coEvery { findByRcBlindIndex(index) } returns party
-            coEvery { findByIdentifier("8506150005", 20) } returns listOf(party)
+            coEvery { findByIdentifier("8506150004", 20) } returns listOf(party)
         }
 
-        val page = service(repo).searchParties(SearchPartiesQuery("850615/0005"))
+        val page = service(repo).searchParties(SearchPartiesQuery("850615/0004"))
 
         assertThat(page.data).containsExactly(party)
         coVerify(exactly = 0) { repo.searchByBusinessKeys(any(), any(), any(), any()) }
@@ -83,12 +83,25 @@ class PartyServiceSearchTest {
 
     @Test
     fun `a foreign national identifier is an exact normalised lookup in any country format`(): Unit = runBlocking {
-        val repo = mockk<PartyRepository> { coEvery { findByIdentifier(any(), any()) } returns emptyList() }
+        val repo = mockk<PartyRepository> {
+            coEvery { findByIdentifier(any(), any()) } returns
+                listOf(mockk<Party> { every { id } returns java.util.UUID.randomUUID() })
+        }
         service(repo).searchParties(SearchPartiesQuery("123-45-6789")) // US SSN
         service(repo).searchParties(SearchPartiesQuery("QQ 12 34 56 C")) // UK NINO
         coVerify { repo.findByIdentifier("123456789", 20) }
         coVerify { repo.findByIdentifier("qq123456c", 20) }
         coVerify(exactly = 0) { repo.searchByBusinessKeys(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an alphanumeric fragment with no identifier hit falls back to the name search`(): Unit = runBlocking {
+        val repo = mockk<PartyRepository> {
+            coEvery { findByIdentifier(any(), any()) } returns emptyList()
+            coEvery { searchByBusinessKeys(any(), any(), any(), any()) } returns emptyList()
+        }
+        service(repo).searchParties(SearchPartiesQuery("ab12cd34"))
+        coVerify { repo.searchByBusinessKeys("ab12cd34", 21, null, emptyList()) }
     }
 
     @Test
@@ -102,6 +115,7 @@ class PartyServiceSearchTest {
         assertThat(splitBirthDate("Doe 12/31/1985")).isEqualTo(listOf("1985-12-31") to "Doe")
         assertThat(splitBirthDate("Doe 31/12/1985")).isEqualTo(listOf("1985-12-31") to "Doe")
         assertThat(splitBirthDate("Doe 1985.12.31")).isEqualTo(listOf("1985-12-31") to "Doe")
+        assertThat(splitBirthDate("Novák 3.4.1985")).isEqualTo(listOf("1985-04-03") to "Novák")
         assertThat(splitBirthDate("Doe 03/04/1985").first).containsExactlyInAnyOrder("1985-04-03", "1985-03-04")
     }
 
