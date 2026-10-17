@@ -58,8 +58,8 @@ jobs:
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
           # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor,
-          # GovernanceAuditor, Statement, Swift, Treasury and RiskEngine added
-          # as third through forty-seventh
+          # GovernanceAuditor, Statement, Swift, Treasury, RiskEngine and
+          # CardProcessing added as third through forty-eighth
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -114,6 +114,7 @@ jobs:
               "openbank-swift-service",
               "openbank-treasury-service",
               "openbank-risk-engine",
+              "openbank-card-processing-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
