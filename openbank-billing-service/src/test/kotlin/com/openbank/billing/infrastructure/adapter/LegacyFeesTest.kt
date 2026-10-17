@@ -39,7 +39,8 @@ class LegacyFeesTest {
         assertThat(LegacyProductTypes.accountingClassOf("SAVINGS")).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
         assertThat(LegacyProductTypes.accountingClassOf("TERM_DEPOSIT")).isEqualTo("CUSTOMER_DEPOSIT_TERM")
         // No class may be guessed for a non-deposit product: it is a counted ACCOUNTING_CLASS_UNRESOLVED skip.
-        listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT", "FUTURE_TYPE", "TERM_LIFE", "", null).forEach {
+        val nonDeposit = listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT")
+        (nonDeposit + listOf("FUTURE_TYPE", "TERM_LIFE", "", null)).forEach {
             assertThat(LegacyProductTypes.accountingClassOf(it)).isNull()
         }
     }

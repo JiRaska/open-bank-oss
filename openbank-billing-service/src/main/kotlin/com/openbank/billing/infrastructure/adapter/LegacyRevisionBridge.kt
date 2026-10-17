@@ -74,7 +74,14 @@ internal object LegacyFees {
 internal object LegacyProductTypes {
     /** All v1 product types: `openbank-product-catalog` `ProductType` and the legacy-product pack schema. */
     val KNOWN = setOf(
-        "CURRENT", "SAVINGS", "TERM_DEPOSIT", "OVERDRAFT", "LOAN", "MORTGAGE", "CREDIT_CARD", "INVESTMENT",
+        "CURRENT",
+        "SAVINGS",
+        "TERM_DEPOSIT",
+        "OVERDRAFT",
+        "LOAN",
+        "MORTGAGE",
+        "CREDIT_CARD",
+        "INVESTMENT",
     )
 
     fun accountingClassOf(productType: String?): String? = when (productType) {
