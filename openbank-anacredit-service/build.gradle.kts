@@ -13,6 +13,7 @@ dependencies {
     implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
+    implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.jackson.module.kotlin)

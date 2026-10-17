@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.38.0...notification-service-v0.39.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.1...notification-service-v0.38.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.0...notification-service-v0.37.1) (2026-10-14)
 
 

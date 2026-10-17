@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.2...customer-edge-v1.4.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+## [1.3.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.1...customer-edge-v1.3.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **customer-edge:** supply the configured pension provider on applications ([#12834](https://github.com/JiRaska/open-bank-oss/issues/12834)) ([bf4393c](https://github.com/JiRaska/open-bank-oss/commit/bf4393ca55acd29e1a074d4635978b9f213a4a09))
+
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.0...customer-edge-v1.3.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension,customer-edge:** replace deprecated JSON and query APIs ([#12947](https://github.com/JiRaska/open-bank-oss/issues/12947)) ([88dfa4f](https://github.com/JiRaska/open-bank-oss/commit/88dfa4f3d5e50111877c901ead84f48006692d27))
+
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.2.0...customer-edge-v1.3.0) (2026-10-16)
+
+
+### Features
+
+* **payment-batches:** persist company-scoped drafts ([#12259](https://github.com/JiRaska/open-bank-oss/issues/12259)) ([743987d](https://github.com/JiRaska/open-bank-oss/commit/743987d92e9b1ad076bccddcfbefce008ba81f5c))
+
 ## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.1.0...customer-edge-v1.2.0) (2026-10-14)
 
 

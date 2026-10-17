@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.6](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.5...mcp-service-v0.17.6) (2026-10-16)
+
+
+### Security
+
+* **opa:** authorize machines by the verified service_account flag (phase 2 of 2, gated on [#12538](https://github.com/JiRaska/open-bank-oss/issues/12538) rollout) ([#12537](https://github.com/JiRaska/open-bank-oss/issues/12537)) ([abf3aff](https://github.com/JiRaska/open-bank-oss/commit/abf3aff4f24fd170a6e1641b3008f9e4648a9572))
+
 ## [0.17.5](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.4...mcp-service-v0.17.5) (2026-10-14)
 
 

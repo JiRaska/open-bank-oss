@@ -73,6 +73,35 @@ prints nothing useful.
 - A user needs `firstName`/`lastName`/`email`, or Keycloak 26 answers "Account is not
   fully set up" with no hint why.
 
+## Role scope: `fullScopeAllowed: false` plus explicit `scopeMappings`
+
+Keycloak 26 deprecates the per-client "Full scope allowed" switch and logs a WARN for every
+client that leaves it on (its default). Every client in both templates therefore sets
+`fullScopeAllowed: false`, and the top-level `scopeMappings` array grants each of those
+clients every realm role the template declares. That is deliberately the same set full
+scope allowed: a token still carries exactly the user's effective realm roles, and a role
+added to a user later still reaches the token.
+
+**Turning the switch off without the mapping strips every role from every token** — M2M
+and user alike — and every `@RolesAllowed` endpoint answers 403. So:
+
+- A new realm role must be appended to every `scopeMappings` entry in the same change.
+- A new client gets `fullScopeAllowed: false` and its own `scopeMappings` entry.
+  `openbank-synthetic-catalog-read` is the one client with no entry: it is meant to carry
+  no realm roles at all.
+
+The equivalence was measured, not argued: import the template before and after into a
+local Keycloak at the `keycloak.yaml` version, then for every client × every user
+(service-account users included) call
+`GET /admin/realms/<r>/clients/<id>/evaluate-scopes/generate-example-access-token?userId=<u>`
+and compare `realm_access`, `resource_access`, `aud` and `scope`. All 1,769 pairs were
+identical. With `scopeMappings` removed, all 1,435 pairs that carry roles lost every one of
+them, which shows the comparison can see the failure it guards against.
+
+Like everything else here, this is a cold-start-only change. A running realm keeps its
+current switches until someone applies the same mapping with `kcadm` (see
+`openbank-infra/CLAUDE.md`). Add the mappings **before** you turn the switch off.
+
 ## Secrets
 
 Every client secret and user password is a `__PLACEHOLDER__` token. **This repo is
@@ -232,17 +261,16 @@ through the approved identity process and verify their live access tokens and th
 two-person approval flow before enabling publication. Do not make either approval role
 or `catalog:read` a default scope of the Admin UI client.
 
-**Separate and still open — the reason those 25 sites are unreachable is NOT these
-roles.** `catalog:read|author|publish` is not declared as a client scope in either realm
-template: `realm-template.json` has `clientScopes: []`, and `customers-realm-template.json`
-carries `profile`, `accounts:read`, `payments:initiate`, `statements:read`,
-`sca:enroll-device`, `sca:decide`, `telemetry:rum` — no catalog scope. So no token from a
-cold-started realm can carry the scope the augmentor reads, and the augmentor returns the
-identity unchanged. Whether the *live* realm has such a scope is unverified here on
-purpose: `check-realm-role-parity` states its own blind spot (`doesNotVerify:
-"client-role assignments; group membership; …"`) and client scopes are outside it, so
-nothing in this repo currently measures it. Wiring the scope is an authorization design
-decision (default vs optional scope, and which clients may request it), not a drift fix.
+**Catalog read and write grants remain separate.** `catalog:read` is declared in the
+staff realm imports and assigned to `openbank-admin-ui` as an optional scope in both
+Docker and GitOps. The Admin UI explicitly requests it during login; it is not a default
+grant. This enables a cold staff realm to issue the read scope consumed by the augmentor.
+`catalog:author` and `catalog:publish` are still absent, and no catalog scope is assigned
+by the customer realm. Write-scope provisioning remains a separate authorization decision.
+
+These source declarations and their offline parity regression do not establish the live
+realm's assignments or a deployed Admin UI image. The role-parity gate does not verify
+client-scope assignments; runtime access and import reconciliation require separate evidence.
 
 ### `clients[openbank-edge-webauthn].description`
 

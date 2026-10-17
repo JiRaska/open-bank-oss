@@ -1815,6 +1815,21 @@ gates:
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
 
+  # Deployed-code-lag report unit test. Guards the
+  # hours-scale "code on main is not running in sandbox" report that feeds the
+  # deploy-code-lag-watch escalation — aged own-source drift is reported, marker-only
+  # drift stays in deploy-drift-watch's lane.
+  - id: deploy-code-lag-report-unit-test
+    selftest_exempt: "is-a-test-suite"
+    name: "deployed-code-lag report unit test"
+    group: supplychain
+    mode: enforced
+    rationale: "Guards the hours-scale deployed-code-lag report: aged own-source drift feeds the deploy-code-lag-watch escalation, marker-only drift stays in deploy-drift-watch's lane — a silently wrong report either misses real lag or cries wolf on every marker."
+    review_after: "2027-04-01"
+    budget_seconds: 30
+    run: |
+      bash .github/scripts/test-deploy-code-lag-report.sh
+
   # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
   # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
   # machine, to decide whether OpenBank's audit log was tampered with. Nothing in CI can
@@ -3187,6 +3202,38 @@ gates:
     selftest_inputs: [".github/scripts/gen-ai-governance-snapshot.py"]
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
+
+  - id: agent-merge-recorder-selftest
+    name: "agent-merge recorder maps agent PRs to merge evidence and fails closed (ADR-0031 phase 3, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS test-record-agent-merge.py, a 30-case unittest suite
+      covering the registry-first agentId mapping (flaky-test-hunter/unit-return-<n> and
+      agent/<id>-<rest> resolve to the declared charter id from agents.yaml, unchartered
+      agent/ sessions record as external-coding-agent, longest match wins), declared-agent
+      author mapping, non-agent no-op exit 0, payload shape, token-file resolution (minted
+      header wins over env fallback, missing/empty file fails closed), human-merger
+      eligibility (Bot type, app/ and [bot] logins, declared-agent accounts all rejected),
+      and the workflow wiring (ARC runner, SHA pin, read-only permissions, mint step,
+      job-scoped credentials, no static JWT anywhere, failure tracking issue kept open
+      until verified backfill). Its red is reachable by construction: every case drives
+      the real script against stub events/servers.
+    budget_seconds: 60   # local HTTP stubs only, no network; ~2s observed
+    rationale: >-
+      ADR-0031 phase 3's "recorded human merge" evidence is produced by this CI-side recorder;
+      an untested mapping silently attributes merges to the wrong agent (or records nothing),
+      which is worse than no record — it is false provenance in an audit store. The recorder
+      deliberately FAILS CLOSED: it runs after the merge (pull_request closed), so red blocks
+      nothing, while the previous fail-soft design let a missing record hide behind a green
+      check — the un-falsifiable state this evidence exists to eliminate.
+    review_after: "2027-10-14"
+    # Subjects are test cases, not files: the floor drops the day someone deletes a case.
+    # 30 = the measured SUBJECTS count as of 2026-10-16 (25 after the human-merger cases,
+    # plus the registry-first agentId mapping cases); keep in lockstep.
+    min_subjects: 30
+    run: |
+      python3 .github/scripts/test-record-agent-merge.py
 
   # ==== kotlin =========================================================
   # ADR-0160 mechanism 1 / rules.yaml: change_requirements.event_consumer_liveness.
@@ -4914,6 +4961,27 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
+  # image, so every scheduler and outbound edge in it is live by default. The switch list is
+  # derived from the ledger source; a new scheduler without a switch is red until the instance
+  # turns it off or declares it entity-local.
+  - id: ledger-instance-switches-off
+    name: "bank-only ledger schedulers/edges off on non-bank instances (ADR-0337, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15   # ~3.4s measured locally incl. self-test
+    rationale: >-
+      A second ledger-service deployment runs the bank's image, so its schedulers, outbox
+      dispatcher and Kafka channel act on the company's books by default; the switch list is
+      derived from source so a new bank-only job cannot reach the instance unswitched.
+    review_after: '2027-04-10'
+    min_subjects: 5   # 11 measured 2026-10-10 (7 @Scheduled, 2 *enabled* props, 1 channel, 1 REST client)
+    selftest: python3 .github/scripts/check-ledger-instance-switches.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-ledger-instance-switches.py"]
+    run: |
+      python3 .github/scripts/check-ledger-instance-switches.py --root .
+
   - id: quoted-sequence-name-ratchet
     name: "quoted mixed-case Hibernate sequence ratchet (issue #6480, enforced)"
     group: data
@@ -6517,3 +6585,26 @@ gates:
     selftest_inputs: [".github/scripts/check-cronjob-max-success-age.py", "openbank-infra/gitops/components/observability/prometheus-rules-jobs.yaml"]
     run: |
       python3 .github/scripts/check-cronjob-max-success-age.py
+
+  # Phase 2 of the verified service_account flag. The rego that reads it treats a principal
+  # WITHOUT the field as a machine for staff rules, so it must not reach the cluster while any
+  # libs-runtime consumer still runs an image built before phase 1, which sends the field. This
+  # gate fails until every consumer's gitops pin is built from a commit that contains phase 1.
+  - id: pdp-flag-rollout-complete
+    name: "every libs-runtime consumer is pinned to an image that sends service_account (enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      A policy bundle pod-roll reaches every service at once, while a libs-runtime change reaches a
+      service only when its image is rebuilt and its gitops pin moves. If the fail-closed rego landed
+      first, every service still on the old libs would send no flag and lose all staff grants: a
+      fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
+      from history, and counts an unresolvable pin as lagging. It is monotonic once green.
+    review_after: "2027-04-11"
+    budget_seconds: 120                  # ~60 compare-API calls in a shallow checkout
+    min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
+    run: |
+      bash .github/scripts/check-pdp-flag-rollout.sh
+    selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]
