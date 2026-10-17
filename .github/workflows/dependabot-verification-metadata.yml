@@ -90,9 +90,10 @@ jobs:
           # its platform BOMs (quarkusProdRuntimeClasspathConfigurationPlatform) are never
           # touched by it, so artifacts that exist only there were never hashed — measured
           # as 38 missing for one service (#3028). quarkusDependenciesBuild resolves the
-          # Quarkus application model without running a full quarkusBuild.
+          # Quarkus application model without running a full quarkusBuild. cyclonedxBom
+          # resolves each component's .pom, which auto-deploy's SBOM step then verifies.
           ./gradlew --write-verification-metadata sha256 \
-            testClasses quarkusDependenciesBuild --no-daemon -q
+            testClasses quarkusDependenciesBuild cyclonedxBom --no-daemon -q
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false"
 
