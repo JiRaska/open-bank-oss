@@ -7,11 +7,14 @@ package com.openbank.simulation.invariants
 import com.openbank.clearing.domain.model.ClearingBatch
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
+import com.openbank.sdd.domain.model.MandateStatus
+import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.ClearingSettlementPosting
+import com.openbank.simulation.model.SddCollectionStatus
 import com.openbank.simulation.runner.World
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
@@ -393,6 +396,91 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Money-path SEPA Direct Debit adoption: every mandate left the setup confirmation (a B2B
+     * mandate parked in PENDING_CONFIRMATION never collected and never will — the debtor-bank
+     * confirmation is part of setup), and every collection reached a terminal outcome. All
+     * [com.openbank.simulation.model.SddCollectionStatus] values are terminal by construction;
+     * the check exists so a future non-terminal status fails here, not in the money sweep.
+     */
+    val sddCompleteness = object : Invariant {
+        private val terminal = SddCollectionStatus.entries.toSet()
+
+        override val name = "sdd-completeness"
+        override fun check(world: World): Violation? {
+            world.sdd.mandates.forEach { mandate ->
+                if (mandate.status == MandateStatus.PENDING_CONFIRMATION) {
+                    return Violation(
+                        name,
+                        "sdd mandate ${mandate.id} parked in PENDING_CONFIRMATION: never confirmed by debtor bank",
+                    )
+                }
+            }
+            world.sdd.collections.forEach { collection ->
+                if (collection.status !in terminal) {
+                    return Violation(name, "sdd collection ${collection.id} stuck in ${collection.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path SEPA Direct Debit adoption: the collection-to-journal correspondence. A SETTLED
+     * collection has exactly its debit journal (never reversed) and, when refunded, exactly its
+     * refund journal; a REJECTED / REFUSED / FAILED collection moved no money (the fail-closed
+     * authorisation and the pre-money fault mapping must never book a leg); a REVERSED
+     * collection's debit journal was unwound; and a one-off (OOFF) mandate never settles more
+     * than one collection — the money-side mirror of the policy's MD01 reuse reject. The
+     * cross-entry drift itself is covered by conservationOfMoney.
+     */
+    val sddMoneyConservation = object : Invariant {
+        override val name = "sdd-money-conservation"
+        override fun check(world: World): Violation? {
+            world.sdd.collections.forEach { collection ->
+                when (collection.status) {
+                    SddCollectionStatus.SETTLED -> {
+                        if (collection.debitJournalId == null || collection.reversed) {
+                            return Violation(name, "settled sdd collection ${collection.id} has no live debit journal")
+                        }
+                    }
+                    SddCollectionStatus.REJECTED, SddCollectionStatus.REFUSED, SddCollectionStatus.FAILED -> {
+                        if (collection.debitJournalId != null || collection.refundJournalId != null) {
+                            return Violation(
+                                name,
+                                "${collection.status} sdd collection ${collection.id} booked a journal: " +
+                                    "money moved for a non-settled collection",
+                            )
+                        }
+                    }
+                    SddCollectionStatus.REVERSED -> {
+                        if (collection.debitJournalId == null || !collection.reversed) {
+                            return Violation(
+                                name,
+                                "reversed sdd collection ${collection.id}: debit journal not unwound",
+                            )
+                        }
+                        if (collection.refundJournalId != null) {
+                            return Violation(name, "reversed sdd collection ${collection.id} carries a refund journal")
+                        }
+                    }
+                }
+                if (collection.refundJournalId != null && collection.status != SddCollectionStatus.SETTLED) {
+                    return Violation(name, "refund journal on a ${collection.status} sdd collection ${collection.id}")
+                }
+            }
+            world.sdd.mandates
+                .filter { it.sequenceType == SequenceType.OOFF }
+                .forEach { mandate ->
+                    val settled = world.sdd.collectionsOf(mandate.id).count { it.status == SddCollectionStatus.SETTLED }
+                    if (settled > 1) {
+                        return Violation(name, "one-off sdd mandate ${mandate.id} settled $settled collections")
+                    }
+                }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -405,6 +493,8 @@ object MoneyPathInvariants {
         sctInstCompleteness,
         clearingCompleteness,
         clearingBatchConservation,
+        sddCompleteness,
+        sddMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

@@ -13,6 +13,7 @@ import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
 import com.openbank.simulation.scenario.SctInstPaymentScenario
+import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
 
@@ -71,6 +72,15 @@ class SimulationRunner(
             // is a no-op today but kept for the same "settled before the invariant sweep"
             // convention as every other scenario above.
             ClearingCycleScenario.step(world)
+            context.scheduler.drain()
+            // Money-path SEPA Direct Debit adoption: interleave the mandate lifecycle + collection
+            // + refund path (real SddMandate aggregate through the real MandateLifecycle state
+            // machine, real CollectionAuthorisationPolicy decisions, real RefundPolicy windows)
+            // so its EUR debit/refund legs share the fault profile and are checked by the same
+            // invariant sweep every step. The EUR legs carry no CZK customer dimension, so the
+            // balance projection is untouched; the drain is a no-op today but kept for the same
+            // "settled before the invariant sweep" convention as every other scenario above.
+            SddCollectionScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,

@@ -266,6 +266,10 @@ const simulationScenarios = [
   // aggregates and the real NetSettlementJournalFactory settleable-currency/GL-pair resolution
   // under the fault injector (per-rail, per-currency batches with net-settlement legs).
   { classname: 'com.openbank.simulation.scenario.ClearingCycleScenarioTest', components: ['openbank-clearing-service'], scope: 'Clearing cycle batching, net-settlement posting, conflict reversal and reported-not-dropped scenario (pure JVM)' },
+  // Money-path SEPA Direct Debit adoption: drives the real sdd-service SddMandate aggregate through
+  // the real MandateLifecycle state machine, the real CollectionAuthorisationPolicy decisions and
+  // the real RefundPolicy windows under the fault injector (EUR debit/refund legs).
+  { classname: 'com.openbank.simulation.scenario.SddCollectionScenarioTest', components: ['openbank-sdd-service'], scope: 'SEPA Direct Debit mandate lifecycle, collection authorisation, EUR debit/refund and idle-expiry scenario (pure JVM, EUR scheme legs)' },
 ]
 
 async function simulationScenarioEvidence() {

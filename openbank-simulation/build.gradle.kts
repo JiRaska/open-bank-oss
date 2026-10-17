@@ -82,6 +82,14 @@ dependencies {
     // domain POJOs and the pure factory are referenced from this module).
     implementation(project(":openbank-clearing-service"))
 
+    // Money-path SEPA Direct Debit adoption: the harness drives the REAL sdd-service domain —
+    // the SddMandate aggregate, the pure MandateLifecycle state machine, the fail-closed
+    // CollectionAuthorisationPolicy and the RefundPolicy window rules (ADR-0036) — so
+    // SddCollectionScenario exercises production SDD semantics rather than a re-model. The
+    // domain package is framework-free (ADR-0002); pulling the whole project(...) is the
+    // established convention here (only the domain POJOs are referenced from this module).
+    implementation(project(":openbank-sdd-service"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

@@ -17,6 +17,7 @@ import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.ClearingCycleBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
+import com.openbank.simulation.model.SddCollectionBook
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.model.StatementCloseBook
 import java.math.BigDecimal
@@ -65,6 +66,12 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // the completeness/conservation invariants assert over — same terminal-state role as the
     // SEPA/settlement/sct-inst lists above.
     val clearing = ClearingCycleBook()
+
+    // Money-path SEPA Direct Debit adoption: the REAL `SddMandate` aggregates (sdd-service) driven
+    // through the real MandateLifecycle state machine by SddCollectionScenario, plus the
+    // per-collection record the money-side invariants assert over (production has no collection
+    // aggregate — the debit goes straight through the transaction path).
+    val sdd = SddCollectionBook()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every
