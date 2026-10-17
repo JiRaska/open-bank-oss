@@ -89,6 +89,26 @@ dependencies {
     // is framework-free (ADR-0002), so only the domain POJOs land on the classpath.
     implementation(project(":openbank-statement-service"))
 
+    // Issue #12839 follow-up (Refs #12830): the harness also drives the REAL standing-order
+    // domain aggregate — `StandingOrder.recordExecution` / `recordFailure` / `confirmExecution`
+    // / `calculateNextDate` (the daily-sweep schedule semantics, the MAX_CONSECUTIVE_FAILURES
+    // rule, and the ONCE-order lifecycle the service layer must honour). The domain package is
+    // framework-free (ADR-0002), so only the domain POJOs land on the classpath.
+    implementation(project(":openbank-standing-order-service"))
+
+    // ADR-0032 §B: the harness also drives the REAL fx-service screening domain — the pure,
+    // framework-free `ScreeningPolicy` verdict over a conversion's screened names (BLOCK / REVIEW
+    // / CLEAR with the 0.85 potential-hit block threshold mirrored from sanctions' isHighRisk).
+    implementation(project(":openbank-fx-service"))
+
+    // The harness also drives the REAL card-processing domain — the `CardAuthorization`
+    // aggregate (a derived, never-stored held amount) and the pure `AuthorizationLifecycle`
+    // policy (clear/reverse/expire with refusals as values, including the over-capture refusal
+    // that compares against the remainder so a near-Long.MAX presentment cannot wrap the
+    // check). The domain package is framework-free (ADR-0002), so only the domain POJOs land
+    // on the classpath.
+    implementation(project(":openbank-card-processing-service"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
