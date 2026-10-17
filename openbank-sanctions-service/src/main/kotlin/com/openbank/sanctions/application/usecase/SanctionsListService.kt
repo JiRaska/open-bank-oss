@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
@@ -14,11 +15,13 @@ import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.quarkus.logging.Log
+import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
 import java.time.Clock
+import java.time.Duration
 import java.time.ZonedDateTime
 import java.util.UUID
 
@@ -27,6 +30,8 @@ private suspend fun SanctionsListRepositoryImpl.requireList(listType: String): S
 
 private val INCOMPLETE_IMPORTS = setOf(ListImportOutcome.FAILED_KEPT_EXISTING, ListImportOutcome.EMPTY_FEED)
 
+// @Startup: the heartbeat gauge must exist from boot, not from the first request that touches this lazy bean.
+@Startup
 @ApplicationScoped
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
@@ -34,7 +39,13 @@ class SanctionsListService(
     private val clock: Clock,
     private val publisher: SanctionsChangePublisher,
     private val publicationFence: SanctionsImportPublicationFence? = null,
+    metrics: DomainMetrics? = null,
 ) {
+    // Null in unit tests that build the service by hand; the CDI constructor always supplies it.
+    private val liveness = metrics?.registerWorkflowLiveness(
+        "sanctions-list-refresh",
+        Duration.ofSeconds(REFRESH_TICK_SECONDS),
+    )
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
     // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
@@ -44,7 +55,8 @@ class SanctionsListService(
         importer: SanctionsImportService,
         publisher: SanctionsChangePublisher,
         publicationFence: SanctionsImportPublicationFence,
-    ) : this(repo, importer, Clock.systemUTC(), publisher, publicationFence)
+        metrics: DomainMetrics,
+    ) : this(repo, importer, Clock.systemUTC(), publisher, publicationFence, metrics)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -174,6 +186,7 @@ class SanctionsListService(
     // failure here is logged and the list is simply retried on its next due tick.
     suspend fun scheduledRefresh() {
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
+        var allListsHandled = true
         for (list in repo.listSanctionsLists()) {
             try {
                 if (list.enabled && list.isDueForScheduledRefresh(now)) {
@@ -186,6 +199,7 @@ class SanctionsListService(
                     publisher.publishPending(list.id, type)
                 }
             } catch (ex: Exception) {
+                allListsHandled = false
                 // observed-by: every enabled list is revisited on the next tick. Pending journal
                 // evidence is retained on failure and retried even outside the feed's cron minute.
                 // Aborting the sweep would let one unavailable list starve the other lists.
@@ -197,6 +211,8 @@ class SanctionsListService(
                 )
             }
         }
+        // A tick where any list failed is not a success: a feed that fails every minute must go stale.
+        if (allListsHandled) liveness?.recordSuccess()
     }
 
     private fun normalizeCronDays(raw: String?): String? {
@@ -250,6 +266,7 @@ class SanctionsListService(
 
     companion object {
         private val LIST_TYPES = SanctionsListType.entries.associateBy { it.name }
+        private const val REFRESH_TICK_SECONDS = 60L
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
     }
 }
