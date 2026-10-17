@@ -51,7 +51,7 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
-    // ADR-0334 S8: git-pact provider replay of customer-edge's consumer pact (@PactFolder).
+    // Provider replay classes remain in src/test/kotlin and compile with the test source set.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
@@ -65,9 +65,6 @@ dependencies {
     // #12379: consumer pact for the document-service render call (ADR-0063 P2).
     testImplementation(libs.pact.consumer)
     testImplementation(libs.wiremock.standalone)
-    // #12425: the provider replay of tax-reporting-service's consumer pact lands with that pact
-    // (stacked tax-reporting PR): check-pact-provider-replay.py rejects a replay class with no pact.
-    testImplementation(libs.pact.provider)
     // RepinCzDpsV1MigrationTest drives Flyway directly (target V11, then V12) against a real Postgres.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
 }

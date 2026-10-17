@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.26.0...party-service-v0.27.0) (2026-10-16)
+
+
+### Features
+
+* **tax-reporting:** CRS/FATCA information-exchange return family (ADR-0340) ([#13007](https://github.com/JiRaska/open-bank-oss/issues/13007)) ([8c85a90](https://github.com/JiRaska/open-bank-oss/commit/8c85a903f2511f6b0a421611d24bbe63f1ab3dc1))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.5...party-service-v0.26.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [0.25.5](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.4...party-service-v0.25.5) (2026-10-14)
 
 

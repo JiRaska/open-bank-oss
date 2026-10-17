@@ -74,6 +74,55 @@ response_attributes := {"four_eyes_required": true} if four_eyes_required
 # the narrow path below does not.)
 default policy_version := "unknown"
 
+# ---------------------------------------------------------------------------------------
+# Machine identity: the VERIFIED flag, never the name. `input.principal.id` is a NAME claim
+# (Quarkus takes it from upn/preferred_username), so `startswith(id, "service-account-")`
+# lets a machine token whose name is not `service-account-*` (a client_id-only token, a
+# renamed account, mapper drift) read as a person. The PEP (libs-runtime AuthorizeInterceptor)
+# derives `input.principal.service_account` from the verified JWT's claims only
+# (ServiceAccountIdentity.machineClientId) and, when known, `input.principal.client_id`.
+#
+# Rules that keep machines OUT test `not principal_is_machine`; rules that grant ONE client test
+# `machine_named("service-account-<client>")`. The id must match the fixed name AND a present
+# machine marker must carry the matching client_id derived from verified JWT claims. Never write
+# a bare id-prefix check for a named grant.
+#
+# FAIL CLOSED: only an explicit `service_account == false` from the PEP makes a principal a
+# person. An absent field (an old or broken PEP, a hand-built input) is a machine, so it
+# reaches no staff grant. Grants TO machines are below (machine_grant_ok).
+# ---------------------------------------------------------------------------------------
+principal_is_machine if not input.principal.service_account == false
+
+# Grants TO machines. Generic machine grants trust the marker; only while the field is ABSENT (a
+# PEP not yet rebuilt on phase-1 libs-runtime) does the legacy name prefix stand in. Named grants
+# use machine_named below and additionally bind client_id when the marker is present. An absent
+# field never grants a STAFF rule (principal_is_machine above). Remove legacy bodies once
+# check-pdp-flag-rollout.sh --live reports the whole fleet current.
+machine_grant_ok if input.principal.service_account == true
+
+machine_grant_ok if {
+	object.get(input.principal, "service_account", null) == null
+	startswith(input.principal.id, "service-account-")
+}
+
+machine_named(name) if {
+	input.principal.id == name
+	machine_grant_ok
+	# A present PEP marker is current ABI: bind the fixed name to the client id that the
+	# interceptor derived from azp + preferred_username. A renamed machine remains classified as
+	# a machine, but cannot borrow another client's named grant.
+	input.principal.service_account == true
+	input.principal.client_id == trim_prefix(name, "service-account-")
+}
+
+machine_named(name) if {
+	input.principal.id == name
+	# Phase-1 PEPs do not send these fields; keep their historical name-based grant only while
+	# the marker is absent. A present marker with missing client_id must deny.
+	object.get(input.principal, "service_account", null) == null
+	machine_grant_ok
+}
+
 policy_version := data.openbank.bundle.version
 
 # ---------------------------------------------------------------------------------------
@@ -174,7 +223,7 @@ allowed_reasons contains "party-self-service" if {
 # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
 allowed_reasons contains "matrix-allows" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in input.principal.roles
 	matrix_grants(input.action, role)
 }
@@ -230,7 +279,7 @@ allowed_reasons contains "operator-mcp-session" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	startswith(input.action, "mcp.session.")
 }
 
@@ -250,7 +299,7 @@ allowed_reasons contains "operator-compose-message" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "opsmessage.compose"
 }
 
@@ -262,8 +311,24 @@ allowed_reasons contains "operator-decide-message-approval" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "opsmessage.approval.decide"
+}
+
+# ADR-0333 D6: reviewed customer notification copy is edited and published by staff.
+# Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+# identity must never be able to change copy shown to a customer.
+allowed_reasons contains "operator-manage-notification-template" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {
+        "commstemplate.create",
+        "commstemplate.read",
+        "commstemplate.preview",
+        "commstemplate.publish",
+    }
 }
 
 # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
@@ -278,7 +343,7 @@ allowed_reasons contains "commstyle-publish" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "commstyle.publish"
 }
 
@@ -290,7 +355,7 @@ allowed_reasons contains "commstyle-decide-publish-approval" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "commstyle.approval.decide"
 }
 
@@ -413,7 +478,7 @@ allowed_reasons contains "customer-self-action" if {
 # ceremony's signers, so this grant cannot sign on someone else's behalf.
 allowed_reasons contains "edge-service-notification" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	some family in {"notification.", "device.", "document.", "signatureCeremony."}
 	startswith(input.action, family)
 }
@@ -429,7 +494,7 @@ allowed_reasons contains "edge-service-notification" if {
 # edge principal (least privilege; the edge exposes no route for those anyway).
 allowed_reasons contains "edge-service-consent" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {"consent.list", "consent.revoke"}
 }
 
@@ -441,7 +506,7 @@ allowed_reasons contains "edge-service-consent" if {
 # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
 allowed_reasons contains "edge-service-engagement" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
 }
 
@@ -463,7 +528,7 @@ allowed_reasons contains "edge-service-engagement" if {
 # through a different client, so their preferred_username is never "service-account-*".
 allowed_reasons contains "edge-service-audit-customer" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action == "audit.customerRead"
 }
 
@@ -492,7 +557,7 @@ allowed_reasons contains "edge-service-audit-customer" if {
 # staff sessions from this specific carve-out.
 allowed_reasons contains "m2m-sanctions-screening" if {
 	input.principal.type == "HUMAN"
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 	input.action == "sanctions.create"
 }
 
@@ -625,6 +690,7 @@ prohibited if {
 shared_m2m_identity if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
+	machine_grant_ok
 }
 
 # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.

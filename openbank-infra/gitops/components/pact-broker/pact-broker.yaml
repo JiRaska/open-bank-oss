@@ -44,9 +44,20 @@ spec:
       labels:
         app.kubernetes.io/name: pact-broker
     spec:
+      # Pod Security "restricted" (the namespace warns/audits at that level). The image already
+      # runs as uid 100 (ruby); declaring it is what lets runAsNonRoot be verified at admission.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: pact-broker
           image: docker.io/pactfoundation/pact-broker:2.138.0-pactbroker2.119.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 9292

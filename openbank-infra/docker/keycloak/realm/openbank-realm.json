@@ -25,6 +25,10 @@
         "description": "Bank administrator"
       },
       {
+        "name": "ROLE_MERGE_RECORDER",
+        "description": "CI merge-record ingest only (ADR-0031 phase 3): the record-agent-merge pipeline client carries exactly this role — least privilege, one endpoint, no interactive use"
+      },
+      {
         "name": "ROLE_OPERATOR",
         "description": "Bank operator"
       },
@@ -703,6 +707,15 @@
       }
     },
     {
+      "name": "fx:read",
+      "description": "FX rate sheet read (fx-rates-read journey, #12847). fx-service's FxScopeRoleMapper maps this scope to FX_SCOPE_READ, admitted by fx_rest_ext.rego on fx.list/fx.read only. Not a realm default: only a client that lists it receives it.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
       "name": "pension:legal-approve",
       "description": "Pension catalog legal approval; requires separately assigned legal realm role",
       "protocol": "openid-connect",
@@ -1288,6 +1301,26 @@
       "attributes": {}
     },
     {
+      "clientId": "openbank-synthetic-fx-read",
+      "name": "OpenBank Synthetic Journey: FX rate sheet read",
+      "description": "Synthetic-only identity for the fx-rates-read k6 journey (ADR-0252, #12847). No realm roles; its only grant is the fx:read client scope, which fx-service's FxScopeIdentityAugmentor maps to FX_SCOPE_READ and fx_rest_ext.rego admits on fx.list/fx.read only.",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "fx:read"
+      ],
+      "optionalClientScopes": [],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-admin-ui",
       "name": "OpenBank Admin UI",
       "enabled": true,
@@ -1617,6 +1650,12 @@
       "username": "service-account-openbank-synthetic-catalog-read",
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-catalog-read",
+      "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-synthetic-fx-read",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-fx-read",
       "realmRoles": []
     }
   ]

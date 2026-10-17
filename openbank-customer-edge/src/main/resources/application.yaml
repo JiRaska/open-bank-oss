@@ -139,6 +139,10 @@ openbank:
     # Pension lifecycle (ADR-0334 S6): participant side and unit register. Caller edges are
     # declared in the GitOps workload env; provider rollout remains gated by #12350.
     pension-service-url: ${PENSION_SERVICE_URL:https://pension-service.pension.svc:8443}
+    # openbank.edge.pension.provider-entity-id comes ONLY from env OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID
+    # (MicroProfile env mapping). It is the provider pension-service is configured with; the edge
+    # supplies it on every application. Deliberately not declared here: an empty `${X:}` expansion
+    # fails boot even for an Optional injection. Unset = onboarding refused (503).
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}
@@ -158,6 +162,9 @@ openbank:
     # that API is deployed would stop every business payment. Flip per environment in GitOps.
     business-approvals:
       enforce: ${BUSINESS_APPROVALS_ENFORCE:false}
+    # Draft storage stays inaccessible to customers until the signed batch release path is reviewed.
+    business-payment-batches:
+      enabled: ${BUSINESS_PAYMENT_BATCHES_ENABLED:false}
     # Client-visible feature flags, published as X-Edge-Features (#10281). standingorders-replace lets an
     # edit name replacesStandingOrderId; turn it on only after standing-order-service (which does the
     # atomic swap) is rolled out — an older one would create a second order and cancel nothing.

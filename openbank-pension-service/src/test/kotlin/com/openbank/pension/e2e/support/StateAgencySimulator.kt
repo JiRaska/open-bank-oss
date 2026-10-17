@@ -18,7 +18,7 @@ import java.math.BigDecimal
  * `L;claimId;contractRef;participantRef;YYYY-MM;contribution;requested` lines.
  * Result: `R;FORMAT;RESULT;year;quarter;aggregatePaid`, then `P;claimId;paid`,
  * `Q;claimId;paid;code` (partial) or `X;claimId;code` (not paid).
- * Return report: `H;FORMAT;RETURNS;IČO;YYYY-MM;count;total`, then `V;returnId;contractRef;cause;amount;month`.
+ * Return report: `H;FORMAT;RETURNS;IČO;YYYY-MM;currency;count;total`, then `V;returnId;contractRef;cause;amount;month`.
  * Return result: `R;FORMAT;RETURNS-RESULT;YYYY-MM`, then `C;returnId` or `E;returnId;code`.
  */
 object StateAgencySimulator {

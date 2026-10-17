@@ -40,13 +40,13 @@ rules_mock := {
 	"shared_m2m_write_prohibition": {"reasons": []},
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-supervisor := {"type": "HUMAN", "id": "u-sup", "roles": ["ROLE_SUPERVISOR"]}
+supervisor := {"service_account": false, "type": "HUMAN", "id": "u-sup", "roles": ["ROLE_SUPERVISOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -145,6 +145,20 @@ test_edge_may_read if {
 	decision.allow == true
 }
 
+test_edge_may_manage_own_balance_alert if {
+	read := rest.allow with input as {"principal": edge, "action": "balance.alert.read"}
+		with data.rules as rules_mock
+	update := rest.allow with input as {"principal": edge, "action": "balance.alert.update"}
+		with data.rules as rules_mock
+	read.allow == true
+	update.allow == true
+}
+
+test_other_service_may_not_change_balance_alert if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "balance.alert.update"}
+		with data.rules as rules_mock
+}
+
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-balance-write is the EXTENSION's reason, so its presence
 # proves the ext; matrix-allows proving the base+data wiring comes from test_edge_may_read above
@@ -156,11 +170,11 @@ test_extension_is_loaded if {
 
 # --- #10486 batch 2: transaction-service and settlement-service own identities (ROLE_API only) ---
 
-transaction_m2m := {"type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
+transaction_m2m := {"service_account": true, "client_id": "openbank-transaction", "type": "HUMAN", "id": "service-account-openbank-transaction", "roles": ["ROLE_API"]}
 
-settlement_m2m := {"type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
+settlement_m2m := {"service_account": true, "client_id": "openbank-settlement", "type": "HUMAN", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]}
 
-other_role_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_role_api_sa := {"service_account": true, "client_id": "openbank-mcp-service", "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
 balance_actions := {
 	"balance.read", "balance.hold", "balance.holdRelease", "balance.credit", "balance.debit",
@@ -227,8 +241,59 @@ test_batch2_balance_rules_do_not_admit_the_shared_client if {
 
 test_settlement_cover_rejects_wrong_principal_type if {
 	rest.allow == false with input as {
-		"principal": {"type": "AGENT", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-settlement", "type": "AGENT", "id": "service-account-openbank-settlement", "roles": ["ROLE_API"]},
 		"action": "balance.hold",
 	}
 		with data.rules as rules_mock
+}
+
+# --- ADR-0340 B: tax-reporting's own identity may read balances, nothing else ---
+
+tax_reporting_m2m := {"service_account": true, "client_id": "openbank-tax-reporting", "type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_may_read_balance_via_its_identity_rule if {
+	decision := rest.allow with input as {"principal": tax_reporting_m2m, "action": "balance.read"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"service-tax-reporting-balance-read" in rest.allowed_reasons with input as {"principal": tax_reporting_m2m, "action": "balance.read"}
+		with data.rules as rules_mock
+}
+
+test_tax_reporting_denied_every_other_balance_action if {
+	every action in balance_actions - {"balance.read"} {
+		rest.allow == false with input as {"principal": tax_reporting_m2m, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_tax_reporting_balance_rule_does_not_admit_other_service_accounts if {
+	not "service-tax-reporting-balance-read" in rest.allowed_reasons with input as {"principal": other_role_api_sa, "action": "balance.read"}
+		with data.rules as rules_mock
+	not "service-tax-reporting-balance-read" in rest.allowed_reasons with input as {"principal": services_m2m, "action": "balance.read"}
+		with data.rules as rules_mock
+}
+
+# Current PEP marker must be explicit true with the matching client. Absent is the
+# deliberate legacy ABI; explicit null is malformed and must not borrow that path.
+tax_reporting_guard_identity := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_current_and_absent_legacy_allowed if {
+	every principal in [tax_reporting_guard_identity, object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "openbank-tax-reporting"})] {
+		rest.allow.allow with input as {"principal": principal, "action": "balance.read"}
+	}
+}
+
+test_tax_reporting_explicit_null_marker_denied if {
+	not rest.allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, {"service_account": null, "client_id": "openbank-tax-reporting"}), "action": "balance.read"}
+}
+
+test_tax_reporting_false_or_bad_client_binding_denied if {
+	every changed in [
+		{"service_account": false, "client_id": "openbank-tax-reporting"},
+		{"service_account": true, "client_id": "another-client"},
+		{"service_account": true},
+		{"service_account": true, "client_id": "openbank-tax-reporting", "id": "service-account-another-client"},
+	] {
+		not rest.allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, changed), "action": "balance.read"}
+	}
 }
