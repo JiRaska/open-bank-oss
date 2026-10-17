@@ -24,7 +24,7 @@ object BillingJournalFactory {
 
     /**
      * The customer leg's class comes from the pinned revision; the ledger maps (class, PRINCIPAL,
-     * currency) to that currency's deposit-control GL (ledger V31). In CZK that is 2100, the very
+     * currency) to that currency's deposit-control GL (ledger V32). In CZK that is 2100, the very
      * account billing always debited; `FeeJournalsUnchangedTest` proves CZK is byte-identical. A
      * non-CZK fee debits its own control account (2101-2103) -- the old fixed CZK account was refused
      * by the ledger for any other currency, so no non-CZK fee ever posted through it.

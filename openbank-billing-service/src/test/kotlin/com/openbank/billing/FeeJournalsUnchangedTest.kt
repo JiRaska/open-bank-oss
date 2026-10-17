@@ -176,8 +176,8 @@ class FeeJournalsUnchangedTest {
     @Test
     fun `the literal map equals the billing rows the ledger migration seeds`() {
         val migration = listOf(
-            Path.of("../openbank-ledger-service/src/main/resources/db/migration/V31__accounting_class_gl_map.sql"),
-            Path.of("openbank-ledger-service/src/main/resources/db/migration/V31__accounting_class_gl_map.sql"),
+            Path.of("../openbank-ledger-service/src/main/resources/db/migration/V32__accounting_class_gl_map.sql"),
+            Path.of("openbank-ledger-service/src/main/resources/db/migration/V32__accounting_class_gl_map.sql"),
         ).firstOrNull { Files.exists(it) }
         assertThat(migration).describedAs("the ledger migration must be readable from the billing build").isNotNull()
         val row = Regex("""\('([A-Z_]+)',\s*'([A-Z_]+)',\s*'([A-Z]{3})',\s*'(\d{4})'\)""")
@@ -216,7 +216,7 @@ private data class Landed(
     val subAccountId: UUID?,
 )
 
-/** The billing rows of the ledger map (V31), as chart ids; 2100 is the chart's `...0002`. */
+/** The billing rows of the ledger map (V32), as chart ids; 2100 is the chart's `...0002`. */
 private object LedgerMap {
     fun idOf(code: String): UUID = UUID.fromString(
         if (code == "2100") "a0000000-0000-0000-0000-000000000002" else "a0000000-0000-0000-0000-00000000$code",
