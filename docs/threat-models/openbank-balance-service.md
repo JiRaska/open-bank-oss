@@ -461,3 +461,21 @@ columns), so a stored row cannot fail to load; a sandbox read-only check on 2026
 off-scale amount or non-ISO currency in `balances`, `balance_holds`, `balance_movement` or
 `ledger_projection_event`. The `Balance` aggregate itself still holds `BigDecimal` fields.
 No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+## Active-holds read boundary
+
+`GET /api/v1/balances/{accountId}/holds` adds a read of hold ids, amounts, currencies,
+reasons, references and lifecycle timestamps for agent-service's `get_balance_holds` tool.
+Cross-account disclosure reveals financial metadata even though this endpoint moves no money.
+The handler retains the sibling read role gate (API/viewer/operator/admin) and `balance.read`
+OPA check. With `X-Customer-Party-Id` from trusted customer-edge, the account-service owner must
+match; unknown accounts and mismatches receive the same 404. Without that header this is the
+existing service-reader path: header absence is not proof of retail ownership. Do not treat
+coarse ROLE_API admission or test identities as evidence of a verified production caller.
+
+The repository excludes released holds and expiry at/before the injected service clock.
+It does not release the expired reservation or change available/reserved balances, and emits no
+outbox event. Consumers must not infer released funds from an absent row. Tests cover real
+HTTP/DB filtering and unchanged rows, anonymous/wrong-role rejection, and owner-guard delegation;
+consumer/provider Pact replay pins the response and the missing-identity refusal. These checks
+do not replace review of trusted header provenance, live OPA policy or production credentials.
