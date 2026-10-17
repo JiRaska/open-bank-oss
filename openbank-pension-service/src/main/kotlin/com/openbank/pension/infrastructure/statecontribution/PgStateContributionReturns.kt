@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.statecontribution
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.pension.application.port.out.ReturnReport
 import com.openbank.pension.application.port.out.StateContributionReturnRepository
 import com.openbank.pension.domain.statecontribution.ReturnCause
@@ -102,8 +103,7 @@ class PgStateContributionReturns(client: Pool) :
         return client.withTransaction { conn ->
             conn.preparedQuery(
                 "INSERT INTO pension_return_reports (id, month, return_ids, payload, channel_reference, " +
-                    "result_applied, " +
-                    "created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                    "result_applied, created_at, currency, total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             ).execute(
                 Tuple.tuple(
                     listOf(
@@ -114,6 +114,8 @@ class PgStateContributionReturns(client: Pool) :
                         report.channelReference,
                         report.resultApplied,
                         utc(report.createdAt),
+                        report.total.currency.code,
+                        report.total.amount,
                     ),
                 ),
             ).flatMap {
@@ -179,6 +181,7 @@ private fun Row.toReport() = ReturnReport(
     channelReference = getString("channel_reference"),
     resultApplied = getBoolean("result_applied"),
     createdAt = getOffsetDateTime("created_at").toInstant(),
+    total = Money.of(getBigDecimal("total"), getString("currency")),
 )
 
 private fun utc(i: Instant): OffsetDateTime = i.atOffset(ZoneOffset.UTC)
