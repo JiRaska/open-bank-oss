@@ -418,7 +418,7 @@ not change any existing request's outcome until explicitly flipped.
   (decision) + `AccountApiIT` (end-to-end header behaviour).
 - **2026-05-30** — Added `account_outbox_seq` (Hibernate sequence fix). Additive DDL only:
   no new data flow, external surface or trust boundary. Risk class = **availability** (a missing/
-  wrong sequence breaks INSERTs); mitigated by `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  wrong sequence breaks INSERTs); mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-01** — IBAN generation correctness (`IbanGenerator` + new `CzechAccountNumber` in
   openbank-libs). The previous generator emitted a padded `System.nanoTime()` tail under a hard-coded
   `0000` bank code: ISO 13616 mod-97-valid but with a **BBAN that no Czech bank could issue** (no ČNB

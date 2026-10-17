@@ -375,7 +375,7 @@ not change any existing request's outcome until explicitly flipped.
   mitigated by `DomesticPaymentOutboxBacklogGaugeTest`. No DB change; rollback = revert the commit.
 - **2026-05-30** — Added `domestic_payments_seq`, `domestic_payment_outbox_seq` (Hibernate fix).
   Additive DDL only — no new flow/surface/boundary. Risk class = **availability**, mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `domestic-payment → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.
   **Shadow = fail-open and never-enforce**: `DomesticPaymentService.scoreFraudShadow()` wraps the
