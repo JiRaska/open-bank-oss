@@ -161,27 +161,26 @@ class PensionCoInstanceSwitchesIT {
             "LedgerOutboxDispatcher",
         )
 
-        @Suppress("UNCHECKED_CAST")
         private fun instanceEnv(): Map<String, String> {
             val docs = File("$COMPONENT/ledger-service.yaml").reader().use { r -> Yaml().loadAll(r).toList() }
-            val rollout = docs.filterIsInstance<Map<String, Any?>>().single { it["kind"] == "Rollout" }
-            val containers = ((rollout["spec"] as Map<String, Any?>)["template"] as Map<String, Any?>)
-                .let { (it["spec"] as Map<String, Any?>)["containers"] as List<Map<String, Any?>> }
-            val env = containers.single { it["name"] == "ledger-service" }["env"] as List<Map<String, Any?>>
-            return env.filter { it["value"] != null }.associate { it["name"] as String to it["value"].toString() }
+            val rollout = docs.filterIsInstance<Map<*, *>>().single { it["kind"] == "Rollout" }
+            val containers = ((rollout["spec"] as Map<*, *>)["template"] as Map<*, *>)
+                .let { (it["spec"] as Map<*, *>)["containers"] as List<*> }
+            val env = containers.map { it as Map<*, *> }.single { it["name"] == "ledger-service" }["env"] as List<*>
+            return env.map { it as Map<*, *> }.filter { it["value"] != null }
+                .associate { it["name"] as String to it["value"].toString() }
         }
 
         /** Writes the ConfigMap's callback SQL where Flyway's filesystem location will find it. */
-        @Suppress("UNCHECKED_CAST")
         private fun chartOfAccountsDir(): File {
             val cm = File("$COMPONENT/chart-of-accounts.yaml").reader().use { r -> Yaml().loadAll(r).toList() }
-                .filterIsInstance<Map<String, Any?>>().single { it["kind"] == "ConfigMap" }
-            val data = cm["data"] as Map<String, String>
+                .filterIsInstance<Map<*, *>>().single { it["kind"] == "ConfigMap" }
+            val data = cm["data"] as Map<*, *>
             val dir = File("build/pension-co-flyway").apply {
                 deleteRecursively()
                 mkdirs()
             }
-            data.forEach { (name, sql) -> File(dir, name).writeText(sql) }
+            data.forEach { (name, sql) -> File(dir, name as String).writeText(sql as String) }
             return dir
         }
     }
