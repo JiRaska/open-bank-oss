@@ -208,12 +208,20 @@ class InterestService(
     ): Uni<InterestRateConfig?> = when {
         pinRowExists -> Uni.createFrom().failure(unresolvable(request))
         effective == null -> Uni.createFrom().item<InterestRateConfig?>(null)
-        else -> pins.pinIfCatalogSourced(request.accountId, request.productId, request.currency, effective)
-            .flatMap { wrote ->
-                // First writer wins: re-read so a concurrent pin is honoured.
-                pins.findPinnedConfig(request.accountId, request.productId, request.currency)
-                    .flatMap { reread -> settle(request, effective, wrote, reread, pins) }
+        else -> pins.hasCatalogHistory(request.accountId, request.productId, request.currency).flatMap { history ->
+            if (history) {
+                // Accrued under a catalog config before but no pin: the backfill missed it. Fail closed -
+                // accruing at today's catalog rate would reprice the contract.
+                Uni.createFrom().failure(unresolvable(request))
+            } else {
+                pins.pinIfCatalogSourced(request.accountId, request.productId, request.currency, effective)
+                    .flatMap { wrote ->
+                        // First writer wins: re-read so a concurrent pin is honoured.
+                        pins.findPinnedConfig(request.accountId, request.productId, request.currency)
+                            .flatMap { reread -> settle(request, effective, wrote, reread, pins) }
+                    }
             }
+        }
     }
 
     private fun unresolvable(request: AccrualRequest) =

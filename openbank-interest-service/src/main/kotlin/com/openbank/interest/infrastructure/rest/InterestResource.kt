@@ -10,6 +10,7 @@ import com.openbank.interest.application.port.`in`.GetAccrualsUseCase
 import com.openbank.interest.application.port.`in`.ManageRateConfigUseCase
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualSummary
+import com.openbank.interest.domain.model.CatalogRevisionUnresolvableException
 import com.openbank.interest.domain.model.CatalogSourcedRateException
 import com.openbank.interest.domain.model.DayCount
 import com.openbank.interest.domain.model.InterestAccrual
@@ -77,6 +78,10 @@ class InterestResource(
             .onFailure(RateConfigNotFoundException::class.java).recoverWithItem { e ->
                 // No rate for this (account/product, currency): a client/config condition, not a 500.
                 Response.status(422).entity(mapOf("error" to e.message)).build()
+            }
+            .onFailure(CatalogRevisionUnresolvableException::class.java).recoverWithItem { e ->
+                // ADR-0341: the pinned revision cannot be resolved; refused rather than repriced. Retry after repair.
+                Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
             }
         // The untyped `.onFailure().recoverWithItem { serverError }` that used to sit here is gone
         // (#3057): it stamped 500 over failures libs-runtime already maps correctly — an

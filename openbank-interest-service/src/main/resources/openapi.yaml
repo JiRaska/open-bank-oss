@@ -44,6 +44,10 @@ paths:
           description: >-
             No active rate config for the (account/product, currency) — the account has no rate in
             the requested currency, so nothing is accrued (issue #1265).
+        '409':
+          description: >-
+            The account is pinned to a catalog revision (ADR-0341) whose rate cannot be resolved, or
+            has catalog accrual history but no pin. Refused rather than accrued at a different rate.
 
   /api/v1/interest/accrue/all:
     post:

@@ -392,6 +392,18 @@ class RateRevisionPinRepositoryImpl @Inject constructor(
         }.map { it?.let(mapper::toDomain) }
 
     @WithSession
+    override fun hasCatalogHistory(accountId: UUID, productId: String, currency: String): Uni<Boolean> =
+        sf.withSession { s ->
+            s.createNativeQuery<Number>(
+                "SELECT COUNT(*) FROM interest_accruals ia JOIN catalog_interest_rate_snapshots cs " +
+                    "ON cs.config_id = ia.config_id AND cs.outcome = 'APPLIED' " +
+                    "WHERE ia.account_id = :a AND ia.product_id = :prod AND ia.currency = :ccy " +
+                    "AND ia.status <> 'REVERSED'",
+            ).setParameter("a", accountId).setParameter("prod", productId).setParameter("ccy", currency)
+                .singleResult.map { it.toLong() > 0 }
+        }
+
+    @WithSession
     override fun hasPin(accountId: UUID, productId: String, currency: String): Uni<Boolean> = sf.withSession { s ->
         s.createQuery(
             "SELECT COUNT(p) FROM AccountRateRevisionPinEntity p WHERE p.accountId = :a " +

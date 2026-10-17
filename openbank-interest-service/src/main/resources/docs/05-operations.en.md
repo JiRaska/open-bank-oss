@@ -107,6 +107,20 @@ Cause: no `interest_rate_configs` row active for the product on `toDate`. Action
 
 By design: `interest-service` moves no cash. The `interest.withholding.remitted.v1` event delegates the odvod to the downstream tax/reporting consumer, which flips the batch to `SETTLED`. Check the consumer, not this service.
 
+## Catalog revision pins (ADR-0341)
+
+With catalog sync on, an account accrues from the published revision it was **pinned** to, never from
+"the currently effective" rate. A row in `account_rate_revision_pins` is written at the account's first
+catalog-sourced accrual. V19 backfilled a pin for every existing account from its latest non-reversed
+accrual under a catalog-sourced config; operator-managed accounts get no pin and keep operator semantics.
+
+**Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`; the daily run skips the
+account with a WARN and counts `openbank.interest.accrual.catalog.revision.unresolved`) when a pin row
+exists but its revision does not resolve to a cached rate config, or when the account has catalog accrual
+history but no pin. It is never accrued at the currently effective rate. Repair the cache (or the missing
+pin) and re-run; the accrual is idempotent per day. A catalog-sourced effective rate used for an unpinned
+account is counted by `openbank.interest.accrual.catalog.rate.unpinned` and should stay at zero.
+
 ## Tech-stack matrix
 
 Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):

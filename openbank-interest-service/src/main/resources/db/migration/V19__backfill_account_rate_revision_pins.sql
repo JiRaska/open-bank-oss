@@ -4,7 +4,7 @@
 -- ADR-0341: V18 pins an account at its FIRST accrual. Accounts that already accrued before catalog
 -- sync was switched on have no pin, and without this backfill the first post-sync accrual would pin
 -- them to whatever revision is current - a silent repricing of a live contract. Pin every existing
--- account to the revision whose cached config its LATEST accrual used. An account whose latest
+-- account to the revision whose cached config its latest non-reversed CATALOG-SOURCED accrual used. An account whose latest
 -- accrual used an operator-managed config (no catalog snapshot) gets no pin and keeps operator
 -- semantics. Reversed accruals are not history. Idempotent: an existing pin is never replaced.
 
@@ -23,16 +23,19 @@ BEGIN
 END $$;
 
 INSERT INTO account_rate_revision_pins (id, account_id, product_id, currency, revision_id, pinned_at)
-SELECT gen_random_uuid(), l.account_id, l.product_id, l.currency, s.revision_id, NOW()
+SELECT gen_random_uuid(), l.account_id, l.product_id, l.currency, l.revision_id, NOW()
 FROM (
-    SELECT DISTINCT ON (account_id, product_id, currency)
-           account_id, product_id, currency, config_id
-    FROM interest_accruals
-    WHERE status <> 'REVERSED'
-    ORDER BY account_id, product_id, currency, accrual_date DESC
+    -- The latest NON-REVERSED accrual that ran under a catalog-sourced config: an account whose most
+    -- recent accrual was operator-managed but which accrued under a catalog config earlier is still
+    -- pinned to that earlier revision.
+    SELECT DISTINCT ON (ia.account_id, ia.product_id, ia.currency)
+           ia.account_id, ia.product_id, ia.currency, s.revision_id
+    FROM interest_accruals ia
+    JOIN catalog_interest_rate_snapshots s
+      ON s.config_id = ia.config_id AND s.outcome = 'APPLIED'
+    WHERE ia.status <> 'REVERSED'
+    ORDER BY ia.account_id, ia.product_id, ia.currency, ia.accrual_date DESC
 ) l
-JOIN catalog_interest_rate_snapshots s
-  ON s.config_id = l.config_id AND s.outcome = 'APPLIED'
 ON CONFLICT (account_id, product_id, currency) DO NOTHING;
 
 -- Rollback (data only, no schema change):

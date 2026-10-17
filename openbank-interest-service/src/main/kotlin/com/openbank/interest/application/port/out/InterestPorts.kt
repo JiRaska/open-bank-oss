@@ -190,6 +190,9 @@ interface RateRevisionPinRepository {
     /** The config of the revision [accountId] is pinned to for (product, currency), or null if unpinned. */
     fun findPinnedConfig(accountId: UUID, productId: String, currency: String): Uni<InterestRateConfig?>
 
+    /** True when the account has a non-reversed accrual that ran under a catalog-sourced config. */
+    fun hasCatalogHistory(accountId: UUID, productId: String, currency: String): Uni<Boolean>
+
     /** True when a pin ROW exists for the account, whether or not its revision resolves to a config. */
     fun hasPin(accountId: UUID, productId: String, currency: String): Uni<Boolean>
 
