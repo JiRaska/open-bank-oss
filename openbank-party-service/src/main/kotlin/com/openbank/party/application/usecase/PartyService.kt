@@ -55,6 +55,45 @@ import java.util.UUID
 
 private const val RC_KEY_VERSION = 1
 
+/**
+ * A national / personal identifier as an operator types it, for ANY country — birth number (CZ/SK),
+ * PESEL, SSN, NINO, personnummer, codice fiscale, a tax id… After stripping the separators people
+ * write (space . / - + parentheses) it is 6–20 alphanumerics with at least 4 digits. Such a term is matched
+ * EXACTLY (never as a substring), so the search cannot be used to enumerate identifiers by prefix.
+ */
+private val SEPARATORS = Regex("""[\s./()+-]""")
+
+internal fun normalizeIdentifier(term: String): String? {
+    val n = term.replace(SEPARATORS, "").lowercase()
+    if (n.length !in 6..20 || !n.all { it.isLetterOrDigit() } || n.count { it.isDigit() } < 4) return null
+    return n
+}
+
+// Date of birth as one token of the term. Day-first with `.`/`/`/`-` (most of the world), ISO
+// year-first, and month-first only where it is the sole valid reading (`12/31/1985`). An ambiguous
+// `03/04/1985` yields BOTH dates: the name part still has to match, so this widens nothing.
+private val YEAR_FIRST = Regex("""(?<!\d)(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?!\d)""")
+private val YEAR_LAST_STRICT = Regex("""(?<!\d)(\d{1,2})(?:\.\s?|[/-])(\d{1,2})(?:\.\s?|[/-])(\d{4})(?!\d)""")
+
+private fun dateOrNull(y: Int, m: Int, d: Int) = runCatching { java.time.LocalDate.of(y, m, d) }.getOrNull()
+
+/** Splits date(s) of birth out of a search term: the ISO candidates and the remaining text. */
+internal fun splitBirthDate(term: String): Pair<List<String>, String> {
+    val yearFirst = YEAR_FIRST.find(term)
+    val match = yearFirst ?: YEAR_LAST_STRICT.find(term) ?: return emptyList<String>() to term
+    val g = match.groupValues
+    val dates = if (match === yearFirst) {
+        listOfNotNull(dateOrNull(g[1].toInt(), g[2].toInt(), g[3].toInt()))
+    } else {
+        val a = g[1].toInt()
+        val b = g[2].toInt()
+        val y = g[3].toInt()
+        listOfNotNull(dateOrNull(y, b, a), dateOrNull(y, a, b)).distinct()
+    }
+    if (dates.isEmpty()) return emptyList<String>() to term
+    return dates.map { it.toString() } to term.removeRange(match.range).trim().replace(Regex("""\s+"""), " ")
+}
+
 /** A party in either terminal state is outside the world a mandate describes (ADR-0284 D3). */
 private val MANDATE_INELIGIBLE = setOf(PartyStatus.CLOSED, PartyStatus.MERGED)
 
@@ -403,19 +442,42 @@ class PartyService : PartyUseCase {
     }
 
     // ADR-0055 bounded search, extended to business keys by ADR-0228 D1 (name, email, phone,
-    // tax id, registration number — never birth number). The shared SearchRequest contract owns
+    // tax id, registration number). The shared SearchRequest contract owns
     // the DB-safety guardrails (page-size clamp, min-term length, LIKE-escaping); this service
     // owns the SQL and the keyset cursor. A blank/`*`/sub-2-char term has no fulltext predicate —
     // we return an empty page rather than enumerate the whole table from the /search surface
     // (use GET /parties to list). Data-minimised response via toSimpleResponse.
+    //
+    // Two operator-facing shapes on top of the substring match (a person is looked up by name,
+    // birth number or date of birth — never by UUID):
+    //  - a national/personal identifier of any country (normalizeIdentifier) is an EXACT match
+    //    on the normalised tax id / registration number — never a prefix, so the surface cannot
+    //    enumerate identifiers. A Czech/Slovak birth number additionally resolves through the RČ
+    //    blind index (the one country with a pepper-hashed column today; add others the same way);
+    //  - a date of birth inside the term (`Novák 15.6.1985`, `Smith 1985-06-15`, `Doe 12/31/1985`)
+    //    narrows the name match to that date. The name part must still clear the 2-char minimum,
+    //    so a bare date never lists everyone born that day.
     override suspend fun searchParties(query: SearchPartiesQuery): CursorPage<Party> {
-        val req = SearchRequest.of(query.q, query.limit, query.cursor)
+        val raw = query.q?.trim().orEmpty()
+        val (birthDates, nameTerm) = splitBirthDate(raw)
+        // Date first: `15.6.1985` or `Smith 1985-06-15` would otherwise normalise to an identifier.
+        if (birthDates.isEmpty()) normalizeIdentifier(raw)?.let { id ->
+            val limit = query.limit.coerceIn(1, 100)
+            val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
+                resolvePartyByRc(ResolvePartyByRcCommand(raw))
+            } else {
+                null
+            }
+            val hits = (listOfNotNull(byIndex) + partyRepo.findByIdentifier(id, limit)).distinctBy { it.id }.take(limit)
+            return CursorPage(data = hits, pagination = PageInfo(limit = limit, hasNextPage = false))
+        }
+        val req = SearchRequest.of(if (birthDates.isNotEmpty()) nameTerm else query.q, query.limit, query.cursor)
         if (!req.hasTerm) {
             return CursorPage(data = emptyList(), pagination = PageInfo(limit = req.limit, hasNextPage = false))
         }
         val afterId = req.cursor?.let { runCatching { UUID.fromString(CursorEncoder.decode(it)) }.getOrNull() }
         // Fetch limit+1 to detect a next page without a second count query.
-        val rows = partyRepo.searchByBusinessKeys(req.term!!, req.limit + 1, afterId)
+        val rows = partyRepo.searchByBusinessKeys(req.term!!, req.limit + 1, afterId, birthDates)
         val hasNext = rows.size > req.limit
         val pageRows = if (hasNext) rows.dropLast(1) else rows
         val nextCursor = if (hasNext &&

@@ -351,6 +351,8 @@ COPY --from=changelog-collector /changelog-bundle ./changelog-bundle
 # tree — do NOT add --chmod=0644 to a directory COPY, it would strip the dir +x
 # bit and break traversal.)
 COPY --chmod=0644 openbank-admin-ui/test-results.json ./test-results.json
+# Test-file inventory (what EXISTS, vs test-results.json = what reported). See scripts/collect-test-inventory.mjs.
+COPY --chmod=0644 openbank-admin-ui/test-inventory.json ./test-inventory.json
 # Quality report — contract pairs + pitest mutation scores (read-only consumer;
 # src/app/api/quality-report/route.ts, ADR-0063). build-push-admin-ui.sh runs
 # scripts/collect-quality-report.mjs before the build so this file always exists
@@ -425,6 +427,7 @@ ENV OPENBANK_OPENAPI_BUNDLE=/app/openapi-bundle
 ENV OPENBANK_FLAGS_BUNDLE=/app/flags-bundle
 ENV OPENBANK_CHANGELOG_BUNDLE=/app/changelog-bundle
 ENV OPENBANK_TEST_RESULTS=/app/test-results.json
+ENV OPENBANK_TEST_INVENTORY=/app/test-inventory.json
 ENV OPENBANK_TEST_INTELLIGENCE=/app/test-intelligence.json
 ENV OPENBANK_READINESS=/app/prod-readiness.json
 ENV OPENBANK_COST_REPORT=/app/cost-report.json

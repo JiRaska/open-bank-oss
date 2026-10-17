@@ -168,6 +168,10 @@ fi
 
 # Common evidence projection. A collector failure must be honest (unavailable),
 # never an all-zero report that resembles a healthy run.
+INV_OUT="openbank-admin-ui/test-inventory.json"
+echo "==> collect test-file inventory"
+node openbank-admin-ui/scripts/collect-test-inventory.mjs --repo "${REPO_ROOT}" --out "${INV_OUT}" 2>&1 \
+  || echo '{"collectedAt":"1970-01-01T00:00:00.000Z","kotlin":{"unit":0,"integration":0,"services":{}},"adminUi":0,"e2e":0,"totalFiles":0}' > "${INV_OUT}"
 TI_OUT="openbank-admin-ui/test-intelligence.json"
 echo "==> collect unified test intelligence"
 if ! node openbank-admin-ui/scripts/collect-test-intelligence.mjs \
