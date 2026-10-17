@@ -130,6 +130,16 @@ spec:
                     secretKeyRef:
                       name: openbao-db-admin-passwords
                       key: ledger
+                # ADR-0337: the pension company's ledger instance. optional: true on purpose —
+                # every other key above is required, so a missing key here would hold this whole
+                # fleet-wide CronJob in CreateContainerConfigError until an operator added it.
+                # configure.sh skips the service while the value is empty (runbook 0006 §3).
+                - name: VAULT_ADMIN_PASS_LEDGER_PENSION_CO
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-db-admin-passwords
+                      key: ledger-pension-co
+                      optional: true
               resources:
                 requests:
                   cpu: 50m
