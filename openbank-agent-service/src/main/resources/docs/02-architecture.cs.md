@@ -1,6 +1,6 @@
 # Architektura
 
-Služba dodržuje hexagonální architekturu nařízenou [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). Doménová vrstva má **nula frameworkových importů**. Perzistence je čisté JDBC (bez ORM) nad malou sadou důkazních tabulek — agent service nevlastní žádná bankovní data; jejími „výstupy" jsou completiony modelu, downstream čtení, řádky důkazů o návrzích/merge a audit eventy.
+Služba dodržuje hexagonální architekturu nařízenou [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). Doménová vrstva má **nula frameworkových importů**. Perzistence je čisté JDBC (bez ORM) pro stav návrhů, kill switche, merge záznamů a auditního outboxu — agent service nevlastní žádná bankovní data; jejími „výstupy" jsou completiony modelu, downstream čtení, řádky důkazů o návrzích/merge a audit eventy.
 
 ## C4 — pohled na kontejner
 
@@ -63,7 +63,9 @@ Orchestrace use-case a porty:
 
 ## Odolný auditní outbox
 
-Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. Publikují přes `AuditEventPublisher` **model gateway**, **policy gate** i **ingest merge záznamů** (ten atribuován mergujícímu člověku, `HUMAN` / `agent.pr.merged`); dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
+Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. Publikují přes `AuditEventPublisher` **model gateway**, **policy gate** i **ingest merge záznamů** (ten atribuován mergujícímu člověku, `HUMAN` / `agent.pr.merged`); dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu.
+
+Při vytvoření návrhu i při jeho schválení či zamítnutí se stav návrhu a odpovídající auditní událost zapisují v jedné databázové transakci. Pokud operace selže, oba zápisy se vrátí zpět. Také merge recorder zapisuje svůj záznam a odolný auditní outbox společně v jedné transakci. Doručení do Kafky probíhá až po těchto databázových transakcích a je typu at-least-once, takže konzumenti musí deduplikovat. Tato změna neopravuje historické chybějící auditní události. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
 
 ## Odolnost
 
