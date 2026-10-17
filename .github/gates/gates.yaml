@@ -88,6 +88,20 @@ gates:
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
 
+  - id: pitest-threshold-single-source
+    name: "pitest.yml reads one mutation threshold in every lane (enforced)"
+    group: lint
+    mode: enforced
+    min_subjects: 5   # 7 threshold sites in pitest.yml on 2026-10-17
+    budget_seconds: 10
+    rationale: "The enforced authz lane ran Gradle at 70 while its Test Intelligence envelope was built at 63, so the dashboard could show PASS for a run the lane failed. The threshold is now env.PITEST_MUTATION_THRESHOLD and every --mutation-threshold, -Ppitest.mutationThreshold and $SCORE comparison must read it; the self-test re-introduces the 63 and must go red."
+    review_after: "2027-10-17"
+    selftest: python3 .github/scripts/check-pitest-threshold-single-source.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pitest-threshold-single-source.py", ".github/workflows/pitest.yml"]
+    run: |
+      python3 .github/scripts/check-pitest-threshold-single-source.py
+
   - id: fleet-scanning-test-edges
     name: "services-ci builds tests that read other modules' trees (derived, enforced)"
     group: lint
