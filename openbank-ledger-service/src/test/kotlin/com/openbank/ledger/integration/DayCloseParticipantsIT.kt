@@ -169,6 +169,29 @@ class DayCloseParticipantsIT {
     }
 
     @Test
+    fun `a REFUSED participant holds the day exactly like a missing one until an operator waives it`() {
+        seedTiedOutEligibleDay(REFUSED_CONTROL_DAY)
+        interestReports(REFUSED_CONTROL_DAY, ParticipationOutcome.RAN, journals = 1)
+        seedTiedOutEligibleDay(REFUSED_DAY)
+        interestReports(REFUSED_DAY, ParticipationOutcome.REFUSED, journals = 0, reason = "3 posting(s) refused")
+
+        assertThat(await { statusOf(REFUSED_CONTROL_DAY) == AccountingDayStatus.TIED_OUT })
+            .describedAs("the control day proves the cron ran and the tie-out condition is met")
+            .isTrue()
+        assertThat(statusOf(REFUSED_DAY))
+            .describedAs("interest was refused - its interest was not posted, so the day must not tie out")
+            .isEqualTo(AccountingDayStatus.CUTOFF)
+        val held = onEventLoop { participation.completeness(REFUSED_DAY) }
+        assertThat(held.refused).containsExactly("interest")
+        assertThat(held.complete).isFalse()
+
+        onEventLoop {
+            participation.waive(WaiveParticipationCommand(REFUSED_DAY, "interest", "accepted by finance, INC-2", "op"))
+        }
+        assertThat(await { statusOf(REFUSED_DAY) == AccountingDayStatus.TIED_OUT }).isTrue()
+    }
+
+    @Test
     fun `a report after the day tied out is stored as late and a foreign principal is refused`() {
         seedTiedOutEligibleDay(LATE_REPORT_DAY)
         interestReports(LATE_REPORT_DAY, ParticipationOutcome.RAN, journals = 1)
@@ -201,6 +224,8 @@ class DayCloseParticipantsIT {
         val LATE_DAY: LocalDate = LocalDate.of(2019, 1, 11)
         val WAIVED_DAY: LocalDate = LocalDate.of(2019, 2, 10)
         val LATE_REPORT_DAY: LocalDate = LocalDate.of(2019, 3, 10)
+        val REFUSED_CONTROL_DAY: LocalDate = LocalDate.of(2019, 4, 9)
+        val REFUSED_DAY: LocalDate = LocalDate.of(2019, 4, 10)
         const val SEED_ACTOR = "it-seed"
         const val BUDGET_NANOS = 60_000_000_000L
         const val POLL_INTERVAL_MILLIS = 250L

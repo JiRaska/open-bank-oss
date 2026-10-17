@@ -5,17 +5,20 @@
 package com.openbank.ledger.application.usecase
 
 import com.openbank.ledger.application.port.`in`.ReportParticipationCommand
+import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.CloseParticipationRepository
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseParticipationRecord
+import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.quarkus.runtime.StartupEvent
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -120,5 +123,90 @@ class CloseParticipationServiceTest {
         val c = service.completeness(day)
         assertThat(c.complete).isTrue()
         assertThat(c.reported.getValue("interest").outcome).isEqualTo(ParticipationOutcome.RAN)
+    }
+
+    private fun row(outcome: ParticipationOutcome, at: String) = CloseParticipationRecord(
+        day, "interest", outcome, 0, 0, if (outcome == ParticipationOutcome.RAN) null else "r", "p",
+        Instant.parse(at), false,
+    )
+
+    @Test
+    fun `a REFUSED report does not make the day complete - interest was not posted`(): Unit = runBlocking {
+        coEvery { repository.findForDate(day) } returns
+            listOf(row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z"))
+        val c = service.completeness(day)
+        assertThat(c.missing).isEmpty()
+        assertThat(c.refused).containsExactly("interest")
+        assertThat(c.complete).isFalse()
+    }
+
+    @Test
+    fun `RAN, SKIPPED and an operator WAIVED all release the day`(): Unit = runBlocking {
+        for (outcome in listOf(ParticipationOutcome.RAN, ParticipationOutcome.SKIPPED, ParticipationOutcome.WAIVED)) {
+            coEvery { repository.findForDate(day) } returns listOf(
+                row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z"),
+                row(outcome, "2026-10-17T02:00:00Z"),
+            )
+            assertThat(service.completeness(day).complete).describedAs(outcome.name).isTrue()
+        }
+    }
+
+    private fun waive() = WaiveParticipationCommand(day, "interest", "operator accepts the gap", "op-1")
+
+    private fun cutoffDay() = AccountingDayRecord.open(day, Instant.parse("2026-10-15T22:00:00Z"), "s")
+        .copy(status = AccountingDayStatus.CUTOFF)
+
+    @Test
+    fun `a waiver on a CUTOFF day with no RAN report is stored, and may supersede a REFUSED one`(): Unit = runBlocking {
+        coEvery { days.findByDate(day) } returns cutoffDay()
+        coEvery { repository.findForDate(day) } returns
+            listOf(row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z"))
+        val saved = service.waive(waive())
+        assertThat(saved.outcome).isEqualTo(ParticipationOutcome.WAIVED)
+        coVerify(exactly = 1) { repository.append(match { it.outcome == ParticipationOutcome.WAIVED }) }
+    }
+
+    @Test
+    fun `a waiver is refused for an unknown day, a future day, and any day not in CUTOFF`(): Unit = runBlocking {
+        coEvery { repository.findForDate(day) } returns emptyList()
+        // Unknown (never opened) - which is also every future day.
+        coEvery { days.findByDate(day) } returns null
+        assertThatThrownBy { runBlocking { service.waive(waive()) } }
+            .isInstanceOf(AccountingDayNotFoundException::class.java)
+        for (status in listOf(AccountingDayStatus.OPEN, AccountingDayStatus.TIED_OUT, AccountingDayStatus.LOCKED)) {
+            coEvery { days.findByDate(day) } returns cutoffDay().copy(status = status)
+            assertThatThrownBy { runBlocking { service.waive(waive()) } }
+                .describedAs(status.name)
+                .isInstanceOf(LedgerConflictException::class.java)
+        }
+        coVerify(exactly = 0) { repository.append(any()) }
+    }
+
+    @Test
+    fun `a participant that already RAN cannot be waived, and nothing is appended`(): Unit = runBlocking {
+        coEvery { days.findByDate(day) } returns cutoffDay()
+        coEvery { repository.findForDate(day) } returns listOf(row(ParticipationOutcome.RAN, "2026-10-17T01:00:00Z"))
+        assertThatThrownBy { runBlocking { service.waive(waive()) } }
+            .isInstanceOf(LedgerConflictException::class.java)
+            .hasMessageContaining("RAN")
+        coVerify(exactly = 0) { repository.append(any()) }
+    }
+
+    @Test
+    fun `participants-mode accepts exactly off, shadow and enforce and fails the boot on anything else`() {
+        for (ok in listOf("off", "shadow", "enforce")) {
+            assertThat(CloseParticipantsConfig.requireKnownMode(ok)).isEqualTo(ok)
+        }
+        for (bad in listOf("enforced", "Enforce", "", " shadow", "on")) {
+            assertThatThrownBy { CloseParticipantsConfig.requireKnownMode(bad) }
+                .describedAs("'$bad'")
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+        val badConfig = object : CloseParticipantsConfig {
+            override fun participantsMode() = "enforced"
+            override fun participants(): Map<String, CloseParticipantsConfig.Participant> = emptyMap()
+        }
+        assertThatThrownBy { CloseParticipantsModeValidator(badConfig).onStart(StartupEvent()) }
+            .isInstanceOf(IllegalStateException::class.java)
     }
 }

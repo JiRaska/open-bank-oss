@@ -781,7 +781,10 @@ paths:
       summary: Waive a missing day-close participant (ADR-0342 D3)
       description: >
         Operator-only. Records WAIVED with the operator's identity and a mandatory reason, which
-        counts as reported for the day's completeness. Never written by a participant.
+        counts as reported for the day's completeness. Never written by a participant. Allowed only
+        for an existing CUTOFF day (404 for a day never opened, 409 for any other status) and only
+        for a participant with no RAN report (409); it may supersede a REFUSED report, and no
+        existing row is ever rewritten.
       operationId: waiveDayCloseParticipant
       parameters:
         - $ref: '#/components/parameters/BusinessDatePath'
@@ -810,6 +813,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/ledger/periods:
     get:
@@ -1372,12 +1377,21 @@ components:
 
     CloseCompletenessResponse:
       type: object
-      required: [businessDate, complete, missing, participants]
+      required: [businessDate, complete, missing, refused, participants]
       properties:
         businessDate: { type: string, format: date }
-        complete: { type: boolean }
+        complete:
+          type: boolean
+          description: False while any declared participant is missing or its latest report is REFUSED.
         missing:
           type: array
+          description: Declared participants with no report for the day.
+          items: { type: string }
+        refused:
+          type: array
+          description: >
+            Declared participants whose latest report is REFUSED - their work was not posted, so
+            they hold the day exactly like a missing one until they report RAN or are waived.
           items: { type: string }
         participants:
           type: array

@@ -14,6 +14,8 @@ import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseCompleteness
+import com.openbank.ledger.domain.model.CloseParticipationRecord
+import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.calendar.AccountingClock
@@ -220,6 +222,26 @@ class AccountingDaySchedulerTest {
                 "enforce",
             ).count(),
         ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `ENFORCE holds a day whose only participant REFUSED - the interest was not posted`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+            yesterday,
+            expected = setOf("interest"),
+            reported = mapOf(
+                "interest" to CloseParticipationRecord(
+                    yesterday, "interest", ParticipationOutcome.REFUSED, 0, 3, "3 posting(s) refused",
+                    "service-account-openbank-interest", Instant.parse("2026-08-07T01:30:00Z"), false,
+                ),
+            ),
+        )
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 0) { useCase.transition(any()) }
     }
 
     @Test

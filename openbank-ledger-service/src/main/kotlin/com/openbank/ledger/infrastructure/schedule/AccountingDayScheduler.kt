@@ -264,7 +264,8 @@ class AccountingDayScheduler(
 
     /**
      * ADR-0342 D3: a CUTOFF day ties out only when every declared day-close participant has a
-     * record for it (RAN, SKIPPED, REFUSED, or an operator WAIVED). In `shadow` the verdict is
+     * record for it that is not a refusal (RAN, SKIPPED, or an operator WAIVED). A REFUSED report
+     * means the work was not posted, so it holds the day exactly like no report at all. In `shadow` the verdict is
      * counted and logged and the day moves anyway; in `enforce` the day stays in CUTOFF, where the
      * stuck-CUTOFF gauge above pages after the threshold and the waiver is the operator's way out.
      */
@@ -279,11 +280,15 @@ class AccountingDayScheduler(
         }
         meterRegistry.counter(PARTICIPANTS_DECISIONS, "outcome", outcome, "mode", mode).increment()
         if (!completeness.complete) {
+            val consequence = if (outcome == "held") HELD_TEXT else SHADOW_TEXT
             log.warnf(
-                "Accounting day %s: tie-out is OK but day-close participant(s) %s have not reported — %s",
+                "Accounting day %s: tie-out is OK but day-close participant(s) %s have not reported " +
+                    "(missing) or were refused - missing=%s refused=%s - %s",
                 date,
+                completeness.pending.sorted(),
                 completeness.missing.sorted(),
-                if (outcome == "held") "day stays in CUTOFF until they report or are waived" else "shadow, moving on",
+                completeness.refused.sorted(),
+                consequence,
             )
         }
         return completeness.complete || mode != CloseParticipantsConfig.MODE_ENFORCE
@@ -366,6 +371,9 @@ class AccountingDayScheduler(
         const val STUCK_AGE_GAUGE = "openbank.ledger.accounting_day.stuck_cutoff_age_seconds"
 
         const val BUSINESS_DATE_TAG = "business_date"
+
+        private const val HELD_TEXT = "day stays in CUTOFF until they report RAN or are waived"
+        private const val SHADOW_TEXT = "shadow, moving on"
 
         /** ADR-0342 D3 decision counter: outcome = complete | would_hold | held. */
         const val PARTICIPANTS_DECISIONS = "openbank.ledger.close.participants.decisions"

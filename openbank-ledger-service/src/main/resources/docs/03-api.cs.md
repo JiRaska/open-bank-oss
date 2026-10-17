@@ -85,3 +85,11 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 ## Chybový model
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapování je centralizováno v `ExceptionMappers` a generický fallback je delegován na `openbank-libs` (ADR-0049 D4 — služba neregistruje catch-all `Exception` mapper). Typické stavy: `400` (nevyvážené / neplatné zaúčtování), `401`/`403` (auth), `404` (neznámý zápis), `409` (konflikt idempotency klíče).
+
+## Účastníci závěrky dne (ADR-0342)
+
+`GET /api/v1/ledger/accounting-days/{date}/participants` vrací úplnost dne. Deklarovaný účastník (například `interest`) hlásí `RAN`, `SKIPPED` nebo `REFUSED` přes `PUT .../participants/{participant}`; hlásit smí jen service-account deklarovaný pro něj. Účastník, který nehlásil, je v `missing`; ten, jehož poslední hlášení je `REFUSED`, je v `refused` - jeho práce (například kapitalizace úroků) nebyla zaúčtována. Obojí drží den v `CUTOFF` (`complete=false`), dokud účastník nenahlásí `RAN` nebo ho operátor nepromině.
+
+`POST .../participants/{participant}/waive` (operátor, povinný důvod) je povolen jen pro existující den v `CUTOFF` a jen pro účastníka bez hlášení `RAN`: `404` pro den, který nebyl otevřen (tedy i pro budoucí den), `409` pro den mimo `CUTOFF` nebo účastníka, který již proběhl. Prominutí se přidává jako nový záznam, nikdy nepřepisuje předchozí; může nahradit hlášení `REFUSED`.
+
+`openbank.ledger.close.participants-mode` je `off`, `shadow` (výchozí, počítá by-hold rozhodnutí a den přesto uzavře) nebo `enforce`; jakákoli jiná hodnota zastaví start služby.

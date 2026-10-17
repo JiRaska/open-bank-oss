@@ -13,11 +13,14 @@ import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseCompleteness
 import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
+import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.ledger.domain.model.requireValid
 import io.micrometer.core.instrument.MeterRegistry
+import io.quarkus.runtime.StartupEvent
 import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
@@ -39,7 +42,11 @@ import java.time.LocalDate
 @ConfigMapping(prefix = "openbank.ledger.close")
 interface CloseParticipantsConfig {
 
-    /** `off | shadow | enforce` — whether a missing participant holds `CUTOFF → TIED_OUT`. */
+    /**
+     * `off | shadow | enforce` — whether a missing or REFUSED participant holds `CUTOFF → TIED_OUT`.
+     * Any other value fails the boot ([CloseParticipantsModeValidator]) rather than silently
+     * behaving as one of the three.
+     */
     @WithDefault(MODE_SHADOW)
     fun participantsMode(): String
 
@@ -53,6 +60,27 @@ interface CloseParticipantsConfig {
         const val MODE_OFF = "off"
         const val MODE_SHADOW = "shadow"
         const val MODE_ENFORCE = "enforce"
+        val MODES: Set<String> = setOf(MODE_OFF, MODE_SHADOW, MODE_ENFORCE)
+
+        /** Throws [IllegalStateException] unless [mode] is exactly one of [MODES]. */
+        fun requireKnownMode(mode: String): String {
+            check(mode in MODES) {
+                "openbank.ledger.close.participants-mode='$mode' is not one of ${MODES.sorted()}"
+            }
+            return mode
+        }
+    }
+}
+
+/**
+ * Fails the boot on an unknown `participants-mode` (ADR-0342). The rollout convention keeps
+ * `shadow` as the default, but a typo such as `enforced` would otherwise fall through every
+ * `when` as 'shadow' and leave the operator believing the day was held.
+ */
+@ApplicationScoped
+class CloseParticipantsModeValidator(private val config: CloseParticipantsConfig) {
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        CloseParticipantsConfig.requireKnownMode(config.participantsMode())
     }
 }
 
@@ -117,6 +145,27 @@ class CloseParticipationService(
             throw CloseParticipantNotDeclaredException(
                 "'${command.participant}' is not a declared day-close participant",
             )
+        }
+        // A waiver is the operator's way out of a HELD day, so it only exists for a day that is held:
+        // an existing CUTOFF day. An unknown day (never opened, hence also any future day) is 404,
+        // and an OPEN/TIED_OUT/LOCKED day is a conflict - waiving ahead of time would pre-approve a
+        // close, and waiving after it would only rewrite history.
+        val day = accountingDayRepository.findByDate(command.businessDate)
+            ?: throw AccountingDayNotFoundException(
+                "Accounting day ${command.businessDate} has not been opened - nothing to waive",
+            )
+        checkConflict(day.status == AccountingDayStatus.CUTOFF) {
+            "Participant '${command.participant}' can only be waived for a day in CUTOFF; " +
+                "${command.businessDate} is ${day.status}"
+        }
+        // Append-only: a waiver never rewrites a row, it supersedes the latest one. It may supersede
+        // a REFUSED report (the owner's explicit decision to hold the day without that work), but a
+        // participant that already RAN has nothing to waive - the report stands.
+        val ran = repository.findForDate(command.businessDate)
+            .any { it.participant == command.participant && it.outcome == ParticipationOutcome.RAN }
+        checkConflict(!ran) {
+            "Participant '${command.participant}' already reported RAN for ${command.businessDate}; " +
+                "a RAN report cannot be waived"
         }
         return record(
             businessDate = command.businessDate,

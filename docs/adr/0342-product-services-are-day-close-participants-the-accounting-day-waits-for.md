@@ -80,6 +80,16 @@ holds today (`ledger_rest_ext.rego` gives interest exactly `ledger.create`), and
 answer is the authoritative one anyway. A report arriving for a day already `TIED_OUT` or `LOCKED`
 is stored and flagged `late`, and never moves the day.
 
+**A `REFUSED` report does not release the day (owner decision, review of the first PR).** A refused
+capitalization means interest was NOT posted, so counting the refusal as "reported" would tie the
+day out over missing interest. `REFUSED` therefore holds the day in CUTOFF exactly like a missing
+participant (`CloseCompleteness.refused`, `complete=false`) until the participant reports `RAN` or
+an operator explicitly waives it. The same holds for a run in which pairs failed for any reason
+other than the closed-day 409: it is reported non-`RAN` with the failed count. The business date a
+participant reports under is the ledger's accounting day (ADR-0207, `AccountingClock`), never the
+UTC calendar date. A waiver is accepted only for an existing `CUTOFF` day and a participant with no
+`RAN` report; it is appended, never overwriting a row.
+
 **D5 — A shared primitive.** `openbank-libs-runtime` carries the participant side
 (`CloseParticipationReporter`, the record type, the metric) so the six participants differ only in
 what they count. pension-fund reports to its own ledger deployment (ADR-0337), which runs the same

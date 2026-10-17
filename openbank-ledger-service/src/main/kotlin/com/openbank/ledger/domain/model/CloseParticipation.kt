@@ -62,8 +62,10 @@ data class CloseParticipationRecord(
 
 /**
  * The completeness verdict for one day over the declared participants (ADR-0342 D3). A participant
- * with no record is [missing]; any record, including `REFUSED`, counts as reported — a refusal is a
- * known outcome the operator can see and act on, not an unknown one the close must wait for.
+ * with no record is [missing]. A participant whose latest record is `REFUSED` is [refused]: the
+ * ledger turned its postings away, so the work (e.g. interest capitalization) was NOT done, and the
+ * day must not tie out as if it had been. Both hold the day in CUTOFF until the participant
+ * reports `RAN` (or `SKIPPED`) or an operator explicitly waives it (`WAIVED`).
  */
 data class CloseCompleteness(
     val businessDate: LocalDate,
@@ -72,7 +74,14 @@ data class CloseCompleteness(
 ) {
     val missing: Set<String> get() = expected - reported.keys
 
-    val complete: Boolean get() = missing.isEmpty()
+    /** Declared participants whose latest report is `REFUSED` — their work was not posted. */
+    val refused: Set<String>
+        get() = expected.filterTo(linkedSetOf()) { reported[it]?.outcome == ParticipationOutcome.REFUSED }
+
+    /** Everything still holding the day: [missing] plus [refused]. */
+    val pending: Set<String> get() = missing + refused
+
+    val complete: Boolean get() = pending.isEmpty()
 
     companion object {
         fun of(

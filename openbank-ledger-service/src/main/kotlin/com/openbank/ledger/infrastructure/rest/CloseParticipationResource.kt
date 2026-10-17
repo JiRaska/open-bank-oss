@@ -39,6 +39,7 @@ import java.time.LocalDate
  * - `POST …/{participant}/waive` — an operator records that a missing participant is not required
  *   for this day. `ledger.approve`, like every other day transition.
  * - `GET` — the day's completeness: every declared participant with its latest record, or MISSING.
+ *   `complete` is false while any participant is missing OR its latest report is REFUSED.
  */
 @Path("/api/v1/ledger/accounting-days/{businessDate}/participants")
 @Produces(MediaType.APPLICATION_JSON)
@@ -65,6 +66,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 businessDate = completeness.businessDate.toString(),
                 complete = completeness.complete,
                 missing = completeness.missing.sorted(),
+                refused = completeness.refused.sorted(),
                 participants = rows,
             ),
         ).build()
@@ -171,6 +173,7 @@ data class CloseCompletenessResponse(
     val businessDate: String,
     val complete: Boolean,
     val missing: List<String>,
+    val refused: List<String>,
     val participants: List<ParticipationResponse>,
 )
 

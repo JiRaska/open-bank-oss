@@ -44,7 +44,7 @@ class CloseParticipationEntity : PanacheEntityBase {
     var reportedBy: String = ""
 
     @Column(name = "reported_at", nullable = false)
-    var reportedAt: Instant = Instant.EPOCH
+    lateinit var reportedAt: Instant
 
     @Column(name = "late", nullable = false)
     var late: Boolean = false
