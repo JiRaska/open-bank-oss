@@ -51,20 +51,27 @@ accounting and regulatory terms.
 
 1. **Pin at opening.** Every product-bearing contract (account, loan, fee-bearing arrangement,
    pension contract, fund membership, treasury deal) records the `productRevisionId` of the
-   published revision it was opened under. Opening without a resolvable published revision fails
+   published revision it was opened under. Contracts that predate this decision are backfilled with
+   the revision effective at their opening time (`effectiveAt` = opened-at), never with the revision
+   published when the backfill runs, so adoption does not reprice a live contract. Opening without a resolvable published revision fails
    closed, as ADR-0264 decided for loans; account-service's fail-open existence check (ADR-0158)
    becomes fail-closed for products with price components.
-2. **Terms from the pinned revision only.** Fees, rates, tiers and management fees are read from
+2. **Terms from the pinned revision only, fail-closed.** Fees, rates, tiers and management fees are read from
    the pinned revision's price components, never from "the currently published" revision and
    never from a service-local constant. A service may cache a revision's terms locally, keyed by
-   revision id; such a cache is never edited by its own API. Billing moves from v1 fees to v2 price
+   revision id; such a cache is never edited by its own API. A pinned revision that lacks the term a
+   service needs (for example no fee component in the contract's currency) is a visible, counted skip,
+   never a zero amount. Billing moves from v1 fees to v2 price
    components. A change of terms is a new revision plus an explicit re-pin, which is an auditable
    contract event, not an edit.
 3. **Accounting class, not GL codes, in the catalog.** A revision carries a closed
    `accountingClass` (for example `CUSTOMER_DEPOSIT_DEMAND`, `LOAN_RETAIL_INSTALLMENT`,
    `INTERBANK_PLACEMENT`, `FEE_INCOME_ACCOUNT`). The ledger owns the chart of accounts and the
    `accountingClass → GL account` map. Product services post with the accounting class; the ledger
-   resolves the account. Product services stop carrying literal GL codes.
+   resolves the account. Product services stop carrying literal GL codes. The map changes only through
+   a reviewed Flyway migration in ledger-service (money-path, two approvals), the same way the chart
+   itself changes; there is no runtime write path. A posting records the GL account it resolved, so a
+   later reversal or correction uses that account even after the map changes.
 4. **One regulatory classification.** A revision carries a closed `regulatoryClass` drawn from the
    reporting taxonomy (FINREP instrument and counterparty class, AnaCredit instrument type).
    Finrep, AnaCredit and tax reporting read it from the pinned revision recorded on the posting or
