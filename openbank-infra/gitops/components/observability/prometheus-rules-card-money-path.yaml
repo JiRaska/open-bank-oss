@@ -86,7 +86,6 @@ spec:
             severity: critical
             domain: payments
           annotations:
-            subject_period: continuous
             summary: Card spend is missing from the books and will not be retried
             description: >-
               One or more cleared card transactions exhausted their ledger posting attempts. They are

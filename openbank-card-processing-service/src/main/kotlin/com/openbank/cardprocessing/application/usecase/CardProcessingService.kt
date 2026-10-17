@@ -301,7 +301,7 @@ class CardProcessingService(
             occurredAt = Instant.now(clock),
         )
         val appliedAt = Instant.now(clock)
-        val claimToken = UUID.randomUUID()
+        val claimToken = Ids.randomId()
         // Written PENDING in the SAME transaction as the clearing: a crash between the commit and the
         // first posting attempt leaves a row the re-driver finds (V5, #13228). The first backoff gives
         // the inline attempt below room to finish before the re-driver can claim the row.

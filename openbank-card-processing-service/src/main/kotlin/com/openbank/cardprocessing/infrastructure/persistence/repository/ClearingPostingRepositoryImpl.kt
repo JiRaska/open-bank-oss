@@ -9,6 +9,7 @@ import com.openbank.cardprocessing.application.port.out.PostingBacklog
 import com.openbank.cardprocessing.application.port.out.PostingStatus
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.infrastructure.persistence.entity.CardClearingEntity
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -42,7 +43,7 @@ class ClearingPostingRepositoryImpl : ClearingPostingRepository {
         }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun claim(clearingId: UUID, now: Instant, leaseUntil: Instant, maxAttempts: Int): UUID? {
-        val token = UUID.randomUUID()
+        val token = Ids.randomId()
         val claimed = Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Int>(
