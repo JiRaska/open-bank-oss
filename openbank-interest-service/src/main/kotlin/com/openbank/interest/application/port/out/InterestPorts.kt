@@ -180,3 +180,40 @@ interface InterestCapitalizationRepository {
         capitalizedAt: OffsetDateTime,
     ): Uni<InterestCapitalization>
 }
+
+/**
+ * Outbound port for ADR-0341 revision pinning. A catalog-sourced rate config is the local cache of one
+ * published revision (keyed by revision id); an account that accrues from one is pinned to it, and the
+ * pin - not the currently effective rate - answers every later accrual.
+ */
+interface RateRevisionPinRepository {
+    /** The config of the revision [accountId] is pinned to for (product, currency), or null if unpinned. */
+    fun findPinnedConfig(accountId: UUID, productId: String, currency: String): Uni<InterestRateConfig?>
+
+    /** True when the account has a non-reversed accrual that ran under a catalog-sourced config. */
+    fun hasCatalogHistory(accountId: UUID, productId: String, currency: String): Uni<Boolean>
+
+    /** True when a pin ROW exists for the account, whether or not its revision resolves to a config. */
+    fun hasPin(accountId: UUID, productId: String, currency: String): Uni<Boolean>
+
+    /**
+     * Pin [accountId] to the revision [config] caches. Writes a pin ONLY when [config] is catalog-sourced
+     * AND no pin exists yet AND the account has no non-reversed accrual under a catalog-sourced config
+     * (such an account was pinned by the V19 backfill; an account with only operator-config history is
+     * pinned here, at its first catalog-sourced accrual). First writer wins; an existing pin is never
+     * replaced.
+     *
+     * Returns true when THIS call wrote the pin; false means nothing was written (operator-managed
+     * config, existing history, or a concurrent writer already pinned). It does NOT mean "no pin
+     * exists" - callers must re-read via [findPinnedConfig].
+     */
+    fun pinIfCatalogSourced(
+        accountId: UUID,
+        productId: String,
+        currency: String,
+        config: InterestRateConfig,
+    ): Uni<Boolean>
+
+    /** True when [configId] is the local cache of a catalog revision; such rows are not editable here. */
+    fun isCatalogSourced(configId: UUID): Uni<Boolean>
+}

@@ -124,3 +124,17 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey na JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, build/push image, ArgoCD zvedne tag.
 - **Release osa** (release-please) je řízena `version.txt` + Conventional Commits; **osa API kontraktu** je `openapi.yaml: info.version` (ADR-0048). Nevynucujte jejich rovnost.
 - GitOps: u konfliktů image-tagů berte `--ours` (čerstvě sestavený tag); u RBAC/config berte `--theirs` nebo řešte ručně.
+
+## Připnutí revize katalogu (ADR-0341)
+
+Při zapnuté synchronizaci katalogu účet akruuje podle publikované revize, ke které je **připnut**, nikdy
+podle "aktuálně platné" sazby. Řádek v `account_rate_revision_pins` vzniká při prvním akruálu účtu pod
+katalogovou sazbou. Migrace V19 doplnila pin každému existujícímu účtu podle jeho posledního nezrušeného
+akruálu pod katalogovou konfigurací; účty s provozní sazbou pin nemají a zůstávají na provozní sémantice.
+
+**Chování fail-closed.** Účet je odmítnut (`POST /accrue` vrací `409`; denní běh účet přeskočí s WARN a
+zvýší `openbank.interest.accrual.catalog.revision.unresolved`), pokud pin existuje, ale jeho revize se
+nepřeloží na uloženou sazbu, nebo má účet katalogovou historii akruálů bez pinu. Nikdy se neakruuje podle
+aktuálně platné sazby. Opravte cache (nebo chybějící pin) a spusťte znovu; akruál je za den idempotentní.
+Použití katalogové sazby u nepřipnutého účtu počítá `openbank.interest.accrual.catalog.rate.unpinned`
+a má zůstat na nule.

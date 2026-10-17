@@ -321,3 +321,16 @@ money-path service, not adjacent.
   the shared client". Rollback: revert the commit (the ledger client returns to the shared token).
 - **2026-09-21** — **Remittance leg joins the existing own identity (#10486 batch 2).** `TransactionServiceClient` (the withholding-tax remittance debit, #999) now selects the NAMED oidc-client `ledger` — the same Keycloak client `openbank-interest` (`ROLE_API` only) the capitalization journal already uses — instead of the shared default. transaction-service grants that principal exactly `transaction.create` (`service-interest-transaction-create`). **No new credential, secret, ExternalSecret or env var:** the existing `OIDC_LEDGER_CLIENT_SECRET` is reused, so nothing needs provisioning for this service. The blast radius of the `openbank-interest` secret grows from `ledger.create` to `ledger.create` + `transaction.create`, still far short of the shared secret's 54 money-path writes. `AccountServiceClient` and `ProductCatalogClient` stay on the shared client (asserted by `LedgerOidcClientIdentityWiringTest`). Rollback: revert the commit.
 - **2026-09-21** — **Accrual-run account reads move to the service's own machine identity (#10486 batch 5).** `AccountServiceClient` (`GET /api/v1/accounts/active`, `GET /api/v1/accounts/{id}/balance`) now mints its bearer from the NAMED oidc-client `ledger`, Keycloak client `openbank-interest` (`ROLE_API` only), which its ledger and remittance legs already use. account-service grants it `account.list` and `account.read` (`service-interest-account-read`). **STRIDE-S/E:** no new credential; the existing secret now also reaches those two reads. **Repudiation improves:** the reads name this service. Rollback: revert the commit.
+- **2026-10-17** — **Catalog sync on by default; accounts pinned to a revision (ADR-0341 step 1b).**
+  `interest.catalog-sync.enabled` now defaults true, so published rates reach `interest_rate_configs`
+  as a local cache keyed by revision id (`catalog_interest_rate_snapshots`). New table
+  `account_rate_revision_pins` (V18) pins an account to the revision it first accrues under; a later
+  revision reprices NEW accounts only, so a catalog publish can no longer silently change an existing
+  contract's rate (the integrity threat this closes: a maker-checker publish was previously an
+  unreviewed repricing of every live account). Catalog-sourced rows are refused by
+  `DELETE /api/v1/interest/rates/{id}` (409), so an operator cannot edit an immutable revision's cache.
+  An operator's account-specific override still wins, by design, and stays an audited
+  `interest.rate.changed` event. **Residual:** pinning happens at first accrual, not account opening
+  (account-service carries no revision yet - the last adoption step); an account that opens and
+  accrues under revision A before B is effective stays on A. Rollback: set
+  `INTEREST_CATALOG_SYNC_ENABLED=false`; V18 is additive and is retained.
