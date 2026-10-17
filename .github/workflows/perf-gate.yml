@@ -10,6 +10,9 @@
 # only once the isolated harness and synthetic-data boundary are proven (issue #3348).
 # v1.1: adds the read-only FX rate sheet — FX lookup sits inside every cross-currency
 # payment, so its read latency is additive to the money path without touching it.
+# v1.2: adds the balance pending-approvals read — the one balance read that answers 200
+# on a fresh database; the id-scoped balance rows need seeded fixtures (perf gate has
+# none by design).
 name: Performance gate
 
 on:
@@ -49,16 +52,17 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared scope (ADR-0243, issue #3348; FX added as the third read-only
-          # subject). Kept as a named constant so the summary can say what the run was
-          # SUPPOSED to measure, not only what it did. All subjects are non-mutating
-          # reads booted against disposable PostgreSQL. Keep money-path flows out of this
-          # GitHub-hosted lane until their isolated target and synthetic identities exist
-          # (perf/scenarios.yaml).
+          # The declared scope (ADR-0243, issue #3348; FX and Balance added as third and
+          # fourth read-only subjects). Kept as a named constant so the summary can say
+          # what the run was SUPPOSED to measure, not only what it did. All subjects are
+          # non-mutating reads booted against disposable PostgreSQL. Keep money-path
+          # flows out of this GitHub-hosted lane until their isolated target and synthetic
+          # identities exist (perf/scenarios.yaml).
           DECLARED = [
               "openbank-product-catalog",
               "openbank-flaky-test-hunter",
               "openbank-fx-service",
+              "openbank-balance-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
