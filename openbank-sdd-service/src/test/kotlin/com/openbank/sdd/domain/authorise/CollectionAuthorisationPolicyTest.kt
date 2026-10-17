@@ -44,9 +44,7 @@ class CollectionAuthorisationPolicyTest {
     @Test
     fun `a non-active mandate is rejected`() {
         val r = CollectionAuthorisationPolicy.authorise(
-            Fixtures.mandate(status = MandateStatus.SUSPENDED),
-            instruction(),
-            DebtorControls(),
+            Fixtures.mandate(status = MandateStatus.SUSPENDED), instruction(), DebtorControls(),
         )
         assertThat(r).isInstanceOf(AuthorisationResult.Reject::class.java)
     }
@@ -54,20 +52,14 @@ class CollectionAuthorisationPolicyTest {
     @Test
     fun `a scheme mismatch is rejected`() {
         val r = CollectionAuthorisationPolicy.authorise(
-            Fixtures.mandate(scheme = SddScheme.CORE),
-            instruction(scheme = SddScheme.B2B),
-            DebtorControls(),
+            Fixtures.mandate(scheme = SddScheme.CORE), instruction(scheme = SddScheme.B2B), DebtorControls(),
         )
         assertThat(r).isInstanceOf(AuthorisationResult.Reject::class.java)
     }
 
     @Test
     fun `a non-EUR collection is rejected because SDD is EUR-only`() {
-        val r = CollectionAuthorisationPolicy.authorise(
-            Fixtures.mandate(),
-            instruction(currency = "CZK"),
-            DebtorControls(),
-        )
+        val r = CollectionAuthorisationPolicy.authorise(Fixtures.mandate(), instruction(currency = "CZK"), DebtorControls())
         assertThat(r).isInstanceOf(AuthorisationResult.Reject::class.java)
         assertThat((r as AuthorisationResult.Reject).reasonCode).isEqualTo("FF05")
     }
@@ -81,25 +73,14 @@ class CollectionAuthorisationPolicyTest {
 
     @Test
     fun `a one-off mandate already used is rejected`() {
-        val used = Fixtures.mandate(
-            sequenceType = SequenceType.OOFF,
-            lastCollectionDate = LocalDate.parse("2026-02-01"),
-        )
-        val r = CollectionAuthorisationPolicy.authorise(
-            used,
-            instruction().copy(sequenceType = SequenceType.OOFF),
-            DebtorControls(),
-        )
+        val used = Fixtures.mandate(sequenceType = SequenceType.OOFF, lastCollectionDate = LocalDate.parse("2026-02-01"))
+        val r = CollectionAuthorisationPolicy.authorise(used, instruction().copy(sequenceType = SequenceType.OOFF), DebtorControls())
         assertThat(r).isInstanceOf(AuthorisationResult.Reject::class.java)
     }
 
     @Test
     fun `block-all is a debtor refusal, not a reject`() {
-        val r = CollectionAuthorisationPolicy.authorise(
-            Fixtures.mandate(),
-            instruction(),
-            DebtorControls(blockAll = true),
-        )
+        val r = CollectionAuthorisationPolicy.authorise(Fixtures.mandate(), instruction(), DebtorControls(blockAll = true))
         assertThat(r).isInstanceOf(AuthorisationResult.Refuse::class.java)
         assertThat((r as AuthorisationResult.Refuse).reasonCode).isEqualTo("MS02")
     }

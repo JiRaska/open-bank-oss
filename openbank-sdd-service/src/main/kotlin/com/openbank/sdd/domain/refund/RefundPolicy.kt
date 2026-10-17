@@ -31,7 +31,12 @@ object RefundPolicy {
     /** Statutory unauthorised-transaction window. */
     const val UNAUTHORISED_MONTHS = 13L
 
-    fun assess(scheme: SddScheme, debitDate: LocalDate, asOf: LocalDate, authorised: Boolean): RefundDecision {
+    fun assess(
+        scheme: SddScheme,
+        debitDate: LocalDate,
+        asOf: LocalDate,
+        authorised: Boolean,
+    ): RefundDecision {
         if (asOf.isBefore(debitDate)) {
             return RefundDecision.Ineligible("Debit date $debitDate is in the future relative to $asOf")
         }
@@ -48,14 +53,10 @@ object RefundPolicy {
                 if (days <= CORE_UNCONDITIONAL_DAYS) {
                     RefundDecision.Eligible(RefundKind.UNCONDITIONAL, "MD06")
                 } else {
-                    RefundDecision.Ineligible(
-                        "Beyond the 8-week unconditional window for an authorised Core collection",
-                    )
+                    RefundDecision.Ineligible("Beyond the 8-week unconditional window for an authorised Core collection")
                 }
             }
-            SddScheme.B2B -> RefundDecision.Ineligible(
-                "Authorised B2B collection carries no post-settlement refund right",
-            )
+            SddScheme.B2B -> RefundDecision.Ineligible("Authorised B2B collection carries no post-settlement refund right")
         }
     }
 }

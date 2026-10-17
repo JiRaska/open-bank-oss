@@ -5,6 +5,7 @@ package com.openbank.sdd.infrastructure.persistence.mapper
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.sdd.domain.model.MandateAmendment
 import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sdd.infrastructure.persistence.entity.SddMandateEntity
 import jakarta.enterprise.context.ApplicationScoped

@@ -17,11 +17,7 @@ class MandateLifecycleTest {
 
     @Test
     fun `confirming a pending B2B mandate activates and marks it verified`() {
-        val pending = Fixtures.mandate(
-            scheme = SddScheme.B2B,
-            status = MandateStatus.PENDING_CONFIRMATION,
-            b2bConfirmed = false,
-        )
+        val pending = Fixtures.mandate(scheme = SddScheme.B2B, status = MandateStatus.PENDING_CONFIRMATION, b2bConfirmed = false)
         val confirmed = MandateLifecycle.confirm(pending)
         assertThat(confirmed.status).isEqualTo(MandateStatus.ACTIVE)
         assertThat(confirmed.b2bConfirmed).isTrue()
@@ -67,10 +63,7 @@ class MandateLifecycleTest {
         assertThatThrownBy {
             MandateLifecycle.amend(
                 Fixtures.mandate(status = MandateStatus.CANCELLED),
-                "umr",
-                "UMR-0001",
-                "UMR-0002",
-                Instant.now(),
+                "umr", "UMR-0001", "UMR-0002", Instant.now(),
             )
         }.isInstanceOf(IllegalMandateTransition::class.java)
     }
@@ -100,11 +93,7 @@ class MandateLifecycleTest {
     @Test
     fun `idle anchor falls back to the signature date when there is no collection`() {
         // No collection ever; signed 2023-01-01, asOf 36 months later -> idle.
-        val never = Fixtures.mandate(
-            status = MandateStatus.ACTIVE,
-            lastCollectionDate = null,
-            signatureDate = LocalDate.parse("2023-01-01"),
-        )
+        val never = Fixtures.mandate(status = MandateStatus.ACTIVE, lastCollectionDate = null, signatureDate = LocalDate.parse("2023-01-01"))
         assertThat(MandateLifecycle.expireIfIdle(never, LocalDate.parse("2026-01-01")).status)
             .isEqualTo(MandateStatus.EXPIRED)
     }

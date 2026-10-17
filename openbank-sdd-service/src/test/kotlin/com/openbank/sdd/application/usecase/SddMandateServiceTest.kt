@@ -87,11 +87,7 @@ class SddMandateServiceTest {
 
     @Test
     fun `confirming a pending B2B mandate activates it`() {
-        val pending = Fixtures.mandate(
-            scheme = SddScheme.B2B,
-            status = MandateStatus.PENDING_CONFIRMATION,
-            b2bConfirmed = false,
-        )
+        val pending = Fixtures.mandate(scheme = SddScheme.B2B, status = MandateStatus.PENDING_CONFIRMATION, b2bConfirmed = false)
         every { mandates.findById(pending.id) } returns Uni.createFrom().item(pending)
         stubSaveAndOutbox()
 
@@ -118,15 +114,7 @@ class SddMandateServiceTest {
         every { outbox.append(capture(msgSlot)) } returns Uni.createFrom().voidItem()
 
         val result = service.authorise(
-            CollectionInstruction(
-                "DE98ZZZ09999999999",
-                "UMR-0001",
-                SddScheme.CORE,
-                SequenceType.FRST,
-                BigDecimal("42.00"),
-                "EUR",
-                LocalDate.parse("2026-03-01"),
-            ),
+            CollectionInstruction("DE98ZZZ09999999999", "UMR-0001", SddScheme.CORE, SequenceType.FRST, BigDecimal("42.00"), "EUR", LocalDate.parse("2026-03-01")),
             DebtorControls(),
         ).await().indefinitely()
 

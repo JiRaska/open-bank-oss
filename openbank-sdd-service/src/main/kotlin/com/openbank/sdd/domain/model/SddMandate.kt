@@ -21,7 +21,12 @@ enum class SequenceType { OOFF, FRST, RCUR, FNAL }
 enum class MandateStatus { PENDING_CONFIRMATION, ACTIVE, SUSPENDED, CANCELLED, EXPIRED }
 
 /** A recorded amendment, surfaced as the `AMDT` marker the next collection must carry. */
-data class MandateAmendment(val field: String, val oldValue: String, val newValue: String, val at: Instant)
+data class MandateAmendment(
+    val field: String,
+    val oldValue: String,
+    val newValue: String,
+    val at: Instant,
+)
 
 /**
  * The debtor-side SEPA Direct Debit mandate aggregate (ADR-0036 §A) — system of record for the
