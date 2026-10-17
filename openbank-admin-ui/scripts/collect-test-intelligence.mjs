@@ -259,6 +259,9 @@ const simulationScenarios = [
   { classname: 'com.openbank.simulation.invariants.BillingFeeConservationInvariantTest', components: ['openbank-billing-service'], scope: 'Billing fee conservation invariant sweep (pure JVM)' },
   { classname: 'com.openbank.simulation.invariants.InterestConservationInvariantTest', components: ['openbank-interest-service'], scope: 'Interest accrual conservation invariant sweep (pure JVM)' },
   { classname: 'com.openbank.simulation.invariants.StatementCloseIntegrityInvariantTest', components: ['openbank-statement-service'], scope: 'Statement close integrity invariant sweep (pure JVM)' },
+  // Money-path SCT Inst adoption: drives the real sepa-instant SctInstPayment status machine
+  // and the real SctInstSchemeRules EUR-only admission under the fault injector.
+  { classname: 'com.openbank.simulation.scenario.SctInstPaymentScenarioTest', components: ['openbank-sepa-instant'], scope: 'SCT Inst instant-payment settlement, timeout and recall scenario (pure JVM, EUR scheme legs)' },
 ]
 
 async function simulationScenarioEvidence() {

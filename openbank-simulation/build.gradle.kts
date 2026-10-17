@@ -67,6 +67,12 @@ dependencies {
     implementation(project(":openbank-sepa-payment"))
     implementation(project(":openbank-settlement-service"))
 
+    // Money-path SCT Inst adoption: the harness drives the REAL `SctInstPayment` aggregate and
+    // the real `SctInstSchemeRules.requireSchemeCurrency` admission (EPC SCT Inst rulebook,
+    // #11913 EUR-only) from sepa-instant. The domain package is framework-free (ADR-0002), so
+    // only the domain POJOs land on the classpath.
+    implementation(project(":openbank-sepa-instant"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

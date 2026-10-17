@@ -5,6 +5,7 @@
 package com.openbank.simulation.runner
 
 import com.openbank.sepa.domain.model.SepaPayment
+import com.openbank.sepainstant.domain.model.SctInstPayment
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.simulation.adapters.AuditLog
 import com.openbank.simulation.adapters.BalanceProjection
@@ -53,6 +54,10 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // here so the Layer-3 invariants can assert every one reaches a terminal state.
     val sepaPayments = mutableListOf<SepaPayment>()
     val settlements = mutableListOf<Settlement>()
+
+    // Money-path SCT Inst adoption: the REAL `SctInstPayment` (sepa-instant) aggregate driven by
+    // SctInstPaymentScenario — same terminal-state completeness invariant as the SEPA pair above.
+    val sctInstPayments = mutableListOf<SctInstPayment>()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every

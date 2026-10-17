@@ -5,6 +5,7 @@
 package com.openbank.simulation.invariants
 
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
@@ -241,6 +242,33 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Money-path SCT Inst adoption: every `SctInstPayment` driven by
+     * [com.openbank.simulation.scenario.SctInstPaymentScenario] must reach a terminal status
+     * (SETTLED / REJECTED / TIMEOUT / RECALLED) by the time a step has fully settled — the
+     * instant-payment analogue of [sepaPaymentCompleteness]. A payment stuck PENDING or
+     * PROCESSING after the drain means a timeout or recall path failed to fire, exactly the
+     * "mid-flight money" defect class the scenario's fault injection exists to surface.
+     */
+    val sctInstCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SctInstStatus.SETTLED,
+            SctInstStatus.REJECTED,
+            SctInstStatus.TIMEOUT,
+            SctInstStatus.RECALLED,
+        )
+
+        override val name = "sct-inst-completeness"
+        override fun check(world: World): Violation? {
+            world.sctInstPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "sct-inst payment ${payment.paymentId} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -250,6 +278,7 @@ object MoneyPathInvariants {
         auditCompleteness,
         sepaPaymentCompleteness,
         settlementCompleteness,
+        sctInstCompleteness,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

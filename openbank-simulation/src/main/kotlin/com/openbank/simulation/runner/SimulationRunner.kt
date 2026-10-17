@@ -11,6 +11,7 @@ import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.SctInstPaymentScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
 
@@ -53,6 +54,13 @@ class SimulationRunner(
             // domain-class binding into the same seeded run so it shares the fault profile and
             // is checked by the same invariant sweep every step.
             SepaSettlementScenario.step(world)
+            context.scheduler.drain()
+            // Money-path SCT Inst adoption: interleave the EUR instant-payment path (real
+            // SctInstStatus machine + real SctInstSchemeRules admission) so its settlement leg
+            // shares the fault profile and is checked by the same invariant sweep every step.
+            // Its EUR journal legs net to zero per currency, so ledger conservation holds
+            // without touching the CZK balance projection.
+            SctInstPaymentScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
