@@ -296,6 +296,8 @@ export const PERMISSIONS = {
   // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
   // put two role vocabularies in the console for a surface that cannot yet be written to.
   "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
+  // ADR-0333 D6: the notification service enforces the same staff roles and a distinct maker/checker.
+  "communication:templates:manage": [ROLES.ADMIN, ROLES.OPERATOR],
   // Phase 2 write path (ADR-0285 D6). Maker drafts/submits; ADMIN can do both for break-glass,
   // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
   "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
@@ -412,6 +414,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   // when it comes AFTER the differentiating literal, which is why the editor lives at
   // /communication/edit/[personaKey], not /communication/[personaId]/edit.
   [['communication:style:propose', 'communication:style:decide'], ['/communication/edit']],
+  ['communication:templates:manage', ['/communication/notification-templates']],
   ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],

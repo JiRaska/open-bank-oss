@@ -1666,6 +1666,7 @@
       "fullScopeAllowed": false,
       "defaultClientScopes": [
         "basic",
+        "profile",
         "fx:read"
       ],
       "optionalClientScopes": [],

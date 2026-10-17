@@ -474,7 +474,7 @@ $KC get clients/$ID/client-secret -r openbank | jq -r .value \
   | bao kv put openbank/keycloak/synthetic-fx-read client_id=openbank-synthetic-fx-read client_secret=-
 ```
 
-Verify: `default-client-scopes` lists exactly `basic` and `fx:read`; the service account holds no
+Verify: `default-client-scopes` lists exactly `basic`, `profile` and `fx:read` (`profile` carries `preferred_username`, which the rego `machine_named` grant matches); the service account holds no
 `ROLE_*` mapping; `kubectl -n observability annotate externalsecret journey-fx-read-oidc force-sync="$(date +%s)" --overwrite`
 reports `SecretSynced`.
 
