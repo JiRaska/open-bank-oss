@@ -754,6 +754,27 @@ gates:
       python3 .github/scripts/check-public-workload-ha.py --enforce \
         --baseline .github/public-workload-ha-baseline.txt
 
+  # Per-service alert baseline is DERIVED from the deployed-workload inventory (every workload
+  # declaring a `management` port). Same shape as the NetworkPolicy gate below: regenerate, then
+  # fail on any diff -- including an UNTRACKED output, hence --intent-to-add -- so a new service
+  # without its inventory entry is red until the generator has been run.
+  - id: gen-service-alert-rules-drift-gate
+    name: "per-service alert baseline drift gate (observability audit 2026-10-17)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30
+    selftest_inputs: ["openbank-infra/scripts/gen-service-alert-rules.py"]
+    selftest: python3 openbank-infra/scripts/gen-service-alert-rules.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/scripts/gen-service-alert-rules.py
+      f=openbank-infra/gitops/components/observability/prometheus-rules-service-inventory.yaml
+      git add --intent-to-add "$f"
+      if ! git diff --exit-code -- "$f"; then
+        echo "::error::Service alert baseline drift -- run python3 openbank-infra/scripts/gen-service-alert-rules.py and commit the result."
+        exit 1
+      fi
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
