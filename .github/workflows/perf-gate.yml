@@ -60,8 +60,8 @@ jobs:
           # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor,
           # GovernanceAuditor, Statement, Swift, Treasury, RiskEngine,
           # CardProcessing, TppRegistry, PensionFund, TaxReporting,
-          # CaseCoordinator, DevOpsAgent and DocsTruthAgent added as third
-          # through fifty-fourth
+          # CaseCoordinator, DevOpsAgent, DocsTruthAgent and FinOpsAgent added
+          # as third through fifty-fifth
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -123,6 +123,7 @@ jobs:
               "openbank-case-coordinator-agent",
               "openbank-devops-agent",
               "openbank-docs-truth-agent",
+              "openbank-finops-agent",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -241,6 +242,8 @@ jobs:
                   "openbank-devops-agent",
                   # measured: same lgtm pull at boot (no kafka channels)
                   "openbank-docs-truth-agent",
+                  # measured: same lgtm pull at boot (no kafka channels)
+                  "openbank-finops-agent",
               }
               temporal = None
               if svc in NEEDS_TEMPORAL:
