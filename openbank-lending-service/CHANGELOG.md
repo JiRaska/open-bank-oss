@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.43.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.43.0...lending-service-v0.43.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **lending:** record provisioning-cycle attempts across restart and rollover ([#12315](https://github.com/JiRaska/open-bank-oss/issues/12315)) ([8fb8d99](https://github.com/JiRaska/open-bank-oss/commit/8fb8d994ae9d8987ca3750e1a6d1d15c5dec25b0))
+
+## [0.43.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.42.0...lending-service-v0.43.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.41.2...lending-service-v0.42.0) (2026-10-16)
+
+
+### Features
+
+* **lending:** ADR-0211 explicit origination commands, KYC/four-eyes timer branches, jqwik property tests ([#12769](https://github.com/JiRaska/open-bank-oss/issues/12769)) ([c319e97](https://github.com/JiRaska/open-bank-oss/commit/c319e970d2b70307bace6402e371f94b82b610a0))
+
 ## [0.41.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.41.1...lending-service-v0.41.2) (2026-10-14)
 
 

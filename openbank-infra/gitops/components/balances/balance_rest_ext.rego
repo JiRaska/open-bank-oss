@@ -60,7 +60,7 @@ allowed_reasons contains "operator-balance-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {
 		"balance.read",
 		"balance.hold",
@@ -81,7 +81,7 @@ allowed_reasons contains "supervisor-overdraft-limit" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_SUPERVISOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action == "balance.overdraftLimit"
 }
 
@@ -149,7 +149,7 @@ allowed_reasons contains "viewer-balance-read" if {
 # this PR.
 allowed_reasons contains "service-balance-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action in {
 		"balance.read",
 		"balance.hold",
@@ -181,13 +181,13 @@ allowed_reasons contains "service-balance-m2m" if {
 #     reserves cover -> balance.hold. Never directly release a hold on an unknown journal outcome.
 allowed_reasons contains "service-transaction-balance-hold" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-transaction"
+	machine_named("service-account-openbank-transaction")
 	input.action in {"balance.hold", "balance.holdRelease"}
 }
 
 allowed_reasons contains "service-settlement-balance-move" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-settlement"
+	machine_named("service-account-openbank-settlement")
 	input.action in {"balance.debit", "balance.credit"}
 }
 
@@ -195,12 +195,26 @@ allowed_reasons contains "service-settlement-balance-move" if {
 # projection consumes that reservation; settlement cannot directly release it after a timeout.
 allowed_reasons contains "service-settlement-balance-cover" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-settlement"
+	machine_named("service-account-openbank-settlement")
 	input.action == "balance.hold"
 }
 
+# ADR-0340 B — tax-reporting-service's own machine identity (client `openbank-tax-reporting`,
+# ROLE_API only) reads period-end booked balances for the CRS/FATCA assembly
+# (CrsFatcaReportingSources.bookedBalance -> GET /balances/{accountId}/{currency}?asOf=, the
+# statement point-in-time route). balance.read only: it moves nothing, holds nothing, and reads
+# nothing else.
+allowed_reasons contains "service-tax-reporting-balance-read" if {
+	input.principal.type == "HUMAN"
+
+	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+	not input.principal.service_account == null
+	machine_named("service-account-openbank-tax-reporting")
+	input.action == "balance.read"
+}
+
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"balance.hold",
 		"balance.holdRelease",

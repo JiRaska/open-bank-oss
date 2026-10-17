@@ -1,6 +1,6 @@
 # Architektura
 
-Služba dodržuje hexagonální architekturu nařízenou [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). Doménová vrstva má **nula frameworkových importů**. Na rozdíl od většiny služeb OpenBank zde **není perzistentní adaptér** — agent service nevlastní žádná bankovní data; jejími „výstupy" jsou completiony modelu, downstream čtení a audit eventy.
+Služba dodržuje hexagonální architekturu nařízenou [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). Doménová vrstva má **nula frameworkových importů**. Perzistence je čisté JDBC (bez ORM) nad malou sadou důkazních tabulek — agent service nevlastní žádná bankovní data; jejími „výstupy" jsou completiony modelu, downstream čtení, řádky důkazů o návrzích/merge a audit eventy.
 
 ## C4 — pohled na kontejner
 
@@ -43,10 +43,12 @@ Orchestrace use-case a porty:
 - **`AgentPolicyGate`** — Policy Enforcement Point (PEP). Ptá se `PolicyDecisionPoint`, audituje rozhodnutí (AI-atribuované, ALLOW/DENY) a aplikuje `EnforcementMode`. V režimu BLOCK DENY zastaví volání **kromě** případu, kdy chyboval sám PDP (`pdpError`), kdy degraduje na advisory + WARN, takže mrtvý OPA sidecar nikdy asistenta nezamkne.
 - **`CharterRateLimiter` / `CharterRegistry`** — per-agent charter limity (tokens-per-run, runs-per-day) čtené z konfigurace (zrcadlí `agents.yaml`). Čítače v paměti; restart podu je vynuluje (distribuované vynucení je follow-up).
 - **`ProposalDetector`** — označuje odpovědi asistenta, které obsahují doporučenou akci vyžadující lidské potvrzení (ADR-0031 D4 HITL).
+- **`MergeRecordService`** — životní cyklus zaznamenaného lidského merge (ADR-0031 fáze 3). Idempotentní insert do `agent_merge_record` (`ON CONFLICT DO NOTHING` na UNIQUE `pr_number`, takže znovu doručený webhook nic nezaznamená); publikuje audit event `agent.pr.merged` (`actorType=HUMAN`, actorId = mergující člověk) přes odolný outbox pouze tehdy, když byl řádek skutečně vložen.
 - **`PolicyDecisionPoint`** / **`ModelProvider`** — odchozí porty.
 
 ### Adaptéry (`com.openbank.agent.infrastructure`)
-- **Příchozí:** `mcp/McpEndpoint` (`/mcp` JSON-RPC dispatcher), `chat/ChatEndpoint` (`/agent/chat`, `/agent/models`).
+- **Příchozí:** `mcp/McpEndpoint` (`/mcp` JSON-RPC dispatcher), `chat/ChatEndpoint` (`/agent/chat`, `/agent/models`), `rest/AgentMergeRecordResource` (`/api/v1/agent-merge-records`, ingest i čtení merge důkazů).
+- **Odchozí — perzistence:** `persistence/JdbcAgentProposalRepository`, `JdbcKillSwitchRepository`, `JdbcAgentMergeRecordRepository` — čisté JDBC repozitáře (bez Panache).
 - **Odchozí — model:** `model/MockModelProvider` (offline default), `model/OpenAiCompatibleModelProvider` (libovolný OpenAI-tvarovaný backend — Groq, vLLM, Ollama).
 - **Odchozí — policy:** `policy/OpaPolicyDecisionPoint` (+ `OpaClient`) aktivní při `agent.policy.opa.enabled=true`, fail-closed; `policy/DenyByDefaultPolicyDecisionPoint` jako bezpečný fallback.
 - **Odchozí — bankovní:** `client/ServiceClients.kt` — read-only REST klienti, každý nese client-credentials Bearer přes OIDC client filter (ADR-0031 / ADR-0034).
@@ -61,7 +63,7 @@ Orchestrace use-case a porty:
 
 ## Odolný auditní outbox
 
-Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. **Model gateway** a **policy gate** publikují přes `AuditEventPublisher`; dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
+Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. Publikují přes `AuditEventPublisher` **model gateway**, **policy gate** i **ingest merge záznamů** (ten atribuován mergujícímu člověku, `HUMAN` / `agent.pr.merged`); dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
 
 ## Odolnost
 
