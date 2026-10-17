@@ -3,7 +3,7 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.agent.infrastructure.client
+package com.openbank.agent.contract
 
 import au.com.dius.pact.consumer.MockServer
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
@@ -16,6 +16,8 @@ import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.agent.infrastructure.client.RestDownstreamReadAdapter
+import com.openbank.agent.infrastructure.client.SepaInstantServiceClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
@@ -37,10 +39,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * identity fields by value because getById returns exactly the seeded row.
  */
 @ExtendWith(PactConsumerTestExt::class)
-@PactTestFor(providerName = "openbank-sepa-instant-service", pactVersion = PactSpecVersion.V3)
+@PactTestFor(providerName = "openbank-sepa-instant", pactVersion = PactSpecVersion.V3)
 class AgentSepaInstantReadPactConsumerTest {
 
-    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant-service")
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant")
     fun listPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("a settled SCT Inst payment exists for the pact agent")
         .uponReceiving("GET the payment list behind the sepa_instant_list tool")
@@ -63,7 +65,7 @@ class AgentSepaInstantReadPactConsumerTest {
         )
         .toPact()
 
-    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant-service")
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant")
     fun getPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("a settled SCT Inst payment exists for the pact agent")
         .uponReceiving("GET the payment behind the sepa_instant_get tool")
@@ -87,7 +89,7 @@ class AgentSepaInstantReadPactConsumerTest {
         )
         .toPact()
 
-    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant-service")
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant")
     fun listByDebtorPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("a settled SCT Inst payment exists for the pact agent")
         .uponReceiving("GET the debtor payments behind the sepa_instant_list_by_debtor tool")
@@ -107,7 +109,7 @@ class AgentSepaInstantReadPactConsumerTest {
         )
         .toPact()
 
-    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant-service")
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-sepa-instant")
     fun getMissingPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("no SCT Inst payment exists with the requested id")
         .uponReceiving("GET a payment sepa-instant does not hold, via the sepa_instant_get tool")

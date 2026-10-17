@@ -45,6 +45,10 @@ Returns all payments as `SctInstPaymentResponse[]`. `200 OK`.
 
 Query params: `page` (default `0`), `size` (default `20`). Returns `SctInstPaymentResponse[]`. `200 OK`.
 
+## Agent read contract
+
+The agent-service consumer contract covers the list, get-by-ID, and debtor-list reads above, including the `404` response for an unknown payment ID. Provider verification seeds one settled payment and replays the contract against the running service; it does not change the production API.
+
 ### `POST /api/v1/sepa-instant/{paymentId}/recall` — Recall
 
 Recalls a **SETTLED** payment. Protected by `@Authorize(action = "sctInstPayment.recall", resource = "#paymentId")` (ADR-0034 OPA).

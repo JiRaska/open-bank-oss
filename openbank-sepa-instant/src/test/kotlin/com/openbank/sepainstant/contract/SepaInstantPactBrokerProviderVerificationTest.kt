@@ -47,7 +47,7 @@ import javax.sql.DataSource
     initArgs = [ResourceArg(name = "db", value = "openbank_sepa_instant_it")],
 )
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
-@Provider("openbank-sepa-instant-service")
+@Provider("openbank-sepa-instant")
 @PactBroker
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")

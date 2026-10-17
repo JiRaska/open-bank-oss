@@ -46,7 +46,7 @@ import javax.sql.DataSource
  *
  * IMPORTANT: if the consumer changes its contract, regenerate the pact
  * (`./gradlew :openbank-agent-service:test --tests "*AgentSepaInstantReadPactConsumerTest*"`)
- * and commit `pacts/openbank-agent-service-openbank-sepa-instant-service.json` in the same PR,
+ * and commit `pacts/openbank-agent-service-openbank-sepa-instant.json` in the same PR,
  * or this test verifies a stale contract. `pact-drift-check.yml` gates that.
  *
  * [IgnoreNoPactsToVerify] makes a missing/unreadable pact folder a skip rather than a failure —
@@ -62,7 +62,7 @@ import javax.sql.DataSource
     initArgs = [ResourceArg(name = "db", value = "openbank_sepa_instant_it")],
 )
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
-@Provider("openbank-sepa-instant-service")
+@Provider("openbank-sepa-instant")
 @PactFolder("../pacts")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class SepaInstantPactProviderVerificationTest {

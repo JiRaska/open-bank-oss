@@ -281,6 +281,6 @@
     }
   },
   "provider": {
-    "name": "openbank-sepa-instant-service"
+    "name": "openbank-sepa-instant"
   }
 }
