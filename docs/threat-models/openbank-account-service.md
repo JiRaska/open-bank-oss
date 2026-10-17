@@ -1041,3 +1041,23 @@ The account ownership projection still returns an account identifier only for an
 active account owned by the supplied party. A compromised pension credential can
 invoke its scoped projection; it does not acquire shared operator or compliance
 roles. Realm import and credential delivery must be verified before deployment.
+
+## 2026-10-17 - Pension-fund read of one published catalog revision (ADR-0341)
+
+Trust-boundary change: the `product-catalog-ingress-allow-list` network policy in the `accounts`
+namespace gains the `pension-fund` namespace, and `account_rest_ext.rego` gains the reason
+`service-pension-fund-catalog-read`. pension-fund-service reads ONE immutable, PUBLISHED catalog
+revision by id (`GET /api/v2/revisions/{id}`) to pin a new fund's management fee.
+
+- **Spoofing / elevation:** the grant is limited to action `catalog.read` and to the named
+  machine identity `service-account-openbank-pension-fund` that also carries the
+  `CATALOG_SCOPE_READ` scope. The scope alone does not suffice; no other caller gains anything.
+  `catalog.author`, `catalog.publish` and the approval decisions stay unreachable for it
+  (`account_rest_ext_test.rego` pins the negatives).
+- **Tampering:** read-only, immutable revision; the caller fails closed unless the revision is
+  PUBLISHED with the expected schema, so a mutable or draft value can never price a fund.
+- **Information disclosure:** a catalog revision is product configuration, not customer data.
+- **Denial of service:** the edge adds one low-rate caller on a create-time path; NAV, register
+  and reporting never call the catalog, so a catalog outage cannot stall unit accounting.
+- **Residual:** the ingress rule is namespace-wide for `pension-fund`; mTLS client identity and
+  the OPA named-caller check are the effective limits.
