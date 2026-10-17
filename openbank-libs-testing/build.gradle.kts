@@ -122,6 +122,8 @@ dependencies {
     // services do (and that verification-metadata already pins) without imposing it on `api`.
     compileOnly(enforcedPlatform(libs.quarkus.bom))
     compileOnly(libs.quarkus.junit5)
+    // SecurityIdentity for ApprovalEndpointConformance; services supply it at test runtime.
+    compileOnly("io.quarkus.security:quarkus-security")
     compileOnly("io.smallrye.config:smallrye-config-source-yaml")
     testImplementation(enforcedPlatform(libs.quarkus.bom))
     testImplementation("io.smallrye.config:smallrye-config-source-yaml")
