@@ -248,6 +248,25 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
+  `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
+  reports RAN / SKIPPED / REFUSED for a day), `POST …/{participant}/waive` (operator), `GET` (read
+  roles). New table `ledger_close_participation` (V31, append-only history). `AccountingDayScheduler`
+  now also requires every declared participant to have reported before `CUTOFF → TIED_OUT`
+  (`openbank.ledger.close.participants-mode`, ships `shadow`). **STRIDE-S/E:** the PUT is admitted
+  under the existing `ledger.create` grant (no rego change), so any principal that may post journals
+  reaches it; the use case then requires the caller's VERIFIED service-account
+  (`ServiceAccountIdentity.verifiedPrincipalName`: `azp` bound to `preferred_username`) to equal the
+  principal declared for that participant — a different service-account, or a human token, is 403.
+  A participant cannot write `WAIVED`; waiving is `ROLE_OPERATOR` + `ledger.approve` and records the
+  operator's `sub`. **STRIDE-T/R:** reports are append-only rows with reporter and time; a report into
+  a `TIED_OUT`/`LOCKED` day is stored with `late=true` and never moves the day, so a late or replayed
+  report cannot reopen or rewrite a closed day. **STRIDE-D:** a participant that never reports holds
+  the day in CUTOFF under `enforce`, which the existing stuck-CUTOFF alert pages and the waiver
+  releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
+  counts, service names and reasons, no customer data. The closed-day 409 body now also carries
+  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert; V31 drop is safe while `shadow`.
+
 - **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
   identity (PR #13127).** Previously the deployment projected account-service's `OIDC_CLIENT_SECRET`,
   so its outbound calls authenticated as another service's client. It now authenticates as its own

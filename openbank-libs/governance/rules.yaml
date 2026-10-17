@@ -997,6 +997,17 @@ change_requirements:
 # Money-path services (from CODEOWNERS critical paths) — stricter rules apply.
 # Two approvals, mandatory threat model, mutation testing, higher coverage floor.
 # ---------------------------------------------------------------------------------------
+# ADR-0342 D2 (#13167): the product services the accounting day's close WAITS for. Each name must
+# match openbank-ledger-service application.yaml `openbank.ledger.close.participants` (with the same
+# principal) and the service must construct a CloseParticipationReporter — check-close-participants.py
+# (gate close-participants-declared) holds all three together. billing, lending, treasury, pension and
+# pension-fund (the latter against its own ledger deployment, ADR-0337) join one PR each.
+close_participants:
+  participants:
+    interest:
+      service: openbank-interest-service
+      principal: service-account-openbank-interest
+
 money_path_services:
   - openbank-ledger-service
   - openbank-transaction-service

@@ -5,6 +5,9 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
+import com.openbank.interest.application.port.out.CloseJobRunPort
+import com.openbank.libs.close.CloseJobRun
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
@@ -15,7 +18,6 @@ import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
-import java.time.LocalDate
 
 /**
  * Drives the monthly interest capitalization. One tick per month (cron in
@@ -35,8 +37,10 @@ class InterestCapitalizationScheduler(
     private val capitalizeInterestUseCase: CapitalizeInterestUseCase,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
+    private val closeJobRuns: CloseJobRunPort,
 ) {
     private val log = Logger.getLogger(InterestCapitalizationScheduler::class.java)
+    private val accountingClock = AccountingClock.bank(clock)
     private var liveness: WorkflowLivenessRecorder? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -46,10 +50,12 @@ class InterestCapitalizationScheduler(
     @Scheduled(
         cron = "{openbank.interest.capitalization-cron}",
         identity = "interest-monthly-capitalization",
+        timeZone = InterestCloseJobs.SCHEDULE_ZONE,
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runMonthlyCapitalization(): Uni<Void> {
-        val toDate = LocalDate.now(clock)
+        // Business date = the ledger's accounting day (ADR-0207, Europe/Prague), not the UTC date.
+        val toDate = accountingClock.today()
         log.infof("interest capitalization tick starting up to %s", toDate)
         // observed-by: the `interest-capitalization` workflow-liveness gauge. `recordSuccess()` below runs on the
         // onItem path only, so a failed tick leaves
@@ -58,13 +64,51 @@ class InterestCapitalizationScheduler(
         // deliberate rather than lazy: `capitalizeAll` is idempotent per (account, period), so the next tick (or a
         // manual re-run) fills the gap, and failing the Uni would buy nothing the gauge does not
         // already say. #5745 section C.
-        return capitalizeInterestUseCase.capitalizeAll(toDate)
-            .onItem().invoke { count ->
-                log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, count)
+        return capitalizeInterestUseCase.capitalizeAllWithOutcome(toDate)
+            .onItem().invoke { outcome ->
+                log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, outcome.capitalized)
+                if (outcome.refusedClosedDay > 0) {
+                    log.warnf(
+                        "interest capitalization up to %s: %d posting(s) refused — accounting day closed (%s)",
+                        toDate,
+                        outcome.refusedClosedDay,
+                        outcome.refusalReason,
+                    )
+                }
+                if (outcome.failed > 0) {
+                    log.warnf(
+                        "interest capitalization up to %s: %d pair(s) FAILED for reasons other than a closed day " +
+                            "(first: %s) - the day is reported as not complete",
+                        toDate,
+                        outcome.failed,
+                        outcome.failureReason,
+                    )
+                }
                 liveness?.recordSuccess()
             }
+            // ADR-0342 D4: one journal per capitalized pair; closed-day refusals become a REFUSED
+            // day-close outcome on the ledger's day-end page instead of only this WARN.
+            .call { outcome ->
+                closeJobRuns.record(
+                    CloseJobRun(
+                        businessDate = toDate,
+                        job = InterestCloseJobs.CAPITALIZATION,
+                        itemsProcessed = outcome.capitalized,
+                        journalsPosted = outcome.capitalized,
+                        // A pair that FAILED (not a closed-day 409) posted no interest either, so it is
+                        // reported exactly like a refusal: a non-RAN outcome that holds the day. The
+                        // reason says which it was.
+                        refused = outcome.refusedClosedDay + outcome.failed,
+                        refusalReason = listOfNotNull(
+                            outcome.refusalReason,
+                            outcome.failureReason?.let { "${outcome.failed} pair(s) failed: $it" },
+                        ).joinToString("; ").ifBlank { null },
+                        completedAt = clock.instant(),
+                    ),
+                )
+            }
             .onFailure().invoke { e -> log.errorf(e, "interest capitalization up to %s failed", toDate) }
-            .onFailure().recoverWithItem(0)
+            .onFailure().recoverWithNull()
             .replaceWithVoid()
     }
 

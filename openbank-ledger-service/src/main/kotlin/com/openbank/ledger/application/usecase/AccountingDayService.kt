@@ -86,6 +86,7 @@ class AccountingDayService(
             record = moved,
             expectedVersion = current.version,
             outbox = transitionMessage(moved, from = current.status.name, by = command.transitionedBy),
+            requiredParticipants = command.requiredParticipants,
         )
     }
 

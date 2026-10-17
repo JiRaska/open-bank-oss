@@ -6,6 +6,9 @@ package com.openbank.ledger.application.port.`in`
 
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
+import com.openbank.ledger.domain.model.CloseCompleteness
+import com.openbank.ledger.domain.model.CloseParticipationRecord
+import com.openbank.ledger.domain.model.ParticipationOutcome
 import java.time.LocalDate
 
 /** Open [businessDate] for posting. [openedBy] is the acting principal from the verified JWT. */
@@ -20,6 +23,13 @@ data class TransitionAccountingDayCommand(
     val businessDate: LocalDate,
     val to: AccountingDayStatus,
     val transitionedBy: String,
+    /**
+     * When non-null, the transition commits only if every one of these day-close participants has a
+     * latest report for the day that is not REFUSED - judged INSIDE the transition's own
+     * transaction, under the same per-day lock reports and waivers take. A completeness read made
+     * before the transaction can be overtaken by a REFUSED report landing in between.
+     */
+    val requiredParticipants: Set<String>? = null,
 )
 
 data class GetAccountingDayQuery(val businessDate: LocalDate)
@@ -44,4 +54,39 @@ interface AccountingDayUseCase {
     suspend fun get(query: GetAccountingDayQuery): AccountingDayRecord
 
     suspend fun list(query: ListAccountingDaysQuery): List<AccountingDayRecord>
+}
+
+/**
+ * A participant's report. [callerPrincipal] is the VERIFIED service-account name of the caller
+ * (`ServiceAccountIdentity.verifiedPrincipalName`), or null for a token that is not one; the use
+ * case compares it with the participant's declared principal (ADR-0342 D2).
+ */
+data class ReportParticipationCommand(
+    val businessDate: LocalDate,
+    val participant: String,
+    val outcome: ParticipationOutcome,
+    val journalsPosted: Int,
+    val itemsProcessed: Int,
+    val reason: String?,
+    val callerPrincipal: String?,
+)
+
+/** An operator waiving a missing participant for one day (ADR-0342 D3). */
+data class WaiveParticipationCommand(
+    val businessDate: LocalDate,
+    val participant: String,
+    val reason: String?,
+    val waivedBy: String,
+)
+
+interface CloseParticipationUseCase {
+
+    /** The declared participant names, from configuration. */
+    fun declaredParticipants(): Set<String>
+
+    suspend fun report(command: ReportParticipationCommand): CloseParticipationRecord
+
+    suspend fun waive(command: WaiveParticipationCommand): CloseParticipationRecord
+
+    suspend fun completeness(businessDate: LocalDate): CloseCompleteness
 }

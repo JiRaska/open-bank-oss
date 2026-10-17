@@ -5,12 +5,15 @@
 package com.openbank.ledger.infrastructure.schedule
 
 import com.openbank.ledger.application.port.`in`.AccountingDayUseCase
+import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.OpenAccountingDayCommand
 import com.openbank.ledger.application.port.`in`.TransitionAccountingDayCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
+import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
@@ -110,6 +113,12 @@ class AccountingDayScheduler(
 
     @Inject
     lateinit var tieOutScheduler: TieOutScheduler
+
+    @Inject
+    lateinit var closeParticipation: CloseParticipationUseCase
+
+    @Inject
+    lateinit var closeParticipantsConfig: CloseParticipantsConfig
 
     // Nullable, not `lateinit` — a money-path job must never fail because its observability
     // wiring was not initialised (same reasoning as TieOutScheduler).
@@ -234,23 +243,63 @@ class AccountingDayScheduler(
                     requestTieOut(day.businessDate, cutoffAt, reRunBudget)
                     return@runStep
                 }
-                if (run != null && run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt)) {
+                val okRun = run?.takeIf { it.status == TieOutRunStatus.OK && !it.runAt.isBefore(cutoffAt) }
+                if (okRun != null && participantsAllowTieOut(day.businessDate)) {
                     accountingDayUseCase.transition(
                         TransitionAccountingDayCommand(
                             businessDate = day.businessDate,
                             to = AccountingDayStatus.TIED_OUT,
                             transitionedBy = SYSTEM_ACTOR,
+                            // Re-judged inside the transition's transaction (enforce only): the check
+                            // above is advisory and can be overtaken by a REFUSED report.
+                            requiredParticipants = closeParticipation.declaredParticipants()
+                                .takeIf {
+                                    closeParticipantsConfig.participantsMode() ==
+                                        CloseParticipantsConfig.MODE_ENFORCE
+                                },
                         ),
                     )
                     log.infof(
                         "Accounting day %s tied out (tie-out run %s at %s)",
                         day.businessDate,
-                        run.status,
-                        run.runAt,
+                        okRun.status,
+                        okRun.runAt,
                     )
                 }
             }
         }
+    }
+
+    /**
+     * ADR-0342 D3: a CUTOFF day ties out only when every declared day-close participant has a
+     * record for it that is not a refusal (RAN, SKIPPED, or an operator WAIVED). A REFUSED report
+     * means the work was not posted, so it holds the day exactly like no report at all. In `shadow` the verdict is
+     * counted and logged and the day moves anyway; in `enforce` the day stays in CUTOFF, where the
+     * stuck-CUTOFF gauge above pages after the threshold and the waiver is the operator's way out.
+     */
+    private suspend fun participantsAllowTieOut(date: LocalDate): Boolean {
+        val mode = closeParticipantsConfig.participantsMode()
+        if (mode == CloseParticipantsConfig.MODE_OFF) return true
+        val completeness = closeParticipation.completeness(date)
+        val outcome = when {
+            completeness.complete -> "complete"
+            mode == CloseParticipantsConfig.MODE_ENFORCE -> "held"
+            else -> "would_hold"
+        }
+        meterRegistry.counter(PARTICIPANTS_DECISIONS, "outcome", outcome, "mode", mode).increment()
+        if (!completeness.complete) {
+            val consequence = if (outcome == "held") HELD_TEXT else SHADOW_TEXT
+            log.warnf(
+                "Accounting day %s: tie-out is OK but day-close participant(s) %s have not reported " +
+                    "(missing) or were refused - missing=%s refused=%s - %s",
+                date,
+                completeness.pending.sorted(),
+                completeness.missing.sorted(),
+                completeness.refused.sorted(),
+                consequence,
+            )
+        }
+        return completeness.complete || mode != CloseParticipantsConfig.MODE_ENFORCE
     }
 
     /**
@@ -311,6 +360,13 @@ class AccountingDayScheduler(
     private suspend fun runStep(step: String, date: LocalDate, block: suspend () -> Unit) {
         try {
             block()
+        } catch (held: CloseParticipantsPendingException) {
+            meterRegistry.counter(PARTICIPANTS_DECISIONS, "outcome", "held", "mode", "enforce").increment()
+            log.warnf(
+                "Accounting day %s: a participant report landed during the tie-out - %s; day stays in CUTOFF",
+                date,
+                held.message,
+            )
         } catch (ex: Exception) {
             log.errorf(ex, "Accounting-day reconcile step '%s' failed for %s: %s", step, date, ex.message)
         }
@@ -330,6 +386,12 @@ class AccountingDayScheduler(
         const val STUCK_AGE_GAUGE = "openbank.ledger.accounting_day.stuck_cutoff_age_seconds"
 
         const val BUSINESS_DATE_TAG = "business_date"
+
+        private const val HELD_TEXT = "day stays in CUTOFF until they report RAN or are waived"
+        private const val SHADOW_TEXT = "shadow, moving on"
+
+        /** ADR-0342 D3 decision counter: outcome = complete | would_hold | held. */
+        const val PARTICIPANTS_DECISIONS = "openbank.ledger.close.participants.decisions"
 
         /**
          * Actor recorded on scheduler-driven transitions. Distinct from any JWT principal so an

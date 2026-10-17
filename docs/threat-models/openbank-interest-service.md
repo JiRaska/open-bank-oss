@@ -67,6 +67,21 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-10-17** — **Interest is the first day-close participant (ADR-0342, #13167).** New outbound
+  edge: `PUT /api/v1/ledger/accounting-days/{date}/participants/interest` to ledger-service, over the
+  same base URL, TLS bucket and named oidc-client `ledger` (Keycloak `openbank-interest`) as the
+  existing journal POST — no new credential, client or port. New table `interest_close_job_run`
+  (V18) recording that the accrual / capitalization job ran for a day; a new hourly
+  `InterestCloseParticipationScheduler` folds those rows into the report. **STRIDE-S:** the ledger
+  accepts the report only from `service-account-openbank-interest`, so another service cannot report
+  for interest and interest cannot report for another participant. **STRIDE-T/R:** the report is
+  derived from the service's own persisted runs, never caller input; a due job with no recorded run
+  produces NO report, so a failed or late run holds the ledger's close instead of reporting a false
+  completion. **STRIDE-D:** a ledger outage only delays the report (re-offered every tick; the day
+  waits). A capitalization the ledger refuses with `ACCOUNTING_DAY_CLOSED` is now counted and
+  reported `REFUSED` instead of only logged; the claim semantics on a rejected post are unchanged.
+  Rollback: revert; dropping V18 loses only past-run evidence.
+
 - **2026-10-14** — **Tax-profile resolution now reads party attributes** (ADR-0339 B, #12811). The
   constant-only tax-profile stub is replaced by `PartyTaxProfileProvider`: account
   detail → owning party → taxpayer type (`INDIVIDUAL` vs legal entities) → declared residency
