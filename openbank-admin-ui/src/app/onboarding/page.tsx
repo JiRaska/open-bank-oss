@@ -397,7 +397,7 @@ function RecordDrawer({
               <ShortId value={record.partyId} copyLabel={t('Kopírovat ID klienta', 'Copy customer ID')} />
             </div>
           </div>
-          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
+          <button type="button" onClick={onClose} data-drawer-initial-focus className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
             <X size={14} aria-hidden="true" />
           </button>
         </div>
