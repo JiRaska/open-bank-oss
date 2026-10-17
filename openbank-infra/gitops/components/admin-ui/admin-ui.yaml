@@ -169,6 +169,12 @@ spec:
               value: /config/sbom-drift/sbom-drift.json
             - name: SECURITY_SCANNER_URL
               value: http://security-scanner-service.security-scanner.svc:8120
+            # Regulatory report generation (/api/regulatory/returns): ATMs the bank operates, for
+            # the ECB payment statistics. The platform keeps no ATM register, so the figure is a
+            # declared fact; 0 = no own ATM network. REGULATORY_MLRO_CONTACT is deliberately unset
+            # until an MLRO is named — the SAR report then carries a data gap and export stays blocked.
+            - name: REGULATORY_ATM_COUNT
+              value: "0"
             # Trace Explorer (/observability/traces): the BFF /api/tempo proxy
             # reaches Grafana Tempo's query API in-cluster. Absent → the page
             # degrades calmly to "Tempo unreachable" (graceful-state rule).
