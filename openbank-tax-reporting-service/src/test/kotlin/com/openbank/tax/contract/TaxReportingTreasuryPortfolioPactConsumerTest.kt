@@ -130,7 +130,7 @@ class TaxReportingTreasuryPortfolioPactConsumerTest {
                     "company",
                     ReportingPeriod(Periodicity.QUARTER, LocalDate.parse("2026-12-31")),
                 )
-        }
+        }.values
         assertThat(values.keys).containsExactlyInAnyOrderElementsOf(definition.datapoints)
         assertThat(values.getValue("government_bond_valuation")).isEqualByComparingTo("1012345.67")
         assertThat(definition.validate(values)).isEmpty()
