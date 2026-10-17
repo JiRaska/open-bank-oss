@@ -32,7 +32,7 @@ class FakeLedgerRead : LedgerReadPort {
     /** GL codes whose balance read fails upstream (e.g. a ledger not serving the route yet). */
     val unavailableAccounts = java.util.concurrent.CopyOnWriteArraySet<String>()
 
-    /** The ledger's nostro map, as V31 seeds it. */
+    /** The ledger's nostro map, as V32 seeds it. */
     override suspend fun nostroAccounts(): Map<String, NostroGl> = mapOf(
         "CZK" to NostroGl("1001", java.util.UUID.fromString("a0000000-0000-0000-0000-000000001001")),
         "EUR" to NostroGl("1002", java.util.UUID.fromString("a0000000-0000-0000-0000-000000001002")),

@@ -175,7 +175,7 @@ class TreasuryNostroLedgerReadPactConsumerTest {
      * type matchers) and the test below serialises the PRODUCTION [PostJournalRequest] DTO against it,
      * so a drifted field name fails the consumer test while a drifted ledger fails the provider replay.
      * The provider state is the already-existing chart seed; the ledger resolves the classes through
-     * V31's `accounting_class_gl_map`, so replay is also the proof the map covers what treasury sends.
+     * V32's `accounting_class_gl_map`, so replay is also the proof the map covers what treasury sends.
      */
     @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
     fun postJournalByAccountingClassPact(builder: PactDslWithProvider): RequestResponsePact = builder

@@ -20,7 +20,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * ADR-0341 D3 against the real database: the accountingClass -> GL map seeded by V31 is exactly the
+ * ADR-0341 D3 against the real database: the accountingClass -> GL map seeded by V32 is exactly the
  * table below (the treasury rows are the other half of treasury's `PostingJournalsUnchangedTest`,
  * which proves new rules + this map reproduce the legacy chart), and a journal posted by class lands
  * on the very same accounts as one posted by `glAccountId`.

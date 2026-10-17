@@ -7,7 +7,7 @@ package com.openbank.treasury.domain
 import com.openbank.treasury.domain.model.PostingLine
 
 /**
- * The treasury rows of the ledger's `accounting_class_gl_map` (migration V31), as a literal.
+ * The treasury rows of the ledger's `accounting_class_gl_map` (migration V32), as a literal.
  * `AccountingClassGlMapIT` in openbank-ledger-service holds the same table against the real
  * database, so the chain "new rules + this map == the legacy chart" (see
  * [PostingJournalsUnchangedTest]) and "this map == the migration" together prove the journals land
