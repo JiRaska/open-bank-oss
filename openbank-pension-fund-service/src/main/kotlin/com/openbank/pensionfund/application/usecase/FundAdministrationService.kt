@@ -45,6 +45,9 @@ class FundAdministrationService(
             "productRevisionId is required: a fund's fee comes from a published catalog revision"
         }
         val terms = fundTerms.resolve(revisionId)
+        require(definition.managementFeeRate == null || definition.managementFeeRate.compareTo(terms.managementFeeRate) == 0) {
+            "managementFeeRate is deprecated and must equal the revision's fee ${terms.managementFeeRate}"
+        }
         val fund = Fund(
             id = Ids.newId(),
             name = definition.name,
@@ -81,6 +84,10 @@ class FundAdministrationService(
         require(definition.productRevisionId == null || definition.productRevisionId == current.productRevisionId) {
             "productRevisionId cannot change: re-pinning a fund is not an amendment"
         }
+        require(
+            definition.managementFeeRate == null ||
+                definition.managementFeeRate.compareTo(current.managementFeeRate) == 0,
+        ) { "managementFeeRate cannot be edited: it is derived from the pinned revision" }
         val amended = current.amend(
             name = definition.name,
             depositaryReference = definition.depositaryReference,

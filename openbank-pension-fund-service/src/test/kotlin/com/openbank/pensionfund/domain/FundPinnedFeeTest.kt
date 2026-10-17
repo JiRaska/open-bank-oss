@@ -55,4 +55,14 @@ class FundPinnedFeeTest {
             assertThatThrownBy { FundRevisionTerms.parse(id, bad) }.isInstanceOf(IllegalArgumentException::class.java)
         }
     }
+
+    @Test
+    fun `a fee percent outside 0 to 100 fails closed and the bounds are accepted`() {
+        listOf("-0.01", "100.01", "250").forEach { bad ->
+            assertThatThrownBy { FundRevisionTerms.parse(id, revision(fee = bad)) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(FundRevisionTerms.parse(id, revision(fee = "100")).managementFeeRate).isEqualByComparingTo("1")
+        assertThat(FundRevisionTerms.parse(id, revision(fee = "0")).managementFeeRate).isEqualByComparingTo("0")
+    }
 }

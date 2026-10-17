@@ -1041,3 +1041,21 @@ The account ownership projection still returns an account identifier only for an
 active account owned by the supplied party. A compromised pension credential can
 invoke its scoped projection; it does not acquire shared operator or compliance
 roles. Realm import and credential delivery must be verified before deployment.
+
+## 2026-10-17 - pension-fund namespace admitted to product-catalog ingress (ADR-0341)
+
+The `accounts` component's NetworkPolicy `product-catalog-ingress-allow-list` now also admits the
+`pension-fund` namespace, and the component's OPA extension adds one grant: the machine identity
+`service-account-openbank-pension-fund` holding the `CATALOG_SCOPE_READ` scope may perform
+`catalog.read` only. The caller reads one immutable published revision by id to pin a new
+fund's management fee.
+
+| Threat | Control |
+|---|---|
+| **Spoofing** - another workload in `pension-fund` or elsewhere reuses the grant | The rule requires the named principal (`machine_named`) AND the scope; a token with only the scope, or the name without the scope, is denied. The pension-fund client has no realm role. `account_rest_ext_test.rego` pins both denials. |
+| **Elevation** - the credential reaches authoring or publishing | The rule matches `catalog.read` alone; `catalog.author`, `catalog.publish` and the approval decisions stay denied for this principal. |
+| **Information disclosure** - reading unpublished terms | The read returns published revisions by id; the consumer rejects any other state (fail closed). |
+| **Denial of service** - ingress widened to a new namespace | Same mTLS listener as the existing allow-listed namespaces; the added namespace is one fixed workload. |
+
+Rollback: revert the NetworkPolicy namespace entry and the rego rule together; fund creation in
+pension-fund then fails closed, while NAV, register and reporting keep using the stored fee.

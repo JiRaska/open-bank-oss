@@ -71,7 +71,11 @@ object FundRevisionTerms {
         val percent = revision.path("content").path("attributes").path("feeSchedule")
             .path("managementFeeAnnualPercent").takeIf(JsonNode::isTextual)?.textValue()
         requireNotNull(percent) { "revision $requested has no feeSchedule.managementFeeAnnualPercent" }
-        val rate = BigDecimal(percent).divide(PERCENT)
+        val pct = BigDecimal(percent)
+        require(pct.signum() >= 0 && pct.compareTo(PERCENT) <= 0) {
+            "revision $requested managementFeeAnnualPercent $percent is outside 0..100"
+        }
+        val rate = pct.divide(PERCENT)
         return PinnedFundTerms(requested, rate)
     }
 }
