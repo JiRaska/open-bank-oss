@@ -13,6 +13,7 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
+import com.openbank.simulation.model.CardAuthorizationBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SimPaymentSaga
@@ -68,6 +69,12 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // attempt's ReconciliationPolicy decision cross-checked against whether a period was actually
     // persisted. Populated by StatementCloseScenario; empty (trivially satisfied) otherwise.
     val statementCloses = StatementCloseBook()
+
+    // The card-authorization hold-lifecycle invariant's state — the real card-processing
+    // CardAuthorization aggregate per authorization, plus how much of the cleared total actually
+    // landed as ledger journals and how much of the hold was released back to available balance.
+    // Populated by CardAuthorizationScenario; empty (trivially satisfied) otherwise.
+    val cardAuths = CardAuthorizationBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency

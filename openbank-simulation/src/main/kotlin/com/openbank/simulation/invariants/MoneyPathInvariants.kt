@@ -4,6 +4,7 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
@@ -241,6 +242,59 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * The card-authorization hold conservation laws, per authorization, checked once a step has
+     * fully settled (the expiry task fires in the drain first — same "settled" semantics as
+     * [billingFeeConservation]):
+     *
+     * 1. no authorization may still [hold funds][com.openbank.cardprocessing.domain.model.AuthorizationStatus.holdsFunds]
+     *    — a hold that never reaches clearing, reversal or expiry is a permanent freeze the
+     *    customer cannot spend and cannot see released;
+     * 2. `cleared == posted` — every presentment the policy accepted landed exactly once as a
+     *    ledger journal: a dropped capture posting (money the scheme thinks it collected but
+     *    the ledger never received) and a replayed one (double-posted on a re-delivered
+     *    presentment) both break the equality, and conservation-of-money alone cannot see
+     *    either, because each journal still balances internally;
+     * 3. `cleared + released == authorized` — a hold is fully accounted for: what was not
+     *    captured must have been released back to available balance, no less (silently frozen
+     *    funds) and no more (money freed while the scheme can still present against it).
+     */
+    val cardAuthorizationConservation = object : Invariant {
+        override val name = "card-authorization-conservation"
+        override fun check(world: World): Violation? {
+            world.cardAuths.all().forEach { authorization ->
+                if (authorization.status.holdsFunds) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id} still holds funds in ${authorization.status}",
+                    )
+                }
+                val cleared = authorization.clearedAmountMinorUnits
+                val posted = world.cardAuths.postedMinorUnits(authorization.id)
+                if (cleared != posted) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id} cleared=$cleared but posted=$posted",
+                    )
+                }
+                val released = world.cardAuths.releasedMinorUnits(authorization.id)
+                // A DECLINED authorization never held funds: the authorized amount is what the
+                // acquirer asked for, not what the bank reserved, so there is nothing to
+                // account for beyond the (zero) cleared and posted totals above.
+                if (authorization.status != AuthorizationStatus.DECLINED &&
+                    cleared + released != authorization.amountMinorUnits
+                ) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id}: cleared=$cleared + released=$released " +
+                            "!= authorized=${authorization.amountMinorUnits}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -253,6 +307,7 @@ object MoneyPathInvariants {
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        cardAuthorizationConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */
