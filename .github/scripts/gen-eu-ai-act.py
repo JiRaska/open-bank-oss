@@ -62,7 +62,7 @@ OBLIGATIONS = [
     ("Art. 11 Technical documentation",
      "This ADR-0148 mapping + the charter in agents.yaml + the model card (ADR-0141)."),
     ("Art. 12 Record-keeping / logging",
-     "AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain)."),
+     "AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain); ADR-0031 phase 3 adds the recorded-human-merge evidence (agent_merge_record + agent.pr.merged, attested per runbook 0018)."),
     ("Art. 13 Transparency to deployers",
      "Charter + prompt registry (ADR-0148) make each agent's inputs/behaviour inspectable."),
     ("Art. 14 Human oversight",

@@ -42,6 +42,8 @@ class TestScanAdapterTest {
         override fun modelId() = "deepseek-ai/DeepSeek-V3.2"
 
         override fun repoRoot() = root.toString()
+
+        override fun policyGate() = error("TestScanAdapter never opens PRs — the policy gate config is unused here")
     }
 
     private fun testSourceDir(root: Path, module: String = "openbank-sample-service"): Path {

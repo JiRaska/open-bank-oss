@@ -1,6 +1,6 @@
 # Architecture
 
-The service follows the hexagonal architecture mandated by [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). The domain layer has **zero framework imports**. The service has persistence adapters for its own proposal, kill-switch, and audit-outbox state; it does not own banking-system data. Its other outputs are model completions and downstream read calls.
+The service follows the hexagonal architecture mandated by [ADR-0002](../../../../docs/adr/0002-hexagonal-architecture.md). The domain layer has **zero framework imports**. Persistence is plain JDBC (no ORM) for proposal, kill-switch, merge-record, and audit-outbox state — the service owns no banking data; its "outputs" are model completions, downstream read calls, merge/proposal evidence rows, and audit events.
 
 ## C4 — container view
 
@@ -43,10 +43,12 @@ The use-case orchestration and ports:
 - **`AgentPolicyGate`** — the Policy Enforcement Point (PEP). Asks the `PolicyDecisionPoint`, audits the decision (AI-attributed, ALLOW/DENY), and applies the `EnforcementMode`. In BLOCK mode a DENY stops the call **unless** the PDP itself errored (`pdpError`), in which case it degrades to advisory + WARN so a dead OPA sidecar never locks the assistant out.
 - **`CharterRateLimiter` / `CharterRegistry`** — per-agent charter limits (tokens-per-run, runs-per-day) read from config (mirrors `agents.yaml`). In-memory counters; a pod restart resets them (distributed enforcement is a follow-up).
 - **`ProposalDetector`** — flags assistant replies that contain a recommended action requiring human confirmation (ADR-0031 D4 HITL).
+- **`MergeRecordService`** — the recorded-human-merge lifecycle (ADR-0031 phase 3). Idempotent insert into `agent_merge_record` (`ON CONFLICT DO NOTHING` on the UNIQUE `pr_number`, so webhook redeliveries record nothing); publishes the `agent.pr.merged` audit event (`actorType=HUMAN`, actorId = merging human) through the durable outbox only when a row was actually inserted.
 - **`PolicyDecisionPoint`** / **`ModelProvider`** — outbound ports.
 
 ### Adapters (`com.openbank.agent.infrastructure`)
-- **Inbound:** `mcp/McpEndpoint` (`/mcp` JSON-RPC dispatcher), `chat/ChatEndpoint` (`/agent/chat`, `/agent/models`).
+- **Inbound:** `mcp/McpEndpoint` (`/mcp` JSON-RPC dispatcher), `chat/ChatEndpoint` (`/agent/chat`, `/agent/models`), `rest/AgentMergeRecordResource` (`/api/v1/agent-merge-records`, ingest + read of the merge evidence).
+- **Outbound — persistence:** `persistence/JdbcAgentProposalRepository`, `JdbcKillSwitchRepository`, `JdbcAgentMergeRecordRepository` — plain JDBC repositories (no Panache).
 - **Outbound — model:** `model/MockModelProvider` (offline default), `model/OpenAiCompatibleModelProvider` (any OpenAI-shaped backend — Groq, vLLM, Ollama).
 - **Outbound — policy:** `policy/OpaPolicyDecisionPoint` (+ `OpaClient`) active when `agent.policy.opa.enabled=true`, fail-closed; `policy/DenyByDefaultPolicyDecisionPoint` as the safe fallback.
 - **Outbound — banking:** `client/ServiceClients.kt` — the read-only REST clients, each carrying a client-credentials Bearer via the OIDC client filter (ADR-0031 / ADR-0034).
@@ -61,9 +63,9 @@ The use-case orchestration and ports:
 
 ## Durable audit outbox
 
-The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway** and **policy gate** publish through `AuditEventPublisher`; a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain.
+The service has no domain-event outbox, but its `agent_audit_outbox` durably records AI-attributed `AuditEvent`s before Kafka delivery. The **model gateway**, **policy gate**, and **merge-record ingest** publish through `AuditEventPublisher` (the ingest attributed to the merging human, `HUMAN` / `agent.pr.merged`); a dispatcher retries broker delivery and `audit-service` deduplicates the producer event id before extending its hash chain.
 
-Each proposal creation or decision stores its state and the corresponding audit event in one database transaction. If the operation fails, both writes roll back. Kafka delivery happens after that database transaction and is at least once, so consumers must deduplicate. This change does not repair historical missing audit events. Kafka activation remains explicitly controlled until the runtime rollout is attested.
+Each proposal creation or decision stores its state and the corresponding audit event in one database transaction. If the operation fails, both writes roll back. The merge recorder likewise commits its record and durable audit enqueue together. Kafka delivery happens after those database transactions and is at least once, so consumers must deduplicate. This change does not repair historical missing audit events. Kafka activation remains explicitly controlled until the runtime rollout is attested.
 
 ## Resilience
 
