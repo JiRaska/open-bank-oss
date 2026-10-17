@@ -153,6 +153,62 @@ def classify_topics(
     return violations, allowlisted_hit, stale_allowlist
 
 
+DLQ_TOPIC = re.compile(r"(^openbank\.dlq\.)|(\.dlq$)")
+ISSUE_REF = re.compile(r"#\d{2,}")
+
+
+def is_connector_dlq(topic: str) -> bool:
+    """A dead-letter topic is written by the connector's own failure-strategy, never by a service
+    channel, so it has a 'consumer' declaration (the nested dead-letter-queue topic: key under an
+    incoming channel) and no producer by construction. Matching by NAME is deliberate: the scanner
+    cannot tell a nested DLQ key from a channel topic, and every DLQ here follows the convention."""
+    return bool(DLQ_TOPIC.search(topic))
+
+
+def load_consumer_allowlist(rules_path: pathlib.Path) -> dict[str, str]:
+    if not rules_path.exists():
+        return {}
+    data = yaml.safe_load(rules_path.read_text(encoding="utf-8")) or {}
+    rule = (data.get("change_requirements") or {}).get("event_consumer_liveness") or {}
+    return {e["topic"]: e.get("reason", "") for e in (rule.get("consumer_allowlist") or []) if e.get("topic")}
+
+
+def classify_consumer_only(
+    all_producers: dict[str, set[str]],
+    all_consumers: dict[str, set[str]],
+    consumer_allowlist: dict[str, str],
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Reverse direction: (violations, allowlisted_hit, stale_now_produced, stale_no_longer_consumed).
+    A consumer-only topic is one some service subscribes to and no service publishes."""
+    consumer_only = sorted(t for t in all_consumers if t not in all_producers and not is_connector_dlq(t))
+    violations = [t for t in consumer_only if t not in consumer_allowlist]
+    hit = [t for t in consumer_only if t in consumer_allowlist]
+    stale_produced = sorted(t for t in consumer_allowlist if t in all_producers)
+    stale_gone = sorted(t for t in consumer_allowlist if t not in all_consumers and t not in all_producers)
+    return violations, hit, stale_produced, stale_gone
+
+
+def untracked_entries(allowlist: dict[str, str]) -> list[str]:
+    """Entries whose reason cites no issue number: an exemption nobody is tracking is permanent."""
+    return sorted(t for t, reason in allowlist.items() if not ISSUE_REF.search(reason))
+
+
+def asyncapi_missing_plan(root: pathlib.Path, producer_allowlist: dict[str, str]) -> list[str]:
+    """A producer-only topic that has an AsyncAPI file must say, in that file, which issue plans the
+    consumer (`x-planned-consumer: <issue url>`), so a reader of the contract sees it is a plan and
+    not an oversight. Returns '<topic> (<file>)' for each file that names the topic without it."""
+    missing = []
+    for f in sorted(root.glob("openbank-contracts/*/asyncapi.yaml")):
+        doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        for channel in (doc.get("channels") or {}).values():
+            topic = (channel or {}).get("address")
+            if topic in producer_allowlist and not re.fullmatch(
+                r"https://github\.com/\S+/issues/\d+", str((channel or {}).get("x-planned-consumer", ""))
+            ):
+                missing.append(f"{topic} ({f.relative_to(root)})")
+    return missing
+
+
 def self_test() -> int:
     """Falsify the topic resolver and the producer/consumer scanner.
 
@@ -259,6 +315,29 @@ def self_test() -> int:
                      f"{len(live_prod)} produced topic(s) — the glob moved and this gate "
                      f"would report every topic as consumed")
 
+    # --- reverse direction (#13168) ---
+    cprod = {"a.produced": {"svc-a"}}
+    ccons = {"a.produced": {"svc-b"}, "b.orphan": {"svc-b"}, "openbank.dlq.x.y": {"svc-b"}, "z.dlq": {"svc-b"}}
+    v, hit, sp, sg = classify_consumer_only(cprod, ccons, {})
+    case("a consumed-never-produced topic is a violation", v, ["b.orphan"])
+    case("...a connector DLQ topic is NOT (openbank.dlq.* and *.dlq)", ("openbank.dlq.x.y" in v, "z.dlq" in v), (False, False))
+    v, hit, sp, sg = classify_consumer_only(cprod, ccons, {"b.orphan": "r #12345"})
+    case("an allowlisted orphan consumer is not a violation", v, [])
+    case("...and is reported as allowlisted", hit, ["b.orphan"])
+    v, hit, sp, sg = classify_consumer_only({**cprod, "b.orphan": {"svc-c"}}, ccons, {"b.orphan": "r #12345"})
+    case("an allowlisted topic that now has a producer is stale", sp, ["b.orphan"])
+    v, hit, sp, sg = classify_consumer_only(cprod, {"a.produced": {"svc-b"}}, {"gone.topic": "r #12345"})
+    case("an allowlisted topic nobody consumes or produces any more is reported gone", sg, ["gone.topic"])
+    case("a reason without an issue ref is untracked", untracked_entries({"t.a": "plan is vague", "t.b": "see #8793"}), ["t.a"])
+    with tempfile.TemporaryDirectory() as td2:
+        root2 = pathlib.Path(td2)
+        (root2 / "openbank-contracts" / "x").mkdir(parents=True)
+        (root2 / "openbank-contracts" / "x" / "asyncapi.yaml").write_text("channels:\n  c:\n    address: t.planned\n")
+        case("an AsyncAPI channel for a producer-only topic without x-planned-consumer is flagged",
+             asyncapi_missing_plan(root2, {"t.planned": "r #12345"}), ["t.planned (openbank-contracts/x/asyncapi.yaml)"])
+        (root2 / "openbank-contracts" / "x" / "asyncapi.yaml").write_text(
+            "channels:\n  c:\n    address: t.planned\n    x-planned-consumer: https://github.com/o/r/issues/12345\n")
+        case("...and passes once it carries the issue link", asyncapi_missing_plan(root2, {"t.planned": "r #12345"}), [])
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
@@ -312,6 +391,42 @@ def main() -> int:
             f"the #889 failure class — a published event nobody consumes."
         )
 
+    consumer_allowlist = load_consumer_allowlist(root / args.rules)
+    c_viol, c_hit, c_stale_prod, c_stale_gone = classify_consumer_only(
+        all_producers, all_consumers, consumer_allowlist
+    )
+    annotation = "error" if args.enforce else "warning"
+    for topic in c_hit:
+        print(f"::notice::event-consumer-liveness: {topic} is consumed by "
+              f"{', '.join(sorted(all_consumers[topic]))} but published by no one — allowlisted: {consumer_allowlist[topic]}")
+    for topic in c_viol:
+        print(
+            f"::{annotation}::event-consumer-liveness: {topic} is consumed by "
+            f"{', '.join(sorted(all_consumers[topic]))} but NO service publishes it (no matching "
+            f"mp.messaging.outgoing topic). The consumer receives nothing and reports healthy. Add the producer, "
+            f"remove the consumer, or add it to rules.yaml: event_consumer_liveness.consumer_allowlist "
+            f"with a reason and a tracking issue (#NNN)."
+        )
+    for topic in c_stale_prod:
+        print(f"::{annotation}::event-consumer-liveness: {topic} is in consumer_allowlist but now HAS a producer "
+              f"({', '.join(sorted(all_producers[topic]))}) — delete the stale entry.")
+    for topic in c_stale_gone:
+        print(f"::notice::event-consumer-liveness: {topic} is in consumer_allowlist but is no longer consumed or "
+              f"produced anywhere — delete the entry when convenient.")
+    untracked = [("allowlist", t) for t in untracked_entries(allowlist)] + [
+        ("consumer_allowlist", t) for t in untracked_entries(consumer_allowlist)
+    ]
+    for where, topic in untracked:
+        print(f"::{annotation}::event-consumer-liveness: {where} entry {topic} cites no tracking issue (#NNN) in its "
+              f"reason — an exemption nobody tracks becomes permanent.")
+    unplanned = asyncapi_missing_plan(root, allowlist)
+    for item in unplanned:
+        print(f"::{annotation}::event-consumer-liveness: {item} is a producer-only topic whose AsyncAPI channel "
+              f"has no `x-planned-consumer: <issue url>` — link the issue that plans the consumer.")
+
+    print(
+        f"check-event-consumer-liveness: {len(c_viol)} consumer-only violation(s), "
+        f"{len(c_hit)} allowlisted consumer-only topic(s).")
     print(
         f"check-event-consumer-liveness: {len(all_producers)} producer topic(s) scanned across "
         f"{len(yaml_files)} service(s); {len(violations)} unallowlisted violation(s), "
@@ -319,7 +434,7 @@ def main() -> int:
         f"{len(stale_allowlist)} stale allowlist entry/entries."
     )
 
-    if (violations or stale_allowlist) and args.enforce:
+    if (violations or stale_allowlist or c_viol or c_stale_prod or untracked or unplanned) and args.enforce:
         return 1
     return 0
 
