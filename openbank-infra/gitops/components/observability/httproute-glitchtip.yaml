@@ -7,9 +7,10 @@
 # routed; the web UI, Django /admin/ and the rest of /api/0/ get no route and so answer 404 at
 # the edge.
 #
-# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
-# gateway-api-cutover-pending`, which external-dns skips, so glitchtip.open-bank.tech keeps
-# resolving to ingress-nginx. Three steps, each its own change, in this order:
+# IN DNS since the cutover: external-dns publishes glitchtip.open-bank.tech from this route,
+# pointing at the Gateway's NLB. The chart's Ingress (apps/glitchtip.yaml `ingress.annotations`)
+# now carries `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` and keeps
+# serving on ingress-nginx as the rollback (swap the annotation back). The three steps were:
 #   1. this file — the Certificate, the ReferenceGrant, the route and its policy;
 #   2. the Gateway's https-glitchtip listener (envoy-gateway/gateway.yaml), once the grant and
 #      the Secret are live (the Phase-1 RefNotPermitted lesson);
@@ -90,8 +91,6 @@ metadata:
   name: glitchtip
   namespace: observability
   annotations:
-    # Held out of DNS until the cutover change (step 3 above).
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     # ADR-0234 declaration carried over from apps/glitchtip.yaml.
     openbank.io/ungated-machine-callers: >-
       SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload

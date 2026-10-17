@@ -94,6 +94,10 @@ spec:
           enabled: true
           className: nginx
           annotations:
+            # DNS moved to the Envoy Gateway route (components/observability/
+            # httproute-glitchtip.yaml). This makes external-dns ignore this Ingress; it stays
+            # as the rollback until a later change deletes it.
+            external-dns.kubernetes.io/controller: gateway-api-cutover-pending
             cert-manager.io/cluster-issuer: letsencrypt-prod
             # ADR-0234: declared exemption from the identity-aware edge gate.
             # This host carries ONLY machine traffic — a GlitchTip/Sentry SDK
