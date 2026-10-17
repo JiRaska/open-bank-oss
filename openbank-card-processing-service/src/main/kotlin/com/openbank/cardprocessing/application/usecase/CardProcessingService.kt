@@ -324,19 +324,26 @@ class CardProcessingService(
 
         // Deliberately AFTER the commit, and not rolled back on failure: the clearing is a fact the
         // acquirer has already asserted, and refusing to record it because the ledger is briefly
-        // unreachable would lose it. A FAILED posting is a finding, not a silent success — which is
-        // what the three-valued outcome is for.
-        val posting = ledger.postClearedSpend(saved, command.amountMinorUnits, command.idempotencyKey)
+        // unreachable would lose it. A FAILED or UNKNOWN posting is a finding, not a silent success -
+        // which is what the multi-valued outcome is for. NOTE: nothing re-drives a FAILED/UNKNOWN
+        // posting yet - a replay deliberately posts nothing (no persisted posting state to tell a
+        // booked posting from a lost one); that durable re-driver is an open decision.
+        postToLedger(saved, command.amountMinorUnits, command.idempotencyKey)
+        return PresentmentOutcome.Accepted(saved)
+    }
+
+    private suspend fun postToLedger(authorization: CardAuthorization, amountMinorUnits: Long, idempotencyKey: String) {
+        val posting = ledger.postClearedSpend(authorization, amountMinorUnits, idempotencyKey)
         metrics.ledgerPosting(posting.outcome)
-        if (posting.outcome == PostingOutcome.FAILED) {
+        if (posting.outcome == PostingOutcome.FAILED || posting.outcome == PostingOutcome.UNKNOWN) {
             log.errorf(
-                "ledger posting FAILED for authorization %s (%s) — the clearing is recorded, the books are not: %s",
-                saved.id,
-                command.idempotencyKey.forLog(),
+                "ledger posting %s for authorization %s (%s) - the clearing is recorded, the books may not be: %s",
+                posting.outcome,
+                authorization.id,
+                idempotencyKey.forLog(),
                 posting.detail?.forLog(),
             )
         }
-        return PresentmentOutcome.Accepted(saved)
     }
 
     private suspend fun replayClearing(recorded: RecordedClearing, fingerprint: String): PresentmentOutcome {

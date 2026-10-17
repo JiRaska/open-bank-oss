@@ -87,11 +87,14 @@ class TransactionLedgerPostingAdapter(
             ).awaitSuspending()
             PostingResult(PostingOutcome.POSTED, response.id, response.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            // A response body that fails to bind proves nothing: the 2xx status is not established, so
-            // this is neither POSTED nor FAILED. Rethrow so the retry converges - the idempotency key
-            // makes transaction-service replay a posting that did book. (Interim rule; a central typed
-            // facade will own "success only on a proven 2xx".)
-            if (isUnreadableResponse(e)) throw e
+            // An unreadable answer proves nothing: the debit may or may not be booked. It must NOT be
+            // rethrown (this runs after the clearing committed and nobody retries the caller) and must
+            // not be called POSTED or FAILED: it is UNKNOWN, counted, and re-driven by a replay of the
+            // clearing under the same idempotency key, which transaction-service dedupes.
+            if (isUnreadableResponse(e)) {
+                log.warnf(e, "ledger posting for authorization %s has an unreadable answer", authorization.id)
+                return PostingResult(PostingOutcome.UNKNOWN, null, UNREADABLE_DETAIL)
+            }
             // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
             // here may propagate and undo a fact the acquirer has already asserted. The FAILED
             // outcome is what makes the gap visible instead of swallowed.
@@ -114,6 +117,7 @@ class TransactionLedgerPostingAdapter(
         const val TYPE_DEBIT = "DEBIT"
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
+        const val UNREADABLE_DETAIL = "transaction-service answer unreadable; booking unknown"
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */

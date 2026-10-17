@@ -89,11 +89,11 @@ class TransactionLedgerPostingHttpIT {
     }
 
     @Test
-    fun `a 2xx body that cannot bind is rethrown - neither POSTED nor FAILED`(): Unit = runBlocking {
-        val failure = runCatching { adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2") }
-            .exceptionOrNull()
+    fun `a 2xx body that cannot bind is UNKNOWN - not thrown, not POSTED, not FAILED`(): Unit = runBlocking {
+        val result = adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2")
 
-        assertThat(failure).describedAs("an unreadable answer proves no 2xx").isNotNull
+        assertThat(result.outcome).isEqualTo(PostingOutcome.UNKNOWN)
+        assertThat(result.transactionId).isNull()
     }
 
     @Test
@@ -123,9 +123,9 @@ class TransactionLedgerPostingHttpIT {
     }
 
     @Test
-    fun `a connection cut with no status is never POSTED`(): Unit = runBlocking {
-        val result = runCatching { adapter().postClearedSpend(authorization("stub-drop"), 12_345, "clr-drop") }
+    fun `a connection cut with no status is never POSTED and never thrown`(): Unit = runBlocking {
+        val result = adapter().postClearedSpend(authorization("stub-drop"), 12_345, "clr-drop")
 
-        assertThat(result.getOrNull()?.outcome).isNotEqualTo(PostingOutcome.POSTED)
+        assertThat(result.outcome).isNotEqualTo(PostingOutcome.POSTED)
     }
 }
