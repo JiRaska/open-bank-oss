@@ -1020,7 +1020,7 @@
       "clientId": "openbank-interest",
       "fullScopeAllowed": false,
       "name": "OpenBank Interest Service",
-      "description": "Per-service M2M client for interest-service's ledger capitalization posts (issue #10486). Holds ROLE_API only; ledger.create is granted by identity in ledger_rest_ext.rego.",
+      "description": "Per-service M2M client for interest-service's ledger capitalization posts (issue #10486) and its pinned-revision catalog reads (#8481). Holds ROLE_API and the narrow catalog:read scope; ledger.create and catalog.read are granted by identity in the upstream rego.",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
@@ -1032,7 +1032,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__INTEREST_CLIENT_SECRET__"
     },
