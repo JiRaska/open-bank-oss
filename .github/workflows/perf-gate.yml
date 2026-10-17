@@ -56,8 +56,8 @@ jobs:
           # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment, SEPA
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
-          # Delegation, AnaCredit, KYB, Onboarding, SCA and PSD2 added as third through
-          # thirty-fourth read-only subjects). Kept as a named constant so the summary
+          # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2 and Incentive added as
+          # third through thirty-fifth read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
           # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
@@ -98,6 +98,7 @@ jobs:
               "openbank-onboarding-service",
               "openbank-sca-service",
               "openbank-psd2-service",
+              "openbank-incentive-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -149,6 +150,20 @@ jobs:
                   # boot additionally needs -Dopenbank.lending.worker.enabled=false.
                   "openbank-lending-service",
               }
+              # openbank-incentive-service injects JsonWebToken as a CONSTRUCTOR parameter
+              # (IncentiveResource), so quarkus.oidc.enabled=false leaves the bean
+              # unsatisfied and ArC fails the boot (measured this PR:
+              # UnsatisfiedResolutionException for JsonWebToken). It additionally
+              # refuses to start without a 32+-char PROMO_CODE_PEPPER
+              # (IncentiveApplication startup gate). Both facts are measured
+              # declarations, wired as extra boot args below — OIDC stays ENABLED
+              # for these subjects, with discovery pointed at an unreachable fake
+              # issuer (the smoke probe carries no token, so no JWKS fetch ever
+              # happens and quarkus.security.auth.enabled-in-dev-mode=false keeps
+              # @RolesAllowed permissive, as measured locally).
+              OIDC_REQUIRED = {
+                  "openbank-incentive-service",
+              }
               temporal = None
               if svc in NEEDS_TEMPORAL:
                   # The gap between the block header and `namespace:` varies per service
@@ -170,6 +185,7 @@ jobs:
                   "db": db.group(1),
                   "redis": "true" if needs_redis else "false",
                   "temporal": (temporal.group(1).strip() if temporal else ""),
+                  "oidc_required": "true" if svc in OIDC_REQUIRED else "false",
               })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
@@ -241,6 +257,9 @@ jobs:
       # measured per-service gate keys). Namespace read from the service's own config;
       # every other subject gets an empty value and the boot skips the server entirely.
       TEMPORAL_NS: ${{ matrix.temporal }}
+      # "true" only for the derive step's OIDC_REQUIRED declaration (constructor-injected
+      # JsonWebToken — OIDC must stay enabled or ArC fails the boot; see the derive step).
+      OIDC_REQUIRED: ${{ matrix.oidc_required }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -335,12 +354,35 @@ jobs:
           #     (sanctions), UP for one with only incoming (balance) — SmallRye is
           #     asymmetric here, and the lane times HTTP read handlers, not messaging.
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
+          # OIDC_ARGS: every subject except OIDC_REQUIRED boots with OIDC off (the
+          # unauthenticated-harness default). OIDC_REQUIRED subjects carry a
+          # constructor-injected JsonWebToken and die with the bean unsatisfied when
+          # OIDC is off (measured on openbank-incentive-service) — for them OIDC stays
+          # enabled but discovery is pointed at an unreachable fake issuer with a lazy
+          # JWKS path; the probe carries no token, so nothing is ever fetched.
+          OIDC_ARGS=(-Dquarkus.oidc.enabled=false)
+          if [ "${OIDC_REQUIRED}" = "true" ]; then
+            OIDC_ARGS=(
+              -Dquarkus.oidc.discovery-enabled=false
+              -Dquarkus.oidc.auth-server-url=http://localhost:65535/auth/realms/openbank
+              -Dquarkus.oidc.jwks-path=/protocol/openid-connect/certs
+              -Dquarkus.oidc.client-id=perf-gate
+              -Dquarkus.oidc.credentials.secret=perf-gate
+            )
+          fi
+          # IncentiveApplication refuses to start without a 32+-char pepper
+          # (openbank.incentive.code-pepper, ${PROMO_CODE_PEPPER:} — measured this PR).
+          PEPPER_ARGS=()
+          if [ "${SERVICE}" = "openbank-incentive-service" ]; then
+            PEPPER_ARGS=(-DPROMO_CODE_PEPPER=perf-gate-pepper-0123456789abcdef)
+          fi
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.username=openbank \
             -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
-            -Dquarkus.oidc.enabled=false \
+            "${OIDC_ARGS[@]}" \
+            "${PEPPER_ARGS[@]}" \
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
             -Dauthz.enforce=false \
             -Dquarkus.messaging.health.enabled=false \
