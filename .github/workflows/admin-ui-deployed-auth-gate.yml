@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: Apache-2.0
+# Daily, off-peak: every money-path admin screen on the DEPLOYED sandbox must send an
+# unauthenticated visitor to SSO. Named "auth-gate" on purpose — it is not a screen-behaviour test
+# and uses no credentials (#13171). One small job; the 106 stubbed specs stay in the PR lane.
+name: Admin UI deployed auth-gate
+
+on:
+  schedule:
+    - cron: '47 4 * * *'   # 04:47 UTC, outside the busy PR window
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/admin-ui-deployed-auth-gate.yml'
+      - 'openbank-admin-ui/e2e/deployed-auth-gate.spec.ts'
+      - 'openbank-admin-ui/playwright.deployed.config.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-ui-deployed-auth-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auth-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+      # The specs use Playwright's request context only: no browser binary is needed.
+      - working-directory: openbank-admin-ui
+        env:
+          CI: 'true'
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/deployed-auth-gate.xml
+        run: npx playwright test --config playwright.deployed.config.ts
+      - if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service openbank-admin-ui --component openbank-admin-ui \
+            --out openbank-admin-ui/build/test-intelligence/run-deployed-auth-gate.json
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-run-openbank-admin-ui-deployed-auth-gate-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run-deployed-auth-gate.json
+          retention-days: 30
+          if-no-files-found: error
