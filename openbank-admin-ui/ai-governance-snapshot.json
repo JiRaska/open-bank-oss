@@ -3,7 +3,7 @@
   "adrStatus": "Accepted",
   "phase": 2,
   "totalPhases": 5,
-  "phaseLabel": "Governed oversight active — HITL queue live; HolmesGPT shadow evidence + copilot deployed (no autonomous business action)",
+  "phaseLabel": "Governed oversight active — phase-3 mechanism implemented with PR writer stopped pending runtime evidence (no autonomous business action)",
   "agentsActing": 0,
   "phaseRoadmap": [
     {
@@ -22,7 +22,7 @@
       "number": 3,
       "status": "blocked",
       "title": "One non-money development agent",
-      "outcome": "Needs a deployed development agent with a real, policy-gated PR path and recorded human merge."
+      "outcome": "Needs the deployed policy-gated PR path, a recorded real human merge, and deployment attestation before the phase advances."
     },
     {
       "number": 4,
@@ -38,16 +38,17 @@
     }
   ],
   "controlMaturity": {
-    "current": 4,
+    "current": 5,
     "total": 5,
-    "label": "Four core governance control families are built; independently verifiable provenance remains partial.",
+    "label": "All five governance control families are built; independently verifiable provenance remains partial until D5 hardening completes.",
     "achieved": [
       "D1",
       "D2",
       "D3",
-      "D4"
+      "D4",
+      "D8"
     ],
-    "remaining": "D5 still needs asymmetric, third-party-verifiable audit anchors and AI-attribution in release evidence."
+    "remaining": "D5 still needs asymmetric, third-party-verifiable audit anchors and AI-attribution in release evidence; D6–D7 and D9 remain partial."
   },
   "decisions": [
     {
@@ -102,7 +103,7 @@
       "id": "D9",
       "title": "Phasing (blast radius grows with controls)",
       "status": "partial",
-      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phases 3–5 (dev agent → money-path → tamper-evidence) follow."
+      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phase 3 (one non-money development agent), then phases 4–5 (money-path development and independently verifiable provenance), remain future rollout steps. Phase-3 mechanism implemented: flaky-test-hunter's PR path checks the packaged agents.yaml charter in process and queries the OPA sidecar. Both fail CLOSED before any branch or PR is created, including on any PDP outage (advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). GitOps keeps the PR writer stopped with FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=false: this returns DENY, never bypasses the policy checks. Temporal finding workflows remain enabled. The recorded-human-merge mechanism is implemented: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). Controlled PR-writer activation and runtime verification are separate rollout work. Phase 3 remains blocked until independently verified evidence is on file: (1) the first real agent PR merge recorded through that pipeline (row + audit evidence), and (2) deployment attestation — a green fleet-attestation run (cosign/KMS-verified image attestations) covering the deployed agent-service and flaky-test-hunter images pinned by gitops to the merge commit, cross-checked against the Pact Broker deployed-version record. Phase.current moves to 3 only with both on file."
     }
   ],
   "decisionSummary": {
@@ -177,6 +178,8 @@
       "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)"
     ],
     "planned": [
+      "Runtime verification of PR-path policy decisions (agent.github.pr_open; writer currently stopped in GitOps)",
+      "First real human merge recorded as agent_merge_record + agent.pr.merged audit, out-of-band of agent telemetry",
       "By-actor live query endpoint (audit-service)",
       "Independently attested runtime evidence of KMS-signed anchors",
       "ai_attribution populated in evidence bundle",
@@ -456,7 +459,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "b4ddd769c30c0212"
+        "sha256": "1cdfff25203dfc9c"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

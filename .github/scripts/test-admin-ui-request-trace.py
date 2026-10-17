@@ -111,6 +111,9 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         if path == "/redirect-final":
             self._respond(200, SENTINELS[2].encode())
             return
+        if path == "/trace-failure":
+            self._respond(503, b"failure-response", headers={"X-Sentinel": SENTINELS[3]})
+            return
         if path == "/binary":
             self._respond(200, bytes(range(256)))
             return
@@ -123,6 +126,11 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         if path == "/python-final":
             self._respond(200, getattr(self.server, "python_redirect_body", json.dumps({"artifacts": []}).encode()))
             return
+        if path.startswith("/repos/r/actions/runs/"):
+            run_id = int(path.rsplit("/", 1)[-1])
+            workflow = ".github/workflows/verify-provider.yml" if run_id == 3000 else ".github/workflows/services-ci.yml"
+            self._respond(200, json.dumps({"path": workflow}).encode())
+            return
         query = parse_qs(urlsplit(self.path).query)
         page = int((query.get("page") or ["1"])[0])
         if page < 3:
@@ -131,7 +139,10 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
                 for index in range(100)
             ]
         else:
-            artifacts = [{"id": 301, "expired": False, "workflow_run": {"head_branch": "main"}}]
+            artifacts = [
+                {"id": 300, "expired": False, "workflow_run": {"head_branch": "main", "id": 3000}},
+                {"id": 301, "expired": False, "workflow_run": {"head_branch": "main", "id": 3010}},
+            ]
         body = json.dumps({"artifacts": artifacts}).encode()
         if page == 3:
             # urllib follows this redirect; the trace must observe both sends.
@@ -321,10 +332,39 @@ class RequestTraceTests(unittest.TestCase):
             stage = finish_stage(trace_dir, "sbom", env, supervisor)
             self.assertEqual(wrapped.returncode, direct.returncode)
             self.assertEqual(wrapped.stdout, b"")
+            self.assertEqual(wrapped.stderr, b"")
             self.assertEqual(output.read_bytes(), direct.stdout)
             receipt_text = json.dumps(stage)
             captured = wrapped.stdout + wrapped.stderr + receipt_text.encode()
             for sentinel in SENTINELS:
+                self.assertNotIn(sentinel.encode(), captured)
+
+    def test_curl_failure_emits_only_safe_notice_and_preserves_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "body.bin"
+            arguments = [
+                "curl", "--noproxy", "*", "-sS", "--fail-with-body",
+                "-H", f"Authorization: Bearer {SENTINELS[0]}",
+                f"{self.origin}/trace-failure?marker={SENTINELS[1]}", "-o", str(output),
+            ]
+            direct = subprocess.run(arguments, capture_output=True, check=False, timeout=10)
+            direct_body = output.read_bytes()
+            output.unlink()
+            trace_dir = Path(directory) / "trace"
+            trace_dir.mkdir()
+            env = {**os.environ, "ADMIN_UI_TRACE_DIR": str(trace_dir)}
+            supervisor = start_stage(self, trace_dir, "sbom", env)
+            wrapped = subprocess.run(
+                [sys.executable, str(CURL_TRACE), "--stage", "sbom", "--auth", "github", "--", *arguments],
+                capture_output=True, env=env, check=False, timeout=10,
+            )
+            stage = finish_stage(trace_dir, "sbom", env, supervisor)
+            self.assertEqual(direct.returncode, 22)
+            self.assertEqual((wrapped.returncode, wrapped.stdout), (direct.returncode, direct.stdout))
+            self.assertEqual(output.read_bytes(), direct_body)
+            self.assertEqual(wrapped.stderr, b"WARN: traced curl command failed; request details withheld.\n")
+            captured = wrapped.stdout + wrapped.stderr + json.dumps(stage).encode()
+            for sentinel in (*SENTINELS, self.origin, "failure-response"):
                 self.assertNotIn(sentinel.encode(), captured)
 
     def test_curl_parser_rejects_unsupported_or_truncated_verbose_stream(self) -> None:
@@ -376,12 +416,29 @@ path, origin, mode, trace_dir = sys.argv[1:]
 spec = importlib.util.spec_from_file_location("artifact_collector", path)
 module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 trace = module.SendTrace("service_ti", "github"); trace.install()
+real_urlopen = module.urlopen
+# Keep the real provenance helper and urllib transport; route its fixed API origin to the oracle.
+def loopback_urlopen(request, **kwargs):
+    prefix = "https://api.github.com"
+    if request.full_url.startswith(prefix + "/"):
+        request = module.Request(
+            origin + request.full_url[len(prefix):],
+            headers=dict(request.header_items()), method=request.get_method(),
+        )
+    return real_urlopen(request, **kwargs)
+module.urlopen = loopback_urlopen
+seen_run_ids = []
+def run_path(run_id):
+    seen_run_ids.append(run_id)
+    return module.github_run_path("r", "TRACE_SENTINEL_AUTH_8f4e", run_id)
 try:
     if mode == "pages":
         result = module.latest_main_artifact(
             "TRACE_SENTINEL_QUERY_71ad",
             lambda name, page: module.github_page("r", "TRACE_SENTINEL_AUTH_8f4e", name, page, api_origin=origin),
+            run_path,
         )
+        assert seen_run_ids == [3000, 3010]
         assert result == "301"
     else:
         try:
@@ -413,12 +470,14 @@ print(json.dumps({"counts": dict(trace.counts), "complete": trace.invocation.sta
             )
             self.assertEqual(child.returncode, 0, child.stderr)
             result = json.loads(child.stdout)
-            self.assertEqual(result["counts"], {"non_api": 4})
+            self.assertEqual(result["counts"], {"non_api": 6})
             self.assertTrue(result["complete"])
-            self.assertEqual(len(self.server.oracle), 4)
+            self.assertEqual(len(self.server.oracle), 6)
+            provenance_paths = [urlsplit(path).path for _method, path, _host in self.server.oracle if "/actions/runs/" in path]
+            self.assertEqual(provenance_paths, ["/repos/r/actions/runs/3000", "/repos/r/actions/runs/3010"])
             stage = finish_stage(trace_dir, "service_ti", env, supervisor)
             self.assertTrue(stage["complete"], stage)
-            self.assertEqual(sum(r["numericSendCount"] for r in stage["records"]), 5)
+            self.assertEqual(sum(r["numericSendCount"] for r in stage["records"]), 7)
             receipt_text = json.dumps(stage) + child.stdout + child.stderr
             for sentinel in SENTINELS:
                 self.assertNotIn(sentinel, receipt_text)

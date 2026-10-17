@@ -25,6 +25,7 @@
 | **D5 — AI atribuce** | `ModelGateway` a `AgentPolicyGate` emitují `AuditEvent {actorType=AI_AGENT}` pro každý completion / rozhodnutí (model_id, model_version, prompt_hash, tokeny, policy_decision, reason). |
 | **D6 — model gateway** | jediná hranice důvěry, kterou prochází každé volání modelu; provider-agnostická, citlivý kontext připnut k self-hosted modelu. |
 | **D9 — fázované vynucení** | `EnforcementMode` ADVISORY (jen audit, default) → BLOCK; fail-closed PDP s bezpečnostním fallbackem `pdpError`, takže mrtvý OPA nikdy nezamkne asistenta. |
+| **Fáze 3 — zaznamenané lidské merge** | `POST /api/v1/agent-merge-records` ingestuje mimo pásmo (CI workflow `record-agent-merge`, `ROLE_MERGE_RECORDER`) trvalý záznam toho, KDO mergoval PR autora agentem — agent své merge nikdy nenahlašuje sám. `agent_merge_record.pr_number` UNIQUE deduplikuje znovudoručení webhooku; každý merge je auditován jednou jako `agent.pr.merged` s `actorType=HUMAN` pod mergujícím člověkem, přes odolný outbox ([04 — Data](./04-data.md)). |
 
 ## Charter `ui-assistant` (agents.yaml)
 
@@ -71,7 +72,7 @@ Agent service **není** systém záznamu a neukládá žádná zákaznická data
 - ✅ AuthZ: deny-by-default OPA policy gate na volání nástroje; nenamapovaný nástroj selže uzavřeně.
 - ✅ Least privilege: read-only povrch nástrojů; charter zakazuje veškeré zápisy/peníze/secrets.
 - ✅ Postoj k prompt-injection: systémový prompt instruuje model, aby s daty nástrojů nakládal jako s nedůvěryhodnými a nikdy nenásledoval instrukce uvnitř nich (guardraily ADR-0031 D6 — llama-guard / injection filter jsou runtime cíl).
-- ✅ Audit: každé volání modelu + každé rozhodnutí policy je AI-atribuováno.
+- ✅ Audit: každé volání modelu + každé rozhodnutí policy je AI-atribuováno; každý mergovaný PR agenta je zaznamenán jednou jako lidsky atribuovaný důkaz merge (`agent.pr.merged`, exactly-once i přes znovudoručení webhooku).
 - ✅ Žádný syrový prompt v klidu: pouze SHA-256 `prompt_hash`.
 - ✅ Response hlavičky: CSP, X-Frame-Options DENY, nosniff, HSTS, Referrer/Permissions-Policy.
 - ✅ Rate limiting: `openbank.rate-limit` (max-concurrent) + per-agent charter limity.

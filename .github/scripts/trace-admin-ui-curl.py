@@ -162,6 +162,8 @@ def main() -> int:
         else "pre_send_failure" if return_code != 0 else "no_send_observed"
     )
     invocation.end(parser_state.counts, complete=complete, reason=reason)
+    if return_code != 0:
+        print("WARN: traced curl command failed; request details withheld.", file=sys.stderr)
     return 128 - return_code if return_code < 0 else return_code
 
 

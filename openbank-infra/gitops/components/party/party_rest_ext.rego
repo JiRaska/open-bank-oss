@@ -122,6 +122,9 @@ allowed_reasons contains "service-interest-party-m2m" if {
 # in rest.rego can never admit anyone else; this identity-gated rule is the whole grant.
 allowed_reasons contains "service-tax-reporting-party-tax-facts" if {
 	input.principal.type == "HUMAN"
+
+	# Absent marker retains the legacy ABI; explicit null is not a verified marker.
+	not input.principal.service_account == null
 	machine_named("service-account-openbank-tax-reporting")
 	input.action == "party.reporting.taxFacts"
 }

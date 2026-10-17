@@ -62,6 +62,7 @@ data class StrategyElectionDto(val strategyCode: String, val effectiveFrom: Loca
 data class ContractResponse(
     val contractId: UUID,
     val participantPartyId: UUID,
+    val participantBirthDate: LocalDate,
     val productLine: ProductLine,
     val jurisdiction: String,
     val packVersion: Int,
@@ -80,6 +81,7 @@ data class ContractResponse(
         fun from(c: PensionContract) = ContractResponse(
             contractId = c.id,
             participantPartyId = c.participantPartyId,
+            participantBirthDate = c.participantBirthDate,
             productLine = c.productLine,
             jurisdiction = c.jurisdiction,
             packVersion = c.packVersion,
