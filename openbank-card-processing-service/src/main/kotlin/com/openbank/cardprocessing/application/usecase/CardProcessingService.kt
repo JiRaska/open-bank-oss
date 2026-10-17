@@ -327,7 +327,7 @@ class CardProcessingService(
         // unreachable would lose it. A FAILED or UNKNOWN posting is a finding, not a silent success -
         // which is what the multi-valued outcome is for. NOTE: nothing re-drives a FAILED/UNKNOWN
         // posting yet - a replay deliberately posts nothing (no persisted posting state to tell a
-        // booked posting from a lost one); that durable re-driver is an open decision.
+        // booked posting from a lost one); the durable re-driver is tracked in #13228.
         postToLedger(saved, command.amountMinorUnits, command.idempotencyKey)
         return PresentmentOutcome.Accepted(saved)
     }

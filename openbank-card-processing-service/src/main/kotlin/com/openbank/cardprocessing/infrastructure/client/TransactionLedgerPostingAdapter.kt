@@ -89,8 +89,8 @@ class TransactionLedgerPostingAdapter(
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // An unreadable answer proves nothing: the debit may or may not be booked. It must NOT be
             // rethrown (this runs after the clearing committed and nobody retries the caller) and must
-            // not be called POSTED or FAILED: it is UNKNOWN, counted, and re-driven by a replay of the
-            // clearing under the same idempotency key, which transaction-service dedupes.
+            // not be called POSTED or FAILED: it is UNKNOWN and counted. It is NOT retried yet (a replay of
+            // the clearing posts nothing): the durable re-driver is tracked in #13228.
             if (isUnreadableResponse(e)) {
                 log.warnf(e, "ledger posting for authorization %s has an unreadable answer", authorization.id)
                 return PostingResult(PostingOutcome.UNKNOWN, null, UNREADABLE_DETAIL)
