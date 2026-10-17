@@ -4,7 +4,10 @@
 
 package com.openbank.standingorder.infrastructure.kafka
 
+import com.fasterxml.jackson.core.JsonParseException
+import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.messaging.EventRetry
@@ -15,6 +18,8 @@ import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
 import com.openbank.standingorder.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.ProcessingException
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -190,15 +195,72 @@ class StandingOrderDueConsumer(
             description = node.path("remittanceInfo").asText(null)?.takeIf { it.isNotBlank() },
             valueDate = LocalDate.now(clock),
         )
-        // The REST client throws on a non-2xx answer (default response mapper - this client does not
-        // disable it), exactly as it did when this call returned a raw Response: a rejected transfer
-        // leaves through EventRetry/the connector, never through here. Reaching the next line IS the
-        // 2xx the previous `statusInfo.family` check re-tested.
-        val txResponse = transactionClient.initiateTransaction(request).awaitSuspending()
-        log.infof("[standing-order-exec] order %s internal transfer accepted (transaction %s)", orderId, txResponse.id)
+        if (!submitTransfer(orderId, request)) {
+            recordFailureSafely(orderId)
+            return
+        }
         runCatching { useCase.confirmExecution(orderId) }
             .onFailure { log.warnf(it, "[standing-order-exec] confirmExecution failed for order %s", orderId) }
     }
+
+    /**
+     * Books the own-account transfer and says, explicitly, what the answer meant. The generated
+     * client (ADR-0319) returns a typed body, so the old `statusInfo.family` branch has nothing to
+     * look at: a non-2xx answer arrives as a [WebApplicationException] from the REST client's
+     * default response mapper (`disable-default-mapper` is set nowhere), and the outcome is decided
+     * here rather than left to whatever the mapper happens to throw:
+     *
+     * - **2xx** - accepted. The body is never required: transaction-service has already committed
+     *   the transfer, so a body that does not bind into the generated type (the client wraps that in
+     *   an exception caused by a Jackson error) must not turn a booked transfer into a retry or a
+     *   failed execution - a retry would re-present the same idempotency key, a failure would
+     *   suspend an order that was in fact paid.
+     * - **4xx** - a rejection (the previous behaviour for a non-2xx answer): `false`, so the caller
+     *   records the failed execution. 408/425/429 are the exceptions - they say "try again", not "no".
+     * - **5xx, timeouts, connection errors** - retriable: rethrown for [EventRetry] and then the
+     *   connector, never recorded as a failure, because the transfer may or may not have booked.
+     */
+    private suspend fun submitTransfer(orderId: UUID, request: InitiateTransactionRequest): Boolean = try {
+        val txResponse = transactionClient.initiateTransaction(request).awaitSuspending()
+        log.infof("[standing-order-exec] order %s internal transfer accepted (transaction %s)", orderId, txResponse.id)
+        true
+    } catch (e: WebApplicationException) {
+        val status = e.response.status
+        when {
+            status in HTTP_OK_RANGE && isBodyBindingFailure(e) -> acceptedWithUnreadableBody(orderId, e)
+            status in HTTP_CLIENT_ERROR_RANGE && status !in RETRIABLE_CLIENT_ERRORS -> {
+                log.warnf(
+                    "[standing-order-exec] order %s internal transfer rejected (HTTP %d) — recording failure",
+                    orderId,
+                    status,
+                )
+                false
+            }
+            else -> throw e
+        }
+    } catch (e: ProcessingException) {
+        if (isBodyBindingFailure(e)) acceptedWithUnreadableBody(orderId, e) else throw e
+    } catch (e: JsonProcessingException) {
+        // Measured against the real client: a 2xx body that does not bind arrives as the raw Jackson
+        // exception, NOT wrapped in a ProcessingException or WebApplicationException.
+        if (isBodyBindingFailure(e)) acceptedWithUnreadableBody(orderId, e) else throw e
+    }
+
+    private fun acceptedWithUnreadableBody(orderId: UUID, cause: Exception): Boolean {
+        log.warnf(
+            cause,
+            "[standing-order-exec] order %s internal transfer accepted (2xx) but the response body did not " +
+                "bind - the transfer is committed, treating as success",
+            orderId,
+        )
+        return true
+    }
+
+    // READ-side Jackson errors only (MismatchedInputException covers InvalidFormat/UnrecognizedProperty;
+    // JsonParseException is malformed JSON). A WRITE-side failure (InvalidDefinitionException,
+    // JsonGenerationException) means the request never left: that is not an accepted transfer.
+    private fun isBodyBindingFailure(e: Throwable): Boolean =
+        generateSequence(e) { it.cause }.any { it is MismatchedInputException || it is JsonParseException }
 
     /**
      * Resolves [creditorIban] and returns its accountId ONLY when it belongs to the same party as
@@ -255,5 +317,13 @@ class StandingOrderDueConsumer(
     private suspend fun recordFailureSafely(orderId: UUID) {
         runCatching { useCase.recordFailure(orderId) }
             .onFailure { log.warnf(it, "[standing-order-exec] recordFailure failed for order %s", orderId) }
+    }
+
+    private companion object {
+        val HTTP_OK_RANGE = 200..299
+        val HTTP_CLIENT_ERROR_RANGE = 400..499
+
+        /** Request Timeout, Too Early, Too Many Requests: the server asks for another attempt. */
+        val RETRIABLE_CLIENT_ERRORS = setOf(408, 425, 429)
     }
 }

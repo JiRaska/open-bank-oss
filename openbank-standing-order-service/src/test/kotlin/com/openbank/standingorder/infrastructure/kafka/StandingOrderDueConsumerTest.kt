@@ -199,23 +199,46 @@ class StandingOrderDueConsumerTest {
         coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
     }
 
-    // The REST client throws on a non-2xx answer (default response mapper), so a rejection reaches the
-    // consumer as an exception, never as a Response: it is retried and rethrown for the connector to
-    // dead-letter (EventRetry) and the order is neither confirmed nor recorded as failed here.
+    // A rejection (4xx) reaches the consumer as the REST client's exception, never as a Response. It
+    // is the previous "non-2xx" behaviour: recorded as a failed execution, not retried (a refused
+    // transfer refuses identically on every delivery). The real-socket proof is TransactionClientOutcomeIT.
     @Test
-    fun `a rejected internal transfer is rethrown and never confirmed`(): Unit = runBlocking {
-        val lookupBody = mapper.writeValueAsString(
-            mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
-        )
-        every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
-        every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().failure(WebApplicationException(422))
+    fun `a rejected internal transfer (4xx) is recorded as a failed execution and never confirmed`(): Unit =
+        runBlocking {
+            val lookupBody = mapper.writeValueAsString(
+                mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
+            )
+            every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { transactionClient.initiateTransaction(any()) } returns
+                Uni.createFrom().failure(WebApplicationException(422))
+            coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
-        assertThatThrownBy { runBlocking { consumer.consume(dueEvent(paymentType = "DOMESTIC")) } }
-            .isInstanceOf(WebApplicationException::class.java)
+            consumer.consume(dueEvent(paymentType = "DOMESTIC"))
 
-        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
-    }
+            coVerify(exactly = 1) { useCase.recordFailure(orderId) }
+            coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+            io.mockk.verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
+        }
+
+    // A 5xx says nothing about whether the transfer booked: retried, rethrown for the connector to
+    // dead-letter, and NOT recorded as a failure.
+    @Test
+    fun `an unavailable transaction-service (5xx) is retried and rethrown, not recorded as a failure`(): Unit =
+        runBlocking {
+            val lookupBody = mapper.writeValueAsString(
+                mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
+            )
+            every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { transactionClient.initiateTransaction(any()) } returns
+                Uni.createFrom().failure(WebApplicationException(503))
+
+            assertThatThrownBy { runBlocking { consumer.consume(dueEvent(paymentType = "DOMESTIC")) } }
+                .isInstanceOf(WebApplicationException::class.java)
+
+            io.mockk.verify(exactly = 3) { transactionClient.initiateTransaction(any()) }
+            coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+            coVerify(exactly = 0) { useCase.recordFailure(any()) }
+        }
 
     @Test
     fun `DOMESTIC order with no creditorIban records a failure without calling account-service`(): Unit = runBlocking {
