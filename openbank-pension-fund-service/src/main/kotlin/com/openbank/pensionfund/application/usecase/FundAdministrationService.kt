@@ -45,7 +45,8 @@ class FundAdministrationService(
             "productRevisionId is required: a fund's fee comes from a published catalog revision"
         }
         val terms = fundTerms.resolve(revisionId)
-        require(definition.managementFeeRate == null || definition.managementFeeRate.compareTo(terms.managementFeeRate) == 0) {
+        val suppliedFee = definition.managementFeeRate
+        require(suppliedFee == null || suppliedFee.compareTo(terms.managementFeeRate) == 0) {
             "managementFeeRate is deprecated and must equal the revision's fee ${terms.managementFeeRate}"
         }
         val fund = Fund(

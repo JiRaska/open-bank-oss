@@ -135,6 +135,8 @@ class FundPinnedFeeNavTest {
             // A new fund pinned to the superseded revision is refused, a new one on B is priced at B.
             assertThatThrownBy { kotlinx.coroutines.runBlocking { service.createFund(definition(a)) } }
                 .isInstanceOf(IllegalArgumentException::class.java)
-            assertThat(service.createFund(definition(b)).managementFeeRate).isEqualByComparingTo("0.01")
+            assertThat(
+                service.createFund(definition(b).copy(isin = "CZ0008040318")).managementFeeRate,
+            ).isEqualByComparingTo("0.01")
         }
 }
