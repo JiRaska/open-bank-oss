@@ -208,7 +208,11 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         .willRespondWith()
         .status(422)
         .headers(mapOf("Content-Type" to "application/json"))
-        .body(newJsonBody { o -> o.stringType("error", "no GL account is mapped for accountingClass=NOT_A_MAPPED_CLASS") }.build())
+        .body(
+            newJsonBody { o ->
+                o.stringType("error", "no GL account is mapped for accountingClass=NOT_A_MAPPED_CLASS")
+            }.build(),
+        )
         .toPact()
 
     @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
@@ -253,16 +257,17 @@ class TreasuryNostroLedgerReadPactConsumerTest {
     }
 
     private fun postBody(accountingClass: String, key: String = JOURNAL_KEY): String {
-        fun leg(cls: String, role: String, side: String) = com.openbank.treasury.infrastructure.client.JournalLineRequest(
-            accountingClass = cls,
-            accountingRole = role,
-            side = side,
-            amount = java.math.BigDecimal("250000.00"),
-            currencyCode = "CZK",
-            fxRate = null,
-            baseAmount = java.math.BigDecimal("250000.00"),
-            baseCurrencyCode = "CZK",
-        )
+        fun leg(cls: String, role: String, side: String) =
+            com.openbank.treasury.infrastructure.client.JournalLineRequest(
+                accountingClass = cls,
+                accountingRole = role,
+                side = side,
+                amount = java.math.BigDecimal("250000.00"),
+                currencyCode = "CZK",
+                fxRate = null,
+                baseAmount = java.math.BigDecimal("250000.00"),
+                baseCurrencyCode = "CZK",
+            )
         return com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
             com.openbank.treasury.infrastructure.client.PostJournalRequest(
                 idempotencyKey = key,
@@ -270,7 +275,10 @@ class TreasuryNostroLedgerReadPactConsumerTest {
                 entryDate = JOURNAL_DATE,
                 valueDate = JOURNAL_DATE,
                 description = "MM placement settlement",
-                lines = listOf(leg(accountingClass, "PRINCIPAL", "DEBIT"), leg("NOSTRO_ACCOUNT", "PRINCIPAL", "CREDIT")),
+                lines = listOf(
+                    leg(accountingClass, "PRINCIPAL", "DEBIT"),
+                    leg("NOSTRO_ACCOUNT", "PRINCIPAL", "CREDIT"),
+                ),
                 createdBy = java.util.UUID.fromString("0191c0de-0000-7000-8000-0000000000aa"),
             ),
         )

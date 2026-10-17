@@ -11,5 +11,5 @@ import com.openbank.ledger.domain.model.AccountingRole
 interface AccountingClassMapRepository {
     suspend fun find(accountingClass: String, role: AccountingRole, currencyCode: String): AccountingClassMapping?
 
-    suspend fun listAll(): List<AccountingClassMapping>
+    suspend fun listMappings(): List<AccountingClassMapping>
 }

@@ -7,6 +7,7 @@ package com.openbank.ledger.integration
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -30,34 +31,36 @@ import java.util.UUID
 class AccountingClassGlMapIT {
 
     /** (accountingClass, role, currency) -> GL code. Keep identical to treasury's `LedgerMapGolden` + billing rows. */
-    private val golden: Map<Triple<String, String, String>, String> = listOf(
-        row("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", "1001"),
-        row("NOSTRO_ACCOUNT", "PRINCIPAL", "EUR", "1002"),
-        row("INTERBANK_PLACEMENT", "PRINCIPAL", "CZK", "1500"),
-        row("INTERBANK_PLACEMENT", "PRINCIPAL", "EUR", "1501"),
-        row("INTERBANK_PLACEMENT", "ACCRUED_INTEREST", "CZK", "1520"),
-        row("INTERBANK_PLACEMENT", "ACCRUED_INTEREST", "EUR", "1521"),
-        row("INTERBANK_PLACEMENT", "INTEREST_INCOME", "CZK", "4200"),
-        row("INTERBANK_PLACEMENT", "INTEREST_INCOME", "EUR", "4201"),
-        row("INTERBANK_BORROWING", "PRINCIPAL", "CZK", "2300"),
-        row("INTERBANK_BORROWING", "PRINCIPAL", "EUR", "2301"),
-        row("INTERBANK_BORROWING", "ACCRUED_INTEREST", "CZK", "2310"),
-        row("INTERBANK_BORROWING", "ACCRUED_INTEREST", "EUR", "2311"),
-        row("INTERBANK_BORROWING", "INTEREST_EXPENSE", "CZK", "5200"),
-        row("INTERBANK_BORROWING", "INTEREST_EXPENSE", "EUR", "5201"),
-        row("CNB_DEPOSIT_FACILITY", "PRINCIPAL", "CZK", "1510"),
-        row("CNB_DEPOSIT_FACILITY", "ACCRUED_INTEREST", "CZK", "1520"),
-        row("CNB_DEPOSIT_FACILITY", "INTEREST_INCOME", "CZK", "4200"),
-        row("CNB_LOMBARD_BORROWING", "PRINCIPAL", "CZK", "2320"),
-        row("CNB_LOMBARD_BORROWING", "ACCRUED_INTEREST", "CZK", "2310"),
-        row("CNB_LOMBARD_BORROWING", "INTEREST_EXPENSE", "CZK", "5200"),
-        row("FX_SPOT_POSITION", "PRINCIPAL", "CZK", "1990"),
-        row("FX_SPOT_POSITION", "PRINCIPAL", "EUR", "1991"),
-    ) + listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM").flatMap { cls ->
-        listOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103").map { (ccy, code) ->
-            row(cls, "PRINCIPAL", ccy, code)
-        }
-    } + row("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK", "4003")
+    private val golden: Map<Triple<String, String, String>, String> = (
+        listOf(
+            row("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", "1001"),
+            row("NOSTRO_ACCOUNT", "PRINCIPAL", "EUR", "1002"),
+            row("INTERBANK_PLACEMENT", "PRINCIPAL", "CZK", "1500"),
+            row("INTERBANK_PLACEMENT", "PRINCIPAL", "EUR", "1501"),
+            row("INTERBANK_PLACEMENT", "ACCRUED_INTEREST", "CZK", "1520"),
+            row("INTERBANK_PLACEMENT", "ACCRUED_INTEREST", "EUR", "1521"),
+            row("INTERBANK_PLACEMENT", "INTEREST_INCOME", "CZK", "4200"),
+            row("INTERBANK_PLACEMENT", "INTEREST_INCOME", "EUR", "4201"),
+            row("INTERBANK_BORROWING", "PRINCIPAL", "CZK", "2300"),
+            row("INTERBANK_BORROWING", "PRINCIPAL", "EUR", "2301"),
+            row("INTERBANK_BORROWING", "ACCRUED_INTEREST", "CZK", "2310"),
+            row("INTERBANK_BORROWING", "ACCRUED_INTEREST", "EUR", "2311"),
+            row("INTERBANK_BORROWING", "INTEREST_EXPENSE", "CZK", "5200"),
+            row("INTERBANK_BORROWING", "INTEREST_EXPENSE", "EUR", "5201"),
+            row("CNB_DEPOSIT_FACILITY", "PRINCIPAL", "CZK", "1510"),
+            row("CNB_DEPOSIT_FACILITY", "ACCRUED_INTEREST", "CZK", "1520"),
+            row("CNB_DEPOSIT_FACILITY", "INTEREST_INCOME", "CZK", "4200"),
+            row("CNB_LOMBARD_BORROWING", "PRINCIPAL", "CZK", "2320"),
+            row("CNB_LOMBARD_BORROWING", "ACCRUED_INTEREST", "CZK", "2310"),
+            row("CNB_LOMBARD_BORROWING", "INTEREST_EXPENSE", "CZK", "5200"),
+            row("FX_SPOT_POSITION", "PRINCIPAL", "CZK", "1990"),
+            row("FX_SPOT_POSITION", "PRINCIPAL", "EUR", "1991"),
+        ) + listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM").flatMap { cls ->
+            listOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103").map { (ccy, code) ->
+                row(cls, "PRINCIPAL", ccy, code)
+            }
+        } + row("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK", "4003")
+        ).toMap()
 
     private fun row(accountingClass: String, role: String, currency: String, code: String) =
         Triple(accountingClass, role, currency) to code
@@ -105,6 +108,27 @@ class AccountingClassGlMapIT {
     }
 
     @Test
+    fun `fee billing resolves to the two accounts its configuration used to name by id`() {
+        // Billing's previous defaults (BillingLedgerConfig): debit a0..0002 (2100), credit a0..4003 (4003).
+        Given {
+            queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
+            queryParam("role", "PRINCIPAL")
+            queryParam("currency", "CZK")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(200)
+            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000000002"))
+        }
+        Given {
+            queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
+            queryParam("role", "FEE_INCOME")
+            queryParam("currency", "CZK")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(200)
+            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000004003"))
+        }
+    }
+
+    @Test
     fun `a journal posted by class lands on the same accounts as one posted by glAccountId`() {
         val today = LocalDate.now().toString()
         val byId = post(
@@ -129,7 +153,10 @@ class AccountingClassGlMapIT {
         val today = LocalDate.now().toString()
         postExpecting(
             400,
-            line(""""glAccountId":"a0000000-0000-0000-0000-000000001500","accountingClass":"INTERBANK_PLACEMENT","accountingRole":"PRINCIPAL"""", "DEBIT"),
+            line(
+                """"glAccountId":"a0000000-0000-0000-0000-000000001500","accountingClass":"INTERBANK_PLACEMENT","accountingRole":"PRINCIPAL"""",
+                "DEBIT",
+            ),
             line(""""glAccountId":"a0000000-0000-0000-0000-000000001001"""", "CREDIT"),
             today,
         )
@@ -160,11 +187,10 @@ class AccountingClassGlMapIT {
         """{"idempotencyKey":"$key","transactionId":"${UUID.randomUUID()}","entryDate":"$date","valueDate":"$date",""" +
             """"description":"accounting class IT","createdBy":"${UUID.randomUUID()}","lines":[$a,$b]}"""
 
-    private fun post(key: String, a: String, b: String, date: String): JsonPath =
-        Given {
-            contentType("application/json")
-            body(payload(key, a, b, date))
-        } When { post("/api/v1/journals") } Then { statusCode(201) } Extract { jsonPath() }
+    private fun post(key: String, a: String, b: String, date: String): JsonPath = Given {
+        contentType("application/json")
+        body(payload(key, a, b, date))
+    } When { post("/api/v1/journals") } Then { statusCode(201) } Extract { jsonPath() }
 
     private fun postExpecting(status: Int, a: String, b: String, date: String) {
         Given {

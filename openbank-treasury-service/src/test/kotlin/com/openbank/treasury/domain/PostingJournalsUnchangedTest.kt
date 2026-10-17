@@ -32,8 +32,14 @@ class PostingJournalsUnchangedTest {
             put("placement-$ccy", placement(currency = ccy))
             put("borrowing-$ccy", placement(currency = ccy, product = ProductType.MM_BORROWING))
         }
-        put("cnb-deposit", placement(product = ProductType.CNB_DEPOSIT_FACILITY, maturity = MONDAY.plusDays(1)))
-        put("cnb-lombard", placement(product = ProductType.CNB_LOMBARD, maturity = MONDAY.plusDays(1)))
+        put(
+            "cnb-deposit",
+            placement(product = ProductType.CNB_DEPOSIT_FACILITY, counterparty = "CNB", maturity = MONDAY.plusDays(1)),
+        )
+        put(
+            "cnb-lombard",
+            placement(product = ProductType.CNB_LOMBARD, counterparty = "CNB", maturity = MONDAY.plusDays(1)),
+        )
         put("fx-buy", fxSpot(side = FxSide.BUY))
         put("fx-sell", fxSpot(side = FxSide.SELL))
     }
@@ -75,7 +81,11 @@ class PostingJournalsUnchangedTest {
     @Test
     fun `maturity is unchanged whether nothing, part or all of the interest was accrued`() {
         deals.filterValues { it.product != ProductType.FX_SPOT }.forEach { (name, deal) ->
-            listOf(BigDecimal.ZERO, deal.interest.divide(BigDecimal("3"), 2, java.math.RoundingMode.HALF_UP), deal.interest)
+            listOf(
+                BigDecimal.ZERO,
+                deal.interest.divide(BigDecimal("3"), 2, java.math.RoundingMode.HALF_UP),
+                deal.interest,
+            )
                 .forEach { accrued ->
                     assertThat(render(PostingRules.maturity(deal, accrued)))
                         .describedAs("$name maturity accrued=$accrued")

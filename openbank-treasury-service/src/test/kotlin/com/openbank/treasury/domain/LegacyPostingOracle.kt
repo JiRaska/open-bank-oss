@@ -194,8 +194,16 @@ object LegacyPostingRules {
     }
 
     /** The principal's liability account: interbank borrowings, or the ČNB lombard account. */
-    private fun liabilityCode(deal: Deal): String =
-        LegacyTreasuryChart.code(deal.currency, if (deal.product == ProductType.CNB_LOMBARD) "cnb-borrowing" else "borrowing")
+    private fun liabilityCode(deal: Deal): String = LegacyTreasuryChart.code(
+        deal.currency,
+        if (deal.product ==
+            ProductType.CNB_LOMBARD
+        ) {
+            "cnb-borrowing"
+        } else {
+            "borrowing"
+        },
+    )
 
     private fun line(code: String, side: Side, amount: BigDecimal, ccy: String): LegacyLine? =
         if (amount.signum() > 0) LegacyLine(code, side, amount, ccy) else null

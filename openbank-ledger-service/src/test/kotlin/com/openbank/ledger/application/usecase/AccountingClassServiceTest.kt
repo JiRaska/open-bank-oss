@@ -19,10 +19,11 @@ class AccountingClassServiceTest {
     private val mapped = AccountingClassMapping("INTERBANK_PLACEMENT", AccountingRole.PRINCIPAL, "CZK", id, "1500")
 
     private val repo = object : AccountingClassMapRepository {
-        override suspend fun find(accountingClass: String, role: AccountingRole, currencyCode: String) =
-            mapped.takeIf { it.accountingClass == accountingClass && it.role == role && it.currencyCode == currencyCode }
+        override suspend fun find(accountingClass: String, role: AccountingRole, currencyCode: String) = mapped.takeIf {
+            it.accountingClass == accountingClass && it.role == role && it.currencyCode == currencyCode
+        }
 
-        override suspend fun listAll() = listOf(mapped)
+        override suspend fun listMappings() = listOf(mapped)
     }
     private val service = AccountingClassService(repo)
 
