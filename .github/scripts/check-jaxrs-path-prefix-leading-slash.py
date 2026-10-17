@@ -66,7 +66,11 @@ DIRECT_RE = re.compile(
 
 # One-hop alias: `val <name> = <expr>.uriInfo.path` / `<expr>.requestUri.path` / `<expr>.path`
 ALIAS_ASSIGN_RE = re.compile(
-    r"\bval\s+(\w+)\s*=\s*[\w.]*\.(?:uriInfo\.path|requestUri\.path|path)\b(?!\s*\()",
+    r"\bval\s+(\w+)\s*=\s*[\w.]*\.(?:uriInfo\.path|requestUri\.path|path)\b(?!\s*\()"
+    # An alias that is NORMALISED on assignment (`ctx.uriInfo.path.removePrefix("/")`) no longer
+    # carries the leading slash, so a slash-less literal against it is correct -- that is exactly
+    # how #11008 fixed the three psd2 filters. Without this the gate flagged the fix itself.
+    r"(?!\.(?:removePrefix|trimStart|drop)\b)",
 )
 
 
@@ -208,6 +212,13 @@ def self_test() -> int:
         (svc / "JacksonPath.kt").write_text(
             'val code = request.path("code").takeIf { it.isTextual }?.textValue()\n'
             'val ok = code?.startsWith("CZ") ?: false\n',
+        )
+        # Known-negative (#11008's fix shape): the alias is normalised, so slash-less literals are right.
+        (svc / "NormalisedAlias.kt").write_text(
+            'val path = ctx.uriInfo.path.removePrefix("/")\n'
+            'val gated = path.startsWith("v1/payments")\n'
+            "val trimmed = ctx.requestUri.path.trimStart('/')\n"
+            'val g2 = trimmed.startsWith("open-banking/")\n',
         )
         (tests / "DirectFilterTest.kt").write_text(
             'val gated = ctx.uriInfo.path.startsWith("open-banking/")\n',

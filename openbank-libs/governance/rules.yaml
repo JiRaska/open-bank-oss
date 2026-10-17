@@ -407,7 +407,7 @@ change_requirements:
          check must match against '/v1/...', never 'v1/...' (#10997)"
       - "no new slash-less prefix site; the per-file baseline only shrinks"
     gate: jaxrs-path-prefix-leading-slash
-    enforced: advisory
+    enforced: enforce   # promoted 2026-10-17 (#11008 merged, baseline empty)
     target_enforce_date: "2026-12-31"
     ci_producer: ".github/scripts/check-jaxrs-path-prefix-leading-slash.py"
   db_backup_association:
