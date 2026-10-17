@@ -16,10 +16,21 @@ interface AccrueInterestUseCase {
 
 /**
  * What one capitalization run did (ADR-0342 D4): how many pairs were capitalized (one ledger
- * journal each), and how many the ledger refused because the accounting day no longer accepts
- * postings — a close outcome reported to the ledger, not just a WARN line.
+ * journal each), how many the ledger refused because the accounting day no longer accepts
+ * postings, and how many FAILED for any other reason (ledger unreachable, 5xx, a bug). All three are
+ * close outcomes reported to the ledger, not just a WARN line: only a run with neither refusals nor
+ * failures may be reported as RAN, because otherwise the day ties out over interest never posted.
  */
-data class CapitalizationRunOutcome(val capitalized: Int, val refusedClosedDay: Int, val refusalReason: String?)
+data class CapitalizationRunOutcome(
+    val capitalized: Int,
+    val refusedClosedDay: Int,
+    val refusalReason: String?,
+    val failed: Int = 0,
+    val failureReason: String? = null,
+) {
+    /** True when every pair that was due is capitalized. */
+    val complete: Boolean get() = refusedClosedDay == 0 && failed == 0
+}
 
 interface CapitalizeInterestUseCase {
     fun capitalize(accountId: UUID, productId: String, toDate: LocalDate): Uni<InterestCapitalization>

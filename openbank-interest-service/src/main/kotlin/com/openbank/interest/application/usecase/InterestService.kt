@@ -677,7 +677,7 @@ class InterestService(
                     Multi.createFrom().iterable(pairs)
                         .onItem().transformToUniAndConcatenate { (accountId, productId) ->
                             capitalize(accountId, productId, toDate)
-                                .map { PairResult(capitalized = true, closedDayReason = null) }
+                                .map { PairResult(capitalized = true) }
                                 .onFailure().recoverWithItem { e ->
                                     log.warnf(
                                         e,
@@ -687,23 +687,36 @@ class InterestService(
                                         toDate,
                                         e.message,
                                     )
-                                    PairResult(capitalized = false, closedDayReason = closedDayRejection(e))
+                                    val closedDay = closedDayRejection(e)
+                                    val other = e.message ?: e.javaClass.simpleName
+                                    PairResult(
+                                        capitalized = false,
+                                        closedDayReason = closedDay,
+                                        failureReason = other.takeIf { closedDay == null },
+                                    )
                                 }
                         }
                         .collect().asList()
                 }
             }.map { results ->
                 val refused = results.mapNotNull { it.closedDayReason }
+                val failures = results.mapNotNull { it.failureReason }
                 CapitalizationRunOutcome(
                     capitalized = recovered + results.count { it.capitalized },
                     refusedClosedDay = refused.size,
                     refusalReason = refused.firstOrNull(),
+                    failed = failures.size,
+                    failureReason = failures.firstOrNull(),
                 )
             }
         }
 
     /** One pair's result inside [capitalizeAllWithOutcome]. */
-    private data class PairResult(val capitalized: Boolean, val closedDayReason: String?)
+    private data class PairResult(
+        val capitalized: Boolean,
+        val closedDayReason: String? = null,
+        val failureReason: String? = null,
+    )
 
     /**
      * The ledger's closed-day 409 (ADR-0342 D4), found anywhere in the cause chain — the guard and

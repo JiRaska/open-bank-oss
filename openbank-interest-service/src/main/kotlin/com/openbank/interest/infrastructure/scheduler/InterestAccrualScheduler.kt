@@ -7,6 +7,7 @@ package com.openbank.interest.infrastructure.scheduler
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
 import com.openbank.interest.application.port.out.CloseJobRunPort
 import com.openbank.libs.close.CloseJobRun
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
@@ -17,7 +18,6 @@ import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
-import java.time.LocalDate
 
 /**
  * Drives the daily interest accrual. One tick per day (cron in `openbank.interest.accrual.cron`)
@@ -37,6 +37,7 @@ class InterestAccrualScheduler(
     private val closeJobRuns: CloseJobRunPort,
 ) {
     private val log = Logger.getLogger(InterestAccrualScheduler::class.java)
+    private val accountingClock = AccountingClock.bank(clock)
     private var liveness: WorkflowLivenessRecorder? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -49,7 +50,10 @@ class InterestAccrualScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runDailyAccrual(): Uni<Void> {
-        val date = LocalDate.now(clock)
+        // The business date is the ledger's accounting day (ADR-0207: Europe/Prague), not the UTC
+        // calendar date - a run at 00:30 Prague is still the UTC day before, and recording it there
+        // would report a day the ledger has not even opened for this job.
+        val date = accountingClock.today()
         log.infof("interest accrual tick starting for %s", date)
         // observed-by: the `interest-accrual` workflow-liveness gauge. `recordSuccess()` below runs on the
         // onItem path only, so a failed tick leaves

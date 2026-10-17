@@ -12,6 +12,7 @@ import com.openbank.interest.application.port.out.CloseJobRunPort
 import com.openbank.libs.close.CloseParticipationAssembler
 import com.openbank.libs.close.CloseParticipationReporter
 import com.openbank.libs.close.CloseParticipationSink
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.MeterRegistry
@@ -55,6 +56,7 @@ class InterestCloseParticipationScheduler(
 ) {
     private val log = Logger.getLogger(InterestCloseParticipationScheduler::class.java)
     private val reporter = CloseParticipationReporter(InterestCloseJobs.PARTICIPANT, sink, meterRegistry)
+    private val accountingClock = AccountingClock.bank(clock)
     private var liveness: WorkflowLivenessRecorder? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -66,14 +68,34 @@ class InterestCloseParticipationScheduler(
         identity = "interest-close-participation",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun reportRecentDays(): Uni<Void> = reportDays(LocalDate.now(clock))
-        .onItem().invoke { _ -> liveness?.recordSuccess() }
+    fun reportRecentDays(): Uni<Void> = reportDays(accountingClock.today())
+        // Liveness means "reports reach the ledger", not "the tick ran": a ledger that is
+        // unreachable, 403 or 404 for good would otherwise leave this gauge fresh forever while no
+        // day is ever delivered. A tick that attempted nothing (every day still waiting on a job)
+        // is healthy - it has nothing to deliver - and so is one where every attempt was accepted.
+        .onItem().invoke { result ->
+            if (result.allDelivered) {
+                liveness?.recordSuccess()
+            } else {
+                log.warnf(
+                    "interest day-close participation: %d of %d report(s) NOT accepted by the ledger - " +
+                        "liveness not refreshed",
+                    result.attempted - result.delivered,
+                    result.attempted,
+                )
+            }
+        }
         .onFailure().invoke { e -> log.errorf(e, "interest day-close participation tick failed") }
         .onFailure().recoverWithNull()
         .replaceWithVoid()
 
+    /** How many reports a tick tried to send and how many the ledger accepted. */
+    data class TickResult(val attempted: Int, val delivered: Int) {
+        val allDelivered: Boolean get() = delivered == attempted
+    }
+
     /** Report every completed day in `[today - lookbackDays, today - 1]`. Visible for the IT. */
-    fun reportDays(today: LocalDate): Uni<Int> {
+    fun reportDays(today: LocalDate): Uni<TickResult> {
         val from = today.minusDays(lookbackDays)
         val to = today.minusDays(1)
         return closeJobRuns.findBetween(from, to).flatMap { runs ->
@@ -87,7 +109,7 @@ class InterestCloseParticipationScheduler(
             Multi.createFrom().iterable(reports)
                 .onItem().transformToUniAndConcatenate { reporter.report(it) }
                 .collect().asList()
-                .map { results -> results.count { it } }
+                .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
         }
     }
 
@@ -99,7 +121,7 @@ class InterestCloseParticipationScheduler(
     /** True when [cron] (Quartz syntax, as Quarkus reads it) fires at least once on [day]. */
     private fun firesOn(cron: String, day: LocalDate): Boolean {
         if (cron.isBlank() || cron.trim().equals(OFF, ignoreCase = true)) return false
-        val start = day.atStartOfDay(clock.zone)
+        val start = day.atStartOfDay(accountingClock.zone)
         val next = ExecutionTime.forCron(PARSER.parse(cron)).nextExecution(start.minusNanos(1))
         return next.map { it.toLocalDate() == day }.orElse(false)
     }

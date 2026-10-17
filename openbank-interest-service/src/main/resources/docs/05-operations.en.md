@@ -124,3 +124,7 @@ Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey per JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, image build/push, ArgoCD picks up the tag.
 - **Release axis** (release-please) is driven by `version.txt` + Conventional Commits; **API-contract axis** is `openapi.yaml: info.version` (ADR-0048). Do not force them equal.
 - GitOps: for image-tag merge conflicts take `--ours` (the freshly-built tag); for RBAC/config take `--theirs` or resolve manually.
+
+## Day-close participation (ADR-0342)
+
+Interest reports to the ledger as participant `interest`. The business date of every accrual and capitalization run is the ledger's accounting day (`Europe/Prague`, via `AccountingClock`), not the UTC calendar date, so a run between 00:00 and 02:00 Prague time is recorded under the day the ledger is actually closing. A capitalization run in which any pair was refused (closed-day 409) or failed for another reason is recorded as not complete and reported `REFUSED` with the counts and first reason; only a fully capitalized run is reported `RAN`. `openbank_workflow_last_success_age_seconds{workflow="interest-close-participation"}` is refreshed only when the ledger accepted the tick's reports, so an unreachable ledger or a persistent 403/404 lets the staleness alert fire.

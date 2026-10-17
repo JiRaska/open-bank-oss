@@ -526,6 +526,29 @@ class InterestServiceTest {
     }
 
     @Test
+    fun `capitalizeAllWithOutcome counts a non-closed-day pair failure, so the run is not complete`() {
+        val toDate = LocalDate.of(2026, 1, 20)
+        val prod = "SAVINGS"
+        val accountA = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        val accountB = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        stubCapitalization()
+        every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
+            Uni.createFrom().item(listOf(accountA to prod, accountB to prod))
+        every { accrualRepo.findPendingCapitalization(accountA, prod, toDate) } returns
+            Uni.createFrom().item(listOf(sampleAccrual(accountA, prod, LocalDate.of(2026, 1, 18), BigDecimal("1.50"))))
+        every { accrualRepo.findPendingCapitalization(accountB, prod, toDate) } returns
+            Uni.createFrom().item(emptyList())
+
+        val outcome = service.capitalizeAllWithOutcome(toDate).await().indefinitely()
+
+        assertThat(outcome.capitalized).isEqualTo(1)
+        assertThat(outcome.refusedClosedDay).isEqualTo(0)
+        assertThat(outcome.failed).describedAs("B failed for a reason that is not the closed-day 409").isEqualTo(1)
+        assertThat(outcome.failureReason).isNotBlank()
+        assertThat(outcome.complete).isFalse()
+    }
+
+    @Test
     fun `capitalizeAll returns 0 and does nothing when no pair is pending`() {
         val toDate = LocalDate.of(2026, 1, 20)
         every { accrualRepo.findOutstandingCapitalizationClaims() } returns Uni.createFrom().item(emptyList())

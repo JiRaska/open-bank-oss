@@ -5,16 +5,22 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.interest.application.port.`in`.CapitalizationRunOutcome
+import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.InterestAccrual
+import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseOutcome
 import com.openbank.libs.close.CloseParticipationReport
+import com.openbank.libs.close.CloseParticipationSink
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
+import io.quarkus.runtime.StartupEvent
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.inject.Instance
 import org.assertj.core.api.Assertions.assertThat
@@ -23,6 +29,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.UUID
 
 /**
  * ADR-0342 participant side: interest reports a day only when every job DUE that day has a recorded
@@ -119,5 +126,109 @@ class InterestCloseParticipationSchedulerTest {
         }
         InterestAccrualScheduler(accrual, clock, noOpDomainMetrics(), runs).runDailyAccrual().await().indefinitely()
         assertThat(runs.runs).isEmpty()
+    }
+
+    private fun metricsOver(registry: MeterRegistry): DomainMetrics {
+        val instance = mockk<Instance<MeterRegistry>>()
+        every { instance.isResolvable } returns true
+        every { instance.get() } returns registry
+        return DomainMetrics().apply { registryInstance = instance }
+    }
+
+    private fun successRecorded(registry: MeterRegistry): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "interest-close-participation")
+        .gauge()?.value()
+
+    private fun schedulerWith(sink: CloseParticipationSink, registry: MeterRegistry, at: Clock = clock) =
+        InterestCloseParticipationScheduler(
+            closeJobRuns = runs,
+            sink = sink,
+            meterRegistry = SimpleMeterRegistry(),
+            clock = at,
+            domainMetrics = metricsOver(registry),
+            accrualCron = "0 0 1 * * ?",
+            capitalizationCron = "0 0 2 1 * ?",
+            lookbackDays = 3,
+        ).also { it.onStart(StartupEvent()) }
+
+    @Test
+    fun `liveness is recorded only when the ledger accepted the reports`() {
+        ran(LocalDate.of(2026, 10, 2), InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
+        for (failure in listOf("unreachable", "HTTP 403", "HTTP 404")) {
+            val registry = SimpleMeterRegistry()
+            val scheduler = schedulerWith(
+                { _, _ -> Uni.createFrom().failure(IllegalStateException(failure)) },
+                registry,
+            )
+            scheduler.reportRecentDays().await().indefinitely()
+            assertThat(successRecorded(registry)).describedAs(failure).isEqualTo(0.0)
+        }
+
+        val registry = SimpleMeterRegistry()
+        schedulerWith({ _, _ -> Uni.createFrom().item(Unit) }, registry).reportRecentDays().await().indefinitely()
+        assertThat(successRecorded(registry)).describedAs("accepted").isEqualTo(1.0)
+    }
+
+    // 2026-10-02T22:30Z is 00:30 on 2026-10-03 in Europe/Prague (CEST, +02:00): the UTC date is
+    // still the 2nd, the accounting day the ledger runs is the 3rd.
+    private val pragueHalfPastMidnight = Clock.fixed(Instant.parse("2026-10-02T22:30:00Z"), ZoneOffset.UTC)
+
+    @Test
+    fun `an accrual run at 00-30 Prague is recorded under the Prague business date, not the UTC one`() {
+        var accruedFor: LocalDate? = null
+        val accrual = object : AccrueInterestUseCase {
+            override fun accrue(request: AccrualRequest): Uni<InterestAccrual> = error("unused")
+            override fun accrueAll(date: LocalDate): Uni<Int> {
+                accruedFor = date
+                return Uni.createFrom().item(4)
+            }
+        }
+        InterestAccrualScheduler(accrual, pragueHalfPastMidnight, noOpDomainMetrics(), runs)
+            .runDailyAccrual().await().indefinitely()
+
+        val prague = LocalDate.of(2026, 10, 3)
+        assertThat(accruedFor).isEqualTo(prague)
+        assertThat(runs.runs.keys).containsExactly(prague to InterestCloseJobs.ACCRUAL)
+    }
+
+    @Test
+    fun `a capitalization run at 00-30 Prague on the 1st is the 1st, and a failed pair is not RAN`() {
+        val firstOfMonth = Clock.fixed(Instant.parse("2026-09-30T22:30:00Z"), ZoneOffset.UTC)
+        val capitalize = object : CapitalizeInterestUseCase {
+            override fun capitalize(
+                accountId: UUID,
+                productId: String,
+                toDate: LocalDate,
+            ): Uni<InterestCapitalization> = error("unused")
+            override fun capitalizeAll(toDate: LocalDate): Uni<Int> = error("unused")
+            override fun recoverOutstandingClaims(): Uni<Int> = Uni.createFrom().item(0)
+            override fun capitalizeAllWithOutcome(toDate: LocalDate): Uni<CapitalizationRunOutcome> =
+                Uni.createFrom().item(CapitalizationRunOutcome(5, 0, null, failed = 2, failureReason = "ledger 503"))
+        }
+        InterestCapitalizationScheduler(capitalize, firstOfMonth, noOpDomainMetrics(), runs)
+            .runMonthlyCapitalization().await().indefinitely()
+
+        val oct1 = LocalDate.of(2026, 10, 1)
+        val run = runs.runs.getValue(oct1 to InterestCloseJobs.CAPITALIZATION)
+        assertThat(run.refused).describedAs("failed pairs hold the day like refusals").isEqualTo(2)
+        assertThat(run.refusalReason).contains("2 pair(s) failed").contains("ledger 503")
+
+        ran(oct1, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
+        scheduler.reportDays(today).await().indefinitely()
+        assertThat(delivered.single { it.businessDate == oct1 }.outcome).isEqualTo(CloseOutcome.REFUSED)
+    }
+
+    @Test
+    fun `the report tick at 00-30 Prague treats the Prague date as today`() {
+        // Prague 2026-10-03 00:30: yesterday (2026-10-02) is complete and must be offered NOW;
+        // against the UTC date (10-02) it would still be today and wait until the next day.
+        ran(LocalDate.of(2026, 10, 2), InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
+        schedulerWith({ _, r ->
+            delivered += r
+            Uni.createFrom().item(Unit)
+        }, SimpleMeterRegistry(), pragueHalfPastMidnight)
+            .reportRecentDays().await().indefinitely()
+        assertThat(delivered.map { it.businessDate }).contains(LocalDate.of(2026, 10, 2))
     }
 }

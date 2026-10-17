@@ -124,3 +124,7 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey na JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, build/push image, ArgoCD zvedne tag.
 - **Release osa** (release-please) je řízena `version.txt` + Conventional Commits; **osa API kontraktu** je `openapi.yaml: info.version` (ADR-0048). Nevynucujte jejich rovnost.
 - GitOps: u konfliktů image-tagů berte `--ours` (čerstvě sestavený tag); u RBAC/config berte `--theirs` nebo řešte ručně.
+
+## Účast na závěrce dne (ADR-0342)
+
+Interest hlásí ledgeru jako účastník `interest`. Obchodní datum každého běhu připsání i kapitalizace je účetní den ledgeru (`Europe/Prague`, přes `AccountingClock`), nikoli kalendářní datum UTC; běh mezi 00:00 a 02:00 pražského času se proto zapíše pod den, který ledger skutečně uzavírá. Běh kapitalizace, ve kterém byl některý pár odmítnut (409 uzavřeného dne) nebo selhal z jiného důvodu, se eviduje jako neúplný a hlásí se jako `REFUSED` s počty a první příčinou; jako `RAN` se hlásí jen plně kapitalizovaný běh. `openbank_workflow_last_success_age_seconds{workflow="interest-close-participation"}` se obnoví jen tehdy, když ledger hlášení z daného běhu přijal, takže nedostupný ledger nebo trvalé 403/404 nechá zazvonit alert na zastaralost.
