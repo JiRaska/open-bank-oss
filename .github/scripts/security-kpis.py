@@ -72,7 +72,9 @@ def collect_credentials() -> dict:
                      summaries[0]) if len(summaries) == 1 else None
     if not m:
         return {"available": False, "reason": "collector output unparsable"}
-    total, static, _operator_managed, _dynamic, declared, overdue, undeclared = map(int, m.groups())
+    total, static, operator_managed, dynamic, declared, overdue, undeclared = map(int, m.groups())
+    if total != static + operator_managed + dynamic or static != declared + overdue + undeclared:
+        return {"available": False, "reason": "collector counts inconsistent with summary"}
     # Inventory exits 1 for overdue credentials, not for an unavailable collector.
     if (rc == 1) != (overdue > 0):
         return {"available": False, "reason": "collector status inconsistent with summary"}
@@ -324,8 +326,28 @@ def self_test() -> int:
     expired = fixture(True)
     fresh = fixture(False)
     good = fresh[1]
+    # Exercise the real producer CLI against isolated source YAML, including a malformed
+    # deadline that is static but belongs to none of its deadline buckets.
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        fixture_root = Path(directory)
+        source = fixture_root / "openbank-infra/gitops/components/fixture/external-secret.yaml"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "kind: ExternalSecret\nmetadata:\n  name: fixture-credential\n  namespace: fixture\n"
+            "  annotations:\n    openbank.io/rotation-deadline: soon\n"
+            "spec:\n  target:\n    name: fixture-credential\n  data:\n"
+            "    - secretKey: password\n      remoteRef:\n        key: fixture/reference\n")
+        malformed = run_json([sys.executable, str(Path(__file__).with_name("credential-inventory.py")),
+                              "--inventory", "--root", str(fixture_root), "--today", today.isoformat()])
+    if malformed[0] != 0 or "1 ExternalSecrets, 1 static" not in malformed[1]:
+        print("self-test FAIL: malformed-deadline producer fixture"); bad += 1
     cases = [
         ("current producer", fresh, True, False),
+        ("inconsistent total", (0, good.replace("4 ExternalSecrets", "5 ExternalSecrets")), False, None),
+        ("inconsistent static buckets", (0, good.replace("2 static", "3 static").replace(
+            "4 ExternalSecrets", "5 ExternalSecrets")), False, None),
+        ("real malformed-deadline producer", malformed, False, None),
         ("overdue producer", expired, True, True),
         ("failed producer", (2, good), False, None),
         ("overdue exit without overdue", (1, good), False, None),
@@ -341,6 +363,9 @@ def self_test() -> int:
             actual = collect_credentials()
         if actual["available"] != available or (available and actual["overdueFound"] != overdue):
             print(f"self-test FAIL: credential boundary {label}"); bad += 1
+        if (label in ("inconsistent total", "inconsistent static buckets", "real malformed-deadline producer")
+                and actual.get("reason") != "collector counts inconsistent with summary"):
+            print(f"self-test FAIL: credential count reconciliation reason {label}"); bad += 1
     with patch.dict(globals(), {"run_json": lambda _: expired}):
         actual = collect_credentials()
     if actual.get("totalSecrets") != 5 or actual.get("staticSecrets") != 3 or actual.get("withDeadline") != 1 or actual.get("overdue") != 1 or actual.get("undeclared") != 1:
