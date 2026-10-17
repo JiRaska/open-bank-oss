@@ -18,6 +18,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
+import { MergeRecordsSection } from '@/components/agent/MergeRecordsSection'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
 import styles from './IAOps.module.css'
@@ -439,6 +440,9 @@ function IAOpsContent() {
               })}
             </div>
           </Card>
+
+          {/* ── A2. Recorded human merges (ADR-0031 phase 3 evidence) ── */}
+          <MergeRecordsSection knownAgentIds={data.agents.map(a => a.id)} />
 
           {/* Tool tiers — what MCP/the bot can & cannot do */}
           {Object.keys(data.toolTiers).length > 0 && (

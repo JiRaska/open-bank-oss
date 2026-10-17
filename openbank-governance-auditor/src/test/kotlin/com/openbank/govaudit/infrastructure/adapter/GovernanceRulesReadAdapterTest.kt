@@ -124,4 +124,16 @@ class GovernanceRulesReadAdapterTest {
         assertThat(adapter.defaultApprovals()).isEqualTo(1)
         assertThat(adapter.moneyPathApprovals()).isEqualTo(2)
     }
+
+    @Test
+    fun `a live document without a money_path_services section falls back to the mirror, never to an empty set`(
+        @TempDir dir: Path,
+    ): Unit = runBlocking {
+        val rules = dir.resolve("rules.yaml")
+        // Readable and parseable, but the section is gone (renamed key, or a 200 that is not rules.yaml).
+        Files.writeString(rules, "review:\n  default_approvals: 1\n  money_path_approvals: 2\n")
+        val adapter = adapterFor(moneyPathServices = "openbank-ledger-service", rulesYamlPath = rules.toString())
+
+        assertThat(adapter.moneyPathServices()).containsExactly("openbank-ledger-service")
+    }
 }

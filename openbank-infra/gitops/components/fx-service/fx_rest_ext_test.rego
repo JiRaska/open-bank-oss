@@ -11,13 +11,13 @@ import rego.v1
 
 import data.openbank.rest
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-payments_desk := {"type": "HUMAN", "id": "u-pay", "roles": ["ROLE_PAYMENTS"]}
+payments_desk := {"service_account": false, "type": "HUMAN", "id": "u-pay", "roles": ["ROLE_PAYMENTS"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The matrix grants ROLE_OPERATOR fx.{convert, list, read} — convert is the only fx write in the
 # grant, and the only one needing a veto beyond the exclusion. Shape mirrors
@@ -90,5 +90,36 @@ test_edge_no_operator_rule_on_convert if {
 test_shared_no_operator_rule_on_trigger if {
 	not "operator-fx-trigger" in rest.allowed_reasons
 		with input as {"principal": shared, "action": "fx.trigger"}
+		with data.rules as rules_mock
+}
+
+# --- synthetic journey fx-rates-read: scope-derived role, rate sheet only (#12847) ---
+
+synthetic_fx := {"type": "HUMAN", "id": "service-account-openbank-synthetic-fx-read", "roles": ["FX_SCOPE_READ"]}
+
+synthetic_fx_no_scope := {"type": "HUMAN", "id": "service-account-openbank-synthetic-fx-read", "roles": []}
+
+test_synthetic_journey_lists_rates if {
+	rest.allow with input as {"principal": synthetic_fx, "action": "fx.list"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_reads_rate if {
+	rest.allow with input as {"principal": synthetic_fx, "action": "fx.read"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_denied_convert if {
+	not rest.allow with input as {"principal": synthetic_fx, "action": "fx.convert"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_denied_trigger if {
+	not rest.allow with input as {"principal": synthetic_fx, "action": "fx.trigger"}
+		with data.rules as rules_mock
+}
+
+test_synthetic_journey_role_absent_without_scope if {
+	not rest.allow with input as {"principal": synthetic_fx_no_scope, "action": "fx.list"}
 		with data.rules as rules_mock
 }

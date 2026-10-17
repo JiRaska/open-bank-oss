@@ -25,6 +25,7 @@
 | **D5 — AI attribution** | `ModelGateway` and `AgentPolicyGate` emit `AuditEvent {actorType=AI_AGENT}` for every completion / decision (model_id, model_version, prompt_hash, tokens, policy_decision, reason). |
 | **D6 — model gateway** | the single trust boundary every model call passes through; provider-agnostic, sensitive context pinned to a self-hosted model. |
 | **D9 — phased enforcement** | `EnforcementMode` ADVISORY (audit-only, default) → BLOCK; fail-closed PDP with a `pdpError` safety fallback so a dead OPA never locks the assistant out. |
+| **Phase 3 — recorded human merge** | `POST /api/v1/agent-merge-records` ingests, out-of-band by the `record-agent-merge` CI workflow (`ROLE_MERGE_RECORDER`), a durable record of WHO merged an agent-authored PR — the agent never self-reports. `agent_merge_record.pr_number` UNIQUE dedupes webhook redeliveries; each merge is audited once as `agent.pr.merged` with `actorType=HUMAN` under the merging human, via the durable outbox ([04 — Data](./04-data.md)). |
 
 ## The `ui-assistant` charter (agents.yaml)
 
@@ -71,7 +72,7 @@ The agent service is **not** a system of record and stores no customer data, so 
 - ✅ AuthZ: deny-by-default OPA policy gate per tool call; unmapped tool fails closed.
 - ✅ Least privilege: read-only tool surface; charter denies all writes/money/secrets.
 - ✅ Prompt-injection posture: system prompt instructs the model to treat tool data as untrusted and never follow instructions inside it (ADR-0031 D6 guardrails — llama-guard / injection filter are the runtime target).
-- ✅ Audit: every model call + every policy decision is AI-attributed.
+- ✅ Audit: every model call + every policy decision is AI-attributed; every merged agent PR is recorded once as human-attributed merge evidence (`agent.pr.merged`, exactly-once across webhook redeliveries).
 - ✅ No raw prompt at rest: SHA-256 `prompt_hash` only.
 - ✅ Response headers: CSP, X-Frame-Options DENY, nosniff, HSTS, Referrer/Permissions-Policy.
 - ✅ Rate limiting: `openbank.rate-limit` (max-concurrent) + per-agent charter limits.
