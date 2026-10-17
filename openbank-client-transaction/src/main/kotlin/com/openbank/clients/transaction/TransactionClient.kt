@@ -74,7 +74,12 @@ class TransactionClient(private val api: TransactionsApi) {
                 fromError<T>(failure as WebApplicationException)
             }
 
-        /** How many times closing a Response itself failed. Counted and logged, never allowed to change a result. */
+        /**
+         * A TEST HOOK: how many times closing a Response itself failed. The module is a library without a
+         * metrics registry, so no meter is registered; what operators can observe is the WARNING log line
+         * ("closing a transaction-service Response failed", with the cause). A close failure is never
+         * allowed to change a decided result. A consumer that wants a metric gets a callback here later.
+         */
         internal val closeFailures = AtomicLong()
 
         private val log = System.getLogger(TransactionClient::class.java.name)

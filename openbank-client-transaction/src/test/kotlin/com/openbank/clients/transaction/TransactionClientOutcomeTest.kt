@@ -365,23 +365,41 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `a refusal body is read bounded, not whole`() {
-        status = 422
-        body = "x".repeat(200_000)
+    fun `a refusal body is read bounded - never more than 4096 bytes are pulled from the stream`() {
+        val pulled = java.util.concurrent.atomic.AtomicLong()
+        val endless = object : InputStream() {
+            override fun read(): Int {
+                pulled.incrementAndGet()
+                return 'x'.code
+            }
 
-        val result = outcome() as TransactionCallOutcome.Rejected
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                // Finite on purpose (1 MB): a reader without the limit must fail the test, not hang it.
+                if (pulled.get() >= 1_000_000L) return -1
+                pulled.addAndGet(len.toLong())
+                java.util.Arrays.fill(b, off, off + len, 'x'.code.toByte())
+                return len
+            }
+        }
+        val response = fake(422, entity = true)
+        every { response.readEntity(InputStream::class.java) } returns endless
 
+        val result = TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
+            .await().indefinitely() as TransactionCallOutcome.Rejected
+
+        assertThat(pulled.get()).isLessThanOrEqualTo(4096L)
         assertThat(result.problem).hasSize(300)
     }
 
     /** Minimal JSON reader: the facade reads bodies through whatever the caller's client registers. */
     private class JsonReader(private val mapper: ObjectMapper) : MessageBodyReader<Any> {
+        // Not for InputStream: that read must stay with the client's own handling (a refusal body is read raw).
         override fun isReadable(
             type: Class<*>,
             genericType: Type?,
             annotations: Array<out Annotation>?,
             mediaType: MediaType?,
-        ) = true
+        ) = !InputStream::class.java.isAssignableFrom(type)
 
         override fun readFrom(
             type: Class<Any>,
