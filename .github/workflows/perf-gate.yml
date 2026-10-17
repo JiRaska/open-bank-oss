@@ -53,13 +53,13 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib, re
           # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
-          # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment and SEPA
-          # Instant added as third through thirteenth read-only subjects). Kept as a
-          # named constant so the summary can say what the run was SUPPOSED to measure,
-          # not only what it did. All subjects are non-mutating reads booted against
-          # disposable PostgreSQL. Keep money-path WRITES out of this GitHub-hosted
-          # lane until their isolated target and synthetic identities exist
-          # (perf/scenarios.yaml).
+          # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment, SEPA
+          # Instant and Standing Order added as third through fourteenth read-only
+          # subjects). Kept as a named constant so the summary can say what the run was
+          # SUPPOSED to measure, not only what it did. All subjects are non-mutating
+          # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
+          # this GitHub-hosted lane until their isolated target and synthetic identities
+          # exist (perf/scenarios.yaml).
           DECLARED = [
               "openbank-product-catalog",
               "openbank-flaky-test-hunter",
@@ -74,6 +74,7 @@ jobs:
               "openbank-sepa-payment",
               "openbank-domestic-payment",
               "openbank-sepa-instant",
+              "openbank-standing-order-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
