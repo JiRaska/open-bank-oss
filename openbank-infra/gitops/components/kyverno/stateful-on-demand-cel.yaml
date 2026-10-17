@@ -71,6 +71,7 @@ spec:
           'fraud/fraud-db',
           'fx/fx-db',
           'interest/interest-db',
+          'ledger-pension-co/ledger-pension-co-db',
           'ledger/ledger-db',
           'lending/lending-db',
           'payments/card-issuance-db',

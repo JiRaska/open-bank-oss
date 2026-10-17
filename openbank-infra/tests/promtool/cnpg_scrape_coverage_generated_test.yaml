@@ -146,6 +146,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -379,6 +383,8 @@ tests:
       - series: 'kube_namespace_created{namespace="kyc"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
@@ -598,6 +604,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -832,6 +842,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -1026,6 +1038,10 @@ tests:
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -1263,6 +1279,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="loyalty"}'
@@ -1461,6 +1479,10 @@ tests:
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
@@ -1695,6 +1717,8 @@ tests:
       - series: 'kube_namespace_created{namespace="kyc"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
@@ -1900,6 +1924,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -2131,6 +2159,8 @@ tests:
       - series: 'kube_namespace_created{namespace="kyc"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
@@ -2329,6 +2359,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-1",job="ledger-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger-pension-co",pod="ledger-pension-co-db-2",job="ledger-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
@@ -2560,6 +2594,8 @@ tests:
       - series: 'kube_namespace_created{namespace="kyc"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
