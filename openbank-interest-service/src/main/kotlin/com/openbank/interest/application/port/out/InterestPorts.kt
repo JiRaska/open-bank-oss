@@ -180,3 +180,27 @@ interface InterestCapitalizationRepository {
         capitalizedAt: OffsetDateTime,
     ): Uni<InterestCapitalization>
 }
+
+/**
+ * Outbound port for ADR-0341 revision pinning. A catalog-sourced rate config is the local cache of one
+ * published revision (keyed by revision id); an account that accrues from one is pinned to it, and the
+ * pin - not the currently effective rate - answers every later accrual.
+ */
+interface RateRevisionPinRepository {
+    /** The config of the revision [accountId] is pinned to for (product, currency), or null if unpinned. */
+    fun findPinnedConfig(accountId: UUID, productId: String, currency: String): Uni<InterestRateConfig?>
+
+    /**
+     * Pin [accountId] to the revision [config] caches, if [config] is catalog-sourced; first writer wins
+     * and an existing pin is never replaced. Returns false (writes nothing) for an operator-managed config.
+     */
+    fun pinIfCatalogSourced(
+        accountId: UUID,
+        productId: String,
+        currency: String,
+        config: InterestRateConfig,
+    ): Uni<Boolean>
+
+    /** True when [configId] is the local cache of a catalog revision; such rows are not editable here. */
+    fun isCatalogSourced(configId: UUID): Uni<Boolean>
+}

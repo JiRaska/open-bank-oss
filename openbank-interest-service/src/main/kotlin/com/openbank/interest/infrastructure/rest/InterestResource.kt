@@ -10,6 +10,7 @@ import com.openbank.interest.application.port.`in`.GetAccrualsUseCase
 import com.openbank.interest.application.port.`in`.ManageRateConfigUseCase
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualSummary
+import com.openbank.interest.domain.model.CatalogSourcedRateException
 import com.openbank.interest.domain.model.DayCount
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
@@ -196,4 +197,8 @@ class InterestResource(
     @Authorize(action = "interest.delete", resource = "#id")
     fun deactivateRateConfig(@PathParam("id") id: UUID): Uni<Response> = rateConfigUseCase.deactivateConfig(id)
         .map { Response.ok(it).build() }
+        .onFailure(CatalogSourcedRateException::class.java).recoverWithItem { e ->
+            // ADR-0341: a catalog-sourced row caches an immutable revision; terms change by a new revision.
+            Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+        }
 }

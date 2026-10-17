@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Interest Service API
-  version: 1.8.0
+  version: 1.9.0
   description: >-
     Interest accrual, capitalization, and rate configuration. Capitalization withholds Czech
     final tax on credit interest (§36/§38d ZDP, ADR-0033): CZK interest credited to a resident
@@ -333,6 +333,8 @@ paths:
       responses:
         '200':
           description: Deactivated
+        '409':
+          description: The config is the local cache of a published catalog revision (ADR-0341) and cannot be edited
 
 components:
   schemas:

@@ -16,11 +16,13 @@ import com.openbank.interest.application.port.out.InterestCapitalizationReposito
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.LedgerPostingPort
 import com.openbank.interest.application.port.out.LedgerPostingRejectedException
+import com.openbank.interest.application.port.out.RateRevisionPinRepository
 import com.openbank.interest.application.port.out.TaxProfilePort
 import com.openbank.interest.domain.event.InterestRateChanged
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.AccrualSummary
+import com.openbank.interest.domain.model.CatalogSourcedRateException
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
@@ -104,6 +106,14 @@ class InterestService(
     @Inject
     internal var capitalizationMetrics: InterestCapitalizationMetrics? = null
 
+    /**
+     * ADR-0341 revision pinning. Field injection for the same reasons as [capitalizationMetrics]
+     * (nine-parameter constructor at the detekt threshold; hand-constructed in unit tests). Null
+     * means "no pinning": the date-effective rate answers, exactly as before.
+     */
+    @Inject
+    internal var revisionPins: RateRevisionPinRepository? = null
+
     private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
@@ -121,47 +131,80 @@ class InterestService(
                 }
             }
 
-    private fun accrueNew(request: AccrualRequest): Uni<InterestAccrual> =
-        configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
-            .flatMap { config ->
-                if (config == null) {
-                    // Fails closed: no rate for this (account/product, currency) — see #1265. 422, not 500.
-                    Uni.createFrom().failure(
-                        RateConfigNotFoundException(request.productId, request.currency),
-                    )
+    private fun accrueNew(request: AccrualRequest): Uni<InterestAccrual> = resolveRate(request).flatMap { config ->
+        if (config == null) {
+            // Fails closed: no rate for this (account/product, currency) — see #1265. 422, not 500.
+            Uni.createFrom().failure(
+                RateConfigNotFoundException(request.productId, request.currency),
+            )
+        } else {
+            val dailyRate = config.dayCount.dailyRate(config.annualRate, request.accrualDate)
+            val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
+            val accrual = InterestAccrual(
+                accountId = request.accountId,
+                productId = request.productId,
+                configId = config.id,
+                accrualDate = request.accrualDate,
+                balance = request.balance,
+                dailyRate = dailyRate,
+                accruedAmount = accruedAmount,
+                currency = request.currency,
+                createdAt = OffsetDateTime.now(clock),
+            )
+            accrualRepo.save(accrual).onFailure().recoverWithUni { e ->
+                // Lost the race against a concurrent first attempt with the same natural
+                // key: the V12 constraint rejected our insert, so the winner's row IS the
+                // correct replay answer. Anything else propagates unchanged.
+                if (!e.isAccrualConflict()) {
+                    Uni.createFrom().failure(e)
                 } else {
-                    val dailyRate = config.dayCount.dailyRate(config.annualRate, request.accrualDate)
-                    val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
-                    val accrual = InterestAccrual(
-                        accountId = request.accountId,
-                        productId = request.productId,
-                        configId = config.id,
-                        accrualDate = request.accrualDate,
-                        balance = request.balance,
-                        dailyRate = dailyRate,
-                        accruedAmount = accruedAmount,
-                        currency = request.currency,
-                        createdAt = OffsetDateTime.now(clock),
-                    )
-                    accrualRepo.save(accrual).onFailure().recoverWithUni { e ->
-                        // Lost the race against a concurrent first attempt with the same natural
-                        // key: the V12 constraint rejected our insert, so the winner's row IS the
-                        // correct replay answer. Anything else propagates unchanged.
-                        if (!e.isAccrualConflict()) {
-                            Uni.createFrom().failure(e)
-                        } else {
-                            accrualRepo.findByNaturalKey(
+                    accrualRepo.findByNaturalKey(
+                        request.accountId,
+                        request.accrualDate,
+                        request.productId,
+                        request.currency,
+                    ).flatMap { winner ->
+                        if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(e)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * ADR-0341: the pinned revision's terms, never "the currently published" ones. An operator's
+     * account-specific override still wins (an exception granted to one account). Otherwise an account
+     * already pinned to a catalog revision keeps that revision's rate for life - a superseding revision
+     * changes nothing for it - and an unpinned account accruing from a catalog-sourced rate is pinned to
+     * it now. A purely operator-managed rate is untouched.
+     */
+    private fun resolveRate(request: AccrualRequest): Uni<InterestRateConfig?> {
+        val pins = revisionPins
+        return configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
+            .flatMap { effective ->
+                if (pins == null || effective?.accountId != null) {
+                    Uni.createFrom().item(effective)
+                } else {
+                    pins.findPinnedConfig(request.accountId, request.productId, request.currency).flatMap { pinned ->
+                        when {
+                            pinned != null -> Uni.createFrom().item<InterestRateConfig?>(pinned)
+                            effective == null -> Uni.createFrom().item<InterestRateConfig?>(null)
+                            else -> pins.pinIfCatalogSourced(
                                 request.accountId,
-                                request.accrualDate,
                                 request.productId,
                                 request.currency,
-                            ).flatMap { winner ->
-                                if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(e)
-                            }
+                                effective,
+                            )
+                                .flatMap { _ ->
+                                    // First writer wins: re-read so a concurrent pin to another revision is honoured.
+                                    pins.findPinnedConfig(request.accountId, request.productId, request.currency)
+                                        .map { it ?: effective }
+                                }
                         }
                     }
                 }
             }
+    }
 
     /**
      * The daily accrual run: discover every ACTIVE interest-bearing account fleet-wide (paged via
@@ -787,12 +830,23 @@ class InterestService(
         if (config == null) {
             Uni.createFrom().failure(IllegalArgumentException("Config not found"))
         } else {
-            val deactivated = config.copy(active = false, updatedAt = OffsetDateTime.now(clock))
-            configRepo.updateWithOutbox(
-                deactivated,
-                InterestRateChanged.outboxMessage(deactivated, InterestRateChanged.Change.DEACTIVATED, clock.instant()),
-            )
+            // ADR-0341: a catalog-sourced row is a cache of an immutable revision, never edited here.
+            (revisionPins?.isCatalogSourced(id) ?: Uni.createFrom().item(false)).flatMap { catalogSourced ->
+                if (catalogSourced) {
+                    Uni.createFrom().failure<InterestRateConfig>(CatalogSourcedRateException(id))
+                } else {
+                    deactivateOperatorConfig(config)
+                }
+            }
         }
+    }
+
+    private fun deactivateOperatorConfig(config: InterestRateConfig): Uni<InterestRateConfig> {
+        val deactivated = config.copy(active = false, updatedAt = OffsetDateTime.now(clock))
+        return configRepo.updateWithOutbox(
+            deactivated,
+            InterestRateChanged.outboxMessage(deactivated, InterestRateChanged.Change.DEACTIVATED, clock.instant()),
+        )
     }
 
     /**

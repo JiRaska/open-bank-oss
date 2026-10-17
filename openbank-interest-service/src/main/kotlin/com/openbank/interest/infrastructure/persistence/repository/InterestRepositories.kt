@@ -371,3 +371,59 @@ internal fun OutboxMessage.toOutboxEntity(updatedAt: Instant): InterestOutboxEnt
         this.updatedAt = stamp
     }
 }
+
+@ApplicationScoped
+class RateRevisionPinRepositoryImpl @Inject constructor(
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: InterestMapper,
+    private val clock: Clock,
+) : RateRevisionPinRepository {
+    @WithSession
+    override fun findPinnedConfig(accountId: UUID, productId: String, currency: String): Uni<InterestRateConfig?> =
+        sf.withSession { s ->
+            s.createQuery(
+                "SELECT c FROM InterestRateConfigEntity c, CatalogInterestRateSnapshotEntity r, " +
+                    "AccountRateRevisionPinEntity p WHERE p.accountId = :a AND p.productId = :prod " +
+                    "AND p.currency = :ccy AND r.revisionId = p.revisionId AND c.id = r.configId",
+                InterestRateConfigEntity::class.java,
+            ).setParameter("a", accountId).setParameter("prod", productId).setParameter("ccy", currency)
+                .setMaxResults(1).singleResultOrNull
+        }.map { it?.let(mapper::toDomain) }
+
+    @WithTransaction
+    override fun pinIfCatalogSourced(
+        accountId: UUID,
+        productId: String,
+        currency: String,
+        config: InterestRateConfig,
+    ): Uni<Boolean> = sf.withTransaction { s ->
+        s.createQuery(
+            "SELECT r.revisionId FROM CatalogInterestRateSnapshotEntity r " +
+                "WHERE r.configId = :id AND r.outcome = 'APPLIED'",
+            UUID::class.java,
+        ).setParameter("id", config.id).setMaxResults(1).singleResultOrNull.flatMap { revisionId ->
+            if (revisionId == null) {
+                Uni.createFrom().item(false)
+            } else {
+                // First writer wins; a concurrent first accrual of the same account loses harmlessly.
+                s.createNativeQuery<Int>(
+                    "INSERT INTO account_rate_revision_pins " +
+                        "(id, account_id, product_id, currency, revision_id, pinned_at) " +
+                        "VALUES (:id, :a, :prod, :ccy, :rev, :at) " +
+                        "ON CONFLICT (account_id, product_id, currency) DO NOTHING",
+                ).setParameter("id", UUID.randomUUID()).setParameter("a", accountId)
+                    .setParameter("prod", productId).setParameter("ccy", currency)
+                    .setParameter("rev", revisionId).setParameter("at", OffsetDateTime.now(clock))
+                    .executeUpdate().replaceWith(true)
+            }
+        }
+    }
+
+    @WithSession
+    override fun isCatalogSourced(configId: UUID): Uni<Boolean> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(r) FROM CatalogInterestRateSnapshotEntity r WHERE r.configId = :id",
+            Long::class.javaObjectType,
+        ).setParameter("id", configId).singleResult.map { it > 0 }
+    }
+}
