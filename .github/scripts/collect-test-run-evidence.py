@@ -194,7 +194,7 @@ def validate_envelope(envelope: dict) -> None:
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
         retry_fields = {"retryFlaky", "failedAttemptCount", "failedAttemptDurationMs"}
-        if set(item) - (required_case_fields | {"testDefinitionPath"} | retry_fields) or not required_case_fields.issubset(item):
+        if set(item) - (required_case_fields | {"testDefinitionPath", "verifies"} | retry_fields) or not required_case_fields.issubset(item):
             raise ValueError("test case fields are invalid")
         if (not re.fullmatch(r"[0-9a-f]{24}", item["fingerprint"]) or item["kind"] not in SUITE_KINDS
                 or item["state"] not in {"passed", "failed", "skipped"}
@@ -213,6 +213,11 @@ def validate_envelope(envelope: dict) -> None:
                     or failed_attempt_duration < 0 or failed_attempt_duration > JSON_SAFE_INTEGER_MAX
                     or failed_attempt_duration > item["durationMs"]):
                 raise ValueError("retry-flaky test case metadata is invalid")
+        verifies = item.get("verifies")
+        if verifies is not None and (
+                not isinstance(verifies, list) or not 1 <= len(verifies) <= MAX_VERIFIES
+                or any(not isinstance(v, str) or not re.fullmatch(VERIFIES_ID, v) for v in verifies)):
+            raise ValueError("test case verifies ids are invalid")
         path = item.get("testDefinitionPath")
         if (path is not None and (
                 not re.fullmatch(r"src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\.(?:kt|java)", path)
@@ -421,6 +426,34 @@ def safe_sum_duration_ms(values: list[int | None]) -> int | None:
     return total
 
 
+# `verifies:<id>` convention (issue #13171): a test that proves a requirement names it in a form the
+# collector can read, so "this requirement is verified" is a claim about an executed, green test and
+# not about a class that merely exists. Kotlin/JUnit 5 uses the built-in `@Tag("verifies:<id>")`
+# (class or method); Playwright puts `@verifies:<id>` in the test title, because the JUnit reporter
+# writes the title into `name`. An id is `<scope>/<ref>`, e.g. `clearing/T1`.
+VERIFIES_ID = r"[a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
+VERIFIES_TAG = re.compile(r"""@Tag\(\s*"verifies:(""" + VERIFIES_ID + r""")"\s*\)""")
+VERIFIES_TITLE = re.compile(r"(?<![A-Za-z0-9])@verifies:(" + VERIFIES_ID + r")")
+MAX_VERIFIES = 8
+
+
+def verifies_ids(service: Path, classname: str, name: str) -> list[str]:
+    """Requirement ids a test case declares, from its source tag or its Playwright title."""
+    found = set(VERIFIES_TITLE.findall(name))
+    source_path = test_definition_path(service, classname)
+    if source_path is not None:
+        source = (service / source_path).read_text(errors="replace")
+        simple = classname.split("$", 1)[0].rsplit(".", 1)[-1]
+        # Class-level tags are those between the previous blank-free annotation block and `class`.
+        for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*class[ \t]+" + re.escape(simple) + r"\b", source):
+            found.update(VERIFIES_TAG.findall(match.group(1)))
+        method = re.sub(r"\(\)$", "", re.sub(r"\s*\[[^]]*]\s*$", "", name)).strip()
+        if method:
+            for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*fun[ \t]+`?" + re.escape(method) + r"`?\s*\(", source):
+                found.update(VERIFIES_TAG.findall(match.group(1)))
+    return sorted(found)[:MAX_VERIFIES]
+
+
 def test_cases(component: str, service: Path) -> list[dict]:
     """Emit secret-free observations with stable identity and verified test-source provenance."""
     result = []
@@ -471,6 +504,9 @@ def test_cases(component: str, service: Path) -> list[dict]:
             source_path = test_definition_path(service, classname)
             if source_path is not None:
                 item["testDefinitionPath"] = source_path
+            declared = verifies_ids(service, classname, name)
+            if declared:
+                item["verifies"] = declared
             result.append(item)
     return sorted(result, key=lambda item: (item["fingerprint"], item["state"]))
 
@@ -1519,6 +1555,25 @@ def main() -> None:
                     f"classify({classname!r}, task={task!r}) returned {got!r}, expected {want!r}"
                 )
 
+        # `verifies:` convention: read from a Kotlin @Tag (class AND method level) and from a
+        # Playwright title; a NEAR-MISS spelling must be ignored (a negative control — a reader
+        # that accepts `verified:` or an unscoped id would credit a test with a claim it never made).
+        with tempfile.TemporaryDirectory() as directory:
+            service = Path(directory)
+            source_dir = service / "src/test/kotlin/com/openbank/x"
+            source_dir.mkdir(parents=True)
+            (source_dir / "GuardTest.kt").write_text(
+                '@Tag("verifies:x/T1")\nclass GuardTest {\n'
+                '    @Test\n    @Tag("verifies:x/R2")\n    fun `denies`() {}\n\n'
+                '    @Test\n    @Tag("verified:x/R9")\n    @Tag("verifies:unscoped")\n    fun `allows`() {}\n}\n')
+            got = verifies_ids(service, "com.openbank.x.GuardTest", "denies()")
+            assert got == ["x/R2", "x/T1"], f"verifies: class+method tags not read: {got}"
+            got = verifies_ids(service, "com.openbank.x.GuardTest", "allows()")
+            assert got == ["x/T1"], f"verifies: near-miss spellings were credited: {got}"
+            got = verifies_ids(service, "nav.spec.ts", "loads the inbox @verifies:approvals/A1")
+            assert got == ["approvals/A1"], f"verifies: Playwright title tag not read: {got}"
+            assert verifies_ids(service, "nav.spec.ts", "loads the inbox @verifies:nonsense") == [], \
+                "verifies: unscoped title id accepted"
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
         return
     if not args.service or not args.out:

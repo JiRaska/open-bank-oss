@@ -252,6 +252,19 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-31"   # ADR-0320: enforce once P1 has one migrated consumer
     ci_producer: ".github/scripts/check-raw-http-client.py"
+  threat_model_test_evidence:
+    # A threat-model mitigation that cites a test proves only that the test EXISTS under
+    # threat-model-claims-resolve. This asks the next question: did it run, green, in the latest
+    # Test Intelligence envelope for its component (`@Tag("verifies:<scope>/<ref>")` / the
+    # Playwright `@verifies:<scope>/<ref>` title token make the link machine-readable, #13171).
+    detect: ["a docs/threat-models/*.md mitigation row citing a *Test/*IT/*Spec class, or a verifies:<scope>/<row-id> tag"]
+    require:
+      - "the cited test (or the tests declaring the row's verifies id) ran in the latest scheduled main run and every result is passed"
+      - "a component with no envelope is unknown, never a verdict; an unreadable corpus is UNRESOLVED, not a failure"
+    gate: threat-model-test-evidence
+    enforced: advisory
+    target_enforce_date: "2027-01-31"   # ADR-0144: enforce after one full month of advisory output is triaged
+    ci_producer: ".github/scripts/check-threat-model-test-evidence.py"
   resilience_profile_declaration:
     detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
     require:

@@ -99,6 +99,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
+import os
 import pathlib
 import re
 import subprocess
@@ -746,6 +748,117 @@ def money_path(root: pathlib.Path) -> list[str]:
     return mod.money_path_services(root / "openbank-libs" / "governance" / "rules.yaml")
 
 
+# ---------------------------------------------------------------- test EVIDENCE (issue #13171)
+# `Corpus.resolve` proves a cited test class EXISTS. It cannot tell a green test from one that has
+# been red, skipped or deleted from the CI task for a month. The Test Intelligence run envelopes
+# can: a cited test class must have run, and run green, in the latest evidence for its component.
+TEST_CLASS = re.compile(r"^[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec)$")
+
+
+def load_evidence(paths: list[pathlib.Path]) -> dict[str, dict]:
+    """component -> {simple test class: set of states, 'verifies': {id: set of states}}.
+
+    The NEWEST envelope per component wins (`run.observedAt`): evidence is a statement about the
+    latest run, and an older green must never mask a newer red.
+    """
+    newest: dict[str, tuple[str, dict]] = {}
+    files: list[pathlib.Path] = []
+    for p in paths:
+        files.extend(sorted(p.rglob("*.json")) if p.is_dir() else [p])
+    for f in files:
+        try:
+            env = json.loads(f.read_text(encoding="utf-8"))
+            comp, seen = str(env["component"]), str(env["run"]["observedAt"])
+            env["testCases"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # not an envelope, or a malformed one — never a pass, never a crash
+        if comp not in newest or seen > newest[comp][0]:
+            newest[comp] = (seen, env)
+    out: dict[str, dict] = {}
+    for comp, (_, env) in newest.items():
+        classes: dict[str, set[str]] = {}
+        ids: dict[str, set[str]] = {}
+        for case in env.get("testCases", []):
+            simple = str(case.get("classname", "")).split("$", 1)[0].rsplit(".", 1)[-1]
+            classes.setdefault(simple, set()).add(str(case.get("state")))
+            for vid in case.get("verifies", []) or []:
+                ids.setdefault(str(vid), set()).add(str(case.get("state")))
+        out[comp] = {"classes": classes, "verifies": ids}
+    return out
+
+
+def evidence_findings(root: pathlib.Path, services: list[str], corpus: "Corpus",
+                      evidence: dict[str, dict]) -> tuple[list[tuple[str, str, str, str]], int]:
+    """UNVERIFIED findings: a cited test that is absent from, or not green in, the latest run.
+
+    Judged only for components that HAVE an envelope — no evidence for a component is "unknown",
+    never "failed" (the third state: could not read is not a verdict).
+    """
+    findings: list[tuple[str, str, str, str]] = []
+    judged = 0
+    for svc in services:
+        comp = svc if svc.startswith("openbank-") else f"openbank-{svc}"
+        ev = evidence.get(comp)
+        path = root / "docs" / "threat-models" / f"{svc}.md"
+        if ev is None or not path.exists():
+            continue
+        scope = comp.removeprefix("openbank-").removesuffix("-service")
+        for rid, _threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
+            if kind == "prose":
+                continue  # no row id to attribute a verdict to; the register rows are the claims
+            declared = ev["verifies"].get(f"{scope}/{rid}")
+            if declared is not None:
+                judged += 1
+                if declared != {"passed"}:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"`verifies:{scope}/{rid}` ran but not green ({', '.join(sorted(declared))})"))
+                continue
+            for sym in citations(mitig):
+                if not TEST_CLASS.match(sym) or not corpus.resolve(sym):
+                    continue
+                judged += 1
+                states = ev["classes"].get(sym)
+                if states is None:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites test `{sym}`, which exists but has no result in the latest "
+                                     f"{comp} run (not executed, or excluded from the CI task)"))
+                elif states != {"passed"}:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites test `{sym}`, whose latest result is {', '.join(sorted(states))}"))
+    return findings, judged
+
+
+def fetch_latest_evidence(dest: pathlib.Path) -> list[pathlib.Path]:
+    """Best-effort download of the newest scheduled main Services CI envelopes via `gh`.
+
+    Returns [] on ANY failure and says so: an unreadable corpus is UNRESOLVED, not a pass and not
+    a failure (a rate limit must not become someone else's red PR).
+    """
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    try:
+        run = subprocess.run(
+            ["gh", "run", "list", "-R", repo, "--workflow", "services-ci.yml", "--branch", "main",
+             "--event", "schedule", "--status", "success", "--limit", "1", "--json", "databaseId"],
+            capture_output=True, text=True, timeout=60, check=True)
+        run_id = json.loads(run.stdout)[0]["databaseId"]
+        listing = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts", "--paginate", "--jq",
+             ".artifacts[] | select(.name | startswith(\"test-intelligence-run-\")) | .name"],
+            capture_output=True, text=True, timeout=120, check=True)
+        from concurrent.futures import ThreadPoolExecutor
+
+        def pull(name: str) -> None:
+            subprocess.run(["gh", "run", "download", str(run_id), "-R", repo, "-n", name,
+                            "-D", str(dest / name)], capture_output=True, text=True, timeout=120, check=True)
+
+        # ~80 envelopes: sequential downloads took minutes; a handful in parallel keeps the gate cheap.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(pull, listing.stdout.split()))
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError):
+        return []
+    return [dest]
+
+
 def audit(root: pathlib.Path):
     services = subjects_all(root)
     mp = set(money_path(root))
@@ -1035,6 +1148,44 @@ def self_test() -> int:
         case("the phantom beside a disclaimer is a finding (was silenced row-wide)",
              sorted({d.split('`')[1] for k, _, _, d in got if k == "PHANTOM"}),
              ["PhantomGuardFilter"])
+
+    # --- test EVIDENCE: a cited test must have run GREEN in the latest envelope for its component.
+    import tempfile
+    with tempfile.TemporaryDirectory() as _d:
+        _root = pathlib.Path(_d)
+        (_root / "docs" / "threat-models").mkdir(parents=True)
+        (_root / "docs" / "threat-models" / "openbank-x.md").write_text(
+            "| ID | Threat | Mitigation |\n|----|--------|------------|\n"
+            "| T1 | Replay | `GreenGuardTest` asserts it |\n"
+            "| T2 | Bypass | `RedGuardTest` asserts it |\n"
+            "| T3 | Drift | `GhostGuardTest` asserts it |\n"
+            "| T4 | Tamper | `SkippedGuardTest` asserts it |\n", encoding="utf-8")
+        _corpus = _FakeCorpus({f"openbank-x/src/test/kotlin/{n}.kt": f"class {n} {{"
+                               for n in ("GreenGuardTest", "RedGuardTest", "GhostGuardTest", "SkippedGuardTest")})
+        _cases = [{"classname": "com.openbank.x.GreenGuardTest", "state": "passed"},
+                  {"classname": "com.openbank.x.RedGuardTest", "state": "passed"},
+                  {"classname": "com.openbank.x.RedGuardTest", "state": "failed"},
+                  {"classname": "com.openbank.x.SkippedGuardTest", "state": "skipped"}]
+        _env = lambda seen, cases: {"component": "openbank-x", "run": {"observedAt": seen}, "testCases": cases}
+        (_root / "ev").mkdir()
+        (_root / "ev" / "new.json").write_text(json.dumps(_env("2026-10-17T03:00:00Z", _cases)))
+        # An OLDER all-green envelope must not mask the newer red/missing results.
+        (_root / "ev" / "old.json").write_text(json.dumps(_env("2026-10-01T03:00:00Z", [
+            {"classname": "com.openbank.x.RedGuardTest", "state": "passed"},
+            {"classname": "com.openbank.x.GhostGuardTest", "state": "passed"}])))
+        (_root / "ev" / "junk.json").write_text("not json")
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"]))
+        _got = sorted(r for _k, _s, r, _d2 in _f)
+        case("evidence: red, absent and skipped cited tests are UNVERIFIED; green is not", _got, ["T2", "T3", "T4"])
+        case("evidence: every cited test was judged", _n, 4)
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, {})
+        case("evidence: no envelope for the component is unknown, never a verdict", (_f, _n), ([], 0))
+        (_root / "ev" / "ids.json").write_text(json.dumps(_env("2026-10-18T03:00:00Z", [
+            {"classname": "p.GreenGuardTest", "state": "passed", "verifies": ["x/T1"]},
+            {"classname": "p.RedGuardTest", "state": "failed", "verifies": ["x/T2"]}])))
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"]))
+        case("evidence: a declared verifies id is judged by its own tests",
+             sorted(r for _k, _s, r, _d2 in _f), ["T2", "T3", "T4"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")
