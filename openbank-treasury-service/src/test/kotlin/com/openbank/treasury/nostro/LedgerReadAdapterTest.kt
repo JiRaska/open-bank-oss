@@ -32,7 +32,7 @@ class LedgerReadAdapterTest {
     private val date = LocalDate.parse("2026-09-25")
     private val client = mockk<LedgerReadRestClient>()
     private val classes = mockk<LedgerAccountingClassRestClient>()
-    private val adapter = LedgerReadAdapter(client, classes)
+    private val adapter = LedgerReadAdapter(client, classes, postByClass = true)
 
     private fun answer404(body: String?) {
         val response = mockk<Response>(relaxed = true)
@@ -119,5 +119,48 @@ class LedgerReadAdapterTest {
         every { classes.list() } returns Uni.createFrom().failure(WebApplicationException(response))
         assertThatThrownBy { runBlocking { adapter.nostroAccounts() } }
             .isInstanceOf(LedgerUnavailableException::class.java)
+    }
+
+    @Test
+    fun `with the switch off an older ledger's 404 on the class map does not stop reconciliation`() =
+        runBlocking<Unit> {
+            val response = mockk<Response>(relaxed = true)
+            every { response.status } returns 404
+            every { classes.list() } returns Uni.createFrom().failure(WebApplicationException(response))
+            val legacy = LedgerReadAdapter(client, classes, postByClass = false)
+
+            val nostros = legacy.nostroAccounts()
+
+            assertThat(nostros.getValue("CZK").glCode).isEqualTo("1001")
+            assertThat(nostros.getValue("EUR").glCode).isEqualTo("1002")
+            assertThat(nostros.getValue("CZK").glAccountId.toString()).isEqualTo("a0000000-0000-0000-0000-000000001001")
+            io.mockk.verify(exactly = 0) { classes.list() }
+        }
+
+    @Test
+    fun `with the switch off the line read finds the nostro account without touching the class map`() =
+        runBlocking<Unit> {
+            every { classes.list() } returns Uni.createFrom().failure(IllegalStateException("must not be called"))
+            every { client.list(any(), any(), any(), any()) } returns Uni.createFrom().item(
+                com.openbank.treasury.infrastructure.nostro.JournalPage(),
+            )
+            val legacy = LedgerReadAdapter(client, classes, postByClass = false)
+            assertThat(legacy.nostroLines("1001", date, date)).isEmpty()
+        }
+
+    @Test
+    fun `one reconcile reads the class map once`() = runBlocking<Unit> {
+        every { classes.list() } returns Uni.createFrom().item(
+            listOf(
+                AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", java.util.UUID.randomUUID(), "1001"),
+            ),
+        )
+        every { client.list(any(), any(), any(), any()) } returns Uni.createFrom().item(
+            com.openbank.treasury.infrastructure.nostro.JournalPage(),
+        )
+        adapter.nostroAccounts()
+        adapter.nostroLines("1001", date, date)
+        adapter.nostroAccounts()
+        io.mockk.verify(exactly = 1) { classes.list() }
     }
 }
