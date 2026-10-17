@@ -88,9 +88,28 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
         }
     }
 
+    /**
+     * The default disposition: a GitHub issue carrying the finding and its diagnosis for the HITL
+     * queue. Same fail-closed shape as [openProposalPr] — no token, no write — and idempotent per
+     * finding title: an open `flaky-test` issue with the same title is returned instead of a
+     * duplicate, so a re-run of the same snapshot cannot flood the tracker. Until 2026-10-17 this
+     * method only logged, so every "ticket-only" disposition recorded `proposalUrl = null` and the
+     * human queue never saw it.
+     */
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun openTicket(finding: FlakyTestFinding, diagnosis: String): String? {
-        log.infof("No safe automatic change for finding %s; a human triage ticket is required", finding.id)
-        return null
+        if (config.githubToken().orElse("").isBlank()) {
+            log.warnf("flaky-test-hunter.github-token not seeded — no tracking issue opened for %s", finding.id)
+            return null
+        }
+        return try {
+            withContext(Dispatchers.IO) {
+                GitHubTicketWriter(objectMapper, ::send).openOrReuse(finding, diagnosis)
+            }
+        } catch (ex: Exception) {
+            log.warnf("GitHub tracking issue failed for finding %s: %s", finding.id, ex.message)
+            null
+        }
     }
 
     private fun isEligible(finding: FlakyTestFinding, fix: String): Boolean =
@@ -184,6 +203,64 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
         const val ADD_EXPLICIT_UNIT_RETURN_TYPE = "add-explicit-unit-return-type"
         const val CONNECT_TIMEOUT_SECONDS = 10L
         const val REQUEST_TIMEOUT_SECONDS = 30L
+        val OK_RANGE = 200..299
+    }
+}
+
+/**
+ * The ticket half of the GitHub writer: list open `flaky-test` issues, reuse one with the same
+ * title, else create one. Separate from [GitHubProposalAdapter] so the adapter stays under the
+ * detekt function budget; it shares the adapter's allow-listed, token-bearing `send`.
+ */
+internal class GitHubTicketWriter(
+    private val objectMapper: ObjectMapper,
+    private val send: (method: String, path: String, body: String?) -> EgressResponse?,
+) {
+    fun openOrReuse(finding: FlakyTestFinding, diagnosis: String): String? {
+        val title = title(finding)
+        return existing(title) ?: create(title, finding, diagnosis)
+    }
+
+    private fun existing(title: String): String? {
+        val response = send("GET", "/issues?state=open&labels=$TICKET_LABEL&per_page=100", null) ?: return null
+        if (response.status !in OK_RANGE) return null
+        return objectMapper.readTree(response.bodyAsString())
+            .firstOrNull { it.path("title").asText() == title && !it.has("pull_request") }
+            ?.path("html_url")?.asText()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun create(title: String, finding: FlakyTestFinding, diagnosis: String): String? {
+        val request = objectMapper.writeValueAsString(
+            mapOf("title" to title, "body" to body(finding, diagnosis), "labels" to listOf(TICKET_LABEL)),
+        )
+        val response = send("POST", "/issues", request) ?: return null
+        if (response.status !in OK_RANGE) return null
+        return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
+    }
+
+    private fun title(finding: FlakyTestFinding): String = "$TICKET_TITLE_PREFIX${finding.title}".take(TITLE_MAX_CHARS)
+
+    private fun body(finding: FlakyTestFinding, diagnosis: String): String = """
+        Finding `${finding.id}` (`${finding.checkType}`, ${finding.severity}) detected at ${finding.detectedAt}
+        on `${finding.component}`.
+
+        **Diagnosis**
+
+        ${diagnosis.take(DIAGNOSIS_MAX_CHARS)}
+
+        **Measurement**: ${finding.rawMetricValue.toPlainString()} against threshold
+        ${finding.threshold.toPlainString()}.
+
+        No bounded mechanical repair exists for this check type, so the agent opened a tracking
+        issue instead of a pull request. A human must read the test's intent before anything
+        changes; the agent never edits a test file (ADR-0168, ADR-0031 D9).
+    """.trimIndent()
+
+    private companion object {
+        const val TICKET_LABEL = "flaky-test"
+        const val TICKET_TITLE_PREFIX = "flaky-test-hunter: "
+        const val TITLE_MAX_CHARS = 200
+        const val DIAGNOSIS_MAX_CHARS = 4000
         val OK_RANGE = 200..299
     }
 }

@@ -117,6 +117,35 @@ class GitHubProposalAdapterTest {
         return "http://stub.test:${srv.address.port}"
     }
 
+    private var lastIssueRequestBody: String? = null
+
+    /** GitHub Issues stub: GET lists what `openIssues` holds, POST creates and echoes an html_url. */
+    private fun startIssuesStub(openIssues: List<Map<String, String>> = emptyList(), createStatus: Int = 201): String {
+        val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        srv.createContext("/repos/test-owner/test-repo/issues") { ex: HttpExchange ->
+            requestsSeen.incrementAndGet()
+            when (ex.requestMethod) {
+                "GET" -> respond(ex, 200, objectMapper.writeValueAsString(openIssues))
+                "POST" -> {
+                    lastIssueRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
+                    respond(ex, createStatus, """{"html_url":"https://github.com/test-owner/test-repo/issues/4242"}""")
+                }
+                else -> respond(ex, 405, "{}")
+            }
+        }
+        srv.start()
+        server = srv
+        return "http://stub.test:${srv.address.port}"
+    }
+
+    private val ticketOnlyFinding = eligibleFinding.copy(
+        id = "fedcba9876543210",
+        checkType = FlakyTestCheckType.TEST_COUNT_DRIFT,
+        title = "openbank-ledger-service declares 143 @Test methods but JUnit executed 91",
+        component = "openbank-ledger-service",
+        filePath = "openbank-ledger-service/build/test-results/test",
+    )
+
     private fun encodedSource(lineSeparator: String): String = Base64.getMimeEncoder(
         76,
         lineSeparator.toByteArray(StandardCharsets.US_ASCII),
@@ -279,5 +308,75 @@ class GitHubProposalAdapterTest {
 
         assertThat(prUrl).isNull()
         assertThat(requestsSeen.get()).isEqualTo(0)
+    }
+
+    @Test
+    fun `a finding with no mechanical fix opens a labelled GitHub issue carrying the diagnosis`() {
+        val baseUrl = startIssuesStub()
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "JUnit dropped 52 expression-body tests") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4242")
+        // GET open issues (dedupe), then POST — exactly once each.
+        assertThat(requestsSeen.get()).isEqualTo(2)
+        val issue = objectMapper.readTree(lastIssueRequestBody)
+        assertThat(issue.path("title").asText())
+            .isEqualTo("flaky-test-hunter: openbank-ledger-service declares 143 @Test methods but JUnit executed 91")
+        assertThat(issue.path("labels").map { it.asText() }).containsExactly("flaky-test")
+        assertThat(issue.path("body").asText())
+            .contains("fedcba9876543210")
+            .contains("TEST_COUNT_DRIFT")
+            .contains("JUnit dropped 52 expression-body tests")
+            .contains("never edits a test file")
+    }
+
+    @Test
+    fun `an open issue with the same title is reused instead of duplicated`() {
+        val baseUrl = startIssuesStub(
+            openIssues = listOf(
+                mapOf(
+                    "title" to
+                        "flaky-test-hunter: openbank-ledger-service declares 143 @Test methods but JUnit executed 91",
+                    "html_url" to "https://github.com/test-owner/test-repo/issues/4000",
+                ),
+            ),
+        )
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4000")
+        assertThat(requestsSeen.get()).isEqualTo(1)
+        assertThat(lastIssueRequestBody).isNull()
+    }
+
+    @Test
+    fun `a rejected issue create yields null rather than a fabricated url`() {
+        val baseUrl = startIssuesStub(createStatus = 422)
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(2)
+    }
+
+    @Test
+    fun `no token opens no issue and makes no network call`() {
+        var stubHit = false
+        val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        srv.createContext("/") { ex: HttpExchange ->
+            stubHit = true
+            respond(ex, 500, "{}")
+        }
+        srv.start()
+        server = srv
+        val adapter = adapterFor(configWithToken("http://127.0.0.1:${srv.address.port}", Optional.empty()))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isNull()
+        assertThat(stubHit).isFalse()
     }
 }

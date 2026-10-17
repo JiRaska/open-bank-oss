@@ -114,7 +114,15 @@ data class FlakyTestReport(
     val trigger: RunTrigger,
 )
 
-enum class RunTrigger { SCHEDULED, CI_TEST_SUITE_FAILURE_WEBHOOK, OPERATOR_MANUAL }
+/**
+ * No SCHEDULED value, on purpose. The deployed pod carries no repository checkout and no
+ * test-results artifacts, so a periodic sweep of `TestScanPort` had nothing to read and ran
+ * against an empty tree from the day it shipped (2026-10-17 Test Intelligence audit). The
+ * scan path is reachable only where a checkout exists (a webhook or an operator trigger on a
+ * developer machine); the production input is the Admin UI's Test Intelligence snapshot posted
+ * to `POST /evidence/analyze` — see the service CLAUDE.md and the charter in agents.yaml.
+ */
+enum class RunTrigger { CI_TEST_SUITE_FAILURE_WEBHOOK, OPERATOR_MANUAL }
 
 /** Privacy-bounded projection received only from the authenticated Admin UI BFF. */
 data class TestIntelligenceAnalysisRequest(
