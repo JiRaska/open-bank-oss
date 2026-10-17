@@ -56,8 +56,8 @@ jobs:
           # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment, SEPA
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
-          # Delegation, AnaCredit, KYB, Onboarding and SCA added as third through
-          # thirty-third read-only subjects). Kept as a named constant so the summary
+          # Delegation, AnaCredit, KYB, Onboarding, SCA and PSD2 added as third through
+          # thirty-fourth read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
           # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
@@ -97,6 +97,7 @@ jobs:
               "openbank-kyb-service",
               "openbank-onboarding-service",
               "openbank-sca-service",
+              "openbank-psd2-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
