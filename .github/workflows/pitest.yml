@@ -23,9 +23,6 @@ permissions:
 jobs:
   pitest:
     name: pitest / ${{ matrix.service }}
-    # The `services` dispatch input was declared and read by nothing, so every manual run cost the
-    # whole matrix. Schedule and an empty input still run everything.
-    if: github.event_name != 'workflow_dispatch' || inputs.services == '' || contains(format(' {0} ', inputs.services), format(' {0} ', matrix.service))
     runs-on: ubuntu-latest
     timeout-minutes: 30  # measured max 414s (ledger); mutation runs are the likeliest to hang
     permissions:
@@ -111,14 +108,33 @@ jobs:
           - openbank-pension-fund-service
 
     steps:
+      # The `services` dispatch input was declared and read by nothing, so every manual run cost the
+      # whole matrix. `matrix` is not available to a job-level `if:`, so the selection is a step
+      # output every later step is gated on. Schedule and an empty input still run everything.
+      - id: sel
+        env:
+          EVENT: ${{ github.event_name }}
+          WANTED: ${{ inputs.services }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          if [ "$EVENT" != "workflow_dispatch" ] || [ -z "${WANTED// /}" ] || [[ " $WANTED " == *" $SERVICE "* ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$SERVICE not selected by the services input"
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.sel.outputs.run == 'true'
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        if: steps.sel.outputs.run == 'true'
         with:
           java-version: "25"
           distribution: temurin
 
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        if: steps.sel.outputs.run == 'true'
         with:
           # READ-ONLY. setup-java's own `cache: gradle` SAVES a whole Gradle-home entry
           # (~1.1 GB) on this job's key, into a pool already over the 10 GB ceiling — so
@@ -130,15 +146,17 @@ jobs:
           cache-read-only: true
 
       - name: Validate Gradle wrapper
+        if: steps.sel.outputs.run == 'true'
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       - name: Run pitest on domain layer
+        if: steps.sel.outputs.run == 'true'
         run: ./gradlew :${{ matrix.service }}:pitest
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
       - name: Build mutation Test Intelligence envelope
-        if: always()
+        if: always() && steps.sel.outputs.run == 'true'
         continue-on-error: true
         run: |
           python3 .github/scripts/collect-test-run-evidence.py \
@@ -148,7 +166,7 @@ jobs:
             --out "${{ matrix.service }}/build/reports/pitest/test-intelligence-run.json"
 
       - name: Upload pitest XML report
-        if: always()
+        if: always() && steps.sel.outputs.run == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pitest-${{ matrix.service }}
@@ -161,7 +179,7 @@ jobs:
       # (rules.yaml money_path_depth; raising kill scores is tracked with the coverage
       # ratchet roadmap).
       - name: Check mutation threshold (advisory)
-        if: always()
+        if: always() && steps.sel.outputs.run == 'true'
         run: |
           XML="${{ matrix.service }}/build/reports/pitest/mutations.xml"
           if [ ! -f "$XML" ]; then
