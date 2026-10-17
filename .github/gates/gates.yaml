@@ -3586,6 +3586,7 @@ gates:
     verified: "2026-10-17 — promoted: #11008 merged 2026-09-28; 0 sites fleet-wide on origin/main, baseline emptied; the detector now understands the removePrefix(\"/\") normalisation #11008 used (it flagged its own fix: 5 false sites, exit 1, while advisory)"
     budget_seconds: 15   # ~1.2s locally; generous for a slower runner
     rationale: "A slash-less UriInfo.path prefix check never matches under RESTEasy Reactive, so the gate it guards silently never runs; this stops a new occurrence while #11008 fixes the 3 known ones."
+    review_after: "2027-04-17"
     min_subjects: 1000   # 2521 service src/main .kt files scanned 2026-09-26
     selftest: python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --self-test
     selftest_expect: pass
