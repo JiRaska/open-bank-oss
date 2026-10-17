@@ -4975,6 +4975,7 @@ gates:
       QUARKUS_REDIS_HOSTS falls back to localhost and answers 500 on every approvals call while
       its pod reports Ready; the producer set is derived from source so a new service cannot be
       missed.
+    review_after: "2027-04-17"
     min_subjects: 9   # 18 producers measured 2026-10-17; half
     selftest: python3 .github/scripts/check-approvalstore-redis-supplied.py --self-test
     selftest_expect: pass
