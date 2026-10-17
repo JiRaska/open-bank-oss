@@ -13,7 +13,8 @@
 // `Uni<jakarta.ws.rs.core.Response>` so the HTTP status is explicit and the body is read lazily.
 // A typed `Uni<T>` fails on an unreadable 2xx body WITHOUT a status, which on a money path turns a
 // booked debit into an error. The raw Response must not reach callers: `TransactionClient` is the
-// single place that classifies it (Booked / Conflict / Rejected / throw) - see its KDoc.
+// single place that classifies it (Booked / Conflict / Rejected / throw) - see its KDoc. Consumers must
+// NOT call the generated TransactionsApi directly.
 //
 // VERSIONING (ADR-0319 D2, ADR-0048): the artifact version is the provider's API-CONTRACT version,
 // `info.version` of the spec, read at configuration time - never the provider's release version.
@@ -119,6 +120,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    testImplementation(libs.mockk)
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
