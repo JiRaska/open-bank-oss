@@ -93,6 +93,21 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET active holds without an authenticated identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/balances/c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3/holds"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {

@@ -3,7 +3,7 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 
-package com.openbank.agent.infrastructure.client
+package com.openbank.agent.contract
 
 import au.com.dius.pact.consumer.MockServer
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
@@ -15,9 +15,12 @@ import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.agent.infrastructure.client.BalanceServiceClient
+import com.openbank.agent.infrastructure.client.RestDownstreamReadAdapter
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
@@ -81,6 +84,26 @@ class AgentBalanceHoldsPactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-balance-service")
+    fun listHoldsMissingIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET active holds without an authenticated identity")
+        .path("/api/v1/balances/$HOLDS_ACCOUNT_ID/holds")
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "listHoldsMissingIdentityPact")
+    fun `get_balance_holds propagates 401 without identity`(mockServer: MockServer) {
+        assertThatThrownBy {
+            adapterWith(mockServer).read("get_balance_holds", args("""{"accountId": "$HOLDS_ACCOUNT_ID"}"""))
+        }.isInstanceOfSatisfying(WebApplicationException::class.java) {
+            assertThat(it.response.status).isEqualTo(401)
+        }
+    }
 
     @Test
     @PactTestFor(pactMethod = "listHoldsPact")
