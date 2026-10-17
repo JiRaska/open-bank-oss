@@ -29,6 +29,14 @@
 #
 # Usage:  source "$(dirname "$0")/ensure-admin-ui-deps.sh"; ensure_admin_ui_deps "<label>"
 
+_openbank_ensure_admin_ui_deps_cleanup_lock() {
+  local lock_path="${OPENBANK_ADMIN_UI_DEPS_LOCK_PATH:-}"
+  if [ -n "$lock_path" ]; then
+    rm -rf -- "$lock_path"
+    unset OPENBANK_ADMIN_UI_DEPS_LOCK_PATH
+  fi
+}
+
 ensure_admin_ui_deps() {
   local label="${1:-deps}" script_dir repo_root ui_dir lock marker waited
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,11 +64,14 @@ ensure_admin_ui_deps() {
     waited=$((waited + 2))
     if [ -f "$marker" ]; then return 0; fi
   done
-  trap 'rm -rf "$lock"' EXIT
+  # The EXIT handler must outlive this function's local scope: npm ci can fail under errexit,
+  # and a trap that reads `$lock` then sees an unset variable and strands the lock.
+  OPENBANK_ADMIN_UI_DEPS_LOCK_PATH="$lock"
+  trap '_openbank_ensure_admin_ui_deps_cleanup_lock' EXIT
 
   # Re-check under the lock: the holder we queued behind has usually just finished.
   if [ -f "$marker" ]; then
-    rm -rf "$lock"
+    _openbank_ensure_admin_ui_deps_cleanup_lock
     trap - EXIT
     return 0
   fi
@@ -72,6 +83,6 @@ ensure_admin_ui_deps() {
   ( cd "$ui_dir" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null )
   touch "$marker"
 
-  rm -rf "$lock"
+  _openbank_ensure_admin_ui_deps_cleanup_lock
   trap - EXIT
 }
