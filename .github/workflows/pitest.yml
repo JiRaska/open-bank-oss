@@ -217,6 +217,7 @@ jobs:
   # loads twice (Banner$Inject_ ClassCastException) — see the init script header.
   pitest-authz:
     name: pitest / authz decision path (enforced)
+    if: github.event_name != 'workflow_dispatch' || inputs.services == ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -300,6 +301,7 @@ jobs:
   # module without splitting the jandex classloaders) but stays advisory, like the service matrix.
   pitest-libs:
     name: pitest / libs (${{ matrix.module }}, advisory)
+    if: github.event_name != 'workflow_dispatch' || inputs.services == ''
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
