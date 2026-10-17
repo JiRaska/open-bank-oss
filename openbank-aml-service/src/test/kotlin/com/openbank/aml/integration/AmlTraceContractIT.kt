@@ -19,6 +19,9 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -56,6 +59,11 @@ class AmlTraceContractIT {
     @Inject
     lateinit var exporter: RecordingSpanExporter
 
+    @BeforeEach
+    fun resetRecordedSpans() {
+        exporter.reset()
+    }
+
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
     @OidcSecurity(
@@ -66,11 +74,13 @@ class AmlTraceContractIT {
         ],
     )
     fun `creating an aml case keeps the request, its case INSERT and its outbox INSERT in one trace`() {
+        val party = UUID.randomUUID()
+
         Given {
             contentType("application/json")
             header("Idempotency-Key", UUID.randomUUID().toString())
             body(
-                """{"partyId":"${UUID.randomUUID()}","accountId":null,"transactionId":null,""" +
+                """{"partyId":"$party","accountId":null,"transactionId":null,""" +
                     """"customerReference":"trace-contract","screeningType":"TRANSACTION_MONITORING",""" +
                     """"riskLevel":"MEDIUM","alertCode":"TRACE_CONTRACT","alertDetail":null,""" +
                     """"matchedEntity":null}""",
@@ -79,6 +89,8 @@ class AmlTraceContractIT {
             post("/api/v1/aml/cases")
         } Then {
             statusCode(201)
+            body("id", notNullValue())
+            body("partyId", equalTo(party.toString()))
         }
 
         exporter.contract()
@@ -93,5 +105,47 @@ class AmlTraceContractIT {
             )
             .hasNoErrorSpan()
             .verifiedAs("aml-create-case")
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
+    fun `opening a manual investigation keeps the request, its case INSERT and its outbox INSERT in one trace`() {
+        val party = UUID.randomUUID()
+
+        Given {
+            contentType("application/json")
+            header("Idempotency-Key", "trace-${UUID.randomUUID()}")
+            body(
+                """{"partyId":"$party","customerReference":"REF-TRACE-1",""" +
+                    """"screeningType":"MANUAL_INVESTIGATION","riskLevel":"MEDIUM",""" +
+                    """"alertCode":"ALERT-TRACE"}""",
+            )
+        } When {
+            post("/api/v1/aml/cases")
+        } Then {
+            statusCode(201)
+            body("id", notNullValue())
+            body("partyId", equalTo(party.toString()))
+        }
+
+        exporter.contract()
+            .requiresSpan("POST /api/v1/aml/cases")
+            .requiresAttribute("POST /api/v1/aml/cases", "http.response.status_code")
+            .requiresAttribute("INSERT aml_cases", "db.sql.table")
+            .requiresAttribute("INSERT aml_outbox", "db.sql.table")
+            .requiresSameTrace(
+                "POST /api/v1/aml/cases",
+                "INSERT aml_cases",
+                "INSERT aml_outbox",
+            )
+            .hasNoErrorSpan()
+            .verifiedAs("aml-create-case-manual-investigation")
     }
 }

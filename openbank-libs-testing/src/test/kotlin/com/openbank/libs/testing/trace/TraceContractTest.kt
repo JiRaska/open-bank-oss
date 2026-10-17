@@ -77,4 +77,34 @@ class TraceContractTest {
 
         provider.close()
     }
+
+    @Test
+    fun `reset isolates later traces without mutating earlier contract snapshots`() {
+        val exporter = RecordingSpanExporter()
+        val provider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+            .build()
+        try {
+            val parent = provider.get("test").spanBuilder("request").startSpan()
+            provider.get("test")
+                .spanBuilder("old.only")
+                .setParent(io.opentelemetry.context.Context.current().with(parent))
+                .startSpan().end()
+            parent.end()
+            val earlier = exporter.contract()
+
+            exporter.reset()
+
+            assertThatThrownBy { exporter.contract().requiresSpan("request") }
+                .isInstanceOf(AssertionError::class.java)
+            earlier.requiresSpan("old.only").requiresSameTrace("request", "old.only")
+
+            provider.get("test").spanBuilder("request").startSpan().end()
+            exporter.contract().requiresSpan("request").requiresSameTrace("request")
+            assertThatThrownBy { exporter.contract().requiresSpan("old.only") }
+                .isInstanceOf(AssertionError::class.java)
+        } finally {
+            provider.close()
+        }
+    }
 }

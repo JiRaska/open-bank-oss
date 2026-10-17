@@ -14,6 +14,8 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 import java.util.UUID
@@ -58,7 +60,7 @@ class LedgerTraceContractIT {
                   "entryDate": "$today",
                   "valueDate": "$today",
                   "description": "Trace contract posting",
-                  "createdBy": "${UUID.randomUUID()}",
+                  "createdBy": "00000000-0000-0000-0000-000000000099",
                   "lines": [
                     {
                       "glAccountId": "$glAssetId",
@@ -84,6 +86,8 @@ class LedgerTraceContractIT {
             post("/api/v1/journals")
         } Then {
             statusCode(201)
+            body("id", notNullValue())
+            body("status", equalTo("POSTED"))
         }
 
         exporter.contract()
