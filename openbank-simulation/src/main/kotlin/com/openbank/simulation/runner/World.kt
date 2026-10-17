@@ -14,6 +14,7 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
+import com.openbank.simulation.model.ClearingCycleBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SimPaymentSaga
@@ -58,6 +59,12 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // Money-path SCT Inst adoption: the REAL `SctInstPayment` (sepa-instant) aggregate driven by
     // SctInstPaymentScenario — same terminal-state completeness invariant as the SEPA pair above.
     val sctInstPayments = mutableListOf<SctInstPayment>()
+
+    // Money-path clearing adoption: the REAL `ClearingItem`/`ClearingBatch`/`ClearingCycleResult`
+    // aggregates (clearing-service) driven by ClearingCycleScenario, with the per-rail cycle book
+    // the completeness/conservation invariants assert over — same terminal-state role as the
+    // SEPA/settlement/sct-inst lists above.
+    val clearing = ClearingCycleBook()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every

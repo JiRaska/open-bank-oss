@@ -4,10 +4,14 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingItem
+import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.ClearingSettlementPosting
 import com.openbank.simulation.runner.World
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
@@ -269,6 +273,126 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Money-path clearing adoption: every `ClearingItem` the scenario seeded is either terminal
+     * (SETTLED / FAILED / REVERSED) or accounted for, and every `ClearingBatch` is terminal. The
+     * accounted-for case is the #11974 reported-not-dropped law: an item still PENDING whose rail
+     * HAS cycled since it was seeded must be counted in that rail's latest cycle result
+     * `unsettleablePending` (its currency has no settlement GL pair — reported, never silently
+     * skipped). An item whose rail has not cycled since seeding is legitimately PENDING (the
+     * #12004 rail-isolation probe), and a railless item can never be selected by any cycle.
+     */
+    val clearingCompleteness = object : Invariant {
+        private val terminal = setOf(
+            ClearingStatus.SETTLED,
+            ClearingStatus.FAILED,
+            ClearingStatus.REVERSED,
+        )
+
+        override val name = "clearing-completeness"
+        override fun check(world: World): Violation? {
+            world.clearing.batches.forEach { batch ->
+                if (batch.status !in terminal) {
+                    return Violation(name, "clearing batch ${batch.id} stuck in ${batch.status}")
+                }
+            }
+            world.clearing.items.forEach { item ->
+                if (item.status in terminal) return@forEach
+                val rail = item.rail
+                    ?: return Violation(
+                        name,
+                        "clearing item ${item.id} has no rail: no cycle can ever select it (#12004)",
+                    )
+                if (world.clearing.cycleEpoch(rail) == world.clearing.seedEpochOf(item.id)) {
+                    return@forEach // the rail has not cycled since the item was seeded — PENDING is expected
+                }
+                val last = world.clearing.cycles.lastOrNull { it.rail == rail }
+                if (last == null || last.unsettleablePending[item.currency] == null) {
+                    return Violation(
+                        name,
+                        "clearing item ${item.id} (${item.currency} on $rail) was skipped by cycle " +
+                            "${last?.cycleId}: not batched, not terminal, not reported unsettleable",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path clearing adoption: the batch bookkeeping law, per batch. A SETTLED batch has
+     * exactly its items (itemCount, Σ amounts == totalDebit == totalCredit, zero net position —
+     * the real NET bilateral model) and exactly one net-settlement journal for totalDebit; a
+     * FAILED batch moved no money (no journal — a settlement leg for a dead batch would be the
+     * classic "money without a clearing" defect); a REVERSED batch's journal was unwound. The
+     * cross-entry drift itself is covered by conservationOfMoney — this invariant pins the
+     * batch-to-ledger correspondence the clearing cycle's durable outbox intent (ADR-0281)
+     * promises.
+     */
+    val clearingBatchConservation = object : Invariant {
+        override val name = "clearing-batch-conservation"
+        override fun check(world: World): Violation? {
+            world.clearing.batches.forEach { batch ->
+                val items = world.clearing.itemsOf(batch.id)
+                val posting = world.clearing.postings[batch.id]
+                when (batch.status) {
+                    ClearingStatus.SETTLED -> return checkSettled(batch, items, posting)
+                    ClearingStatus.FAILED -> {
+                        if (posting != null) {
+                            return Violation(
+                                name,
+                                "FAILED batch ${batch.id} posted a settlement journal: money moved for a dead batch",
+                            )
+                        }
+                        if (items.any { it.status != ClearingStatus.FAILED }) {
+                            return Violation(name, "FAILED batch ${batch.id} has non-FAILED items")
+                        }
+                    }
+                    ClearingStatus.REVERSED -> {
+                        if (posting == null || !posting.reversed) {
+                            return Violation(
+                                name,
+                                "REVERSED batch ${batch.id}: settlement journal not reversed (money not unwound)",
+                            )
+                        }
+                        if (items.any { it.status != ClearingStatus.REVERSED }) {
+                            return Violation(name, "REVERSED batch ${batch.id} has non-REVERSED items")
+                        }
+                    }
+                    else -> return Violation(name, "clearing batch ${batch.id} in non-terminal ${batch.status}")
+                }
+            }
+            return null
+        }
+
+        private fun checkSettled(
+            batch: ClearingBatch,
+            items: List<ClearingItem>,
+            posting: ClearingSettlementPosting?,
+        ): Violation? {
+            if (items.size != batch.itemCount || items.any { it.status != ClearingStatus.SETTLED }) {
+                return Violation(name, "settled batch ${batch.id}: ${items.size}/${batch.itemCount} items settled")
+            }
+            val sum = items.fold(BigDecimal.ZERO) { acc, item -> acc + item.amount }
+            if (sum.compareTo(batch.totalDebit) != 0) {
+                return Violation(
+                    name,
+                    "settled batch ${batch.id}: items sum $sum != totalDebit ${batch.totalDebit}",
+                )
+            }
+            if (batch.totalCredit.compareTo(batch.totalDebit) != 0 || batch.netPosition.signum() != 0) {
+                return Violation(name, "settled batch ${batch.id}: NET bilateral totals drifted")
+            }
+            if (posting == null || posting.reversed) {
+                return Violation(name, "settled batch ${batch.id}: no unreversed net-settlement journal")
+            }
+            if (posting.amount.compareTo(batch.totalDebit) != 0) {
+                return Violation(name, "settled batch ${batch.id}: journal ${posting.amount} != totalDebit")
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -279,6 +403,8 @@ object MoneyPathInvariants {
         sepaPaymentCompleteness,
         settlementCompleteness,
         sctInstCompleteness,
+        clearingCompleteness,
+        clearingBatchConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

@@ -262,6 +262,10 @@ const simulationScenarios = [
   // Money-path SCT Inst adoption: drives the real sepa-instant SctInstPayment status machine
   // and the real SctInstSchemeRules EUR-only admission under the fault injector.
   { classname: 'com.openbank.simulation.scenario.SctInstPaymentScenarioTest', components: ['openbank-sepa-instant'], scope: 'SCT Inst instant-payment settlement, timeout and recall scenario (pure JVM, EUR scheme legs)' },
+  // Money-path clearing adoption: drives the real clearing-service ClearingItem/ClearingBatch
+  // aggregates and the real NetSettlementJournalFactory settleable-currency/GL-pair resolution
+  // under the fault injector (per-rail, per-currency batches with net-settlement legs).
+  { classname: 'com.openbank.simulation.scenario.ClearingCycleScenarioTest', components: ['openbank-clearing-service'], scope: 'Clearing cycle batching, net-settlement posting, conflict reversal and reported-not-dropped scenario (pure JVM)' },
 ]
 
 async function simulationScenarioEvidence() {

@@ -73,6 +73,15 @@ dependencies {
     // only the domain POJOs land on the classpath.
     implementation(project(":openbank-sepa-instant"))
 
+    // Money-path clearing adoption: the harness drives the REAL clearing-service domain
+    // aggregates (ClearingItem/ClearingBatch/ClearingCycleResult/NetSettlementPosting) and the
+    // framework-free NetSettlementJournalFactory (the real settleable-currency set and the
+    // seeded cash-clearing/scheme-settlement GL pairs), so ClearingCycleScenario exercises
+    // production clearing semantics rather than a re-model. The domain package is framework-free
+    // (ADR-0002); pulling the whole project(...) is the established convention here (only the
+    // domain POJOs and the pure factory are referenced from this module).
+    implementation(project(":openbank-clearing-service"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

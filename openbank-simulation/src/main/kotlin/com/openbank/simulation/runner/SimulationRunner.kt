@@ -8,6 +8,7 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
@@ -61,6 +62,15 @@ class SimulationRunner(
             // Its EUR journal legs net to zero per currency, so ledger conservation holds
             // without touching the CZK balance projection.
             SctInstPaymentScenario.step(world)
+            context.scheduler.drain()
+            // Money-path clearing adoption: interleave the per-(rail, currency) clearing-cycle
+            // path (real ClearingItem/ClearingBatch aggregates, real NetSettlementJournalFactory
+            // GL resolution and ClearingService.cycleIdFor) so its net-settlement legs share the
+            // fault profile and are checked by the same invariant sweep every step. Its GL-to-GL
+            // legs carry no customer dimension, so the balance projection is untouched; the drain
+            // is a no-op today but kept for the same "settled before the invariant sweep"
+            // convention as every other scenario above.
+            ClearingCycleScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
