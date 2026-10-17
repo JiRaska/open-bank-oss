@@ -7,8 +7,12 @@ package com.openbank.agent.integration
 
 import com.openbank.agent.application.ProposalService
 import com.openbank.agent.domain.proposal.ProposalState
+import com.openbank.agent.infrastructure.audit.AgentAuditOutbox
 import com.openbank.agent.it.PostgresTestResource
+import io.mockk.every
+import io.mockk.spyk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -19,6 +23,7 @@ import org.hamcrest.Matchers.anyOf
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.`is`
 import org.junit.jupiter.api.Test
+import java.sql.SQLException
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -227,6 +232,120 @@ class ProposalApiIT {
                     statement.setObject(1, proposal.id)
                     statement.executeUpdate()
                 }
+            }
+        }
+    }
+
+    @Test
+    fun `proposal creation rolls back a checked audit failure before SQL and retries successfully`() {
+        val proposedBy = "checked-create-${UUID.randomUUID()}"
+        installCheckedAuditFailureOnce {
+            it.contains("\"actorId\":\"$proposedBy\"") &&
+                it.contains("\"eventType\":\"agent.proposal.created\"")
+        }
+
+        try {
+            assertThatThrownBy {
+                service.create("checked rollback", "r", "a", proposedBy, null, null)
+            }.isInstanceOf(SQLException::class.java).hasMessage("injected checked audit failure before SQL")
+            assertThat(count("SELECT count(*) FROM agent_proposal WHERE proposed_by = ?", proposedBy)).isZero()
+            assertThat(creationAuditCount(proposedBy)).isZero()
+
+            val retry = service.create("checked rollback", "r", "a", proposedBy, null, null)
+            val persisted = service.get(retry.id)
+            assertThat(persisted).usingRecursiveComparison().ignoringFields("proposedAt").isEqualTo(retry)
+            assertThat(persisted?.proposedAt).isBetween(
+                retry.proposedAt.minusNanos(1000),
+                retry.proposedAt.plusNanos(1000),
+            )
+            assertThat(count("SELECT count(*) FROM agent_proposal WHERE proposed_by = ?", proposedBy)).isEqualTo(1)
+            assertThat(creationAuditCount(proposedBy)).isEqualTo(1)
+        } finally {
+            deleteProposalFixture(proposedBy)
+        }
+    }
+
+    @Test
+    fun `proposal decision rolls back a checked audit failure before SQL and retries successfully`() {
+        val proposedBy = "checked-decision-${UUID.randomUUID()}"
+        val proposal = service.create("checked decision rollback", "r", "a", proposedBy, null, null)
+        val original = service.get(proposal.id)
+        val reviewer = "reviewer-${UUID.randomUUID()}"
+        try {
+            installCheckedAuditFailureOnce {
+                it.contains("\"aggregateId\":\"${proposal.id}\"") &&
+                    it.contains("\"eventType\":\"agent.proposal.decided\"")
+            }
+            assertThatThrownBy {
+                service.decide(proposal.id, approve = true, decidedBy = reviewer, reason = "verified")
+            }.isInstanceOf(SQLException::class.java).hasMessage("injected checked audit failure before SQL")
+            val unchanged = service.get(proposal.id)
+            assertThat(unchanged).isEqualTo(original)
+            assertThat(unchanged?.state).isEqualTo(ProposalState.PROPOSED)
+            assertThat(unchanged?.decidedBy).isNull()
+            assertThat(unchanged?.decidedAt).isNull()
+            assertThat(unchanged?.decisionReason).isNull()
+            assertThat(decisionAuditCount(proposal.id)).isZero()
+
+            val retry = service.decide(proposal.id, approve = true, decidedBy = reviewer, reason = "verified")
+            assertThat(retry).isNotNull()
+            assertThat(retry?.state).isEqualTo(ProposalState.APPROVED)
+            assertThat(retry?.decidedBy).isEqualTo(reviewer)
+            assertThat(retry?.decisionReason).isEqualTo("verified")
+            assertThat(retry?.decidedAt).isNotNull()
+            val persisted = service.get(proposal.id)
+            assertThat(persisted).usingRecursiveComparison().ignoringFields("proposedAt", "decidedAt").isEqualTo(retry)
+            assertThat(persisted?.decidedAt).isBetween(
+                retry?.decidedAt?.minusNanos(1000),
+                retry?.decidedAt?.plusNanos(1000),
+            )
+            assertThat(count("SELECT count(*) FROM agent_proposal WHERE proposed_by = ?", proposedBy)).isEqualTo(1)
+            assertThat(decisionAuditCount(proposal.id)).isEqualTo(1)
+            assertThat(creationAuditCount(proposedBy)).isEqualTo(1)
+        } finally {
+            deleteProposalFixture(proposedBy)
+        }
+    }
+
+    private fun installCheckedAuditFailureOnce(matches: (String) -> Boolean) {
+        var failed = false
+        val outbox = spyk(AgentAuditOutbox(dataSource))
+        every { outbox.enqueue(any(), any()) } answers {
+            if (!failed && matches(secondArg())) {
+                failed = true
+                throw SQLException("injected checked audit failure before SQL")
+            }
+            callOriginal()
+        }
+        QuarkusMock.installMockForType(outbox, AgentAuditOutbox::class.java)
+    }
+
+    private fun creationAuditCount(proposedBy: String): Long = count(
+        "SELECT count(*) FROM agent_audit_outbox WHERE payload::jsonb ->> 'actorId' = ? " +
+            "AND payload::jsonb ->> 'eventType' = 'agent.proposal.created'",
+        proposedBy,
+    )
+
+    private fun decisionAuditCount(id: UUID): Long = count(
+        "SELECT count(*) FROM agent_audit_outbox WHERE payload::jsonb ->> 'aggregateId' = ? " +
+            "AND payload::jsonb ->> 'eventType' = 'agent.proposal.decided'",
+        id.toString(),
+    )
+
+    private fun deleteProposalFixture(proposedBy: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "DELETE FROM agent_audit_outbox WHERE payload::jsonb ->> 'actorId' = ? " +
+                    "OR payload::jsonb ->> 'aggregateId' IN " +
+                    "(SELECT id::text FROM agent_proposal WHERE proposed_by = ?)",
+            ).use { statement ->
+                statement.setString(1, proposedBy)
+                statement.setString(2, proposedBy)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement("DELETE FROM agent_proposal WHERE proposed_by = ?").use { statement ->
+                statement.setString(1, proposedBy)
+                statement.executeUpdate()
             }
         }
     }
