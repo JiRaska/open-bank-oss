@@ -36,6 +36,8 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
     // @TestSecurity for the ADR-0034 Phase 5 advisory-mode authz regression test.
