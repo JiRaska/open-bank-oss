@@ -9,6 +9,7 @@ import com.openbank.libs.identity.RodneCislo
 import com.openbank.party.application.port.`in`.SearchPartiesQuery
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.Party
+import com.openbank.party.infrastructure.persistence.repository.foldForSearch
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -113,8 +114,7 @@ class PartyServiceSearchTest {
 class FoldForSearchTest {
     @Test
     fun `diacritics and case are folded so a partial plain-ascii term matches`() {
-        org.assertj.core.api.Assertions.assertThat(
-            com.openbank.party.infrastructure.persistence.repository.foldForSearch("  Jan  NOVÁK Müller Ångström Žluťoučký "),
-        ).isEqualTo("jan novak muller angstrom zlutoucky")
+        assertThat(foldForSearch("  Jan  NOVÁK Müller Ångström Žluťoučký "))
+            .isEqualTo("jan novak muller angstrom zlutoucky")
     }
 }

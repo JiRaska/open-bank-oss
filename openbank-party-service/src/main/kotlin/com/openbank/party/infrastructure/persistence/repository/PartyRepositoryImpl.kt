@@ -100,43 +100,41 @@ class PartyRepositoryImpl(
         limit: Int,
         afterId: UUID?,
         birthDates: List<String>,
-    ): List<Party> =
-        Panache.withSession {
-            // Every word must match somewhere (AND), each word anywhere in a name/contact field (OR),
-            // accent- and case-insensitively: "novak jan" finds "Jan Novák". The term is folded the
-            // same way in Kotlin (foldForSearch) as party_fold() folds the columns (V27).
-            val params = mutableListOf<Any>()
-            val words = foldForSearch(escapedTerm).split(' ').filter { it.isNotBlank() }.ifEmpty { listOf("") }
-            var predicate = words.joinToString(" and ", prefix = "(", postfix = ") ") { word ->
-                params += "%$word%"
-                val n = params.size
-                "(cast(function('party_fold', legalName) as String) like ?$n escape '\\' " +
-                    "or cast(function('party_fold', tradingName) as String) like ?$n escape '\\' " +
-                    "or lower(email) like ?$n escape '\\' or lower(phone) like ?$n escape '\\' " +
-                    "or lower(registrationNumber) like ?$n escape '\\')"
-            }
-            if (birthDates.isNotEmpty()) {
-                params += birthDates
-                predicate += "and dateOfBirth in ?${params.size} "
-            }
-            if (afterId != null) {
-                params += afterId
-                predicate += "and partyId > ?${params.size} "
-            }
-            find("$predicate order by partyId", *params.toTypedArray()).page(0, limit).list()
-        }.awaitSuspending().map { it.toDomain() }
+    ): List<Party> = Panache.withSession {
+        // Every word must match somewhere (AND), each word anywhere in a name/contact field (OR),
+        // accent- and case-insensitively: "novak jan" finds "Jan Novák". The term is folded the
+        // same way in Kotlin (foldForSearch) as party_fold() folds the columns (V27).
+        val params = mutableMapOf<String, Any>()
+        val words = foldForSearch(escapedTerm).split(' ').filter { it.isNotBlank() }.ifEmpty { listOf("") }
+        var predicate = words.withIndex().joinToString(" and ", prefix = "(", postfix = ") ") { (i, word) ->
+            val n = "w$i"
+            params[n] = "%$word%"
+            "(cast(function('party_fold', legalName) as String) like :$n escape '\\' " +
+                "or cast(function('party_fold', tradingName) as String) like :$n escape '\\' " +
+                "or lower(email) like :$n escape '\\' or lower(phone) like :$n escape '\\' " +
+                "or lower(registrationNumber) like :$n escape '\\')"
+        }
+        if (birthDates.isNotEmpty()) {
+            params["birthDates"] = birthDates
+            predicate += "and dateOfBirth in :birthDates "
+        }
+        if (afterId != null) {
+            params["afterId"] = afterId
+            predicate += "and partyId > :afterId "
+        }
+        find("$predicate order by partyId", params).page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun findByIdentifier(normalized: String, limit: Int): List<Party> =
-        Panache.withSession {
-            find(
-                "function('regexp_replace', lower(taxId), '[^a-z0-9]', '', 'g') = ?1 " +
-                    "or function('regexp_replace', lower(registrationNumber), '[^a-z0-9]', '', 'g') = ?1 " +
-                    // a phone typed as digits lands here too; match its national/international tail
-                    "or cast(function('regexp_replace', phone, '[^0-9]', '', 'g') as String) like ?2 order by partyId",
-                normalized,
-                "%" + normalized.filter { it.isDigit() }.takeLast(9).ifEmpty { "-" },
-            ).page(0, limit).list()
-        }.awaitSuspending().map { it.toDomain() }
+    override suspend fun findByIdentifier(normalized: String, limit: Int): List<Party> = Panache.withSession {
+        find(
+            "function('regexp_replace', lower(taxId), '[^a-z0-9]', '', 'g') = ?1 " +
+                "or function('regexp_replace', lower(registrationNumber), '[^a-z0-9]', '', 'g') = ?1 " +
+                // a phone typed as digits lands here too; match its national/international tail
+                "or cast(function('regexp_replace', phone, '[^0-9]', '', 'g') as String) like ?2 order by partyId",
+            normalized,
+            "%" + normalized.filter { it.isDigit() }.takeLast(PHONE_TAIL_DIGITS).ifEmpty { "-" },
+        ).page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
 
@@ -472,10 +470,12 @@ class PartyPayeeRepositoryImpl :
     )
 }
 
+/** National numbers differ in prefix (0 / +420 / 00420); the last 9 digits identify the line. */
+private const val PHONE_TAIL_DIGITS = 9
+
 /** Lower-case and strip diacritics (Novák → novak, Müller → muller, Łódź → łodz); mirrors party_fold(). */
-internal fun foldForSearch(s: String): String =
-    java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "")
-        .lowercase()
-        .trim()
-        .replace(Regex("\\s+"), " ")
+internal fun foldForSearch(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+    .replace(Regex("\\p{M}+"), "")
+    .lowercase()
+    .trim()
+    .replace(Regex("\\s+"), " ")

@@ -62,11 +62,15 @@ private const val RC_KEY_VERSION = 1
  * EXACTLY (never as a substring), so the search cannot be used to enumerate identifiers by prefix.
  */
 private val SEPARATORS = Regex("""[\s./()+-]""")
+private const val IDENTIFIER_MIN_LENGTH = 6
+private const val IDENTIFIER_MAX_LENGTH = 20
+private const val IDENTIFIER_MIN_DIGITS = 4
+private const val MAX_PAGE_SIZE = 100
 
 internal fun normalizeIdentifier(term: String): String? {
     val n = term.replace(SEPARATORS, "").lowercase()
-    if (n.length !in 6..20 || !n.all { it.isLetterOrDigit() } || n.count { it.isDigit() } < 4) return null
-    return n
+    val shaped = n.length in IDENTIFIER_MIN_LENGTH..IDENTIFIER_MAX_LENGTH && n.all { it.isLetterOrDigit() }
+    return n.takeIf { shaped && n.count { it.isDigit() } >= IDENTIFIER_MIN_DIGITS }
 }
 
 // Date of birth as one token of the term. Day-first with `.`/`/`/`-` (most of the world), ISO
@@ -81,14 +85,14 @@ private fun dateOrNull(y: Int, m: Int, d: Int) = runCatching { java.time.LocalDa
 internal fun splitBirthDate(term: String): Pair<List<String>, String> {
     val yearFirst = YEAR_FIRST.find(term)
     val match = yearFirst ?: YEAR_LAST_STRICT.find(term) ?: return emptyList<String>() to term
-    val g = match.groupValues
+    val (first, second, third) = match.destructured
     val dates = if (match === yearFirst) {
-        listOfNotNull(dateOrNull(g[1].toInt(), g[2].toInt(), g[3].toInt()))
+        listOfNotNull(dateOrNull(first.toInt(), second.toInt(), third.toInt()))
     } else {
-        val a = g[1].toInt()
-        val b = g[2].toInt()
-        val y = g[3].toInt()
-        listOfNotNull(dateOrNull(y, b, a), dateOrNull(y, a, b)).distinct()
+        val y = third.toInt()
+        val dayFirst = dateOrNull(y, second.toInt(), first.toInt())
+        val monthFirst = dateOrNull(y, first.toInt(), second.toInt())
+        listOfNotNull(dayFirst, monthFirst).distinct()
     }
     if (dates.isEmpty()) return emptyList<String>() to term
     return dates.map { it.toString() } to term.removeRange(match.range).trim().replace(Regex("""\s+"""), " ")
@@ -461,15 +465,19 @@ class PartyService : PartyUseCase {
         val raw = query.q?.trim().orEmpty()
         val (birthDates, nameTerm) = splitBirthDate(raw)
         // Date first: `15.6.1985` or `Smith 1985-06-15` would otherwise normalise to an identifier.
-        if (birthDates.isEmpty()) normalizeIdentifier(raw)?.let { id ->
-            val limit = query.limit.coerceIn(1, 100)
-            val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
-                resolvePartyByRc(ResolvePartyByRcCommand(raw))
-            } else {
-                null
+        if (birthDates.isEmpty()) {
+            normalizeIdentifier(raw)?.let { id ->
+                val limit = query.limit.coerceIn(1, MAX_PAGE_SIZE)
+                val byIndex = if (RodneCislo.parse(raw) is RodneCislo.Parsed) {
+                    resolvePartyByRc(ResolvePartyByRcCommand(raw))
+                } else {
+                    null
+                }
+                val hits = (listOfNotNull(byIndex) + partyRepo.findByIdentifier(id, limit)).distinctBy {
+                    it.id
+                }.take(limit)
+                return CursorPage(data = hits, pagination = PageInfo(limit = limit, hasNextPage = false))
             }
-            val hits = (listOfNotNull(byIndex) + partyRepo.findByIdentifier(id, limit)).distinctBy { it.id }.take(limit)
-            return CursorPage(data = hits, pagination = PageInfo(limit = limit, hasNextPage = false))
         }
         val req = SearchRequest.of(if (birthDates.isNotEmpty()) nameTerm else query.q, query.limit, query.cursor)
         if (!req.hasTerm) {
