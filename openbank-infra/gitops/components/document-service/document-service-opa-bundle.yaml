@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "239d4b7c8e6a5222"
+    openbank.tech/policy-checksum: "cc8471867abbcc97"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -328,6 +328,22 @@ data:
     	role in input.principal.roles
     	not principal_is_machine
     	input.action == "opsmessage.approval.decide"
+    }
+
+    # ADR-0333 D6: reviewed customer notification copy is edited and published by staff.
+    # Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+    # identity must never be able to change copy shown to a customer.
+    allowed_reasons contains "operator-manage-notification-template" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {
+            "commstemplate.create",
+            "commstemplate.read",
+            "commstemplate.preview",
+            "commstemplate.publish",
+        }
     }
 
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
@@ -1452,6 +1468,7 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        - commstemplate.read
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read

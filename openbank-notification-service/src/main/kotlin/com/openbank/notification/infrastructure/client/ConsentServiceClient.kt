@@ -5,9 +5,15 @@
 package com.openbank.notification.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.contact.ContactSuppressionPort
+import com.openbank.libs.contact.SuppressionEntry
+import com.openbank.libs.contact.SuppressionReason
+import com.openbank.libs.contact.SuppressionScope
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -16,6 +22,7 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
+import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.util.UUID
 
 /**
@@ -48,3 +55,31 @@ interface ConsentServiceClient {
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ConsentCheckResponse(val granted: Boolean = false)
+
+@RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/suppressions")
+@Produces(MediaType.APPLICATION_JSON)
+interface SuppressionServiceClient {
+    @GET
+    @Path("/party/{partyId}")
+    fun listActive(@PathParam("partyId") partyId: UUID): Uni<List<SuppressionResponse>>
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class SuppressionResponse(
+    val scope: SuppressionScope,
+    val value: String? = null,
+    val reason: SuppressionReason,
+    val source: String,
+) {
+    fun toEntry(): SuppressionEntry = SuppressionEntry(scope, value, reason, source)
+}
+
+/** Consent-service owns the live do-not-contact list; an unavailable read fails the gate closed. */
+@ApplicationScoped
+class LiveSuppressionAdapter(@RestClient private val client: SuppressionServiceClient) : ContactSuppressionPort {
+    override suspend fun activeSuppressions(partyId: UUID): List<SuppressionEntry> =
+        client.listActive(partyId).awaitSuspending().map(SuppressionResponse::toEntry)
+}

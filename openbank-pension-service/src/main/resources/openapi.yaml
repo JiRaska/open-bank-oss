@@ -25,7 +25,7 @@ info:
   # 2.2.0: additive — GET /contracts gains the optional staff free-text search parameter `q`
   #        (contract/participant party id fragment, participant birth date, product line, payment
   #        reference) and Contract gains `participantBirthDate`. MINOR per ADR-0048.
-  version: 2.2.0
+  version: 2.3.0
   description: |
     Participant-side pension contracts (ADR-0334). A contract is created under the jurisdiction
     pack in force on its creation date and PINS that pack version for life; incentive evaluation
@@ -1370,7 +1370,7 @@ paths:
     post:
       tags: [Pension funding operations]
       operationId: fileReturnReport
-      summary: File the monthly return report with every DUE return (ZDPS §18(4))
+      summary: File the monthly return reports with every DUE return, one per currency (ZDPS §18(4))
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -3307,14 +3307,22 @@ components:
         channelReference: { type: [string, 'null'], description: 'MANUAL:sha256:… means nothing was transmitted' }
         resultApplied: { type: boolean }
         createdAt: { type: string, format: date-time }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: 'ISO 4217 currency of every line and of the total; a report is single-currency' }
+        total: { type: number, description: Sum of this report's lines, all in its currency }
     ReturnReportRun:
       type: object
       properties:
         filed: { type: boolean }
         report:
+          deprecated: true
+          description: The first of reports; kept for clients written before multi-currency reports
           oneOf:
             - $ref: '#/components/schemas/ReturnReport'
             - type: 'null'
+        reports:
+          type: array
+          description: One report per currency with DUE returns; never sums amounts across currencies
+          items: { $ref: '#/components/schemas/ReturnReport' }
     StateContributionDeadlines:
       type: object
       properties:

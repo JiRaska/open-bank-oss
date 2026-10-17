@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "9f36e37dfcbdf650"
+        openbank.tech/policy-checksum: "4dabb95834e23331"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -114,6 +114,11 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0331 / ADR-0252: trust the taint only from customer-edge, which forwards it
+            # after its own trusted-principal decision (UpstreamClient). Held to that one
+            # relay identity by check-synthetic-customer-identity.py.
+            - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
+              value: "service-account-openbank-edge"
             # Kafka broker for the transactional-outbox dispatcher (party-outbox-out →
             # topic openbank.party.events; the direct party-events-out emitter was retired
             # by #4007, so this is now the ONLY way a party event leaves the service).

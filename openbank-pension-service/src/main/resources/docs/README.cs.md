@@ -55,6 +55,20 @@ příspěvku k referenčnímu datu. Resource volá metodu služby bez argumentů
 "today" uvnitř služby (výchozí argument četl na CDI client proxině) padlo na NPE, proto metoda
 řeší hodiny na reálném beane a jen scheduler předává explicitní datum.
 
+### Vratky ve více měnách
+
+Měsíční hlášení o vratkách státního příspěvku (ZDPS §18(4), `POST .../state-contribution/return-reports`)
+se podává **zvlášť pro každou měnu**. Všechny vratky ve stavu DUE se seskupí podle měny ISO 4217
+a každá skupina odchází jako samostatné hlášení a soubor (`VR-<měsíc>-<měna>-<id>.txt`). Částky
+různých měn se nikdy nesčítají ani nepřepočítávají: hlavička hlášení nese jeho měnu
+(`H;cz-mf-state-contribution-v1;RETURNS;<IČO>;<YYYY-MM>;<měna>;<počet>;<součet>`) a sčítá jen jeho
+vlastní řádky typem `Money` z libs, který součet napříč měnami odmítne. Vratka v EUR proto nikdy
+neblokuje hlášení v CZK. Odpověď je vrací v poli `reports` (`report` je první z nich, kvůli starším
+klientům); každé nese `currency` a `total`, uložené v `pension_return_reports`
+(`V16__return_report_currency`). Vratka s měnou, která není platný kód ISO 4217, je odmítnuta už
+při vzniku. Metrika `openbank_pension_state_contribution_return_amount_total` má label měny; hodnota
+mimo ISO 4217 se zapíše jako `currency="INVALID"`, takže množina labelů zůstává omezená.
+
 ## Vykazování účastníků pro výkazy ČNB
 
 `GET /api/v2/pension/reporting/participant-aggregates` vrací agregace za jedno období pro výkazy
@@ -98,6 +112,17 @@ výchozí hodnoty se nemění. Demo nepotřebuje skutečnou identitu společnost
 schválení vlastnictví dat. Používá syntetická data a simulované externí služby. Neprokazuje
 izolaci současně běžících nasazení se skutečnými OIDC/OPA tokeny, skutečné vypořádání plateb
 ani kompletně propojený produkční tok peněz. Tyto schopnosti zůstávají v #12472 a #12479.
+
+## Provozní metriky
+
+Management endpoint metrik publikuje čítače přechodů a výsledků penzijních operací včetně
+spotřeby SCA, financování, státních příspěvků a změny výplatního účtu. Čítače popisují
+pozorované výsledky aplikace; nedokládají vypořádání na externí platební infrastruktuře.
+Stavové metriky ukazují stavy smluv a agregátů, velikosti front a stáří nejstarší položky.
+Úloha `pension-state-gauges` je ve výchozím nastavení obnovuje každých 60 sekund
+(`openbank.pension.state-gauges.every`). Nový pod nevystaví stavové série před prvním
+úspěšným snapshotem. Při chybě obnovy zůstávají předchozí hodnoty; před jejich použitím
+ověřte liveness úlohy. Štítky používají omezené kategorie, nikdy identifikátory stran či smluv.
 
 ## Formát komunikace s partnerem pro renty
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.1...customer-edge-v1.3.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* **customer-edge:** supply the configured pension provider on applications ([#12834](https://github.com/JiRaska/open-bank-oss/issues/12834)) ([bf4393c](https://github.com/JiRaska/open-bank-oss/commit/bf4393ca55acd29e1a074d4635978b9f213a4a09))
+
 ## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.0...customer-edge-v1.3.1) (2026-10-16)
 
 

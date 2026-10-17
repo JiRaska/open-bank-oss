@@ -1,0 +1,15 @@
+# Pension company ledger (ADR-0337: each legal entity keeps its own books in its own ledger-service
+# deployment). App plane. Holds a second ledger-service instance — same image as the bank's
+# `ledger` namespace — plus its single-owner CNPG Postgres and an in-namespace Redis for the
+# ADR-0155 ApprovalStore. Every bank-only scheduler and outbound event switch is OFF here
+# (.github/scripts/check-ledger-instance-switches.py). No public Ingress; callers are
+# tax-reporting (frozen trial balances) and staff tooling only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ledger-pension-co
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
