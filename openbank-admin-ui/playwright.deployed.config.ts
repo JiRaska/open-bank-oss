@@ -16,7 +16,7 @@ export default defineConfig({
   reporter: [
     ['github'],
     ['junit', {
-      outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/deployed-auth-gate.xml',
+      outputFile: process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/auth-gate/deployed-auth-gate.xml',
       includeRetries: true,
     }],
   ],

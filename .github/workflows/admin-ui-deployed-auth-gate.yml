@@ -38,7 +38,7 @@ jobs:
       - working-directory: openbank-admin-ui
         env:
           CI: 'true'
-          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/deployed-auth-gate.xml
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/auth-gate/deployed-auth-gate.xml
         run: npx playwright test --config playwright.deployed.config.ts
       - if: always()
         run: |
