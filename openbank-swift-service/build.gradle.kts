@@ -38,6 +38,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
+    // RecordingSpanExporter + TraceContract for the trace-contract IT.
+    testImplementation(project(":openbank-libs-testing"))
     // @TestSecurity for the ADR-0034 Phase 5 advisory-mode authz regression test.
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)

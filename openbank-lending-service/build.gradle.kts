@@ -41,6 +41,8 @@ dependencies {
     implementation("io.temporal:temporal-sdk:1.25.1")
 
     testImplementation(libs.quarkus.junit5)
+    // RecordingSpanExporter + TraceContract for the trace-contract IT.
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     // @TestSecurity for the advisory-mode authz regression test (ADR-0034 Phase 5, issue #266).

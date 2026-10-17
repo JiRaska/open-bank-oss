@@ -32,3 +32,10 @@ Tuto dokumentaci publikuje služba sama na management endpointu `/q/openbank/doc
 2. **`no_match` nikdy nevrací jméno; `close_match` smí.** VoP je ze své podstaty **orákulum nad jmény majitelů účtů** — přesně to po něm nařízení chce. Autorizace to omezit nemůže (plátce musí smět ověřit příjemce, kterého nevlastní), takže obranou jsou **rate limit** plus tato **asymetrie vyzrazení**, vynucená v `init` bloku `VopVerification`, ne ponechaná na volajících.
 
 3. **Requester strana je poctivá, ne hotová.** Napojení na EPC VoP scheme tu neexistuje a v referenční implementaci ani nebude — stejně jako platební rails dosáhnou jen na `openbank-clearing-simulator`. Zahraniční IBAN vrací `no_data` / `NO_SCHEME_CONNECTIVITY` přes skutečný seam (`VopSchemeRoutingPort`), místo vymyšleného verdiktu.
+
+
+## Kontrakt HTTP a databázové trace
+
+`VopTraceContractIT` volá `POST /api/v1/vop/verify` nad skutečným testovacím PostgreSQL. Vyžaduje HTTP 200, span požadavku s `http.response.status_code` a span `INSERT vop_verification` s `db.sql.table` ve stejné trace, bez chybového spanu. Fixture ponechává návazné vyhledávací služby nedostupné, takže prochází fail-open cestou `NO_DATA` a zaznamenává evidenci ověření; test samostatně nekontroluje výsledek v těle odpovědi ani nečte zpět commitnutý databázový řádek.
+
+Testovací závislost `quarkus-test-security` dodává simulovanou identitu s rolí `ROLE_VIEWER`. Samostatný profil zapíná OpenTelemetry SDK, používá náhodný HTTP testovací port a vypíná vynucování OPA i rate limiter nad Valkey, protože tyto služby v testu nejsou dostupné. Recorder zachycuje runtime spany přes testovací CDI span processor. Test ověřuje návaznost trace v tomto izolovaném profilu; neověřuje živé OIDC tokeny, vynucenou politiku OPA, rate limiting, dostupnost externích lookupů ani produkční nasazení.

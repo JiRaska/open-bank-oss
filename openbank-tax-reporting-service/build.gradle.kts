@@ -46,3 +46,10 @@ dependencies {
     // #12425: consumer pacts for the pension reporting read models, written to pacts/.
     testImplementation(libs.pact.consumer)
 }
+
+// The trace-contract profile adds another Quarkus/OTel boot to the existing test suite.
+// The default 512m test JVM exhausted its heap under coverage instrumentation; use the
+// same module-scoped test heap as interest and SEPA, without changing coverage or timeouts.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}

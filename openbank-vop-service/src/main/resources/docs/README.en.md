@@ -32,3 +32,10 @@ This documentation is published directly by the service at the management endpoi
 2. **`no_match` never echoes a name; `close_match` may.** VoP is, by construction, an oracle over account-holder names — that is exactly the function the regulation mandates. Authorization cannot bound it (a payer must be able to check a payee they do not own), so the controls are the **rate limit** plus this **disclosure asymmetry**, enforced in `VopVerification`'s `init` block rather than trusted to callers.
 
 3. **The requester side is honest, not finished.** There is no EPC VoP scheme link here and there will not be one in a reference implementation — the same way the rails reach only `openbank-clearing-simulator`. An external IBAN returns `no_data` / `NO_SCHEME_CONNECTIVITY` through a real seam (`VopSchemeRoutingPort`), rather than a fabricated verdict.
+
+
+## HTTP and database trace contract
+
+`VopTraceContractIT` exercises `POST /api/v1/vop/verify` against real test PostgreSQL. It requires HTTP 200, the request span with `http.response.status_code`, and an `INSERT vop_verification` span with `db.sql.table` in the same trace, with no error span. The fixture leaves lookup downstreams unavailable, exercising the fail-open `NO_DATA` path while recording verification evidence; the test does not separately assert the response outcome or read the committed row back from the database.
+
+The test-only `quarkus-test-security` dependency supplies a simulated `ROLE_VIEWER` identity. Its dedicated profile enables the OpenTelemetry SDK, uses an ephemeral HTTP test port, and disables OPA enforcement and the Valkey rate limiter because those services are absent. The recorder captures runtime spans through a test CDI span processor. This verifies trace continuity under that isolated profile; it does not verify live OIDC tokens, enforced OPA policy, rate limiting, external lookup connectivity, or production deployment.

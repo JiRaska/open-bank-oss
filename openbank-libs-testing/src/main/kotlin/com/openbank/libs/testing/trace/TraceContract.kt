@@ -115,5 +115,8 @@ class RecordingSpanExporter : SpanExporter {
 
     override fun shutdown(): CompletableResultCode = CompletableResultCode.ofSuccess()
 
+    /** Clears captured spans between requests; previously created contracts retain their snapshots. */
+    fun reset(): Unit = synchronized(recorded) { recorded.clear() }
+
     fun contract(): TraceContract = synchronized(recorded) { TraceContract.from(recorded) }
 }

@@ -53,3 +53,11 @@ kover {
         }
     }
 }
+
+// The trace profile joins other Quarkus profiles in the coverage-instrumented
+// test worker. The full suite exhausted the default 512m heap (measured at 99.6%
+// with Kover data retained), causing Java heap space errors. Preserve all coverage
+// and HTTP/trace assertions with the account/lending per-service test allowance.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
