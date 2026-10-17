@@ -228,3 +228,7 @@ stateDiagram-v2
 3. **Databáze opakuje peněžní invarianty** — CHECK omezení pro cleared ≤ authorised a důvod-zamítnutí-právě-když-zamítnuto.
 4. **Přeskočený nebo selhaný vedlejší efekt nikdy není úspěch** — zaúčtování i skórování mají vlastní výsledky `SKIPPED_DISABLED` / `FAILED`.
 5. **Žádná kartová data** — reference pouze přes id z card-issuance.
+
+## Klient transaction-service (ADR-0319)
+
+Odchozí volání transaction-service už nepoužívá ručně psané REST rozhraní a DTO. Služba rozšiřuje rozhraní vygenerované z vlastního `openapi.yaml` transaction-service (modul `openbank-client-transaction`, verzovaný verzí API kontraktu poskytovatele). Autentizace, config key a request filtry zůstávají v `@RegisterRestClient` sub-rozhraní této služby. Rozjetá cesta nebo pole nově selže při kompilaci a consumer pact se přehrává proti poskytovateli na každém PR.
