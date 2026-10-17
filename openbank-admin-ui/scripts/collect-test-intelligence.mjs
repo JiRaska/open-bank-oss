@@ -249,6 +249,16 @@ const simulationScenarios = [
   { classname: 'com.openbank.simulation.scenario.FeeBillingScenarioTest', components: ['openbank-billing-service'], scope: 'Billing fee domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.InterestAccrualScenarioTest', components: ['openbank-interest-service'], scope: 'Interest accrual domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.StatementCloseScenarioTest', components: ['openbank-statement-service'], scope: 'Statement close domain scenario (pure JVM)' },
+  // #8364 PD/LGD calibration governance: the replay is deterministic, spans every
+  // IFRS 9 stage bucket and discriminates between parameter sets — money-path
+  // lending evidence that previously never reached the matrix because the class
+  // was missing from this mapping (the JUnit XML existed, the projection did not).
+  { classname: 'com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest', components: ['openbank-lending-service'], scope: 'IFRS 9 ECL calibration replay scenario (pure JVM, #8364)' },
+  // Cross-cutting conservation invariants: same simulation harness, class-level
+  // granularity. Each maps to the domain whose bookkeeping it proves balanced.
+  { classname: 'com.openbank.simulation.invariants.BillingFeeConservationInvariantTest', components: ['openbank-billing-service'], scope: 'Billing fee conservation invariant sweep (pure JVM)' },
+  { classname: 'com.openbank.simulation.invariants.InterestConservationInvariantTest', components: ['openbank-interest-service'], scope: 'Interest accrual conservation invariant sweep (pure JVM)' },
+  { classname: 'com.openbank.simulation.invariants.StatementCloseIntegrityInvariantTest', components: ['openbank-statement-service'], scope: 'Statement close integrity invariant sweep (pure JVM)' },
 ]
 
 async function simulationScenarioEvidence() {

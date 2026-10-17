@@ -944,6 +944,12 @@ capabilities:
       ['com.openbank.simulation.scenario.FeeBillingScenarioTest', 6, ['openbank-billing-service']],
       ['com.openbank.simulation.scenario.InterestAccrualScenarioTest', 4, ['openbank-interest-service']],
       ['com.openbank.simulation.scenario.StatementCloseScenarioTest', 3, ['openbank-statement-service']],
+      // #8364: lending's ECL calibration replay was already running in CI; mapping
+      // it here is what makes its evidence reach the matrix.
+      ['com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest', 4, ['openbank-lending-service']],
+      ['com.openbank.simulation.invariants.BillingFeeConservationInvariantTest', 3, ['openbank-billing-service']],
+      ['com.openbank.simulation.invariants.InterestConservationInvariantTest', 3, ['openbank-interest-service']],
+      ['com.openbank.simulation.invariants.StatementCloseIntegrityInvariantTest', 3, ['openbank-statement-service']],
     ] as const
     for (const [, , services] of mapped) for (const service of services) {
       write(repo, `${service}/version.txt`, '1.0.0\n')
@@ -964,23 +970,32 @@ capabilities:
       write(repo, `openbank-simulation/build/test-results/test/TEST-${classname}.xml`,
         `<testsuite name="${classname}" tests="${count}" failures="0" errors="0" skipped="0">${cases}</testsuite>`)
     }
-    write(repo, 'openbank-simulation/build/test-results/test/TEST-com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest.xml',
-      '<testsuite name="com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest"><testcase classname="com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest" name="shared IFRS9 math"/></testsuite>')
+    // A real simulation class that is NOT in the scenario mapping (engine determinism
+    // belongs to the harness itself): its JUnit XML must not acquire projected evidence.
+    write(repo, 'openbank-simulation/build/test-results/test/TEST-com.openbank.simulation.engine.EngineDeterminismTest.xml',
+      '<testsuite name="com.openbank.simulation.engine.EngineDeterminismTest"><testcase classname="com.openbank.simulation.engine.EngineDeterminismTest" name="same seed same world"/></testsuite>')
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
     const byComponent = new Map(report.components.map(component => [component.component, component]))
     expect(byComponent.get('openbank-simulation')?.evidence[0].counts?.passed).toBe(58)
     for (const [classname, count, services] of mapped) for (const service of services) {
-      expect(byComponent.get(service)?.evidence).toEqual([expect.objectContaining({
+      expect(byComponent.get(service)?.evidence).toEqual(expect.arrayContaining([expect.objectContaining({
         kind: 'simulation', state: 'passed', source: `JUnit:test/TEST-${classname}.xml`,
         counts: expect.objectContaining({ discovered: count, passed: count }),
         detail: expect.stringContaining(classname),
         run: expect.objectContaining({ id: run.id, commit: run.commit, url: run.url }),
-      })])
+      })]))
     }
     expect(byComponent.get('openbank-uncovered-service')?.evidence).toEqual([])
-    expect(byComponent.get('openbank-lending-service')?.evidence).toEqual([])
+    // billing/interest/statement carry two scenario evidences each (domain scenario
+    // + conservation invariant); lending carries exactly its calibration replay.
+    expect(byComponent.get('openbank-billing-service')?.evidence).toHaveLength(2)
+    expect(byComponent.get('openbank-interest-service')?.evidence).toHaveLength(2)
+    expect(byComponent.get('openbank-statement-service')?.evidence).toHaveLength(2)
+    expect(byComponent.get('openbank-lending-service')?.evidence).toHaveLength(1)
+    // the unmapped engine-determinism class projected nothing anywhere
+    expect(report.components.flatMap(component => component.evidence).every(item => !item.source.includes('EngineDeterminism'))).toBe(true)
     expect(report.requiredControls.every(control => control.kind !== 'simulation')).toBe(true)
   })
 
