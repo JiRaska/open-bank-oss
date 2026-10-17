@@ -40,7 +40,10 @@ class InterestCloseParticipationSchedulerTest {
 
     private val scheduler = InterestCloseParticipationScheduler(
         closeJobRuns = runs,
-        sink = { _, report -> delivered += report; Uni.createFrom().item(Unit) },
+        sink = { _, report ->
+            delivered += report
+            Uni.createFrom().item(Unit)
+        },
         meterRegistry = SimpleMeterRegistry(),
         clock = clock,
         domainMetrics = noOpDomainMetrics(),
@@ -93,7 +96,14 @@ class InterestCloseParticipationSchedulerTest {
         assertThat(delivered.single { it.businessDate == oct1 })
             .isEqualTo(CloseParticipationReport(oct1, CloseOutcome.RAN, journalsPosted = 5, itemsProcessed = 12))
 
-        ran(oct1, InterestCloseJobs.CAPITALIZATION, items = 3, journals = 3, refused = 2, reason = "HTTP 409 ACCOUNTING_DAY_CLOSED")
+        ran(
+            oct1,
+            InterestCloseJobs.CAPITALIZATION,
+            items = 3,
+            journals = 3,
+            refused = 2,
+            reason = "HTTP 409 ACCOUNTING_DAY_CLOSED",
+        )
         scheduler.reportDays(today).await().indefinitely()
         val refused = delivered.last { it.businessDate == oct1 }
         assertThat(refused.outcome).isEqualTo(CloseOutcome.REFUSED)
@@ -104,7 +114,8 @@ class InterestCloseParticipationSchedulerTest {
     fun `the accrual scheduler records a run only for a successful tick`() {
         val accrual = object : AccrueInterestUseCase {
             override fun accrue(request: AccrualRequest): Uni<InterestAccrual> = error("unused")
-            override fun accrueAll(date: LocalDate): Uni<Int> = Uni.createFrom().failure(IllegalStateException("db down"))
+            override fun accrueAll(date: LocalDate): Uni<Int> =
+                Uni.createFrom().failure(IllegalStateException("db down"))
         }
         InterestAccrualScheduler(accrual, clock, noOpDomainMetrics(), runs).runDailyAccrual().await().indefinitely()
         assertThat(runs.runs).isEmpty()

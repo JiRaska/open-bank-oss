@@ -53,8 +53,11 @@ class CloseParticipationServiceTest {
         coEvery { days.findByDate(any()) } returns null
     }
 
-    private fun command(principal: String?, outcome: ParticipationOutcome = ParticipationOutcome.RAN, reason: String? = null) =
-        ReportParticipationCommand(day, "interest", outcome, 2, 5, reason, principal)
+    private fun command(
+        principal: String?,
+        outcome: ParticipationOutcome = ParticipationOutcome.RAN,
+        reason: String? = null,
+    ) = ReportParticipationCommand(day, "interest", outcome, 2, 5, reason, principal)
 
     @Test
     fun `the declared principal may report its participant`(): Unit = runBlocking {
@@ -64,13 +67,14 @@ class CloseParticipationServiceTest {
     }
 
     @Test
-    fun `another service-account, or a token that is not one, is refused before anything is stored`(): Unit = runBlocking {
-        assertThatThrownBy { runBlocking { service.report(command("service-account-openbank-billing")) } }
-            .isInstanceOf(CloseParticipantForbiddenException::class.java)
-        assertThatThrownBy { runBlocking { service.report(command(null)) } }
-            .isInstanceOf(CloseParticipantForbiddenException::class.java)
-        coVerify(exactly = 0) { repository.append(any()) }
-    }
+    fun `another service-account, or a token that is not one, is refused before anything is stored`(): Unit =
+        runBlocking {
+            assertThatThrownBy { runBlocking { service.report(command("service-account-openbank-billing")) } }
+                .isInstanceOf(CloseParticipantForbiddenException::class.java)
+            assertThatThrownBy { runBlocking { service.report(command(null)) } }
+                .isInstanceOf(CloseParticipantForbiddenException::class.java)
+            coVerify(exactly = 0) { repository.append(any()) }
+        }
 
     @Test
     fun `an undeclared participant is not found and a participant cannot waive itself`(): Unit = runBlocking {
@@ -78,14 +82,20 @@ class CloseParticipationServiceTest {
             runBlocking { service.report(command("x").copy(participant = "lending")) }
         }.isInstanceOf(CloseParticipantNotDeclaredException::class.java)
         assertThatThrownBy {
-            runBlocking { service.report(command("service-account-openbank-interest", ParticipationOutcome.WAIVED, "x")) }
+            runBlocking {
+                service.report(command("service-account-openbank-interest", ParticipationOutcome.WAIVED, "x"))
+            }
         }.isInstanceOf(LedgerValidationException::class.java)
     }
 
     @Test
     fun `a report into a tied-out day is stored as late`(): Unit = runBlocking {
         coEvery { days.findByDate(day) } returns
-            AccountingDayRecord.open(day, Instant.parse("2026-10-15T22:00:00Z"), "s").copy(status = AccountingDayStatus.TIED_OUT)
+            AccountingDayRecord.open(
+                day,
+                Instant.parse("2026-10-15T22:00:00Z"),
+                "s",
+            ).copy(status = AccountingDayStatus.TIED_OUT)
         val saved = service.report(command("service-account-openbank-interest"))
         assertThat(saved.late).isTrue()
     }
@@ -93,7 +103,15 @@ class CloseParticipationServiceTest {
     @Test
     fun `completeness takes the latest report per participant`(): Unit = runBlocking {
         fun row(outcome: ParticipationOutcome, at: String) = CloseParticipationRecord(
-            day, "interest", outcome, 0, 0, if (outcome == ParticipationOutcome.RAN) null else "r", "p", Instant.parse(at), false,
+            day, "interest", outcome, 0, 0,
+            if (outcome ==
+                ParticipationOutcome.RAN
+            ) {
+                null
+            } else {
+                "r"
+            },
+            "p", Instant.parse(at), false,
         )
         coEvery { repository.findForDate(day) } returns listOf(
             row(ParticipationOutcome.REFUSED, "2026-10-17T01:00:00Z"),

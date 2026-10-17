@@ -213,7 +213,11 @@ class AccountingDaySchedulerTest {
         coVerify(exactly = 0) { useCase.transition(any()) }
         assertThat(
             scheduler.meterRegistry.counter(
-                AccountingDayScheduler.PARTICIPANTS_DECISIONS, "outcome", "held", "mode", "enforce",
+                AccountingDayScheduler.PARTICIPANTS_DECISIONS,
+                "outcome",
+                "held",
+                "mode",
+                "enforce",
             ).count(),
         ).isEqualTo(1.0)
     }
@@ -228,7 +232,11 @@ class AccountingDaySchedulerTest {
         coVerify(exactly = 1) { useCase.transition(match { it.businessDate == yesterday }) }
         assertThat(
             scheduler.meterRegistry.counter(
-                AccountingDayScheduler.PARTICIPANTS_DECISIONS, "outcome", "would_hold", "mode", "shadow",
+                AccountingDayScheduler.PARTICIPANTS_DECISIONS,
+                "outcome",
+                "would_hold",
+                "mode",
+                "shadow",
             ).count(),
         ).isEqualTo(1.0)
     }

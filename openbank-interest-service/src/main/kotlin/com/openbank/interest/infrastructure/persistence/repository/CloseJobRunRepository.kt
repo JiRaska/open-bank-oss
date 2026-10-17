@@ -19,31 +19,32 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRun
 
     override fun record(run: CloseJobRun): Uni<Unit> = sf.withTransaction { s ->
         s.createNativeQuery<Int>(UPSERT_SQL)
-            .setParameter(1, run.businessDate)
-            .setParameter(2, run.job)
-            .setParameter(3, run.itemsProcessed)
-            .setParameter(4, run.journalsPosted)
-            .setParameter(5, run.refused)
-            .setParameter(6, run.refusalReason)
-            .setParameter(7, OffsetDateTime.ofInstant(run.completedAt, ZoneOffset.UTC))
+            .setParameter(P_DATE, run.businessDate)
+            .setParameter(P_JOB, run.job)
+            .setParameter(P_ITEMS, run.itemsProcessed)
+            .setParameter(P_JOURNALS, run.journalsPosted)
+            .setParameter(P_REFUSED, run.refused)
+            .setParameter(P_REASON, run.refusalReason)
+            .setParameter(P_COMPLETED, OffsetDateTime.ofInstant(run.completedAt, ZoneOffset.UTC))
             .executeUpdate()
     }.replaceWith(Unit)
 
     override fun findBetween(from: LocalDate, to: LocalDate): Uni<List<CloseJobRun>> = sf.withSession { s ->
         s.createNativeQuery<Array<Any?>>(SELECT_SQL)
-            .setParameter(1, from)
-            .setParameter(2, to)
+            .setParameter(P_DATE, from)
+            .setParameter(P_JOB, to)
             .resultList
     }.map { rows -> rows.map { it.toRun() } }
 
+    // Column order of SELECT_SQL.
     private fun Array<Any?>.toRun() = CloseJobRun(
-        businessDate = asDate(this[0]),
-        job = this[1] as String,
-        itemsProcessed = (this[2] as Number).toInt(),
-        journalsPosted = (this[3] as Number).toInt(),
-        refused = (this[4] as Number).toInt(),
-        refusalReason = this[5] as String?,
-        completedAt = asInstant(this[6]),
+        businessDate = asDate(this[COL_DATE]),
+        job = this[COL_JOB] as String,
+        itemsProcessed = (this[COL_ITEMS] as Number).toInt(),
+        journalsPosted = (this[COL_JOURNALS] as Number).toInt(),
+        refused = (this[COL_REFUSED] as Number).toInt(),
+        refusalReason = this[COL_REASON] as? String,
+        completedAt = asInstant(this[COL_COMPLETED]),
     )
 
     private fun asDate(value: Any?): LocalDate = when (value) {
@@ -60,6 +61,22 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRun
     }
 
     private companion object {
+        // Positional parameters of UPSERT_SQL (SELECT_SQL reuses 1 and 2 for its range).
+        const val P_DATE = 1
+        const val P_JOB = 2
+        const val P_ITEMS = 3
+        const val P_JOURNALS = 4
+        const val P_REFUSED = 5
+        const val P_REASON = 6
+        const val P_COMPLETED = 7
+        const val COL_DATE = 0
+        const val COL_JOB = 1
+        const val COL_ITEMS = 2
+        const val COL_JOURNALS = 3
+        const val COL_REFUSED = 4
+        const val COL_REASON = 5
+        const val COL_COMPLETED = 6
+
         const val UPSERT_SQL =
             "INSERT INTO interest_close_job_run " +
                 "(business_date, job, items_processed, journals_posted, refused, refusal_reason, completed_at) " +

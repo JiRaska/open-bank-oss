@@ -182,7 +182,12 @@ class DayCloseParticipantsIT {
             onEventLoop {
                 participation.report(
                     ReportParticipationCommand(
-                        LATE_REPORT_DAY, "interest", ParticipationOutcome.RAN, 0, 0, null,
+                        LATE_REPORT_DAY,
+                        "interest",
+                        ParticipationOutcome.RAN,
+                        0,
+                        0,
+                        null,
                         callerPrincipal = "service-account-openbank-billing",
                     ),
                 )

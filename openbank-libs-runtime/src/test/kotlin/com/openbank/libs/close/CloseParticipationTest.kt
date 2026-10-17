@@ -43,7 +43,9 @@ class CloseParticipationTest {
                 CloseJobRun(day.plusDays(1), "accrual", 99, 99, 0, null, at),
             ),
         )
-        assertThat(report).isEqualTo(CloseParticipationReport(day, CloseOutcome.RAN, journalsPosted = 4, itemsProcessed = 14))
+        assertThat(
+            report,
+        ).isEqualTo(CloseParticipationReport(day, CloseOutcome.RAN, journalsPosted = 4, itemsProcessed = 14))
     }
 
     @Test
@@ -96,7 +98,15 @@ class CloseParticipationTest {
 
         assertThat(calls.get()).describedAs("the third, identical report is not re-sent").isEqualTo(2)
         assertThat(
-            registry.counter(CloseParticipationReporter.METRIC, "participant", "interest", "outcome", "ran", "delivered", "false")
+            registry.counter(
+                CloseParticipationReporter.METRIC,
+                "participant",
+                "interest",
+                "outcome",
+                "ran",
+                "delivered",
+                "false",
+            )
                 .count(),
         ).isEqualTo(1.0)
     }

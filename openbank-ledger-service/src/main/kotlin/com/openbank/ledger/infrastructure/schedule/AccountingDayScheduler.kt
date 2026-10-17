@@ -242,9 +242,8 @@ class AccountingDayScheduler(
                     requestTieOut(day.businessDate, cutoffAt, reRunBudget)
                     return@runStep
                 }
-                if (run != null && run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt) &&
-                    participantsAllowTieOut(day.businessDate)
-                ) {
+                val okRun = run?.takeIf { it.status == TieOutRunStatus.OK && !it.runAt.isBefore(cutoffAt) }
+                if (okRun != null && participantsAllowTieOut(day.businessDate)) {
                     accountingDayUseCase.transition(
                         TransitionAccountingDayCommand(
                             businessDate = day.businessDate,
@@ -255,8 +254,8 @@ class AccountingDayScheduler(
                     log.infof(
                         "Accounting day %s tied out (tie-out run %s at %s)",
                         day.businessDate,
-                        run.status,
-                        run.runAt,
+                        okRun.status,
+                        okRun.runAt,
                     )
                 }
             }

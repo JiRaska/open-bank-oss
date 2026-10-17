@@ -709,11 +709,10 @@ class InterestService(
      * The ledger's closed-day 409 (ADR-0342 D4), found anywhere in the cause chain — the guard and
      * the claim machinery may wrap it. Null for every other failure, which stays an ordinary skip.
      */
-    private fun closedDayRejection(failure: Throwable): String? =
-        generateSequence(failure) { it.cause }
-            .filterIsInstance<LedgerPostingRejectedException>()
-            .firstOrNull { AccountingDayClosed.isClosedDayRejection(it.status, it.message) }
-            ?.message
+    private fun closedDayRejection(failure: Throwable): String? = generateSequence(failure) { it.cause }
+        .filterIsInstance<LedgerPostingRejectedException>()
+        .firstOrNull { AccountingDayClosed.isClosedDayRejection(it.status, it.message) }
+        ?.message
 
     override fun listAllAccruals(): Uni<List<InterestAccrual>> = accrualRepo.findAll()
 
