@@ -54,7 +54,7 @@ class FundPinnedFeeNavTest {
     }
 
     @Test
-    fun `a fund without a resolvable published revision is refused and nothing is stored`() =
+    fun `a fund without a resolvable published revision is refused and nothing is stored`(): Unit =
         kotlinx.coroutines.runBlocking {
             assertThatThrownBy { kotlinx.coroutines.runBlocking { admin.createFund(definition(null)) } }
                 .isInstanceOf(IllegalArgumentException::class.java)
