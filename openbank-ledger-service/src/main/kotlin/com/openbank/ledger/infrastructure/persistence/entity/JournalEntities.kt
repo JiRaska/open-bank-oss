@@ -178,7 +178,7 @@ class AccountingClassGlMapEntity : PanacheEntityBase {
     var currencyCode: String = ""
 
     @Column(name = "gl_account_id", nullable = false)
-    var glAccountId: UUID = UUID(0L, 0L)
+    var glAccountId: UUID = Ids.newId()
 
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now()
