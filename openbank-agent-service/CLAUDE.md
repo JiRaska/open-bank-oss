@@ -32,12 +32,12 @@ SQL file.
 
 ## Layout
 
-- `domain/model/` — `AgentProposal`, `KillSwitchEntry`, `AgentCharter`
-- `application/` — `AgentProposalService`, `KillSwitchService`, `CharterRateLimiter`
-- `infrastructure/persistence/` — `AgentProposalRepository` (JDBC), `KillSwitchRepository`
-- `infrastructure/rest/` — `AgentProposalResource`, `KillSwitchResource`, `McpServerResource`
-- `infrastructure/gateway/` — `ModelGateway` + provider adapters (mock, openai-compat)
-- `infrastructure/policy/` — `AgentPolicyGate` (OPA), `PromptInjectionGuardrail`
+- `domain/` — `proposal/AgentProposal`, `policy/AgentPolicy`, MCP types in `McpTypes.kt`
+- `application/` — `ProposalService`, `KillSwitchService`, `CharterRateLimiter`, `CharterRegistry`, `AgentPolicyGate`, `PromptInjectionGuard`, `ModelGateway`, `McpToolRegistry`
+- `infrastructure/persistence/` — `JdbcAgentProposalRepository`, `JdbcKillSwitchRepository`
+- `infrastructure/rest/` — `ProposalResource`, `AdminControlResource`, `OversightResource`; MCP is `infrastructure/mcp/McpEndpoint`
+- `infrastructure/model/` — provider adapters (`OpenAiCompatibleModelProvider`)
+- `infrastructure/policy/` — `OpaPolicyDecisionPoint`, `DenyByDefaultPolicyDecisionPoint`, `OpaClient`
 
 ## Build / test
 
