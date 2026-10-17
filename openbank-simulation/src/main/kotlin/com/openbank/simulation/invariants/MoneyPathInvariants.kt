@@ -4,9 +4,12 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.cardprocessing.domain.model.AuthorizationStatus
+import com.openbank.fx.domain.screening.ScreeningDecision
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.ScreeningRecord
 import com.openbank.simulation.runner.World
 import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.StandingOrderStatus
@@ -224,6 +227,60 @@ object MoneyPathInvariants {
     }
 
     /**
+     * ADR-0032 §B: the real `ScreeningPolicy`'s verdict over a conversion's screened names and the
+     * payment path's disposition of that conversion must never disagree. A BLOCK must refuse and
+     * never execute; a REVIEW alert must be resolved exactly once — false positive (released,
+     * then executed) or confirmed hit (escalated, refused, never executed) — never silently
+     * dropped, never double-resolved; a CLEAR must execute and never be refused. A conversion that
+     * executed under a BLOCK, or a REVIEW alert that vanished without a resolution, is exactly the
+     * class of defect a sanctions-path audit exists to catch.
+     */
+    val screeningDispositionIntegrity = object : Invariant {
+        override val name = "screening-disposition-integrity"
+        override fun check(world: World): Violation? {
+            world.screening.conversions().forEach { conversionId ->
+                val r = world.screening.record(conversionId) ?: return@forEach
+                dispositionDisagreement(r)?.let { detail ->
+                    return Violation(name, "conversion $conversionId: $detail")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * The per-conversion half of [screeningDispositionIntegrity] — extracted so `check` stays
+     * within the nesting budget. Returns the first disagreement between the decision and the
+     * disposition, or null when they match.
+     */
+    private fun dispositionDisagreement(r: ScreeningRecord): String? = when (r.decision) {
+        ScreeningDecision.BLOCK -> when {
+            r.executed -> "BLOCK but executed"
+            !r.refused -> "BLOCK never refused"
+            else -> null
+        }
+        ScreeningDecision.REVIEW -> reviewDisagreement(r)
+        ScreeningDecision.CLEAR -> when {
+            r.refused -> "CLEAR but refused"
+            !r.executed -> "CLEAR but never executed"
+            else -> null
+        }
+    }
+
+    private fun reviewDisagreement(r: ScreeningRecord): String? = when {
+        r.resolutionCount == 0 -> "REVIEW alert silently dropped"
+        r.resolutionCount > 1 -> "REVIEW alert resolved ${r.resolutionCount} times"
+        !r.reviewWasOpened -> "REVIEW was resolved without ever opening an alert"
+        r.reviewOpen || !r.reviewResolved ->
+            "REVIEW is not settled (open=${r.reviewOpen}, resolved=${r.reviewResolved})"
+        r.reviewEscalatedToBlock && (!r.refused || r.executed) ->
+            "escalated hit must refuse and never execute (refused=${r.refused}, executed=${r.executed})"
+        !r.reviewEscalatedToBlock && r.refused -> "false positive released but refused"
+        !r.reviewEscalatedToBlock && !r.executed -> "false positive released but never executed"
+        else -> null
+    }
+
+    /**
      * ADR-0035 §E / ADR-0078, issue #667: a statement period is persisted *if and only if* the
      * real `ReconciliationPolicy` decided `Reconciled` for that close attempt — never on a
      * `Mismatch` (no partial, self-inconsistent legal document is ever produced) and never skipped
@@ -293,6 +350,66 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * The card-authorization hold conservation laws, per authorization, checked once a step has
+     * fully settled (the expiry task fires in the drain first — same "settled" semantics as
+     * [billingFeeConservation]):
+     *
+     * 1. no authorization may still [hold funds][com.openbank.cardprocessing.domain.model.AuthorizationStatus.holdsFunds]
+     *    — a hold that never reaches clearing, reversal or expiry is a permanent freeze the
+     *    customer cannot spend and cannot see released;
+     * 2. `cleared == posted` — every presentment the policy accepted landed exactly once as a
+     *    ledger journal: a dropped capture posting (money the scheme thinks it collected but
+     *    the ledger never received) and a replayed one (double-posted on a re-delivered
+     *    presentment) both break the equality, and conservation-of-money alone cannot see
+     *    either, because each journal still balances internally;
+     * 3. `cleared + released == authorized` — a hold is fully accounted for: what was not
+     *    captured must have been released back to available balance, no less (silently frozen
+     *    funds) and no more (money freed while the scheme can still present against it).
+     */
+    val cardAuthorizationConservation = object : Invariant {
+        override val name = "card-authorization-conservation"
+        override fun check(world: World): Violation? {
+            world.cardAuths.all().forEach { authorization ->
+                if (authorization.status.holdsFunds) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id} still holds funds in ${authorization.status}",
+                    )
+                }
+                val cleared = authorization.clearedAmountMinorUnits
+                val posted = world.cardAuths.postedMinorUnits(authorization.id)
+                if (cleared != posted) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id} cleared=$cleared but posted=$posted",
+                    )
+                }
+                val released = world.cardAuths.releasedMinorUnits(authorization.id)
+                if (authorization.status == AuthorizationStatus.DECLINED && (cleared != 0L || released != 0L)) {
+                    return Violation(
+                        name,
+                        "declined authorization ${authorization.id}: cleared=$cleared, posted=$posted, " +
+                            "released=$released despite never holding funds",
+                    )
+                }
+                // A DECLINED authorization never held funds: the authorized amount is what the
+                // acquirer asked for, not what the bank reserved, so there is nothing to
+                // account for beyond the zero cleared, posted and released totals checked above.
+                if (authorization.status != AuthorizationStatus.DECLINED &&
+                    cleared + released != authorization.amountMinorUnits
+                ) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id}: cleared=$cleared + released=$released " +
+                            "!= authorized=${authorization.amountMinorUnits}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -306,6 +423,8 @@ object MoneyPathInvariants {
         interestCapitalizationConservation,
         statementCloseIntegrity,
         standingOrderExecutionConservation,
+        screeningDispositionIntegrity,
+        cardAuthorizationConservation,
     )
 
     /** A terminal-state guard used by the saga orchestrator. */

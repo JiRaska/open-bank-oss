@@ -10,6 +10,10 @@ Discharges the two things `db_change.require` asks of a PR that touches a Flyway
 
   2. "rollback note in PR" — an ADDED migration must say how to undo itself.
 
+An added integer-versioned Flyway migration must also exceed its service's maximum at
+the tested base commit. Otherwise Flyway's default out-of-order protection prevents it
+from applying after a higher version already present on main (#13026).
+
 Where the rollback note lives
 -----------------------------
 In the migration file, as a `-- Rollback:` comment. `blocked_on` in rules.yaml assumed a
@@ -42,6 +46,8 @@ import subprocess
 import sys
 
 MIGRATION_RE = re.compile(r"/src/main/resources/db/migration/.+\.sql$")
+INTEGER_VERSION_RE = re.compile(r"V([0-9]+)__.+\.sql")
+MIGRATION_ROOT = "/src/main/resources/db/migration/"
 
 # ClickHouse warehouse migrations (#6253). They are applied ONCE — by the init ConfigMap on an empty
 # data dir, or by an operator — and nothing re-applies them (#7645), so an edit to one that already
@@ -81,6 +87,8 @@ def resolves_a_duplicate_version(base: str, old_path: str, new_path: str) -> boo
     Deliberately narrow, so it cannot become a way to edit history in general: the OLD name's
     version must still be claimed by a DIFFERENT migration in the same directory at `base`, the
     new version must be free there, and the file's CONTENT must be untouched by the rename.
+    The caller also requires the destination to exceed the service's base maximum: fixing a
+    duplicate must not introduce an out-of-order migration below another applied version.
     """
     old_v, new_v = version_of(old_path), version_of(new_path)
     if old_v is None or new_v is None or old_v == new_v:
@@ -120,7 +128,7 @@ def changed_migrations(base: str) -> tuple[list[str], list[str]]:
         # resolves_a_duplicate_version for why the checksum premise does not hold there.
         if status.startswith("R") and len(parts) >= 3 and resolves_a_duplicate_version(
             base, parts[1], parts[-1],
-        ):
+        ) and not added_version_findings(base, [path]):
             print(f"check-db-migration: {path} renumbers a DUPLICATE version — permitted, "
                   f"because a colliding migration cannot have been applied and so has no "
                   f"checksum to invalidate.")
@@ -145,6 +153,54 @@ def changed_clickhouse_migrations(base: str) -> list[str]:
         if len(parts) >= 2 and CLICKHOUSE_MIGRATION_RE.search(parts[-1]):
             edited.append(parts[-1])
     return edited
+
+
+def added_version_findings(base: str, added: list[str]) -> list[tuple[str, str]]:
+    """Compare new integer versions with one immutable base inventory per service.
+
+    Nested migration directories belong to the same service. Repeatable/non-versioned
+    SQL retains its existing rollback-note requirement; unsupported V-prefixed names
+    cannot establish an integer maximum and are findings instead of being ignored.
+    """
+    findings: list[tuple[str, str]] = []
+    candidates: dict[str, list[tuple[str, int]]] = {}
+    for path in added:
+        name = path.rsplit("/", 1)[-1]
+        if not name.startswith("V"):
+            continue
+        match = INTEGER_VERSION_RE.fullmatch(name)
+        if not match:
+            findings.append((path, "unsupported integer Flyway version in added migration."))
+            continue
+        root = path.split(MIGRATION_ROOT, 1)[0] + MIGRATION_ROOT
+        candidates.setdefault(root, []).append((path, int(match.group(1))))
+
+    for root, new_versions in candidates.items():
+        base_versions: list[int] = []
+        unknown = False
+        for path in git("ls-tree", "-r", "-z", "--name-only", base, "--", root).split("\0"):
+            if not MIGRATION_RE.search(path):
+                continue
+            name = path.rsplit("/", 1)[-1]
+            if not name.startswith("V"):
+                continue
+            match = INTEGER_VERSION_RE.fullmatch(name)
+            if not match:
+                unknown = True
+                findings.append((path, "unsupported integer Flyway version at the tested base; "
+                                  "cannot establish this service's maximum."))
+            else:
+                base_versions.append(int(match.group(1)))
+        maximum = max(base_versions, default=None)
+        seen: set[int] = set()
+        for path, version in new_versions:
+            if version in seen:
+                findings.append((path, f"duplicate added Flyway version {version} in this service."))
+            seen.add(version)
+            if not unknown and maximum is not None and version <= maximum:
+                findings.append((path, f"New Flyway version {version} must exceed this service's "
+                                  f"maximum {maximum} at the tested base commit."))
+    return findings
 
 
 def has_rollback_note(text: str) -> bool:
@@ -263,14 +319,22 @@ def main() -> int:
         ap.error("--base is required")
 
     level = "error" if args.enforce else "warning"
-    added, modified = changed_migrations(args.base)
-    ch_edited = changed_clickhouse_migrations(args.base)
+    try:
+        base = git("rev-parse", "--verify", "--end-of-options", f"{args.base}^{{commit}}").strip()
+    except subprocess.CalledProcessError:
+        ap.error("--base must resolve to an available commit; migration comparison is unavailable")
+    added, modified = changed_migrations(base)
+    ch_edited = changed_clickhouse_migrations(base)
 
     if not added and not modified and not ch_edited:
         print("check-db-migration: no Flyway or ClickHouse migration touched — nothing to check.")
         return 0
 
     findings = 0
+
+    for path, message in added_version_findings(base, added):
+        findings += 1
+        print(f"::{level} file={path}::{message}")
 
     for path in modified:
         findings += 1

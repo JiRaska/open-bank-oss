@@ -13,8 +13,10 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
+import com.openbank.simulation.model.CardAuthorizationBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
+import com.openbank.simulation.model.ScreeningBook
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.model.StandingOrderBook
 import com.openbank.simulation.model.StatementCloseBook
@@ -75,6 +77,18 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // attempt/confirmation sets keyed like production's so-exec- idempotency key. Populated by
     // StandingOrderExecutionScenario; empty (trivially satisfied) otherwise.
     val standingOrders = StandingOrderBook()
+
+    // ADR-0032 §B: the FX sanctions-screening disposition invariant's state — the REAL
+    // ScreeningPolicy's verdict per conversion cross-checked against what the payment path
+    // actually did (refused / executed / held for review and resolved). Populated by
+    // FxScreeningScenario; empty (trivially satisfied) otherwise.
+    val screening = ScreeningBook()
+
+    // The card-authorization hold-lifecycle invariant's state — the real card-processing
+    // CardAuthorization aggregate per authorization, plus how much of the cleared total actually
+    // landed as ledger journals and how much of the hold was released back to available balance.
+    // Populated by CardAuthorizationScenario; empty (trivially satisfied) otherwise.
+    val cardAuths = CardAuthorizationBook()
 
     val customerAccounts: List<UUID>
     val currency: String = config.currency
