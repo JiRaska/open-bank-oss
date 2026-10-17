@@ -76,7 +76,12 @@ class SanctionsListService(
         )
     }
 
-    suspend fun refresh(listType: String): SanctionsList {
+    /**
+     * [onDeferred] is invoked when the list did NOT actually refresh (FAILED_KEPT_EXISTING /
+     * EMPTY_FEED / an inherited incomplete import). Such a refresh returns normally, so without
+     * the callback a caller cannot tell it from success.
+     */
+    suspend fun refresh(listType: String, onDeferred: () -> Unit = {}): SanctionsList {
         Log.info("Manual refresh triggered for list: $listType")
         val list = repo.requireList(listType)
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
@@ -119,9 +124,11 @@ class SanctionsListService(
                     (permit.inheritedIncomplete && result.outcome != ListImportOutcome.IMPORTED)
                 ) {
                     permit.deferUntilNextRefresh()
-                    return@duringRefresh checkNotNull(repo.markRetryPendingFenced(listType, permit)) {
+                    val deferred = checkNotNull(repo.markRetryPendingFenced(listType, permit)) {
                         "Failed to defer sanctions list refresh for $listType"
                     }
+                    onDeferred()
+                    return@duringRefresh deferred
                 }
                 publisher.publishFenced(currentList.id, enumType, permit)
                 markCompleted(result, currentList, permit)
@@ -129,7 +136,9 @@ class SanctionsListService(
         }
         // Unit-test constructor exercises the same orchestration with a mocked publisher.
         val result = importer.importList(enumType, list.sourceUrl)
-        if (result.outcome !in INCOMPLETE_IMPORTS) {
+        if (result.outcome in INCOMPLETE_IMPORTS) {
+            onDeferred()
+        } else {
             publisher.publishPending(list.id, enumType)
         }
         return markCompleted(result, list)
@@ -191,7 +200,8 @@ class SanctionsListService(
             try {
                 if (list.enabled && list.isDueForScheduledRefresh(now)) {
                     Log.infof("Scheduled refresh for %s", list.listType)
-                    refresh(list.listType)
+                    // A deferred refresh returns normally, so it is reported through the callback.
+                    refresh(list.listType) { allListsHandled = false }
                 } else {
                     // A disabled feed can still have committed changes from a previous import.
                     // Drain its journal without importing or waiting for the feed to be enabled.

@@ -5,9 +5,12 @@ package com.openbank.sanctions.application.usecase
 
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessMetrics
+import com.openbank.sanctions.application.port.out.ListImportOutcome
+import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
 import com.openbank.sanctions.domain.model.SanctionsList
+import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -83,6 +86,39 @@ class SanctionsRefreshHeartbeatTest {
         val service = service()
 
         service.scheduledRefresh()
+
+        assertThat(successRecorded()).isEqualTo(0.0)
+    }
+
+    private fun dueList() = aList("OFAC_SDN").copy(enabled = true, refreshRequestedAt = Instant.EPOCH)
+
+    private fun tickWith(result: ListImportResult) = runBlocking {
+        val list = dueList()
+        coEvery { repo.listSanctionsLists() } returns listOf(list)
+        coEvery { repo.findByListType("OFAC_SDN") } returns list
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns result
+        coEvery { publisher.publishPending(any(), any()) } returns SanctionsPublicationOutcome.NO_CHANGES
+        coEvery { repo.markUpdated("OFAC_SDN", any()) } returns list
+        service().scheduledRefresh()
+    }
+
+    @Test
+    fun `a refresh that imports the feed is a success`() {
+        tickWith(ListImportResult(ListImportOutcome.IMPORTED, 5))
+
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a refresh that keeps the existing list after a failed import is not a success`() {
+        tickWith(ListImportResult(ListImportOutcome.FAILED_KEPT_EXISTING, 0))
+
+        assertThat(successRecorded()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a refresh that finds an empty feed is not a success`() {
+        tickWith(ListImportResult(ListImportOutcome.EMPTY_FEED, 0))
 
         assertThat(successRecorded()).isEqualTo(0.0)
     }

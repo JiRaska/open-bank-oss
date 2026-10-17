@@ -203,6 +203,10 @@ class AgentAuditOutboxDispatcher @Inject constructor(
     // scheduler attempt fail before this class can return at the feature gate.
     @Channel("agent-audit-events-out") private val emitter: Instance<Emitter<Record<String, String>>>,
     @ConfigProperty(name = "agent.audit.kafka.enabled", defaultValue = "false") private val enabled: Boolean,
+    // The SAME key and default as the @Scheduled expression below, so the heartbeat's expected
+    // interval cannot drift from the real poll cadence when an environment overrides it.
+    @ConfigProperty(name = "agent.audit.outbox.poll-interval", defaultValue = "5s")
+    private val pollInterval: Duration = Duration.ofSeconds(DEFAULT_POLL_SECONDS),
 ) {
     @Inject
     lateinit var metrics: DomainMetrics
@@ -215,7 +219,7 @@ class AgentAuditOutboxDispatcher @Inject constructor(
     @PostConstruct
     fun registerHeartbeat() {
         if (enabled) {
-            liveness = metrics.registerWorkflowLiveness("agent-audit-outbox-dispatch", Duration.ofSeconds(POLL_SECONDS))
+            liveness = metrics.registerWorkflowLiveness("agent-audit-outbox-dispatch", pollInterval)
         }
     }
 
@@ -247,7 +251,7 @@ class AgentAuditOutboxDispatcher @Inject constructor(
         if (allPublished) liveness?.recordSuccess()
     }
     private companion object {
-        const val POLL_SECONDS = 5L
+        const val DEFAULT_POLL_SECONDS = 5L
         const val BATCH_SIZE = 25
     }
 }
