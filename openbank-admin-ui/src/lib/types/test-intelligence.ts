@@ -97,8 +97,25 @@ export interface TestInfrastructureObservation {
   reprovisions?: number
 }
 
+/**
+ * How a component's posture relates to the code that is RUNNING (#13201).
+ * - `running-commit`: the posture came from the evidence store for exactly the running commit.
+ * - `snapshot`: the posture is the bundled snapshot; `snapshotCommit` says which build it is about.
+ * `match` is null when either commit is unknown — never guessed.
+ */
+export interface RunningCommitObservation {
+  runningCommit: string | null
+  snapshotCommit: string | null
+  source: 'running-commit' | 'snapshot'
+  match: boolean | null
+  /** Why the evidence store was not used for this component. */
+  storeStatus: 'hit' | 'miss' | 'error' | 'disabled' | 'not-running'
+}
+
 export interface ComponentTestPosture {
   component: string
+  /** Added by the route at request time; absent in the on-disk/CI file. */
+  running?: RunningCommitObservation
   released: boolean
   moneyPath: boolean
   evidence: EvidenceObservation[]
@@ -315,6 +332,8 @@ export interface ClientExperienceEvidence {
 
 export interface TestIntelligenceReport {
   schemaVersion: 1
+  /** Added by the route at request time; absent in the on-disk/CI file. */
+  evidence?: TestEvidenceMeta
   collectedAt: string
   components: ComponentTestPosture[]
   contracts: ContractEvidence[]
@@ -450,4 +469,22 @@ export interface TestAgentFinding {
   rootCause: string | null
   proposalUrl: string | null
   status: string
+}
+
+/** Provenance of an evidence payload served by admin-ui: where it came from and how old it is. */
+export interface TestEvidenceMeta {
+  /** Composition of the payload: bundled snapshot only, or overlaid with running-commit evidence. */
+  source: 'bundled' | 'running-commit'
+  /** When the bundled snapshot was collected (null if unknown — never invented). */
+  asOf: string | null
+  ageSeconds: number | null
+  stale: boolean
+  /** When admin-ui last assembled this payload (its server-side cache refresh). */
+  servedFrom: string
+  runningCommits: {
+    /** Null off-cluster: running commits cannot be read without the Kubernetes API. */
+    known: number | null
+    matchingSnapshot: number
+    fromStore: number
+  }
 }

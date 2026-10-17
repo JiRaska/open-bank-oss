@@ -6,6 +6,10 @@ import path from 'path'
 import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
+import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshotCache'
+import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
+import { loadRunningCommits } from '@/lib/evidence/runningCommits'
+import { buildEvidenceMeta, etagOf, ifNoneMatchHits, overlayRunningEvidence } from '@/lib/evidence/overlay'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
 
@@ -426,11 +430,11 @@ function attachAiEvalAssurance(report: TestIntelligenceReport): TestIntelligence
   } catch { return report }
 }
 
-export async function GET(): Promise<NextResponse> {
+async function assembleReport(file: string): Promise<{ report: TestIntelligenceReport; runningKnown: boolean }> {
   try {
-    const parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as TestIntelligenceReport
     if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.components)) {
-      return NextResponse.json(emptyReport('Unsupported test-intelligence report schema'))
+      return { report: emptyReport('Unsupported test-intelligence report schema'), runningKnown: false }
     }
     const compatible = {
       ...parsed, history: parsed.history ?? [], performanceHistory: parsed.performanceHistory ?? [], runHistory: parsed.runHistory ?? [], testCases: parsed.testCases ?? [], clientExperiences: parsed.clientExperiences ?? [],
@@ -440,10 +444,37 @@ export async function GET(): Promise<NextResponse> {
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },
       })),
     }
-    const current = enforceRuntimeFreshness(compatible)
+    // Running commits come from ONE Kubernetes list call, never from the services (#13201).
+    const running = await loadRunningCommits().catch(() => null)
+    const joined = await overlayRunningEvidence(compatible, running, (component, commit) => commitEvidence.read(component, commit))
+    const current = enforceRuntimeFreshness(joined)
     const withJourneys = await attachLiveJourneys(current)
-    return NextResponse.json(attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), { headers: { 'Cache-Control': 'no-store' } })
+    return { report: attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), runningKnown: running !== null }
   } catch {
-    return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))
+    return { report: emptyReport('test-intelligence.json is not bundled'), runningKnown: false }
   }
+}
+
+// One assembled report per snapshot file, refreshed at most every CACHE_TTL_MS however many
+// viewers poll: the Prometheus/Tempo/Kubernetes/store fan-out is paid per TTL, not per request.
+const CACHE_TTL_MS = 30_000
+const commitEvidence = createCommitEvidenceReader()
+const caches = new Map<string, SnapshotCache<{ report: TestIntelligenceReport; runningKnown: boolean }>>()
+function cacheFor(file: string) {
+  let cache = caches.get(file)
+  if (!cache) {
+    cache = createSnapshotCache({ load: () => assembleReport(file), ttlMs: CACHE_TTL_MS })
+    caches.set(file, cache)
+  }
+  return cache
+}
+
+export async function GET(req?: Request): Promise<Response> {
+  const { value, producedAt } = await cacheFor(reportFile()).get()
+  const payload = JSON.stringify({ ...value.report, evidence: buildEvidenceMeta(value.report, value.runningKnown, producedAt) })
+  const etag = etagOf(payload)
+  // `no-cache` = always revalidate; an unchanged poll is a bodyless 304.
+  const headers = { 'Cache-Control': 'private, no-cache', ETag: etag }
+  if (ifNoneMatchHits(req?.headers.get('if-none-match') ?? null, etag)) return new Response(null, { status: 304, headers })
+  return new NextResponse(payload, { headers: { ...headers, 'Content-Type': 'application/json' } })
 }
