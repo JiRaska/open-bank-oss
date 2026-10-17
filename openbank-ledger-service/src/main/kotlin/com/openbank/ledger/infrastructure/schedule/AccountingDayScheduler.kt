@@ -5,10 +5,12 @@
 package com.openbank.ledger.infrastructure.schedule
 
 import com.openbank.ledger.application.port.`in`.AccountingDayUseCase
+import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.OpenAccountingDayCommand
 import com.openbank.ledger.application.port.`in`.TransitionAccountingDayCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
+import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.TieOutRunStatus
@@ -110,6 +112,12 @@ class AccountingDayScheduler(
 
     @Inject
     lateinit var tieOutScheduler: TieOutScheduler
+
+    @Inject
+    lateinit var closeParticipation: CloseParticipationUseCase
+
+    @Inject
+    lateinit var closeParticipantsConfig: CloseParticipantsConfig
 
     // Nullable, not `lateinit` — a money-path job must never fail because its observability
     // wiring was not initialised (same reasoning as TieOutScheduler).
@@ -234,7 +242,9 @@ class AccountingDayScheduler(
                     requestTieOut(day.businessDate, cutoffAt, reRunBudget)
                     return@runStep
                 }
-                if (run != null && run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt)) {
+                if (run != null && run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt) &&
+                    participantsAllowTieOut(day.businessDate)
+                ) {
                     accountingDayUseCase.transition(
                         TransitionAccountingDayCommand(
                             businessDate = day.businessDate,
@@ -251,6 +261,33 @@ class AccountingDayScheduler(
                 }
             }
         }
+    }
+
+    /**
+     * ADR-0342 D3: a CUTOFF day ties out only when every declared day-close participant has a
+     * record for it (RAN, SKIPPED, REFUSED, or an operator WAIVED). In `shadow` the verdict is
+     * counted and logged and the day moves anyway; in `enforce` the day stays in CUTOFF, where the
+     * stuck-CUTOFF gauge above pages after the threshold and the waiver is the operator's way out.
+     */
+    private suspend fun participantsAllowTieOut(date: LocalDate): Boolean {
+        val mode = closeParticipantsConfig.participantsMode()
+        if (mode == CloseParticipantsConfig.MODE_OFF) return true
+        val completeness = closeParticipation.completeness(date)
+        val outcome = when {
+            completeness.complete -> "complete"
+            mode == CloseParticipantsConfig.MODE_ENFORCE -> "held"
+            else -> "would_hold"
+        }
+        meterRegistry.counter(PARTICIPANTS_DECISIONS, "outcome", outcome, "mode", mode).increment()
+        if (!completeness.complete) {
+            log.warnf(
+                "Accounting day %s: tie-out is OK but day-close participant(s) %s have not reported — %s",
+                date,
+                completeness.missing.sorted(),
+                if (outcome == "held") "day stays in CUTOFF until they report or are waived" else "shadow, moving on",
+            )
+        }
+        return completeness.complete || mode != CloseParticipantsConfig.MODE_ENFORCE
     }
 
     /**
@@ -330,6 +367,9 @@ class AccountingDayScheduler(
         const val STUCK_AGE_GAUGE = "openbank.ledger.accounting_day.stuck_cutoff_age_seconds"
 
         const val BUSINESS_DATE_TAG = "business_date"
+
+        /** ADR-0342 D3 decision counter: outcome = complete | would_hold | held. */
+        const val PARTICIPANTS_DECISIONS = "openbank.ledger.close.participants.decisions"
 
         /**
          * Actor recorded on scheduler-driven transitions. Distinct from any JWT principal so an

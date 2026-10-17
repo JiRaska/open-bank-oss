@@ -122,6 +122,10 @@ spec:
             # …so the day lock has no calendar to read: off, not shadow/enforce.
             - name: LEDGER_DAY_LOCK_MODE
               value: "off"
+            # …and no day-close participants of its own yet (ADR-0342): the bank's list names
+            # interest-service, which never reports to this entity's books.
+            - name: LEDGER_CLOSE_PARTICIPANTS_MODE
+              value: "off"
             # OIDC resource server: same realm as the bank instance.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank

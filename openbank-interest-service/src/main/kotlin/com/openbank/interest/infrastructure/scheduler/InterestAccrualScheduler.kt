@@ -5,6 +5,8 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.interest.application.port.out.CloseJobRunPort
+import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
@@ -32,6 +34,7 @@ class InterestAccrualScheduler(
     private val accrueInterestUseCase: AccrueInterestUseCase,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
+    private val closeJobRuns: CloseJobRunPort,
 ) {
     private val log = Logger.getLogger(InterestAccrualScheduler::class.java)
     private var liveness: WorkflowLivenessRecorder? = null
@@ -59,6 +62,14 @@ class InterestAccrualScheduler(
             .onItem().invoke { count ->
                 log.infof("interest accrual for %s wrote %d accrual(s)", date, count)
                 liveness?.recordSuccess()
+            }
+            // ADR-0342: the evidence InterestCloseParticipationScheduler reports to the ledger. Only
+            // a SUCCESSFUL run is recorded — a failed tick leaves the day unreported, so the ledger
+            // holds it in CUTOFF instead of closing it without interest.
+            .call { count ->
+                closeJobRuns.record(
+                    CloseJobRun(date, InterestCloseJobs.ACCRUAL, count, 0, 0, null, clock.instant()),
+                )
             }
             .onFailure().invoke { e -> log.errorf(e, "interest accrual for %s failed", date) }
             .onFailure().recoverWithItem(0)

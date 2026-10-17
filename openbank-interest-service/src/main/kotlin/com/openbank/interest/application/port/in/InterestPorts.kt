@@ -14,9 +14,24 @@ interface AccrueInterestUseCase {
     fun accrueAll(date: LocalDate): Uni<Int>
 }
 
+/**
+ * What one capitalization run did (ADR-0342 D4): how many pairs were capitalized (one ledger
+ * journal each), and how many the ledger refused because the accounting day no longer accepts
+ * postings — a close outcome reported to the ledger, not just a WARN line.
+ */
+data class CapitalizationRunOutcome(val capitalized: Int, val refusedClosedDay: Int, val refusalReason: String?)
+
 interface CapitalizeInterestUseCase {
     fun capitalize(accountId: UUID, productId: String, toDate: LocalDate): Uni<InterestCapitalization>
     fun capitalizeAll(toDate: LocalDate): Uni<Int>
+
+    /**
+     * [capitalizeAll] with the closed-day refusals counted. Defaulted so a stub implementing only
+     * [capitalizeAll] keeps compiling; [com.openbank.interest.application.usecase.InterestService]
+     * overrides it with the real count.
+     */
+    fun capitalizeAllWithOutcome(toDate: LocalDate): Uni<CapitalizationRunOutcome> =
+        capitalizeAll(toDate).map { CapitalizationRunOutcome(it, 0, null) }
 
     /**
      * Completes every outstanding capitalization claim at its own frozen period, starting no new

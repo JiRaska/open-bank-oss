@@ -5,6 +5,8 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
+import com.openbank.interest.application.port.out.CloseJobRunPort
+import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
@@ -35,6 +37,7 @@ class InterestCapitalizationScheduler(
     private val capitalizeInterestUseCase: CapitalizeInterestUseCase,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
+    private val closeJobRuns: CloseJobRunPort,
 ) {
     private val log = Logger.getLogger(InterestCapitalizationScheduler::class.java)
     private var liveness: WorkflowLivenessRecorder? = null
@@ -58,13 +61,36 @@ class InterestCapitalizationScheduler(
         // deliberate rather than lazy: `capitalizeAll` is idempotent per (account, period), so the next tick (or a
         // manual re-run) fills the gap, and failing the Uni would buy nothing the gauge does not
         // already say. #5745 section C.
-        return capitalizeInterestUseCase.capitalizeAll(toDate)
-            .onItem().invoke { count ->
-                log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, count)
+        return capitalizeInterestUseCase.capitalizeAllWithOutcome(toDate)
+            .onItem().invoke { outcome ->
+                log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, outcome.capitalized)
+                if (outcome.refusedClosedDay > 0) {
+                    log.warnf(
+                        "interest capitalization up to %s: %d posting(s) refused — accounting day closed (%s)",
+                        toDate,
+                        outcome.refusedClosedDay,
+                        outcome.refusalReason,
+                    )
+                }
                 liveness?.recordSuccess()
             }
+            // ADR-0342 D4: one journal per capitalized pair; closed-day refusals become a REFUSED
+            // day-close outcome on the ledger's day-end page instead of only this WARN.
+            .call { outcome ->
+                closeJobRuns.record(
+                    CloseJobRun(
+                        businessDate = toDate,
+                        job = InterestCloseJobs.CAPITALIZATION,
+                        itemsProcessed = outcome.capitalized,
+                        journalsPosted = outcome.capitalized,
+                        refused = outcome.refusedClosedDay,
+                        refusalReason = outcome.refusalReason,
+                        completedAt = clock.instant(),
+                    ),
+                )
+            }
             .onFailure().invoke { e -> log.errorf(e, "interest capitalization up to %s failed", toDate) }
-            .onFailure().recoverWithItem(0)
+            .onFailure().recoverWithNull()
             .replaceWithVoid()
     }
 

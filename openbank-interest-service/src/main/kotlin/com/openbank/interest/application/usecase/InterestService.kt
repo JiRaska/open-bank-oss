@@ -5,6 +5,7 @@
 package com.openbank.interest.application.usecase
 
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.interest.application.port.`in`.CapitalizationRunOutcome
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
 import com.openbank.interest.application.port.`in`.GetAccrualsUseCase
 import com.openbank.interest.application.port.`in`.ManageRateConfigUseCase
@@ -30,6 +31,7 @@ import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
 import com.openbank.interest.infrastructure.observability.InterestCapitalizationMetrics
+import com.openbank.libs.close.AccountingDayClosed
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.money.RoundingPolicy
@@ -664,31 +666,54 @@ class InterestService(
             }
         }
 
-    override fun capitalizeAll(toDate: LocalDate): Uni<Int> = recoverOutstandingClaims().flatMap { recovered ->
-        accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
-            if (pairs.isEmpty()) {
-                Uni.createFrom().item(0)
-            } else {
-                Multi.createFrom().iterable(pairs)
-                    .onItem().transformToUniAndConcatenate { (accountId, productId) ->
-                        capitalize(accountId, productId, toDate)
-                            .map { 1 }
-                            .onFailure().invoke { e ->
-                                log.warnf(
-                                    e,
-                                    "capitalization skipped for account %s product %s up to %s: %s",
-                                    accountId,
-                                    productId,
-                                    toDate,
-                                    e.message,
-                                )
-                            }
-                            .onFailure().recoverWithItem(0)
-                    }
-                    .collect().with(java.util.stream.Collectors.summingInt { it })
+    override fun capitalizeAll(toDate: LocalDate): Uni<Int> = capitalizeAllWithOutcome(toDate).map { it.capitalized }
+
+    override fun capitalizeAllWithOutcome(toDate: LocalDate): Uni<CapitalizationRunOutcome> =
+        recoverOutstandingClaims().flatMap { recovered ->
+            accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
+                if (pairs.isEmpty()) {
+                    Uni.createFrom().item(emptyList<PairResult>())
+                } else {
+                    Multi.createFrom().iterable(pairs)
+                        .onItem().transformToUniAndConcatenate { (accountId, productId) ->
+                            capitalize(accountId, productId, toDate)
+                                .map { PairResult(capitalized = true, closedDayReason = null) }
+                                .onFailure().recoverWithItem { e ->
+                                    log.warnf(
+                                        e,
+                                        "capitalization skipped for account %s product %s up to %s: %s",
+                                        accountId,
+                                        productId,
+                                        toDate,
+                                        e.message,
+                                    )
+                                    PairResult(capitalized = false, closedDayReason = closedDayRejection(e))
+                                }
+                        }
+                        .collect().asList()
+                }
+            }.map { results ->
+                val refused = results.mapNotNull { it.closedDayReason }
+                CapitalizationRunOutcome(
+                    capitalized = recovered + results.count { it.capitalized },
+                    refusedClosedDay = refused.size,
+                    refusalReason = refused.firstOrNull(),
+                )
             }
-        }.map { capitalized -> recovered + capitalized }
-    }
+        }
+
+    /** One pair's result inside [capitalizeAllWithOutcome]. */
+    private data class PairResult(val capitalized: Boolean, val closedDayReason: String?)
+
+    /**
+     * The ledger's closed-day 409 (ADR-0342 D4), found anywhere in the cause chain — the guard and
+     * the claim machinery may wrap it. Null for every other failure, which stays an ordinary skip.
+     */
+    private fun closedDayRejection(failure: Throwable): String? =
+        generateSequence(failure) { it.cause }
+            .filterIsInstance<LedgerPostingRejectedException>()
+            .firstOrNull { AccountingDayClosed.isClosedDayRejection(it.status, it.message) }
+            ?.message
 
     override fun listAllAccruals(): Uni<List<InterestAccrual>> = accrualRepo.findAll()
 
