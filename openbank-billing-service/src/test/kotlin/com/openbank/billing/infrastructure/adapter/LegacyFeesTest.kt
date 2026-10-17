@@ -34,12 +34,37 @@ class LegacyFeesTest {
     }
 
     @Test
-    fun `only deposit product types imply a deposit class`() {
+    fun `every v1 product type implies a deposit class, and only an unknown one implies none`() {
         assertThat(LegacyProductTypes.accountingClassOf("CURRENT")).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
         assertThat(LegacyProductTypes.accountingClassOf("SAVINGS")).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
         assertThat(LegacyProductTypes.accountingClassOf("TERM_DEPOSIT")).isEqualTo("CUSTOMER_DEPOSIT_TERM")
-        listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT", null).forEach {
+        // Billed against the customer's current account before ADR-0341, so still billed (not silently skipped).
+        listOf("LOAN", "MORTGAGE", "CREDIT_CARD", "OVERDRAFT", "INVESTMENT").forEach {
+            assertThat(LegacyProductTypes.accountingClassOf(it)).describedAs(it).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+        }
+        listOf("FUTURE_TYPE", "TERM_LIFE", "", null).forEach {
             assertThat(LegacyProductTypes.accountingClassOf(it)).isNull()
         }
+    }
+
+    @Test
+    fun `the mapped set is exactly the v1 ProductType enum and the legacy-product schema enum`() {
+        assertThat(LegacyProductTypes.KNOWN).containsExactlyInAnyOrder(
+            "SAVINGS",
+            "CURRENT",
+            "LOAN",
+            "MORTGAGE",
+            "CREDIT_CARD",
+            "TERM_DEPOSIT",
+            "OVERDRAFT",
+            "INVESTMENT",
+        )
+        val schema = java.nio.file.Path.of(
+            "../openbank-product-catalog/src/main/resources/catalog-packs/banking/legacy-product-v1.schema.json",
+        )
+        assertThat(java.nio.file.Files.exists(schema)).describedAs("catalog schema readable from the build").isTrue()
+        val enumValues = com.fasterxml.jackson.databind.ObjectMapper().readTree(schema.toFile())
+            .path("properties").path("productType").path("enum").map { it.asText() }
+        assertThat(LegacyProductTypes.KNOWN).containsExactlyInAnyOrderElementsOf(enumValues)
     }
 }

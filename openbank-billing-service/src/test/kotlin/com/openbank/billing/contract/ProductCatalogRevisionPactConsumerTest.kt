@@ -75,6 +75,30 @@ class ProductCatalogRevisionPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * ADR-0341 D1: the pin is the revision effective when the account was OPENED. The instant is far in
+     * the future on purpose so the seeded revision is effective at it whenever the provider state was
+     * published; what the interaction pins is that the parameter is sent, named exactly so, and honoured.
+     */
+    @Pact(consumer = "openbank-billing-service", provider = "openbank-product-catalog")
+    fun publishedRevisionAsOfOpeningPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(STATE_PUBLISHED_DEPOSIT_REVISION)
+        .uponReceiving("GET the published revision of a v1 deposit product as of the account's opening")
+        .path("/api/v2/legacy-products/$CURRENT_PERSONAL_PRODUCT_ID/published-revision")
+        .query("effectiveAt=$OPENED_AT")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.stringValue("id", REVISION_ID)
+                o.stringValue("state", "PUBLISHED")
+            }.build(),
+        )
+        .toPact()
+
     @Pact(consumer = "openbank-billing-service", provider = "openbank-product-catalog")
     fun revisionByIdPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(STATE_PUBLISHED_DEPOSIT_REVISION)
@@ -130,6 +154,20 @@ class ProductCatalogRevisionPactConsumerTest {
         val revision = mapper.readValue(body, com.openbank.billing.infrastructure.client.RevisionDto::class.java)
         assertThat(revision.id).isEqualTo(REVISION_ID)
         assertThat(revision.state).isEqualTo("PUBLISHED")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "publishedRevisionAsOfOpeningPact")
+    fun `the lookup is dated at the account's opening`(mockServer: MockServer) {
+        val (status, body) = get(mockServer, lookupPathFor(CURRENT_PERSONAL_PRODUCT_ID) + "?effectiveAt=$OPENED_AT")
+
+        assertThat(status).isEqualTo(200)
+        assertThat(mapper.readTree(body)["id"].asText()).isEqualTo(REVISION_ID)
+        // the production client names the parameter exactly this way
+        val param = ProductCatalogRestClient::class.java.methods
+            .single { it.name == "getPublishedRevisionForLegacyProduct" }.parameters
+            .mapNotNull { it.getAnnotation(jakarta.ws.rs.QueryParam::class.java)?.value }
+        assertThat(param).containsExactly("effectiveAt")
     }
 
     @Test
@@ -191,12 +229,14 @@ class ProductCatalogRevisionPactConsumerTest {
 
         const val UNKNOWN_PRODUCT_ID = "00000000-0000-0000-0000-000000000fff"
 
+        const val OPENED_AT = "2099-01-01T00:00:00Z"
+
         private val CLIENT_PATH: String = ProductCatalogRestClient::class.java.getAnnotation(
             JaxrsPath::class.java,
         ).value
 
         private fun methodPath(name: String): String =
-            ProductCatalogRestClient::class.java.getMethod(name, String::class.java)
+            ProductCatalogRestClient::class.java.methods.single { it.name == name }
                 .getAnnotation(JaxrsPath::class.java).value
 
         val LOOKUP_TEMPLATE: String = CLIENT_PATH + methodPath("getPublishedRevisionForLegacyProduct")

@@ -183,7 +183,7 @@ class RestBillingAdaptersTest {
     fun `a revision with neither a class nor a derivable product type reports none`(): Unit = runBlocking {
         val catalog = mockk<ProductCatalogRestClient>()
         every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
-            revision(attributes = mapOf("productType" to "MORTGAGE"), prices = arrayOf(price("X", "1", "CZK"))),
+            revision(attributes = mapOf("productType" to "FUTURE_TYPE"), prices = arrayOf(price("X", "1", "CZK"))),
         )
 
         val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
@@ -240,15 +240,127 @@ class RestBillingAdaptersTest {
     @Test
     fun `the catalog's own 404 means nothing is published, any other failure is a fault`(): Unit = runBlocking {
         val catalog = mockk<ProductCatalogRestClient>()
-        every { catalog.getPublishedRevisionForLegacyProduct("none") } returns
+        every { catalog.getPublishedRevisionForLegacyProduct("none", any()) } returns
             Uni.createFrom().failure(NotFoundException())
-        every { catalog.getPublishedRevisionForLegacyProduct("boom") } returns
+        every { catalog.getPublishedRevisionForLegacyProduct("boom", any()) } returns
             Uni.createFrom().failure(RuntimeException("5xx"))
         val port = RestProductRevisionPort(catalog, meters)
 
         assertThat(port.publishedRevisionIdFor("none")).isNull()
         assertThat(runCatching { port.publishedRevisionIdFor("boom") }.exceptionOrNull())
             .isInstanceOf(RuntimeException::class.java)
+    }
+
+    @Test
+    fun `every v1 product type derives a class, so no previously billed product silently stops being billed`() {
+        com.openbank.billing.infrastructure.adapter.LegacyProductTypes.KNOWN.forEach {
+            assertThat(com.openbank.billing.infrastructure.adapter.LegacyProductTypes.accountingClassOf(it))
+                .describedAs(it).startsWith("CUSTOMER_DEPOSIT_")
+        }
+    }
+
+    @Test
+    fun `a component billing cannot price is dropped LOUDLY, by reason, and the revision still reports fee-bearing`():
+        Unit =
+        runBlocking {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+                revision(
+                    attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
+                    prices = arrayOf(
+                        price("FEE_PCT", "0.01", "CZK", kind = "RATE"),
+                        PriceComponentDto("FEE_NOCCY", "AMOUNT", BigDecimal("3"), null, "monthly", "MONTHLY"),
+                    ),
+                ),
+            )
+            val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+            assertThat(terms.fees).isEmpty()
+            assertThat(terms.feeBearing).isTrue()
+            assertThat(meters.get("billing.fee.component.dropped").tag("reason", "NON_AMOUNT_KIND").counter().count())
+                .isEqualTo(1.0)
+            assertThat(meters.get("billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count())
+                .isEqualTo(1.0)
+        }
+
+    @Test
+    fun `a revision whose only price is an interest rate is not fee-bearing`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+            revision(
+                attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_SAVINGS"),
+                prices = arrayOf(price("INTEREST_RATE", "0.02", "CZK", kind = "RATE")),
+            ),
+        )
+        val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+        assertThat(terms.feeBearing).isFalse()
+        assertThat(terms.fees).isEmpty()
+    }
+
+    @Test
+    fun `fees in only another currency make the revision fee-bearing with nothing to charge here`(): Unit =
+        runBlocking {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+                revision(
+                    attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
+                    prices = arrayOf(price("MAINTENANCE", "9", "CZK")),
+                ),
+            )
+            val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "EUR")
+            assertThat(terms.fees).isEmpty()
+            assertThat(terms.feeBearing).isTrue()
+        }
+
+    @Test
+    fun `the pin lookup is dated at the account's opening`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        val opened = java.time.Instant.parse("2026-03-01T00:00:00Z")
+        every { catalog.getPublishedRevisionForLegacyProduct("prod-1", "2026-03-01T00:00:00Z") } returns
+            Uni.createFrom().item(RevisionDto(REVISION, "SUPERSEDED", RevisionContentDto()))
+        val port = RestProductRevisionPort(catalog, meters)
+
+        assertThat(port.publishedRevisionIdFor("prod-1", opened)).isEqualTo(REVISION)
+        verify(exactly = 0) { catalog.getPublishedRevisionForLegacyProduct("prod-1", null) }
+        assertThat(meters.find("billing.revision_pin.fallback_to_current").counter()).isNull()
+    }
+
+    @Test
+    fun `an account older than the catalog's first revision falls back to the current one, counted`(): Unit =
+        runBlocking {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getPublishedRevisionForLegacyProduct("prod-1", "2020-01-01T00:00:00Z") } returns
+                Uni.createFrom().failure(NotFoundException())
+            every { catalog.getPublishedRevisionForLegacyProduct("prod-1", null) } returns
+                Uni.createFrom().item(RevisionDto(REVISION, "PUBLISHED", RevisionContentDto()))
+            val port = RestProductRevisionPort(catalog, meters)
+
+            assertThat(port.publishedRevisionIdFor("prod-1", java.time.Instant.parse("2020-01-01T00:00:00Z")))
+                .isEqualTo(REVISION)
+            assertThat(meters.get("billing.revision_pin.fallback_to_current").counter().count()).isEqualTo(1.0)
+        }
+
+    @Test
+    fun `an unknown product stays unresolved even after the fallback`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getPublishedRevisionForLegacyProduct("none", any()) } returns
+            Uni.createFrom().failure(NotFoundException())
+        val port = RestProductRevisionPort(catalog, meters)
+        assertThat(port.publishedRevisionIdFor("none", java.time.Instant.parse("2020-01-01T00:00:00Z"))).isNull()
+        assertThat(meters.find("billing.revision_pin.fallback_to_current").counter()).isNull()
+    }
+
+    @Test
+    fun `resolve carries the account's opening instant`(): Unit = runBlocking {
+        val accounts = mockk<AccountRestClient>()
+        val balances = mockk<BalanceRestClient>()
+        every { accounts.getAccount("acc1") } returns Uni.createFrom().item(
+            AccountDto("acc1", "prod-1", "CZK", "ACTIVE", null, "2026-03-01T08:30:00Z"),
+        )
+        every { balances.getBalance("acc1", "CZK") } returns
+            Uni.createFrom().item(BalanceDto("acc1", "CZK", BigDecimal("1")))
+        val r = RestAccountContextPort(accounts, balances).resolve("acc1", "CZK")
+        assertThat(r!!.openedAt).isEqualTo(java.time.Instant.parse("2026-03-01T08:30:00Z"))
     }
 
     @Test

@@ -35,6 +35,8 @@ data class AccountDto(
     val currencyCode: String,
     val status: String? = null,
     val partyId: String? = null,
+    /** ISO-8601 instant the account was opened; the revision pin is resolved as of this moment. */
+    val openedAt: String? = null,
 )
 
 /**
@@ -72,10 +74,16 @@ data class AccountPageDto(
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 interface ProductCatalogRestClient {
-    /** The revision effective now for a v1 product id; 404 when none is published. */
+    /**
+     * The revision effective at `effectiveAt` (now when absent) for a v1 product id; 404 when none is
+     * published then (ADR-0257 effective-dated lookup).
+     */
     @GET
     @Path("/legacy-products/{productId}/published-revision")
-    fun getPublishedRevisionForLegacyProduct(@PathParam("productId") productId: String): Uni<RevisionDto>
+    fun getPublishedRevisionForLegacyProduct(
+        @PathParam("productId") productId: String,
+        @QueryParam("effectiveAt") effectiveAt: String?,
+    ): Uni<RevisionDto>
 
     /** One immutable revision by its durable id. */
     @GET

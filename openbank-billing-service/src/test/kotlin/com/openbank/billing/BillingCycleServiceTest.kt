@@ -26,7 +26,7 @@ import java.math.BigDecimal
  */
 class BillingCycleServiceTest {
 
-    private val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"))
+    private val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"), OPENED)
 
     private fun feeAssessmentService(fees: List<BillableFee> = listOf(fee("f1", "5"))) = FeeAssessmentService(
         object : AccountContextPort {
@@ -34,6 +34,7 @@ class BillingCycleServiceTest {
         },
         FakeRevisions(fees),
         InMemoryPins(),
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
     )
 
     private fun fee(id: String, amount: String) =

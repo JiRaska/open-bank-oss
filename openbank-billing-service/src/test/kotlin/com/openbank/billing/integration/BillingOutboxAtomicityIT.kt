@@ -112,6 +112,7 @@ class BillingOutboxAtomicityIT {
         override suspend fun resolve(accountId: String, currency: String) = AccountBilling(
             productId = PRODUCT_ID,
             context = FeeContext(balance = BigDecimal("10.00"), currency = currency),
+            openedAt = java.time.Instant.parse("2026-01-15T10:00:00Z"),
         )
     }
 
@@ -123,7 +124,8 @@ class BillingOutboxAtomicityIT {
     @Alternative
     @ApplicationScoped
     class OneChargeableFeeCatalog : ProductRevisionPort {
-        override suspend fun publishedRevisionIdFor(productId: String): String = REVISION_ID
+        override suspend fun publishedRevisionIdFor(productId: String, effectiveAt: java.time.Instant?): String =
+            REVISION_ID
 
         override suspend fun terms(revisionId: String, currency: String) = RevisionTerms(
             revisionId = revisionId,

@@ -114,6 +114,44 @@ class BillingLedgerPostJournalPactConsumerTest {
         )
         .toPact()
 
+    private val eurRequestBody: String = objectMapper.writeValueAsString(
+        BillingJournalFactory.buildRequest(
+            feeCommand.copy(
+                idempotencyKey = "fee-2026-07-pact-002-maintenance-EUR",
+                currency = "EUR",
+                amount = BigDecimal("6.00"),
+            ),
+            systemActorId,
+            entryDate,
+        ),
+    )
+
+    /**
+     * The currency the first cut of ADR-0341 got wrong: a EUR fee leg resolved to the EUR control
+     * account (2101) and the fee-income class had no EUR row, so the ledger answered 422 and the
+     * outbox retried forever. Replayed against the real ledger map, this is the proof both legs of a
+     * non-CZK fee resolve (to the accounts billing always posted to).
+     */
+    @Pact(consumer = "openbank-billing-service", provider = "openbank-ledger-service")
+    fun postBillingEurFeeJournalPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the standard chart of accounts is seeded")
+        .uponReceiving("POST a balanced two-line EUR fee-charge journal")
+        .path("/api/v1/journals")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(eurRequestBody)
+        .willRespondWith()
+        .status(201)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.uuid("id")
+                o.uuid("transactionId")
+                o.stringValue("status", "POSTED")
+            }.build(),
+        )
+        .toPact()
+
     /**
      * ADR-0279: every changed contract test needs a 401 negative interaction. Shares
      * `NEGATIVE_AUTH_STATE` ("no valid M2M identity is presented") with the other M2M consumers,
@@ -141,6 +179,20 @@ class BillingLedgerPostJournalPactConsumerTest {
             .post("/api/v1/journals")
             .then()
             .statusCode(401)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "postBillingEurFeeJournalPact")
+    fun `a EUR fee journal is created too`(mockServer: MockServer) {
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(eurRequestBody)
+            .post("/api/v1/journals")
+            .then()
+            .statusCode(201)
+            .extract().jsonPath()
+        assertThat(body.getString("status")).isEqualTo("POSTED")
     }
 
     @Test

@@ -51,7 +51,11 @@ class RestAccountContextPort(
             segment = null,
             currency = currency,
         )
-        return AccountBilling(productId = account.productId, context = context)
+        return AccountBilling(
+            productId = account.productId,
+            context = context,
+            openedAt = account.openedAt?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() },
+        )
     }
 }
 
@@ -102,12 +106,29 @@ class RestProductRevisionPort(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, RevisionTerms>?) = size > CACHE_CAPACITY
     }
 
-    override suspend fun publishedRevisionIdFor(productId: String): String? = try {
-        catalog.getPublishedRevisionForLegacyProduct(productId).awaitSuspending().id
+    override suspend fun publishedRevisionIdFor(productId: String, effectiveAt: java.time.Instant?): String? {
+        val asOf = lookup(productId, effectiveAt?.toString())
+        if (asOf != null || effectiveAt == null) return asOf
+        // Nothing was published as far back as the account's opening: it predates the catalog's first
+        // revision (every account that existed when the catalog was introduced). The catalog holds no
+        // older terms for it, so the revision effective now is the only one there is. COUNTED, because
+        // an account that falls back here is priced by a revision that did not exist when it was opened.
+        val current = lookup(productId, null)
+        if (current != null) {
+            meters.counter("billing.revision_pin.fallback_to_current").increment()
+            log.warnf("no revision of product %s was effective at %s; pinning the current one", productId, effectiveAt)
+        }
+        return current
+    }
+
+    private suspend fun lookup(productId: String, effectiveAt: String?): String? = try {
+        catalog.getPublishedRevisionForLegacyProduct(productId, effectiveAt).awaitSuspending().id
     } catch (e: WebApplicationException) {
         // The catalog's own 404 means "unknown product / nothing published"; every other status is a fault.
         if (e.response.status == NOT_FOUND) null else throw e
     }
+
+    private val log = org.jboss.logging.Logger.getLogger(RestProductRevisionPort::class.java)
 
     override suspend fun terms(revisionId: String, currency: String): RevisionTerms {
         val cached = synchronized(cache) { cache[revisionId] }
@@ -140,6 +161,22 @@ class RestProductRevisionPort(
             null
         }
         val legacyFees = LegacyFees.byPriceCode(attributes[LEGACY_DOCUMENT] as? String)
+        val usable = revision.content.prices.filter { it.kind == "AMOUNT" && it.currency != null }
+        // A component billing cannot price is DROPPED, never silently: counted and logged by reason, so a
+        // percentage fee or a currency-less amount is visible instead of becoming a smaller bill.
+        (revision.content.prices - usable.toSet()).forEach { price ->
+            val reason = if (price.kind != "AMOUNT") "NON_AMOUNT_KIND" else "NULL_CURRENCY"
+            meters.counter("billing.fee.component.dropped", "reason", reason).increment()
+            log.warnf(
+                "revision %s: price component %s (kind=%s) is not billable: %s",
+                revision.id,
+                price.code,
+                price.kind,
+                reason,
+            )
+        }
+        val feeBearing = revision.content.prices.any { it.kind == "AMOUNT" || it.code.startsWith("FEE_") } ||
+            legacyFees.isNotEmpty()
         return RevisionTerms(
             revisionId = revision.id,
             accountingClass = explicit ?: derived,
@@ -148,8 +185,8 @@ class RestProductRevisionPort(
                 derived != null -> AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE
                 else -> AccountingClassSource.NONE
             },
-            fees = revision.content.prices.filter { it.kind == "AMOUNT" && it.currency != null }
-                .map { price -> toFee(price, legacyFees[price.code]) },
+            fees = usable.map { price -> toFee(price, legacyFees[price.code]) },
+            feeBearing = feeBearing,
         )
     }
 

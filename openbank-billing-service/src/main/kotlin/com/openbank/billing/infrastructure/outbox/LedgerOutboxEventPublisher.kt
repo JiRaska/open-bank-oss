@@ -114,9 +114,11 @@ class LedgerOutboxEventPublisher(
 
     /**
      * A row written before ADR-0341 carries no class. It is still posted -- refusing would strand a
-     * charge the customer's statement already shows -- as the demand-deposit class, which resolves to
-     * the same account those rows were written for (2100 in CZK), and the fallback is COUNTED so its
-     * disappearance is observable. Rows written by this release always carry the class.
+     * charge the customer's statement already shows -- as the demand-deposit class. The fee leg's
+     * (CUSTOMER_DEPOSIT_DEMAND, FEE_SETTLEMENT, currency) resolves to 2100 in EVERY currency, which is
+     * exactly the account those rows were always written for, and `FeeJournalsUnchangedTest` pins it.
+     * The fallback is COUNTED so its disappearance is observable. Rows written by this release always
+     * carry the class.
      */
     private fun accountingClassOf(fromPayload: String?, idempotencyKey: String): String {
         if (fromPayload != null) return fromPayload

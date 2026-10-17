@@ -19,7 +19,16 @@ import java.util.UUID
  * `null` from [AccountContextPort.resolve] means "could not resolve" — billing fails closed
  * and does not charge (ADR-0143).
  */
-data class AccountBilling(val productId: String, val context: FeeContext)
+data class AccountBilling(
+    val productId: String,
+    val context: FeeContext,
+    /**
+     * When the account was opened. The pin is resolved as the revision effective AT THIS INSTANT, not
+     * "now" (ADR-0341 D1/D2): an account opened under older terms must not be repriced by a later
+     * publication just because billing happened to see it for the first time afterwards.
+     */
+    val openedAt: Instant? = null,
+)
 
 /**
  * Reads the account-side facts a waiver rule is evaluated against (balance, turnover, segment,
@@ -42,6 +51,12 @@ data class RevisionTerms(
     val accountingClass: String?,
     val accountingClassSource: AccountingClassSource,
     val fees: List<BillableFee>,
+    /**
+     * True when the revision declares fees at all: any AMOUNT price component in ANY currency, any
+     * component coded as a fee, or a fee in its embedded v1 document. A fee-bearing revision whose
+     * [fees] come out empty for the account's currency is a defect to surface (skip), never "zero fees".
+     */
+    val feeBearing: Boolean = false,
 )
 
 /** Where [RevisionTerms.accountingClass] came from. */
@@ -65,8 +80,13 @@ enum class AccountingClassSource {
  * read port here: a failure throws and the caller turns it into an explicit skip.
  */
 interface ProductRevisionPort {
-    /** The id of the revision effective now for a v1 product id, or null when none is published. */
-    suspend fun publishedRevisionIdFor(productId: String): String?
+    /**
+     * The id of the revision effective at [effectiveAt] (null = now) for a v1 product id, or null when
+     * none is published. When the product has no revision effective that far back (an account that
+     * predates the catalog's first revision), implementations fall back to the one effective now and
+     * COUNT it, because the catalog holds no older terms for that account.
+     */
+    suspend fun publishedRevisionIdFor(productId: String, effectiveAt: Instant? = null): String?
 
     /** The terms of [revisionId] in [currency]; cached by revision id, since a revision is immutable. */
     suspend fun terms(revisionId: String, currency: String): RevisionTerms

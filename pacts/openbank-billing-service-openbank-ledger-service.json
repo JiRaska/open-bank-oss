@@ -19,7 +19,7 @@
           "lines": [
             {
               "accountingClass": "CUSTOMER_DEPOSIT_DEMAND",
-              "accountingRole": "PRINCIPAL",
+              "accountingRole": "FEE_SETTLEMENT",
               "amount": 150.00,
               "baseAmount": 150.00,
               "baseCurrencyCode": "CZK",
@@ -67,7 +67,7 @@
           "lines": [
             {
               "accountingClass": "CUSTOMER_DEPOSIT_DEMAND",
-              "accountingRole": "PRINCIPAL",
+              "accountingRole": "FEE_SETTLEMENT",
               "amount": 150.00,
               "baseAmount": 150.00,
               "baseCurrencyCode": "CZK",
@@ -87,6 +87,94 @@
             }
           ],
           "transactionId": "61032cf1-5aff-3102-93ca-fd8f781d0cac",
+          "valueDate": "2026-07-01"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/journals"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "POSTED",
+          "transactionId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            },
+            "$.transactionId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.transactionId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a balanced two-line EUR fee-charge journal",
+      "providerStates": [
+        {
+          "name": "the standard chart of accounts is seeded"
+        }
+      ],
+      "request": {
+        "body": {
+          "createdBy": "00000000-0000-0000-0000-0000000000bb",
+          "description": "Fee charge: Maintenance",
+          "entryDate": "2026-07-01",
+          "idempotencyKey": "fee-2026-07-pact-002-maintenance-EUR",
+          "lines": [
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT_DEMAND",
+              "accountingRole": "FEE_SETTLEMENT",
+              "amount": 6.00,
+              "baseAmount": 6.00,
+              "baseCurrencyCode": "EUR",
+              "currencyCode": "EUR",
+              "side": "DEBIT",
+              "subAccountId": "99999999-9999-9999-9999-999999999999"
+            },
+            {
+              "accountingClass": "FEE_INCOME_ACCOUNT",
+              "accountingRole": "FEE_INCOME",
+              "amount": 6.00,
+              "baseAmount": 6.00,
+              "baseCurrencyCode": "EUR",
+              "currencyCode": "EUR",
+              "side": "CREDIT",
+              "subAccountId": null
+            }
+          ],
+          "transactionId": "a9c77d9e-bc83-3f1c-8398-828d799e92bb",
           "valueDate": "2026-07-01"
         },
         "headers": {

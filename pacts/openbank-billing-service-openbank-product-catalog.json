@@ -82,6 +82,36 @@
       }
     },
     {
+      "description": "GET the published revision of a v1 deposit product as of the account's opening",
+      "providerStates": [
+        {
+          "name": "a published v1-projected deposit revision exists for billing"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/legacy-products/3f20a53e-5ea4-307a-8a0f-9605728381ba/published-revision",
+        "query": {
+          "effectiveAt": [
+            "2099-01-01T00:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "id": "0191c0de-0000-7000-8000-00000000b111",
+          "state": "PUBLISHED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the published revision of a v1 deposit product by its product id",
       "providerStates": [
         {

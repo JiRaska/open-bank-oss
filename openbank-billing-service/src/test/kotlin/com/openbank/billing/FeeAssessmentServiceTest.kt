@@ -11,10 +11,12 @@ import com.openbank.billing.application.usecase.FeeAssessmentService
 import com.openbank.billing.domain.BillableFee
 import com.openbank.libs.product.FeeContext
 import com.openbank.libs.product.WaiveReason
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 
 /**
  * Unit coverage for the fee assessment use case (ADR-0143 phase 2b), against in-memory fakes.
@@ -24,6 +26,7 @@ import java.math.BigDecimal
 class FeeAssessmentServiceTest {
 
     private val pins = InMemoryPins()
+    private val meters = SimpleMeterRegistry()
 
     private fun accounts(billing: AccountBilling?) = object : AccountContextPort {
         override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
@@ -33,13 +36,14 @@ class FeeAssessmentServiceTest {
         billing: AccountBilling?,
         fees: List<BillableFee>,
         revisions: FakeRevisions = FakeRevisions(fees),
-    ) = FeeAssessmentService(accounts(billing), revisions, pins)
+    ) = FeeAssessmentService(accounts(billing), revisions, pins, meters)
 
     @Suppress("TooGenericExceptionThrown")
     private fun serviceWithUnreachableCatalog(billing: AccountBilling?) = FeeAssessmentService(
         accounts(billing),
         FakeRevisions(emptyList(), failure = RuntimeException("product-catalog unreachable")),
         pins,
+        meters,
     )
 
     private fun fee(
@@ -52,7 +56,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `multiple fees get distinct idempotency keys — no collapse (ADR-0143)`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"), OPENED)
         val a = service(billing, listOf(fee("f1", "5"), fee("f2", "3"))).assess("cyc1", "acc1", "CZK")
         val keys = a.journalCommands().map { it.idempotencyKey }
         assertThat(keys).containsExactly("fee-cyc1-acc1-f1-CZK", "fee-cyc1-acc1-f2-CZK")
@@ -61,7 +65,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `a satisfied waiver waives to zero and posts no journal`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("60000"), currency = "EUR"))
+        val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("60000"), currency = "EUR"), OPENED)
         val a = service(
             billing,
             listOf(fee("f1", "5", currency = "EUR", waivable = true, condition = "Balance > 50 000 EUR")),
@@ -73,7 +77,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `a non-waivable fee is always charged`(): Unit = runBlocking {
-        val billing = AccountBilling("p", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("p", FeeContext(currency = "CZK"), OPENED)
         val a = service(billing, listOf(fee("f1", "9"))).assess("c", "acc", "CZK")
         assertThat(a.assessedFees.single().reason).isEqualTo(WaiveReason.NOT_WAIVABLE)
         assertThat(a.journalCommands().single().amount).isEqualByComparingTo("9")
@@ -90,7 +94,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `an unreachable product catalog skips the assessment and charges nothing`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
         val a = serviceWithUnreachableCatalog(billing).assess("c", "acc", "CZK")
         assertThat(a.skipped).isTrue()
         assertThat(a.skipReason).isEqualTo("PRODUCT_CATALOG_UNREACHABLE")
@@ -100,7 +104,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `the first assessment pins the published revision and prices the fee from it`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
         val revisions = FakeRevisions(listOf(fee("f1", "5")))
         val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
 
@@ -114,7 +118,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `a pinned account keeps its revision when the product is later re-published`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
         pins.pins["acc"] = FakeRevisions.PUBLISHED_ID
         val revisions = FakeRevisions(listOf(fee("f1", "5")), published = FakeRevisions.OTHER_ID)
 
@@ -128,7 +132,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `a product with no published revision is skipped and nothing is pinned`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
         val a = service(billing, emptyList(), FakeRevisions(listOf(fee("f1", "5")), published = null))
             .assess("c", "acc", "CZK")
 
@@ -140,7 +144,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `a revision with no accounting class is skipped, never posted to a guessed account`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
         val revisions = FakeRevisions(
             listOf(fee("f1", "5")),
             accountingClass = null,
@@ -155,7 +159,7 @@ class FeeAssessmentServiceTest {
 
     @Test
     fun `a class derived from a legacy product type still assesses`(): Unit = runBlocking {
-        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"))
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
         val revisions = FakeRevisions(
             listOf(fee("f1", "5")),
             accountingClass = "CUSTOMER_DEPOSIT_SAVINGS",
@@ -164,5 +168,86 @@ class FeeAssessmentServiceTest {
         val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
         assertThat(a.skipped).isFalse()
         assertThat(a.journalCommands().single().accountingClass).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
+    }
+
+    private fun skipCount(reason: String) = meters.counter("billing.assessment.skipped", "reason", reason).count()
+
+    @Test
+    fun `a fee-bearing product with no fee in the account currency is skipped, never a zero-fee assessment`(): Unit =
+        runBlocking {
+            val billing = AccountBilling("prod-1", FeeContext(currency = "EUR"), OPENED)
+            // The revision prices a fee in CZK only; the account is in EUR.
+            val revisions = FakeRevisions(listOf(fee("f1", "5", currency = "CZK")))
+            val a = service(billing, emptyList(), revisions).assess("c", "acc", "EUR")
+
+            assertThat(a.skipped).isTrue()
+            assertThat(a.skipReason).isEqualTo("FEE_COMPONENT_UNRESOLVED")
+            assertThat(a.assessedFees).isEmpty()
+            assertThat(a.journalCommands()).isEmpty()
+            assertThat(skipCount("FEE_COMPONENT_UNRESOLVED")).isEqualTo(1.0)
+        }
+
+    @Test
+    fun `a fee-bearing revision whose components are all unusable is skipped too`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
+        // No usable component at all (e.g. only a percentage fee), but the revision does declare fees.
+        val revisions = FakeRevisions(emptyList(), feeBearing = true)
+        val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+        assertThat(a.skipped).isTrue()
+        assertThat(a.skipReason).isEqualTo("FEE_COMPONENT_UNRESOLVED")
+    }
+
+    @Test
+    fun `a product that genuinely declares no fee assesses to zero fees and is not skipped`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), OPENED)
+        val a = service(billing, emptyList(), FakeRevisions(emptyList())).assess("c", "acc", "CZK")
+        assertThat(a.skipped).isFalse()
+        assertThat(a.assessedFees).isEmpty()
+        assertThat(skipCount("FEE_COMPONENT_UNRESOLVED")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `the pin is resolved as of the account's opening, so a later republication does not reprice it`(): Unit =
+        runBlocking {
+            val opened = Instant.parse("2026-03-01T00:00:00Z")
+            val republished = Instant.parse("2026-06-01T00:00:00Z")
+            val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), opened)
+            val revisions = FakeRevisions(
+                listOf(fee("f1", "5")),
+                history = listOf(
+                    Instant.parse("2026-01-01T00:00:00Z") to FakeRevisions.PUBLISHED_ID,
+                    republished to FakeRevisions.OTHER_ID,
+                ),
+            )
+            // Billing sees the account for the first time AFTER the republication.
+            val a = service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+
+            assertThat(revisions.lookups).containsExactly(opened)
+            assertThat(pins.pins).containsEntry("acc", FakeRevisions.PUBLISHED_ID)
+            assertThat(a.assessedFees.single().productRevisionId).isEqualTo(FakeRevisions.PUBLISHED_ID)
+        }
+
+    @Test
+    fun `an account opened after the republication is priced by the new revision`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), Instant.parse("2026-07-01T00:00:00Z"))
+        val revisions = FakeRevisions(
+            listOf(fee("f1", "5")),
+            history = listOf(
+                Instant.parse("2026-01-01T00:00:00Z") to FakeRevisions.PUBLISHED_ID,
+                Instant.parse("2026-06-01T00:00:00Z") to FakeRevisions.OTHER_ID,
+            ),
+        )
+        service(billing, emptyList(), revisions).assess("c", "acc", "CZK")
+        assertThat(pins.pins).containsEntry("acc", FakeRevisions.OTHER_ID)
+    }
+
+    @Test
+    fun `an account whose opening is unknown is skipped rather than pinned to today's terms`(): Unit = runBlocking {
+        val billing = AccountBilling("prod-1", FeeContext(currency = "CZK"), openedAt = null)
+        val a = service(billing, emptyList(), FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc", "CZK")
+        assertThat(a.skipped).isTrue()
+        assertThat(a.skipReason).isEqualTo("ACCOUNT_OPENING_UNKNOWN")
+        assertThat(pins.pins).isEmpty()
+        assertThat(skipCount("ACCOUNT_OPENING_UNKNOWN")).isEqualTo(1.0)
     }
 }

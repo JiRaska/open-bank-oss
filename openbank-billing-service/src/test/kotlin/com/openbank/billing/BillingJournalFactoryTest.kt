@@ -50,7 +50,8 @@ class BillingJournalFactoryTest {
         val debit = lines.single { it.side == "DEBIT" }
         val credit = lines.single { it.side == "CREDIT" }
         // Legs name a class and a role, never a GL account (ADR-0341 D3); the ledger resolves them.
-        assertThat(debit.accountingClass to debit.accountingRole).isEqualTo("CUSTOMER_DEPOSIT_DEMAND" to "PRINCIPAL")
+        assertThat(debit.accountingClass to debit.accountingRole)
+            .isEqualTo("CUSTOMER_DEPOSIT_DEMAND" to "FEE_SETTLEMENT")
         assertThat(debit.subAccountId).isEqualTo(UUID.fromString(accountId))
         assertThat(credit.accountingClass to credit.accountingRole).isEqualTo("FEE_INCOME_ACCOUNT" to "FEE_INCOME")
         assertThat(credit.subAccountId).isNull()

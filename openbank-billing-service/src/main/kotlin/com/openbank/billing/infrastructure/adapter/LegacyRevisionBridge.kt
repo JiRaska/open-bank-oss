@@ -62,12 +62,33 @@ internal object LegacyFees {
     private val NON_CODE = Regex("[^A-Z0-9]+")
 }
 
-/** `productType` of a v1 projection -> the deposit accounting class it implies (see [LegacyFees]). */
+/**
+ * `productType` of a v1 projection -> the deposit accounting class it implies (see [LegacyFees]).
+ *
+ * EVERY value of the v1 `ProductType` enum (and of the `legacy-product` schema's `productType` enum)
+ * is mapped, because before ADR-0341 billing charged a fee against the customer's deposit-control
+ * account whatever the product's type. A product that is not itself a deposit (LOAN, MORTGAGE,
+ * CREDIT_CARD, OVERDRAFT, INVESTMENT) is billed to the customer's CURRENT account, which is where its
+ * fee was always debited; deriving it is COUNTED per type (`billing.accounting_class.derived`). Only a
+ * type the v1 enum does not contain yields null, and that is a counted skip, not a guess.
+ */
 internal object LegacyProductTypes {
+    /** All v1 product types: `openbank-product-catalog` `ProductType` and the legacy-product pack schema. */
+    val KNOWN = setOf(
+        "CURRENT",
+        "SAVINGS",
+        "TERM_DEPOSIT",
+        "OVERDRAFT",
+        "LOAN",
+        "MORTGAGE",
+        "CREDIT_CARD",
+        "INVESTMENT",
+    )
+
     fun accountingClassOf(productType: String?): String? = when (productType) {
-        "CURRENT" -> "CUSTOMER_DEPOSIT_DEMAND"
         "SAVINGS" -> "CUSTOMER_DEPOSIT_SAVINGS"
         "TERM_DEPOSIT" -> "CUSTOMER_DEPOSIT_TERM"
+        "CURRENT", "OVERDRAFT", "LOAN", "MORTGAGE", "CREDIT_CARD", "INVESTMENT" -> "CUSTOMER_DEPOSIT_DEMAND"
         else -> null
     }
 }

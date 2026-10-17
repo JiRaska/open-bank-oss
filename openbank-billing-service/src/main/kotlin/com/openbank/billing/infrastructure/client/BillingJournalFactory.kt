@@ -22,8 +22,13 @@ import java.util.UUID
  */
 object BillingJournalFactory {
 
-    /** The customer leg's class comes from the pinned revision; the ledger maps it to the deposit-control GL. */
-    private const val CUSTOMER_ROLE = "PRINCIPAL"
+    /**
+     * The customer leg's class comes from the pinned revision; the ledger maps (class, FEE_SETTLEMENT,
+     * currency) to the deposit-control GL billing always debited: 2100 in EVERY currency, not the
+     * per-currency control account PRINCIPAL would name (ledger V31). Byte-identical to before ADR-0341;
+     * `FeeJournalsUnchangedTest` proves it for every currency and both legs.
+     */
+    private const val CUSTOMER_ROLE = "FEE_SETTLEMENT"
 
     /** The bank's fee income, a class of its own that no product revision carries (ADR-0341 D3). */
     private const val FEE_INCOME_CLASS = "FEE_INCOME_ACCOUNT"
