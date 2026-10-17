@@ -5,9 +5,7 @@
 // FATCA, assembled by tax-reporting-service (ADR-0340).
 
 import {
-  ReportSourceError, activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, malformed, mapLimit, num,
-  offsetRoster, round2, rows, str, sumByCurrency, template, text, within,
-  type GeneratedCell, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
+  ReportSourceError, count, gap, malformed, num, round2, rows, str, template, text, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
 } from '@/lib/regulatory/generators/core'
 
 const TAX_CATALOGUE = 'cz-tax-information-exchange'

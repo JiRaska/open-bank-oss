@@ -5,9 +5,7 @@
 // FAÚ suspicious-transaction report (zákon č. 253/2008 Sb.).
 
 import {
-  ReportSourceError, activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, malformed, mapLimit, num,
-  offsetRoster, round2, rows, str, sumByCurrency, template, text, within,
-  type GeneratedCell, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
+  ReportSourceError, amount, count, malformed, mapLimit, num, offsetRoster, round2, str, template, text, within, type GeneratedCell, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
 } from '@/lib/regulatory/generators/core'
 
 const SAR_STATUSES = new Set(['ESCALATED', 'BLOCKED'])

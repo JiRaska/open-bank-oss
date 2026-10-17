@@ -5,9 +5,7 @@
 // DORA ICT incident report (EU 2022/2554).
 
 import {
-  ReportSourceError, activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, malformed, mapLimit, num,
-  offsetRoster, round2, rows, str, sumByCurrency, template, text, within,
-  type GeneratedCell, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
+  count, num, offsetRoster, str, template, text, within, type GeneratedTemplate, type ReportSourceClient,
 } from '@/lib/regulatory/generators/core'
 
 const DORA_MAJOR = new Set(['P1_CRITICAL', 'P2_HIGH'])

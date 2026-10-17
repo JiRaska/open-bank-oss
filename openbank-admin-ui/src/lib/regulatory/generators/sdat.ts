@@ -5,9 +5,7 @@
 // SDAT (ČNB statistical reporting, vyhláška č. 314/2013 Sb.): PLAT payments and VKLA deposits.
 
 import {
-  ReportSourceError, activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, malformed, mapLimit, num,
-  offsetRoster, round2, rows, str, sumByCurrency, template, text, within,
-  type GeneratedCell, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
+  ReportSourceError, activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, malformed, mapLimit, num, round2, str, sumByCurrency, template, type GeneratedCell, type GeneratedTemplate, type ReportSourceClient, type Row,
 } from '@/lib/regulatory/generators/core'
 
 /** SDAT PLAT — payment statistics: counts and volumes by rail and currency for one month. */

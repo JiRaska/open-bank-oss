@@ -5,9 +5,7 @@
 // ECB payment statistics (ECB/2013/43).
 
 import {
-  ReportSourceError, activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, malformed, mapLimit, num,
-  offsetRoster, round2, rows, str, sumByCurrency, template, text, within,
-  type GeneratedCell, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
+  activeAccounts, amount, completedTransactions, count, currencyCells, gap, isPayment, rows, str, sumByCurrency, template, type GeneratedTemplate, type GenerationConfig, type ReportSourceClient, type Row,
 } from '@/lib/regulatory/generators/core'
 
 /** ECB payment statistics — annual: accounts, cards, cashless payments, ATMs. */
