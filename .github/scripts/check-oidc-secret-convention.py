@@ -141,6 +141,12 @@ def classify(found, baseline: dict[str, str] | None = None, dedicated: set[str] 
 
 SHARED_CLIENT = "openbank-services"
 
+# Env names that set the client a workload authenticates as. `OIDC_CLIENT_ID` is the
+# application.yaml expression some services expose (pricing). The two `QUARKUS_*` names are
+# Quarkus's own env overrides of `quarkus.oidc-client.client-id` and `quarkus.oidc.client-id`,
+# which apply even where application.yaml writes the client id as a literal (ledger-pension-co).
+CLIENT_ID_ENVS = frozenset({"OIDC_CLIENT_ID", "QUARKUS_OIDC_CLIENT_CLIENT_ID", "QUARKUS_OIDC_CLIENT_ID"})
+
 
 def dedicated_clients_in(doc) -> set[str]:
     """Literal OIDC_CLIENT_ID values a workload sets that are NOT the shared client."""
@@ -151,7 +157,7 @@ def dedicated_clients_in(doc) -> set[str]:
     for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
         for e in (c or {}).get("env") or []:
             v = (e or {}).get("value")
-            if (e or {}).get("name") == "OIDC_CLIENT_ID" and isinstance(v, str) and v and v != SHARED_CLIENT \
+            if (e or {}).get("name") in CLIENT_ID_ENVS and isinstance(v, str) and v and v != SHARED_CLIENT \
                     and not v.startswith("${"):
                 out.add(v)
     return out
@@ -244,10 +250,16 @@ def self_test() -> int:
         ok = len(v) == want
         failed += not ok
         print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {want}v, got {len(v)}v)")
-    wl = lambda cid: {"kind": "Deployment", "spec": {"template": {"spec": {"containers": [
-        {"name": "a", "env": [{"name": "OIDC_CLIENT_ID", "value": cid}]}]}}}}
+    wl = lambda cid, env="OIDC_CLIENT_ID": {"kind": "Deployment", "spec": {"template": {"spec": {
+        "containers": [{"name": "a", "env": [{"name": env, "value": cid}]}]}}}}
     for name, doc, want in [
         ("a dedicated OIDC_CLIENT_ID is detected", wl("openbank-pricing-service"), 1),
+        ("a dedicated QUARKUS_OIDC_CLIENT_CLIENT_ID is detected",
+         wl("openbank-ledger-pension-co", "QUARKUS_OIDC_CLIENT_CLIENT_ID"), 1),
+        ("the shared client via QUARKUS_OIDC_CLIENT_CLIENT_ID is not a dedicated one",
+         wl(SHARED_CLIENT, "QUARKUS_OIDC_CLIENT_CLIENT_ID"), 0),
+        ("an unrelated *_CLIENT_ID env is not a client override",
+         wl("openbank-foo", "KAFKA_CLIENT_ID"), 0),
         ("the shared client is not a dedicated one", wl(SHARED_CLIENT), 0),
         ("an env-expression default is not a literal client", wl("${X:openbank-foo}"), 0),
     ]:
