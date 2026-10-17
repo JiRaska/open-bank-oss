@@ -9,8 +9,10 @@ import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -38,12 +40,12 @@ class SanctionsRefreshHeartbeatTest {
     private val publisher = mockk<SanctionsChangePublisher>()
     private val registry = SimpleMeterRegistry()
 
-    private fun service(): SanctionsListService {
+    private fun service(fence: SanctionsImportPublicationFence? = null): SanctionsListService {
         val instance = mockk<Instance<MeterRegistry>>()
         every { instance.isResolvable } returns true
         every { instance.get() } returns registry
         val metrics = DomainMetrics().apply { registryInstance = instance }
-        return SanctionsListService(repo, importer, clock, publisher, null, metrics)
+        return SanctionsListService(repo, importer, clock, publisher, fence, metrics)
     }
 
     private fun successRecorded(): Double? = registry
@@ -119,6 +121,73 @@ class SanctionsRefreshHeartbeatTest {
     @Test
     fun `a refresh that finds an empty feed is not a success`() {
         tickWith(ListImportResult(ListImportOutcome.EMPTY_FEED, 0))
+
+        assertThat(successRecorded()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a list that failed at its cron minute keeps the heartbeat stale on the next tick`(): Unit = runBlocking {
+        val due = dueList()
+        val idle = due.copy(refreshRequestedAt = null)
+        coEvery { repo.listSanctionsLists() } returns listOf(due)
+        coEvery { repo.findByListType("OFAC_SDN") } throws IllegalStateException("db hiccup")
+        coEvery { publisher.publishPending(any(), any()) } returns SanctionsPublicationOutcome.NO_CHANGES
+        val service = service()
+
+        service.scheduledRefresh()
+        assertThat(successRecorded()).isEqualTo(0.0)
+
+        // Tick 2: the cron minute has passed, nothing is due, yet the last attempt still failed.
+        coEvery { repo.listSanctionsLists() } returns listOf(idle)
+        service.scheduledRefresh()
+
+        assertThat(successRecorded()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a later successful refresh of the failed list restores the heartbeat`(): Unit = runBlocking {
+        val due = dueList()
+        coEvery { repo.listSanctionsLists() } returns listOf(due)
+        coEvery { repo.findByListType("OFAC_SDN") } returns due
+        coEvery { publisher.publishPending(any(), any()) } returns SanctionsPublicationOutcome.NO_CHANGES
+        coEvery { repo.markUpdated("OFAC_SDN", any()) } returns due
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returnsMany listOf(
+            ListImportResult(ListImportOutcome.FAILED_KEPT_EXISTING, 0),
+            ListImportResult(ListImportOutcome.IMPORTED, 5),
+        )
+        val service = service()
+
+        service.scheduledRefresh()
+        assertThat(successRecorded()).isEqualTo(0.0)
+        service.scheduledRefresh()
+
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    private fun fencedTick(result: ListImportResult, inheritedIncomplete: Boolean) = runBlocking {
+        val list = dueList()
+        val fence = mockk<SanctionsImportPublicationFence>()
+        val permit = SanctionsPublicationPermit(SanctionsListType.OFAC_SDN, 1, inheritedIncomplete)
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
+            secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>().invoke(permit)
+        }
+        coEvery { repo.listSanctionsLists() } returns listOf(list)
+        coEvery { repo.findByListType("OFAC_SDN") } returns list
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any(), any()) } returns result
+        coEvery { repo.markRetryPendingFenced("OFAC_SDN", any()) } returns list
+        service(fence).scheduledRefresh()
+    }
+
+    @Test
+    fun `the fenced branch reports a failed import as deferred, not a success`() {
+        fencedTick(ListImportResult(ListImportOutcome.FAILED_KEPT_EXISTING, 0), inheritedIncomplete = false)
+
+        assertThat(successRecorded()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `the fenced branch reports an inherited incomplete import as deferred, not a success`() {
+        fencedTick(ListImportResult(ListImportOutcome.SKIPPED_NOT_ENTITY_BASED, 0), inheritedIncomplete = true)
 
         assertThat(successRecorded()).isEqualTo(0.0)
     }
