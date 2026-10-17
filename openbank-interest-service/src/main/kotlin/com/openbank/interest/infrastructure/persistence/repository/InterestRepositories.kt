@@ -406,15 +406,20 @@ class RateRevisionPinRepositoryImpl @Inject constructor(
                 Uni.createFrom().item(false)
             } else {
                 // First writer wins; a concurrent first accrual of the same account loses harmlessly.
+                // Only an account with NO accrual history is pinned here - history is pinned by V19.
                 s.createNativeQuery<Int>(
                     "INSERT INTO account_rate_revision_pins " +
                         "(id, account_id, product_id, currency, revision_id, pinned_at) " +
-                        "VALUES (:id, :a, :prod, :ccy, :rev, :at) " +
+                        "SELECT CAST(:id AS uuid), CAST(:a AS uuid), CAST(:prod AS varchar), " +
+                        "CAST(:ccy AS char(3)), CAST(:rev AS uuid), CAST(:at AS timestamptz) " +
+                        "WHERE NOT EXISTS (SELECT 1 FROM interest_accruals ia " +
+                        "WHERE ia.account_id = CAST(:a AS uuid) AND ia.product_id = CAST(:prod AS varchar) " +
+                        "AND ia.currency = CAST(:ccy AS char(3))) " +
                         "ON CONFLICT (account_id, product_id, currency) DO NOTHING",
                 ).setParameter("id", UUID.randomUUID()).setParameter("a", accountId)
                     .setParameter("prod", productId).setParameter("ccy", currency)
                     .setParameter("rev", revisionId).setParameter("at", OffsetDateTime.now(clock))
-                    .executeUpdate().replaceWith(true)
+                    .executeUpdate().map { it > 0 }
             }
         }
     }

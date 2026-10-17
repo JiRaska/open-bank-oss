@@ -11,6 +11,7 @@ import com.openbank.interest.application.port.out.LedgerPostingPort
 import com.openbank.interest.application.port.out.RateRevisionPinRepository
 import com.openbank.interest.application.port.out.TaxProfilePort
 import com.openbank.interest.domain.model.AccrualRequest
+import com.openbank.interest.domain.model.CatalogRevisionUnresolvableException
 import com.openbank.interest.domain.model.CatalogSourcedRateException
 import com.openbank.interest.domain.model.DayCount
 import com.openbank.interest.domain.model.InterestAccrual
@@ -125,5 +126,33 @@ class InterestServiceRevisionPinTest {
         assertThatThrownBy { service.deactivateConfig(cached.id).await().indefinitely() }
             .isInstanceOf(CatalogSourcedRateException::class.java)
         verify(exactly = 0) { configRepo.updateWithOutbox(any(), any()) }
+    }
+
+    @Test
+    fun `a pin that cannot be resolved fails the accrual and never falls back to the effective rate`() {
+        val effective = config("0.03")
+        every { accrualRepo.findByNaturalKey(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
+            Uni.createFrom().item(effective)
+        every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
+        every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(true)
+
+        assertThatThrownBy { service.accrue(request).await().indefinitely() }
+            .isInstanceOf(CatalogRevisionUnresolvableException::class.java)
+        verify(exactly = 0) { accrualRepo.save(any()) }
+    }
+
+    @Test
+    fun `no pin written means an operator-managed rate and the effective config answers`() {
+        val effective = config("0.03")
+        val saved = stubAccrual()
+        every { configRepo.findEffectiveRate(account, "SAVINGS", request.accrualDate, "EUR") } returns
+            Uni.createFrom().item(effective)
+        every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
+        every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(false)
+
+        service.accrue(request).await().indefinitely()
+
+        assertThat(saved.captured.configId).isEqualTo(effective.id)
     }
 }

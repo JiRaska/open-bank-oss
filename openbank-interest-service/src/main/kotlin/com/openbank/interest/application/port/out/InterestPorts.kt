@@ -191,8 +191,14 @@ interface RateRevisionPinRepository {
     fun findPinnedConfig(accountId: UUID, productId: String, currency: String): Uni<InterestRateConfig?>
 
     /**
-     * Pin [accountId] to the revision [config] caches, if [config] is catalog-sourced; first writer wins
-     * and an existing pin is never replaced. Returns false (writes nothing) for an operator-managed config.
+     * Pin [accountId] to the revision [config] caches. Writes a pin ONLY when [config] is catalog-sourced
+     * AND the account has no prior accrual for (product, currency) AND no pin exists yet; first writer
+     * wins and an existing pin is never replaced. An account with accrual history is pinned by the V19
+     * backfill from the config it last accrued under, never by "whatever is current now".
+     *
+     * Returns true when THIS call wrote the pin; false means nothing was written (operator-managed
+     * config, existing history, or a concurrent writer already pinned). It does NOT mean "no pin
+     * exists" - callers must re-read via [findPinnedConfig].
      */
     fun pinIfCatalogSourced(
         accountId: UUID,

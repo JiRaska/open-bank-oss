@@ -22,6 +22,7 @@ import com.openbank.interest.domain.event.InterestRateChanged
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.AccrualSummary
+import com.openbank.interest.domain.model.CatalogRevisionUnresolvableException
 import com.openbank.interest.domain.model.CatalogSourcedRateException
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
@@ -194,16 +195,34 @@ class InterestService(
                                 request.productId,
                                 request.currency,
                                 effective,
-                            )
-                                .flatMap { _ ->
-                                    // First writer wins: re-read so a concurrent pin to another revision is honoured.
-                                    pins.findPinnedConfig(request.accountId, request.productId, request.currency)
-                                        .map { it ?: effective }
-                                }
+                            ).flatMap { wrote ->
+                                // First writer wins: re-read so a concurrent pin is honoured.
+                                pins.findPinnedConfig(request.accountId, request.productId, request.currency)
+                                    .flatMap { reread -> settle(request, effective, wrote, reread) }
+                            }
                         }
                     }
                 }
             }
+    }
+
+    /**
+     * After a pin attempt. A resolvable pin wins. If this call just wrote a pin that cannot be resolved,
+     * the revision's snapshot is missing: fail visibly rather than fall back to "currently effective",
+     * which would silently reprice the contract. Nothing written means no catalog pin applies here
+     * (operator-managed rate, or pre-sync history), so the effective operator rate stands.
+     */
+    private fun settle(
+        request: AccrualRequest,
+        effective: InterestRateConfig,
+        wrote: Boolean,
+        reread: InterestRateConfig?,
+    ): Uni<InterestRateConfig?> = when {
+        reread != null -> Uni.createFrom().item<InterestRateConfig?>(reread)
+        wrote -> Uni.createFrom().failure(
+            CatalogRevisionUnresolvableException(request.accountId, request.productId, request.currency),
+        )
+        else -> Uni.createFrom().item<InterestRateConfig?>(effective)
     }
 
     /**
@@ -263,7 +282,14 @@ class InterestService(
                         currency = balance.currency,
                         accrualDate = date,
                     ),
-                ).map { 1 }.onFailure().recoverWithItem(0)
+                ).map { 1 }
+                    .onFailure(CatalogRevisionUnresolvableException::class.java).recoverWithItem { e ->
+                        // Skipped WITH a reason and a metric: never accrued at a guessed rate (ADR-0341).
+                        log.warnf("accrual skipped for account %s: %s", account.id, e.message)
+                        capitalizationMetrics?.catalogRevisionUnresolved()
+                        0
+                    }
+                    .onFailure().recoverWithItem(0)
             }
         }
 

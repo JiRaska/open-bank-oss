@@ -27,6 +27,7 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * ADR-0341 against the real schema: a superseding catalog revision reprices NEW accounts only. An
@@ -43,6 +44,8 @@ internal class RevisionPinSupersedeIT {
     @Inject lateinit var accrue: AccrueInterestUseCase
 
     @Inject lateinit var rates: ManageRateConfigUseCase
+
+    @Inject lateinit var dataSource: DataSource
 
     private val specification = UUID.randomUUID()
 
@@ -85,6 +88,32 @@ internal class RevisionPinSupersedeIT {
         assertThat(later.accruedAmount).isEqualByComparingTo("0.054795")
         assertThat(brandNew.configId).isNotEqualTo(first.configId)
         assertThat(brandNew.accruedAmount).isEqualByComparingTo("0.082192")
+    }
+
+    @Test
+    fun `account with accrual history and no pin is backfilled to the config it last accrued under`() {
+        publish("0.020000000000000000", LocalDate.of(2027, 4, 1), "c-d")
+        val legacy = UUID.randomUUID()
+        val first = accrueOn(legacy, LocalDate.of(2027, 4, 5))
+        // Simulate an account that accrued BEFORE V18: drop its pin, keep its accrual history.
+        dataSource.connection.use { c ->
+            c.prepareStatement("DELETE FROM account_rate_revision_pins WHERE account_id = ?").use {
+                it.setObject(1, legacy)
+                it.executeUpdate()
+            }
+        }
+        // Run the V19 backfill exactly as shipped.
+        val sql = javaClass.classLoader.getResourceAsStream(
+            "db/migration/V19__backfill_account_rate_revision_pins.sql",
+        )!!
+            .bufferedReader().readText()
+        dataSource.connection.use { c -> c.createStatement().use { it.execute(sql) } }
+
+        publish("0.030000000000000000", LocalDate.of(2027, 4, 10), "c-e")
+        val next = accrueOn(legacy, LocalDate.of(2027, 4, 15))
+
+        assertThat(next.configId).isEqualTo(first.configId)
+        assertThat(next.accruedAmount).isEqualByComparingTo("0.054795")
     }
 
     @Test
