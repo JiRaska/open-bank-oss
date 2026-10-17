@@ -61,7 +61,9 @@ Obě jsou `suspend fun`; v `%test` je plánovač vypnutý a testy je spouštěj�
 | `openbank.card.processing.presentments` | `fully_cleared` |
 | `openbank.card.processing.clearing.conflicts` | — (clearingy, reverzace a expirace, které prohrály souběh zápisů a byly znovu vyhodnoceny; expirace, která prohraje dvakrát, počká na další sweep) |
 | `openbank.card.processing.hold.releases` | `kind` (`REVERSAL` / `EXPIRY`) |
-| `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
+| `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED` / `UNKNOWN`) |
+| `openbank.card.processing.ledger.posting.unposted` (gauge) | clearingy, které stále čekají na zaúčtování |
+| `openbank.card.processing.ledger.posting.exhausted` (gauge) | clearingy, které vyčerpaly pokusy; alert `CardLedgerPostingExhausted` |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
 
 Stínové fraud skórování posílá fraud-service jeho skutečný kontrakt `POST /api/v1/fraud/score`: `accountId`, `amount` v hlavních jednotkách podle počtu desetinných míst měny, `currency` a `rail = "CARD"`. Čte `verdict` a celočíselné `score`. Autorizaci nikdy neblokuje. Selhání (jakékoli 4xx/5xx, timeout nebo nečitelné tělo) se počítá jako `outcome=FAILED` a loguje na úrovni WARN, nejvýš jednou za minutu s počtem potlačených selhání. Do 2026-10-04 klient posílal `currencyCode`, žádné `rail` a částky v nejmenších jednotkách a četl `decision`, takže každé stínové skórování tiše selhalo. Pacty `pacts/openbank-card-processing-service-openbank-fraud-service.json` a `…-openbank-transaction-service.json` teď obě volání ukotvují, včetně zaznamenané odpovědi 401.
@@ -91,7 +93,11 @@ Definované v `openbank-infra/gitops/components/observability/prometheus-rules-c
 
 ### Zaúčtování FAILED
 
-Clearing je zaznamenán, účetnictví ne. Hledejte řádek logu `ledger posting FAILED for authorization …` a counter `outcome=FAILED`. Ověřte dosažitelnost transaction-service a token client credentials. Zaúčtování nese idempotenční klíč `card-clearing:<idAutorizace>:h:<base64url(SHA-256(klíč))>` (viz 03 — API), takže opakování přes transaction-service nemůže zaúčtovat dvakrát. Opakování stejného clearingu acquirerem zaúčtování **nezkusí znovu**: klíč clearingu je už započten a vrátí replay bez sáhnutí na účetnictví, takže zaúčtování `FAILED` je nutné znovu spustit vědomě.
+Clearing je zaznamenán, účetnictví možná ne. Hledejte řádek logu `ledger posting FAILED|UNKNOWN for authorization …` a čítač `outcome=FAILED|UNKNOWN`. `UNKNOWN` znamená nečitelnou odpověď (tělo, které nejde namapovat, přerušené spojení): není známo, zda ledger debet zaúčtoval. Zaúčtování nese idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>`, takže jeho opakování nemůže účtovat dvakrát.
+
+Každý řádek clearingu nese stav zaúčtování (`card_clearings.posting_status` `PENDING` / `POSTED` / `FAILED` / `UNKNOWN`, `posting_attempts`, `posting_last_error`, `posting_next_attempt_at`), zapsaný ve stejné transakci jako clearing. Plánovaný re-driver (`openbank.card-processing.posting-redrive-cron`, výchozí každou minutu, heartbeat `card-processing-ledger-posting-redrive`) zaúčtuje každý nezaúčtovaný řádek znovu s exponenciálním backoffem (`posting-backoff-seconds` 60, strop `posting-backoff-max-seconds` 3600) nejvýše `posting-max-attempts` (12) krát. Opakování stejného clearingu akvirerem ledger stále nezasáhne; jen re-driver.
+
+Po posledním pokusu řádek zůstane `FAILED`/`UNKNOWN` (nikdy se nezahodí) a `openbank.card.processing.ledger.posting.exhausted` stoupne nad nulu: alert `CardLedgerPostingExhausted`. Odstraňte příčinu a řádek znovu zpřístupněte (`UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now() WHERE id = …`); idempotency key zaručí jediný debet.
 
 ### Každá autorizace je zamítnuta
 

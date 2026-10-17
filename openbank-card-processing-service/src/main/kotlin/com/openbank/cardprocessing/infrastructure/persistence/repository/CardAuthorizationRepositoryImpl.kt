@@ -6,6 +6,7 @@ package com.openbank.cardprocessing.infrastructure.persistence.repository
 
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
+import com.openbank.cardprocessing.application.port.out.PostingStatus
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
@@ -248,6 +249,9 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         it.amountMinorUnits = amountMinorUnits
         it.currencyCode = currencyCode
         it.appliedAt = appliedAt
+        it.postingStatus = postingStatus.name
+        it.postingAttempts = postingAttempts
+        it.postingNextAttemptAt = postingNextAttemptAt
     }
 
     private fun CardClearingEntity.toDomain() = RecordedClearing(
@@ -258,6 +262,9 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         amountMinorUnits = amountMinorUnits,
         currencyCode = currencyCode,
         appliedAt = appliedAt,
+        postingStatus = PostingStatus.valueOf(postingStatus),
+        postingAttempts = postingAttempts,
+        postingNextAttemptAt = postingNextAttemptAt,
     )
 
     /**

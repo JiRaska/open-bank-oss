@@ -14,6 +14,7 @@ import com.openbank.cardprocessing.application.port.out.CardIssuancePolicyPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.CardProcessingMetricsPort
+import com.openbank.cardprocessing.application.port.out.ClearingPostingRepository
 import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
 import com.openbank.cardprocessing.application.port.out.FraudScore
 import com.openbank.cardprocessing.application.port.out.FraudScoringOutcome
@@ -26,6 +27,7 @@ import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.application.usecase.CardNotFoundException
 import com.openbank.cardprocessing.application.usecase.CardProcessingService
+import com.openbank.cardprocessing.application.usecase.ClearingLedgerPoster
 import com.openbank.cardprocessing.domain.event.CardAuthorised
 import com.openbank.cardprocessing.domain.event.CardDeclined
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
@@ -72,6 +74,7 @@ class CardProcessingServiceTest {
     private val cards = mockk<CardLookupPort>()
     private val issuer = mockk<CardIssuancePolicyPort>()
     private val ledger = mockk<LedgerPostingPort>()
+    private val postings = mockk<ClearingPostingRepository>(relaxed = true)
     private val fraud = mockk<FraudScoringPort>()
 
     // The simulator, not a mock: the merchant lookup is a real collaborator on this path now, and a
@@ -84,7 +87,7 @@ class CardProcessingServiceTest {
         repository = repository,
         cards = cards,
         issuerPolicy = issuer,
-        ledger = ledger,
+        poster = ClearingLedgerPoster(ledger, postings, metrics, clock, backoffSeconds = 60, backoffMaxSeconds = 3600),
         fraud = fraud,
         merchants = merchants,
         metrics = metrics,
@@ -306,8 +309,10 @@ class CardProcessingServiceTest {
         coEvery { quietLedger.postClearedSpend(any(), any(), any()) } returns
             PostingResult(PostingOutcome.POSTED, null, null)
         runBlocking {
+            val quietMetrics = mockk<CardProcessingMetricsPort>(relaxed = true)
+            val poster = ClearingLedgerPoster(quietLedger, postings, quietMetrics, clock, 60, 3600)
             CardProcessingService(
-                repo, cards, issuer, quietLedger, fraud, merchants, mockk(relaxed = true), mapper, clock, HOLD_DAYS,
+                repo, cards, issuer, poster, fraud, merchants, quietMetrics, mapper, clock, HOLD_DAYS,
             ).clear(fingerprintOf.copy(authorizationId = authorizationId, idempotencyKey = key))
         }
         return captured.captured

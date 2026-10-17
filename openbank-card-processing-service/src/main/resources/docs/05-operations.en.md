@@ -61,7 +61,9 @@ Both are `suspend fun`; in `%test` the scheduler is disabled and the tests drive
 | `openbank.card.processing.presentments` | `fully_cleared` |
 | `openbank.card.processing.clearing.conflicts` | — (clearings, reversals and expiries that lost a concurrent-write race and were re-evaluated; an expiry that loses twice is left for the next sweep) |
 | `openbank.card.processing.hold.releases` | `kind` (`REVERSAL` / `EXPIRY`) |
-| `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
+| `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED` / `UNKNOWN`) |
+| `openbank.card.processing.ledger.posting.unposted` (gauge) | clearings still owed a ledger posting |
+| `openbank.card.processing.ledger.posting.exhausted` (gauge) | clearings that used up their attempts; alert `CardLedgerPostingExhausted` |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
 
 Shadow fraud scoring sends fraud-service its real `POST /api/v1/fraud/score` contract: `accountId`, `amount` in major units by the currency's minor-unit digits, `currency` and `rail = "CARD"`. It reads `verdict` and an integer `score`. It never blocks an authorisation. A failure (any 4xx/5xx, timeout or unreadable body) is counted as `outcome=FAILED` and logged at WARN, at most once a minute with the number of suppressed failures. Before 2026-10-04 the client sent `currencyCode`, no `rail` and minor-unit amounts, and read `decision`, so every shadow score failed silently. The pacts `pacts/openbank-card-processing-service-openbank-fraud-service.json` and `…-openbank-transaction-service.json` now pin both calls, including a recorded 401.
@@ -91,7 +93,11 @@ Defined in `openbank-infra/gitops/components/observability/prometheus-rules-card
 
 ### Ledger posting FAILED
 
-The clearing is recorded; the books are not. Look for the log line `ledger posting FAILED for authorization …` and the `outcome=FAILED` counter. Check transaction-service reachability and the client-credentials token. The posting carries the idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>` (see 03 — API), so a replay through transaction-service cannot double-post. An acquirer retry of the same clearing does **not** re-attempt the posting: the clearing key is already applied and replays without touching the ledger, so a `FAILED` posting must be re-driven deliberately.
+The clearing is recorded; the books may not be. Look for the log line `ledger posting FAILED|UNKNOWN for authorization …` and the `outcome=FAILED|UNKNOWN` counter. `UNKNOWN` means the answer was unreadable (a body that did not bind, a cut connection): whether the ledger booked the debit is not known. The posting carries the idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>` (see 03 — API), so posting it again cannot double-post.
+
+Each clearing row carries its posting state (`card_clearings.posting_status` `PENDING` / `POSTED` / `FAILED` / `UNKNOWN`, `posting_attempts`, `posting_last_error`, `posting_next_attempt_at`), written in the clearing's own transaction. The scheduled re-driver (`openbank.card-processing.posting-redrive-cron`, default every minute, heartbeat `card-processing-ledger-posting-redrive`) posts every unposted row again with exponential backoff (`posting-backoff-seconds` 60, capped at `posting-backoff-max-seconds` 3600) up to `posting-max-attempts` (12). An acquirer retry of the same clearing still does **not** touch the ledger; only the re-driver does.
+
+After the last attempt the row stays `FAILED`/`UNKNOWN` (never dropped) and `openbank.card.processing.ledger.posting.exhausted` goes above zero: alert `CardLedgerPostingExhausted`. Fix the cause, then make the row due again (`UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now() WHERE id = …`); the ledger idempotency key guarantees one debit.
 
 ### Every authorisation is declined
 

@@ -122,3 +122,32 @@ tests:
       - eval_time: 90m
         alertname: CardTokenProvisioningAlwaysRefused
         exp_alerts: []
+
+  # 99. The re-driver gave up (#13228): the exhausted gauge fires, a zero gauge does not.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_processing_ledger_posting_exhausted{service="card-processing"}'
+        values: "0 0 0 1x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CardLedgerPostingExhausted
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              domain: payments
+              service: card-processing
+            exp_annotations:
+              summary: Card spend is missing from the books and will not be retried
+              subject_period: continuous
+              description: >-
+                One or more cleared card transactions exhausted their ledger posting attempts. They are kept in card_clearings with posting_status FAILED or UNKNOWN. Fix the cause (transaction-service, the client-credentials token), then make the rows due again; the ledger idempotency key guarantees the debit is booked once.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+
+  - interval: 1m
+    input_series:
+      - series: 'openbank_card_processing_ledger_posting_exhausted{service="card-processing"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CardLedgerPostingExhausted
+        exp_alerts: []

@@ -4,12 +4,15 @@
 
 package com.openbank.cardprocessing.infrastructure.client
 
+import com.fasterxml.jackson.core.JsonParseException
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.libs.domain.calendar.AccountingClock
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.ProcessingException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -82,6 +85,12 @@ class TransactionLedgerPostingAdapter(
             )
             PostingResult(PostingOutcome.POSTED, response.id, response.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            // An unreadable answer proves nothing: the debit may or may not be booked. It is neither
+            // POSTED nor FAILED but UNKNOWN, and the re-driver posts it again under the same key.
+            if (isUnreadableResponse(e)) {
+                log.warnf(e, "ledger posting for authorization %s has an unreadable answer", authorization.id)
+                return PostingResult(PostingOutcome.UNKNOWN, null, UNREADABLE_DETAIL)
+            }
             // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
             // here may propagate and undo a fact the acquirer has already asserted. The FAILED
             // outcome is what makes the gap visible instead of swallowed.
@@ -89,6 +98,9 @@ class TransactionLedgerPostingAdapter(
             PostingResult(PostingOutcome.FAILED, null, e.message)
         }
     }
+
+    private fun isUnreadableResponse(e: Throwable): Boolean = e is ProcessingException ||
+        generateSequence(e) { it.cause }.any { it is MismatchedInputException || it is JsonParseException }
 
     private fun toMajorUnits(minorUnits: Long, currencyCode: String): BigDecimal {
         val digits = runCatching { Currency.getInstance(currencyCode.uppercase()).defaultFractionDigits }
@@ -101,6 +113,7 @@ class TransactionLedgerPostingAdapter(
         const val TYPE_DEBIT = "DEBIT"
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
+        const val UNREADABLE_DETAIL = "transaction-service answer unreadable; booking unknown"
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */
