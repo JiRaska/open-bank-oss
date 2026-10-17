@@ -53,11 +53,11 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib, re
           # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
-          # Ledger, Interest and KYC added as third through ninth read-only subjects).
-          # Kept as a named constant so the summary can say what the run was SUPPOSED to
-          # measure, not only what it did. All subjects are non-mutating reads booted
-          # against disposable PostgreSQL. Keep money-path WRITES out of this
-          # GitHub-hosted lane until their isolated target and synthetic identities
+          # Ledger, Interest, KYC and Transaction added as third through tenth read-only
+          # subjects). Kept as a named constant so the summary can say what the run was
+          # SUPPOSED to measure, not only what it did. All subjects are non-mutating
+          # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
+          # this GitHub-hosted lane until their isolated target and synthetic identities
           # exist (perf/scenarios.yaml).
           DECLARED = [
               "openbank-product-catalog",
@@ -69,6 +69,7 @@ jobs:
               "openbank-ledger-service",
               "openbank-interest-service",
               "openbank-kyc-service",
+              "openbank-transaction-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -93,11 +94,19 @@ jobs:
               # /q/health/ready stayed 503 — the Redis check was DOWN with no broker). Boot a
               # throwaway redis alongside postgres so the readiness gate can ever go green.
               needs_redis = bool(re.search(r"^  redis:\n(?:.*\n)?\s*hosts:", raw, re.M))
+              # A declared `temporal:` block means a worker registers against Temporal at BOOT
+              # (measured on openbank-transaction-service: quarkusDev dies with gRPC
+              # UNAVAILABLE / connection refused on localhost:7233 with no server). The
+              # namespace is read from the service's own config, never a list kept here —
+              # the api-fuzz-authenticated derivation, same shape as the redis probe above.
+              temporal = re.search(r"^  temporal:\n(?:.*\n)?\s*namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M) \
+                  or re.search(r"^  temporal:\n(?:.*\n)?\s*namespace:\s*([^\s${]+)", raw, re.M)
               matrix.append({
                   "service": svc,
                   "port": int(port.group(1)),
                   "db": db.group(1),
                   "redis": "true" if needs_redis else "false",
+                  "temporal": (temporal.group(1).strip() if temporal else ""),
               })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
@@ -164,6 +173,10 @@ jobs:
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
       NEEDS_REDIS: ${{ matrix.redis }}
+      # Set by the derive step when the service's application.yaml declares a `temporal:`
+      # block (namespace read from the service's own config). Empty for subjects without
+      # a Temporal worker — the boot skips the server entirely.
+      TEMPORAL_NS: ${{ matrix.temporal }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -221,6 +234,31 @@ jobs:
             echo "==> [${SERVICE}] starting redis (application.yaml declares quarkus.redis.hosts)"
             docker rm -f perf-redis >/dev/null 2>&1 || true
             docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
+          fi
+
+          # Only services whose application.yaml declares a `temporal:` block get a dev
+          # server: their worker registers against Temporal at BOOT and quarkusDev dies
+          # with gRPC UNAVAILABLE without one (measured on openbank-transaction-service,
+          # connection refused on localhost:7233). temporalio/temporal:1.8.2
+          # `server start-dev` is IN-MEMORY (no extra database) and creates the namespace
+          # it is given — the api-fuzz-authenticated harness's image and readiness probe.
+          if [ -n "${TEMPORAL_NS}" ]; then
+            echo "==> [${SERVICE}] starting Temporal dev server (namespace ${TEMPORAL_NS})"
+            docker rm -f perf-temporal >/dev/null 2>&1 || true
+            docker run -d --name perf-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            TEMPORAL_UP=0
+            for _ in $(seq 1 30); do
+              if docker exec perf-temporal temporal operator namespace describe \
+                   --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1; then
+                TEMPORAL_UP=1; break
+              fi
+              sleep 2
+            done
+            if [ "$TEMPORAL_UP" != "1" ]; then
+              echo "::error::[${SERVICE}] Temporal dev server never became ready"
+              docker logs perf-temporal 2>&1 | tail -20; exit 1
+            fi
           fi
 
           # Two advisory flags keep the boot green without provisioning OPA or Kafka, both
@@ -293,7 +331,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg perf-redis >/dev/null 2>&1 || true
+          docker rm -f perf-pg perf-redis perf-temporal >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()
