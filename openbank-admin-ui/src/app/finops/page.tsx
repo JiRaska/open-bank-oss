@@ -143,7 +143,7 @@ interface FinOpsAnomaly {
 interface AiCostsData {
   available: boolean
   collectedAt: string
-  totalCostLast7dUsd: number
+  totalCostLast7dUsd: number | null
   totalCostLast30dUsd: number | null
   selfHostedPct: number | null
   coverage: {
@@ -971,7 +971,9 @@ function FinOpsContent() {
                   padding: '14px 18px', borderRadius: '10px', background: 'var(--accent-bg)', border: '1px solid var(--accent-border)' }}>
                   <div>
                     <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--accent-text)', letterSpacing: '-0.04em', lineHeight: 1 }}>
-                      ${aiCosts.totalCostLast7dUsd.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {aiCosts.totalCostLast7dUsd == null
+                        ? t('Žádná data', 'No data')
+                        : `$${aiCosts.totalCostLast7dUsd.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
                       {t('Celkem AI náklady — posledních 7 dní', 'Total AI costs — last 7 days')}

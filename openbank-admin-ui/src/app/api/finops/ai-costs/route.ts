@@ -4,8 +4,9 @@
 
 import { NextResponse } from 'next/server'
 
-// Langfuse→Prometheus bridge metrics (ADR-0112 P1). Falls back to mock data
-// when the bridge is not yet deployed (sandbox / local dev).
+// Langfuse→Prometheus bridge metrics (ADR-0112 P1). When the bridge is not deployed (sandbox /
+// local dev) or Prometheus is unreachable, the response is `available: false` with NO figures:
+// totals are null, not 0 — a consumer rendering a number would otherwise show "$0.00" for "unknown".
 export const dynamic = 'force-dynamic'
 const PROMETHEUS_QUERY_TIMEOUT_MS = 5_000
 
@@ -25,7 +26,8 @@ export interface AgentCostEntry {
 export interface AiCostsData {
   available: boolean
   collectedAt: string
-  totalCostLast7dUsd: number
+  /** null = no data (bridge down, or no agent series). Never 0: a panel must not render $0 for "unknown". */
+  totalCostLast7dUsd: number | null
   totalCostLast30dUsd: number | null
   selfHostedPct: number | null
   coverage: MetricsCoverage
@@ -92,18 +94,17 @@ export async function GET() {
   const langfuseAvailable = langfuseUp === 1
 
   if (!langfuseAvailable) {
-    // Return illustrative mock data when Langfuse→Prometheus bridge not yet deployed
-    const mock: AiCostsData = {
+    const unavailable: AiCostsData = {
       available: false,
       collectedAt: now.toISOString(),
-      totalCostLast7dUsd: 0,
+      totalCostLast7dUsd: null,
       totalCostLast30dUsd: null,
       selfHostedPct: null,
       coverage: metricsCoverage(now, false),
       agents: [],
       anomalies: [],
     }
-    return NextResponse.json(mock)
+    return NextResponse.json(unavailable)
   }
 
   // Live path: query Langfuse bridge metrics
@@ -151,7 +152,8 @@ export async function GET() {
   }))
   const agents = agentResults.filter((entry): entry is AgentCostEntry => entry !== null)
 
-  const totalCost7d = agents.reduce((s, a) => s + a.costLast7dUsd, 0)
+  // No series at all is "no data", not a $0 total.
+  const totalCost7d = agents.length === 0 ? null : agents.reduce((s, a) => s + a.costLast7dUsd, 0)
 
   return NextResponse.json({
     available: true,
