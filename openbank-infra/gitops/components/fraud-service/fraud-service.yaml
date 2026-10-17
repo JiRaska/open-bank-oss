@@ -66,7 +66,7 @@ spec:
             # #685 originally set these as MP_MESSAGING_INCOMING_TRANSACTION_SIGNAL_* env vars.
             # Switched here to loading a properties FILE via QUARKUS_CONFIG_LOCATIONS instead —
             # see fraud-service-msg-override.yaml — matching the pattern already established for
-            # transaction-service (transaction-service-msg-override.yaml).
+            # card-issuance-service (card-issuance-service-msg-override.yaml).
             #
             # Correction (round 2): an earlier version of this comment first cited nonexistent
             # issues #2649/#2659, then over-corrected to claim #685's original env-var fix was

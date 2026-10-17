@@ -85,6 +85,9 @@ Nikdy neupravujte aplikovanou migraci. Pokud checksum mismatch blokuje start, na
 
 To je záměr: `Idempotency-Key` se shodoval s existujícím `cards.idempotency_key`. Pro skutečně novou kartu použijte čerstvý klíč.
 
+### Kafka consumer group nebo offset reset se zdá ignorován
+- `group.id` a `auto.offset.reset` consumeru se nečtou z YAML klíčů s tečkou (SmallRye je uvozuje, takže je connector nevidí). V clusteru pocházejí z ConfigMapy `card-issuance-service-msg-override` (properties soubor načtený s `config_ordinal=500`). Pokud consumer čte s jinou skupinou nebo offsetem, zkontroluj nejdřív tuto ConfigMapu, ne `application.yaml`.
+
 ## Testování & CI
 
 - Unit: `CardTest` (stavový automat), `CardServiceTest`, `CardOutboxDispatchTest`.

@@ -279,7 +279,7 @@ spec:
             # group.id / auto.offset.reset (agent-service-msg-override ConfigMap, mounted
             # below) as an external Quarkus config source, so a lagging deployed image also
             # picks up the fix without waiting for a rebuild. Optional in spirit (see
-            # transaction-service-msg-override.yaml precedent) — if the file were absent,
+            # card-issuance-service-msg-override.yaml precedent) — if the file were absent,
             # Quarkus just warns and continues on the baked application.yaml values.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
