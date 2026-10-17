@@ -45,7 +45,13 @@ class GovernanceRulesReadAdapter(private val config: GovernanceAuditorConfig) : 
 
     override suspend fun moneyPathServices(): Set<String> {
         val mirror = config.moneyPathServices().split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-        return resolve("money_path_services", liveLines()?.let { RulesYamlSections.moneyPathServices(it) }, mirror)
+        // RulesYamlSections answers emptySet (not null) for an absent/renamed section, and a 200
+        // that is not rules.yaml (an error page, a moved key) parses to exactly that. An empty
+        // live set would WIN over the mirror and silently downgrade every money-path PR to the
+        // default obligation, so it is treated as "unavailable" -- the fleet always has money-path
+        // services, an empty list is never a real governance state.
+        val live = liveLines()?.let { RulesYamlSections.moneyPathServices(it) }?.takeIf { it.isNotEmpty() }
+        return resolve("money_path_services", live, mirror)
     }
 
     override suspend fun defaultApprovals(): Int {
