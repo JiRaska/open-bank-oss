@@ -6,16 +6,16 @@ package com.openbank.notification.infrastructure.contact
 
 import com.openbank.libs.contact.ContactClass
 import com.openbank.libs.contact.ContactDenyReason
-import com.openbank.notification.domain.model.NotificationCategory
-import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.libs.contact.ContactSuppressionPort
+import com.openbank.libs.contact.SuppressionEntry
+import com.openbank.libs.contact.SuppressionReason
+import com.openbank.libs.contact.SuppressionScope
 import com.openbank.notification.infrastructure.client.ConsentCheckResponse
 import com.openbank.notification.infrastructure.client.ConsentServiceClient
-import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -25,10 +25,6 @@ import java.util.UUID
 /**
  * The ADR-0219 D4 wiring for this service: what the produced gate's ports actually read.
  *
- * The send counter is the interesting one — it must be scoped to the MARKETING template set, not
- * to every notification. An unscoped count would let a burst of security/transactional messages
- * exhaust a customer's marketing send cap and silently suppress a campaign.
- *
  * Nothing here asserts an ALLOWED decision: `check` consults a real wall-clock quiet-hours window,
  * so an allow assertion would pass or fail by time of day. Every case below is decided before that
  * branch is reached.
@@ -36,48 +32,32 @@ import java.util.UUID
 class ContactGateProducerTest {
 
     private val consentClient = mockk<ConsentServiceClient>()
-    private val repo = mockk<NotificationRepository>()
+    private val suppressions = mockk<ContactSuppressionPort> {
+        coEvery { activeSuppressions(any()) } returns emptyList()
+    }
 
-    private val gate = ContactGateProducer().contactPolicyGate(consentClient, repo)
+    private val gate = ContactGateProducer().contactPolicyGate(consentClient, suppressions)
 
     private val partyId: UUID = UUID.randomUUID()
 
     @Test
-    fun `the send counter is scoped to the MARKETING templates only`(): Unit = runBlocking {
-        val templates = slot<List<String>>()
-        coEvery { repo.countSince(partyId, capture(templates), any()) } returns 99
-
-        gate.check(partyId, ContactClass.OUTBOUND_SEND, "MARKETING_COMMS_EMAIL")
-
-        val expected = NotificationTemplate.entries
-            .filter { it.category == NotificationCategory.MARKETING }
-            .map { it.name }
-        assertThat(templates.captured).containsExactlyInAnyOrderElementsOf(expected)
-        assertThat(templates.captured).contains(NotificationTemplate.MARKETING_PRODUCT_OFFER.name)
-        assertThat(templates.captured).doesNotContain(
-            NotificationTemplate.OTP_CODE.name,
-            NotificationTemplate.TRANSACTION_COMPLETED.name,
+    fun `a platform suppression denies notification marketing before counters and consent`(): Unit = runBlocking {
+        coEvery { suppressions.activeSuppressions(partyId) } returns listOf(
+            SuppressionEntry(SuppressionScope.ALL, null, SuppressionReason.CUSTOMER_OPTOUT, "test"),
         )
-    }
-
-    @Test
-    fun `an exhausted send window denies with SEND_CAP_REACHED and never asks consent`(): Unit = runBlocking {
-        coEvery { repo.countSince(any(), any(), any()) } returns 99
 
         val decision = gate.check(partyId, ContactClass.OUTBOUND_SEND, "MARKETING_COMMS_EMAIL")
 
-        assertThat(decision.allowed).isFalse()
-        assertThat(decision.denyReason).isEqualTo(ContactDenyReason.SEND_CAP_REACHED)
+        assertThat(decision.denyReason).isEqualTo(ContactDenyReason.SUPPRESSED_LIST)
         coVerify(exactly = 0) { consentClient.hasActiveConsent(any(), any(), any()) }
     }
 
     @Test
-    fun `a failing send-log read fails CLOSED rather than letting the send through`(): Unit = runBlocking {
-        coEvery { repo.countSince(any(), any(), any()) } throws IllegalStateException("db down")
+    fun `unavailable suppression list fails notification marketing closed`(): Unit = runBlocking {
+        coEvery { suppressions.activeSuppressions(partyId) } throws IllegalStateException("consent unavailable")
 
         val decision = gate.check(partyId, ContactClass.OUTBOUND_SEND, "MARKETING_COMMS_EMAIL")
 
-        assertThat(decision.allowed).isFalse()
         assertThat(decision.denyReason).isEqualTo(ContactDenyReason.GATE_UNAVAILABLE)
     }
 
@@ -99,7 +79,6 @@ class ContactGateProducerTest {
         val decision = gate.check(partyId, ContactClass.SERVICE_EXEMPT, "MARKETING_COMMS_EMAIL")
 
         assertThat(decision.allowed).isTrue()
-        coVerify(exactly = 0) { repo.countSince(any(), any(), any()) }
         coVerify(exactly = 0) { consentClient.hasActiveConsent(any(), any(), any()) }
     }
 
