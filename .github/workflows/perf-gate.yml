@@ -55,8 +55,9 @@ jobs:
           # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
           # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment, SEPA
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
-          # Document, AML, Fraud and Audit added as third through twenty-fourth read-only
-          # subjects). Kept as a named constant so the summary can say what the run was
+          # Document, AML, Fraud, Audit and Lending added as third through twenty-fifth
+          # read-only subjects). Kept as a named constant so the summary can say what
+          # the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
           # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
           # this GitHub-hosted lane until their isolated target and synthetic identities
@@ -86,6 +87,7 @@ jobs:
               "openbank-aml-service",
               "openbank-fraud-service",
               "openbank-audit-service",
+              "openbank-lending-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -129,16 +131,25 @@ jobs:
                   "openbank-transaction-service",
                   "openbank-sepa-payment",
                   "openbank-domestic-payment",
+                  # openbank.lending.worker.enabled defaults TRUE and
+                  # OriginationTimersWorkerRegistrar registers at StartupEvent —
+                  # dies at boot without a server (measured this PR). Note the
+                  # registrar's WorkerFactory is ALSO Linux-only: the perf-gate
+                  # runner is ubuntu, so a server is sufficient there; a macOS dev
+                  # boot additionally needs -Dopenbank.lending.worker.enabled=false.
+                  "openbank-lending-service",
               }
               temporal = None
               if svc in NEEDS_TEMPORAL:
                   # The gap between the block header and `namespace:` varies per service
-                  # (transaction: 1 line, domestic-payment: 2) — allow up to four indented
-                  # continuation lines, so a sibling `task-queue:` cannot satisfy the match.
+                  # (transaction: 1 line, domestic-payment: 2, lending: ~15 of which most
+                  # are #6085 build-time caution comments) — allow up to twenty indented
+                  # continuation lines, so a sibling `task-queue:` cannot satisfy the
+                  # match.
                   temporal = re.search(
-                      r"^  temporal:\n(?:[ \t]+.*\n){0,4}?[ \t]+namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M
+                      r"^  temporal:\n(?:[ \t][^\n]*\n){0,20}?[ \t]+namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M
                   ) or re.search(
-                      r"^  temporal:\n(?:[ \t]+.*\n){0,4}?[ \t]+namespace:\s*([^\s${]+)", raw, re.M
+                      r"^  temporal:\n(?:[ \t][^\n]*\n){0,20}?[ \t]+namespace:\s*([^\s${]+)", raw, re.M
                   )
                   if not temporal:
                       skipped.append((svc, "NEEDS_TEMPORAL but no namespace derivable"))
