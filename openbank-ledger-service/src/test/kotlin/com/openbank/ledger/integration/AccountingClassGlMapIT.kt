@@ -59,10 +59,7 @@ class AccountingClassGlMapIT {
             listOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103").map { (ccy, code) ->
                 row(cls, "PRINCIPAL", ccy, code)
             }
-        } + listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM").flatMap { cls ->
-            // Billing always debited 2100 whatever the currency; FEE_SETTLEMENT keeps that byte for byte.
-            listOf("CZK", "EUR", "USD", "GBP").map { ccy -> row(cls, "FEE_SETTLEMENT", ccy, "2100") }
-        } + listOf("CZK", "EUR", "USD", "GBP").map { ccy -> row("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy, "4003") }
+        } + row("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK", "4003")
         ).toMap()
 
     private fun row(accountingClass: String, role: String, currency: String, code: String) =
@@ -127,25 +124,47 @@ class AccountingClassGlMapIT {
     }
 
     @Test
-    fun `fee billing resolves to the two accounts its configuration used to name by id, in every currency`() {
-        // Billing's previous defaults (BillingLedgerConfig): debit a0..0002 (2100), credit a0..4003 (4003),
-        // whatever the currency of the fee.
-        for (ccy in listOf("CZK", "EUR", "USD", "GBP")) {
+    fun `fee billing resolves to the two accounts its configuration used to name by id`() {
+        // Billing's previous defaults (BillingLedgerConfig): debit a0..0002 (2100), credit a0..4003 (4003).
+        Given {
+            queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
+            queryParam("role", "PRINCIPAL")
+            queryParam("currency", "CZK")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(200)
+            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000000002"))
+        }
+        Given {
+            queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
+            queryParam("role", "FEE_INCOME")
+            queryParam("currency", "CZK")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(200)
+            body("glAccountId", equalTo("a0000000-0000-0000-0000-000000004003"))
+        }
+    }
+
+    @Test
+    fun `a non-CZK fee debits its own control account, and its income leg is an explicit 422 until a chart decision`() {
+        // Billing's old fixed 2100/4003 are CZK accounts and the ledger refuses a line whose currency is not
+        // the account's, so a non-CZK fee has never posted. The debit now resolves to the currency's control
+        // account; the income leg has no account to land in and says so, instead of a currency mismatch.
+        for ((ccy, id) in listOf("EUR" to "2101", "USD" to "2102", "GBP" to "2103")) {
             Given {
                 queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
-                queryParam("role", "FEE_SETTLEMENT")
+                queryParam("role", "PRINCIPAL")
                 queryParam("currency", ccy)
             } When { get("/api/v1/accounting-classes/resolve") } Then {
                 statusCode(200)
-                body("glAccountId", equalTo("a0000000-0000-0000-0000-000000000002"))
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$id"))
             }
             Given {
                 queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
                 queryParam("role", "FEE_INCOME")
                 queryParam("currency", ccy)
             } When { get("/api/v1/accounting-classes/resolve") } Then {
-                statusCode(200)
-                body("glAccountId", equalTo("a0000000-0000-0000-0000-000000004003"))
+                statusCode(422)
+                body("error", containsString("no GL account is mapped"))
             }
         }
     }
