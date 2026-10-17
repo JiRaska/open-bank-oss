@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -107,4 +110,18 @@ tasks.withType<Test> {
     // Pact rootDir + Pact Broker property forwarding centralised into
     // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
+}
+
+// Mutation testing on the money-path domain + application layers (ADR-0063 / ADR-0030 D3, #13149).
+// Weekly + manual via pitest.yml — never a per-PR gate. mutationThreshold is a RATCHET: measured
+// score minus 2 points, raised as surviving mutants get killed, never lowered.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.lending.domain.*", "com.openbank.lending.application.*")
+    targetTests = setOf("com.openbank.lending.domain.*", "com.openbank.lending.application.*")
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.lending.domain.*Kt", "com.openbank.lending.application.*Kt")
 }

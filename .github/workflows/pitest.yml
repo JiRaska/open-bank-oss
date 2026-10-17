@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
+        description: "Space-separated service modules to run (empty = the whole matrix below, which is the source of truth). Use it to measure one new service without spending 28 hosted jobs."
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service"
+        default: ""
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -23,6 +23,9 @@ permissions:
 jobs:
   pitest:
     name: pitest / ${{ matrix.service }}
+    # The `services` dispatch input was declared and read by nothing, so every manual run cost the
+    # whole matrix. Schedule and an empty input still run everything.
+    if: github.event_name != 'workflow_dispatch' || inputs.services == '' || contains(format(' {0} ', inputs.services), format(' {0} ', matrix.service))
     runs-on: ubuntu-latest
     timeout-minutes: 30  # measured max 414s (ledger); mutation runs are the likeliest to hang
     permissions:
@@ -92,6 +95,20 @@ jobs:
           #     NO_COVERAGE, mostly the Nostro* reconciliation classes, which no unit test reaches.
           - openbank-card-issuance-service
           - openbank-treasury-service
+          # #13149 sweep (2026-10-17): the nine money_path_services that were absent. Targets are
+          # the domain AND application packages (billing's fee-waiver logic lives in
+          # application/usecase, outside a domain-only target, which is why it was excluded before).
+          # Thresholds are RATCHETS set at measured minus 2 in each service's build.gradle.kts; the
+          # earlier "thin domain" exclusions were judged on domain file count alone.
+          - openbank-clearing-service
+          - openbank-swift-service
+          - openbank-lending-service
+          - openbank-billing-service
+          - openbank-settlement-service
+          - openbank-psd2-service
+          - openbank-card-processing-service
+          - openbank-pension-service
+          - openbank-pension-fund-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
