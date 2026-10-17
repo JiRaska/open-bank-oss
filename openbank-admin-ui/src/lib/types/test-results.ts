@@ -42,27 +42,4 @@ export interface TestResultsResponse {
   }
   collectedAt: string
   error?: string
-  evidence?: TestEvidenceMeta
-}
-
-/** Provenance of a test-evidence payload: where it came from and how old it is. */
-export interface TestEvidenceMeta {
-  /** `live` = fetched now from the CI-published URL; `bundled` = baked into the image. */
-  source: 'live' | 'bundled'
-  /** When the underlying data was produced (null if unknown — never invented). */
-  asOf: string | null
-  ageSeconds: number | null
-  stale: boolean
-  /** Why the live source was not used (bundled fallback only). */
-  liveError?: string
-  /** Count of test FILES in the repo at image build; compare with tests that reported. */
-  inventory: TestInventory | null
-}
-
-export interface TestInventory {
-  collectedAt: string
-  kotlin: { unit: number; integration: number }
-  adminUi: number
-  e2e: number
-  totalFiles: number
 }

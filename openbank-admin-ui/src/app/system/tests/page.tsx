@@ -17,7 +17,6 @@ import type {
 import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
 } from '@/components/testing/TestIntelligenceFlow'
-import { EvidenceFreshness } from '@/components/testing/EvidenceFreshness'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
@@ -575,8 +574,8 @@ export default function TestIntelligencePage() {
   const testLoading = loading
   const qualityLoading = false
 
-  const fetchReport = useCallback(async (silent: boolean) => {
-    if (!silent) setLoading(true)
+  const load = useCallback(async () => {
+    setLoading(true)
     try {
       const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
       if (!response.ok) throw new Error(`Test intelligence request failed with HTTP ${response.status}`)
@@ -585,15 +584,12 @@ export default function TestIntelligencePage() {
         throw new Error('Invalid test intelligence report')
       }
       setReport(result)
-    } catch { if (!silent) setReport(null) } finally { setLoading(false) }
+    } catch { setReport(null) } finally { setLoading(false) }
   }, [])
-  const load = useCallback(() => fetchReport(false), [fetchReport])
   useEffect(() => {
     const timer = window.setTimeout(() => { void load() }, 0)
-    // Auto-refresh every 60 s while the tab is visible; a failed poll keeps the last good report.
-    const poll = window.setInterval(() => { if (document.visibilityState === 'visible') void fetchReport(true) }, 60_000)
-    return () => { window.clearTimeout(timer); window.clearInterval(poll) }
-  }, [load, fetchReport])
+    return () => window.clearTimeout(timer)
+  }, [load])
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'posture', label: t('Přehled', 'Posture'), icon: <Activity size={13} /> },
@@ -618,7 +614,6 @@ export default function TestIntelligencePage() {
       subtitle={t('Jednotný pohled na běhy, pokrytí kódu, trace kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, trace contracts, mutation, performance, and sandbox synthetic journeys.')}
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
-    {report && <EvidenceFreshness evidence={report.evidence} reportedCases={report.testCases.length} />}
     {report && <TestIntelligenceFlow report={report} />}
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
     {report && <EvidenceGapQueue report={report} selectTab={setTab} />}

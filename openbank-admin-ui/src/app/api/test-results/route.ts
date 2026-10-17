@@ -10,7 +10,6 @@ import type {
   ServiceTestResult,
   TestResultsResponse,
 } from '@/lib/types/test-results'
-import { buildEvidenceMeta, fetchLiveJson, readInventory } from '@/lib/test-evidence'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,27 +72,11 @@ async function getPool(): Promise<Pool> {
 
 const toInt = (v: unknown) => parseInt(v as string) || 0
 
-const NO_STORE = { 'Cache-Control': 'no-store' }
-
 export async function GET() {
-  const inventory = await readInventory()
-  // 1. LIVE: latest CI-published JSON (OPENBANK_TEST_RESULTS_URL, server-side token only).
-  const live = await fetchLiveJson<TestResultsResponse>('OPENBANK_TEST_RESULTS_URL', 'OPENBANK_TEST_RESULTS_TOKEN')
-  let liveError: string | undefined
-  if (live && 'data' in live) {
-    if (Array.isArray(live.data.services) && live.data.totals) {
-      return NextResponse.json(
-        { ...live.data, evidence: buildEvidenceMeta('live', live.data.collectedAt, inventory) },
-        { headers: NO_STORE })
-    }
-    liveError = 'live source returned an unexpected shape'
-  } else if (live) liveError = live.error
-  // 2. BUNDLED fallback; 3. legacy DB only if neither exists.
+  // Prefer the CI-bundled artifact; fall back to the live DB only if absent.
   const bundled = await fromBundle()
   if (bundled) {
-    return NextResponse.json(
-      { ...bundled, evidence: buildEvidenceMeta('bundled', bundled.collectedAt, inventory, Date.now(), liveError) },
-      { headers: NO_STORE })
+    return NextResponse.json(bundled, { headers: { 'Cache-Control': 'no-store' } })
   }
 
   let summaryRows: Record<string, unknown>[] = []
@@ -179,7 +162,6 @@ export async function GET() {
     totals,
     collectedAt: new Date().toISOString(),
     ...(dbError ? { error: dbError } : {}),
-    evidence: buildEvidenceMeta('bundled', summaryRows.length ? new Date().toISOString() : null, inventory, Date.now(), liveError),
   }
 
   return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } })

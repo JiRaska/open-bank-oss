@@ -315,8 +315,6 @@ export interface ClientExperienceEvidence {
 
 export interface TestIntelligenceReport {
   schemaVersion: 1
-  /** Added by the route at request time; absent in the on-disk/CI file. */
-  evidence?: import('./test-results').TestEvidenceMeta
   collectedAt: string
   components: ComponentTestPosture[]
   contracts: ContractEvidence[]

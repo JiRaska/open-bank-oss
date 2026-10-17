@@ -5,7 +5,6 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
-import { buildEvidenceMeta, fetchLiveJson, readInventory } from '@/lib/test-evidence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
@@ -428,16 +427,8 @@ function attachAiEvalAssurance(report: TestIntelligenceReport): TestIntelligence
 }
 
 export async function GET(): Promise<NextResponse> {
-  const inventory = await readInventory()
-  let source: 'live' | 'bundled' = 'bundled'
-  let liveError: string | undefined
   try {
-    const live = await fetchLiveJson<TestIntelligenceReport>('OPENBANK_TEST_INTELLIGENCE_URL', 'OPENBANK_TEST_INTELLIGENCE_TOKEN')
-    let parsed: TestIntelligenceReport | null = null
-    if (live && 'data' in live && live.data.schemaVersion === 1 && Array.isArray(live.data.components)) {
-      parsed = live.data; source = 'live'
-    } else if (live) liveError = 'error' in live ? live.error : 'live source returned an unexpected shape'
-    if (!parsed) parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
+    const parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
     if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.components)) {
       return NextResponse.json(emptyReport('Unsupported test-intelligence report schema'))
     }
@@ -451,11 +442,8 @@ export async function GET(): Promise<NextResponse> {
     }
     const current = enforceRuntimeFreshness(compatible)
     const withJourneys = await attachLiveJourneys(current)
-    const body = attachAiEvalAssurance(await attachLiveClientExperience(withJourneys))
-    return NextResponse.json(
-      { ...body, evidence: buildEvidenceMeta(source, parsed.collectedAt, inventory, Date.now(), liveError) },
-      { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), { headers: { 'Cache-Control': 'no-store' } })
   } catch {
-    return NextResponse.json({ ...emptyReport('test-intelligence.json is not bundled'), evidence: buildEvidenceMeta('bundled', null, inventory, Date.now(), liveError) })
+    return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))
   }
 }
