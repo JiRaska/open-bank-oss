@@ -27,9 +27,14 @@ into the commit, so the reason survives on `main`.
 WHAT IT DOES NOT DO
 -------------------
 It does not know whether the NEW value is honest — a floor raised to a number the build cannot
-reach fails koverVerify on its own. It does not parse Kotlin: `minValue` is matched as a whole
-line, which is how all 76 floors in the fleet are written and how `coverage-floor-only-diff.py`
-already reads the libs-domain one.
+reach fails koverVerify on its own. It does not parse Kotlin: block comments are stripped and
+`minValue = <int>` is matched as a bare integer literal, which is how every floor in the fleet
+is written (including the one-line `bound { minValue = 60 }` form). Any OTHER `minValue =`
+assignment (a variable, an expression) is refused outright rather than guessed at, so the regex
+cannot be talked past. Floors within one file are compared as a sorted multiset (at least as
+many, and HEAD's k-th smallest >= the base's k-th smallest), so reordering bounds cannot hide a
+lowering. Renames are not followed: a moved build script shows up as a deletion of the old path,
+which counts as every floor in it removed.
 
 Usage:  check-coverage-floor-ratchet.py --base <merge-base> [--body <pr body>]
         check-coverage-floor-ratchet.py --self-test
@@ -45,16 +50,33 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-FLOOR_RE = re.compile(r"^\s*minValue\s*=\s*(\d+)\s*(//.*)?$", re.MULTILINE)
+# A bare integer literal, terminated by whitespace, a closing brace, a line comment or the line
+# end — the one-line `bound { minValue = 60 }` form counts, `minValue = 60 * factor` does not.
+FLOOR_RE = re.compile(r"\bminValue\s*=\s*(\d+)(?=\s*(?:\}|//|$))", re.MULTILINE)
+ANY_MINVALUE_RE = re.compile(r"^.*\bminValue\s*=.*$", re.MULTILINE)
+BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 TRAILER = "coverage-floor-lowered:"
 ISSUE_RE = re.compile(r"(?:#\d+|https://github\.com/[\w.-]+/[\w.-]+/issues/\d+)")
 
 
+class UnparseableFloor(ValueError):
+    """A `minValue =` the strict shape does not recognise — refused, never guessed."""
+
+
 def floors(text: str | None) -> list[int] | None:
-    """Every Kover `minValue` in a build script, in file order; None when the file is absent."""
+    """Every Kover `minValue` in a build script, sorted; None when the file is absent.
+
+    Block and line comments are stripped first so a commented-out literal is not a floor. Any remaining `minValue =` that is not a bare integer literal raises, which the
+    caller turns into a failure.
+    """
     if text is None:
         return None
-    return [int(m.group(1)) for m in FLOOR_RE.finditer(text)]
+    code = LINE_COMMENT_RE.sub("", BLOCK_COMMENT_RE.sub("", text))
+    for line in ANY_MINVALUE_RE.findall(code):
+        if not FLOOR_RE.search(line):
+            raise UnparseableFloor(line.strip())
+    return sorted(int(m.group(1)) for m in FLOOR_RE.finditer(code))
 
 
 def lowering_justified(trailer_text: str) -> bool:
@@ -74,13 +96,16 @@ def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None
         before, after = base.get(path), head.get(path)
         if not before:
             continue  # file or floor absent at base: adding a floor is always allowed
-        after = after or []
-        for index, old in enumerate(before):
-            new = after[index] if index < len(after) else None
-            if new is None:
-                lowered.append(f"{path}: Kover floor {old} removed (a missing floor is a floor of 0)")
-            elif new < old:
-                lowered.append(f"{path}: Kover floor lowered {old} -> {new}")
+        after = sorted(after or [])
+        before = sorted(before)
+        # Sorted-multiset domination: at least as many floors, and the k-th smallest at HEAD must
+        # cover the k-th smallest at base, so swapping two bounds cannot disguise a lowering as a
+        # reorder. One finding per file, naming both multisets.
+        if len(after) < len(before):
+            lowered.append(f"{path}: Kover floor(s) removed — base {before}, head {after} "
+                           f"(a missing floor is a floor of 0)")
+        elif any(new < old for old, new in zip(before, after)):
+            lowered.append(f"{path}: Kover floor lowered — base {before}, head {after}")
     if not lowered:
         return []
     if lowering_justified(trailer_text):
@@ -115,8 +140,10 @@ def pr_trailer_text(base: str, body: str | None) -> str:
 
 def changed_build_scripts(base: str) -> list[str]:
     """Build scripts that differ between the base and HEAD, deleted ones included."""
-    out = subprocess.run(["git", "-C", str(REPO), "diff", "--name-only", f"{base}...HEAD", "--",
-                          "*build.gradle.kts"], capture_output=True, text=True, check=True).stdout
+    # --no-renames: a moved build script must appear as a deletion of the old path (every floor
+    # in it removed), not vanish behind rename detection.
+    out = subprocess.run(["git", "-C", str(REPO), "diff", "--no-renames", "--name-only", f"{base}...HEAD",
+                          "--", "*build.gradle.kts"], capture_output=True, text=True, check=True).stdout
     return [p for p in out.splitlines() if "/build/" not in p]
 
 
@@ -129,8 +156,16 @@ def main_check(base_arg: str, body: str | None) -> int:
     # subject count is the whole fleet, read once from the working tree.
     changed = changed_build_scripts(base)
     base_floors = {p: floors(git_show(base, p)) for p in changed}
-    head_floors = {p: floors(git_show("HEAD", p)) for p in changed}
-    errors = evaluate(base_floors, head_floors, pr_trailer_text(base, body))
+    head_floors: dict[str, list[int] | None] = {}
+    errors: list[str] = []
+    for p in changed:
+        try:
+            head_floors[p] = floors(git_show("HEAD", p))
+        except UnparseableFloor as exc:
+            head_floors[p] = []
+            errors.append(f"::error file={p}::{p}: `{exc}` is not a bare integer floor. Write "
+                          f"`minValue = <int>` so the ratchet can read it; an expression here is refused.")
+    errors += evaluate(base_floors, head_floors, pr_trailer_text(base, body))
     subjects = sum(1 for p in tracked_build_scripts("HEAD") if floors((REPO / p).read_text(errors="ignore")))
     print(f"SUBJECTS={subjects}  # build scripts carrying a Kover floor at HEAD")
     for line in errors:
@@ -174,6 +209,11 @@ def self_test() -> int:
          {script: [65], "b/build.gradle.kts": [50]}, {script: [65], "b/build.gradle.kts": [49]}, "", 1)
     case("second bound of two lowered — MUST flag",
          {script: [34, 38]}, {script: [34, 30]}, "", 1)
+    case("two bounds swapped with one lowered — MUST flag (a positional compare would miss it)",
+         {script: [34, 38]}, {script: [38, 33]}, "", 1)
+    case("two bounds reordered, values intact — must not flag",
+         {script: [34, 38]}, {script: [38, 34]}, "", 0)
+    case("one of two bounds removed — MUST flag", {script: [34, 38]}, {script: [38]}, "", 1)
 
     # The parser against the shape every fleet floor is written in.
     sample = """kover {
@@ -199,6 +239,23 @@ pitest { mutationThreshold = 0 }
     inline_ok = inline == [95]
     ok = ok and inline_ok
     print(f"  [{'ok ' if inline_ok else 'FAIL'}] parser accepts a trailing comment: {inline}")
+    one_liner = floors("kover { reports { verify { rule { bound { minValue = 60 } } } } }\n")
+    one_ok = one_liner == [60]
+    ok = ok and one_ok
+    print(f"  [{'ok ' if one_ok else 'FAIL'}] parser reads the one-line bound form: {one_liner}")
+    commented = floors("/* minValue = 99 */\n// minValue = 98\n    minValue = 40\n")
+    commented_ok = commented == [40]
+    ok = ok and commented_ok
+    print(f"  [{'ok ' if commented_ok else 'FAIL'}] parser ignores block and line comments: {commented}")
+    refused = 0
+    for expression in ("    minValue = floorFor(project)\n", "    minValue = 60 * factor\n"):
+        try:
+            floors(expression)
+        except UnparseableFloor:
+            refused += 1
+    expr_ok = refused == 2
+    ok = ok and expr_ok
+    print(f"  [{'ok ' if expr_ok else 'FAIL'}] a non-literal minValue is refused, not guessed ({refused}/2)")
 
     # Known-positive against the REAL tree: lowering a real floor in memory must be caught.
     real = sorted(p for p in tracked_build_scripts("HEAD") if floors((REPO / p).read_text(errors="ignore")))
