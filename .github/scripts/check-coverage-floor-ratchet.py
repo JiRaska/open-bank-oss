@@ -47,6 +47,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -88,6 +89,15 @@ def lowering_justified(trailer_text: str) -> bool:
     return False
 
 
+def covers(before: list[int], after: list[int]) -> bool:
+    """True iff each floor in `before` has its own distinct floor in `after` that is >= it."""
+    pool = iter(after)  # ascending; each base floor consumes the smallest head floor that still covers it
+    for old in before:
+        if not any(new >= old for new in pool):
+            return False
+    return True
+
+
 def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None],
              trailer_text: str) -> list[str]:
     """Pure decision over {path: floors} maps, so the self-test drives the real rule."""
@@ -98,14 +108,12 @@ def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None
             continue  # file or floor absent at base: adding a floor is always allowed
         after = sorted(after or [])
         before = sorted(before)
-        # Sorted-multiset domination: at least as many floors, and the k-th smallest at HEAD must
-        # cover the k-th smallest at base, so swapping two bounds cannot disguise a lowering as a
-        # reorder. One finding per file, naming both multisets.
-        if len(after) < len(before):
-            lowered.append(f"{path}: Kover floor(s) removed — base {before}, head {after} "
+        # Greedy matching: every base floor must be matched by a DISTINCT head floor that is >= it.
+        # Extra head floors (an added bound, even a lower one) just stay unmatched, so adding a
+        # floor beside existing ones is allowed, while swapping bounds cannot hide a lowering.
+        if not covers(before, after):
+            lowered.append(f"{path}: Kover floor lowered or removed — base {before}, head {after} "
                            f"(a missing floor is a floor of 0)")
-        elif any(new < old for old, new in zip(before, after, strict=False)):
-            lowered.append(f"{path}: Kover floor lowered — base {before}, head {after}")
     if not lowered:
         return []
     if lowering_justified(trailer_text):
@@ -121,7 +129,14 @@ def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None
 def tracked_build_scripts(ref: str) -> list[str]:
     out = subprocess.run(["git", "-C", str(REPO), "ls-tree", "-r", "--name-only", ref],
                          capture_output=True, text=True, check=True).stdout
-    return [p for p in out.splitlines() if p.endswith("build.gradle.kts") and "/build/" not in p]
+    return [p for p in out.splitlines() if is_build_script(p)]
+
+
+def is_build_script(path: str) -> bool:
+    """Module build scripts, plus every convention plugin under build-logic (it may carry a floor)."""
+    if "/build/" in path:
+        return False
+    return path.endswith("build.gradle.kts") or (path.startswith("build-logic/") and path.endswith(".gradle.kts"))
 
 
 def git_show(ref: str, path: str) -> str | None:
@@ -143,14 +158,24 @@ def changed_build_scripts(base: str) -> list[str]:
     # --no-renames: a moved build script must appear as a deletion of the old path (every floor
     # in it removed), not vanish behind rename detection.
     out = subprocess.run(["git", "-C", str(REPO), "diff", "--no-renames", "--name-only", f"{base}...HEAD",
-                          "--", "*build.gradle.kts"], capture_output=True, text=True, check=True).stdout
-    return [p for p in out.splitlines() if "/build/" not in p]
+                          "--", "*build.gradle.kts", "build-logic/*.gradle.kts"],
+                         capture_output=True, text=True, check=True).stdout
+    return [p for p in out.splitlines() if is_build_script(p)]
 
 
 def main_check(base_arg: str, body: str | None) -> int:
     base = (base_arg or os.environ.get("PR_DIFF_BASE", "")).strip()
     if not base:
         print("::error::PR_DIFF_BASE is empty but this gate requires it — refusing to run vacuously")
+        return 1
+    resolved = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--verify", "-q", f"{base}^{{commit}}"],
+                              capture_output=True, text=True, check=False)
+    head = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+    if resolved.returncode != 0:
+        print(f"::error::base `{base}` is not a commit in this checkout — refusing to run vacuously")
+        return 1
+    if resolved.stdout.strip() == head.stdout.strip():
+        print("::error::base equals HEAD, so the diff is empty — refusing to report a pass about nothing")
         return 1
     # Only a changed build script can lower a floor, so only those are read at both ends; the
     # subject count is the whole fleet, read once from the working tree.
@@ -211,6 +236,9 @@ def self_test() -> int:
          {script: [34, 38]}, {script: [34, 30]}, "", 1)
     case("two bounds swapped with one lowered — MUST flag (a positional compare would miss it)",
          {script: [34, 38]}, {script: [38, 33]}, "", 1)
+    case("a LOWER bound added beside existing ones — must not flag (adding a floor is allowed)",
+         {script: [34, 38]}, {script: [10, 34, 38]}, "", 0)
+    case("a bound added and one lowered — MUST flag", {script: [34, 38]}, {script: [10, 34, 37]}, "", 1)
     case("two bounds reordered, values intact — must not flag",
          {script: [34, 38]}, {script: [38, 34]}, "", 0)
     case("one of two bounds removed — MUST flag", {script: [34, 38]}, {script: [38]}, "", 1)
@@ -274,8 +302,69 @@ pitest { mutationThreshold = 0 }
         ok = ok and clean
         print(f"  [{'ok ' if clean else 'FAIL'}] the unchanged fleet passes")
 
+    ok = git_plumbing_test() and ok
     print("self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
+
+
+def git_plumbing_test() -> bool:
+    """Drive main_check against a real temporary git repo, so the git plumbing is exercised."""
+    global REPO
+    import io
+    from contextlib import redirect_stdout
+    saved = REPO
+    results: list[tuple[str, bool]] = []
+
+    def run(*cmd: str, cwd: pathlib.Path) -> str:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+    def gate(base: str) -> int:
+        with redirect_stdout(io.StringIO()):
+            return main_check(base, "")
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="floor-ratchet-") as tmp:
+            repo = pathlib.Path(tmp)
+            run("git", "init", "-q", "-b", "main", cwd=repo)
+            run("git", "config", "user.email", "t@example.org", cwd=repo)
+            run("git", "config", "user.name", "t", cwd=repo)
+            run("git", "config", "commit.gpgsign", "false", cwd=repo)
+            module = repo / "openbank-x-service"
+            module.mkdir()
+            script = module / "build.gradle.kts"
+            script.write_text("kover { reports { verify { rule { bound {\n    minValue = 65\n} } } } }\n")
+            run("git", "add", "-A", cwd=repo)
+            run("git", "commit", "-q", "-m", "base", cwd=repo)
+            base = run("git", "rev-parse", "HEAD", cwd=repo)
+            REPO = repo
+            results.append(("base == HEAD must error, not pass", gate(base) == 1))
+            results.append(("an unknown base ref must error, not pass", gate("deadbeef" * 5) == 1))
+            run("git", "checkout", "-q", "-b", "pr", cwd=repo)
+            script.write_text(script.read_text().replace("minValue = 65", "minValue = 60"))
+            run("git", "commit", "-q", "-am", "lower", cwd=repo)
+            results.append(("a floor lowered on the branch must exit 1", gate(base) == 1))
+            run("git", "commit", "-q", "--amend", "-m", "lower\n\ncoverage-floor-lowered: #1", cwd=repo)
+            results.append(("the same lowering with a trailer + issue must exit 0", gate(base) == 0))
+            script.write_text(script.read_text().replace("minValue = 60", "minValue = 70"))
+            run("git", "commit", "-q", "-am", "raise", cwd=repo)
+            run("git", "reset", "-q", "--hard", base, cwd=repo)
+            script.write_text(script.read_text().replace("minValue = 65", "minValue = 70"))
+            run("git", "commit", "-q", "-am", "raise only", cwd=repo)
+            results.append(("a raised floor must exit 0", gate(base) == 0))
+            plugin = repo / "build-logic" / "conv.gradle.kts"
+            plugin.parent.mkdir()
+            plugin.write_text("kover { reports { verify { rule { bound { minValue = 50 } } } } }\n")
+            run("git", "add", "-A", cwd=repo)
+            run("git", "commit", "-q", "-m", "plugin floor", cwd=repo)
+            base2 = run("git", "rev-parse", "HEAD", cwd=repo)
+            plugin.write_text(plugin.read_text().replace("minValue = 50", "minValue = 40"))
+            run("git", "commit", "-q", "-am", "lower plugin floor", cwd=repo)
+            results.append(("a floor lowered in build-logic must exit 1", gate(base2) == 1))
+    finally:
+        REPO = saved
+    for label, passed in results:
+        print(f"  [{'ok ' if passed else 'FAIL'}] temp repo: {label}")
+    return all(passed for _, passed in results)
 
 
 def main() -> int:

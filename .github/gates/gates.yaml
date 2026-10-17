@@ -106,7 +106,7 @@ gates:
       # The trailer is read from the PR body (optional: a PR with no body can still justify a
       # lowering in a commit message of its range) and from `git log base..HEAD`, so the squash
       # merge carries the reason onto main.
-      python3 .github/scripts/check-coverage-floor-ratchet.py --base "${PR_DIFF_BASE}" --body "${PR_BODY:-}"
+      python3 .github/scripts/check-coverage-floor-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
 
   - id: fleet-scanning-test-edges
     name: "services-ci builds tests that read other modules' trees (derived, enforced)"
