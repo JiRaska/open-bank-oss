@@ -25,6 +25,14 @@ spec:
       releaseName: temporal
       values: |
         server:
+          # Includes the stale downstream gRPC connection-cache fix from server 1.31.1
+          # (temporalio/temporal#10601); chart 1.2.0 otherwise defaults to server 1.31.0.
+          # PostgreSQL schema versions remain temporal 1.19 / visibility 1.14, but upstream
+          # migration scripts changed. The pre-upgrade schema hook still uses admin-tools
+          # 1.31.0; verify its result and database compatibility before completing rollout.
+          # Reverting the server image does not reverse schema-hook database changes.
+          image:
+            tag: 1.31.4
           replicaCount: 1
           resources:
             requests:
