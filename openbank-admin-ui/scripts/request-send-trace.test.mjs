@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { channel } from 'node:diagnostics_channel'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
@@ -230,4 +230,73 @@ test('unconfigured collector bypasses trace IPC and taint signaling', async () =
     else process.env.ADMIN_UI_TRACE_PID = oldPid
     rmSync(traceDir, { recursive: true, force: true })
   }
+})
+
+test('gate-health trace reflects collector success, later failure, and missing token', async (testContext) => {
+  const collector = resolve(scriptDir, 'collect-gate-health.mjs')
+
+  async function runCollectorScenario({ token, failAfterFirstRequest }) {
+    const traceDir = mkdtempSync(join(os.tmpdir(), 'admin-ui-gate-health-trace-'))
+    testContext.after(() => rmSync(traceDir, { recursive: true, force: true }))
+    process.env.ADMIN_UI_TRACE_DIR = traceDir
+    const supervisor = await startSupervisor(testContext, traceDir, 'gate_health', 'github')
+    const preload = join(traceDir, 'fetch-fixture.mjs')
+    const reportPath = join(traceDir, 'gate-health.json')
+    writeFileSync(preload, `
+      import { channel } from 'node:diagnostics_channel'
+      let calls = 0
+      globalThis.fetch = async () => {
+        calls += 1
+        if (calls === 1) {
+          channel('undici:client:sendHeaders').publish({
+            request: { origin: 'https://api.github.com' },
+          })
+          const workflowRuns = ${failAfterFirstRequest
+            ? "[{ id: 123, head_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', event: 'workflow_dispatch', created_at: '2026-10-17T00:00:00Z' }]"
+            : '[]'}
+          return new Response(JSON.stringify({ workflow_runs: workflowRuns }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        throw new Error('fixture later GitHub API failure')
+      }
+    `)
+    const childEnv = {
+      ...process.env,
+      ADMIN_UI_TRACE_DIR: traceDir,
+      ADMIN_UI_TRACE_PID: String(supervisor.child.pid),
+      GITHUB_REPOSITORY: 'JiRaska/open-bank-oss',
+      GITHUB_RUN_ID: '123',
+      GITHUB_RUN_ATTEMPT: '1',
+    }
+    if (token) childEnv.GITHUB_TOKEN = token
+    else delete childEnv.GITHUB_TOKEN
+    const child = spawnSync(
+      'node', ['--import', preload, collector, '--out', reportPath],
+      { env: childEnv, encoding: 'utf8', timeout: 10000 },
+    )
+    assert.equal(child.status, 0, child.stderr)
+    const collectorReport = JSON.parse(readFileSync(reportPath, 'utf8'))
+    const stageReport = finishSupervisor(traceDir, supervisor.env)
+    return { collectorReport, stageReport }
+  }
+
+  const successful = await runCollectorScenario({ token: 'fixture-token', failAfterFirstRequest: false })
+  assert.equal(successful.collectorReport.available, true)
+  assert.equal(successful.stageReport.complete, true)
+  assert.equal(successful.stageReport.reasonEnum, null)
+  assert.equal(successful.stageReport.records.reduce((sum, row) => sum + row.numericSendCount, 0), 1)
+
+  const failed = await runCollectorScenario({ token: 'fixture-token', failAfterFirstRequest: true })
+  assert.equal(failed.collectorReport.available, false)
+  assert.equal(failed.stageReport.complete, false)
+  assert.equal(failed.stageReport.reasonEnum, 'collector_failed')
+  assert.equal(failed.stageReport.records.reduce((sum, row) => sum + row.numericSendCount, 0), 1)
+
+  const unconfigured = await runCollectorScenario({ token: '', failAfterFirstRequest: false })
+  assert.equal(unconfigured.collectorReport.available, false)
+  assert.equal(unconfigured.stageReport.complete, false)
+  assert.equal(unconfigured.stageReport.reasonEnum, 'collector_not_configured')
+  assert.equal(unconfigured.stageReport.records.reduce((sum, row) => sum + row.numericSendCount, 0), 0)
 })

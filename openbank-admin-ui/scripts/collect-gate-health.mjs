@@ -247,4 +247,7 @@ try {
 }
 
 writeFileSync(OUT, JSON.stringify(report, null, 2) + '\n')
-await requestTrace.write({ configured: Boolean(TOKEN) })
+await requestTrace.write({
+  configured: Boolean(TOKEN),
+  collectorSucceeded: report.available === true,
+})
