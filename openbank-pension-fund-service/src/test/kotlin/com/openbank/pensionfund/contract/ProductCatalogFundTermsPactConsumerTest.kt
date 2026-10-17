@@ -4,7 +4,7 @@
 package com.openbank.pensionfund.contract
 
 import au.com.dius.pact.consumer.MockServer
-import au.com.dius.pact.consumer.dsl.PactDslJsonBody
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
 import au.com.dius.pact.consumer.junit5.PactTestFor
@@ -44,18 +44,22 @@ class ProductCatalogFundTermsPactConsumerTest {
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith().status(200).headers(mapOf("Content-Type" to "application/json"))
         .body(
-            PactDslJsonBody()
-                .stringValue("id", REVISION_ID)
-                .stringValue("state", "PUBLISHED")
-                .`object`("schemaRef")
-                .stringValue("id", "org.openbank.retirement.pension-savings")
-                .integerType("version", 2)
-                .closeObject()
-                .`object`("content").`object`("attributes")
-                .`object`("feeSchedule")
-                .stringValue("managementFeeAnnualPercent", "0.80")
-                .stringValue("performanceFeePercent", "0")
-                .closeObject().closeObject().closeObject(),
+            newJsonBody { revision ->
+                revision.stringValue("id", REVISION_ID)
+                revision.stringValue("state", "PUBLISHED")
+                revision.`object`("schemaRef") { schema ->
+                    schema.stringValue("id", "org.openbank.retirement.pension-savings")
+                    schema.integerType("version", 2)
+                }
+                revision.`object`("content") { content ->
+                    content.`object`("attributes") { attributes ->
+                        attributes.`object`("feeSchedule") { fee ->
+                            fee.stringValue("managementFeeAnnualPercent", "0.80")
+                            fee.stringValue("performanceFeePercent", "0")
+                        }
+                    }
+                }
+            }.build(),
         )
         .toPact()
 
@@ -93,7 +97,9 @@ class ProductCatalogFundTermsPactConsumerTest {
 
     private fun get(server: MockServer, path: String): Pair<Int, String> {
         val response = HttpClient.newHttpClient().send(
-            HttpRequest.newBuilder(URI.create(server.getUrl() + path)).header("Accept", "application/json").GET().build(),
+            HttpRequest.newBuilder(
+                URI.create(server.getUrl() + path),
+            ).header("Accept", "application/json").GET().build(),
             HttpResponse.BodyHandlers.ofString(),
         )
         return response.statusCode() to response.body()

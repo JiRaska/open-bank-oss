@@ -23,7 +23,9 @@ class FundPinnedFeeTest {
         fee: String? = "0.80",
         revisionId: UUID = id,
     ): com.fasterxml.jackson.databind.JsonNode {
-        val feeJson = fee?.let { """"feeSchedule":{"managementFeeAnnualPercent":"$it","performanceFeePercent":"0"}""" } ?: """"x":1"""
+        val feeJson =
+            fee?.let { """"feeSchedule":{"managementFeeAnnualPercent":"$it","performanceFeePercent":"0"}""" }
+                ?: """"x":1"""
         return mapper.readTree(
             """{"id":"$revisionId","state":"$state","schemaRef":{"id":"$schema","version":$version},""" +
                 """"content":{"attributes":{$feeJson}}}""",
@@ -36,7 +38,9 @@ class FundPinnedFeeTest {
             .isEqualByComparingTo(BigDecimal("0.008"))
         assertThat(FundRevisionTerms.parse(id, revision(fee = "1.25")).managementFeeRate)
             .isEqualByComparingTo(BigDecimal("0.0125"))
-        assertThat(FundRevisionTerms.parse(id, revision(fee = "0")).managementFeeRate).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(
+            FundRevisionTerms.parse(id, revision(fee = "0")).managementFeeRate,
+        ).isEqualByComparingTo(BigDecimal.ZERO)
     }
 
     @Test

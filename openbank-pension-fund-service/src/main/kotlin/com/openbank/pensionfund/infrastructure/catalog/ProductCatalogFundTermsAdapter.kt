@@ -41,9 +41,7 @@ class ProductCatalogFundTermsAdapter(@RestClient private val client: FundRevisio
             client.revision(revisionId)
         } catch (e: WebApplicationException) {
             // Only a genuine 404 means "no such revision"; every other failure stays a failure.
-            if (e.response?.status == HTTP_NOT_FOUND) {
-                throw IllegalArgumentException("productRevisionId $revisionId is not a catalog revision")
-            }
+            require(e.response?.status != HTTP_NOT_FOUND) { "productRevisionId $revisionId is not a catalog revision" }
             throw e
         }
         return FundRevisionTerms.parse(revisionId, revision)
@@ -58,7 +56,7 @@ class ProductCatalogFundTermsAdapter(@RestClient private val client: FundRevisio
 object FundRevisionTerms {
     private const val RETIREMENT_SCHEMA = "org.openbank.retirement.pension-savings"
     private const val MIN_SCHEMA_VERSION = 2
-    private val PERCENT = BigDecimal(100)
+    private val PERCENT = BigDecimal.TEN.pow(2)
 
     fun parse(requested: UUID, revision: JsonNode): PinnedFundTerms {
         require(revision.path("id").asText() == requested.toString()) { "catalog returned another revision" }

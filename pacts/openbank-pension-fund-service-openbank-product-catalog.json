@@ -1,0 +1,31 @@
+{
+  "consumer": {
+    "name": "openbank-pension-fund-service"
+  },
+  "interactions": [
+    {
+      "description": "GET a revision id the catalog does not know",
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/revisions/30000000-0000-0000-0000-000000000fff"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

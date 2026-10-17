@@ -31,16 +31,20 @@ class FundPinnedFeeNavTest {
     )
 
     @Test
-    fun `NAV management fee equals the pinned revision value`() = kotlinx.coroutines.runBlocking {
+    fun `NAV management fee equals the pinned revision value`(): Unit = kotlinx.coroutines.runBlocking {
         val fund = admin.createFund(definition(FixedFundTerms.FEE_0_80_PERCENT))
 
         assertThat(fund.productRevisionId).isEqualTo(FixedFundTerms.FEE_0_80_PERCENT)
         assertThat(fund.managementFeeRate).isEqualByComparingTo("0.008")
         val figures = NavCalculator.calculate(
             NavInput(
-                positions = emptyList<com.openbank.pensionfund.domain.model.PricedPosition>(), cash = BigDecimal("365000"), otherLiabilities = BigDecimal.ZERO,
-                unitsOutstanding = BigDecimal("1000"), managementFeeRate = fund.managementFeeRate,
-                accrualDays = 1, launchNavPerUnit = fund.launchNavPerUnit,
+                positions = emptyList<com.openbank.pensionfund.domain.model.PricedPosition>(),
+                cash = BigDecimal("365000"),
+                otherLiabilities = BigDecimal.ZERO,
+                unitsOutstanding = BigDecimal("1000"),
+                managementFeeRate = fund.managementFeeRate,
+                accrualDays = 1,
+                launchNavPerUnit = fund.launchNavPerUnit,
             ),
         )
         // 365000 gross * 0.008 * 1 day / 365 = 8.00 accrued fee.
@@ -48,16 +52,17 @@ class FundPinnedFeeNavTest {
     }
 
     @Test
-    fun `a fund without a resolvable published revision is refused and nothing is stored`() = kotlinx.coroutines.runBlocking {
-        assertThatThrownBy { kotlinx.coroutines.runBlocking { admin.createFund(definition(null)) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { kotlinx.coroutines.runBlocking { admin.createFund(definition(UUID.randomUUID())) } }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThat(admin.funds()).isEmpty()
-    }
+    fun `a fund without a resolvable published revision is refused and nothing is stored`() =
+        kotlinx.coroutines.runBlocking {
+            assertThatThrownBy { kotlinx.coroutines.runBlocking { admin.createFund(definition(null)) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { kotlinx.coroutines.runBlocking { admin.createFund(definition(UUID.randomUUID())) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(admin.funds()).isEmpty()
+        }
 
     @Test
-    fun `amending cannot change the fee nor re-pin the revision`() = kotlinx.coroutines.runBlocking {
+    fun `amending cannot change the fee nor re-pin the revision`(): Unit = kotlinx.coroutines.runBlocking {
         val fund = admin.createFund(definition(FixedFundTerms.FEE_0_80_PERCENT))
 
         val amended = admin.amendFund(fund.id, definition(null).copy(name = "Renamed"))
