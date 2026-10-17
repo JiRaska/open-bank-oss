@@ -15,6 +15,7 @@ import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.ClearingCycleBook
+import com.openbank.simulation.model.FxConversionBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
 import com.openbank.simulation.model.SddCollectionBook
@@ -80,6 +81,14 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // posting the money-side invariants assert over (production persists no settlement record —
     // the booking is a transaction-service journal keyed by the message, ADR-0108).
     val swift = SwiftMessageBook()
+
+    // Money-path FX adoption: the REAL `FxConversion` aggregates (fx-service) priced with the real
+    // `CnbFixingRate.ratePerUnit` normalisation, `FxRate.inverted()` spread-side logic and
+    // `FxConversionMath` margin arithmetic, driven by FxConversionScenario, plus the per-conversion
+    // CZK+foreign journal pair the money-side invariants assert over (production persists no
+    // settlement record — the booking is a transaction-service journal pair keyed by the
+    // conversion).
+    val fx = FxConversionBook()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every

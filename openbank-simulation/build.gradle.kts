@@ -98,6 +98,15 @@ dependencies {
     // (only the domain POJOs are referenced from this module).
     implementation(project(":openbank-swift-service"))
 
+    // Money-path FX adoption: the harness drives the REAL fx-service domain — the `FxConversion`
+    // aggregate, the `CnbFixingRate` per-unit normalisation, the `FxRate.inverted()` spread-side
+    // logic, the `FxConversionMath` cross-scale margin arithmetic and the fail-closed
+    // `ScreeningPolicy` (ADR-0032) — so FxConversionScenario exercises production FX semantics
+    // rather than a re-model. The domain package is framework-free (ADR-0002); pulling the whole
+    // project(...) is the established convention here (only the domain POJOs are referenced from
+    // this module).
+    implementation(project(":openbank-fx-service"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

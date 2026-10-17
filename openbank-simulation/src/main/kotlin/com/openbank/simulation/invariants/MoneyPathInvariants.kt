@@ -7,6 +7,9 @@ package com.openbank.simulation.invariants
 import com.openbank.clearing.domain.model.ClearingBatch
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
+import com.openbank.fx.domain.model.FxConversion
+import com.openbank.fx.domain.model.FxConversionMath
+import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
@@ -14,6 +17,7 @@ import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.ClearingSettlementPosting
+import com.openbank.simulation.model.FxSettlementPosting
 import com.openbank.simulation.model.SddCollectionStatus
 import com.openbank.simulation.runner.World
 import com.openbank.swift.domain.model.SwiftStatus
@@ -567,6 +571,115 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Money-path FX adoption: every `FxConversion` driven by
+     * [com.openbank.simulation.scenario.FxConversionScenario] must reach a terminal status
+     * (SETTLED / FAILED / REVERSED) by the time a step has fully settled — the conversion
+     * analogue of [swiftCompleteness]. A conversion stuck PENDING after the drain means a
+     * screening, posting or reversal path failed to fire, exactly the "mid-flight money" defect
+     * class the scenario's fault injection exists to surface.
+     */
+    val fxCompleteness = object : Invariant {
+        private val terminal = setOf(
+            FxConversionStatus.SETTLED,
+            FxConversionStatus.FAILED,
+            FxConversionStatus.REVERSED,
+        )
+
+        override val name = "fx-completeness"
+        override fun check(world: World): Violation? {
+            world.fx.conversions.forEach { conversion ->
+                if (conversion.status !in terminal) {
+                    return Violation(name, "fx conversion ${conversion.id} stuck in ${conversion.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path FX adoption: the conversion-to-journal-pair correspondence, with the real
+     * `FxConversionMath` re-derived from the STORED applied rate (a conversion whose persisted
+     * `toAmount`/`fee` no longer matches its own rate is the silent-repricing defect class).
+     * A SETTLED conversion has both journals live (never reversed) and its recorded amounts
+     * re-verify through the real math; a FAILED conversion (sanctions block, uncleared review,
+     * unaffordable debit, write fault) moved no money at all; a REVERSED conversion's both
+     * journals were unwound. Idempotency keys are unique across the book. The cross-entry drift
+     * itself is covered by conservationOfMoney.
+     */
+    val fxMoneyConservation = object : Invariant {
+        override val name = "fx-money-conservation"
+        override fun check(world: World): Violation? {
+            val byKey = world.fx.conversions.groupingBy { it.idempotencyKey }.eachCount()
+            byKey.forEach { (key, count) ->
+                if (count > 1) {
+                    return Violation(name, "idempotency key $key replayed into $count fx conversions")
+                }
+            }
+            world.fx.conversions.forEach { conversion ->
+                val posting = world.fx.postingOf(conversion.id)
+                when (conversion.status) {
+                    FxConversionStatus.SETTLED -> {
+                        val violation = checkSettled(conversion, posting)
+                        if (violation != null) return violation
+                    }
+                    FxConversionStatus.FAILED -> {
+                        if (posting != null) {
+                            return Violation(
+                                name,
+                                "failed fx conversion ${conversion.id} booked a journal: money moved for a dead conversion",
+                            )
+                        }
+                    }
+                    FxConversionStatus.REVERSED -> {
+                        if (posting == null || !posting.czkReversed || !posting.foreignReversed) {
+                            return Violation(
+                                name,
+                                "reversed fx conversion ${conversion.id}: journal pair not fully unwound",
+                            )
+                        }
+                    }
+                    else -> return Violation(
+                        name,
+                        "fx conversion ${conversion.id} in non-terminal ${conversion.status}",
+                    )
+                }
+            }
+            return null
+        }
+
+        /** The settled correspondence: a live journal pair plus amounts re-verified through the real math. */
+        private fun checkSettled(conversion: FxConversion, posting: FxSettlementPosting?): Violation? {
+            val settledJournalsLive = posting != null && !posting.czkReversed && !posting.foreignReversed
+            val journalPairPresent = posting?.czkJournalId != null && posting.foreignJournalId != null
+            if (!settledJournalsLive || !journalPairPresent) {
+                return Violation(name, "settled fx conversion ${conversion.id} has no live journal pair")
+            }
+            val expectedTo = FxConversionMath.convertedAmountMinorUnits(
+                conversion.fromAmountMinorUnits,
+                conversion.fromCurrency,
+                conversion.toCurrency,
+                conversion.appliedRate,
+            )
+            if (conversion.toAmountMinorUnits != expectedTo) {
+                return Violation(
+                    name,
+                    "fx conversion ${conversion.id} toAmount=${conversion.toAmountMinorUnits} " +
+                        "but its stored rate re-derives $expectedTo",
+                )
+            }
+            val expectedFee = FxConversionMath.feeMinorUnits(conversion.fromAmountMinorUnits)
+            if (conversion.feeMinorUnits != expectedFee) {
+                return Violation(
+                    name,
+                    "fx conversion ${conversion.id} fee=${conversion.feeMinorUnits} " +
+                        "but the real margin math derives $expectedFee",
+                )
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -583,6 +696,8 @@ object MoneyPathInvariants {
         sddMoneyConservation,
         swiftCompleteness,
         swiftMoneyConservation,
+        fxCompleteness,
+        fxMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

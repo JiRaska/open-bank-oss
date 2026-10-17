@@ -274,6 +274,11 @@ const simulationScenarios = [
   // real validate() admission and the production scheme → settlement → operator transition
   // mapping under the fault injector (multi-currency correspondent settlement legs).
   { classname: 'com.openbank.simulation.scenario.SwiftMessageScenarioTest', components: ['openbank-swift-service'], scope: 'SWIFT cross-border message admission, scheme verdict, correspondent settlement, conflict reversal and operator acknowledgement scenario (pure JVM, multi-currency legs)' },
+  // Money-path FX adoption: drives the real fx-service domain — CnbFixingRate per-unit
+  // normalisation, FxRate.inverted() spread-side logic, FxConversionMath cross-scale margin
+  // arithmetic and the fail-closed ScreeningPolicy — under the fault injector (CZK customer leg +
+  // foreign GL journal pair per conversion).
+  { classname: 'com.openbank.simulation.scenario.FxConversionScenarioTest', components: ['openbank-fx-service'], scope: 'FX conversion pricing, sanctions screening, CZK customer leg + foreign journal pair, conflict reversal scenario (pure JVM)' },
 ]
 
 async function simulationScenarioEvidence() {

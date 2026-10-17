@@ -10,6 +10,7 @@ import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
+import com.openbank.simulation.scenario.FxConversionScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
 import com.openbank.simulation.scenario.SctInstPaymentScenario
@@ -91,6 +92,14 @@ class SimulationRunner(
             // is untouched; the drain is a no-op today but kept for the same "settled before the
             // invariant sweep" convention as every other scenario above.
             SwiftMessageScenario.step(world)
+            context.scheduler.drain()
+            // Money-path FX adoption: interleave the customer currency-conversion path (real
+            // CnbFixingRate/FxRate.inverted/FxConversionMath/ScreeningPolicy domain) so its CZK
+            // customer-dimension + foreign GL journal pair shares the fault profile and is checked
+            // by the same invariant sweep every step. The CZK leg is projected onto the balance
+            // store through the bus (FeeBillingScenario shape, with the same affordability
+            // guard); the foreign leg is GL-to-GL and never touches the CZK projection.
+            FxConversionScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
