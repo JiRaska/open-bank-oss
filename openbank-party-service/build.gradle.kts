@@ -47,6 +47,9 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
     // Provider-side message Pact verification for the PARTY_CREATED event (ADR-0063 P1).
     testImplementation(libs.pact.provider)
+    // Consumer contracts for the ADR-0179 account merge guard and GDPR portability transaction
+    // reads. The provider folder suites replay the committed HTTP pacts.
+    testImplementation(libs.pact.consumer)
     testImplementation(project(":openbank-libs-testing"))
 
     // CI infra pilot (P2): @QuarkusTest ITs get an isolated, per-JVM PostgreSQL +

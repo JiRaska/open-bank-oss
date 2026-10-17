@@ -24,3 +24,19 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Idempotence:** hlavička `Idempotency-Key` povolená (CORS); Redis (Valkey) je zapojen jako závislost
 - **Auth:** Keycloak OIDC; per-operace `@RolesAllowed` (least-privilege); `settle` navíc `@Authorize` přes OPA (advisory)
 - **Money-path:** **ANO** — služba je v `rules.yaml: money_path_services` (vyžaduje 2 schválení + threat model)
+
+## Kontrakty čtení pro Agent
+
+`AgentClearingReadPactConsumerTest` zaznamenává čtyři interakce Agenta pouze pro čtení:
+seznam dávek, detail dávky, seznam jejích položek a HTTP 404 pro neznámou dávku. Kontrakt
+je uložen v `pacts/openbank-agent-service-openbank-clearing-service.json`.
+`ClearingPactProviderVerificationTest` jej načítá z adresáře `pacts/` v repozitáři a přehrává
+všechny čtyři interakce přes skutečné Quarkus HTTP s připravenými daty v Testcontainers.
+Adresářové ověření vyžaduje příslušný JSON: chybějící kontrakt musí způsobit selhání,
+nikoli úspěšný běh bez interakcí. Při změně konzumenta znovu vygenerujte a commitněte JSON;
+obsluhy stavů poskytovatele udržujte shodné pro adresářové i brokerové ověření.
+
+Samostatný brokerový verifikátor zůstává podmíněn neprázdnou vlastností `pactbroker.url`;
+adresářové ověření nepotřebuje přihlašovací údaje brokeru. Přehrání ověřuje kompatibilitu
+HTTP a JSON s testovými identitami a testovým nastavením autorizace. Neprokazuje produkční
+vynucení OIDC, vlastnictví zdrojů ani OPA.

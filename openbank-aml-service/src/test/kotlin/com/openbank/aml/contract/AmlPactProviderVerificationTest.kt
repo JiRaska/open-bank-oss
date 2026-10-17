@@ -12,15 +12,31 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.aml.infrastructure.persistence.entity.AmlCaseEntity
+import com.openbank.aml.infrastructure.persistence.repository.AmlCaseRepositoryImpl
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.vertx.core.Vertx
+import io.vertx.core.impl.ContextInternal
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.launch
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Provider-side Pact verification for aml-service — its FIRST contract coverage of any kind
@@ -85,6 +101,12 @@ class AmlPactProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    @Inject
+    lateinit var caseRepository: AmlCaseRepositoryImpl
+
+    @Inject
+    lateinit var vertx: Vertx
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -118,5 +140,87 @@ class AmlPactProviderVerificationTest {
     @State("no AML case exists for the FX conversion idempotency key")
     fun stateNoExistingCaseForIdempotencyKey() {
         // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * State: "no AML case exists with the requested id".
+     *
+     * agent-service's aml_get_case 404 leg. Deliberately no seed: the requested case id is one
+     * this test never creates. The handler must EXIST because the class-level [PactFilter] drops
+     * stateless interactions from the git replay.
+     */
+    @State("no AML case exists with the requested id")
+    fun stateNoCaseExistsWithRequestedId() {
+        // No seed: the requested case id is one this provider test never creates.
+    }
+
+    /**
+     * State: "an AML case exists for the pact party".
+     *
+     * agent-service's aml_get_case / aml_list_cases legs: seeds one OPEN TRANSACTION_MONITORING
+     * case for [PACT_PARTY_ID], found by `findByCaseId`/`list` exactly as production reads it.
+     * Constants must match AgentAmlReadPactConsumerTest (openbank-agent-service) — and, per this
+     * class's header, the broker twin. The seed runs on a duplicated Vert.x context because
+     * reactive Panache cannot be driven from Pact-JVM's synchronous @State callback (HR000068);
+     * the fx pact's caution about that trap applies to driving BOTH stores, the seed here touches
+     * only Postgres.
+     */
+    @State("an AML case exists for the pact party")
+    fun stateCaseExistsForPactParty() = runOnVertxContext {
+        // pact-jvm 4.7.3 invokes each @State SETUP callback twice per interaction (documented in
+        // this class's fx seed below) — without the guard the second insert dies on
+        // aml_cases_case_id_key (23505), which is exactly the failure this guard prevents.
+        if (caseRepository.findById(CASE_ID) != null) return@runOnVertxContext
+        val entity = AmlCaseEntity()
+        entity.caseId = CASE_ID
+        entity.idempotencyKey = IDEMPOTENCY_KEY
+        entity.partyId = PACT_PARTY_ID
+        entity.customerReference = CUSTOMER_REFERENCE
+        entity.screeningType = "TRANSACTION_MONITORING"
+        entity.riskLevel = "HIGH"
+        entity.status = "OPEN"
+        entity.alertCode = "PACT-ALERT-001"
+        entity.alertDetail = "pact fixture"
+        entity.matchedEntity = null
+        entity.decisionReason = null
+        entity.assignedAnalyst = null
+        entity.decidedBy = null
+        entity.screenedAt = Instant.parse("2026-01-15T00:00:00Z")
+        entity.decidedAt = null
+        entity.createdAt = Instant.parse("2026-01-15T00:00:00Z")
+        entity.updatedAt = Instant.parse("2026-01-15T00:00:00Z")
+        Panache.withTransaction {
+            caseRepository.persist(entity)
+        }.awaitSuspending()
+        Unit
+    }
+
+    /**
+     * Bridges reactive Panache into Pact-JVM's synchronous `@State` callback — Pact-JVM invokes
+     * `@State` by reflection on the JUnit thread, which has no Vert.x context. Same shape as
+     * transaction-service's and account-service's provider verifications.
+     */
+    private fun runOnVertxContext(block: suspend () -> Unit) {
+        val future = CompletableFuture<Unit>()
+        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
+        VertxContextSafetyToggle.setContextSafe(duplicated, true)
+        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).launch {
+            try {
+                block()
+                future.complete(Unit)
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        future.get(10, TimeUnit.SECONDS)
+    }
+
+    private companion object {
+        /** Must match AgentAmlReadPactConsumerTest (openbank-agent-service) and the broker twin. */
+        private val CASE_ID: UUID = UUID.fromString("2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a")
+        private val PACT_PARTY_ID: UUID = UUID.fromString("1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b")
+        const val IDEMPOTENCY_KEY = "pact-agent-aml-001"
+        const val CUSTOMER_REFERENCE = "pact-agent-aml-ref"
     }
 }

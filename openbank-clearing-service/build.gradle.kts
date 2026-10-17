@@ -50,6 +50,8 @@ dependencies {
     testImplementation(libs.testcontainers.redpanda)
     // Consumer-driven contract for this service's outbound money-path call (issue #8345).
     testImplementation(libs.pact.consumer)
+    // Provider-side pact verification for the agent's read tools over this service's API.
+    testImplementation(libs.pact.provider)
 }
 
 kover {

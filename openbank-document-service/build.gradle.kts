@@ -61,6 +61,11 @@ dependencies {
     // each consumer's own WireMock/mock stub, written from the client and so unable to disagree
     // with it (the #2269 shape).
     testImplementation(libs.pact.provider)
+    // document-service is also a pact CONSUMER: party/address, CURRENT accounts and product
+    // fee data for rendering, plus POST consume of the document-signing SCA challenge.
+    // The four Document*PactConsumerTest classes pin those contracts; the SCA contract drives
+    // ScaVerificationAdapter through a mock-server client, not the production OIDC filter.
+    testImplementation(libs.pact.consumer)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
     // a domain-event payload, so this service's producer tests assert against the real contract
     // rather than a per-service restatement of it (#3914).

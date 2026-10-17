@@ -365,6 +365,11 @@ tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
 // measured and a Testcontainers-heavy integration suite can still publish its evidence.
 kover {
     currentProject {
+        sources {
+            // This separate compilation contains only provider-verification tests from
+            // src/test/kotlin; it must not enter the service production coverage denominator.
+            excludedSourceSets.add("providerPactTest")
+        }
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
             // Kover otherwise wires every Test task into koverVerify. The ordinary `test`

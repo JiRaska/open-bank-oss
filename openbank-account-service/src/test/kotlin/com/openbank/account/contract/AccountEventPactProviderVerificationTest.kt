@@ -226,6 +226,12 @@ class AccountEventPactProviderVerificationTest {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
     }
 
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
+    }
+
     @State("an account has been created")
     fun accountHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
@@ -358,6 +364,12 @@ class AccountEventPactProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /** Empty-party list state, matching the folder twin: the requested party is never seeded. */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
     }
 
     /** Mirror of the git-pact twin's handler — see there for why the findById guard is needed. */

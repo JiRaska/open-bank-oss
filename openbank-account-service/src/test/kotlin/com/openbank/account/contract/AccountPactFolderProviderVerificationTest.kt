@@ -234,6 +234,12 @@ class AccountPactFolderProviderVerificationTest {
         // Deliberately empty. Asserting emptiness here would test the fixture, not the provider.
     }
 
+    @State("no account exists for the requested account")
+    fun noAccountForRequestedAccount() {
+        // Deliberately empty: AmlAccountOwnershipPactConsumerTest's 404 leg requests a UUID no
+        // state in this class ever seeds, so the provider's real not-found path answers.
+    }
+
     @State("an account has been created")
     fun accountHasBeenCreated() {
         // No setup: the message is produced deterministically by the @PactVerifyProvider method below.
@@ -377,6 +383,18 @@ class AccountPactFolderProviderVerificationTest {
     @State("no account exists for the unknown IBAN")
     fun noAccountForUnknownIban() {
         // Intentionally empty.
+    }
+
+    /**
+     * party-service's merge-guard empty-page leg (pact: "no account exists for the requested
+     * party"). Deliberately no seed: the pact addresses a party id this test never creates, and
+     * the handler must EXIST (with this exact name, matching PartyAccountListPactConsumerTest)
+     * because the class-level [PactFilter] drops stateless interactions from the git replay —
+     * an interaction that declares no providerState never runs here at all.
+     */
+    @State("no account exists for the requested party")
+    fun noAccountForRequestedParty() {
+        // No seed: the requested party id is one this provider test never creates.
     }
 
     /**

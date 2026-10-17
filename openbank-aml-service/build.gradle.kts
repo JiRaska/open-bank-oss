@@ -60,6 +60,9 @@ dependencies {
     // Pact provider verification (issue #2255, C3): fx-service is a consumer of
     // POST /api/v1/aml/cases. @TestSecurity supplies the operator role Pact replays with.
     testImplementation(libs.pact.provider)
+    // Pact consumer: AmlAccountOwnershipPactConsumerTest pins the party-resolution read
+    // against account-service (GET /api/v1/accounts/{id}, issue #3413 sweep).
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
 }

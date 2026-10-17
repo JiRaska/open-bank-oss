@@ -1,0 +1,132 @@
+{
+  "consumer": {
+    "name": "openbank-document-service"
+  },
+  "interactions": [
+    {
+      "description": "POST consume the document-signing challenge over another document is refused",
+      "providerStates": [
+        {
+          "name": "a COMPLETED DOCUMENT_SIGNING SCA challenge bound to a document ceremony exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "ceremonyId": "ceremony-doc-0001",
+          "documentSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "partyId": "d0c0c0c0-0000-4000-8000-000000000002"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/d0c0c0c0-0000-4000-8000-000000000001/consume"
+      },
+      "response": {
+        "status": 409
+      }
+    },
+    {
+      "description": "POST consume the document-signing challenge the device signed",
+      "providerStates": [
+        {
+          "name": "a COMPLETED DOCUMENT_SIGNING SCA challenge bound to a document ceremony exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "ceremonyId": "ceremony-doc-0001",
+          "documentSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "partyId": "d0c0c0c0-0000-4000-8000-000000000002"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/d0c0c0c0-0000-4000-8000-000000000001/consume"
+      },
+      "response": {
+        "body": {
+          "consumedAt": "2026-10-16T10:00:00Z",
+          "id": "d0c0c0c0-0000-4000-8000-000000000001",
+          "partyId": "d0c0c0c0-0000-4000-8000-000000000002",
+          "purpose": "DOCUMENT_SIGNING",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.consumedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST consume an unknown challenge is refused",
+      "providerStates": [
+        {
+          "name": "no SCA challenge exists with the requested id"
+        }
+      ],
+      "request": {
+        "body": {
+          "ceremonyId": "ceremony-doc-0001",
+          "documentSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "partyId": "d0c0c0c0-0000-4000-8000-000000000002"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/d0c0c0c0-0000-4000-8000-000000000099/consume"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
+      "description": "POST consume with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "ceremonyId": "ceremony-doc-0001",
+          "documentSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "partyId": "d0c0c0c0-0000-4000-8000-000000000002"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/d0c0c0c0-0000-4000-8000-000000000001/consume"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sca-service"
+  }
+}

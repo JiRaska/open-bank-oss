@@ -1,0 +1,383 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the account disputes behind the dispute_list_by_account tool",
+      "providerStates": [
+        {
+          "name": "a dispute exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/disputes/account/3d3d3d3d-3d3d-4d3d-8d3d-3d3d3d3d3d3d"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 100.0,
+            "currency": "string",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "reference": "string",
+            "status": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].currency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].id": {
+              "type": "Uuid"
+            },
+            "$[*].reference": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].status": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].reference": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the dispute behind the dispute_get tool",
+      "providerStates": [
+        {
+          "name": "a dispute exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/disputes/1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d"
+      },
+      "response": {
+        "body": {
+          "accountId": "3d3d3d3d-3d3d-4d3d-8d3d-3d3d3d3d3d3d",
+          "amount": 250.0,
+          "currency": "EUR",
+          "disputeType": "DUPLICATE",
+          "id": "1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d",
+          "reference": "PACT-AGENT-DISP-001",
+          "resolution": "PENDING",
+          "status": "UNDER_REVIEW",
+          "transactionId": "2d2d2d2d-2d2d-4d2d-8d2d-2d2d2d2d2d2d"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the dispute list behind the dispute_list tool",
+      "providerStates": [
+        {
+          "name": "a dispute exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/disputes"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 100.0,
+            "currency": "string",
+            "disputeType": "string",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "reference": "string",
+            "status": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].currency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].disputeType": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].id": {
+              "type": "Uuid"
+            },
+            "$[*].reference": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].status": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].disputeType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].reference": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the dispute timeline behind the dispute_get_timeline tool",
+      "providerStates": [
+        {
+          "name": "a dispute exists for the pact agent"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/disputes/1d1d1d1d-1d1d-4d1d-8d1d-1d1d1d1d1d1d/timeline"
+      },
+      "response": {
+        "body": [
+          {
+            "description": "string",
+            "disputeId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "eventType": "string",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].description": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].disputeId": {
+              "type": "Uuid"
+            },
+            "$[*].eventType": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].description": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].disputeId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].eventType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a dispute dispute-service does not hold, via the dispute_get tool",
+      "providerStates": [
+        {
+          "name": "no dispute exists with the requested id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/disputes/abababab-abab-4aba-8aba-babababababa"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-dispute-service"
+  }
+}
