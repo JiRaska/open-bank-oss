@@ -5,13 +5,14 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -45,6 +46,7 @@ class SddCollectionDebitConsumer(
     @RestClient private val transactionClient: TransactionServiceClient,
 ) {
     private val log = Logger.getLogger(SddCollectionDebitConsumer::class.java)
+    private val transactions = TransactionClient(transactionClient)
 
     @Incoming("sdd-collection-authorised-in")
     // Poison-pill safety applies to the PAYLOAD only: an unparseable event is acked, because a
@@ -70,33 +72,30 @@ class SddCollectionDebitConsumer(
             val request = debitRequestFrom(node, mandateId, umr)
 
             EventRetry.withRetry(log, "SDD collection debit", "$mandateId/$umr") {
-                try {
-                    val response = transactionClient.initiateTransaction(request).awaitSuspending()
-                    log.infof(
-                        "[sdd-collection-debit] mandate=%s umr=%s debited (transaction %s)",
+                // Only a PROVEN 2xx counts as debited, whether or not the body can be read; an answer that
+                // proves nothing (5xx, dropped connection) is thrown by TransactionClient untouched, so
+                // EventRetry retries it - the idempotency key makes that safe - and it is never reported
+                // as "FAILED to debit".
+                when (val outcome = transactions.initiate(request).awaitSuspending()) {
+                    is TransactionCallOutcome.Booked -> log.infof(
+                        "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d, transaction %s)",
                         mandateId,
                         umr,
-                        response?.id,
+                        outcome.status,
+                        outcome.body?.id,
                     )
-                } catch (e: WebApplicationException) {
-                    // The REST client throws on a non-2xx answer, so the rail's refusal arrives here
-                    // as an exception rather than as a Response to inspect.
-                    if (e.response.status == HTTP_CONFLICT) {
-                        log.infof(
-                            "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
-                            mandateId,
-                            umr,
-                        )
-                    } else {
-                        // A non-2xx-non-409 is the rail refusing an AUTHORISED collection. Throwing
-                        // rather than logging is the whole point: R-transaction/return generation is
-                        // not built (#1000), so the only way this reaches a human is the DLQ.
-                        throw SddDebitFailedException(
-                            "[sdd-collection-debit] mandate=$mandateId umr=$umr FAILED to debit " +
-                                "(HTTP ${e.response.status}) — an authorised collection did not move money",
-                            e,
-                        )
-                    }
+                    TransactionCallOutcome.Conflict -> log.infof(
+                        "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
+                        mandateId,
+                        umr,
+                    )
+                    // The rail refused an AUTHORISED collection (400/422). Throwing rather than logging is the
+                    // whole point: R-transaction/return generation is not built (#1000), so the only way this
+                    // reaches a human is the DLQ.
+                    is TransactionCallOutcome.Rejected -> throw SddDebitFailedException(
+                        "[sdd-collection-debit] mandate=$mandateId umr=$umr REFUSED by transaction-service " +
+                            "(HTTP ${outcome.status}) — an authorised collection did not move money",
+                    )
                 }
             }
         } catch (e: IllegalArgumentException) {
@@ -141,10 +140,9 @@ class SddCollectionDebitConsumer(
 
     private companion object {
         const val EVENT_COLLECTION_AUTHORISED = "sdd.collection.authorised.v1"
-        const val HTTP_CONFLICT = 409
         const val MAX_DESCRIPTION = 140
     }
 }
 
 /** The rail refused an authorised collection. Rethrown so the connector dead-letters it (#5698). */
-class SddDebitFailedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class SddDebitFailedException(message: String) : RuntimeException(message)

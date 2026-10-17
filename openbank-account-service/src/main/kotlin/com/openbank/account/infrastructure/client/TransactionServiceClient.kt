@@ -5,6 +5,9 @@
 package com.openbank.account.infrastructure.client
 
 import com.openbank.account.application.port.out.WelcomeBonusPort
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.api.TransactionsApi
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -37,20 +40,31 @@ interface TransactionServiceRestClient : TransactionsApi
 class TransactionServiceClient(@RestClient private val client: TransactionServiceRestClient, private val clock: Clock) :
     WelcomeBonusPort {
 
+    private val transactions = TransactionClient(client)
+
     // Incoming credit with no source account: transaction-service posts the deposit journal and
     // credits the beneficiary pocket. idempotencyKey is derived from the account so the saga's
     // own idempotency guard makes a repeated grant a no-op.
     override suspend fun grantWelcomeBonus(accountId: UUID, amount: BigDecimal, currency: String) {
-        client.initiateTransaction(
-            InitiateTransactionRequest(
-                idempotencyKey = "welcome-bonus-$accountId",
-                type = "CREDIT",
-                targetAccountId = accountId,
-                amount = amount,
-                currencyCode = currency,
-                description = "Vítací bonus za založení účtu",
-                valueDate = LocalDate.now(clock),
-            ),
-        ).awaitSuspending()
+        val request = InitiateTransactionRequest(
+            idempotencyKey = "welcome-bonus-$accountId",
+            type = "CREDIT",
+            targetAccountId = accountId,
+            amount = amount,
+            currencyCode = currency,
+            description = "Vítací bonus za založení účtu",
+            valueDate = LocalDate.now(clock),
+        )
+        // A refusal must keep failing the grant, exactly as the client's own exception did before the
+        // facade turned 409/400/422 into outcomes; a proven 2xx is a grant whether or not its body reads.
+        when (val outcome = transactions.initiate(request).awaitSuspending()) {
+            is TransactionCallOutcome.Booked -> Unit
+            TransactionCallOutcome.Conflict -> throw TransactionHttpException(HTTP_CONFLICT)
+            is TransactionCallOutcome.Rejected -> throw TransactionHttpException(outcome.status)
+        }
+    }
+
+    private companion object {
+        const val HTTP_CONFLICT = 409
     }
 }
