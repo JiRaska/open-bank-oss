@@ -22,6 +22,11 @@ So three rules:
   2. EXPOSE is mandatory. It is the only live contract — losing it does not fail
      anything loudly, it silently sets the container port to 8080.
   3. The FROM must be byte-identical to the one in `Dockerfile.deploy` (#3354).
+  4. The container port has ONE source, `quarkus.http.port` in application.yaml
+     (`.github/scripts/service-port.py`). A stub that still carries an EXPOSE must agree
+     with it, and a stub that says nothing the deploy recipe and application.yaml do not
+     already say (REDUNDANT_STUB_SHA256) must not exist: delete it. 38 of them were
+     byte-identical except for the port number.
 
 Rule 3 exists because #3618 moved the fleet runtime base from
 `eclipse-temurin:25-jre-alpine` (musl) to `eclipse-temurin:25-jre` (glibc) — the
@@ -60,6 +65,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import pathlib
 import re
 import sys
@@ -80,6 +87,12 @@ QUARKUS_APP_RE = re.compile(r'^\s*COPY\s+.*\bquarkus-app/', re.I | re.M)
 FROM_RE = re.compile(r'^FROM\s+(\S+)\s*$', re.M)
 
 DEPLOY_RECIPE = ".github/workflows/Dockerfile.deploy"
+
+# sha256 of the retired port-only stub with its EXPOSE line removed. 38 services carried
+# this file verbatim; the port it declared is in application.yaml, so the file is a
+# second copy of a number and nothing else. Hash, not text, so the check stays small.
+REDUNDANT_STUB_SHA256 = "f172f41bc8c647250302672ebb94aa6d2491a8b883620eee8d4084974c412e5a"
+EXPOSE_LINE_RE = re.compile(r"^EXPOSE\s+\d+\s*\n", re.M)
 
 # Files outside the openbank-*/Dockerfile glob that still declare the fleet runtime
 # base and so must track it. None is referenced by any workflow or script today —
@@ -155,6 +168,39 @@ def check_fleet_bases(root: pathlib.Path) -> list[str]:
     return problems
 
 
+def _service_port_module(root: pathlib.Path):
+    spec = importlib.util.spec_from_file_location(
+        "service_port", root / ".github" / "scripts" / "service-port.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def check_ports(root: pathlib.Path) -> list[str]:
+    """Rule 4: one source for the port, and no stub that merely restates it."""
+    sp = _service_port_module(root)
+    problems: list[str] = []
+    for path in sorted(root.glob("openbank-*/Dockerfile")):
+        service = path.parent
+        if service.name in SELF_BUILT:
+            continue
+        raw = path.read_text(encoding="utf-8")
+        rel = path.relative_to(root)
+        digest = hashlib.sha256(EXPOSE_LINE_RE.sub("", raw).encode()).hexdigest()
+        if digest == REDUNDANT_STUB_SHA256:
+            problems.append(
+                f"{rel}: is the retired port-only stub (identical to the fleet's but for the "
+                f"EXPOSE number). Nothing builds it and the port is read from "
+                f"quarkus.http.port; delete the file.")
+        declared = sp.stub_port(service)
+        authoritative = sp.yaml_port(service)
+        if declared is not None and authoritative is not None and declared != authoritative:
+            problems.append(
+                f"{rel}: EXPOSE {declared} but application.yaml says quarkus.http.port "
+                f"{authoritative}. application.yaml is the source; fix or delete the stub.")
+    return problems
+
+
 def self_test() -> int:
     """Falsify rule 3 in BOTH directions against a synthetic tree.
 
@@ -206,6 +252,36 @@ def self_test() -> int:
         (exempt / "Dockerfile").write_text(prose + bad + "\nEXPOSE 3000\n")
         if check_fleet_bases(tmp):
             failures.append("a SELF_BUILT Dockerfile was held to the fleet base")
+
+        # Rule 4, both directions, on a tree that carries the real helper.
+        (tmp / ".github" / "scripts").mkdir(parents=True)
+        shutil.copy(pathlib.Path(__file__).with_name("service-port.py"),
+                    tmp / ".github" / "scripts" / "service-port.py")
+        svc = tmp / "openbank-a-service"
+        (svc / "src/main/resources").mkdir(parents=True)
+        (svc / "src/main/resources/application.yaml").write_text(
+            "quarkus:\n  http:\n    port: 8100\n")
+        agreeing.write_text(prose + good + "\nEXPOSE 8100\n")
+        if check_ports(tmp):
+            failures.append("a stub agreeing with application.yaml was flagged")
+        agreeing.write_text(prose + good + "\nEXPOSE 8999\n")
+        if not any("8999" in p for p in check_ports(tmp)):
+            failures.append("an EXPOSE that contradicts application.yaml was NOT flagged")
+
+        # Redundant stub: same bytes as the retired fleet stub modulo the port number.
+        global REDUNDANT_STUB_SHA256
+        real_sha = REDUNDANT_STUB_SHA256
+        try:
+            stub_text = "# declaration only\n" + good + "\n"
+            REDUNDANT_STUB_SHA256 = hashlib.sha256(stub_text.encode()).hexdigest()
+            agreeing.write_text(stub_text + "EXPOSE 8100\n")
+            if not any("retired port-only stub" in p for p in check_ports(tmp)):
+                failures.append("a redundant port-only stub was NOT flagged")
+            agreeing.write_text(stub_text + "ENV X=1\nEXPOSE 8100\n")
+            if any("retired port-only stub" in p for p in check_ports(tmp)):
+                failures.append("a stub with real content was flagged as redundant")
+        finally:
+            REDUNDANT_STUB_SHA256 = real_sha
     finally:
         shutil.rmtree(tmp)
 
@@ -213,8 +289,8 @@ def self_test() -> int:
         print(f"self-test FAILED: {f}")
     if failures:
         return 1
-    print("check-dockerfile-no-build-stage --self-test: OK — rule 3 fires on drift, "
-          "stays quiet on agreement, covers the non-glob files, exempts SELF_BUILT")
+    print("check-dockerfile-no-build-stage --self-test: OK — rules 3 and 4 fire on drift, "
+          "stay quiet on agreement, covers the non-glob files, exempts SELF_BUILT")
     return 0
 
 
@@ -227,7 +303,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    problems: list[str] = check_fleet_bases(pathlib.Path("."))
+    problems: list[str] = check_fleet_bases(pathlib.Path(".")) + check_ports(pathlib.Path("."))
     ports: dict[str, list[str]] = {}
     seen_self_built: set[str] = set()
     checked = 0
