@@ -125,7 +125,18 @@ class GitHubProposalAdapterTest {
         srv.createContext("/repos/test-owner/test-repo/issues") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
             when (ex.requestMethod) {
-                "GET" -> respond(ex, 200, objectMapper.writeValueAsString(openIssues))
+                "GET" -> {
+                    val query = ex.requestURI.rawQuery.orEmpty().split('&').associate {
+                        it.substringBefore('=') to it.substringAfter('=', "")
+                    }
+                    val perPage = query["per_page"]?.toInt() ?: openIssues.size.coerceAtLeast(1)
+                    val page = query["page"]?.toInt() ?: 1
+                    respond(
+                        ex,
+                        200,
+                        objectMapper.writeValueAsString(openIssues.drop((page - 1) * perPage).take(perPage)),
+                    )
+                }
                 "POST" -> {
                     lastIssueRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
                     respond(ex, createStatus, """{"html_url":"https://github.com/test-owner/test-repo/issues/4242"}""")
@@ -323,10 +334,11 @@ class GitHubProposalAdapterTest {
         val issue = objectMapper.readTree(lastIssueRequestBody)
         // Structured fields only — never the finding's free text.
         assertThat(issue.path("title").asText())
-            .isEqualTo("flaky-test-hunter: TEST_COUNT_DRIFT in openbank-ledger-service")
+            .startsWith("flaky-test-hunter: TEST_COUNT_DRIFT in openbank-ledger-service [")
         assertThat(issue.path("labels").map { it.asText() }).containsExactly("flaky-test")
         assertThat(issue.path("body").asText())
             .contains("fedcba9876543210")
+            .contains("<!-- flaky-test-hunter:key=")
             .contains("TEST_COUNT_DRIFT")
             .contains("declares 143 (at)Test methods but JUnit executed 91")
             .contains("JUnit dropped 52 expression-body tests")
@@ -362,7 +374,7 @@ class GitHubProposalAdapterTest {
 
         val issue = objectMapper.readTree(lastIssueRequestBody)
         assertThat(issue.path("title").asText())
-            .isEqualTo("flaky-test-hunter: TEST_COUNT_DRIFT in (unrecognised component)")
+            .startsWith("flaky-test-hunter: TEST_COUNT_DRIFT in (unrecognised component) [")
         val lines = issue.path("body").asText().lines()
         // Every fence line starts at column 0, and the hostile payload lies between them.
         assertThat(lines.filter { it.startsWith("```") }).hasSize(4)
@@ -370,23 +382,95 @@ class GitHubProposalAdapterTest {
         assertThat(issue.path("body").asText()).doesNotContain("<img").contains("www(dot)evil.test")
     }
 
-    @Test
-    fun `an open issue with the same title is reused instead of duplicated`() {
-        val baseUrl = startIssuesStub(
-            openIssues = listOf(
-                mapOf(
-                    "title" to "flaky-test-hunter: TEST_COUNT_DRIFT in openbank-ledger-service",
-                    "html_url" to "https://github.com/test-owner/test-repo/issues/4000",
-                ),
-            ),
+    private fun marked(finding: FlakyTestFinding, url: String) = mapOf(
+        "title" to "unrelated title",
+        "body" to "<!-- flaky-test-hunter:key=${FindingKeys.of(finding)} -->",
+        "html_url" to url,
+    )
+
+    private fun filler(n: Int) = (1..n).map {
+        mapOf(
+            "title" to "other $it",
+            "body" to "no marker",
+            "html_url" to "https://github.com/test-owner/test-repo/issues/$it",
         )
+    }
+
+    @Test
+    fun `an open issue carrying the same finding key is reused instead of duplicated`() {
+        val reused = "https://github.com/test-owner/test-repo/issues/4000"
+        val baseUrl = startIssuesStub(openIssues = listOf(marked(ticketOnlyFinding, reused)))
         val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
 
         val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
 
-        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4000")
+        assertThat(url).isEqualTo(reused)
         assertThat(requestsSeen.get()).isEqualTo(1)
         assertThat(lastIssueRequestBody).isNull()
+    }
+
+    @Test
+    fun `a distinct finding of the same type in the same module is NOT collapsed into the first issue`() {
+        val first = ticketOnlyFinding.copy(filePath = "openbank-ledger-service/src/test/kotlin/A.kt")
+        val second = ticketOnlyFinding.copy(filePath = "openbank-ledger-service/src/test/kotlin/B.kt")
+        val baseUrl = startIssuesStub(
+            openIssues = listOf(marked(first, "https://github.com/test-owner/test-repo/issues/1")),
+        )
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(second, "diagnosis") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4242")
+        assertThat(lastIssueRequestBody).isNotNull()
+    }
+
+    @Test
+    fun `unrecognised components do not share one bucket`() {
+        val first = ticketOnlyFinding.copy(component = "bad component!", filePath = "x/A.kt")
+        val second = ticketOnlyFinding.copy(component = "other bad one?", filePath = "x/A.kt")
+        val baseUrl = startIssuesStub(
+            openIssues = listOf(marked(first, "https://github.com/test-owner/test-repo/issues/1")),
+        )
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(second, "diagnosis") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4242")
+    }
+
+    @Test
+    fun `the same finding in another run with a new random id is still deduplicated`() {
+        val reused = "https://github.com/test-owner/test-repo/issues/4000"
+        val baseUrl = startIssuesStub(openIssues = listOf(marked(ticketOnlyFinding, reused)))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding.copy(id = "0123456789abcdef"), "diagnosis") }
+
+        assertThat(url).isEqualTo(reused)
+    }
+
+    @Test
+    fun `an existing issue beyond the first 100 open issues is found`() {
+        val reused = "https://github.com/test-owner/test-repo/issues/4000"
+        val baseUrl = startIssuesStub(openIssues = filler(130) + marked(ticketOnlyFinding, reused))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isEqualTo(reused)
+        assertThat(lastIssueRequestBody).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(2)
+    }
+
+    @Test
+    fun `a pull request in the issue list is never treated as the tracking issue`() {
+        val pr = marked(ticketOnlyFinding, "https://github.com/test-owner/test-repo/pull/9") + ("pull_request" to "x")
+        val baseUrl = startIssuesStub(openIssues = listOf(pr))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "diagnosis") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4242")
     }
 
     @Test

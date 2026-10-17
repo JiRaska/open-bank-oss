@@ -46,7 +46,10 @@ ENUM_RE = re.compile(r"enum\s+class\s+(\w*Trigger)\s*\{([^}]*)\}", re.S)
 # direction of the ratchet is what forced this edit — leaving a fixed service listed is itself a
 # failure, so the list cannot rot into an excuse nobody rereads (same shape as KNOWN_UNCOVERED in
 # check-pact-provider-replay.py, also empty). A new entry needs a reason and a way out.
-KNOWN_UNEMITTED: dict[str, str] = {}
+KNOWN_UNEMITTED: dict[str, str] = {
+    "openbank-flaky-test-hunter": "weekly sweep removed 2026-10-17 (pod has no checkout); SCHEDULED kept "
+    "@Deprecated so Temporal histories (168 h retention) still deserialize. Delete both after 2026-10-31.",
+}
 
 
 def strip_comments(text: str) -> str:

@@ -18,8 +18,10 @@ Charter: ADR-0168, `openbank-libs/governance/agents.yaml` id `flaky-test-hunter`
   The scan stays reachable through `POST /check/trigger` (operator) and the CI-failure webhook
   for a checkout on a developer machine. Do not add the cron back without giving the pod a
   checkout and the test-results artifacts first.
-- `RunTrigger` therefore has no `SCHEDULED` value. `check-scheduled-trigger-emitted.py` would
-  otherwise demand a scheduler that constructs it.
+- `RunTrigger.SCHEDULED` is kept but `@Deprecated` and never constructed: the report's trigger is
+  part of the Temporal workflow input/result and closed histories are retained 168 h, so removing
+  the value would break reading a past weekly run. Nothing is persisted in Postgres. Delete it (and
+  its `KNOWN_UNEMITTED` entry in `check-scheduled-trigger-emitted.py`) after 2026-10-31.
 
 ## Dispositions
 
@@ -27,8 +29,10 @@ Charter: ADR-0168, `openbank-libs/governance/agents.yaml` id `flaky-test-hunter`
   expression-body `runBlocking` test in this service's own test tree), behind the ADR-0031 phase-3
   policy gate. Fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`.
 - `GitHubProposalAdapter.openTicket` — everything else: opens a GitHub issue labelled
-  `flaky-test` carrying the finding and the diagnosis, reusing an open issue with the same title
-  so a re-run cannot flood the tracker. Until 2026-10-17 this only logged, so every ticket-only
+  `flaky-test` carrying the finding and the diagnosis, reusing the open issue that carries the same
+  hidden `<!-- flaky-test-hunter:key=... -->` marker (hash of check type, raw component and file;
+  all pages of open issues are read, and an unreadable page opens nothing). Distinct findings of one
+  type in one module therefore each get their own issue. Until 2026-10-17 this only logged, so every ticket-only
   disposition recorded `proposalUrl = null` and the HITL queue never saw it. Same token, same
   fail-closed rule.
 
