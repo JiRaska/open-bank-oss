@@ -4,11 +4,15 @@
 
 package com.openbank.tax.application.port.out
 
+import com.openbank.tax.domain.returns.IncomeCreditTotals
+import com.openbank.tax.domain.returns.ObservedIncomeCredit
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
+import com.openbank.tax.domain.returns.ReturnLine
 import com.openbank.tax.domain.returns.StatutoryReturn
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /** The versioned jurisdiction catalogues this deployment reports under (ADR-0336). */
@@ -18,6 +22,13 @@ interface ReturnCatalogueSource {
 
 /** The source system cannot (yet) supply a return's figures. Mapped to 503 — never to zeroes. */
 class ReturnDataUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+/**
+ * What one assemble fetched: the validated datapoint figures plus, for line-based returns
+ * (ADR-0340 CRS/FATCA), the line-level legal artefact assembled from the same snapshot. Both come
+ * from ONE fetch so the totals and the lines can never describe different source states.
+ */
+data class ReturnAssemblyData(val values: Map<String, BigDecimal>, val lines: List<ReturnLine> = emptyList())
 
 /**
  * Extraction seam for a return's datapoints (ADR-0336 D4).
@@ -38,7 +49,7 @@ interface ReturnDataPort {
         definition: ReturnDefinition,
         entityId: String,
         period: ReportingPeriod,
-    ): Map<String, BigDecimal>
+    ): ReturnAssemblyData
 }
 
 /**
@@ -70,6 +81,18 @@ interface StatutoryReturnRepository {
 
     /** Conditional update guarded on the expected version, so two operators cannot both win. */
     suspend fun save(statutoryReturn: StatutoryReturn, expectedVersion: Long): StatutoryReturn
+}
+
+/**
+ * The observed interest credits the CRS/FATCA assembly aggregates per account and period
+ * (ADR-0340 B). A read that cannot run fails the assembly, never returns zeroes.
+ */
+interface IncomeCreditRepository {
+    /** @return true when newly recorded, false when [credit] was already observed (redelivery). */
+    suspend fun record(credit: ObservedIncomeCredit): Boolean
+
+    /** Gross totals per (account, currency) for credits whose accrual period ends in the window. */
+    suspend fun totalsByAccount(from: LocalDate, to: LocalDate): List<IncomeCreditTotals>
 }
 
 interface StatutoryReturnMetricsPort {

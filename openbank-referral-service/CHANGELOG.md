@@ -2,6 +2,13 @@
 
 All notable changes to this service are documented here.
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.6.0...referral-service-v0.7.0) (2026-10-16)
+
+
+### Features
+
+* **referral,admin-ui,infra:** marketing self-serve MGM programs (create → approve → publish) ([#13000](https://github.com/JiRaska/open-bank-oss/issues/13000)) ([feee4f3](https://github.com/JiRaska/open-bank-oss/commit/feee4f3b3c751f7f38622d7a40062355b274d70f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.5.3...referral-service-v0.6.0) (2026-10-14)
 
 
