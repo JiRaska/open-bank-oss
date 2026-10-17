@@ -55,15 +55,20 @@ class CatalogClassificationPackResourceTest {
     @Test
     fun `the class vocabularies are closed`() {
         validate(
-            DEPOSIT, 3,
-            depositBase(""","accountingClass":"INTERBANK_PLACEMENT","regulatoryClass":$regulatory"""), false,
+            DEPOSIT,
+            3,
+            depositBase(""","accountingClass":"INTERBANK_PLACEMENT","regulatoryClass":$regulatory"""),
+            false,
         )
         validate(
-            DEPOSIT, 3,
-            depositBase(""","accountingClass":"GL_2100","regulatoryClass":$regulatory"""), false,
+            DEPOSIT,
+            3,
+            depositBase(""","accountingClass":"GL_2100","regulatoryClass":$regulatory"""),
+            false,
         )
         validate(
-            DEPOSIT, 3,
+            DEPOSIT,
+            3,
             depositBase(
                 ""","accountingClass":"CUSTOMER_DEPOSIT_DEMAND",""" +
                     """"regulatoryClass":{"finrepInstrument":"DEPOSITS_OVERNIGHT","counterpartySector":"PER_PARTY",""" +
@@ -72,7 +77,8 @@ class CatalogClassificationPackResourceTest {
             false,
         )
         validate(
-            DEPOSIT, 3,
+            DEPOSIT,
+            3,
             depositBase(
                 ""","accountingClass":"CUSTOMER_DEPOSIT_DEMAND",""" +
                     """"regulatoryClass":{"finrepInstrument":"MADE_UP","counterpartySector":"PER_PARTY"}""",
@@ -126,10 +132,10 @@ class CatalogClassificationPackResourceTest {
     private fun seedAttributes(): JsonNode =
         requireNotNull(javaClass.getResourceAsStream("/catalog-seeds/retirement/cz-illustrative-offerings.json"))
             .use(mapper::readTree)["offerings"][0]["attributes"].let {
-                (it.deepCopy<JsonNode>() as com.fasterxml.jackson.databind.node.ObjectNode).apply {
-                    putArray("instrumentClasses").add("PENSION_FUNDS")
-                }
+            (it.deepCopy<JsonNode>() as com.fasterxml.jackson.databind.node.ObjectNode).apply {
+                putArray("instrumentClasses").add("PENSION_FUNDS")
             }
+        }
 
     private fun validate(schema: String, version: Int, attributes: String, expectedValid: Boolean) {
         Given {
@@ -146,7 +152,10 @@ class CatalogClassificationPackResourceTest {
     @Test
     fun `every pack closes accountingClass to the shared vocabulary`() {
         val ids = listOf(
-            "banking/deposit-v3", "banking/loan-v3", "banking/treasury-instrument-v1", "retirement/pension-savings-v3",
+            "banking/deposit-v3",
+            "banking/loan-v3",
+            "banking/treasury-instrument-v1",
+            "retirement/pension-savings-v3",
         )
         val seen = ids.flatMap { id ->
             val schema = requireNotNull(javaClass.getResourceAsStream("/catalog-packs/$id.schema.json"))

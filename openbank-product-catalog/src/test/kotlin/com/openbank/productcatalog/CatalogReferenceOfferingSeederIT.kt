@@ -49,8 +49,13 @@ class CatalogReferenceOfferingSeederIT {
             rows = offeringStates()
         }
         assertThat(rows.keys).contains(
-            "TREASURY_MM_PLACEMENT", "TREASURY_MM_BORROWING", "TREASURY_CNB_DEPOSIT_FACILITY",
-            "TREASURY_CNB_LOMBARD", "TREASURY_FX_SPOT", "CZ_DPS_CONSERVATIVE", "CZ_DIP_EQUITY_GLOBAL",
+            "TREASURY_MM_PLACEMENT",
+            "TREASURY_MM_BORROWING",
+            "TREASURY_CNB_DEPOSIT_FACILITY",
+            "TREASURY_CNB_LOMBARD",
+            "TREASURY_FX_SPOT",
+            "CZ_DPS_CONSERVATIVE",
+            "CZ_DIP_LIFECYCLE",
         )
         assertThat(rows.keys.filter { it.startsWith("TREASURY_") }).hasSize(TREASURY_COUNT)
         assertThat(rows.keys.filter { it.startsWith("CZ_D") }).hasSize(PENSION_COUNT)
