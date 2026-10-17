@@ -30,6 +30,7 @@ tests:
               team: platform
               topic: openbank.dlq.audit.audit-events-in
             exp_annotations:
+              subject_period: continuous
               summary: "Dead-letter topic openbank.dlq.audit.audit-events-in received records"
               description: "openbank.dlq.audit.audit-events-in gained 2 record(s) in the last hour. A consumer nacked them after retries. Inspect the records and the owning service's logs. This is the fleet-wide catch-all; a dedicated per-topic alert may fire as well."
       # Arrivals stopped more than an hour ago: clears.
@@ -50,5 +51,6 @@ tests:
               team: platform
               topic: dead-letter-topic-legacy-in
             exp_annotations:
+              subject_period: continuous
               summary: "Dead-letter topic dead-letter-topic-legacy-in received records"
               description: "dead-letter-topic-legacy-in gained 30 record(s) in the last hour. A consumer nacked them after retries. Inspect the records and the owning service's logs. This is the fleet-wide catch-all; a dedicated per-topic alert may fire as well."

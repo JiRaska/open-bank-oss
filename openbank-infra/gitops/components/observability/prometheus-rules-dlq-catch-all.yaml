@@ -29,5 +29,7 @@ spec:
             severity: warning
             team: platform
           annotations:
+            # Driven by real consumer failures, not a schedule: no period to fit the window to.
+            subject_period: continuous
             summary: "Dead-letter topic {{ $labels.topic }} received records"
             description: "{{ $labels.topic }} gained {{ $value }} record(s) in the last hour. A consumer nacked them after retries. Inspect the records and the owning service's logs. This is the fleet-wide catch-all; a dedicated per-topic alert may fire as well."
