@@ -4,6 +4,8 @@
 
 package com.openbank.pension.infrastructure.statecontribution
 
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import com.openbank.pension.application.port.out.ClaimReceiptLine
 import com.openbank.pension.domain.statecontribution.CzClaimReasonCode
 import com.openbank.pension.domain.statecontribution.CzStateContributionCalendar
@@ -40,12 +42,15 @@ import java.util.UUID
  *
  * Monthly return report (§18(4)) and its result (§18(6)):
  * ```
- * H;cz-mf-state-contribution-v1;RETURNS;<IČO>;<YYYY-MM>;<lineCount>;<total>
+ * H;cz-mf-state-contribution-v1;RETURNS;<IČO>;<YYYY-MM>;<currency>;<lineCount>;<total>
  * V;<returnId>;<contractReference>;<cause>;<amount>;<claimMonth or ->
  * R;cz-mf-state-contribution-v1;RETURNS-RESULT;<YYYY-MM>
  * C;<returnId>                            confirmed
  * E;<returnId>;<reasonCode>               refused, re-report after correction
  * ```
+ * A return report is single-currency: `<currency>` (ISO 4217) names the currency of `<total>` and
+ * of every `<amount>`. A month with returns in several currencies is filed as one report per
+ * currency; amounts of different currencies are never summed or converted.
  */
 object CzMfStateContributionFormat {
     const val FORMAT = "cz-mf-state-contribution-v1"
@@ -104,16 +109,19 @@ object CzMfStateContributionFormat {
         return lines
     }
 
-    fun returnReport(ico: String, month: YearMonth, lines: List<ReturnReportLine>): String {
-        val total = lines.fold(BigDecimal.ZERO) { a, l -> a + l.amount }
-        val header = listOf("H", FORMAT, "RETURNS", ico, month, lines.size, total.toPlainString())
+    fun returnReport(ico: String, month: YearMonth, currency: CurrencyCode, lines: List<ReturnReportLine>): String {
+        require(lines.all { it.amount.currency == currency }) {
+            "a $FORMAT return report is single-currency; every line must be in ${currency.code}"
+        }
+        val total = lines.fold(Money(BigDecimal.ZERO, currency)) { a, l -> a + l.amount }
+        val header = listOf("H", FORMAT, "RETURNS", ico, month, currency.code, lines.size, total.amount.toPlainString())
         val body = lines.map {
             listOf(
                 "V",
                 it.returnId,
                 it.contractReference,
                 it.cause.name,
-                it.amount.toPlainString(),
+                it.amount.amount.toPlainString(),
                 it.claimMonth ?: "-",
             )
         }
