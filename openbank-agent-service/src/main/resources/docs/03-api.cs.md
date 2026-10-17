@@ -92,3 +92,9 @@ Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kd
 ## Verzování
 
 Hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `openbank-libs`. Verze MCP protokolu (`2024-11-05`) se vyjednává zvlášť při `initialize` a je nezávislá na verzi HTTP API.
+
+## Kontrakty nástrojů pro čtení sankčních kontrol
+
+`sanctions_list_checks`, `sanctions_get_check` a `sanctions_list_pending` předávají tělo odpovědi sanctions-service přes `RestDownstreamReadAdapter`. Seznamové nástroje vracejí pole; čekající kontroly mají stav `POTENTIAL_HIT`. Neznámé id zůstává chybou404 navazující služby a nezmění se na vymyšlený výsledek bez nálezu.
+
+Čtyři consumer Pact interakce pokrývají seznam, známou kontrolu, čekající kontroly a chybějící id. Používají skutečný adaptér a ručně implementovaného klienta připojeného k Pact mocku. Provider replay čte připravený záznam přes skutečné HTTP a PostgreSQL. Testy neprokazují mapování anotací skutečného REST klienta, platnost JWT, vynucení politik, vlastnictví ani úplnost vrácené populace.
