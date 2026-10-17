@@ -181,3 +181,17 @@ spec:
               customer edge is deleted, renamed, or has never completed successfully. Check the
               canary identity first (ADR-0331, provision-synthetic-customer.sh): a missing secret
               shows in the Job log as "credential absent".
+        - alert: JourneyCustomerAuthenticationMissing
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="observability", cronjob="journey-customer-authentication"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The customer-authentication journey has never succeeded, or its CronJob is gone"
+            description: >-
+              No kube-state-metrics series exists for journey-customer-authentication. The
+              canary customer's token issuance / edge session / negative-auth path through the public
+              token endpoint and customer edge is deleted, renamed, or has never completed successfully. Check the
+              canary identity first (ADR-0331, provision-synthetic-customer.sh): a missing secret
+              shows in the Job log as "credential absent".
