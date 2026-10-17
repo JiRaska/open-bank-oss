@@ -204,4 +204,39 @@ class SanctionsJsonbPayloadIT {
             }
         }
     }
+
+    @Test
+    fun `an insert omitting JSONB payloads reloads each exact database default`() {
+        val defaultId = UUID.fromString("c1414141-1414-4141-8141-141414141414")
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                "INSERT INTO sanctions_checks (id,idempotency_key,entity_type,name) VALUES (?,?,'INDIVIDUAL',?)",
+            ).use { statement ->
+                statement.setObject(1, defaultId)
+                statement.setString(2, "payload-regression-defaults")
+                statement.setString(3, "Synthetic Defaults Probe")
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+
+            c.prepareStatement(
+                "SELECT aliases::text,identifiers::text,matches::text,checked_lists::text " +
+                    "FROM sanctions_checks WHERE id=?",
+            ).use { statement ->
+                statement.setObject(1, defaultId)
+                statement.executeQuery().use { row ->
+                    assertThat(row.next()).isTrue()
+                    assertThat(mapper.readTree(row.getString(1))).isEqualTo(mapper.readTree("[]"))
+                    assertThat(mapper.readTree(row.getString(2))).isEqualTo(mapper.readTree("{}"))
+                    assertThat(mapper.readTree(row.getString(3))).isEqualTo(mapper.readTree("[]"))
+                    assertThat(mapper.readTree(row.getString(4))).isEqualTo(mapper.readTree("[]"))
+                }
+            }
+        }
+
+        val reloaded = onEventLoop { repository.findById(defaultId) }!!
+        assertThat(reloaded.aliases).isEmpty()
+        assertThat(reloaded.identifiers).isEmpty()
+        assertThat(reloaded.matches).isEmpty()
+        assertThat(reloaded.checkedLists).isEmpty()
+    }
 }
