@@ -3,6 +3,9 @@
     <file name="src/main/kotlin/com/openbank/agent/application/port/in/KillSwitchUseCases.kt">
         <error line="6" column="9" source="standard:package-name" />
     </file>
+    <file name="src/main/kotlin/com/openbank/agent/application/port/in/MergeRecordUseCases.kt">
+        <error line="6" column="9" source="standard:package-name" />
+    </file>
     <file name="src/main/kotlin/com/openbank/agent/application/port/in/ProposalUseCases.kt">
         <error line="6" column="9" source="standard:package-name" />
     </file>

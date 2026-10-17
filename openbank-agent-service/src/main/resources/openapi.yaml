@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.14.0"
+  version: "1.15.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -51,6 +51,12 @@ tags:
       HITL approval queue (ADR-0031 D4). Requires an authenticated operator bearer
       (ROLE_OPERATOR, ROLE_ADMIN or ROLE_COMPLIANCE) — not documented as an OpenAPI
       security scheme yet, matching the rest of this spec.
+  - name: merge-records
+    description: >-
+      Recorded human merge (ADR-0031 phase 3): durable evidence of WHO merged an
+      agent-authored PR. Ingest is ROLE_ADMIN only (the GitHub Actions pipeline
+      delivers with a service credential); reads are ROLE_OPERATOR, ROLE_ADMIN or
+      ROLE_COMPLIANCE.
 
 paths:
   /mcp:
@@ -362,6 +368,65 @@ paths:
           description: Proposal not found
         "409":
           description: Proposal already decided, or authenticated principal equals the author (segregation of duties)
+
+  /api/v1/agent-merge-records:
+    post:
+      tags: [merge-records]
+      operationId: recordAgentMerge
+      summary: Ingest a recorded human merge of an agent-authored PR
+      description: |
+        Records WHO merged an agent's PR (ADR-0031 phase 3) — the merge half of the
+        AI-attribution evidence chain next to `agent.proposal.decided`. Called by the
+        GitHub Actions pipeline with a service credential (ROLE_ADMIN only). Idempotent
+        by `prNumber`: a webhook redelivery returns the already-stored record with
+        `inserted: false` and emits no second audit event. A genuine insert emits an
+        `agent.pr.merged` audit event under the merging human.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeRecordIngestRequest'
+      responses:
+        "200":
+          description: The stored merge record (the inserted flag is false on a duplicate redelivery)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergeRecordDto'
+        "400":
+          description: A required field is missing or malformed
+        "401":
+          description: Authentication required
+        "403":
+          description: Authenticated principal lacks ROLE_ADMIN
+    get:
+      tags: [merge-records]
+      operationId: listAgentMergeRecords
+      summary: List recorded human merges of agent-authored PRs
+      description: |
+        The recorded-merge evidence, newest first. `agentId` narrows to one agent's merges
+        (the admin-ui per-agent drill-down). Requires ROLE_OPERATOR, ROLE_ADMIN or
+        ROLE_COMPLIANCE.
+      parameters:
+        - name: agentId
+          in: query
+          description: Filter to merges of PRs authored by this agent id (e.g. "flaky-test-hunter").
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching merge records, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MergeRecordDto'
+        "401":
+          description: Authentication required
+        "403":
+          description: Authenticated principal lacks an operator role
 
   /q/health/ready:
     get:
@@ -738,3 +803,72 @@ components:
         reason:
           type: string
           nullable: true
+
+    MergeRecordIngestRequest:
+      type: object
+      required: [agentId, prNumber, prUrl, headBranch, mergedBy, mergedAt, title]
+      properties:
+        agentId:
+          type: string
+          description: The declared agent id (e.g. "flaky-test-hunter"), derived from the PR head branch prefix/author by the caller.
+        prNumber:
+          type: integer
+          format: int64
+          description: The GitHub PR number — the idempotency key; a redelivery returns the stored record.
+        prUrl:
+          type: string
+        headBranch:
+          type: string
+        mergedBy:
+          type: string
+          description: The HUMAN login who pressed merge — becomes the audit actor.
+        mergedAt:
+          type: string
+          format: date-time
+        title:
+          type: string
+        proposalId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Links the agent_proposal row when the caller can establish it.
+        source:
+          type: string
+          nullable: true
+          description: Ingest origin, e.g. "github-actions". Defaults to "unknown".
+
+    MergeRecordDto:
+      type: object
+      required: [id, agentId, prNumber, prUrl, headBranch, mergedBy, mergedAt, title, recordedAt, source, inserted]
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+        prNumber:
+          type: integer
+          format: int64
+        prUrl:
+          type: string
+        headBranch:
+          type: string
+        mergedBy:
+          type: string
+        mergedAt:
+          type: string
+          format: date-time
+        title:
+          type: string
+        proposalId:
+          type: string
+          format: uuid
+          nullable: true
+        recordedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+        inserted:
+          type: boolean
+          description: False on a duplicate redelivery — the stored original record, returned unchanged.

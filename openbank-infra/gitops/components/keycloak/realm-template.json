@@ -39,6 +39,10 @@
         "description": "Bank administrator"
       },
       {
+        "name": "ROLE_MERGE_RECORDER",
+        "description": "CI merge-record ingest only (ADR-0031 phase 3): the record-agent-merge pipeline client carries exactly this role — least privilege, one endpoint, no interactive use"
+      },
+      {
         "name": "ROLE_OPERATOR",
         "description": "Bank operator"
       },

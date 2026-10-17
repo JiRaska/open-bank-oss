@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.0.3](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.2...pension-service-v2.0.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension:** staff contract search and state-contribution deadlines NPE ([#12943](https://github.com/JiRaska/open-bank-oss/issues/12943)) ([a012019](https://github.com/JiRaska/open-bank-oss/commit/a012019c14d530e454bc1c4aa3a323294a31e7e0))
+
+## [2.0.2](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.1...pension-service-v2.0.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **pension,customer-edge:** replace deprecated JSON and query APIs ([#12947](https://github.com/JiRaska/open-bank-oss/issues/12947)) ([88dfa4f](https://github.com/JiRaska/open-bank-oss/commit/88dfa4f3d5e50111877c901ead84f48006692d27))
+
 ## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.0...pension-service-v2.0.1) (2026-10-14)
 
 
