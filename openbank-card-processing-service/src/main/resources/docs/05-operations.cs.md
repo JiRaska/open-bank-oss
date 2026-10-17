@@ -117,7 +117,7 @@ WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
 SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
 ```
 
-   - `COMPLETED`: debet JE zaúčtovaný; označte řádek: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL WHERE id = '<clearing id>';`
+   - `COMPLETED`: debet JE zaúčtovaný; označte řádek: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL, posting_last_attempt_at = now() WHERE id = '<clearing id>';`
    - žádný řádek: bezpečné znovu odeslat: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
    - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service drží klíč v tomto stavu a bude jím dál odpovídat; je to incident transaction-service, ne reset - neresetovat.
 

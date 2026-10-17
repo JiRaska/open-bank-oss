@@ -19,8 +19,9 @@
 --
 -- posting_next_attempt_at is both the backoff schedule and a short lease: a re-driver claims a row by
 -- pushing it forward and stamping posting_claim_token with a fresh UUID. An attempt's outcome is only
--- written WHERE posting_claim_token still equals the token it was started with (the inline attempt,
--- which claims nothing, writes with a NULL token), and POSTED is terminal: a slow attempt whose lease
+-- written WHERE posting_claim_token still equals the token it was started with (CardProcessingService stamps a
+-- posting_claim_token at insert, so the inline attempt holds a first-grace lease of
+-- posting-first-grace-seconds, 60s, and writes with that token), and POSTED is terminal: a slow attempt whose lease
 -- expired can therefore never overwrite a newer claim's result or turn POSTED back into FAILED. The re-post is safe regardless:
 -- the ledger idempotency key is derived from (authorisation, clearing key) and transaction-service
 -- dedupes on it.
@@ -31,7 +32,7 @@
 -- ROLLBACK: DROP INDEX ix_card_clearings_posting_due; ALTER TABLE card_clearings
 --   DROP COLUMN posting_status, DROP COLUMN posting_attempts, DROP COLUMN posting_last_error,
 --   DROP COLUMN posting_last_attempt_at, DROP COLUMN posting_next_attempt_at,
---   DROP COLUMN posting_transaction_id;
+--   DROP COLUMN posting_transaction_id, DROP COLUMN posting_claim_token;
 -- Safe at any time (additive; nothing references the columns), but it discards the only record of
 -- which clearings still await their ledger posting.
 

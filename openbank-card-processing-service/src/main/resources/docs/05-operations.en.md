@@ -117,7 +117,7 @@ WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
 SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
 ```
 
-   - `COMPLETED`: the debit IS booked; mark the card row done: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL WHERE id = '<clearing id>';`
+   - `COMPLETED`: the debit IS booked; mark the card row done: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL, posting_last_attempt_at = now() WHERE id = '<clearing id>';`
    - no row: safe to re-drive: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
    - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service holds the key in that state and will keep answering with it; this is a transaction-service incident, not a reset - do not reset.
 
