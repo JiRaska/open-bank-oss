@@ -140,7 +140,10 @@ data:
       const accountBody = account && account.status === 200 ? json(account) : null;
       const balance = id ? http.get(`${CUSTOMER_BASE}/customer/v1/balances/${id}`, params('balance-get')) : null;
       if (balance) report('balance', balance, 200);
-      const b = balance && balance.status === 200 ? json(balance) : null;
+      // balance-service answers a JSON ARRAY of BalanceResponse, one per currency: pick the fixture
+      // currency's row. No match leaves b null, which fails the 'served' check below by name.
+      const balanceRows = balance && balance.status === 200 ? json(balance) : null;
+      const b = Array.isArray(balanceRows) ? (balanceRows.find((r) => r && r.currency === FIXTURE_CURRENCY) || null) : null;
 
       // 4. negative path: a well-formed id the caller does not own is refused (403, not 404:
       // the edge deliberately gives no existence oracle)
@@ -153,6 +156,7 @@ data:
         // account appearing is a fixture change a human must make deliberately, not drift.
         'the canary lists exactly its own ACTIVE fixture account': () => !!fixture && owners.size === 1,
         'the account can be opened by id': () => !!accountBody && accountBody.id === id,
+        // fails when the array has no element with currency === FIXTURE_CURRENCY (or the body is not an array)
         'the balance is served for the account': () => !!b && b.accountId === id,
         'the balance is in the fixture currency and internally consistent': () => !!b
           && b.currency === FIXTURE_CURRENCY
