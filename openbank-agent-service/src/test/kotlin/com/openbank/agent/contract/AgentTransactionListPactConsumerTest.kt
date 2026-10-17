@@ -45,6 +45,12 @@ import org.junit.jupiter.api.extension.ExtendWith
  * IMPORTANT — regenerate on change: re-run this test (`./gradlew :openbank-agent-service:test
  * --tests "*AgentTransactionListPactConsumerTest*"`) and commit the updated pact JSON in the same
  * PR; `.github/workflows/pact-drift-check.yml` fails the build if they diverge.
+ *
+ * This class now carries THREE interactions of the one pact file (list 200, detail 200, detail
+ * 404). PactConsumerTestExt merges all `@Pact` methods of a class into the single
+ * consumer/provider pact file — a second class would OVERWRITE it with only its own interaction
+ * (measured on the balance pact this PR). Add further transaction interactions as `@Pact` methods
+ * here, never as a new class.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-transaction-service", pactVersion = PactSpecVersion.V3)
@@ -99,6 +105,94 @@ class AgentTransactionListPactConsumerTest {
         assertThat(node.path("pagination").has("limit")).isTrue()
     }
 
+    // --- Second and third interactions of the SAME pact file: the detail read. ---
+    //
+    // Both @Pact methods in this class merge into the one
+    // `pacts/openbank-agent-service-openbank-transaction-service.json`; a second CLASS would
+    // overwrite it (measured on the balance pact this PR — see AgentBalanceReadPactConsumerTest).
+    //
+    // `GET /api/v1/transactions/{id}` — the `get_transaction` tool. The 200 interaction is seeded
+    // by transaction-service's `a completed transaction exists for the pact detail read` state
+    // (COMPLETED so the terminal fields exist on the wire); the 404 is the enumeration-resistance
+    // case — "no such transaction" must not arrive as an empty body the model reads as a blank
+    // transaction.
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun transactionDetailPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a completed transaction exists for the pact detail read")
+        .uponReceiving("GET the transaction the agent's get_transaction tool returns verbatim")
+        .path(EXPECTED_DETAIL_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                // Type matchers on the load-bearing keys only: the tool serializes the whole
+                // document downstream, so a renamed or retyped key is the failure mode. Nullable
+                // fields (completedAt is set here, but failedAt/failureReason are not) stay
+                // unpinned — pinning them would assert values the domain legitimately leaves null.
+                o.stringType("id", PACT_TX_ID)
+                o.stringType("referenceNumber", "TXN-PACT-AGENT-001")
+                o.stringType("type", "DEBIT")
+                o.stringType("sourceAccountId", PACT_TX_SOURCE_ACCOUNT_ID)
+                o.stringType("targetAccountId", PACT_TX_TARGET_ACCOUNT_ID)
+                o.decimalType("amount", 250.00)
+                o.stringType("currencyCode", "CZK")
+                o.stringType("status", "COMPLETED")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "transactionDetailPact")
+    fun `the transaction detail carries the keys the tool serializes`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        val raw = given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            // Reflected off the client, NOT retyped: this is the request the real client issues.
+            .get(clientDerivedDetailPath())
+            .then()
+            .statusCode(200)
+            .extract().asString()
+
+        val node = mapper.readTree(raw)
+        listOf("id", "referenceNumber", "type", "sourceAccountId", "targetAccountId", "currencyCode", "status")
+            .forEach { key ->
+                assertThat(node.path(key).isTextual)
+                    .describedAs("the '%s' key must stay a string — a retyped field breaks the tool's contract", key)
+                    .isTrue()
+            }
+        assertThat(node.path("amount").isNumber).isTrue()
+    }
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun unknownTransactionPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no transaction exists for the id")
+        .uponReceiving("GET a transaction id the bank does not hold")
+        .path(UNKNOWN_DETAIL_PATH)
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "unknownTransactionPact")
+    fun `a transaction id the bank does not hold is a 404, not an empty transaction`(mockServer: MockServer) {
+        assertClientPathMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get(UNKNOWN_DETAIL_PATH)
+            .then()
+            .statusCode(404)
+    }
+
     private fun assertClientPathMatchesContract() {
         assertThat(clientDerivedTransactionsPath())
             .describedAs(
@@ -125,6 +219,22 @@ class AgentTransactionListPactConsumerTest {
          */
         const val EXPECTED_TRANSACTIONS_PATH = "/api/v1/transactions"
 
+        /** Seeded by transaction-service's `a completed transaction exists for the pact detail read`. */
+        const val PACT_TX_ID = "f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1"
+        const val PACT_TX_SOURCE_ACCOUNT_ID = "f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2"
+        const val PACT_TX_TARGET_ACCOUNT_ID = "f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3"
+
+        /**
+         * LITERAL, deliberately retyped from transaction-service's `TransactionResource`
+         * (`@Path("/api/v1/transactions")` + `@GET @Path("/{transactionId}")`). Never derive from
+         * the client.
+         */
+        const val EXPECTED_DETAIL_PATH = "/api/v1/transactions/$PACT_TX_ID"
+
+        /** Seeded by transaction-service's `no transaction exists for the id` (deliberately empty). */
+        const val UNKNOWN_TX_ID = "00000000-0000-4000-8000-0000000000ff"
+        const val UNKNOWN_DETAIL_PATH = "/api/v1/transactions/$UNKNOWN_TX_ID"
+
         fun clientDerivedTransactionsPath(): String {
             val base = TransactionServiceClient::class.java.getAnnotation(Path::class.java).value
             val method = TransactionServiceClient::class.java.methods
@@ -132,6 +242,15 @@ class AgentTransactionListPactConsumerTest {
                 .getAnnotation(Path::class.java)
                 .value
             return base + method
+        }
+
+        fun clientDerivedDetailPath(): String {
+            val base = TransactionServiceClient::class.java.getAnnotation(Path::class.java).value
+            val method = TransactionServiceClient::class.java.methods
+                .single { it.name == "getTransaction" }
+                .getAnnotation(Path::class.java)
+                .value
+            return (base + method).replace("{id}", PACT_TX_ID)
         }
     }
 }

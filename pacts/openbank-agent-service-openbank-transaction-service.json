@@ -4,6 +4,123 @@
   },
   "interactions": [
     {
+      "description": "GET the transaction the agent's get_transaction tool returns verbatim",
+      "providerStates": [
+        {
+          "name": "a completed transaction exists for the pact detail read"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/transactions/f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1"
+      },
+      "response": {
+        "body": {
+          "amount": 250.0,
+          "currencyCode": "CZK",
+          "id": "f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1",
+          "referenceNumber": "TXN-PACT-AGENT-001",
+          "sourceAccountId": "f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2",
+          "status": "COMPLETED",
+          "targetAccountId": "f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3",
+          "type": "DEBIT"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencyCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.referenceNumber": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.sourceAccountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.targetAccountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a transaction id the bank does not hold",
+      "providerStates": [
+        {
+          "name": "no transaction exists for the id"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/transactions/00000000-0000-4000-8000-0000000000ff"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
       "description": "GET the transaction page the agent's list_transactions tool returns verbatim",
       "providerStates": [
         {
