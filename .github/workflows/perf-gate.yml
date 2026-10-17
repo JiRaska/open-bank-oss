@@ -57,7 +57,7 @@ jobs:
           # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
           # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
           # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
-          # Engagement, Referral and Campaign added as third through thirty-ninth
+          # Engagement, Referral, Campaign and PID added as third through fortieth
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
           # SUPPOSED to measure, not only what it did. All subjects are non-mutating
@@ -104,6 +104,7 @@ jobs:
               "openbank-engagement-service",
               "openbank-referral-service",
               "openbank-campaign-service",
+              "openbank-pid-service",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
