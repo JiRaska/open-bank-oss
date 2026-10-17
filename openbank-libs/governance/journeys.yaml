@@ -375,6 +375,38 @@ journeys:
       read-only k6 pod has no Chromium runtime; adding one without a separate security and
       credential boundary would turn a monitoring gap into a privileged browser foothold.
 
+  - id: fx-rates-read
+    title: "FX rate sheet, pair quote and ČNB reference through the public edge"
+    capability: >-
+      An authenticated customer can read the published FX rate sheet, one live EUR/CZK pair
+      quote and the ČNB reference history — the three read paths the app's currency
+      conversion and rate trend use. A fixer that goes silent, answers an empty sheet, or
+      emits rows without a positive rate is caught here even though every transport-level
+      probe stays green (a 404 is a valid HTTP response, #2204).
+    status: active
+    severity: ticket
+    money_moving: false
+    covers:
+      - openbank-fx-service
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-fx-rates-read.yaml
+    schedule: "8,23,38,53 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and the public customer edge — the same identity
+      wealth-declared-holding and vop-verify-payee drive, reading the same OpenBao KV entry
+      through its own ExternalSecret. Should the secret ever be missing, the script logs
+      "credential absent" and fails every check, which is missing identity evidence and not
+      an fx or edge result. The journey is read-only: no conversion is executed and nothing
+      is written or posted.
+    falsification: >-
+      Point the customer edge's fx-service URL at a dead host, or set CUSTOMER_BASE to
+      fx-service's ClusterIP: the journey must fail on the 5xx/timeout, not pass because a
+      service answered somewhere. Make the ČNB fixing ingest return an empty or malformed
+      sheet: the commercial rate-sheet checks may still pass, but the history leg and the
+      positive-rate shape checks must go red — asserting only "HTTP 200" would let the exact
+      #2204 failure mode (a valid response carrying no rate) stay green for the service's
+      whole life again.
+
   - id: wealth-declared-holding
     title: "Declared holding appears in net worth"
     capability: >-
@@ -446,8 +478,12 @@ money_path_accountability:
     - service: openbank-fx-service
       note: >-
         Its ČNB fixing URL was a 404 for the service's whole life and every test layer stayed
-        green (#2204). A journey here would have to assert the SHAPE of the fetched rate, not
-        that a request succeeded — a 404 is a valid HTTP response.
+        green (#2204) — a 404 is a valid HTTP response, which is why the journey here asserts
+        the SHAPE of the fetched rate, never that a request succeeded. The active
+        fx-rates-read journey covers exactly this read path (rate sheet, EUR/CZK pair quote
+        and ČNB reference history through the public edge, shape-pinned so an empty or
+        malformed fixer goes red). Conversion and any posting journey remain blocked by the
+        default blocker.
     - service: openbank-lending-service
     - service: openbank-sdd-service
     - service: openbank-interest-service
