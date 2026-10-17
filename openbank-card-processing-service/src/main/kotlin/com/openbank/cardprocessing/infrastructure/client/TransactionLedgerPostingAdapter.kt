@@ -4,6 +4,8 @@
 
 package com.openbank.cardprocessing.infrastructure.client
 
+import com.fasterxml.jackson.core.JsonParseException
+import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
@@ -12,6 +14,7 @@ import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -84,12 +87,37 @@ class TransactionLedgerPostingAdapter(
             ).awaitSuspending()
             PostingResult(PostingOutcome.POSTED, response.id, response.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            if (isBodyBindingFailureAfterSuccess(e)) {
+                // The answer was 2xx, so transaction-service COMMITTED the posting; only the body
+                // did not bind into the generated type (the callers use just id and status, and both
+                // are optional). Reporting FAILED here would flag a booked debit as a gap, and a
+                // re-drive would present the same key and be deduplicated - so it is POSTED, with no id.
+                log.warnf(
+                    e,
+                    "ledger posting for authorization %s accepted (2xx) but the body did not bind",
+                    authorization.id,
+                )
+                return PostingResult(PostingOutcome.POSTED, null, BODY_UNREADABLE_DETAIL)
+            }
             // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
             // here may propagate and undo a fact the acquirer has already asserted. The FAILED
             // outcome is what makes the gap visible instead of swallowed.
             log.errorf(e, "ledger posting failed for authorization %s", authorization.id)
             PostingResult(PostingOutcome.FAILED, null, e.message)
         }
+    }
+
+    /**
+     * A body that fails to bind surfaces as a READ-side Jackson error (measured: the raw
+     * `InvalidFormatException`, unwrapped). Write-side errors (the request never left) do not count.
+     * A non-2xx answer never reaches the body (the default response mapper throws first), so a
+     * [WebApplicationException] only counts when its status is 2xx.
+     */
+    private fun isBodyBindingFailureAfterSuccess(e: Exception): Boolean {
+        val bindError = generateSequence<Throwable>(e) { it.cause }
+            .any { it is MismatchedInputException || it is JsonParseException }
+        val status = (e as? WebApplicationException)?.response?.status
+        return bindError && (status == null || status in HTTP_OK_RANGE)
     }
 
     private fun toMajorUnits(minorUnits: Long, currencyCode: String): BigDecimal {
@@ -104,6 +132,8 @@ class TransactionLedgerPostingAdapter(
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
+        const val BODY_UNREADABLE_DETAIL = "transaction-service answered 2xx; response body did not bind"
+        val HTTP_OK_RANGE = 200..299
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */
         const val DEFAULT_FRACTION_DIGITS = 2
