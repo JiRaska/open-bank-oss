@@ -2106,6 +2106,26 @@ gates:
     run: |
       python3 .github/scripts/check-slo-registry.py
 
+  # The SLO dashboard is DERIVED from pyrra-slo-money-path.yaml. It used to hardcode a four-service
+  # rail regex while Pyrra carried 28 SLO pairs, so 24 services had an error budget and no panel.
+  - id: slo-dashboard-drift
+    name: "SLO dashboard matches the Pyrra SLO file (derived, enforced)"
+    group: registry
+    mode: enforced
+    rationale: >-
+      dashboard-openbank-slo.yaml named four payment rails by regex while pyrra-slo-money-path.yaml
+      declares an SLO pair for every money-path service. A hand-kept service list in a dashboard
+      reads as full coverage when it is short. The dashboard is now generated from the Pyrra file,
+      and this gate fails when the committed file drifts from what the generator would write.
+    review_after: '2027-04-17'
+    min_subjects: 20
+    budget_seconds: 30   # parses one YAML and renders JSON; ~2s observed
+    selftest: python3 .github/scripts/gen-slo-dashboard.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-slo-dashboard.py", ".github/scripts/slo-dashboard-base.json"]
+    run: |
+      python3 .github/scripts/gen-slo-dashboard.py --check
+
   # ADR-0148: the prompt registry (openbank-libs/governance/prompts/) must stay resolvable —
   # every prompt file names a real charter, uses <name>.v<N>.md, is non-empty, and never
   # re-uses a shipped version (a prompt is immutable, like a Flyway migration).
