@@ -5,6 +5,7 @@
 package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
@@ -172,8 +173,8 @@ class WithholdingRemittanceSettlementConsumerTest {
             Uni.createFrom().failure(WebApplicationException(503))
 
         assertThatThrownBy { runBlocking { consumer.consume(record()) } }
-            .isInstanceOfSatisfying(WebApplicationException::class.java) {
-                assertThat(it.response.status).isEqualTo(503)
+            .isInstanceOfSatisfying(TransactionHttpException::class.java) {
+                assertThat(it.status).isEqualTo(503)
             }
 
         verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { transactionClient.initiateTransaction(any()) }

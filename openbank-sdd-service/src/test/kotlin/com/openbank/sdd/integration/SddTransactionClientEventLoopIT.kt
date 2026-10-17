@@ -6,6 +6,7 @@ package com.openbank.sdd.integration
 
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
@@ -17,6 +18,7 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import io.vertx.mutiny.core.Vertx
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -46,6 +48,11 @@ class SddTransactionClientEventLoopIT {
             val http = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
             http.createContext("/api/v1/transactions") { exchange ->
                 exchange.requestBody.readAllBytes()
+                if (status < 0) {
+                    // A connection dropped before any status line.
+                    exchange.close()
+                    return@createContext
+                }
                 val bytes = body.toByteArray()
                 exchange.responseHeaders.add("Content-Type", "application/json")
                 exchange.sendResponseHeaders(status, bytes.size.toLong())
@@ -135,5 +142,18 @@ class SddTransactionClientEventLoopIT {
         Stub.status = 409
         Stub.body = "{}"
         assertThat(callOnEventLoop().outcome).isEqualTo(TransactionCallOutcome.Conflict)
+    }
+
+    @Test
+    fun `a connection dropped before any status is thrown by the real Quarkus client, never an outcome`() {
+        Stub.status = -1
+
+        assertThatThrownBy { callOnEventLoop() }.satisfies({ failure ->
+            // Whatever the Quarkus client raises for a dropped connection, it is an exception - not Booked,
+            // not Rejected - and it is not a status verdict either, so the caller retries.
+            // Measured with the real client: the cause is a plain java.io.IOException.
+            assertThat(failure.cause).isInstanceOf(java.io.IOException::class.java)
+            assertThat(failure.cause).isNotInstanceOf(TransactionHttpException::class.java)
+        })
     }
 }

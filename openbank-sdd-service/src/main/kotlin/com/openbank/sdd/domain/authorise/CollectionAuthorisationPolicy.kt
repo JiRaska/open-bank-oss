@@ -60,7 +60,10 @@ object CollectionAuthorisationPolicy {
             return AuthorisationResult.Reject("MD01", "Mandate not active (${mandate.status})")
         }
         if (mandate.scheme != instruction.scheme) {
-            return AuthorisationResult.Reject("MD01", "Scheme mismatch: mandate ${mandate.scheme} vs ${instruction.scheme}")
+            return AuthorisationResult.Reject(
+                "MD01",
+                "Scheme mismatch: mandate ${mandate.scheme} vs ${instruction.scheme}",
+            )
         }
         if (instruction.currency != "EUR") {
             return AuthorisationResult.Reject("FF05", "SEPA Direct Debit is EUR-only (got ${instruction.currency})")
@@ -75,7 +78,10 @@ object CollectionAuthorisationPolicy {
             return AuthorisationResult.Refuse("MS02", "Debtor has blocked all direct debits")
         }
         if (instruction.creditorIdentifier in controls.blockedCreditors) {
-            return AuthorisationResult.Refuse("MS02", "Creditor ${instruction.creditorIdentifier} is on the debtor block-list")
+            return AuthorisationResult.Refuse(
+                "MS02",
+                "Creditor ${instruction.creditorIdentifier} is on the debtor block-list",
+            )
         }
         val cap = controls.maxAmountPerCollection
         if (cap != null && instruction.amount > cap) {

@@ -66,8 +66,7 @@ object MandateLifecycle {
     }
 
     /** Record a creditor pre-notification date (≥14 days before due, tracked not enforced — §E). */
-    fun recordPreNotification(m: SddMandate, date: LocalDate): SddMandate =
-        m.copy(lastPreNotificationDate = date)
+    fun recordPreNotification(m: SddMandate, date: LocalDate): SddMandate = m.copy(lastPreNotificationDate = date)
 
     /** Auto-expire a live mandate idle for [IDLE_EXPIRY_MONTHS]; otherwise returned unchanged. */
     fun expireIfIdle(m: SddMandate, asOf: LocalDate): SddMandate {
