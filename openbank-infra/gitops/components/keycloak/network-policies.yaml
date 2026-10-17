@@ -209,6 +209,9 @@ spec:
               kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: treasury-pension-co
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: vault
         - namespaceSelector:
             matchLabels:
