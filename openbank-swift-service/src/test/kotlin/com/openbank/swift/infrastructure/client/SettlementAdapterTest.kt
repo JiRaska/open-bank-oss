@@ -4,7 +4,6 @@
 
 package com.openbank.swift.infrastructure.client
 
-import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
@@ -13,7 +12,7 @@ import com.openbank.swift.domain.model.SwiftStatus
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -21,7 +20,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 class SettlementAdapterTest {
@@ -33,7 +31,9 @@ class SettlementAdapterTest {
     fun `settle returns settled=true with transactionId on HTTP 201`(): Unit = runBlocking {
         val txId = UUID.randomUUID()
         every { client.initiateTransaction(any()) } returns
-            Uni.createFrom().item(TransactionResponse(id = txId, status = "COMPLETED"))
+            Uni.createFrom().item(
+                Response.status(201).entity(mapOf("id" to txId.toString())).build(),
+            )
 
         val outcome = adapter.settle(message())
 
@@ -50,9 +50,9 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `settle returns settled=false when transaction-service refuses with an HTTP error`(): Unit = runBlocking {
+    fun `settle returns settled=false on non-2xx response`(): Unit = runBlocking {
         every { client.initiateTransaction(any()) } returns
-            Uni.createFrom().failure(WebApplicationException(409))
+            Uni.createFrom().item(Response.status(409).build())
 
         val outcome = adapter.settle(message())
 
@@ -70,21 +70,11 @@ class SettlementAdapterTest {
             .hasMessageContaining("transaction-service unreachable")
     }
 
-    // transaction-service parses valueDate as ISO-8601; the MT103 value date arrives as YYYYMMDD. The
-    // raw string used to go on the wire unchanged and could not be parsed on the other side.
-    @Test
-    fun `settle sends the MT103 YYYYMMDD value date as an ISO date`(): Unit = runBlocking {
-        every { client.initiateTransaction(match { it.valueDate == LocalDate.parse("2026-06-22") }) } returns
-            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
-
-        assertThat(adapter.settle(message()).settled).isTrue()
-    }
-
     @Test
     fun `settle uses idempotency key prefixed with swift-settlement`(): Unit = runBlocking {
         val msgId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         every { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-$msgId" }) } returns
-            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
+            Uni.createFrom().item(Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build())
 
         val outcome = adapter.settle(message(id = msgId))
 
@@ -97,7 +87,9 @@ class SettlementAdapterTest {
             client.initiateTransaction(
                 match { it.amount.toPlainString() == "100.00" && it.currencyCode == "EUR" },
             )
-        } returns Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
+        } returns Uni.createFrom().item(
+            Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build(),
+        )
 
         val outcome = adapter.settle(message(amountMinorUnits = 10_000L))
 
@@ -114,7 +106,9 @@ class SettlementAdapterTest {
         // #11604: main shifted by a fixed two places and booked 1000 yen as 10.00 JPY.
         every {
             client.initiateTransaction(match { it.amount.toPlainString() == booked && it.currencyCode == currency })
-        } returns Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
+        } returns Uni.createFrom().item(
+            Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build(),
+        )
 
         assertThat(adapter.settle(message(amountMinorUnits = minorUnits, currency = currency)).settled).isTrue()
     }

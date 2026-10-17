@@ -12,11 +12,8 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
-import com.fasterxml.jackson.databind.SerializationFeature
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.openbank.clients.transaction.api.TransactionsApi
-import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.swift.infrastructure.client.InitiateSettlementRequest
 import com.openbank.swift.infrastructure.client.TransactionServiceClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
@@ -24,7 +21,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
-import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -75,7 +71,7 @@ import java.util.UUID
  * the provider replay (`TransactionPactFolderProviderVerificationTest`, which runs on every PR)
  * independently answers whether transaction-service still serves it.
  *
- * The request body is serialised from the REAL client DTO [InitiateTransactionRequest] rather than
+ * The request body is serialised from the REAL client DTO [InitiateSettlementRequest] rather than
  * retyped as a JSON string, so a field renamed on the mirror reddens here.
  *
  * IMPORTANT — regenerate on change: re-run this test
@@ -88,23 +84,20 @@ import java.util.UUID
 class SwiftSettlementPactConsumerTest {
 
     private val mapper = jacksonObjectMapper()
-        .registerModule(JavaTimeModule())
-        // Quarkus' mapper writes java.time as ISO strings; the bare test mapper would write an array.
-        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     /**
      * Exactly what [com.openbank.swift.infrastructure.client.SettlementAdapter.settle] builds after
      * ACSC: the `swift-settlement-<messageId>` idempotency key, the ordering customer as
      * `sourceAccountId`, and the minor-unit amount shifted two places.
      */
-    private val settlementDebit = InitiateTransactionRequest(
+    private val settlementDebit = InitiateSettlementRequest(
         idempotencyKey = "swift-settlement-$SWIFT_MESSAGE_ID",
         type = "DEBIT",
         sourceAccountId = UUID.fromString(ORDERING_CUSTOMER_ACCOUNT_ID),
         amount = BigDecimal("12500.00"),
         currencyCode = "EUR",
         description = "MT103 INVOICE-2026-0042",
-        valueDate = LocalDate.parse("2026-02-20"),
+        valueDate = "2026-02-20",
         rail = "SWIFT",
         instructionType = "ONE_OFF",
     )
@@ -222,16 +215,9 @@ class SwiftSettlementPactConsumerTest {
          */
         const val EXPECTED_TRANSACTIONS_PATH = "/api/v1/transactions"
 
-        /**
-         * The route lives on the GENERATED interface the client extends (ADR-0319); a `@Path` restated
-         * on the consumer sub-interface would win, so read that first.
-         */
         fun clientDerivedTransactionsPath(): String {
-            val base = (
-                TransactionServiceClient::class.java.getAnnotation(Path::class.java)
-                    ?: TransactionsApi::class.java.getAnnotation(Path::class.java)
-                )?.value.orEmpty()
-            val method = TransactionsApi::class.java.methods
+            val base = TransactionServiceClient::class.java.getAnnotation(Path::class.java)?.value.orEmpty()
+            val method = TransactionServiceClient::class.java.methods
                 .single { it.name == "initiateTransaction" }
                 .getAnnotation(Path::class.java)
                 ?.value

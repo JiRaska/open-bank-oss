@@ -30,9 +30,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * timeouts/open-breaker failures surfaced by the interceptor are caught too.
  */
 @ApplicationScoped
-class SanctionsScreeningAdapter(
-    @RestClient private val client: SanctionsServiceClient
-) : SanctionsScreeningPort {
+class SanctionsScreeningAdapter(@RestClient private val client: SanctionsServiceClient) : SanctionsScreeningPort {
 
     @Inject
     lateinit var self: SanctionsScreeningAdapter
@@ -52,7 +50,7 @@ class SanctionsScreeningAdapter(
                     role = role,
                     status = mapStatus(response.status),
                     score = response.overallScore ?: 0.0,
-                    matchedEntity = response.matches.firstOrNull()?.matchedName
+                    matchedEntity = response.matches.firstOrNull()?.matchedName,
                 )
             }
 

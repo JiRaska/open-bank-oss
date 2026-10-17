@@ -4,6 +4,8 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.sepainstant.application.port.out.SettlementOutcome
@@ -13,6 +15,7 @@ import com.openbank.sepainstant.domain.model.SctInstPayment
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -32,6 +35,7 @@ import java.time.LocalDate
 class SettlementAdapter(@RestClient private val client: TransactionServiceClient) : SettlementPort {
 
     private val log = Logger.getLogger(SettlementAdapter::class.java)
+    private val transactions = TransactionClient(client)
 
     @Inject
     lateinit var clock: Clock
@@ -57,8 +61,8 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             rail = "SEPA_INST",
             instructionType = "ONE_OFF",
         )
-        return client.initiateTransaction(request)
-            .map { response -> mapResponse(payment, request, response) }
+        return transactions.initiate(request)
+            .map { outcome -> mapOutcome(payment, request, outcome) }
             .onFailure().transform { ex ->
                 SettlementUnavailableException(
                     "transaction-service unreachable for payment ${payment.paymentId}",
@@ -70,12 +74,24 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     // Each throw is a distinct reason a 2xx is NOT proof of this payment's booking; collapsing them into
     // one would lose the reason in the SettlementUnavailableException message.
     @Suppress("ThrowsCount")
-    private fun mapResponse(
+    private fun mapOutcome(
         payment: SctInstPayment,
         request: InitiateTransactionRequest,
-        tx: TransactionResponse?,
+        outcome: TransactionCallOutcome<TransactionResponse>,
     ): SettlementOutcome {
-        val id = tx?.id ?: throw SettlementUnavailableException("Settlement response has no transaction id")
+        // Only 201 maps to a result (200/202 stay "unexpected", as before); 409 and 400/422 are
+        // "not proof of booking" and all of them end as SettlementUnavailableException.
+        val booked = outcome as? TransactionCallOutcome.Booked
+        if (booked == null || booked.status != Response.Status.CREATED.statusCode) {
+            throw SettlementUnavailableException(
+                "Unexpected answer from transaction-service for payment ${payment.paymentId}: $outcome",
+            )
+        }
+        // This adapter verifies the booking against the request, so it needs the body: unreadable = unproven
+        // (the idempotent retry replays the same booking), which is what it always did.
+        val tx = booked.body
+            ?: throw SettlementUnavailableException("Settlement response has no transaction id", booked.bodyError)
+        val id = tx.id ?: throw SettlementUnavailableException("Settlement response has no transaction id")
         val amount = tx.amount ?: throw SettlementUnavailableException("Settlement response has no numeric amount")
         // The provider resolves valueDate to a business day; a completed booking may legitimately
         // have a later valueDate than this request, including on idempotent cross-day replay.
