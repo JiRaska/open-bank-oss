@@ -1,8 +1,8 @@
 # API
 
-REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.5.0**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
+REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.15.0**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
 
-Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.5.0`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.5.0`, `openbank.api.version = "1"`). Jsou nezávislé.
+Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.15.0`, `openbank.api.version = "1"`). Jsou nezávislé.
 
 ## Povrchy
 
@@ -11,6 +11,7 @@ Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.5.0`) a
 | MCP server | `POST /mcp` | JSON-RPC 2.0 přes HTTP | identita `X-Agent-Id` (deny-by-default při absenci) |
 | Admin asistent | `POST /agent/chat` | JSON | Keycloak OIDC; běží jako `ui-assistant` |
 | Registr modelů | `GET /agent/models` | JSON | Keycloak OIDC |
+| Důkazní záznamy merge | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | žádné (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -74,11 +75,19 @@ Smyčka vynucuje charter `ui-assistant`: pre-flight kontrolu runs-per-day (přes
 
 Vrací default id modelu a každý povolený model v registru gateway: `{ default, models: [{ id, provider, sensitivity }] }` kde `sensitivity ∈ {HOSTED, SELF_HOSTED}`.
 
+## Zaznamenané lidské merge — `/api/v1/agent-merge-records`
+
+Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kdo mergoval PR autora agentem** (tabulka viz [04 — Data](./04-data.md)). Záznamy vstupují **mimo pásmo** — GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta se servisním credential pipeline `ROLE_MERGE_RECORDER`. Agent své merge **nikdy nenahlašuje sám**.
+
+- **`POST /api/v1/agent-merge-records`** — pouze `ROLE_MERGE_RECORDER` (volajícím je CI pipeline, ne interaktivní operátor; least privilege — ani `ROLE_ADMIN` nesmí zapisovat merge důkazy). Body: `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title` (vše povinné), plus volitelné `proposalId` (UUID — měkký odkaz na `agent_proposal`) a `source` (default `unknown`). Idempotentní podle `prNumber`: znovu doručený webhook nic nevloží (`ON CONFLICT DO NOTHING`) a odpověď vrátí již uložený záznam s `inserted=false`.
+- **`GET /api/v1/agent-merge-records?agentId=`** — `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_COMPLIANCE`. Nejnovější první; volitelný `agentId` zužuje seznam na merge jednoho agenta.
+
 ## Chybový model
 
 - **MCP / RPC:** JSON-RPC `error` objekt se standardními kódy — `-32700` parse, `-32600` neplatný požadavek, `-32601` metoda nenalezena, `-32602` neplatné params, `-32603` interní.
 - **Na úrovni nástroje:** chyby *uvnitř* nástroje (špatné argumenty, nedostupný downstream, deny policy) se vracejí jako `ToolCallResult` s `isError=true` a čitelným `text`, odlišně od RPC chyb, aby se model mohl zotavit.
 - **Na úrovni chatu:** rate-limit / výpadek modelu degraduje na přívětivou `reply` (HTTP 200), nikdy ne syrový 5xx.
+- **REST ingest:** chybějící/prázdné povinné pole nebo ne-UUID `proposalId` u ingestu merge záznamu se mapuje na `400` přes sdílené mapování `IllegalArgumentException` (libs-runtime), nikdy na 500.
 
 ## Verzování
 

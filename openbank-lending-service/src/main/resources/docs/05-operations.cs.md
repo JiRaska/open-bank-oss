@@ -105,6 +105,14 @@ Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6
 6. **Storno**: každý zápis stornujte v ledger-service (`reverseJournal`) podle klíče `loan:<id>:…`.
 Zápisy se účtují k datu cut-overu, s původním datem události ve `valueDate`. Pouze hlavní kniha: na účet klienta se nic nepřipisuje.
 
+### Pozdní migrace opravných položek V26 (#13026)
+
+V26 se dostala do main až po V27. Při `validate-on-migrate: false` může výchozí pořadí Flyway ponechat V26 neaplikovanou, přestože migrace při startu skončí úspěšně. GitOps Rollout služby dočasně nastavuje `QUARKUS_FLYWAY_OUT_OF_ORDER=true`, aby i databáze s V27 vytvořila `provisioning_cycle_attempt` a `provisioning_cycle_run.current_attempt_id`.
+
+Zachovej deployment holdy a kontroly povýšení image. Před schváleným nasazením ověř `flyway_schema_history` každé cílové databáze; historie zdrojů ani CI nedokládají nasazený stav. Po migraci ověř úspěšné záznamy V26/V27, schéma pokusů a zachování souhrnů opravných položek i podpisových hashů. Opakovaná migrace nesmí zdvojit zpětně doplněné záznamy V26.
+
+Dočasnou proměnnou prostředí z GitOps odstraň až poté, co **každá** cílová databáze eviduje úspěšnou V26. Přesnou výjimku kontroly historického pořadí ponech, dokud Git stále dokládá dřívější příchod V27. Zachovej identity potvrzených SQL migrací; obnova nepoužívá Flyway repair ani přečíslování. Návrat schématu popisuje V26 a před odstraněním vyžaduje export historie pokusů.
+
 ### Flyway checksum mismatch při startu
 Nikdy nepřepisuj nasazenou migraci. Nastav dočasně `QUARKUS_FLYWAY_REPAIR_AT_START=true`, nech DB ustálit a pak odstraň.
 

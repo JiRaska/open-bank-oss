@@ -76,7 +76,7 @@ class GitHubProposalAdapterTest {
 
     /** Starts a minimal but contract-faithful GitHub REST API stub covering the five endpoints
      * the adapter calls in sequence for an eligible finding. */
-    private fun startGitHubStub(): String {
+    private fun startGitHubStub(encodedContent: String = encodedSource("\n")): String {
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         srv.createContext("/repos/test-owner/test-repo/git/ref/heads/main") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
@@ -86,10 +86,10 @@ class GitHubProposalAdapterTest {
             requestsSeen.incrementAndGet()
             when (ex.requestMethod) {
                 "GET" -> {
-                    val encoded = Base64.getEncoder().encodeToString(
-                        sourceWithOneRepairableFunction.toByteArray(StandardCharsets.UTF_8),
+                    val response = objectMapper.writeValueAsString(
+                        mapOf("sha" to "file-sha-456", "content" to encodedContent),
                     )
-                    respond(ex, 200, """{"sha":"file-sha-456","content":"$encoded"}""")
+                    respond(ex, 200, response)
                 }
                 "PUT" -> {
                     lastCommitRequestBody = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
@@ -116,6 +116,11 @@ class GitHubProposalAdapterTest {
         server = srv
         return "http://stub.test:${srv.address.port}"
     }
+
+    private fun encodedSource(lineSeparator: String): String = Base64.getMimeEncoder(
+        76,
+        lineSeparator.toByteArray(StandardCharsets.US_ASCII),
+    ).encodeToString(sourceWithOneRepairableFunction.toByteArray(StandardCharsets.UTF_8))
 
     private fun respond(ex: HttpExchange, status: Int, body: String) {
         val bytes = body.toByteArray(StandardCharsets.UTF_8)
@@ -169,6 +174,32 @@ class GitHubProposalAdapterTest {
             .contains(eligibleFinding.filePath)
             .contains("did not modify production code, approve, or merge")
             .contains("#5281")
+    }
+
+    @Test
+    fun `GitHub CRLF wrapped content opens a PR`() {
+        val baseUrl = startGitHubStub(encodedSource("\r\n"))
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val prUrl = runBlocking { adapter.openProposalPr(eligibleFinding, "add-explicit-unit-return-type") }
+
+        assertThat(prUrl).isEqualTo("https://github.com/test-owner/test-repo/pull/9001")
+        assertThat(requestsSeen.get()).isEqualTo(5)
+    }
+
+    @Test
+    fun `malformed Base64 is rejected before any GitHub write`() {
+        val malformed = encodedSource("\n").replaceFirst("\n", "\t")
+        val baseUrl = startGitHubStub(malformed)
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val prUrl = runBlocking { adapter.openProposalPr(eligibleFinding, "add-explicit-unit-return-type") }
+
+        assertThat(prUrl).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(1)
+        assertThat(lastBranchRequestBody).isNull()
+        assertThat(lastCommitRequestBody).isNull()
+        assertThat(lastPullRequestBody).isNull()
     }
 
     @Test
