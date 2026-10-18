@@ -165,3 +165,7 @@ audit-service + aml-service consume the event
 3. **Human-in-the-loop for fuzzy matches** — `POTENTIAL_HIT` never auto-blocks; requires compliance review.
 4. **No list data stored** — only match metadata; list entries remain at their authoritative source URLs.
 5. **PII minimisation** — `name` and `dateOfBirth` are PII; masked in logs.
+
+## Scheduled-job heartbeat
+
+The 60-second sanctions-list refresh tick registers the fleet workflow-liveness heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a tick counts as a success only when no list failed in it, so a feed that fails every minute goes stale instead of reading healthy. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.

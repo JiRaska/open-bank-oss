@@ -42,6 +42,7 @@ servers:
 channels:
   wealthEvents:
     address: openbank.wealth.events
+    x-planned-consumer: https://github.com/JiRaska/open-bank-oss/issues/9774
     title: Declared holding lifecycle
     description: |
       One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —

@@ -171,40 +171,6 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
-# payment.scheme-accepted — rail ACSC notification consumed by transaction-service
-# to settle a PROCESSING payment (ADR-0108). Produced by sepa-payment, sepa-instant,
-# domestic-payment, and swift-service after receiving pacs.002 ACSC from the scheme.
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: payment.scheme-accepted
-  namespace: messaging
-  labels:
-    strimzi.io/cluster: openbank-cluster
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 604800000
-    cleanup.policy: delete
----
-# DLQ for payment.scheme-accepted — receives messages that transaction-service
-# failed to process after retries (SmallRye failure-strategy=dead-letter-queue).
-# Separate retention (30d) so ops can replay failed settlements before they expire.
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaTopic
-metadata:
-  name: payment.scheme-accepted.dlq
-  namespace: messaging
-  labels:
-    strimzi.io/cluster: openbank-cluster
-spec:
-  partitions: 1
-  replicas: 1
-  config:
-    retention.ms: 2592000000
-    cleanup.policy: delete
----
 # swift-service: SWIFT MT/MX cross-border payment events (ADR-0104 D4)
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic

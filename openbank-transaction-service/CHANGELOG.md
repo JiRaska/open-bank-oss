@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.29.0...transaction-service-v1.30.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
+## [1.29.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.28.0...transaction-service-v1.29.0) (2026-10-18)
+
+
+### Features
+
+* **client-transaction:** generate the ADR-0319 transaction-service client ([#13211](https://github.com/JiRaska/open-bank-oss/issues/13211)) ([024dd79](https://github.com/JiRaska/open-bank-oss/commit/024dd79bd5d464bf7b0550f67bec4e81260c5062))
+
 ## [1.28.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.27.1...transaction-service-v1.28.0) (2026-10-16)
 
 
