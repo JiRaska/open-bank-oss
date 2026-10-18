@@ -7,26 +7,17 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.kotlinx.coroutines.core)
@@ -37,12 +28,9 @@ dependencies {
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
-    testImplementation(libs.quarkus.junit5)
     // @TestSecurity for the ADR-0034 Phase 5 advisory-mode authz regression test.
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     // Boot smoke-test (SwiftBootSmokeIT): per-job Testcontainers Postgres + Valkey and the
     // in-memory Kafka connector, so a real Quarkus boot + Flyway runs in CI (issue #578).
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
