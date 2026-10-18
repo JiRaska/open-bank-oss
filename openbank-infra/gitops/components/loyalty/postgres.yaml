@@ -8,8 +8,6 @@ metadata:
   name: loyalty-db
   namespace: loyalty
 spec:
-  monitoring:
-    enablePodMonitor: true
   instances: 2
   # ADR-0325: an update (image bump, config change) promotes the already-updated
   # standby first and only then restarts the old primary. CNPG's default,
@@ -81,3 +79,26 @@ spec:
   backupOwnerReference: self
   cluster:
     name: loyalty-db
+---
+# Owned replacement for the CNPG-generated PodMonitor: spec.monitoring.enablePodMonitor and
+# podMonitorMetricRelabelings are deprecated since CNPG 1.30. Same selector, port and
+# relabelling the operator generated; named -metrics so the operator, which deletes only a
+# PodMonitor named after the Cluster AND owned by it, never touches this one.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: loyalty-db-metrics
+  namespace: loyalty
+  labels:
+    cnpg.io/cluster: loyalty-db
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: loyalty-db
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      relabelings:
+        # Restore the operator monitor default before any copied custom target relabelings.
+        - targetLabel: job
+          replacement: loyalty/loyalty-db

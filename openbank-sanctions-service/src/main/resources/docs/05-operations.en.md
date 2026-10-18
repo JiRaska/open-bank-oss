@@ -166,3 +166,7 @@ sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so t
 ## XML feed rejection
 
 OFAC and EU FSF imports now parse through the shared hardened `SecureXml` SAX parser. A feed containing a DOCTYPE is rejected, including external DTDs and entity declarations. On parse failure the import keeps the previously stored list and reports `FAILED_KEPT_EXISTING`; investigate the upstream feed and do not disable the parser guard to force a refresh. `SanctionsImportServiceTest` and `EuFsfSaxParserTest` exercise the rejection.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
