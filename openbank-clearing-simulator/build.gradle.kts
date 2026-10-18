@@ -7,19 +7,10 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
@@ -31,11 +22,8 @@ dependencies {
     // above deliberately does not re-export it.
     implementation(project(":openbank-libs-iso20022"))
 
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     // Provider-side verification of the pacs.008/pacs.002 contract rail services publish
     // (ADR-0063, issue #468). Git-pact (@PactFolder), matching ledger-service — no broker needed.
     testImplementation(libs.pact.provider)
