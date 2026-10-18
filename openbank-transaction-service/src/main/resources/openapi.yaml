@@ -26,7 +26,10 @@ info:
   # fields the server actually sends and the spec lacked: limit, hasNextPage (already described),
   # previousCursor and totalCount - libs `PageInfo`, pinned by PageInfoContractBindingTest. `hasMore`,
   # which the server never sent, is kept and labelled. No path, parameter or status code changes.
-  version: 1.21.0
+  # 1.21.0 -> 1.22.0 (#13212): comment-only. 1.21.0 landed on main with #13211 while this branch was
+  # open, so this takes the next free minor; the comment above is corrected to say the 1.21.0 change
+  # was a quoting fix AND an additive schema change. No path, parameter, schema or status code change.
+  version: 1.22.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0

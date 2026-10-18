@@ -105,3 +105,7 @@ Domain invariants that must surface as 422 deliberately throw `IllegalStateExcep
 
 - **API contract axis:** `openapi.yaml:info.version` (1.21.0); its major == URL `/api/v{N}` == `openbank.api.version` (1). An API change classifies its own bump from the OpenAPI diff (ADR-0048).
 - **Release axis:** `version.txt` (1.2.1), owned by release-please — independent of the API axis.
+
+## Transaction page pagination fields
+
+`TransactionPage.pagination` in the OpenAPI document declares all four fields the server sends, taken from the shared libs `PageInfo`: `limit`, `hasNextPage`, `previousCursor` and `totalCount`. `hasMore`, which the server never sent, stays in the schema and is labelled as such. Clients generated from the spec, such as the `openbank-client-transaction` client used by card-processing, party and standing-order, can now read these fields without a hand-written DTO. The API contract version is 1.22.0 and nothing changes in paths, parameters or status codes; the 400 descriptions on the merchant routes are quoted so the document validates in openapi-generator.
