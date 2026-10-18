@@ -128,8 +128,8 @@ mp:
         # Kafka's `latest` default instead of `earliest`. Set instead via the
         # card-issuance-service-msg-override ConfigMap (QUARKUS_CONFIG_LOCATIONS,
         # config_ordinal=500) — a properties FILE, matching the pattern already established for
-        # transaction-service's payment-scheme-accepted channel (see
-        # openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml); it
+        # transaction-service's former payment-scheme-accepted channel (its msg-override
+        # ConfigMap was removed with that dead path, ADR-0108); it
         # carries the exact hyphenated property key unambiguously, avoiding any reliance on
         # MicroProfile Config's env-var-name reverse-mapping for channel discovery.
         #

@@ -427,8 +427,8 @@ mp:
         # class applies regardless (issue #686).
         #
         # A properties-file override (not MP_MESSAGING_INCOMING_*_GROUP_ID env vars) is used,
-        # matching the pattern already established for transaction-service's
-        # payment-scheme-accepted channel. A properties file carries the exact hyphenated
+        # matching the pattern already established for card-issuance-service's party-events-in
+        # channel. A properties file carries the exact hyphenated
         # property key unambiguously, avoiding any reliance on MicroProfile Config's env-var-name
         # reverse-mapping for channel discovery.
         #
