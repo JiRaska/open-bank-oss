@@ -72,12 +72,13 @@ class SddCollectionDebitConsumer(
             val request = debitRequestFrom(node, mandateId, umr)
 
             EventRetry.withRetry(log, "SDD collection debit", "$mandateId/$umr") {
-                // Only a PROVEN 2xx counts as debited, whether or not the body can be read; an answer that
+                // Only a COMPLETED transaction counts as debited (initiate() throws
+                // TransactionCompletionUncertainException for any other 2xx); an answer that
                 // proves nothing (5xx, dropped connection) is thrown by TransactionClient untouched, so
                 // EventRetry retries it - the idempotency key makes that safe - and it is never reported
                 // as "FAILED to debit".
                 when (val outcome = transactions.initiate(request).awaitSuspending()) {
-                    is TransactionCallOutcome.Booked -> log.infof(
+                    is TransactionCallOutcome.HttpSuccess -> log.infof(
                         "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d, transaction %s)",
                         mandateId,
                         umr,

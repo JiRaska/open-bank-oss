@@ -77,11 +77,11 @@ class TransactionClientOutcomeTest {
     private fun outcome() = TransactionClient.classify(post(), TransactionResponse::class.java).await().indefinitely()
 
     @Test
-    fun `201 with a readable body is Booked with the body`() {
+    fun `201 with a readable body is HttpSuccess with the body`() {
         val id = UUID.randomUUID()
         body = """{"id":"$id","status":"COMPLETED"}"""
 
-        val result = outcome() as TransactionCallOutcome.Booked
+        val result = outcome() as TransactionCallOutcome.HttpSuccess
 
         assertThat(result.status).isEqualTo(201)
         assertThat(result.body?.id).isEqualTo(id)
@@ -89,10 +89,10 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `201 whose body cannot be read is STILL Booked - the status was proven first`() {
+    fun `201 whose body cannot be read is STILL HttpSuccess - the status was proven first`() {
         body = """{"id":"not-a-uuid","status":"COMPLETED"}"""
 
-        val result = outcome() as TransactionCallOutcome.Booked
+        val result = outcome() as TransactionCallOutcome.HttpSuccess
 
         assertThat(result.status).isEqualTo(201)
         assertThat(result.body).isNull()
@@ -100,10 +100,10 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `204 is Booked with no body and no body error`() {
+    fun `204 is HttpSuccess with no body and no body error`() {
         status = 204
 
-        val result = outcome() as TransactionCallOutcome.Booked
+        val result = outcome() as TransactionCallOutcome.HttpSuccess
 
         assertThat(result.status).isEqualTo(204)
         assertThat(result.body).isNull()
@@ -188,7 +188,7 @@ class TransactionClientOutcomeTest {
     }
 
     @Test
-    fun `the Quarkus shape - a WebApplicationException carrying a 2xx is Booked with that exception as bodyError`() {
+    fun `a 2xx WebApplicationException preserves its error as HTTP success metadata`() {
         status = 201
         body = """{"id":"${UUID.randomUUID()}","status":"COMPLETED"}"""
         val wae = WebApplicationException(post().await().indefinitely())
@@ -196,7 +196,7 @@ class TransactionClientOutcomeTest {
 
         val result = TransactionClient.classify(real, TransactionResponse::class.java).await().indefinitely()
 
-        assertThat(result).isEqualTo(TransactionCallOutcome.Booked<TransactionResponse>(201, null, wae))
+        assertThat(result).isEqualTo(TransactionCallOutcome.HttpSuccess<TransactionResponse>(201, null, wae))
     }
 
     @Test
@@ -204,14 +204,14 @@ class TransactionClientOutcomeTest {
         status = 201
         body = null
 
-        val result = outcome() as TransactionCallOutcome.Booked
+        val result = outcome() as TransactionCallOutcome.HttpSuccess
 
         assertThat(result.body).isNull()
         assertThat(result.bodyError).isNull()
     }
 
     @Test
-    fun `a reader failing with a non-Jackson exception leaves the 2xx Booked with exactly that error`() {
+    fun `a reader failing with a non-Jackson exception leaves the 2xx HttpSuccess with exactly that error`() {
         // Over a real socket the client's built-in Jackson reader takes every body, so a failure that is
         // NOT a Jackson one has to come from a Response whose readEntity throws it.
         val response = fake(201, entity = true)
@@ -219,17 +219,17 @@ class TransactionClientOutcomeTest {
         every { response.readEntity(TransactionResponse::class.java) } throws boom
 
         val result = TransactionClient.classify(Uni.createFrom().item(response), TransactionResponse::class.java)
-            .await().indefinitely() as TransactionCallOutcome.Booked
+            .await().indefinitely() as TransactionCallOutcome.HttpSuccess
 
         assertThat(result.body).isNull()
         assertThat(result.bodyError).isSameAs(boom)
     }
 
     @Test
-    fun `a 2xx with malformed JSON leaves it Booked with the parser error`() {
+    fun `a 2xx with malformed JSON leaves it HttpSuccess with the parser error`() {
         body = "EXPLODE"
 
-        val result = outcome() as TransactionCallOutcome.Booked
+        val result = outcome() as TransactionCallOutcome.HttpSuccess
 
         assertThat(result.body).isNull()
         assertThat(result.bodyError).isNotNull()
@@ -319,7 +319,7 @@ class TransactionClientOutcomeTest {
                 .await().indefinitely()
 
             when (code) {
-                201 -> assertThat(result).isInstanceOf(TransactionCallOutcome.Booked::class.java)
+                201 -> assertThat(result).isInstanceOf(TransactionCallOutcome.HttpSuccess::class.java)
                 409 -> assertThat(result).isEqualTo(TransactionCallOutcome.Conflict)
                 else -> assertThat(result).isInstanceOf(TransactionCallOutcome.Rejected::class.java)
             }

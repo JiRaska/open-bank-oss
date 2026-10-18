@@ -6,6 +6,7 @@ package com.openbank.sdd.integration
 
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
@@ -107,7 +108,7 @@ class SddTransactionClientEventLoopIT {
     }
 
     @Test
-    fun `a readable 201 body is read on the event loop - not reported as booked without a body`() {
+    fun `a readable 201 body is read on the event loop - not reported as success without a body`() {
         val id = UUID.randomUUID()
         Stub.status = 201
         Stub.body = """{"id":"$id","status":"COMPLETED"}"""
@@ -116,20 +117,20 @@ class SddTransactionClientEventLoopIT {
         // Recorded in the test report: which thread the classification (and so the body read) ran on.
         println("EVENTLOOP-IT classification thread = ${seen.thread}")
 
-        val booked = seen.outcome as TransactionCallOutcome.Booked
+        val booked = seen.outcome as TransactionCallOutcome.HttpSuccess
         assertThat(booked.bodyError).describedAs("body read on thread %s", seen.thread).isNull()
         assertThat(booked.body?.id).isEqualTo(id)
     }
 
     @Test
-    fun `an unreadable 201 body is Booked with the error, over the real Quarkus client`() {
+    fun `an unreadable 201 body on initiate is completion-uncertain, never booked, over the real Quarkus client`() {
         Stub.status = 201
         Stub.body = """{"id":"not-a-uuid"}"""
 
-        val booked = callOnEventLoop().outcome as TransactionCallOutcome.Booked
-
-        assertThat(booked.body).isNull()
-        assertThat(booked.bodyError).isNotNull()
+        assertThatThrownBy { callOnEventLoop() }.satisfies({ failure ->
+            assertThat(generateSequence(failure) { it.cause.takeIf { c -> c !== it } })
+                .anyMatch { it is TransactionCompletionUncertainException }
+        })
     }
 
     @Test

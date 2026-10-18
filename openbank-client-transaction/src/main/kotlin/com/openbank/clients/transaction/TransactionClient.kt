@@ -25,9 +25,11 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * The rule, once:
  *
- *  - a 2xx status is PROVEN from the response line, before any body is touched -> [TransactionCallOutcome.Booked].
- *    The body is read lazily afterwards inside a try: an unreadable body is `bodyError`, never a failure,
- *    because the money has already moved;
+ *  - a 2xx status proves HTTP success, before the body is read -> [TransactionCallOutcome.HttpSuccess];
+ *  - [initiate] and [reverse] additionally require a readable transaction whose status is COMPLETED.
+ *    The provider can return FAILED or an in-progress idempotent replay with the same 2xx status.
+ *    Missing, unreadable or any other state is uncertain, never proof of a booked transaction;
+ *  - [list] is a read: its HTTP success says nothing about the business state of its entries;
  *  - 409 -> [TransactionCallOutcome.Conflict]; 400 and 422 -> [TransactionCallOutcome.Rejected];
  *  - every other status (3xx, 401, 403, 404, 5xx) is thrown as ONE type, [TransactionHttpException], whether
  *    the client handed back a [Response] or threw a [WebApplicationException] (that one is its `cause`); and
@@ -46,17 +48,30 @@ class TransactionClient(private val api: TransactionsApi) {
 
     fun initiate(request: InitiateTransactionRequest): Uni<TransactionCallOutcome<TransactionResponse>> =
         classify(api.initiateTransaction(request), TransactionResponse::class.java)
+            .onItem().transform { requireCompleted(it) }
 
     fun reverse(
         transactionId: UUID,
         request: ReverseTransactionRequest,
     ): Uni<TransactionCallOutcome<TransactionResponse>> =
         classify(api.reverseTransaction(transactionId, request), TransactionResponse::class.java)
+            .onItem().transform { requireCompleted(it) }
 
     fun list(accountId: UUID, limit: Int, cursor: String?): Uni<TransactionCallOutcome<TransactionPage>> =
         classify(api.listTransactions(accountId, limit, cursor), TransactionPage::class.java)
 
     internal companion object {
+        private fun requireCompleted(
+            outcome: TransactionCallOutcome<TransactionResponse>,
+        ): TransactionCallOutcome<TransactionResponse> {
+            if (outcome is TransactionCallOutcome.HttpSuccess &&
+                (outcome.bodyError != null || outcome.body?.status != "COMPLETED")
+            ) {
+                throw TransactionCompletionUncertainException(outcome.status, outcome.bodyError)
+            }
+            return outcome
+        }
+
         /** A refusal body is read at most this many bytes, whatever the server sends. */
         private const val PROBLEM_MAX_BYTES = 4096
         private const val PROBLEM_MAX_CHARS = 300
@@ -101,7 +116,7 @@ class TransactionClient(private val api: TransactionsApi) {
 
         private fun <T> fromResponse(response: Response, type: Class<T>): TransactionCallOutcome<T> = try {
             when (val status = response.status) {
-                in HTTP_OK until HTTP_MULTIPLE_CHOICES -> booked(response, status, type)
+                in HTTP_OK until HTTP_MULTIPLE_CHOICES -> httpSuccess(response, status, type)
                 HTTP_CONFLICT -> TransactionCallOutcome.Conflict
                 HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE -> rejected(response, status)
                 else -> throw TransactionHttpException(status)
@@ -115,7 +130,7 @@ class TransactionClient(private val api: TransactionsApi) {
             return try {
                 when (val status = response.status) {
                     in HTTP_OK until HTTP_MULTIPLE_CHOICES ->
-                        Uni.createFrom().item(TransactionCallOutcome.Booked(status, null, failure))
+                        Uni.createFrom().item(TransactionCallOutcome.HttpSuccess(status, null, failure))
                     HTTP_CONFLICT -> Uni.createFrom().item(TransactionCallOutcome.Conflict)
                     HTTP_BAD_REQUEST, HTTP_UNPROCESSABLE -> Uni.createFrom().item(rejected(response, status))
                     else -> Uni.createFrom().failure(TransactionHttpException(status, failure))
@@ -126,11 +141,11 @@ class TransactionClient(private val api: TransactionsApi) {
         }
 
         @Suppress("TooGenericExceptionCaught")
-        private fun <T> booked(response: Response, status: Int, type: Class<T>): TransactionCallOutcome<T> = try {
+        private fun <T> httpSuccess(response: Response, status: Int, type: Class<T>): TransactionCallOutcome<T> = try {
             val body = if (response.hasEntity()) response.readEntity(type) else null
-            TransactionCallOutcome.Booked(status, body, null)
+            TransactionCallOutcome.HttpSuccess(status, body, null)
         } catch (e: Exception) {
-            TransactionCallOutcome.Booked(status, null, e)
+            TransactionCallOutcome.HttpSuccess(status, null, e)
         }
 
         private fun boundedText(response: Response): String =
@@ -155,3 +170,11 @@ class TransactionClient(private val api: TransactionsApi) {
  */
 class TransactionHttpException(val status: Int, cause: Throwable? = null) :
     RuntimeException("transaction-service answered HTTP $status", cause)
+
+/**
+ * The write answered successfully, but its transaction completion is unproven. Reconcile or retry
+ * with the SAME idempotency key; never confirm the operation or submit it under a new key.
+ * A returned FAILED state is not interpreted as proof that no ledger effect ever happened.
+ */
+class TransactionCompletionUncertainException(val status: Int, cause: Throwable? = null) :
+    RuntimeException("transaction-service completion is unproven (HTTP $status)", cause)

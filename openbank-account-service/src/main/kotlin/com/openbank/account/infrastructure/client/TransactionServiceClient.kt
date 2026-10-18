@@ -56,9 +56,10 @@ class TransactionServiceClient(@RestClient private val client: TransactionServic
             valueDate = LocalDate.now(clock),
         )
         // A refusal must keep failing the grant, exactly as the client's own exception did before the
-        // facade turned 409/400/422 into outcomes; a proven 2xx is a grant whether or not its body reads.
+        // facade turned 409/400/422 into outcomes. initiate() returns HttpSuccess only for a readable COMPLETED
+        // transaction; any other 2xx is thrown as TransactionCompletionUncertainException (retry, same key).
         when (val outcome = transactions.initiate(request).awaitSuspending()) {
-            is TransactionCallOutcome.Booked -> Unit
+            is TransactionCallOutcome.HttpSuccess -> Unit
             TransactionCallOutcome.Conflict -> throw TransactionHttpException(HTTP_CONFLICT)
             is TransactionCallOutcome.Rejected -> throw TransactionHttpException(outcome.status)
         }

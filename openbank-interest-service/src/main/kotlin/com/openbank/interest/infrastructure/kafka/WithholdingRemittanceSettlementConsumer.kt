@@ -194,14 +194,15 @@ class WithholdingRemittanceSettlementConsumer(
     /**
      * Books the debit and advances the batch to SETTLED; a 409 is an idempotent success (#999).
      *
-     * Only a PROVEN 2xx settles the batch ([TransactionCallOutcome.Booked]) - and then regardless of whether
-     * the response body can be read, because the money has moved. Any answer that proves nothing (5xx, a
-     * dropped connection) is thrown by [TransactionClient] untouched, so [EventRetry] retries it; the
+     * Only a COMPLETED transaction settles the batch: [TransactionClient.initiate] returns
+     * [TransactionCallOutcome.HttpSuccess] only for a readable COMPLETED body, and throws
+     * `TransactionCompletionUncertainException` for any other 2xx (FAILED, in progress, unreadable).
+     * Any answer that proves nothing (5xx, a dropped connection) is thrown likewise, so [EventRetry] retries it; the
      * idempotency key makes the retry safe. It is never reported as "FAILED to book".
      */
     private suspend fun bookAndSettle(remittanceId: UUID, request: InitiateTransactionRequest) {
         when (val outcome = transactions.initiate(request).awaitSuspending()) {
-            is TransactionCallOutcome.Booked -> {
+            is TransactionCallOutcome.HttpSuccess -> {
                 remitUseCase.settle(remittanceId).awaitSuspending()
                 log.infof(
                     "[withholding-remittance] batch %s settled (HTTP %d, transaction %s)",

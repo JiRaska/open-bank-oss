@@ -103,4 +103,4 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 ## Collection debit booking
 
-The collection-debit consumer books the debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a proven 2xx counts as debited, even when the response body is unreadable. A 409 is an idempotent success. A refusal (400/422) throws `SddDebitFailedException` so the event reaches the DLQ. Any other answer or a dropped connection is thrown and retried with the same idempotency key. No configuration changed.
+The collection-debit consumer books the debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a readable COMPLETED transaction counts as debited; any other 2xx state (FAILED, in progress, unreadable) is thrown as completion-uncertain and retried with the same idempotency key. A 409 is an idempotent success. A refusal (400/422) throws `SddDebitFailedException` so the event reaches the DLQ. Any other answer or a dropped connection is thrown and retried with the same idempotency key. No configuration changed.

@@ -42,7 +42,7 @@ import java.util.UUID
  * none of them, and `TransactionResource` parses `rail` through `parseEnumParam` — so a rename of
  * `PaymentRail.CARD` would be invisible to every other contract. The response pins `rail` and
  * `instructionType` as exact values (`stringValue`, never `stringType`) for that reason, and
- * `status` as `COMPLETED` because the adapter treats any 2xx as POSTED.
+ * `status` as `COMPLETED` because only proven completion may be reported as POSTED.
  *
  * The idempotency key is the real `CardClearingLedgerKey` shape (96 chars against a VARCHAR(100)
  * column): a retried clearing must present the same key or the customer is debited twice, and a
