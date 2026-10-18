@@ -126,3 +126,7 @@ Legacy 404 odpovědi zachovávají `{ "error": "<zpráva>" }` kvůli existujíc�
 
 - Verzování v URL: kompatibilní `/api/v1`, nejnovější `/api/v2`.
 - Verze OpenAPI kontraktu (`openapi.yaml:info.version`) je osa API kontraktu; jakákoli breaking změna ji musí zvednout dle klasifikace `oasdiff` a aktualizovat kontrakt + kontraktní test ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Publikovaná revize původního produktu (ADR-0341)
+
+`GET /api/v2/legacy-products/{productId}/published-revision` určí publikovanou revizi katalogu pro bankovní produkt v1 podle jeho v1 identifikátoru, pro volající, kteří produkt znají jen podle `productId` účtu. Volitelný parametr `effectiveAt` určuje okamžik; bez něj se vrátí revize platná nyní. Volající si připne vrácené `id` revize a pozdější čtení používají připnutí, ne toto vyhledání. Pokud produkt neexistuje nebo žádná jeho revize ještě není publikovaná, vrací 404. Vyžaduje roli pro čtení katalogu. Verze kontraktu API je 2.5.0; změna je aditivní.
