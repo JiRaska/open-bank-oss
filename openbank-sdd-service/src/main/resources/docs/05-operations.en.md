@@ -96,3 +96,7 @@ The `MandateExpiryScheduler` cron is **disabled by default** (`openbank.sdd.expi
 - Per-service CI builds a fast-jar and a container image (host-side `quarkusBuild`, not in-Docker Gradle — see CLAUDE.md GitOps rules).
 - **Release** is automatic via release-please from Conventional Commits (scope `sdd`). Do not hand-edit `version.txt` / `CHANGELOG.md`. `version.txt` is currently `0.2.0`; `quarkus.application.version` in `application.yaml` is `0.1.1` (a known drift — these are reconciled by the `bump` skill on the next change).
 - **Flyway** runs at start (`migrate-at-start: true`); `validate-on-migrate` is off and connection retries are configured for cold-start ordering against the DB.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

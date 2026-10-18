@@ -116,3 +116,7 @@ sanctions nastavuje `openbank.warmup.protected-path: /api/v1/sanctions/pending`,
 ## Odmítnutí XML listiny
 
 Importy OFAC a EU FSF používají sdílený zabezpečený SAX parser `SecureXml`. Listina s DOCTYPE se odmítne, včetně externích DTD a deklarací entit. Při chybě parsování import ponechá dosavadní seznam a oznámí `FAILED_KEPT_EXISTING`; prošetřete zdrojovou listinu a nevypínejte ochranu parseru kvůli vynucení obnovy. Odmítnutí ověřují `SanctionsImportServiceTest` a `EuFsfSaxParserTest`.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
