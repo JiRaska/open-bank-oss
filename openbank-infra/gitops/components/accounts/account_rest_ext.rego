@@ -171,6 +171,19 @@ allowed_reasons contains "service-pension-fund-catalog-read" if {
 	input.action == "catalog.read"
 }
 
+# #8481 / ADR-0341 — interest-service's own machine identity (client `openbank-interest`, ROLE_API
+# plus the narrow `catalog:read` scope that product-catalog maps to CATALOG_SCOPE_READ) reads the
+# published catalog: the event stream, a revision by its immutable id, and the offering it belongs
+# to (CatalogInterestProfileSynchronizer). Every one of those is action catalog.read - nothing
+# here reaches catalog.author, catalog.publish or the approval decisions. The shared
+# openbank-services principal gets no catalog grant; the scope alone is insufficient for OPA.
+allowed_reasons contains "service-interest-catalog-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-interest")
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
 # ADR-0340 B — tax-reporting-service's own machine identity (client `openbank-tax-reporting`,
 # ROLE_API only) walks the fleet-wide ACTIVE roster for the CRS/FATCA assembly
 # (CrsFatcaReportingSources.activeAccounts -> GET /accounts/active). account.list only: balances
