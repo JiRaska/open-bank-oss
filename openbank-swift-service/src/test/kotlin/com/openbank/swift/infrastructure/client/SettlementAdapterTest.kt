@@ -95,15 +95,46 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `a 204 is not a booking - the facade treats it as uncertain and the caller retries`() {
+    fun `a partial HTTP 206 response cannot confirm completed settlement`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(created(UUID.randomUUID(), status = 206))
+
+        val outcome = runBlocking { adapter.settle(message()) }
+
+        assertThat(outcome.settled).isFalse()
+        assertThat(outcome.transactionId).isNull()
+    }
+
+    @Test
+    fun `a 204 has unproven completion and is unavailable`() {
         every { client.initiateTransaction(any()) } returns Uni.createFrom().item(Response.status(204).build())
 
         assertThatThrownBy { runBlocking { adapter.settle(message()) } }
             .isInstanceOf(SettlementUnavailableException::class.java)
     }
 
+    @ParameterizedTest
+    @CsvSource("FAILED", "PENDING", "PROCESSING", "INITIATED", "REVERSED", "UNKNOWN")
+    fun `a readable noncompleted transaction never settles the SWIFT message`(status: String) {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(
+                Response.status(201).entity(TransactionResponse(id = UUID.randomUUID(), status = status)).build(),
+            )
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
     @Test
-    fun `a 2xx with an unreadable body is uncertain, never a booking - it is retried`() {
+    fun `a 201 without a response body has unproven completion`() {
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().item(Response.status(201).build())
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a 2xx with an unreadable body never proves settlement`() {
         val response = mockk<Response>(relaxed = true)
         every { response.status } returns 201
         every { response.hasEntity() } returns true
@@ -115,6 +146,34 @@ class SettlementAdapterTest {
     }
 
     @Test
+    fun `a transaction without a completion status never settles`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(Response.status(201).entity(TransactionResponse(id = UUID.randomUUID())).build())
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a later completed response reuses the original settlement idempotency key`(): Unit = runBlocking {
+        val msg = message()
+        every { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-${msg.id}" }) } returnsMany
+            listOf(
+                Uni.createFrom().item(
+                    Response.status(201)
+                        .entity(TransactionResponse(id = UUID.randomUUID(), status = "PENDING"))
+                        .build(),
+                ),
+                Uni.createFrom().item(created(UUID.randomUUID())),
+            )
+
+        assertThatThrownBy { runBlocking { adapter.settle(msg) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+        assertThat(adapter.settle(msg).settled).isTrue()
+        verify(exactly = 2) { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-${msg.id}" }) }
+    }
+
+    @Test
     fun `a 422 refusal leaves the message SENT`(): Unit = runBlocking {
         every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(WebApplicationException(422))
 
@@ -122,7 +181,7 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `a 503 is not decided - it is retried via SettlementUnavailableException`() {
+    fun `a 503 is unavailable and does not decide settlement`() {
         every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(WebApplicationException(503))
 
         assertThatThrownBy { runBlocking { adapter.settle(message()) } }

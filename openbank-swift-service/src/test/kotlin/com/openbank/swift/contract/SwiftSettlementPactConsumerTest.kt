@@ -181,7 +181,8 @@ class SwiftSettlementPactConsumerTest {
             // Reflected off the client, NOT retyped: this is the path the real client issues.
             .post(clientDerivedTransactionsPath())
             .then()
-            // The shared TransactionClient facade requires a readable COMPLETED body on a 2xx.
+            // The shared facade requires a readable COMPLETED body; the adapter additionally
+            // retains its original HTTP 200/201/202 bound. Other statuses do not settle.
             .statusCode(201)
             .extract().jsonPath()
 

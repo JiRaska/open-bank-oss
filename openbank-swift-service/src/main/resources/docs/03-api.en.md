@@ -68,10 +68,12 @@ transaction-service settlement amount, the `swift.message.status-changed` event 
 booked in transaction-service through its generated, typed client. `valueDate` is held and exposed here as
 MT103 basic ISO (`YYYYMMDD`), while transaction-service parses ISO-8601 (`YYYY-MM-DD`), so the adapter
 converts it before sending; previously the raw `YYYYMMDD` went on the wire and the booking could not be
-accepted. A stored value that no longer parses sends nothing and the message stays `SENT`. A 2xx counts as a
-booking only when the shared client reads a COMPLETED transaction (anything else, including `204`, is uncertain
-and retried); `409` and `400`/`422` leave the message `SENT`; a `5xx` or dropped connection is raised as
-unavailable and retried by the caller. The API contract
+accepted. A stored value that no longer parses sends nothing and the message stays `SENT`. Only HTTP
+200/201/202 with a readable transaction whose status is `COMPLETED` prove settlement. A missing,
+unreadable, `FAILED` or in-progress response remains uncertain, including a `204`. A `409` or
+`400`/`422` does not complete the message. The caller retains `SENT` after an unavailable or uncertain
+result; no automatic redriver for `SENT` is implemented here. Any later reconciliation must reuse
+the original `swift-settlement-<messageId>` idempotency key. The API contract
 of this service (`valueDate` `^\d{8}$`) is unchanged.
 
 | Input | Answer |

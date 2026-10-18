@@ -69,9 +69,12 @@ každou měnu pevně o dvě místa.
 v transaction-service přes jeho generovaného, typovaného klienta. `valueDate` se zde drží a vystavuje
 v základním ISO tvaru MT103 (`YYYYMMDD`), zatímco transaction-service parsuje ISO-8601 (`YYYY-MM-DD`),
 proto adaptér hodnotu před odesláním převede; dříve odcházelo surové `YYYYMMDD` a zaúčtování nemohlo být
-přijato. Uložená hodnota, která už nejde parsovat, nic neodešle a zpráva zůstane `SENT`. Za zaúčtování se
-počítá 2xx jen tehdy, když sdílený klient přečte transakci ve stavu COMPLETED (cokoli jiného, včetně `204`,
-je nejisté a volající zopakuje); `409` a `400`/`422` nechají zprávu ve stavu `SENT`; `5xx` nebo přerušené spojení se ohlásí jako nedostupnost a volající ho zopakuje.
+přijato. Uložená hodnota, která už nejde parsovat, nic neodešle a zpráva zůstane `SENT`. Zaúčtování prokazuje
+jen HTTP 200/201/202 s čitelnou transakcí ve stavu `COMPLETED`. Chybějící, nečitelná, `FAILED` nebo
+rozpracovaná odpověď zůstává neurčitá, včetně `204`. `409` ani `400`/`422` zprávu nedokončí.
+Volající po nedostupném či neurčitém výsledku zachová `SENT`; automatické opakování zpráv `SENT`
+zde není implementováno. Případné pozdější dorovnání musí použít stejný idempotency key
+`swift-settlement-<messageId>`.
 API kontrakt této služby (`valueDate` `^\d{8}$`) se nemění.
 
 | Vstup | Odpověď |

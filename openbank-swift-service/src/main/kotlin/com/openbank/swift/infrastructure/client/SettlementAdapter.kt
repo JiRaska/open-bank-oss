@@ -7,6 +7,7 @@ package com.openbank.swift.infrastructure.client
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
@@ -24,7 +25,8 @@ import java.util.UUID
 /**
  * Books settled MT103 funds via transaction-service (ADR-0108).
  * Called after the clearing-simulator returns ACSC and swift-service transitions to SENT.
- * Idempotent: uses `swift-settlement-<messageId>` so retries are safe.
+ * Uses the stable `swift-settlement-<messageId>` key for any explicit reconciliation.
+ * The caller retains SENT on uncertainty; no automatic SENT redriver is introduced here.
  */
 @ApplicationScoped
 class SettlementAdapter(@RestClient private val client: TransactionServiceClient) : SettlementPort {
@@ -58,8 +60,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
 
         return try {
             when (val outcome = transactions.initiate(request).awaitSuspending()) {
-                is TransactionCallOutcome.HttpSuccess ->
-                    SettlementOutcome(settled = true, transactionId = outcome.body?.id)
+                is TransactionCallOutcome.HttpSuccess -> booked(message, outcome)
                 // transaction-service WAS reached and refused: the message stays SENT, as it always did.
                 TransactionCallOutcome.Conflict -> refused(message, HTTP_CONFLICT)
                 is TransactionCallOutcome.Rejected -> refused(message, outcome.status)
@@ -68,7 +69,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             // Cancellation is not an outage: rethrow so the coroutine unwinds instead of being retried as one.
             throw e
         } catch (ex: Exception) {
-            // No proven status (5xx, dropped connection): retried by the caller, never decided here.
+            // No proven completion (5xx, dropped connection): the caller retains SENT, never decided here.
             throw SettlementUnavailableException(
                 "transaction-service unreachable for SWIFT message ${message.id}",
                 ex,
@@ -91,6 +92,16 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         instructionType = "ONE_OFF",
     )
 
+    private fun booked(
+        message: SwiftMessage,
+        outcome: TransactionCallOutcome.HttpSuccess<TransactionResponse>,
+    ): SettlementOutcome {
+        // The shared write facade has already required a readable COMPLETED response.
+        // Preserve the settlement endpoint's accepted HTTP statuses as an additional bound.
+        if (outcome.status !in ACCEPTED_STATUSES) return refused(message, outcome.status)
+        return SettlementOutcome(settled = true, transactionId = outcome.body?.id)
+    }
+
     private fun refused(message: SwiftMessage, status: Int): SettlementOutcome {
         log.warnf(
             "transaction-service returned HTTP %d for SWIFT message %s settlement; message stays SENT",
@@ -101,6 +112,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     }
 
     private companion object {
+        val ACCEPTED_STATUSES = setOf(200, 201, 202)
         const val HTTP_CONFLICT = 409
     }
 }
