@@ -1,0 +1,107 @@
+# Merge train for `main` (ADR-0343).
+#
+# Batches armed, green PRs; builds `train/<ts>` = main + squash of each in order; regenerates the
+# derived files over the whole batch; carries the train through the ordinary PR CI on a draft PR
+# labelled `merge-train`; then posts the `merge-train` commit status on each member and merges
+# them in order. A red train is bisected and the culprit is told which contexts failed. The
+# decision logic and its self-test live in .github/scripts/merge-train.py; gate
+# `merge-train-declaration` holds the wiring below in place.
+#
+# PHASE 0 (now): MERGE_TRAIN_SHADOW=true — statuses and comments are posted, nothing is merged,
+# strict up-to-date stays on. PHASE 1: the owner adds `merge-train` to the required contexts,
+# turns strict off (commands in the ADR) and a follow-up PR flips the env below to "false".
+name: Merge train
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Enumerate, classify and build the train locally; push, post and merge nothing"
+        type: boolean
+        default: false
+      batch_size:
+        description: "Maximum members per train"
+        type: number
+        default: 8
+
+permissions:
+  contents: read
+
+concurrency:
+  # A train in flight is never cancelled by the next tick; the tick waits for it. Cancelling
+  # would orphan a pushed train branch and its carrier PR mid-verification.
+  group: merge-train
+  cancel-in-progress: false
+
+env:
+  # Shadow mode is the default (ADR-0343 phase 0). Flip to "false" only after the ruleset
+  # requires `merge-train` and strict is off; the script refuses to merge before that anyway.
+  MERGE_TRAIN_SHADOW: "true"
+
+jobs:
+  train:
+    name: merge train
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      # Pushes, statuses, comments and merges use the GitHub App token below. GITHUB_TOKEN stays
+      # read-only: a push made with it triggers no workflows, so the train would never be built.
+      contents: read
+    steps:
+      - name: Mint the GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the train squashes PR heads onto main and needs their merge-bases.
+          fetch-depth: 0
+          # The App token is what pushes the train branch, so a push triggers the PR lane's CI.
+          token: ${{ steps.app_token.outputs.token }}
+          persist-credentials: true
+
+      - name: Install OPA
+        run: |
+          # regen-derived.sh --all runs gen-agents-opa-data.py, which evaluates the real policy and
+          # refuses to write unless every decision matches, so `opa` is not optional.
+          # Pinned + checksum-verified, identical to opa-policy.yml — bump both together.
+          mkdir -p "$HOME/bin"
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          case "${OS}_${ARCH}" in
+            linux_aarch64)  SUFFIX="linux_arm64_static";  OPA_SHA256="9a1f3625529c6f01240fe68286dde06aa0b23c5253da700ac48f4d943ff8a4de" ;;
+            linux_arm64)    SUFFIX="linux_arm64_static";  OPA_SHA256="9a1f3625529c6f01240fe68286dde06aa0b23c5253da700ac48f4d943ff8a4de" ;;
+            *)              SUFFIX="linux_amd64";         OPA_SHA256="23c654cdb52fc80c3f30e85c0c884a15f78a10173d0a5a060aa25eac15f48fbb" ;;
+          esac
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
+            "https://openpolicyagent.org/downloads/v1.21.1/opa_${SUFFIX}"
+          echo "${OPA_SHA256}  $HOME/bin/opa" | sha256sum -c - \
+            || { echo "::error::OPA v1.21.1 download failed checksum verification"; exit 1; }
+          chmod +x "$HOME/bin/opa"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/opa" version
+
+      - name: Install pyyaml (hash-pinned)
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+
+      - name: Run the train
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+          SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+        run: |
+          set -euo pipefail
+          git config user.name "openbank-gitops-bot[bot]"
+          git config user.email "openbank-gitops-bot[bot]@users.noreply.github.com"
+          # shellcheck disable=SC2086  # DRY_RUN / SHADOW are empty or a single flag each
+          python3 .github/scripts/merge-train.py \
+            --repo "${GITHUB_REPOSITORY}" --branch main \
+            --batch-size "${TRAIN_BATCH_SIZE}" --wait-minutes 90 --poll-seconds 60 \
+            ${SHADOW} ${DRY_RUN}
