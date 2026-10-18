@@ -621,8 +621,6 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.oversight-triggers"
         reason: "agent-service's OversightEventConsumer (ADR-0031 D9 phase 2, channel disabled by default via AGENT_OVERSIGHT_KAFKA_ENABLED) is built; its producers (aml-service, sanctions-service, per the KafkaTopic comment) are not. The 30-minute scheduler sweep covers the gap meanwhile. TRACKING (2026-10-17, #13168): #13179."
-      - topic: "payment.scheme-accepted"
-        reason: "transaction-service's SchemeAcceptedConsumer has no producer anywhere in this repo (the scheme adapter that would write it is external or unbuilt). Removal of the dead path is in flight in #13158 — delete this entry in whichever of the two lands second. TRACKING (2026-10-17, #13168): #13158."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
