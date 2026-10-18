@@ -79,3 +79,78 @@ describe('GET /api/regulatory/returns/[reportId]', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('regulatory report failure log privacy', () => {
+  const detail = 'synthetic-customer@example.test\r\nFORGED %s %o transaction=synthetic-123'
+  const failures = [
+    { kind: 'not_deployed', status: 404, error: 'Unknown service: transaction-service' },
+    { kind: 'unauthorized', status: 403, error: 'unauthorized' },
+    { kind: 'unreachable', status: 502, error: 'upstream_unreachable' },
+    { kind: 'result_limit', status: 500, error: 'result_limit' },
+    { kind: 'error', status: 500, error: 'upstream_error' },
+  ] as const
+
+  beforeEach(() => {
+    vi.resetModules()
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'operator-token', roles: ['ROLE_COMPLIANCE'] } } as never)
+  })
+  afterEach(() => {
+    vi.doUnmock('@/lib/regulatory/generatedReports')
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it.each(failures)('preserves $kind response without logging source detail', async ({ kind, status, error }) => {
+    vi.doMock('@/lib/regulatory/generatedReports', async importOriginal => {
+      const actual = await importOriginal<typeof import('@/lib/regulatory/generatedReports')>()
+      return {
+        ...actual,
+        generateReport: vi.fn().mockRejectedValue(new actual.ReportSourceError(kind, 'transaction-service', detail)),
+      }
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { GET } = await import('@/app/api/regulatory/returns/[reportId]/route')
+    const { generateReport } = await import('@/lib/regulatory/generatedReports')
+
+    const res = await GET(new Request('http://ui/api/regulatory/returns/sdat-payments?period=2026-09'), ctx('sdat-payments'))
+
+    expect(res.status).toBe(status)
+    expect(await res.json()).toEqual({ error, service: 'transaction-service' })
+    expect(generateReport).toHaveBeenCalledWith('sdat-payments', '2026-09', expect.objectContaining({
+      get: expect.any(Function), request: expect.any(Function),
+    }), expect.any(Object))
+    expect(log).toHaveBeenCalledExactlyOnceWith('regulatory BFF: report source failed')
+  })
+
+  it('preserves generic 500 without logging the exception or request values', async () => {
+    vi.doMock('@/lib/regulatory/generatedReports', async importOriginal => {
+      const actual = await importOriginal<typeof import('@/lib/regulatory/generatedReports')>()
+      return { ...actual, generateReport: vi.fn().mockRejectedValue(new Error(detail, { cause: detail })) }
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { GET } = await import('@/app/api/regulatory/returns/[reportId]/route')
+
+    const res = await GET(new Request('http://ui/api/regulatory/returns/sdat-payments?period=2026-09'), ctx('sdat-payments'))
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'upstream_error' })
+    expect(log).toHaveBeenCalledExactlyOnceWith('regulatory BFF: report generation failed')
+  })
+
+  it('restores real generation and bearer relay after the isolated error mocks', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { generateReport } = await import('@/lib/regulatory/generatedReports')
+    expect(vi.isMockFunction(generateReport)).toBe(false)
+    const { GET } = await import('@/app/api/regulatory/returns/[reportId]/route')
+
+    const res = await GET(new Request('http://ui/api/regulatory/returns/sdat-payments?period=2026-09'), ctx('sdat-payments'))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ reportId: 'sdat-payments', period: '2026-09' })
+    expect(fetchMock).toHaveBeenCalled()
+    for (const [, init] of fetchMock.mock.calls as unknown as [string, RequestInit][]) {
+      expect(new Headers(init.headers).get('Authorization')).toBe('Bearer operator-token')
+    }
+  })
+})
