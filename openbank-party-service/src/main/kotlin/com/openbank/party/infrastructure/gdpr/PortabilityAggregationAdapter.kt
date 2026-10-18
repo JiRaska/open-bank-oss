@@ -58,15 +58,15 @@ class PortabilityAggregationAdapter(
             ?: emptyList()
 
     private suspend fun fetchTransactions(accountId: UUID): List<PortabilityTransaction> =
-        transactionClient.listByAccount(accountId, TRANSACTION_PAGE_SIZE)
+        transactionClient.listTransactions(accountId, TRANSACTION_PAGE_SIZE, null)
             .onFailure().recoverWithUni(recover(TRANSACTIONS, accountId, null))
             .awaitSuspending()
             ?.data
             ?.map { tx ->
                 PortabilityTransaction(
-                    transactionId = tx.id ?: "",
-                    bookingDate = tx.bookingDate,
-                    amount = tx.amount,
+                    transactionId = tx.id?.toString() ?: "",
+                    bookingDate = tx.bookingDate?.toString(),
+                    amount = tx.amount?.toPlainString(),
                     currency = tx.currencyCode,
                     type = tx.type,
                     status = tx.status,

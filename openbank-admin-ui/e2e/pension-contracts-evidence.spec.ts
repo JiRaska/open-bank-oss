@@ -138,14 +138,14 @@ test('search: a short query hints, free text searches in place, a UUID opens the
 
   await page.goto('/pension')
   const search = page.getByLabel('Search contracts')
-  const submit = page.getByRole('button', { name: 'Search', exact: true })
+  const submit = page.getByRole('button', { name: 'Filter list', exact: true })
 
   // Under two characters nothing is searched and nothing navigates; the hint says why.
   // The page can surface other role=alert banners (e.g. upstream health) — target the
   // validation hint by its text, not by role alone.
   await search.fill('x')
   await submit.click()
-  await expect(page.getByText('Enter at least 2 characters: birth date, payment reference, product, or UUID.')).toBeVisible()
+  await expect(page.getByText('Enter at least 2 characters: birth date, payment reference, or product.')).toBeVisible()
   await expect(page).toHaveURL(/\/pension$/)
 
   // Free text is a staff search (q) that stays on the list — it never navigates.

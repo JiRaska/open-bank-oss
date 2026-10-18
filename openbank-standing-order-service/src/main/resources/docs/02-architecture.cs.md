@@ -166,3 +166,7 @@ HTTP listener zůstává během postupné migrace zapnutý. Nejprve publikujte a
 podepsaný obraz, potom nastavte HTTPS listener a obnovování certifikátů; pension klienty přepněte
 až po přípravě listeneru a síťových politik. Při rollbacku nejprve obnovte URL klientů a teprve
 potom vraťte obraz poskytovatele nebo odstraňte jeho TLS listener.
+
+## Klient transaction-service (ADR-0319)
+
+Volání, které předává splatný příkaz transaction-service, nově jde přes klienta vygenerovaného z `openapi.yaml` transaction-service (modul `openbank-client-transaction`, ADR-0319) místo ručně psaného rozhraní. Chování se nemění; rozjetí kontraktu selže při kompilaci a v přehrání consumer pactu.

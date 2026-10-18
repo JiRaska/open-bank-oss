@@ -211,8 +211,8 @@ export default function PidPage() {
         if (!syncRes.ok) {
           const retryable = syncRes.status === 408 || syncRes.status === 425 || syncRes.status === 429 || syncRes.status >= 500
           throw new Error(retryable
-            ? t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID dočasně selhala. Zopakujte pouze synchronizaci BankID.`, `Record created (ID: ${partyId}), but BankID sync failed temporarily. Retry BankID sync only.`)
-            : t(`Záznam vytvořen (ID: ${partyId}), ale synchronizace BankID byla odmítnuta (HTTP ${syncRes.status}). Nevytvářejte další stranu; před opakováním synchronizace vyřešte chybu služby nebo dat.`, `Record created (ID: ${partyId}), but BankID sync was rejected (HTTP ${syncRes.status}). Do not create another party; resolve the service or data error before retrying sync.`))
+            ? t(`Záznam vytvořen, ale synchronizace BankID dočasně selhala. Zopakujte pouze synchronizaci BankID.`, `Record created, but BankID sync failed temporarily. Retry BankID sync only.`)
+            : t(`Záznam vytvořen, ale synchronizace BankID byla odmítnuta (HTTP ${syncRes.status}). Nevytvářejte další stranu; před opakováním synchronizace vyřešte chybu služby nebo dat.`, `Record created, but BankID sync was rejected (HTTP ${syncRes.status}). Do not create another party; resolve the service or data error before retrying sync.`))
         }
       }
 
@@ -315,8 +315,8 @@ export default function PidPage() {
               {pendingBankIdSync && (
                 <div role="status" style={{ padding: '12px', background: 'var(--info-bg)', color: 'var(--info-text)', border: '1px solid var(--info-border)', borderRadius: '6px', fontSize: '13px' }}>
                   {t(
-                    `Strana ${pendingBankIdSync.partyId} už byla vytvořena. Údaje jsou uzamčené; další pokus zopakuje pouze synchronizaci BankID se stejnou stranou a původně odeslanou identitou.`,
-                    `Party ${pendingBankIdSync.partyId} was already created. The fields are locked; the next attempt retries BankID sync against the same party and originally submitted identity only.`,
+                    `Strana už byla vytvořena. Údaje jsou uzamčené; další pokus zopakuje pouze synchronizaci BankID se stejnou stranou a původně odeslanou identitou.`,
+                    `The party was already created. The fields are locked; the next attempt retries BankID sync against the same party and originally submitted identity only.`,
                   )}
                 </div>
               )}
@@ -530,7 +530,7 @@ export default function PidPage() {
             <input
               className="input"
               style={{ paddingLeft: '32px', width: '100%' }}
-              placeholder={t('Hledat hodnotu, ID osoby...', 'Search value, person ID...')}
+              placeholder={t('Hledat číslo dokladu nebo rodné číslo…', 'Search document or birth number…')}
               aria-label={t('Hledat PID případy', 'Search PID cases')}
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -600,7 +600,7 @@ export default function PidPage() {
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
                     <Can permission="parties:view">
                       <Link href={`/parties/${r.personId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                        {r.personId?.slice(0, 8) || r.personId}...
+                        {t('Otevřít osobu', 'Open person')}
                       </Link>
                     </Can>
                   </td>
