@@ -1149,6 +1149,11 @@ def _synthetic_origin(root: str) -> None:
 
     os.makedirs(root)
     g("init", "-q", "-b", "main")
+    # A fixture origin is cloned repeatedly while it is still being committed to. Git's detached auto-gc
+    # (triggered by those commits) packs and prunes loose objects in the background, so a concurrent
+    # `git clone` copying them fails with "failed to copy file ... No such file or directory". Never gc.
+    g("config", "gc.auto", "0")
+    g("config", "maintenance.auto", "false")
     w("services/s1.txt", "s1\n")
     w("count.txt", "1\n")
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
