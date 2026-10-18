@@ -1327,7 +1327,9 @@ def self_test() -> int:
             def clone(tag):
                 counter[0] += 1
                 d = os.path.join(root, f"{tag}-{counter[0]}")
-                sh(["git", "clone", "-q", "--branch", "main", origin, d], env=base_env())
+                r = sh(["git", "clone", "-q", "--branch", "main", origin, d], env=base_env(), check=False)
+                if r.returncode != 0:
+                    raise RuntimeError(f"self-test fixture: git clone failed: {r.stderr.strip()[-400:]}")
                 return d
 
             def tick(regen=None, batch_size=8):
@@ -1461,6 +1463,7 @@ def self_test() -> int:
             reset()
 
             # NEGATIVE (review 7): renaming regen-derived.sh to docs/x.md.
+            # stale-ref-ok: docs/x.md exists only inside the synthetic repository this test builds.
             sg = Git(clone("settle"))
             sg("fetch", "-q", "origin", "pV")
             rn = changed_paths(sg, f"{base0}...FETCH_HEAD")
