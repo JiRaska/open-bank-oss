@@ -5,7 +5,10 @@ info:
   title: Standing Order Service API
   # 1.7 -> 1.8 (#11938): additive — create documents 400 CURRENCY_NOT_ALLOWED (a SEPA_CREDIT
   # order executes as an SCT, which is euro-only).
-  version: 1.8.0
+  # 1.8 -> 1.8.1: fix — GET /{id} returned the raw domain entity (leaking idempotencyKey and
+  # failureCount, omitting the computed amount/description); it now returns StandingOrderResponse
+  # like every sibling endpoint, and the response schema is declared for the first time.
+  version: 1.8.1
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -27,6 +30,12 @@ paths:
       responses:
         '200':
           description: All standing orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StandingOrderResponse'
     post:
       tags: [Standing Orders]
       summary: Create a standing order
@@ -44,6 +53,10 @@ paths:
       responses:
         '201':
           description: Standing order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderResponse'
         '400':
           description: >-
             CURRENCY_NOT_ALLOWED (#11938) — `paymentType` is SEPA_CREDIT and `currency` is not EUR;
@@ -69,6 +82,10 @@ paths:
       responses:
         '200':
           description: Standing order detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderResponse'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -96,6 +113,12 @@ paths:
       responses:
         '200':
           description: Standing orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StandingOrderResponse'
 
   /api/v1/standing-orders/{id}/pause:
     post:
@@ -107,6 +130,10 @@ paths:
       responses:
         '200':
           description: Paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderResponse'
 
   /api/v1/standing-orders/{id}/resume:
     post:
@@ -118,6 +145,10 @@ paths:
       responses:
         '200':
           description: Resumed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderResponse'
 
   /api/v1/standing-orders/{id}/record-execution:
     patch:
@@ -129,6 +160,10 @@ paths:
       responses:
         '200':
           description: Execution confirmed; failure count reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -142,6 +177,10 @@ paths:
       responses:
         '200':
           description: Failure recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandingOrderResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -164,6 +203,65 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    StandingOrderResponse:
+      type: object
+      # Mirrors StandingOrderResponse.kt (toResponse) exactly — the shape EVERY endpoint now
+      # serves after the 1.8.1 GET /{id} correction. Kotlin non-null constructor parameters are
+      # required; remittanceInfo/description are nullable. The wire shape is pinned field-by-field
+      # by StandingOrderLifecycleE2E.
+      required: [id, partyId, debtorAccountId, creditorIban, creditorName, status, frequency, paymentType, amountMinorUnits, amount, currency, nextExecutionDate, remittanceInfo, description, executionCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        debtorAccountId:
+          type: string
+          format: uuid
+        creditorIban:
+          type: string
+        creditorName:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, PAUSED, CANCELLED, COMPLETED, FAILED]
+        frequency:
+          type: string
+          enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]
+        paymentType:
+          type: string
+          enum: [SEPA_CREDIT, DOMESTIC, INTERNAL]
+        amountMinorUnits:
+          type: integer
+          format: int64
+        amount:
+          description: amountMinorUnits in major units (e.g. 12500 -> 125.0).
+          type: number
+          format: double
+        currency:
+          type: string
+        nextExecutionDate:
+          type: string
+          format: date
+        remittanceInfo:
+          type: string
+          nullable: true
+        description:
+          description: Alias of remittanceInfo, kept for older consumers.
+          type: string
+          nullable: true
+        executionCount:
+          type: integer
+          format: int32
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
     CreateStandingOrderRequest:
       type: object
       # Mirrors the served DTO (CreateStandingOrderRequest.kt) exactly: Kotlin non-default

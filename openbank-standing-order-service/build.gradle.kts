@@ -49,6 +49,10 @@ dependencies {
     // endpoints over real HTTP — the only way to exercise a reactive Panache write, since a bare
     // @QuarkusTest thread carries no Vert.x context. The existing ITs only hit unsecured routes.
     testImplementation(libs.quarkus.test.security)
+    // @OidcSecurity claims: the PDP principal's human/machine classification is derived from
+    // VERIFIED claims only (ServiceAccountIdentity.isVerifiedPerson — azp + preferred_username),
+    // so a test touching @Authorize endpoints needs the OIDC flavour to prove the human path.
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

@@ -52,7 +52,10 @@ class StandingOrderResource(private val useCase: StandingOrderUseCase) {
     @GET
     @Path("/{id}")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
-    suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
+    // The DTO, not the domain entity: the entity serialization leaks idempotencyKey and
+    // failureCount and omits the computed `amount`/`description` fields every sibling endpoint
+    // returns — measured by StandingOrderLifecycleE2E's read-back, which caught the drift.
+    suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id)?.toResponse() ?: throw NotFoundException()
 
     @GET
     @Path("/party/{partyId}")
