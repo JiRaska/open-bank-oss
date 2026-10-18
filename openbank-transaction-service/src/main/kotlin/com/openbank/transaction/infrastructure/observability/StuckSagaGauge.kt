@@ -4,6 +4,7 @@
 package com.openbank.transaction.infrastructure.observability
 
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.transaction.application.port.out.TransactionRepository
 import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
@@ -55,6 +56,7 @@ class StuckSagaGauge {
     lateinit var stuckAfter: Duration
 
     private val cached = AtomicLong(0)
+    private var liveness: WorkflowLivenessRecorder? = null
 
     /** Current cached count — the value the gauge publishes. Visible for tests. */
     val current: Long get() = cached.get()
@@ -62,6 +64,9 @@ class StuckSagaGauge {
     @PostConstruct
     fun register() {
         metrics.registerStuckPaymentSagas { cached.get() }
+        // Heartbeat: a refresh that stops running freezes the gauge above at its last value, which
+        // reads as a healthy count. The age of the last successful refresh is what exposes that.
+        liveness = metrics.registerWorkflowLiveness("stuck-saga-gauge-refresh", Duration.ofSeconds(REFRESH_SECONDS))
     }
 
     @Scheduled(
@@ -71,5 +76,10 @@ class StuckSagaGauge {
     )
     suspend fun refresh() {
         cached.set(repository.countStuckSagas(clock.instant().minus(stuckAfter)))
+        liveness?.recordSuccess()
+    }
+
+    private companion object {
+        const val REFRESH_SECONDS = 30L
     }
 }

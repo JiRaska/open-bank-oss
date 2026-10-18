@@ -719,7 +719,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      daily: "04:00 UTC"
+      daily: "03:30 UTC"
       reactive: goalert-webhook       # triggered by GoAlert on a CI / deploy / runner anomaly alert
     data_scope:
       read:
@@ -773,7 +773,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      daily: "03:00 UTC"
+      daily: "03:15 UTC"
       reactive: goalert-webhook       # triggered when a WorkflowLivenessWatchdog gauge itself pages
     data_scope:
       read:
@@ -948,7 +948,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      weekly: "06:00 UTC"
+      weekly: "Sunday 05:30 UTC"
       reactive: adr-merge-webhook       # triggered by any merged change under docs/adr/*.md
     data_scope:
       read:
@@ -1004,7 +1004,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      weekly: "07:00 UTC"
+      weekly: "Sunday 06:00 UTC"
       reactive: policy-source-changed-webhook   # triggered when any .rego policy or agents.yaml changes
     data_scope:
       read:
