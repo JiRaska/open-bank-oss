@@ -43,8 +43,10 @@ dependencies {
     testImplementation(libs.quarkus.junit5)
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
-    // @TestSecurity for the advisory-mode authz regression test (ADR-0034 Phase 5, issue #266).
+    // @TestSecurity for the advisory-mode authz regression test (ADR-0034 Phase 5, issue #266);
+    // the OIDC flavour for the service-account-claim journeys (LendingOriginationE2E's intake edge).
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
