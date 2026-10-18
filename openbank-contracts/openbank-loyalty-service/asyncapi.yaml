@@ -41,6 +41,7 @@ servers:
 channels:
   loyaltyEvents:
     address: openbank.loyalty.events
+    x-planned-consumer: https://github.com/JiRaska/open-bank-oss/issues/8793
     title: Lístek ledger events
     description: |
       Topic name from `mp.messaging.outgoing.loyalty-outbox-out.topic` in

@@ -18,6 +18,10 @@ The generated `00-build` page in this same documentation index reports the relea
 
 This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
 
+## Scheduler heartbeat
+
+The daily check scheduler registers the workflow-liveness heartbeat `liveness-sentinel-check` at startup and records a success only after a check was actually dispatched; a fire skipped because Temporal is disabled does not count. The sentinel cannot watch itself, so `LivenessSentinelHeartbeatAbsent` (in `prometheus-rules-workflow-liveness.yaml`) alerts when that series is missing for 30 minutes.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

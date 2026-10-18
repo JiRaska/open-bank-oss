@@ -590,7 +590,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
