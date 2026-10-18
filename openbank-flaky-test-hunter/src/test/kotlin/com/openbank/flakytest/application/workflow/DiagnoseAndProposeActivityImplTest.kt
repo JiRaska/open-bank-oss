@@ -54,7 +54,6 @@ class DiagnoseAndProposeActivityImplTest {
         every { githubRepo() } returns "JiRaska/open-bank-oss"
         every { githubToken() } returns Optional.empty()
         every { llmGatewayUrl() } returns "http://litellm.ai-platform:4000"
-        every { checkCron() } returns "0 30 6 ? * SUN"
         every { repoRoot() } returns "."
     }
 
