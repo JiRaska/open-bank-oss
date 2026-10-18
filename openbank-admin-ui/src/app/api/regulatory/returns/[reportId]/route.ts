@@ -9,7 +9,7 @@
 // only: nothing is transmitted to a regulator. Error contract matches the /api/svc proxy so the
 // page reuses classifyBffFailure(): 401 unauthorized, 404 {error:"Unknown service …"} for an
 // undeployed source, 502 {error:"upstream_unreachable"}, else a generic 500/400 — the upstream
-// detail stays in the server log.
+// details stay out of both responses and operational logs.
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
@@ -52,7 +52,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     return NextResponse.json(report, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     if (err instanceof ReportSourceError) {
-      console.error(`regulatory BFF: ${reportId} ${period} failed: ${err.message}`)
+      console.error('regulatory BFF: report source failed')
       switch (err.kind) {
         case 'not_deployed': return NextResponse.json({ error: `Unknown service: ${err.service}`, service: err.service }, { status: 404 })
         case 'unauthorized': return NextResponse.json({ error: 'unauthorized', service: err.service }, { status: 403 })
@@ -61,7 +61,7 @@ export async function GET(request: Request, { params }: RouteContext) {
         default: return NextResponse.json({ error: 'upstream_error', service: err.service }, { status: 500 })
       }
     }
-    console.error(`regulatory BFF: ${reportId} ${period} failed:`, err)
+    console.error('regulatory BFF: report generation failed')
     return NextResponse.json({ error: 'upstream_error' }, { status: 500 })
   }
 }
