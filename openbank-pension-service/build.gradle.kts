@@ -123,7 +123,7 @@ val dipCrossServiceIT = tasks.register<Test>("dipCrossServiceIT") {
     systemProperty(
         "openbank.test.dip.fixture",
         project(":openbank-product-catalog").file(
-            "src/test/resources/retirement-pack/cz-illustrative-offerings.json",
+            "src/main/resources/catalog-seeds/retirement/cz-illustrative-offerings.json",
         ).absolutePath,
     )
     systemProperty(

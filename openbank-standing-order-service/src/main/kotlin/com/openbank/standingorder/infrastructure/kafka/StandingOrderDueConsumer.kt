@@ -203,18 +203,18 @@ class StandingOrderDueConsumer(
 
     /**
      * Books the own-account transfer and says, explicitly, what the answer meant. The answer is
-     * classified once, by `TransactionClient` (ADR-0319), from the proven HTTP status:
+     * classified by `TransactionClient` (ADR-0319), which separates HTTP status from completion:
      *
-     * - **Booked (2xx)** - accepted, even when the body cannot be read.
+     * - **HttpSuccess for a write** - accepted only with a readable COMPLETED transaction.
      * - **Rejected (400 / 422)** - the only business rejections: `false`, so the caller records the
      *   failed execution.
-     * - **everything else** - 409, 401/403 (identity/config), 404, 5xx and timeouts are thrown for
+     * - **everything else** - uncertain completion, 409, 401/403 (identity/config), 404, 5xx and timeouts are thrown for
      *   [EventRetry] and then the connector's retry/DLQ; a retry re-presents the same idempotency
      *   key and transaction-service replays the booked transfer.
      */
     private suspend fun submitTransfer(orderId: UUID, request: InitiateTransactionRequest): Boolean =
         when (val outcome = TransactionClient(transactionClient).initiate(request).awaitSuspending()) {
-            is TransactionCallOutcome.Booked -> {
+            is TransactionCallOutcome.HttpSuccess -> {
                 log.infof(
                     "[standing-order-exec] order %s internal transfer accepted (transaction %s)",
                     orderId,

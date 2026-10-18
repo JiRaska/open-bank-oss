@@ -14,6 +14,10 @@ import { blockReasonCopy, evaluateExportReadiness, type BalanceVerdict } from '@
 import { Ban } from 'lucide-react'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
+import {
+  defaultPeriod, isGeneratedReportId, nextDeadline, periodKindOf, selectablePeriods,
+  type DeadlineRule, type GeneratedReport,
+} from '@/lib/regulatory/generatedReports'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 type Report = (typeof REPORTS)[number]
@@ -34,6 +38,8 @@ interface RegulatoryCell {
   label?: string
   isDataGap?: boolean
   gapReason?: string | null
+  /** A non-numeric value from a generated report (identifier, date, name), rendered verbatim. */
+  text?: string
 }
 
 interface RegulatoryTemplate {
@@ -63,7 +69,12 @@ type PreviewData =
   | { status: 'unavailable'; kind: BffFailure | TemplateNotDeployedKind }
   | { status: 'no-periods' }
   | { status: 'unsupported' }
-  | { status: 'ready'; templates: RegulatoryTemplate[]; evidence: 'FROZEN' | 'LIVE_PREVIEW' }
+  | { status: 'ready'; templates: RegulatoryTemplate[]; evidence: Evidence; sources?: string[] }
+
+// FROZEN / LIVE_PREVIEW: finrep over the sealed or the working trial balance. GENERATED: a
+// catalogue report aggregated from the operational systems of record over a CLOSED period
+// (`/api/regulatory/returns`); a generated report over a running period is LIVE_PREVIEW.
+type Evidence = 'FROZEN' | 'LIVE_PREVIEW' | 'GENERATED'
 
 type TemplateLoadResult = { template: RegulatoryTemplate } | { kind: BffFailure | TemplateNotDeployedKind }
 
@@ -151,6 +162,9 @@ function cellValueText(cell: RegulatoryCell): string {
   if (cell.isDataGap) {
     return cell.gapReason ? `DATOVÁ MEZERA — ${cell.gapReason}` : 'DATOVÁ MEZERA'
   }
+  if (cell.text !== undefined) return cell.text
+  // `ks` = a count (generated statistical reports), never money.
+  if (cell.currency === 'ks') return new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 }).format(cell.value)
   // `currency` is reused by the backend as a general unit tag, not always an ISO code — COREP
   // C 76.00's r0030 (Liquidity coverage ratio) carries `%` there (finrep openapi.yaml's
   // `CorepCell.currency` has no enum restricting it). Render that as a percentage; everything
@@ -213,9 +227,11 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
     { field: 'Kód SDAT', value: report.sdatCode },
     { field: 'Frekvence', value: report.frequency },
     { field: 'Termín', value: report.deadline },
-    { field: 'Datový zdroj', value: TEMPLATE_PATHS[report.id] ? 'Implementovaný náhled — data se ověřují při načtení' : 'Katalog — datový zdroj není připojen' },
+    { field: 'Datový zdroj', value: TEMPLATE_PATHS[report.id]
+      ? 'Implementovaný náhled — data se ověřují při načtení'
+      : isGeneratedReportId(report.id) ? 'Generovaný výkaz — agregace ze systémů záznamu při načtení' : 'Katalog — datový zdroj není připojen' },
     { field: 'Odeslání regulátorovi', value: 'Není připojeno' },
-    { field: 'Příští termín', value: report.nextDue },
+    { field: 'Příští termín', value: dueOf(report) },
   ]
   if (data.status === 'ready') {
     const rendered = data.templates.flatMap(template => [
@@ -228,9 +244,11 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
         value: cellValueText(cell),
       })),
     ])
-    const source = data.evidence === 'FROZEN'
-      ? 'finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)'
-      : 'finrep-service ← živá ledger předvaha (PRACOVNÍ NÁHLED, měnitelná)'
+    const source = data.sources
+      ? `${data.sources.join(', ')} ← ${data.evidence === 'GENERATED' ? 'uzavřené období' : 'běžící období (PRACOVNÍ NÁHLED, měnitelné)'}`
+      : data.evidence === 'FROZEN'
+        ? 'finrep-service ← zmrazená ledger předvaha (FROZEN / LINES_V1)'
+        : 'finrep-service ← živá ledger předvaha (PRACOVNÍ NÁHLED, měnitelná)'
     return [...meta, { field: 'Zdroj', value: source }, ...rendered]
   }
   const message = data.status === 'loading' || data.status === 'idle'
@@ -266,7 +284,7 @@ const REPORTS = [
     regulation: 'Vyhláška č. 314/2013 Sb.',
     frequency: 'Měsíčně',
     deadline: '15. den následujícího měsíce',
-    nextDue: '2026-06-15',
+    deadlineRule: { kind: 'monthly-day', day: 15 } as DeadlineRule,
     description: 'Statistika platebního styku — počty a objemy plateb dle kanálu, typu a měny',
     sdatCode: 'PLAT',
     fields: ['Počet transakcí', 'Objem v CZK', 'Počet SEPA plateb', 'Počet domácích plateb', 'Počet přeshraničních plateb'],
@@ -278,7 +296,7 @@ const REPORTS = [
     regulation: 'Vyhláška č. 314/2013 Sb.',
     frequency: 'Měsíčně',
     deadline: '15. den následujícího měsíce',
-    nextDue: '2026-06-15',
+    deadlineRule: { kind: 'monthly-day', day: 15 } as DeadlineRule,
     description: 'Statistika vkladů a úvěrů — zůstatky, úrokové sazby, počty účtů',
     sdatCode: 'VKLA',
     fields: ['Celkové vklady CZK', 'Celkové vklady EUR', 'Průměrná úroková sazba', 'Počet aktivních účtů'],
@@ -290,7 +308,7 @@ const REPORTS = [
     regulation: 'Zákon č. 253/2008 Sb. (AML zákon)',
     frequency: 'Ad-hoc (do 24h od zjištění)',
     deadline: 'Do 24 hodin',
-    nextDue: 'Ad-hoc',
+    deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
     description: 'Hlášení podezřelých obchodů a transakcí dle AML zákona',
     sdatCode: 'SAR',
     fields: ['ID zákazníka', 'Popis podezřelé aktivity', 'Výše transakce', 'Datum zjištění', 'Kontaktní osoba MLRO'],
@@ -302,7 +320,7 @@ const REPORTS = [
     regulation: 'CRR/CRD IV (EU 575/2013)',
     frequency: 'Čtvrtletně',
     deadline: '30 dní po konci čtvrtletí',
-    nextDue: '2026-07-30',
+    deadlineRule: { kind: 'days-after-quarter', days: 30 } as DeadlineRule,
     description: 'Common Reporting — kapitálová přiměřenost, rizikové expozice, pákový poměr',
     sdatCode: 'COREP',
     fields: ['Tier 1 kapitál', 'Tier 2 kapitál', 'RWA', 'CAR ratio', 'Leverage ratio'],
@@ -314,7 +332,7 @@ const REPORTS = [
     regulation: 'IAS/IFRS + EBA ITS',
     frequency: 'Čtvrtletně',
     deadline: '30 dní po konci čtvrtletí',
-    nextDue: '2026-07-30',
+    deadlineRule: { kind: 'days-after-quarter', days: 30 } as DeadlineRule,
     description: 'Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky',
     sdatCode: 'FINREP',
     fields: ['Aktiva celkem', 'Závazky celkem', 'Vlastní kapitál', 'Čistý úrokový výnos', 'Provozní náklady'],
@@ -326,7 +344,7 @@ const REPORTS = [
     regulation: 'CRR/CRD IV (EU 575/2013) + nařízení v přenesené pravomoci (EU) 2015/61',
     frequency: 'Měsíčně',
     deadline: '30 dní po konci měsíce',
-    nextDue: '2026-10-30',
+    deadlineRule: { kind: 'days-after-month', days: 30 } as DeadlineRule,
     description: 'Liquidity Coverage Ratio — likvidní aktiva, odtoky, přítoky a výpočet ukazatele LCR',
     sdatCode: 'LCR',
     // Per-template Czech labels rather than field names: this report is a bundle of four COREP
@@ -341,7 +359,7 @@ const REPORTS = [
     regulation: 'ECB/2013/43 Regulation',
     frequency: 'Ročně',
     deadline: '31. března',
-    nextDue: '2027-03-31',
+    deadlineRule: { kind: 'annual', month: 3, day: 31 } as DeadlineRule,
     description: 'Statistika platebního styku pro ECB — počty a hodnoty platebních transakcí',
     sdatCode: 'ECB-PAYM',
     fields: ['Počet platebních účtů', 'Počet karet', 'Objem bezhotovostních plateb', 'Počet ATM'],
@@ -353,7 +371,7 @@ const REPORTS = [
     regulation: 'FATCA (US zákon) + CRS OECD',
     frequency: 'Ročně',
     deadline: '30. června',
-    nextDue: '2026-06-30',
+    deadlineRule: { kind: 'annual', month: 6, day: 30 } as DeadlineRule,
     description: 'Hlášení účtů US osob a entit finančnímu úřadu pro přeposlání IRS',
     sdatCode: 'FATCA',
     fields: ['Jméno US osoby', 'TIN (US daňové číslo)', 'Zůstatek účtu', 'Příjmy z US zdrojů'],
@@ -365,7 +383,7 @@ const REPORTS = [
     regulation: 'DORA (EU 2022/2554) — od 17.1.2025',
     frequency: 'Ad-hoc (do 4h od zjištění)',
     deadline: 'Počáteční hlášení do 4 hodin',
-    nextDue: 'Ad-hoc',
+    deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
     description: 'Hlášení závažných ICT incidentů dle DORA — počáteční, průběžné a závěrečné hlášení',
     sdatCode: 'DORA-INC',
     fields: ['Klasifikace incidentu', 'Dopad na zákazníky', 'RTO/RPO', 'Příčina', 'Nápravná opatření'],
@@ -378,7 +396,12 @@ const DATA_SOURCE_CONFIG = {
 }
 
 function dataSourceOf(report: Report): keyof typeof DATA_SOURCE_CONFIG {
-  return TEMPLATE_PATHS[report.id] ? 'implemented' : 'catalog'
+  return TEMPLATE_PATHS[report.id] || isGeneratedReportId(report.id) ? 'implemented' : 'catalog'
+}
+
+/** Next filing deadline computed from the report's rule — never a stale literal date. */
+function dueOf(report: Report): string {
+  return nextDeadline(report.deadlineRule, new Date()) ?? 'Ad-hoc'
 }
 
 export default function RegulatoryPage() {
@@ -393,13 +416,17 @@ export default function RegulatoryPage() {
   const [previewData, setPreviewData] = useState<PreviewData>({ status: 'idle' })
   const [reportingDate, setReportingDate] = useState('')
   const [reportingPeriods, setReportingPeriods] = useState<string[]>([])
-  const [reportingEvidence, setReportingEvidence] = useState<'FROZEN' | 'LIVE_PREVIEW'>('FROZEN')
+  const [reportingEvidence, setReportingEvidence] = useState<Evidence>('FROZEN')
 
   async function loadPreview(
     report: Report,
     requestedAsOf?: string,
-    requestedEvidence: 'FROZEN' | 'LIVE_PREVIEW' = 'FROZEN',
+    requestedEvidence: Evidence = 'FROZEN',
   ) {
+    if (isGeneratedReportId(report.id)) {
+      await loadGenerated(report.id, requestedAsOf)
+      return
+    }
     const paths = TEMPLATE_PATHS[report.id]
     if (!paths) {
       setPreviewData({ status: 'unsupported' })
@@ -449,6 +476,32 @@ export default function RegulatoryPage() {
         evidence,
         templates: results.filter((result): result is { template: RegulatoryTemplate } => 'template' in result).map(result => result.template),
       })
+    } catch {
+      setPreviewData({ status: 'unavailable', kind: 'unreachable' })
+    }
+  }
+
+  async function loadGenerated(reportId: string, requestedPeriod?: string) {
+    if (!isGeneratedReportId(reportId)) return
+    const kind = periodKindOf(reportId)
+    const now = new Date()
+    const period = requestedPeriod ?? defaultPeriod(kind, now)
+    setReportingPeriods(selectablePeriods(kind, now))
+    setReportingDate(period)
+    setPreviewData({ status: 'loading' })
+    try {
+      // Generation aggregates whole rosters server-side, so it gets more time than a template read.
+      const response = await fetch(`/api/regulatory/returns/${reportId}?${new URLSearchParams({ period })}`, {
+        cache: 'no-store', signal: AbortSignal.timeout(120_000),
+      })
+      if (!response.ok) {
+        setPreviewData({ status: 'unavailable', kind: await classifyBffFailure(response) })
+        return
+      }
+      const report = await response.json() as GeneratedReport
+      const evidence: Evidence = report.closed ? 'GENERATED' : 'LIVE_PREVIEW'
+      setReportingEvidence(evidence)
+      setPreviewData({ status: 'ready', evidence, sources: report.sources, templates: report.templates })
     } catch {
       setPreviewData({ status: 'unavailable', kind: 'unreachable' })
     }
@@ -515,8 +568,8 @@ export default function RegulatoryPage() {
 
   const today = new Date().toISOString().slice(0, 10)
   const upcoming = [...REPORTS]
-    .filter(r => r.nextDue !== 'Ad-hoc' && r.nextDue >= today)
-    .sort((a, b) => a.nextDue.localeCompare(b.nextDue))
+    .filter(r => dueOf(r) !== 'Ad-hoc' && dueOf(r) >= today)
+    .sort((a, b) => dueOf(a).localeCompare(dueOf(b)))
     .slice(0, 3)
 
   return (
@@ -593,9 +646,9 @@ export default function RegulatoryPage() {
         </div>
 
         <div className="card" style={{ padding: '16px' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><Calendar size={14} /> {t('Budoucí katalogové termíny', 'Future catalogue deadlines')}</h3>
+          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><Calendar size={14} /> {t('Nejbližší termíny podání', 'Upcoming filing deadlines')}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {upcoming.length === 0 && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('V katalogu není evidován žádný budoucí termín.', 'No future deadline is recorded in the catalogue.')}</div>}
+            {upcoming.length === 0 && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Žádný pravidelný termín není naplánován.', 'No recurring deadline is scheduled.')}</div>}
             {upcoming.map((report) => (
               <div key={report.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '28px', marginTop: '3px' }}>
@@ -603,8 +656,8 @@ export default function RegulatoryPage() {
                   <div style={{ width: '2px', flex: 1, background: 'var(--border)', marginTop: '4px', minHeight: '12px' }} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>{report.nextDue}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }} title={report.name}>{report.name}</div>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '2px' }}>{dueOf(report)}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '200px' }} title={report.name}>{`${report.sdatCode} · ${report.name}`}</div>
                 </div>
               </div>
             ))}
@@ -642,10 +695,10 @@ export default function RegulatoryPage() {
 
                 {/* Next due */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{report.nextDue !== 'Ad-hoc' && report.nextDue < today ? t('Katalogový termín (historický)', 'Catalogue deadline (historical)') : t('Katalogový termín', 'Catalogue deadline')}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Příští termín', 'Next deadline')}</div>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Calendar size={11} />
-                    {report.nextDue}
+                    {dueOf(report)}
                   </div>
                 </div>
 
@@ -680,9 +733,11 @@ export default function RegulatoryPage() {
                         <strong>{t('Termín:', 'Deadline:')}</strong> {report.deadline}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {source === 'implemented'
-                          ? t('implementovaný náhled přes finrep-service; dostupnost se ověřuje při načtení', 'implemented preview through finrep-service; availability is checked on load')
-                          : t('zatím nenapojeno', 'not connected yet')}
+                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {isGeneratedReportId(report.id)
+                          ? t('generováno z provozních systémů záznamu (agregace při načtení, bez částečných čtení)', 'generated from the operational systems of record (aggregated on load, no partial reads)')
+                          : source === 'implemented'
+                            ? t('implementovaný náhled přes finrep-service; dostupnost se ověřuje při načtení', 'implemented preview through finrep-service; availability is checked on load')
+                            : t('zatím nenapojeno', 'not connected yet')}
                       </div>
                     </div>
                     <div>
@@ -752,10 +807,10 @@ export default function RegulatoryPage() {
               </Dialog.Close>
             </div>
 
-            {TEMPLATE_PATHS[preview.id] && (
+            {(TEMPLATE_PATHS[preview.id] || isGeneratedReportId(preview.id)) && (
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', background: 'var(--surface-2)' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  {t('Referenční datum', 'Reference date')}
+                  {isGeneratedReportId(preview.id) ? t('Vykazované období', 'Reporting period') : t('Referenční datum', 'Reference date')}
                   <select
                     value={reportingDate}
                     onChange={e => setReportingDate(e.target.value)}
@@ -785,7 +840,7 @@ export default function RegulatoryPage() {
                   // `template_not_deployed` result is rendered on the `not_found` base icon/copy,
                   // then fully replaced below via the `title`/`detail` overrides.
                   kind={previewData.kind === 'template_not_deployed' ? 'not_found' : previewData.kind}
-                  service="FINREP / COREP service"
+                  service={isGeneratedReportId(preview.id) ? 'regulatory reporting sources' : 'FINREP / COREP service'}
                   feature={t('regulatorní šablony', 'regulatory templates')}
                   lang="cs"
                   dense
@@ -822,7 +877,9 @@ export default function RegulatoryPage() {
                 {previewData.status === 'ready' && previewData.evidence === 'LIVE_PREVIEW' && (
                   <div role="status" style={{ padding: '12px 20px', color: 'var(--warning-text)', background: 'var(--warning-bg)', borderBottom: '1px solid var(--warning-border)', fontSize: '12px' }}>
                     <strong>{t('Pracovní náhled skutečných hodnot', 'Working preview of actual values')}</strong>
-                    {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
+                    {' — '}{isGeneratedReportId(preview.id)
+                      ? t('vykazované období ještě neskončilo. Hodnoty se mohou změnit; export zůstává zablokovaný.', 'the reporting period has not ended yet. Values may change; export remains blocked.')
+                      : t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
                   </div>
                 )}
                 {previewData.status === 'ready' && previewData.templates.filter(tpl => tpl.provenance === 'synthetic').map(tpl => (
@@ -884,7 +941,9 @@ export default function RegulatoryPage() {
                     {t('Otevřít regulatorní uzávěrku', 'Open regulatory close')} <ExternalLink size={11} aria-hidden="true" />
                   </Link>
                 )}
-                {previewData.status === 'unsupported'
+                {isGeneratedReportId(preview.id)
+                  ? t('Výkaz se generuje z provozních systémů záznamu s tokenem přihlášeného operátora; neúplné čtení výkaz odmítne. Odeslání regulátorovi není součástí generování.', 'The report is generated from the operational systems of record with the signed-in operator\'s token; an incomplete read refuses the report. Transmission to the regulator is not part of generation.')
+                  : previewData.status === 'unsupported'
                   ? t('Tento katalogový výkaz zatím nemá implementovaný datový zdroj ani odeslání. Nezobrazuje fiktivní hodnoty.', 'This catalogue report has no implemented data source or submission path yet. It does not show fictional values.')
                   : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>

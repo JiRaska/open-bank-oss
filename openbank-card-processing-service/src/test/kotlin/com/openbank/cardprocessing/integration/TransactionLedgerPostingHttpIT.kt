@@ -30,7 +30,7 @@ import java.util.UUID
  * What the ledger-posting adapter does with each REAL answer transaction-service can give to the
  * generated client (ADR-0319), over a real HTTP socket and the real Quarkus REST client + Jackson
  * mapper. The posting runs AFTER the clearing committed, so the outcome is a report, never a veto:
- * a 2xx must read POSTED whatever its body looks like (the debit is in the books), a rejection must
+ * only a readable COMPLETED transaction proves POSTED; uncertain completion is UNKNOWN, and a rejection must
  * read FAILED (the gap has to stay visible).
  */
 @QuarkusTest
@@ -80,7 +80,7 @@ class TransactionLedgerPostingHttpIT {
     )
 
     @Test
-    fun `a 2xx body with an unknown field and every optional field missing is POSTED`(): Unit = runBlocking {
+    fun `a COMPLETED transaction with an unknown field is POSTED`(): Unit = runBlocking {
         val result = adapter().postClearedSpend(authorization("stub-extra"), 12_345, "clr-1")
 
         assertThat(result.outcome).isEqualTo(PostingOutcome.POSTED)
@@ -89,13 +89,12 @@ class TransactionLedgerPostingHttpIT {
     }
 
     @Test
-    fun `a 2xx body that cannot bind is POSTED - the 2xx status proves the booking, so it is not UNKNOWN`(): Unit =
-        runBlocking {
-            val result = adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2")
+    fun `an unbindable 2xx body is UNKNOWN because completion cannot be proven`(): Unit = runBlocking {
+        val result = adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2")
 
-            assertThat(result.outcome).isEqualTo(PostingOutcome.POSTED)
-            assertThat(result.transactionId).isNull()
-        }
+        assertThat(result.outcome).isEqualTo(PostingOutcome.UNKNOWN)
+        assertThat(result.transactionId).isNull()
+    }
 
     @Test
     fun `a real 422 is FAILED so the gap stays visible`(): Unit = runBlocking {

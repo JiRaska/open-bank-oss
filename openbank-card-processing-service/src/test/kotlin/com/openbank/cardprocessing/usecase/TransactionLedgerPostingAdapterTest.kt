@@ -69,6 +69,23 @@ class TransactionLedgerPostingAdapterTest {
     }
 
     @Test
+    fun `non-completed transaction states are UNKNOWN and preserve the clearing idempotency key`(): Unit = runBlocking {
+        listOf("FAILED", "PENDING", "PROCESSING", null, "UNRECOGNIZED").forEach { state ->
+            val sent = slot<InitiateTransactionRequest>()
+            every { client.initiateTransaction(capture(sent)) } returns Uni.createFrom().item(
+                ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = state)),
+            )
+            val authorization = authorization("CZK")
+            val result = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
+                .postClearedSpend(authorization, 12_345, "uncertain-clearing")
+            assertThat(result.outcome).describedAs("provider state=%s", state).isEqualTo(PostingOutcome.UNKNOWN)
+            assertThat(result.transactionId).isNull()
+            assertThat(sent.captured.idempotencyKey)
+                .isEqualTo(CardClearingLedgerKey.of(authorization.id, "uncertain-clearing"))
+        }
+    }
+
+    @Test
     fun `a two-decimal currency is posted with two decimals`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
         every { client.initiateTransaction(capture(sent)) } returns

@@ -12,6 +12,7 @@ import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -91,8 +92,8 @@ class TransactionLedgerPostingAdapter(
                 ),
             ).awaitSuspending()
             when (outcome) {
-                // A 2xx status is proven: the debit is booked even when its body cannot be read.
-                is TransactionCallOutcome.Booked ->
+                // The write facade has proven a readable COMPLETED transaction, not merely HTTP 2xx.
+                is TransactionCallOutcome.HttpSuccess ->
                     PostingResult(PostingOutcome.POSTED, outcome.body?.id, outcome.body?.status ?: BOOKED_DETAIL)
                 TransactionCallOutcome.Conflict -> {
                     log.errorf("ledger posting for authorization %s answered 409", authorization.id)
@@ -112,13 +113,17 @@ class TransactionLedgerPostingAdapter(
                 }
             }
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            // An unreadable answer proves nothing: the debit may or may not be booked. It must NOT be
+            // Unproven completion is not a settlement verdict: the debit may or may not be booked. It must NOT be
             // rethrown (this runs after the clearing committed and nobody retries the caller) and must
             // not be called POSTED or FAILED: it is UNKNOWN and counted. It is NOT retried yet (a replay of
             // the clearing posts nothing): the durable re-driver is tracked in #13228.
-            if (isUnreadableResponse(e)) {
-                log.warnf(e, "ledger posting for authorization %s has an unreadable answer", authorization.id)
-                return PostingResult(PostingOutcome.UNKNOWN, null, UNREADABLE_DETAIL)
+            if (isUncertainResponse(e)) {
+                log.warnf(
+                    e,
+                    "ledger posting for authorization %s has unproven transaction completion",
+                    authorization.id,
+                )
+                return PostingResult(PostingOutcome.UNKNOWN, null, UNCERTAIN_DETAIL)
             }
             // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
             // here may propagate and undo a fact the acquirer has already asserted. The FAILED
@@ -128,7 +133,8 @@ class TransactionLedgerPostingAdapter(
         }
     }
 
-    private fun isUnreadableResponse(e: Throwable): Boolean = e is ProcessingException ||
+    private fun isUncertainResponse(e: Throwable): Boolean = e is TransactionCompletionUncertainException ||
+        e is ProcessingException ||
         generateSequence(e) { it.cause }.any { it is MismatchedInputException || it is JsonParseException }
 
     private fun toMajorUnits(minorUnits: Long, currencyCode: String): BigDecimal {
@@ -142,9 +148,9 @@ class TransactionLedgerPostingAdapter(
         const val TYPE_DEBIT = "DEBIT"
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
-        const val BOOKED_DETAIL = "booked; transaction-service answer body not readable"
+        const val BOOKED_DETAIL = "transaction completion confirmed"
         const val CONFLICT_DETAIL = "transaction-service answered 409"
-        const val UNREADABLE_DETAIL = "transaction-service answer unreadable; booking unknown"
+        const val UNCERTAIN_DETAIL = "transaction completion unproven; booking unknown"
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */

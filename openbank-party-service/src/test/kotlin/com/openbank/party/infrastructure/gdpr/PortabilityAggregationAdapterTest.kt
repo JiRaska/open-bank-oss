@@ -55,6 +55,18 @@ class PortabilityAggregationAdapterTest {
     }
 
     @Test
+    fun `a listed transaction need not be completed to remain in the portability export`(): Unit = runBlocking {
+        every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
+            AccountPageBody(data = listOf(AccountSummaryBody(id = accountId, accountNumber = "X", status = "ACTIVE"))),
+        )
+        every { transactionClient.listTransactions(accountId, any(), any()) } returns Uni.createFrom().item(
+            okPage(TransactionPage(data = listOf(TransactionResponse(id = txId, status = "FAILED")))),
+        )
+        val result = adapter.fetchAccountsWithTransactions(partyId)
+        assertThat(result.single().transactions.single().transactionId).isEqualTo(txId.toString())
+    }
+
+    @Test
     fun `accounts are assembled with their transactions, counterparty identity absent in v1`(): Unit = runBlocking {
         every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
             AccountPageBody(

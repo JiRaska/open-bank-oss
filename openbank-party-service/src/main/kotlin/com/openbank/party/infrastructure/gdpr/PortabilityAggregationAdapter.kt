@@ -67,7 +67,7 @@ class PortabilityAggregationAdapter(
         transactions.list(accountId, TRANSACTION_PAGE_SIZE, null)
             .onFailure().recoverWithUni(recover(TRANSACTIONS, accountId, null))
             .awaitSuspending()
-            .let { (it as? TransactionCallOutcome.Booked)?.body }
+            .let { (it as? TransactionCallOutcome.HttpSuccess)?.body }
             ?.data
             ?.map { tx ->
                 PortabilityTransaction(

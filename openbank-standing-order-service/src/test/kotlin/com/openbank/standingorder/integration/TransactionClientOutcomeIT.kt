@@ -5,6 +5,7 @@
 package com.openbank.standingorder.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
@@ -49,7 +50,7 @@ import java.util.UUID
  *  - a 4xx rejection must be RECORDED as a failed execution (else a refused transfer is neither
  *    confirmed nor failed and the order never advances towards suspension);
  *  - a 5xx / 429 is retried and rethrown, never recorded (the transfer may have booked);
- *  - a 2xx must confirm, whatever the body looks like - the money has already moved.
+ *  - only a readable COMPLETED transaction may confirm; uncertain completion is retried with the same key.
  */
 @QuarkusTest
 @QuarkusTestResource(TransactionClientOutcomeIT.InMemoryKafkaResource::class)
@@ -178,7 +179,7 @@ class TransactionClientOutcomeIT {
     }
 
     @Test
-    fun `a 2xx body with an unknown field and every optional field missing is a success`(): Unit = runBlocking {
+    fun `a COMPLETED transaction with an unknown field is a success`(): Unit = runBlocking {
         consumer().consume(dueEvent("stub-extra"))
 
         coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
@@ -187,11 +188,11 @@ class TransactionClientOutcomeIT {
     }
 
     @Test
-    fun `an unbindable 2xx body is confirmed, never retried`(): Unit = runBlocking {
-        consumer().consume(dueEvent("stub-unbindable"))
-
-        assertThat(posts("stub-unbindable")).describedAs("booked: never re-posted").isEqualTo(1)
-        coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
+    fun `an unbindable 2xx body is uncertain and never confirmed`(): Unit = runBlocking {
+        assertThatThrownBy { runBlocking { consumer().consume(dueEvent("stub-unbindable")) } }
+            .isInstanceOf(TransactionCompletionUncertainException::class.java)
+        assertThat(posts("stub-unbindable")).describedAs("retried with the same event key").isEqualTo(3)
+        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
         coVerify(exactly = 0) { useCase.recordFailure(any()) }
     }
 }
