@@ -787,6 +787,8 @@ paths:
         for an existing CUTOFF day (404 for a day never opened, 409 for any other status) and only
         for a participant with no RAN report (409); it may supersede a REFUSED report, and no
         existing row is ever rewritten.
+        A verified human JWT is required even in advisory OPA mode; a machine identity is 403.
+        Audit attribution uses its nonblank sub only; missing or unreadable sub is 401, without a display-name fallback.
       operationId: waiveDayCloseParticipant
       parameters:
         - $ref: '#/components/parameters/BusinessDatePath'

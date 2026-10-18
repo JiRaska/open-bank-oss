@@ -22,6 +22,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.uni
@@ -61,6 +63,7 @@ class DayCloseParticipantsIT {
             "openbank.ledger.fx-revaluation.cron" to "off",
             "openbank.outbox.dispatch-enabled" to "false",
             "openbank.ledger.close.participants-mode" to "enforce",
+            "authz.enforce" to "false",
             "openbank.ledger.close.participants.interest.principal" to INTEREST_PRINCIPAL,
         )
     }
@@ -273,6 +276,13 @@ class DayCloseParticipantsIT {
 
     @Test
     @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "manual-close-operator-sub"),
+            Claim(key = "preferred_username", value = "manual-close-operator"),
+        ],
+    )
     fun `manual HTTP tie-out succeeds after a reasoned operator waiver is recorded`() {
         val date = LocalDate.of(2019, 6, 12)
         seedManualDay(date)
@@ -281,9 +291,28 @@ class DayCloseParticipantsIT {
         val waiver = onEventLoop { participation.completeness(date) }.reported.getValue("interest")
         assertThat(waiver.outcome).isEqualTo(ParticipationOutcome.WAIVED)
         assertThat(waiver.reason).isEqualTo("accepted outage, INC-4")
-        assertThat(waiver.reportedBy).isEqualTo("manual-close-operator")
+        assertThat(waiver.reportedBy).isEqualTo("manual-close-operator-sub")
         given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
         assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.TIED_OUT)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-close-client", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "close-client"),
+            Claim(key = "sub", value = "machine-sub"),
+            Claim(key = "preferred_username", value = "service-account-close-client"),
+            Claim(key = "client_id", value = "close-client"),
+        ],
+    )
+    fun `machine operator cannot record a waiver while OPA is advisory`() {
+        val date = LocalDate.of(2019, 6, 13)
+        seedManualDay(date)
+        given().contentType("application/json").body("""{"reason":"accepted outage, INC-5"}""")
+            .put("/api/v1/ledger/accounting-days/$date/participants/interest/waiver").then().statusCode(403)
+        assertThat(onEventLoop { participation.completeness(date) }.reported).doesNotContainKey("interest")
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
     }
 
     private companion object {

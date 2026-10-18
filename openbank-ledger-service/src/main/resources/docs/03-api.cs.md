@@ -95,3 +95,5 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 `openbank.ledger.close.participants-mode` je `off`, `shadow` (výchozí, počítá by-hold rozhodnutí a den přesto uzavře) nebo `enforce`; jakákoli jiná hodnota zastaví start služby.
 
 V režimu `enforce` aplikační služba účetního dne kontroluje účastníky při automatickém i ručním přechodu operátora `CUTOFF → TIED_OUT`, pod stávajícím transakčním zámkem dne. Chybějící účastník nebo REFUSED vrací 409 do přijetí platného hlášení či výslovné výjimky operátora s důvodem. Volající tuto kontrolu nemůže vynechat. Výchozí režim zůstává `shadow`; změna nepovoluje aktivaci vynucování.
+
+Prominutí vyžaduje ověřený lidský JWT i v advisory režimu OPA; strojový token je odmítnut 403 i s rolí operátora. Audit používá pouze neprázdný JWT `sub`; chybějící, prázdný nebo nečitelný subject vrací 401 bez náhrady zobrazovaným jménem.

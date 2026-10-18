@@ -108,6 +108,13 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
         @PathParam("participant") participant: String,
         body: WaiveParticipationRequest?,
     ): Response {
+        // A waiver is a human exception even while OPA runs in advisory mode.
+        if (!ServiceAccountIdentity.isVerifiedPerson(identity)) {
+            throw WebApplicationException(
+                "A human operator is required to waive a participant",
+                Response.Status.FORBIDDEN,
+            )
+        }
         val saved = useCase.waive(
             WaiveParticipationCommand(
                 businessDate = parseDate(businessDate),
@@ -132,8 +139,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
     }
 
     private fun actingPrincipal(): String {
-        val principal = identity.principal
-        val subject = (principal as? JsonWebToken)?.subject ?: principal?.name
+        val subject = runCatching { (identity.principal as? JsonWebToken)?.subject }.getOrNull()
         if (subject.isNullOrBlank()) {
             throw WebApplicationException("Cannot resolve the acting principal", Response.Status.UNAUTHORIZED)
         }

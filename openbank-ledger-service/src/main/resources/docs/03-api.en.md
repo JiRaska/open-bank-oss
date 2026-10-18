@@ -97,3 +97,5 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 `openbank.ledger.close.participants-mode` is `off`, `shadow` (default, counts would-hold decisions and still ties out) or `enforce`; any other value fails the service start.
 
 In `enforce`, the accounting-day service applies the participant check to both scheduler and manual operator `CUTOFF → TIED_OUT` transitions, under the existing transactional day lock. A missing or REFUSED participant returns 409 until a valid report or an explicit reasoned operator waiver is recorded. A caller cannot omit this policy. The default remains `shadow`; this change does not authorize enabling enforcement.
+
+A waiver requires a verified human JWT even when OPA authorization is advisory; a machine token is rejected with 403 despite an operator role. Audit attribution uses only the nonblank JWT `sub`; a missing, blank or unreadable subject is 401, without falling back to a display name.
