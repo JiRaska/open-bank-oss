@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.3...finrep-service-v0.17.4) (2026-10-18)
+
+
+### Bug Fixes
+
+* **finrep:** classify treasury GL codes in the FINREP allowlist and F01/F02 mappers ([#13146](https://github.com/JiRaska/open-bank-oss/issues/13146)) ([1a4308d](https://github.com/JiRaska/open-bank-oss/commit/1a4308d5d140f7fe024276ef5635155f36b19028))
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.2...finrep-service-v0.17.3) (2026-10-14)
 
 
