@@ -135,7 +135,7 @@ spec:
       #
       # mTLS listener (ADR-0137). Clients presenting a cluster-CA-signed client
       # cert authenticate as the matching KafkaUser principal; this is what the
-      # payment.scheme-accepted producers/consumer use so their ACLs apply.
+      # every service Kafka client uses so its KafkaUser ACLs apply.
       # `authentication.type: tls` ⇒ mutual TLS, so a client with no client
       # cert cannot connect on this port at all. Reachable at
       # `openbank-cluster-kafka-bootstrap.messaging.svc:9093`.
