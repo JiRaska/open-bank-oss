@@ -91,10 +91,11 @@ PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/"
 PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
 # A member touching any of these never rides a train: generators, gate scripts, gates.yaml, the
 # regen inventory and the WORKFLOWS that run the freshness gates all live under `.github/`, and
-# the regeneration-content argument rests on CI running main's copies of them.
+# the regeneration-content argument rests on CI running main's copies of them. Everything ELSE the
+# generator runner executes is derived from origin/main's regen-derived.sh by `Untrainable` —
+# never from a fixed-depth glob, which a deeper file walks straight past.
 UNTRAINABLE_PREFIXES = (".github/",)
-UNTRAINABLE_GLOBS = ("docs/adr/*.sh", "openbank-infra/gitops/*/gen-*", "openbank-infra/gitops/*/*/gen-*",
-                     "openbank-infra/gitops/*/*/*/gen-*")
+SOURCED_BY_GEN_INDEX = "docs/adr/*.sh"         # gen-index.sh sources its sibling libraries
 GENERATOR_OVERLAY_ROOTS = (".github/scripts", "docs/adr", "openbank-infra/gitops")
 REGEN_COMMANDS = ("bash .github/scripts/regen-derived.sh --all", "bash docs/adr/gen-index.sh")
 SPECIAL_MODES = ("120000", "160000")           # symlink, gitlink
@@ -128,8 +129,35 @@ def glob_match(pattern: str, path: str) -> bool:
     return re.fullmatch(rx, path) is not None
 
 
-def is_untrainable_path(path: str) -> bool:
-    return any(path.startswith(p) for p in UNTRAINABLE_PREFIXES) or any(glob_match(g, path) for g in UNTRAINABLE_GLOBS)
+class Untrainable:
+    """Every path the generator runner would EXECUTE, derived from origin/main's regen-derived.sh:
+    its `find <root> -name '<pattern>'` enumeration (any depth, as `find` recurses), every program
+    its GENERATORS inventory and REGEN_COMMANDS invoke, the libraries gen-index.sh sources, and all
+    of `.github/`. If main's script cannot be parsed, it fails CLOSED: any `gen-*` file anywhere."""
+
+    def __init__(self, regen_text: str):
+        m = re.search(r"find\s+(\S+)\s+-name\s+'([^']+)'", regen_text or "")
+        self.find_root = m.group(1).rstrip("/") if m else None
+        self.find_name = m.group(2) if m else None
+        commands = [c for c in generator_commands(regen_text or "") if c != "__BUNDLES__"] + list(REGEN_COMMANDS)
+        self.programs = {tok for c in commands for tok in shlex.split(c) if "/" in tok and tok.endswith((".py", ".sh"))}
+
+    def __call__(self, path: str) -> bool:
+        if any(path.startswith(p) for p in UNTRAINABLE_PREFIXES) or path in self.programs:
+            return True
+        if glob_match(SOURCED_BY_GEN_INDEX, path):
+            return True
+        name = path.rsplit("/", 1)[-1]
+        if self.find_root is None:
+            return name.startswith("gen-")
+        return path.startswith(self.find_root + "/") and fnmatch.fnmatch(name, self.find_name)
+
+
+def generator_commands(script_text: str) -> list[str]:
+    return [m.group(2) for m in re.finditer(r'^\s*"([^"|]+)\|([^"|]+)\|([^"]*)"', script_text, re.MULTILINE)]
+
+
+FAIL_CLOSED_UNTRAINABLE = Untrainable("")
 
 
 def derived_output_patterns(script_text: str) -> list[str]:
@@ -159,8 +187,10 @@ class Member:
 
 
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
-              app: dict[str, tuple[str, str]] | None = None) -> tuple[bool, str]:
-    """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses."""
+              app: dict[str, tuple[str, str]] | None = None, untrainable=None) -> tuple[bool, str]:
+    """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses.
+    `pr["files"]` must come from `git diff` against the verified head, never from the files API."""
+    untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
     if pr.get("state", "open") != "open":
         return False, f"state {pr.get('state')}"
     if pr.get("draft"):
@@ -174,7 +204,7 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         if ref.startswith(pre):
             return False, f"excluded prefix {pre}"
     for f in pr.get("files") or []:
-        if is_untrainable_path(f):
+        if untrainable(f):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
     if (app or {}).get(STATUS_CONTEXT, ("", ""))[0] == "failure":
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
@@ -344,9 +374,11 @@ class TrainBuilder:
     """Squashes verified heads in a working copy and regenerates with main's generators. No secrets."""
 
     def __init__(self, workdir: str, regen_commands: tuple[str, ...] = REGEN_COMMANDS,
-                 overlay_roots: tuple[str, ...] = GENERATOR_OVERLAY_ROOTS):
+                 overlay_roots: tuple[str, ...] = GENERATOR_OVERLAY_ROOTS, untrainable=None):
         self.workdir, self.regen_commands, self.overlay_roots = workdir, regen_commands, overlay_roots
+        self.untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
         self.env = generator_env()
+        self.quarantined: list[str] = []
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return sh(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.workdir, check=check, env=self.env)
@@ -359,7 +391,7 @@ class TrainBuilder:
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
             staged = self.git("diff", "--cached", "--name-only").stdout.split() if r.returncode == 0 else []
-            if r.returncode != 0 or not staged:
+            if r.returncode != 0 or not staged or any(self.untrainable(f) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
                 dropped.append(m.number)
@@ -368,8 +400,28 @@ class TrainBuilder:
             applied.append(m.number)
         if applied:
             self.overlay_trusted_generators(base)
-            self.regenerate()
+            self.quarantine_new_executables(base)
+            try:
+                self.regenerate()
+            finally:
+                self.restore_quarantined()
         return self.git("rev-parse", "HEAD").stdout.strip(), applied, dropped
+
+    def quarantine_new_executables(self, base: str) -> None:
+        """Before any generator runs: remove from the working tree every file the runner would
+        execute that does not exist in origin/main, at any depth. A generator added by a PR can
+        never run, whichever check upstream missed it."""
+        in_base = set(self.git("ls-tree", "-r", "--name-only", base).stdout.split())
+        on_disk = self.git("ls-files", "--cached", "--others", "--exclude-standard").stdout.split()
+        self.quarantined = [f for f in on_disk if self.untrainable(f) and f not in in_base]
+        for f in self.quarantined:
+            os.unlink(os.path.join(self.workdir, f))
+            log(f"::warning::quarantined {f}: not on main, would be executed by the generator runner")
+
+    def restore_quarantined(self) -> None:
+        tracked = [f for f in self.quarantined if self.git("cat-file", "-e", f"HEAD:{f}", check=False).returncode == 0]
+        if tracked:
+            self.git("checkout", "HEAD", "--", *tracked)
 
     def overlay_trusted_generators(self, base: str) -> None:
         roots = [p for p in self.overlay_roots if self.git("cat-file", "-e", f"{base}:{p}", check=False).returncode == 0]
@@ -377,16 +429,16 @@ class TrainBuilder:
             archive = subprocess.run(["git", "archive", base, "--", *roots], cwd=self.workdir,
                                      capture_output=True, check=True, env=self.env).stdout
             subprocess.run(["tar", "-x", "-C", self.workdir], input=archive, check=True, capture_output=True)
-        added = [f for f in self.git("diff", "--name-only", "--diff-filter=A", base, "HEAD").stdout.split() if is_untrainable_path(f)]
-        dirty = [ln[3:].strip() for ln in self.git("status", "--porcelain").stdout.splitlines() if is_untrainable_path(ln[3:].strip())]
-        if added or dirty:
-            raise RuntimeError(f"generator paths differ from the trusted base after overlay: added={added[:5]} modified={dirty[:5]}")
+        dirty = [ln[3:].strip() for ln in self.git("status", "--porcelain").stdout.splitlines() if self.untrainable(ln[3:].strip())]
+        if dirty:
+            raise RuntimeError(f"generator paths differ from the trusted base after overlay: {dirty[:5]}")
 
     def regenerate(self) -> bool:
         for cmd in self.regen_commands:
             r = subprocess.run(shlex.split(cmd), cwd=self.workdir, text=True, capture_output=True, env=self.env)
             if r.returncode != 0:
                 log(f"::warning::regen command failed ({cmd}): {r.stderr.strip()[-300:]}")
+        self.restore_quarantined()
         changed = self.git("ls-files", "-m", "-o", "--exclude-standard").stdout.split()
         if not changed:
             return False
@@ -568,9 +620,6 @@ class GitHub:
     def pr(self, n: int) -> dict:
         return get(f"/repos/{self.repo}/pulls/{int(n)}")
 
-    def pr_files(self, n: int) -> list[str]:
-        return [f["filename"] for f in paginate(f"/repos/{self.repo}/pulls/{int(n)}/files")]
-
     def checks(self, sha: str) -> dict[str, str | None]:
         latest: dict[str, dict] = {}
         for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
@@ -633,34 +682,36 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
             "body": p.get("body") or "", "files": files}
 
 
-def live_candidates(gh, git, repo: str, required: list[str], limit: int = 64) -> tuple[list[Member], dict[int, dict]]:
-    """Open PRs that qualify RIGHT NOW, with their heads fetched and the fetched sha == the API sha."""
+def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
+                    limit: int = 64) -> tuple[list[Member], dict[int, dict]]:
+    """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
+    the file list is `git diff --name-only <base>...<verified head>` — the PR files API stops at
+    3000 entries, so a long PR could hide a path there; git has no such cap."""
     member_required = [c for c in required if c != STATUS_CONTEXT]
+    armed = [p for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)])
+             if p.get("auto_merge") and not p.get("draft")]
+    if armed:
+        git("fetch", "-q", "origin", *[f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}" for p in armed])
     out: list[Member] = []
     apps: dict[int, dict] = {}
-    for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)]):
-        armed = bool(p.get("auto_merge")) and not p.get("draft")
-        view = pr_view(repo, p, gh.pr_files(p["number"]) if armed else [])
-        app = gh.app_statuses(view["head_sha"]) if armed else {}
-        ok, why = qualifies(view, member_required, gh.checks(view["head_sha"]) if armed else {}, app)
-        log(f"#{p['number']:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
+    for p in armed:
+        n = p["number"]
+        fetched = git("rev-parse", "--verify", "--quiet", f"refs/merge-train/pr-{n}", check=False).stdout.strip()
+        if fetched != p["head"]["sha"]:
+            log(f"#{n:>6} skip      fetched head differs from the API head (pushed meanwhile)")
+            continue
+        files = git("diff", "--name-only", f"{base}...{fetched}").stdout.split()
+        view = pr_view(repo, p, files)
+        app = gh.app_statuses(fetched)
+        ok, why = qualifies(view, member_required, gh.checks(fetched), app, untrainable)
+        log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
         if ok:
-            out.append(Member(view["number"], view["title"], view["body"], view["head_sha"], view["head_ref"],
-                              view["created_at"], files=view["files"]))
-            apps[view["number"]] = app
+            out.append(Member(n, view["title"], view["body"], fetched, view["head_ref"], view["created_at"],
+                              ref=fetched, files=files))
+            apps[n] = app
         if len(out) >= limit:
             break
-    if out:
-        git("fetch", "-q", "origin", *[f"+{gh.head_refspec(m.number)}:refs/merge-train/pr-{m.number}" for m in out])
-    verified = []
-    for m in out:
-        fetched = git("rev-parse", f"refs/merge-train/pr-{m.number}").stdout.strip()
-        if fetched != m.head_sha:
-            log(f"#{m.number} skip: fetched head differs from the API head (pushed meanwhile)")
-            continue
-        m.ref = fetched
-        verified.append(m)
-    return verified, apps
+    return out, apps
 
 
 def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tuple[list[Member], list[Member]]:
@@ -677,11 +728,16 @@ def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tupl
     return fast, train
 
 
+def main_regen_text(git, base: str) -> str:
+    return git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout
+
+
 def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member]]:
     """(fast lane, this tick's train batch) — the same function in build, publish and settle."""
     required = gh.required()
-    cands, apps = live_candidates(gh, git, repo, required)
-    fragments = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
+    regen_text = main_regen_text(git, base)
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
+    fragments = regen_inventory_fragments(regen_text)
     fast, train = partition(git, base, cands, fragments)
     return fast, select_batch(train, {n: bisect_size(a) for n, a in apps.items()}, batch_size)
 
@@ -695,6 +751,7 @@ def live_base(gh, git) -> str:
 def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
     base = live_base(gh, git)
     _fast, batch = plan_batch(gh, git, repo, base, batch_size)
+    builder.untrainable = Untrainable(main_regen_text(git, base))
     os.makedirs(out_dir, exist_ok=True)
     if not batch:
         log("build: no train this tick")
@@ -805,7 +862,7 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                 gh.comment(n, CULPRIT_MESSAGE)
                 summary["culprits"].append(n)
             else:
-                for n, head in members:
+                for _n, head in members:
                     gh.post_status(head, "pending", f"bisect size {max(1, len(members) // 2)}")
                 summary["bisected"].append([n for n, _ in members])
         gh.close_carrier(carrier)
@@ -813,8 +870,9 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             Pusher(git, branch, gh.remote).delete()
     # Fast lane, from live data only — nothing here reads a stored classification.
     base = live_base(gh, git)
-    cands, apps = live_candidates(gh, git, repo, required)
-    fragments = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
+    regen_text = main_regen_text(git, base)
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
+    fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
     for m in fast:
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
@@ -901,12 +959,19 @@ SYN_GENERATOR_SRC = (
     "pathlib.Path('derived/index.txt').write_text('\\n'.join(sorted(os.listdir('services')))+'\\n')\n"
     "pathlib.Path(os.environ.get('PROBE_OUT') or os.devnull).write_text("
     "json.dumps({'GH_TOKEN': os.environ.get('GH_TOKEN',''), 'keys': sorted(os.environ)}))\n"
+    # Like regen-derived.sh's run_bundles: execute every bundle generator, at ANY depth.
+    "import fnmatch,subprocess\n"
+    "for r,_,fs in os.walk('openbank-infra/gitops'):\n"
+    "    for f in fs:\n"
+    "        if fnmatch.fnmatch(f,'gen-*opa-bundle*.sh'): subprocess.run(['bash',os.path.join(r,f)])\n"
 )
 SYN_REQUIRED = ["gates (data)", "Validate manifests", "derived", "issue-hygiene", STATUS_CONTEXT]
 # The GENERATORS fragments make docs/, services/, count.txt and bad.txt protected, so PRs touching
 # them ride trains (as real inventory sources do) instead of the fast lane; svc/ stays fast-lane.
 SYN_INVENTORY = ('GENERATORS=(\n  "syn|python3 x|services/ docs/ count.txt bad.txt"\n)\n'
-                 'DERIVED_OUTPUTS=(\n  "derived/*"\n)\n')
+                 'DERIVED_OUTPUTS=(\n  "derived/*"\n)\n'
+                 "  done < <(find openbank-infra/gitops -name 'gen-*opa-bundle*.sh' | sort)\n")
+SYN_DEEP_GENERATOR = "openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh"
 
 
 class FakeGitHub:
@@ -1047,6 +1112,9 @@ def _synthetic_origin(root: str) -> None:
     pr("pW", {".github/gates/gates.yaml": "gates: []\n"})
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
+    # A bundle generator deeper than any fixed-depth glob reaches; it would leave a marker if run.
+    pr("pD", {SYN_DEEP_GENERATOR: f"touch {os.path.join(os.path.dirname(root), 'deep-generator-ran')}\n",
+              "docs/d.md": "d\n"})
 
 
 def self_test() -> int:
@@ -1071,10 +1139,20 @@ def self_test() -> int:
                                 ("agent-pr-guard", {}, {**green, "gates / agent-pr-guard": "failure"})]:
         check(f"qualifies: {label} refused", not qualifies({**base_pr, **over}, req, checks)[0])
     check("qualifies: no required set refused", not qualifies(base_pr, [], green)[0])
+    real_regen = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
+    U = Untrainable(real_regen)
+    check("untrainable: main's find enumeration is parsed", (U.find_root, U.find_name) ==
+          ("openbank-infra/gitops/components", "gen-*opa-bundle*.sh"), f"{U.find_root} {U.find_name}")
     for f in (".github/scripts/regen-derived.sh", ".github/gates/gates.yaml", ".github/scripts/check-x.py",
-              ".github/workflows/ci.yml", "docs/adr/gen-index.sh", "openbank-infra/gitops/components/x/gen-x-opa-bundle.sh"):
-        ok, why = qualifies({**base_pr, "files": [f]}, req, green)
+              ".github/workflows/ci.yml", "docs/adr/gen-index.sh", "docs/adr/lib-frontmatter.sh",
+              "openbank-infra/gitops/components/x/gen-x-opa-bundle.sh",
+              "openbank-infra/gitops/components/a/b/c/d/gen-x-opa-bundle.sh"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: member touching {f} is refused (manual lane)", not ok and "manual lane" in why, why)
+    for f in ("openbank-libs/governance/rules.yaml", "docs/adr/0343-x.md", "openbank-infra/gitops/components/x/x.yaml"):
+        check(f"untrainable: data file {f} is NOT untrainable", not U(f))
+    check("untrainable: an unparsable runner fails closed (any gen-* at any depth)",
+          Untrainable("")("openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh") and Untrainable("")("x/y/z/gen-q.py"))
     check("qualifies: an App failure (culprit) on the head waits for a push",
           not qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", "x")})[0])
     check("order: oldest first", [p["number"] for p in order_candidates(
@@ -1150,7 +1228,7 @@ def self_test() -> int:
             _synthetic_origin(origin)
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
-            numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35,
+            numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34}
             probe = os.path.join(root, "probe.json")
             counter = [0]
@@ -1242,6 +1320,38 @@ def self_test() -> int:
             check("gate-file members: never qualify, never merge, nothing leaks",
                   gh.merged == [] and not gh.carriers.get(max(gh.carriers, default=0), {}).get("state") == "open"
                   and not os.path.exists(os.path.join(origin, "leaked.txt")) and not gh.comments, f"{gh.merged} {gh.comments}")
+            reset()
+
+            # NEGATIVE (review 5): a bundle generator deeper than any fixed glob.
+            marker = os.path.join(root, "deep-generator-ran")
+            open_only("pD")
+            drain()
+            check("deep generator: the PR never qualifies, never merges, and its generator never ran",
+                  gh.merged == [] and not os.path.exists(marker), f"{gh.merged} ran={os.path.exists(marker)}")
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} {SYN_GENERATOR}",), overlay_roots=(".github/scripts",),
+                             untrainable=Untrainable(SYN_INVENTORY))
+            b.git("fetch", "-q", "origin", "pD")
+            head = b.git("rev-parse", "FETCH_HEAD").stdout.strip()
+            _tip, applied, dropped = b.build(base0, [Member(41, "pD", "", head, "pD", "t", ref=head)])
+            check("deep generator: forced past qualifies, build drops it and it still never runs",
+                  applied == [] and dropped == [41] and not os.path.exists(marker), f"{applied} {dropped}")
+            b.git("checkout", "-q", "-f", "--detach", head)       # the file present in the working tree
+            b.quarantine_new_executables(base0)
+            b.regenerate()
+            check("deep generator: quarantine removes a not-on-main executable before any generator runs",
+                  b.quarantined == [SYN_DEEP_GENERATOR] and not os.path.exists(marker)
+                  and os.path.exists(os.path.join(bdir, SYN_DEEP_GENERATOR)), f"{b.quarantined}")
+            reset()
+
+            # NEGATIVE (review 5): the files API is capped at 3000; a long PR hides a path there.
+            open_only("pW")
+            api_calls = []
+            gh.pr_files = lambda n: api_calls.append(n) or [f"svc/f{i}.txt" for i in range(3000)]
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+            check("files: a 3000-entry API list hiding .github/gates/gates.yaml does not admit the PR",
+                  all(m.number != 35 for m in cands) and api_calls == [], f"{[m.number for m in cands]} api={api_calls}")
+            del gh.pr_files
             reset()
 
             # Fast lane: computed live in settle. A docs/adr member is never fast-laned, and settle

@@ -78,6 +78,7 @@ GENERATORS=(
 # manifests the bundle scripts restamp IN PLACE (the policy-checksum annotation). The rest of such
 # a file is not derived, no freshness gate re-derives it, so a path-level bound cannot cover it —
 # a train whose regeneration touches one is refused and takes the manual lane.
+# shellcheck disable=SC2034  # read by merge-train.py from origin/main's copy, not by this script
 DERIVED_OUTPUTS=(
   "openbank-libs/governance/rules-opa-data.yaml"
   "openbank-libs/governance/agents-opa-data.yaml"
