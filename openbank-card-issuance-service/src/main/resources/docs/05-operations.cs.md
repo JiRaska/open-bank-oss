@@ -96,3 +96,7 @@ To je záměr: `Idempotency-Key` se shodoval s existujícím `cards.idempotency_
 
 - Verzování: per-service `version.txt` (aktuálně `0.3.0`), vlastněné release-please z Conventional Commits. Needitovat ručně.
 - CD: ArgoCD přebírá nový image tag z gitops manifestů.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

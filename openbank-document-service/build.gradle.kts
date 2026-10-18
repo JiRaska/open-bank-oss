@@ -7,23 +7,14 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.quarkus.scheduler)
@@ -50,9 +41,7 @@ dependencies {
     implementation(libs.pdfbox)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     // ADR-0063: document-service is a pact PROVIDER. Three merged services render documents
     // through this service's template list + preview endpoints (ADR-0248 #3) — sepa-payment and
@@ -65,7 +54,6 @@ dependencies {
     // a domain-event payload, so this service's producer tests assert against the real contract
     // rather than a per-service restatement of it (#3914).
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
