@@ -3,7 +3,7 @@
 -- day-close participation report it sends to ledger-service; a due job with no row means the day
 -- is NOT reported, so the ledger keeps the day in CUTOFF instead of closing it without interest.
 -- Upserted by the job on every (re-)run for the same day, so a manual re-run updates the counts.
--- Application rollback: revert the feature and retain this additive table and past-run evidence.
+-- Rollback: revert the feature and retain this additive table and past-run evidence.
 -- Schema removal requires a separate reviewed retention/rollback plan; future runs cannot
 -- reconstruct all historical evidence, and missing records delay day-close reporting.
 CREATE TABLE interest_close_job_run (

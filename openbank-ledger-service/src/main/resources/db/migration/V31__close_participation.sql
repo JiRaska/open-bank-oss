@@ -36,7 +36,7 @@ CREATE TABLE ledger_close_participation (
 CREATE INDEX idx_close_participation_day
     ON ledger_close_participation (business_date, participant, seq DESC);
 
--- Application rollback: revert the feature while retaining this additive table and its audit history.
+-- Rollback: revert the feature while retaining this additive table and its audit history.
 -- Shadow mode does not make recorded reports, operator identities or waivers disposable.
 -- Schema removal requires a separate reviewed retention/rollback plan; deleting the table loses
 -- evidence and breaks participant reads/checks until the schema and records are restored.
