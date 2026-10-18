@@ -334,3 +334,13 @@ money-path service, not adjacent.
   (account-service carries no revision yet - the last adoption step); an account that opens and
   accrues under revision A before B is effective stays on A. Rollback: set
   `INTEREST_CATALOG_SYNC_ENABLED=false`; V19 is additive and is retained.
+- **2026-10-17** — **Catalog reads move to the service's own machine identity (#8481, ADR-0341 step 1).**
+  `ProductCatalogClient` now selects the NAMED oidc-client `ledger` (Keycloak client `openbank-interest`)
+  instead of the shared `openbank-services` token, and that client gains the narrow `catalog:read` scope
+  (mapped by product-catalog to `CATALOG_SCOPE_READ`). `account_rest_ext.rego` (the bundle product-catalog
+  runs, `accounts` namespace) grants `service-account-openbank-interest` exactly `catalog.read` — events,
+  revision by id, offering by id — and nothing on `catalog.author`/`catalog.publish`/approvals; the shared
+  principal gets no catalog grant. **Risk class:** least privilege improves (a stolen interest credential
+  reads published terms, cannot author or publish); a revoked scope fails the sync closed and the cursor
+  does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
+  then idles on 403 (catalog sync stays off by default until the follow-up PR).

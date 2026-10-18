@@ -137,13 +137,6 @@ spec:
             # sepa-payment/domestic-payment/sepa-instant for idempotency.
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.payments.svc:6379
-            # ADR-0137 image-independent convergence: load the scheme-accepted
-            # group.id / DLQ-topic override (transaction-service-msg-override
-            # ConfigMap, mounted below) as an external Quarkus config source so
-            # the lagging image picks up main's values without a rebuild (#2664).
-            # Optional location: if the file is absent Quarkus warns and continues.
-            - name: QUARKUS_CONFIG_LOCATIONS
-              value: /mnt/msg-config/override.properties
             # Downstream money-path dependencies. Without these the rest-clients fall back to the
             # application.yaml localhost defaults, so the payment saga's ledger posting and balance
             # credit/debit silently fail and every transaction lands in COMPENSATED/FAILED.
@@ -225,9 +218,6 @@ spec:
               readOnly: true
             - name: kafka-truststore
               mountPath: /mnt/kafka/truststore
-              readOnly: true
-            - name: msg-override
-              mountPath: /mnt/msg-config
               readOnly: true
           resources:
             requests:
@@ -332,9 +322,6 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
-        - name: msg-override
-          configMap:
-            name: transaction-service-msg-override
   strategy:
     canary:
       stableService: transaction-service
