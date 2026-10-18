@@ -134,7 +134,9 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         if path.startswith("/repos/r/actions/runs/"):
             run_id = int(path.rsplit("/", 1)[-1])
             workflow = ".github/workflows/verify-provider.yml" if run_id == 3000 else ".github/workflows/services-ci.yml"
-            self._respond(200, json.dumps({"path": workflow}).encode())
+            self._respond(200, json.dumps({
+                "path": workflow, "event": "push", "head_repository": {"full_name": "r"},
+            }).encode())
             return
         query = parse_qs(urlsplit(self.path).query)
         page = int((query.get("page") or ["1"])[0])
@@ -435,13 +437,14 @@ module.urlopen = loopback_urlopen
 seen_run_ids = []
 def run_path(run_id):
     seen_run_ids.append(run_id)
-    return module.github_run_path("r", "TRACE_SENTINEL_AUTH_8f4e", run_id)
+    return module.github_run("r", "TRACE_SENTINEL_AUTH_8f4e", run_id)
 try:
     if mode == "pages":
         result = module.latest_main_artifact(
             "TRACE_SENTINEL_QUERY_71ad",
             lambda name, page: module.github_page("r", "TRACE_SENTINEL_AUTH_8f4e", name, page, api_origin=origin),
             run_path,
+            "r",
         )
         assert seen_run_ids == [3000, 3010]
         assert result == "301"
