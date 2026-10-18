@@ -46,6 +46,13 @@ class ConsentScaChallengeNotFoundMapper : ExceptionMapper<ConsentScaChallengeNot
 }
 
 @Provider
+class ConsentMixedScopeMapper : ExceptionMapper<ConsentMixedScopeException> {
+    override fun toResponse(e: ConsentMixedScopeException): Response = Response.status(
+        422,
+    ).entity(errorResponse(ErrorCode.VALIDATION_ERROR, e.message ?: "Cannot mix GDPR-only and SCA-required scopes")).build()
+}
+
+@Provider
 class ConsentScaVerificationUnavailableMapper : ExceptionMapper<ConsentScaVerificationUnavailableException> {
     override fun toResponse(e: ConsentScaVerificationUnavailableException): Response = Response.status(503)
         .entity(
