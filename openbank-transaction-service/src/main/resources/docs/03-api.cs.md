@@ -105,7 +105,3 @@ Doménové invarianty, které musí vyjít jako 422, záměrně vyhazují `Illeg
 
 - **Osa API kontraktu:** `openapi.yaml:info.version` (1.21.0); její major == URL `/api/v{N}` == `openbank.api.version` (1). Změna API klasifikuje svůj bump z OpenAPI diffu (ADR-0048).
 - **Osa release:** `version.txt` (1.2.1), vlastní release-please — nezávislá na API ose.
-
-## Pole stránkování seznamu transakcí
-
-`TransactionPage.pagination` v dokumentu OpenAPI deklaruje všechna čtyři pole, která server posílá, převzatá ze sdílené `PageInfo` v libs: `limit`, `hasNextPage`, `previousCursor` a `totalCount`. Pole `hasMore`, které server nikdy neposílal, zůstává ve schématu a je tak označeno. Klienti generovaní ze specifikace, například klient `openbank-client-transaction` používaný službami card-processing, party a standing-order, tato pole nyní čtou bez ručně psaného DTO. Verze kontraktu API je 1.22.0 a cesty, parametry ani stavové kódy se nemění; popisy odpovědí 400 na obchodnických trasách jsou uvozeny, aby dokument prošel validací v openapi-generatoru.
