@@ -111,3 +111,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ## Release
 
 Vydávaný komponent (má `version.txt`). Verzování/changelog vlastní release-please z Conventional Commits ([ADR 0029](../../../../docs/adr/0029-versioning-release-and-governance-as-code.md)). Neupravuj `version.txt` ručně ve feature PR. Změny API kontraktu zvedají `openapi.yaml:info.version` nezávisle ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
