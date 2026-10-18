@@ -212,7 +212,7 @@ export default function AccountsPage() {
           setQuery(party.id)
           void search(party.id)
         }}
-        placeholder={t('Jméno, název firmy nebo UUID party…', 'Party name, company name, or party UUID…')}
+        placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta…', 'Client name, surname, birth number or e-mail…')}
       />
 
       <div className="card">
@@ -234,7 +234,7 @@ export default function AccountsPage() {
                 aria-label={t('Vyhledat účet podle čísla, IBANu nebo Party ID', 'Search accounts by number, IBAN, or Party ID')}
                 aria-describedby={ibanHint ? 'accounts-query-error' : queryHelpVisible ? 'accounts-query-help' : undefined}
                 aria-invalid={Boolean(ibanHint)}
-                placeholder={t('Fragment čísla účtu, IBAN nebo Party ID (UUID)…', 'Account-number fragment, IBAN, or Party ID (UUID)…')}
+                placeholder={t('Fragment čísla účtu nebo IBAN…', 'Account-number fragment or IBAN…')}
                 value={query}
                 onChange={e => {
                   activeSearch.current?.abort()

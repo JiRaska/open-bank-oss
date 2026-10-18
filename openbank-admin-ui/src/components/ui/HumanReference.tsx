@@ -18,6 +18,8 @@ type HumanReferenceProps = {
   href?: string
 }
 
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /** First 8 characters of a UUID-like reference, enough to recognise and search for it. */
 export function shortReference(ref: string): string {
   return ref.length > 12 ? `${ref.slice(0, 8)}…` : ref
@@ -48,4 +50,16 @@ export function HumanReference({ label, reference, copyLabel, href }: HumanRefer
       </button>
     </span>
   )
+}
+
+/**
+ * A machine identifier that has no human name available (yet): shortened, muted, with a copy button
+ * for the rare case support needs the full value. Prefer a name / IBAN / case reference when the
+ * row has one; use this only as the fallback so no screen shows a bare UUID as its content.
+ */
+export function ShortId({ value, copyLabel }: { value: string | null | undefined; copyLabel: string }) {
+  if (!value) return <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+  // A readable reference (IBAN, contract number, `SYNTH-STMT-1`) is already human: show it whole.
+  if (!UUID_LIKE.test(value)) return <span>{value}</span>
+  return <HumanReference label="" reference={value} copyLabel={copyLabel} />
 }
