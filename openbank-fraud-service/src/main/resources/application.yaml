@@ -123,7 +123,7 @@ mp:
         # group.id / auto.offset.reset / dead-letter-queue.topic are deliberately NOT set as YAML
         # keys here — see openbank-infra/gitops/components/fraud-service/fraud-service-msg-override.yaml
         # (loaded via QUARKUS_CONFIG_LOCATIONS) for why and where they're set instead, matching the
-        # pattern already established for transaction-service's payment-scheme-accepted channel.
+        # pattern already established for card-issuance-service's party-events-in channel.
         #
         # Correction (round 2): an earlier version of this comment first cited nonexistent issues
         # #2649/#2659, then over-corrected to claim PR #685's original env-var fix was

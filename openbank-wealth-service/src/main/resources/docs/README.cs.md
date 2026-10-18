@@ -37,3 +37,7 @@ Tento vztah je Pact kontrakt (`pacts/openbank-customer-edge-openbank-wealth-serv
 - `WealthPactFolderProviderVerificationTest` ho přehrává na každém PR proti skutečnému Postgresu.
 - `WealthNegativeAuthProviderVerificationTest` dokazuje, že volající bez identity dostane 401.
 - `WealthPactBrokerProviderVerificationTest` publikuje ověření při pushi do main, aby `can-i-deploy` uměl odpovědět o customer-edge.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
