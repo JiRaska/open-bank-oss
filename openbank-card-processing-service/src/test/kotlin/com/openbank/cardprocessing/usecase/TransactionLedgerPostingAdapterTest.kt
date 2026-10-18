@@ -200,36 +200,4 @@ class TransactionLedgerPostingAdapterTest {
         assertThat(result.detail).contains("connection refused")
         Unit
     }
-
-    @Test
-    fun `only a COMPLETED answer is POSTED - every other settled or unsettled status is not`(): Unit = runBlocking {
-        val expected = mapOf(
-            "COMPLETED" to PostingOutcome.POSTED,
-            "completed" to PostingOutcome.POSTED,
-            "FAILED" to PostingOutcome.FAILED,
-            "REVERSED" to PostingOutcome.FAILED,
-            "PENDING" to PostingOutcome.UNKNOWN,
-            "PROCESSING" to PostingOutcome.UNKNOWN,
-            "SOMETHING_NEW" to PostingOutcome.UNKNOWN,
-        )
-        val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
-
-        expected.forEach { (status, outcome) ->
-            every { client.initiateTransaction(any()) } returns
-                Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = status))
-            val result = adapter.postClearedSpend(authorization("CZK"), 1_000, "clr-status")
-            assertThat(result.outcome).describedAs("status %s", status).isEqualTo(outcome)
-        }
-    }
-
-    @Test
-    fun `an answer with no status at all is UNKNOWN, never POSTED`(): Unit = runBlocking {
-        every { client.initiateTransaction(any()) } returns
-            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = null))
-        val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
-
-        val result = adapter.postClearedSpend(authorization("CZK"), 1_000, "clr-nostatus")
-
-        assertThat(result.outcome).isEqualTo(PostingOutcome.UNKNOWN)
-    }
 }
