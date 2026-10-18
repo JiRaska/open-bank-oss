@@ -22,7 +22,175 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
-  services: {}
+  services:
+    openbank-agent-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-aml-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-anacredit-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-audit-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-balance-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-billing-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-campaign-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-clearing-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-communication-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-consent-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-context-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-control-liveness-sentinel:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-copilot-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-delegation-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-dispute-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-engagement-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-finrep-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-fx-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-incentive-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-kyb-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-kyc-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-lending-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-loyalty-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-mcp-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-notification-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-onboarding-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-pension-fund-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-pid-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-psd2-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-referral-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-risk-engine:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-sca-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-sdd-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-sepa-instant:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-sepa-payment:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-settlement-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-statement-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-swift-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-tpp-registry-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-treasury-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-vop-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+    openbank-wealth-service:
+      issue: "#12948"
+      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
