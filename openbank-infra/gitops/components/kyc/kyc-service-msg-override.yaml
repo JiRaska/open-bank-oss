@@ -12,8 +12,8 @@
 # GroupAuthorizationException.
 #
 # Why a properties FILE and not env vars: this mirrors the pre-existing pattern already used
-# for transaction-service's payment-scheme-accepted channel
-# (openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml). A properties
+# for card-issuance-service's party-events-in channel
+# (openbank-infra/gitops/components/payments/card-issuance-service-msg-override.yaml). A properties
 # file carries the exact hyphenated/dotted keys unambiguously, avoiding any reliance on
 # MicroProfile Config's env-var-name reverse-mapping for channel discovery.
 #
