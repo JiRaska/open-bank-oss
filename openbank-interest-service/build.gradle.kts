@@ -10,24 +10,15 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.scheduler)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     // #999: book the withholding-tax cash leg to the finanční úřad via transaction-service, with an
@@ -41,8 +32,6 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // #8352: AuditEventTime — the ONE shared copy of the rule `AuditConsumer.eventTime` applies to
@@ -61,7 +50,6 @@ dependencies {
     // Consumer-driven contract for the ledger-service postJournal call the ADR-0033 §D
     // capitalization credit leg makes (ADR-0063). interest-service is the fifth ledger-posting
     // consumer; every other one already has a pact with openbank-ledger-service as provider.
-    testImplementation(libs.rest.assured.kotlin)
     // InterestMissingParamStatusIT (#3104) drives `capitalize` over REAL HTTP behind @RolesAllowed —
     // the only layer at which an omitted @QueryParam can be observed at all.
     testImplementation(libs.quarkus.test.security)

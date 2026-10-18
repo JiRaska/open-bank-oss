@@ -7,27 +7,17 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     // ADR-0334 S8: FundAdministrationPort -> pension-fund-service over REST, with pension-service's
     // OWN client-credentials token (Keycloak client openbank-pension, ROLE_API only).
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     // ADR-0334 S3: monthly incentive claim run + subscription sweep.
     implementation(libs.quarkus.scheduler)
@@ -48,15 +38,12 @@ dependencies {
 
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
-    // ADR-0334 S8: git-pact provider replay of customer-edge's consumer pact (@PactFolder).
+    // Provider replay classes remain in src/test/kotlin and compile with the test source set.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security.oidc)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
@@ -65,9 +52,6 @@ dependencies {
     // #12379: consumer pact for the document-service render call (ADR-0063 P2).
     testImplementation(libs.pact.consumer)
     testImplementation(libs.wiremock.standalone)
-    // #12425: the provider replay of tax-reporting-service's consumer pact lands with that pact
-    // (stacked tax-reporting PR): check-pact-provider-replay.py rejects a replay class with no pact.
-    testImplementation(libs.pact.provider)
     // RepinCzDpsV1MigrationTest drives Flyway directly (target V11, then V12) against a real Postgres.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
 }
@@ -139,7 +123,7 @@ val dipCrossServiceIT = tasks.register<Test>("dipCrossServiceIT") {
     systemProperty(
         "openbank.test.dip.fixture",
         project(":openbank-product-catalog").file(
-            "src/test/resources/retirement-pack/cz-illustrative-offerings.json",
+            "src/main/resources/catalog-seeds/retirement/cz-illustrative-offerings.json",
         ).absolutePath,
     )
     systemProperty(

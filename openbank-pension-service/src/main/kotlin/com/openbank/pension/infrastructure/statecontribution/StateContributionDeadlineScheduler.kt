@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * 2. files the monthly return report while any return is DUE (§18(4), due by the 10th); a later
  *    filing is logged as late;
  * 3. publishes the deadline check as gauges, so an alert can fire on a missed deadline:
- *    `openbank_pension_state_contribution_deadline_breaches{kind=…}`.
+ *    `openbank_pension_state_contribution_deadline_breaches{kind=…}` — absent until the first check.
  *
  * `suspend fun` (rules.yaml: scheduled_methods); `StateContributionDeadlineSchedulerCronIT` drives
  * the real cron. Liveness is registered on [StartupEvent] and recorded only on success.
@@ -50,11 +50,24 @@ class StateContributionDeadlineScheduler(
     private val pastPayment = AtomicInteger()
     private val returnsOverdue = AtomicInteger()
 
+    @Volatile
+    private var gaugesPublished = false
+
     fun register(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW, INTERVAL)
+    }
+
+    /**
+     * The breach gauges are registered on the FIRST completed check, not at startup: registered at
+     * boot they read 0 — "no deadline missed" — for up to a day on every fresh pod, a claim the
+     * service had not measured. Absent until measured; the job's liveness covers "never ran".
+     */
+    private fun publishGauges() {
+        if (gaugesPublished) return
         registry.gauge(METRIC, listOf(io.micrometer.core.instrument.Tag.of("kind", "claim_filing")), pastFiling)
         registry.gauge(METRIC, listOf(io.micrometer.core.instrument.Tag.of("kind", "claim_payment")), pastPayment)
         registry.gauge(METRIC, listOf(io.micrometer.core.instrument.Tag.of("kind", "return_due")), returnsOverdue)
+        gaugesPublished = true
     }
 
     @Scheduled(
@@ -73,15 +86,21 @@ class StateContributionDeadlineScheduler(
         val (filed, unfiled) = incentives.submitPending()
         if (filed.isNotEmpty()) log.infof("filed %d claim batch(es); unfiled formats %s", filed.size, unfiled)
         val month = YearMonth.from(today)
-        returns.fileReturnReport(month)?.let { report ->
+        returns.fileReturnReport(month).forEach { report ->
             if (today.isAfter(CzStateContributionCalendar.returnReportDeadline(month))) {
-                log.warnf("return report %s for %s filed after the 10th (ZDPS §18(4))", report.id, month)
+                log.warnf(
+                    "%s return report %s for %s filed after the 10th (ZDPS §18(4))",
+                    report.total.currency.code,
+                    report.id,
+                    month,
+                )
             }
         }
         val d = returns.deadlines(today)
         pastFiling.set(d.claimsPastFilingDeadline)
         pastPayment.set(d.claimsPastExpectedPayment)
         returnsOverdue.set(d.returnsOverdue)
+        publishGauges()
         if (d.claimsPastFilingDeadline + d.claimsPastExpectedPayment + d.returnsOverdue > 0) {
             log.errorf("state contribution deadlines missed: %s", d)
         }

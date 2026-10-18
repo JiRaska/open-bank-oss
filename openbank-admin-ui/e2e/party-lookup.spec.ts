@@ -116,7 +116,7 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     await stubSearch(page)
     await page.goto('/consents')
     await expect(page.getByRole('combobox')).toHaveValue('party')
-    await expect(page.getByPlaceholder(/Jméno nebo název|Name or company/)).toBeVisible()
+    await expect(page.getByPlaceholder(/Jméno, příjmení|Name, surname/)).toBeVisible()
   })
 
   test('a lens switch invalidates an IN-FLIGHT lookup, not just the settled rows', async ({ page }) => {

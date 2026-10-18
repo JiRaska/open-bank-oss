@@ -207,6 +207,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
         "never a writer, so it costs the pool nothing.",
     ),
+    "perf-gate.yml::security-abuse": (
+        "read-only",
+        "Sibling consumer of the perf-gate.yml::perf lane (same auth-on boot, same "
+        "k6 image pin): restores fleet-lint's home to build one service's test "
+        "classes, never a writer (`cache-read-only: true` literally).",
+    ),
     "libs-bench.yml::jmh": (
         "read-only",
         "JMH allocation baseline for the shared libs: resolves libs-domain/runtime/iso20022 "

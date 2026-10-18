@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.RequestFingerprint
+import com.openbank.pension.application.port.out.PensionMetrics
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import io.vertx.mutiny.sqlclient.Pool
@@ -55,6 +56,9 @@ class IdempotencyReplayFilter {
     @Inject
     lateinit var mapper: ObjectMapper
 
+    @Inject
+    lateinit var metrics: PensionMetrics
+
     // readBody: the body is buffered before this runs, so it can be fingerprinted and then handed
     // back to the resource method unchanged.
     @ServerRequestFilter(readBody = true)
@@ -68,6 +72,7 @@ class IdempotencyReplayFilter {
             val stored = row.getString("request_hash")
             if (stored != null && stored != fingerprint) throw IdempotencyKeyReusedException()
             request.setProperty(REPLAYED_PROPERTY, true)
+            metrics.idempotencyReplay(request.method)
             Response.status(row.getInteger("status"))
                 .entity(row.getString("response_body"))
                 .type(MediaType.APPLICATION_JSON)

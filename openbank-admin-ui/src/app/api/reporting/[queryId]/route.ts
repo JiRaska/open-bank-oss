@@ -56,7 +56,13 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
     cache: 'no-store',
     signal: AbortSignal.timeout(CLICKHOUSE_TIMEOUT_MS),
   })
-  if (!res.ok) throw new Error(`ClickHouse ${res.status}`)
+  if (!res.ok) {
+    // Keep ClickHouse's own reason (e.g. `Code: 60 ... (UNKNOWN_TABLE)`): a missing view, a bad
+    // query and an unreachable server all degrade to the same calm UI state, so the server log is
+    // the only place the three can be told apart.
+    const detail = (await res.text().catch(() => '')).slice(0, 500)
+    throw new Error(`ClickHouse ${res.status}: ${detail}`)
+  }
   const body = (await res.json()) as { data?: Record<string, unknown>[] }
   return body.data ?? []
 }
@@ -116,8 +122,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ queryId: st
     return NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } })
   } catch (e) {
     // ClickHouse unreachable / query error → degrade to a calm empty state (never a raw 5xx).
+    console.error(`[reporting] ${entry.id} failed:`, e instanceof Error ? e.message : e)
     return NextResponse.json(
-      { ...empty(queryId), titleCs: entry.titleCs, titleEn: entry.titleEn, columns: entry.columns, error: e instanceof Error ? e.message : 'clickhouse unreachable' },
+      { ...empty(queryId), titleCs: entry.titleCs, titleEn: entry.titleEn, columns: entry.columns, error: 'ClickHouse query failed' },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   }

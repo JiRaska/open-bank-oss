@@ -11,8 +11,12 @@ import unittest
 
 SCRIPT = pathlib.Path(__file__).with_name('check-fleet-attestations.sh')
 FAKE = '''#!/usr/bin/env python3
-import fcntl,json,os,sys,time
+import fcntl,json,os,pathlib,sys,time
 if sys.argv[1]=='version':print('GitVersion: v2.4.3');sys.exit(0)
+cache=os.environ.get('TUF_ROOT')
+if cache:
+ pathlib.Path(cache).mkdir(parents=True,exist_ok=True)
+ (pathlib.Path(cache)/'fixture-cache').touch()
 p=os.environ['FAKE_STATE'];image=sys.argv[-1];kind=sys.argv[1]
 predicate=sys.argv[sys.argv.index('--type')+1] if '--type' in sys.argv else 'signature'
 def update(delta):
@@ -50,7 +54,7 @@ print('verified')
 '''
 
 class WorkersTest(unittest.TestCase):
-    def run_gate(self, names, workers=4, mutate=None, threshold=5, attempts=2, script=None, interrupt=False, barrier=False, extra_env=None, preseed=False, vocabulary=False):
+    def run_gate(self, names, workers=4, mutate=None, threshold=5, attempts=2, script=None, interrupt=False, barrier=False, extra_env=None, preseed=False, vocabulary=False, caller_cache=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             gitops = root/'gitops'; gitops.mkdir()
@@ -75,6 +79,9 @@ class WorkersTest(unittest.TestCase):
                      SYSTEMIC_UNKNOWN_THRESHOLD=str(threshold), FLEET_ATTEST_WORKERS=str(workers), FAKE_FIRST_WAVE_BARRIER='4' if barrier else '')
             env.pop('FLEET_ATTEST_TUF_CACHE_MODE', None)
             env.update(extra_env or {})
+            caller=root/'caller-cache'; caller.mkdir()
+            (caller/'original').write_text('caller-owned-cache')
+            if caller_cache:env['TUF_ROOT']=str(caller)
             args=['bash',str(target)]+(['--vocabulary-control'] if vocabulary else [])
             if interrupt:
                 process=subprocess.Popen(args,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
@@ -96,6 +103,8 @@ class WorkersTest(unittest.TestCase):
                 result=subprocess.run(args,env=env,capture_output=True,text=True,timeout=60,check=False)
             observed=json.loads(state.read_text())
             observed['default_root_exists']=(home/'.sigstore/root').exists()
+            observed['caller_root']=str(caller)
+            observed['caller_unchanged']=sorted(x.name for x in caller.iterdir())==['original'] and (caller/'original').read_text()=='caller-owned-cache'
             observed['cache_paths_remaining']=[x['tuf'] for x in observed.get('env_calls',[]) if x['tuf'] and pathlib.Path(x['tuf']).exists()]
             return result, json.loads(report.read_text()) if report.exists() else None, observed
 
@@ -139,10 +148,19 @@ class WorkersTest(unittest.TestCase):
         self.assertEqual(state['cache_paths_remaining'],[])
         self.assertFalse(state['default_root_exists'])
 
-    def test_unset_mode_preserves_explicit_caller_root(self):
-        result, _, state=self.run_gate(['healthy'],extra_env={'TUF_ROOT':'caller-cache'})
-        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-        self.assertTrue(all(x['tuf']=='caller-cache' for x in state['env_calls']))
+    def test_unset_mode_isolates_workers_and_leaves_caller_cache_untouched(self):
+        for caller_cache in [False, True]:
+            with self.subTest(caller_cache=caller_cache):
+                result, _, state=self.run_gate(['healthy-a','healthy-b'],caller_cache=caller_cache)
+                self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+                roots=collections.defaultdict(set)
+                for call in state['env_calls']:
+                    roots[call['image']].add(call['tuf'])
+                    self.assertNotEqual(call['tuf'],state['caller_root'])
+                self.assertTrue(all(len(values)==1 and None not in values for values in roots.values()))
+                self.assertEqual(len({next(iter(values)) for values in roots.values()}),len(roots))
+                self.assertTrue(state['caller_unchanged'])
+                self.assertEqual(state['cache_paths_remaining'],[])
 
     def test_isolated_vocabulary_control_does_not_preseed_home(self):
         result, _, state=self.run_gate(['healthy'],vocabulary=True,
