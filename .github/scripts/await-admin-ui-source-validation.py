@@ -21,15 +21,22 @@ WORKFLOWS = {
 }
 
 
-def check_workflow(fetch, repository, sha, workflow):
-    query = urllib.parse.urlencode({"head_sha": sha, "event": "push", "per_page": 100})
-    listing = fetch(f"repos/{repository}/actions/workflows/{workflow}/runs?{query}")
-    runs = [run for run in listing.get("workflow_runs", [])
-            if run.get("head_sha") == sha
+def main_push_runs(fetch, repository, workflow, sha=None):
+    params = {"branch": "main", "event": "push", "per_page": 100}
+    if sha:
+        params["head_sha"] = sha
+    listing = fetch(f"repos/{repository}/actions/workflows/{workflow}/runs?{urllib.parse.urlencode(params)}")
+    return [run for run in listing.get("workflow_runs", [])
+            if (sha is None or run.get("head_sha") == sha)
+            and isinstance(run.get("head_sha"), str)
             and run.get("head_branch") == "main"
             and run.get("event") == "push"
             and run.get("path") == f".github/workflows/{workflow}"
             and (run.get("repository") or {}).get("full_name") == repository]
+
+
+def check_workflow(fetch, repository, sha, workflow):
+    runs = main_push_runs(fetch, repository, workflow, sha)
     if not runs:
         return None
     run = max(runs, key=lambda item: item["id"])
@@ -56,6 +63,27 @@ def latest_ui_change(fetch, repository, source_sha):
     return ui_sha
 
 
+def same_ui_tree_pact_sha(fetch, repository, ui_sha, ui_changes):
+    """Return the head of the newest main Pact run whose Admin UI tree is ui_sha's.
+
+    A commit whose latest openbank-admin-ui/ change is ui_sha carries ui_sha's Admin UI
+    tree byte for byte, so its Pact verdict is about the same source. This includes
+    ui_sha's own runs; the NEWEST such run decides, so a failed ancestor is superseded
+    only by a later run over the identical tree, and a later failure or pending run is
+    never bypassed by an earlier success. A commit that touched openbank-admin-ui/
+    resolves to itself and never qualifies. ui_changes caches sha -> latest UI change.
+    """
+    runs = sorted(main_push_runs(fetch, repository, "pact-drift-check.yml"),
+                  key=lambda item: item["id"], reverse=True)
+    for run in runs:
+        head = run["head_sha"]
+        if head not in ui_changes:
+            ui_changes[head] = ui_sha if head == ui_sha else latest_ui_change(fetch, repository, head)
+        if ui_changes[head] == ui_sha:
+            return head
+    return ui_sha
+
+
 def wait_for_validation(fetch, repository, sha, *, clock=time.monotonic,
                         sleep=time.sleep, max_wait=MAX_WAIT_SECONDS):
     deadline = clock() + max_wait
@@ -63,13 +91,20 @@ def wait_for_validation(fetch, repository, sha, *, clock=time.monotonic,
     # Prefer a successful Pact run for the exact image source when one exists. Only fall
     # back to the latest UI-changing ancestor when that source did not trigger Pact drift.
     # A pending or failed exact-source run must never be bypassed by older evidence.
+    # The fallback is the newest main Pact run over the SAME Admin UI tree, not only the
+    # ancestor's: a re-run replays the ancestor's old workflow file, so when its run failed
+    # on a CI defect later fixed on main, only a descendant run can ever clear it.
     ui_sha = latest_ui_change(fetch, repository, sha)
+    ui_changes = {sha: ui_sha}
     while True:
         if check_workflow(fetch, repository, sha, "ci.yml"):
             source_pact = check_workflow(fetch, repository, sha, "pact-drift-check.yml")
-            if source_pact is True or (source_pact is None and
-                                       check_workflow(fetch, repository, ui_sha, "pact-drift-check.yml")):
+            if source_pact is True:
                 return
+            if source_pact is None:
+                evidence = same_ui_tree_pact_sha(fetch, repository, ui_sha, ui_changes)
+                if check_workflow(fetch, repository, evidence, "pact-drift-check.yml"):
+                    return
         remaining = deadline - clock()
         if remaining <= 0:
             raise TimeoutError(f"Exact-source validation for {sha} did not complete within {max_wait}s")

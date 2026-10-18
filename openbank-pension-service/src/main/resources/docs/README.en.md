@@ -58,6 +58,21 @@ resolving "today" inside the service (a default argument read on the CDI client 
 NPE'd, so the method resolves the clock on the real bean and only the scheduler passes an
 explicit date.
 
+### Multi-currency return reports
+
+The monthly state-contribution return report (ZDPS §18(4), `POST .../state-contribution/return-reports`)
+is filed **once per currency**. Every DUE return is grouped by its ISO 4217 currency and each group
+goes out as its own report and file (`VR-<month>-<currency>-<id>.txt`). Amounts of different
+currencies are never added together or converted: the report header names its currency
+(`H;cz-mf-state-contribution-v1;RETURNS;<IČO>;<YYYY-MM>;<currency>;<count>;<total>`) and totals only
+its own lines, computed with the libs `Money` type, which refuses a cross-currency sum. A return in
+EUR therefore never blocks the CZK report. The response lists them in `reports` (`report` is the
+first, kept for older clients); each carries `currency` and `total`, persisted on
+`pension_return_reports` (`V16__return_report_currency`). A return whose currency is not a valid
+ISO 4217 code is refused when it is created. The `openbank_pension_state_contribution_return_amount_total`
+metric is labelled per currency; any value that is not ISO 4217 is recorded as `currency="INVALID"`,
+so the label set stays bounded.
+
 ## Participant reporting for the ČNB returns
 
 `GET /api/v2/pension/reporting/participant-aggregates` serves one period's aggregates for the
@@ -102,6 +117,18 @@ production ownership approval. It uses synthetic data and simulated external col
 It does not prove simultaneous deployment isolation with real OIDC/OPA tokens, real settlement
 or a fully connected production money path. Those capabilities remain in #12472 and #12479.
 
+## Operational metrics
+
+The management metrics endpoint exposes pension transition and outcome counters, including
+SCA consumption, funding, state contributions and payout-account changes. Counters describe
+observed application outcomes; they are not evidence of settlement on an external rail.
+State gauges report contract and aggregate statuses, queue sizes and the oldest queued age.
+The `pension-state-gauges` job refreshes them every 60 seconds by default
+(`openbank.pension.state-gauges.every`). A new pod publishes no state series until its first
+successful snapshot. A failed refresh leaves the previous values in place; check workflow
+liveness before treating those values as current. Labels use bounded categories, never party
+or contract identifiers.
+
 ## Annuity partner wire format
 
 Requests to the reference annuity partner omit absent optional properties and
@@ -109,3 +136,7 @@ null-valued map entries; they do not send JSON null as an alternative value.
 Partner responses may add fields without breaking parsing; decimal amounts
 and date handling retain the protocol contract. The protocol contract tests
 validate outgoing requests and parse the documented offer examples.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

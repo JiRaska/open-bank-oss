@@ -36,7 +36,8 @@ class BalanceSecurityContractTest {
 
     @Test
     fun `every balance endpoint is role-gated, never permit-all`() {
-        val all = endpoints(BalanceResource::class.java) + endpoints(ReconciliationResource::class.java)
+        val all = endpoints(BalanceResource::class.java) + endpoints(ReconciliationResource::class.java) +
+            endpoints(LowBalanceAlertResource::class.java)
         assertThat(all).describedAs("expected to find HTTP endpoints by reflection").isNotEmpty
 
         all.forEach { m ->

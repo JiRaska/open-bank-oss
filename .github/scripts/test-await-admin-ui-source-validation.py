@@ -17,6 +17,8 @@ spec.loader.exec_module(validation)
 REPO = "owner/repository"
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
+FIXED_SHA = "c" * 40
+UI_EDIT_SHA = "d" * 40
 
 
 def run(workflow, *, sha=SHA, run_id=1, status="completed", conclusion="success",
@@ -34,6 +36,8 @@ def job(name, *, status="completed", conclusion="success"):
 class FakeAPI:
     def __init__(self):
         self.ui_sha = SHA
+        # Latest openbank-admin-ui/ change per commit; SHA defaults to self.ui_sha.
+        self.ui_changes = {}
         self.runs = {
             "ci.yml": [run("ci.yml")],
             "pact-drift-check.yml": [run("pact-drift-check.yml", run_id=2)],
@@ -45,7 +49,9 @@ class FakeAPI:
 
     def __call__(self, path):
         if "/commits?" in path:
-            return [{"sha": self.ui_sha}] if self.ui_sha else []
+            head = path.split("sha=", 1)[1].split("&", 1)[0]
+            ui_sha = self.ui_changes.get(head, self.ui_sha if head == SHA else head)
+            return [{"sha": ui_sha}] if ui_sha else []
         if "/workflows/" in path:
             workflow = path.split("/workflows/", 1)[1].split("/runs?", 1)[0]
             return {"workflow_runs": self.runs[workflow]}
@@ -94,6 +100,54 @@ class SourceValidationTest(unittest.TestCase):
         self.api.ui_sha = OTHER_SHA
         self.api.runs["pact-drift-check.yml"] = [run(
             "pact-drift-check.yml", sha=OTHER_SHA, run_id=2, conclusion="failure")]
+        with self.assertRaises(RuntimeError):
+            self.verify()
+
+    def failed_ancestor_then(self, head, **later):
+        """Ancestor OTHER_SHA failed; a later main Pact run happened on `head`."""
+        self.api.ui_sha = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2, conclusion="failure"),
+            run("pact-drift-check.yml", sha=head, run_id=4, **later),
+        ]
+        self.api.jobs[4] = [job(name) for name in validation.WORKFLOWS["pact-drift-check.yml"]]
+
+    def test_later_pact_run_on_same_ui_tree_supersedes_failed_ancestor(self):
+        # 2026-10-18: ee19ade4b's Pact run failed on a CI defect fixed by a later main
+        # commit that did not touch openbank-admin-ui/; its green run proves the same tree.
+        self.failed_ancestor_then(FIXED_SHA)
+        self.api.ui_changes[FIXED_SHA] = OTHER_SHA
+        self.verify()
+
+    def test_later_pact_run_after_an_admin_ui_change_does_not_count(self):
+        # The descendant changed openbank-admin-ui/, so its green run is about another tree.
+        self.failed_ancestor_then(UI_EDIT_SHA)
+        with self.assertRaises(RuntimeError):
+            self.verify()
+
+    def test_pending_later_same_tree_run_waits_instead_of_using_older_success(self):
+        self.api.ui_sha = OTHER_SHA
+        self.api.ui_changes[FIXED_SHA] = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2),
+            run("pact-drift-check.yml", sha=FIXED_SHA, run_id=4, status="in_progress", conclusion=None),
+        ]
+        with self.assertRaises(TimeoutError):
+            self.verify()
+
+    def test_failed_later_same_tree_run_is_not_bypassed_by_older_success(self):
+        self.api.ui_sha = OTHER_SHA
+        self.api.ui_changes[FIXED_SHA] = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2),
+            run("pact-drift-check.yml", sha=FIXED_SHA, run_id=4, conclusion="failure"),
+        ]
+        with self.assertRaises(RuntimeError):
+            self.verify()
+
+    def test_same_tree_run_on_another_branch_does_not_count(self):
+        self.failed_ancestor_then(FIXED_SHA, branch="feature")
+        self.api.ui_changes[FIXED_SHA] = OTHER_SHA
         with self.assertRaises(RuntimeError):
             self.verify()
 

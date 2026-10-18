@@ -5,6 +5,7 @@
 package com.openbank.notification.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.notification.application.OperatorDispatchStatus
 import com.openbank.notification.application.OperatorMessageRejected
 import com.openbank.notification.application.OperatorMessageRequest
 import com.openbank.notification.application.OperatorMessageService
@@ -62,7 +63,7 @@ class OperatorMessageResource {
     @Authorize(action = "opsmessage.compose", resource = "#request")
     @Operation(summary = "Send a customer a message from a reviewed, closed catalogue of templates")
     suspend fun compose(request: ComposeMessageRequest): Response {
-        val notificationId = try {
+        val result = try {
             service.compose(
                 OperatorMessageRequest(
                     partyId = request.partyId,
@@ -76,8 +77,13 @@ class OperatorMessageResource {
                 .entity(mapOf("code" to "BAD_REQUEST", "message" to e.message))
                 .build()
         }
-        return Response.status(Response.Status.CREATED)
-            .entity(mapOf("id" to notificationId))
+        val responseStatus = if (result.dispatchStatus == OperatorDispatchStatus.SENT) {
+            Response.Status.CREATED
+        } else {
+            Response.Status.ACCEPTED
+        }
+        return Response.status(responseStatus)
+            .entity(mapOf("id" to result.id, "dispatchStatus" to result.dispatchStatus.name))
             .build()
     }
 }

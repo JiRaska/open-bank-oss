@@ -4,6 +4,7 @@
 
 package com.openbank.pension.infrastructure.statecontribution
 
+import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.pension.application.port.out.StateContributionReturnChannel
 import com.openbank.pension.domain.statecontribution.ReturnReportLine
 import com.openbank.pension.domain.statecontribution.ReturnResultLine
@@ -21,13 +22,13 @@ class CzReturnChannel(
 
     override val format: String = CzMfStateContributionFormat.FORMAT
 
-    override fun render(month: YearMonth, lines: List<ReturnReportLine>): String {
+    override fun render(month: YearMonth, currency: CurrencyCode, lines: List<ReturnReportLine>): String {
         val ico = configuredIco.filter { ICO.matches(it) }.orElseThrow {
             IllegalStateException(
                 "openbank.pension.state-contribution.cz.company-ico (8 digits) is not configured; nothing filed",
             )
         }
-        return CzMfStateContributionFormat.returnReport(ico, month, lines)
+        return CzMfStateContributionFormat.returnReport(ico, month, currency, lines)
     }
 
     override fun parseResult(payload: String): List<ReturnResultLine> =

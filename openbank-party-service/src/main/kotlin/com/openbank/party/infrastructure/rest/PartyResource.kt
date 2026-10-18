@@ -844,6 +844,8 @@ fun Party.toSimpleResponse() = mapOf(
     "legalName" to legalName,
     "tradingName" to tradingName,
     "email" to email,
+    // Lets an operator tell two namesakes apart in a search result (the detail already carries it).
+    "dateOfBirth" to dateOfBirth,
     "kycStatus" to kycStatus,
     "createdAt" to createdAt,
 )
