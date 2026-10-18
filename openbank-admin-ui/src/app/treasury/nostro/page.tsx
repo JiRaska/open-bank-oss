@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { FileSearch, UploadCloud } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, ShortId, StatCard, StatusBadge } from '@/components/ui'
 import { hasPermission } from '@/lib/auth/roles'
 import { newIdempotencyKey, postNostroStatement, getJson, nostroBreaksUrl, nostroReconciliationUrl } from '@/components/treasury/api'
 import { nostroBreakListSchema, nostroReconciliationSchema, type NostroBreakList, type NostroReconciliation } from '@/components/treasury/contracts'
@@ -32,6 +32,12 @@ export default function NostroReconciliationPage() {
 
 type Notice = { tone: 'success' | 'danger'; text: string }
 
+// treasury-service has no "list statements" endpoint, so the picker is the statements reconciled in
+// THIS page session: each is named by account IBAN + statement date + file, never by its technical id.
+// Held in memory only — an IBAN is account data and is never written to browser storage.
+type RecentStatement = { id: string; iban: string; statementDate: string; fileName: string | null }
+const RECENT_MAX = 12
+
 function Nostro() {
   const { t, language } = useLanguage()
   const { data: session } = useSession()
@@ -45,6 +51,16 @@ function Nostro() {
   const [notice, setNotice] = useState<Notice | null>(null)
   const [result, setResult] = useState<NostroReconciliation | null>(null)
   const [lookupId, setLookupId] = useState('')
+  const [recent, setRecent] = useState<RecentStatement[]>([])
+  const remember = (rec: NostroReconciliation, fileName: string | null) => {
+    setRecent(prev => {
+      const next = [
+        { id: rec.statementId, iban: rec.iban, statementDate: rec.statementDate, fileName: fileName ?? prev.find(r => r.id === rec.statementId)?.fileName ?? null },
+        ...prev.filter(r => r.id !== rec.statementId),
+      ].slice(0, RECENT_MAX)
+      return next
+    })
+  }
 
   const upload = async () => {
     if (!file) return
@@ -64,19 +80,20 @@ function Nostro() {
     setBusy(false)
     if (rec.ok) {
       setResult(rec.data)
+      remember(rec.data, file.name)
       setNotice({ tone: 'success', text: t('Výpis nahrán a spárován s hlavní knihou. Nic se nezaúčtovalo.', 'Statement uploaded and matched against the ledger. Nothing has posted.') })
     } else {
       setNotice({ tone: 'danger', text: t('Výpis byl nahrán, ale rekonciliaci se nepodařilo načíst.', 'The statement uploaded, but the reconciliation could not be loaded.') })
     }
   }
 
-  const lookup = async () => {
-    if (!lookupId.trim()) return
+  const lookup = async (id: string = lookupId) => {
+    if (!id.trim()) return
     setBusy(true)
     setNotice(null)
-    const rec = await getJson(nostroReconciliationUrl(lookupId.trim()), nostroReconciliationSchema)
+    const rec = await getJson(nostroReconciliationUrl(id.trim()), nostroReconciliationSchema)
     setBusy(false)
-    if (rec.ok) setResult(rec.data)
+    if (rec.ok) { setResult(rec.data); remember(rec.data, null) }
     else setNotice({ tone: 'danger', text: rec.kind === 'not_found' ? t('Výpis nebyl nalezen.', 'No such statement.') : t('Rekonciliaci se nepodařilo načíst.', 'The reconciliation could not be loaded.') })
   }
 
@@ -113,13 +130,35 @@ function Nostro() {
       )}
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, maxWidth: 320 }}>
-          {t('Zobrazit rekonciliaci podle ID výpisu', 'View reconciliation by statement ID')}
-          <input className="input" value={lookupId} onChange={e => setLookupId(e.target.value)} aria-label={t('ID výpisu', 'Statement ID')} />
-        </label>
-        <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 12 }} disabled={busy || !lookupId.trim()} onClick={() => void lookup()}>
-          {t('Načíst', 'Load')}
-        </button>
+        <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>{t('Naposledy zpracované výpisy', 'Recently reconciled statements')}</h3>
+        {recent.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+            {t('Zatím žádný výpis. Nahrajte camt.053 výše — poté se zde objeví k opětovnému otevření.', 'No statement yet. Upload a camt.053 above — it then appears here to reopen.')}
+          </p>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recent.map(r => (
+              <li key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void lookup(r.id)}>
+                  {t('Otevřít', 'Open')}
+                </button>
+                <span style={{ fontSize: 13 }}>{r.iban} · {r.statementDate}{r.fileName ? ` · ${r.fileName}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)' }}>
+            {t('Pokročilé: otevřít podle technického ID výpisu', 'Advanced: open by technical statement ID')}
+          </summary>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, maxWidth: 320, marginTop: 8 }}>
+            {t('Technické ID výpisu (z podpůrného zápisu)', 'Technical statement ID (from a support ticket)')}
+            <input className="input" value={lookupId} onChange={e => setLookupId(e.target.value)} aria-label={t('ID výpisu', 'Statement ID')} />
+          </label>
+          <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 12 }} disabled={busy || !lookupId.trim()} onClick={() => void lookup()}>
+            {t('Načíst', 'Load')}
+          </button>
+        </details>
       </div>
 
       {notice && (
@@ -237,7 +276,8 @@ function ReconciliationResult({
           />
         )}
         <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-          {t(`Výpis ${result.statementId} · IBAN ${result.iban} · GL ${result.glCode} · ${result.statementDate}`, `Statement ${result.statementId} · IBAN ${result.iban} · GL ${result.glCode} · ${result.statementDate}`)}
+          {t(`Výpis ke dni ${result.statementDate} · IBAN ${result.iban} · GL ${result.glCode}`, `Statement of ${result.statementDate} · IBAN ${result.iban} · GL ${result.glCode}`)}{' · '}
+          <ShortId value={result.statementId} copyLabel={t('Kopírovat ID výpisu', 'Copy statement ID')} />
         </span>
       </div>
 
@@ -284,7 +324,7 @@ function ReconciliationResult({
                   <td><StatusBadge status={m.matchType} tone={MATCH_TYPE_TONE[m.matchType]} label={matchTypeLabel(m.matchType, t)} /></td>
                   <td>{m.entry.reference ?? t('(bez reference)', '(no reference)')}</td>
                   <td style={{ textAlign: 'right' }}>{money(m.entry.amount)} {m.entry.currency}</td>
-                  <td>{m.ledgerLine.transactionId}</td>
+                  <td><ShortId value={m.ledgerLine.transactionId} copyLabel={t('Kopírovat ID transakce', 'Copy transaction ID')} /></td>
                   <td style={{ textAlign: 'right' }}>{money(m.ledgerLine.amount)} {m.ledgerLine.currency}</td>
                 </tr>
               ))}
@@ -341,7 +381,7 @@ function ReconciliationResult({
             <tbody>
               {result.unmatchedLedgerLines.map(l => (
                 <tr key={l.lineId}>
-                  <td>{l.transactionId}</td>
+                  <td><ShortId value={l.transactionId} copyLabel={t('Kopírovat ID transakce', 'Copy transaction ID')} /></td>
                   <td>{l.entryDate}</td>
                   <td>{l.side}</td>
                   <td style={{ textAlign: 'right' }}>{money(l.amount)} {l.currency}</td>

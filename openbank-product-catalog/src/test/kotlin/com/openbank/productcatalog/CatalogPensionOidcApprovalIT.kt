@@ -83,7 +83,9 @@ class CatalogPensionOidcApprovalIT {
     @Order(1)
     @TestSecurity(user = "catalog-seed-operator", roles = ["ROLE_OPERATOR"])
     fun `seed a draft with an actor distinct from both human approvers`() {
-        val fixture = requireNotNull(javaClass.getResourceAsStream("/retirement-pack/cz-illustrative-offerings.json"))
+        val fixture = requireNotNull(
+            javaClass.getResourceAsStream("/catalog-seeds/retirement/cz-illustrative-offerings.json"),
+        )
             .use {
                 ObjectMapper().readTree(it)["offerings"].first { offering ->
                     offering["attributes"]["productLine"].asText() == "DIP"
