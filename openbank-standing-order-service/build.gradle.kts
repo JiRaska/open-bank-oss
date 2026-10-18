@@ -10,10 +10,6 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
@@ -25,13 +21,8 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.kotlinx.coroutines.core)
@@ -43,10 +34,7 @@ dependencies {
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
     implementation(project(":openbank-client-transaction"))
     implementation(libs.quarkus.scheduler)
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     // @TestSecurity: StandingOrderOutboxAtomicityIT (#8353) drives the @RolesAllowed lifecycle
     // endpoints over real HTTP — the only way to exercise a reactive Panache write, since a bare
     // @QuarkusTest thread carries no Vert.x context. The existing ITs only hit unsecured routes.

@@ -434,6 +434,70 @@ def net_patch(base_sha, sha):
     return sorted(out, key=lambda t: t[0])
 
 
+# ---- derived content excluded from the CARRY-OVER comparison only -----------------------
+# Merging main into a PR that touches rego regenerates the OPA bundle ConfigMaps and the
+# pod-roll `openbank.tech/policy-checksum:` annotations (regen-derived.sh --all). Main's own
+# policy changes then move hunk offsets and checksum values in those files, so the net patch
+# differs while the author's source change is byte-identical. These files are pure functions
+# of sources that STAY compared (the rego, rules.yaml, agents.yaml, the gen-*opa-bundle*.sh
+# generators), and the required `OPA policy gate` regenerates every bundle + annotation and
+# fails on any diff (opa-policy.yml), so a hand edit that diverges from its source cannot
+# merge. rules-opa-data.yaml is excluded ONLY because rules.yaml itself stays compared and
+# the same gate runs `gen-rules-opa-data.py --check`. Nothing here touches the exact-head
+# route, the merge-shape walk, or the fail-closed truncation/identity checks in net_patch.
+DERIVED_BUNDLE_RE = re.compile(r"openbank-infra/gitops/components/(?:.+/)?[^/]+-opa-bundle\.yaml")
+DERIVED_WHOLE_FILES = frozenset({"openbank-libs/governance/rules-opa-data.yaml"})
+POLICY_CHECKSUM_LINE_RE = re.compile(
+    r"[ +-]\s*openbank\.tech/policy-checksum:\s*\"?[0-9a-fA-F]*\"?\s*")
+
+
+def _is_derived_file(name):
+    return bool(name) and (name in DERIVED_WHOLE_FILES or bool(DERIVED_BUNDLE_RE.fullmatch(name)))
+
+
+def _strip_policy_checksums(patch):
+    """Return (normalised patch, whether any checksum line was seen).
+
+    Hunk headers lose their offsets (main shifts them), a hunk whose only changes were
+    checksum lines disappears, and a checksum line kept as context is normalised. Every
+    other added, removed or context line survives verbatim."""
+    hunks, cur, seen = [], None, False
+    for line in patch.split("\n"):
+        if line.startswith("@@"):
+            cur = []
+            hunks.append(cur)
+            continue
+        if cur is None:
+            cur = []
+            hunks.append(cur)
+        if POLICY_CHECKSUM_LINE_RE.fullmatch(line):
+            seen = True
+            if line[:1] == " ":
+                cur.append(" openbank.tech/policy-checksum: <derived>")
+            continue
+        cur.append(line)
+    kept = [h for h in hunks if any(l[:1] in {"+", "-"} for l in h)]
+    return "\n".join("@@\n" + "\n".join(h) for h in kept), seen
+
+
+def carry_over_view(patch_set):
+    """The part of a net patch the carry-over comparison holds equal. Applied to BOTH sides."""
+    out = []
+    for name, status, prev, text, sha in patch_set:
+        # A rename INTO a derived path from a source path is not derived: keep it compared.
+        if _is_derived_file(name) and (not prev or _is_derived_file(prev)):
+            continue
+        norm, seen = _strip_policy_checksums(text)
+        if not seen:
+            out.append((name, status, prev, text, sha))
+        elif norm:
+            # The blob necessarily differs when a derived value does; the normalised patch
+            # of every non-derived line is what stays compared for this file.
+            out.append((name, status, prev, norm, None))
+        # else: the file's ONLY change is a derived checksum value — nothing to compare.
+    return out
+
+
 def only_base_merges_since(approved, head, base_sha):
     """Return base-merge SHAs in chronological order if walking FIRST parents from head
     reaches `approved`; otherwise return None.
@@ -470,9 +534,12 @@ def content_unchanged_since(approved, head, base_sha):
     merges = only_base_merges_since(approved, head, base_sha)
     if merges is None:
         return False
-    approved_patch = net_patch(base_sha, approved)
+    approved_patch = carry_over_view(net_patch(base_sha, approved))
+    if not approved_patch:
+        # Nothing non-derived was approved; there is nothing to hold equal.
+        return False
     for merge in merges:
-        if net_patch(base_sha, merge) != approved_patch:
+        if carry_over_view(net_patch(base_sha, merge)) != approved_patch:
             return False
     return True
 
