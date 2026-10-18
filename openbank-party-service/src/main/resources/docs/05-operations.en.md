@@ -97,3 +97,7 @@ Caused by a rewritten applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=tru
 - Per-service path-scoped CI (only builds when `openbank-party-service/**` changes).
 - fast-jar Docker image (never uber-jar) via `openbank-infra/scripts/build-push-service.sh party`.
 - Versioning is per-service SemVer; `version.txt` is owned by release-please (do not hand-bump). `openapi.yaml:info.version` is the independent API-contract axis (ADR-0048).
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

@@ -138,3 +138,7 @@ nepřeloží na uloženou sazbu, nebo má účet katalogovou historii akruálů 
 aktuálně platné sazby. Opravte cache (nebo chybějící pin) a spusťte znovu; akruál je za den idempotentní.
 Použití katalogové sazby u nepřipnutého účtu počítá `openbank.interest.accrual.catalog.rate.unpinned`
 a má zůstat na nule.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
