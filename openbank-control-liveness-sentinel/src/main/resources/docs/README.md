@@ -13,3 +13,7 @@ The proposal adapter sends requests for the configured GitHub API URL through `S
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Trace continuity into Temporal
+
+The fleet `WorkflowClientOptions` (built by `TemporalClientProducer` in `openbank-libs-temporal`) register an OpenTelemetry context propagator, so the check workflow and its activities run in the trace of whoever started them. `TemporalTracePropagationTest` proves an activity sees the caller's trace id, and that without the propagator it sees none.
