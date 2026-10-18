@@ -171,7 +171,7 @@ otherwise                                      → PENDING_KYC
 1. **Aggregate boundary = Party** — documents and lifecycle state are children of a party.
 2. **Activation is single-authority** — only party-service flips a party to ACTIVE, gating on both KYC and AML.
 3. **Domain events first** — every state change emits a domain event; the outbox guarantees delivery.
-4. **PII minimisation** — birth number is never stored or searchable here; name search is the only fuzzy lookup.
+4. **PII minimisation** — birth number is never stored in clear here and is resolved only exactly via its blind index; personal identifiers are exact-match only, so name search is the only fuzzy lookup.
 5. **Fail-static dependencies** — no flagd / no OPA still serves traffic (caller defaults / advisory mode).
 
 ## transaction-service client (ADR-0319)
