@@ -16,21 +16,32 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.domain.event.TransactionInitiatedEvent
+import com.openbank.transaction.domain.model.Transaction
+import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
+import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -69,6 +80,14 @@ class TransactionPactProviderVerificationTest {
     /** Cleared per interaction for the negative-auth states — see [verifyPacts]. */
     @Inject
     lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
+    lateinit var transactionRepository: TransactionRepository
+
+    // Fixed UUIDs must match the agent-service consumer pact exactly.
+    private val agentTxId = UUID.fromString("f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1")
+    private val agentTxSourceAccountId = UUID.fromString("f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2")
+    private val agentTxTargetAccountId = UUID.fromString("f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3")
 
     private val objectMapper = jacksonObjectMapper()
         .registerModule(JavaTimeModule())
@@ -171,6 +190,56 @@ class TransactionPactProviderVerificationTest {
     fun stateTransactionInitiated() {
         // No setup needed: the message producer below returns a deterministic payload.
     }
+
+    /** Mirror of the git-pact twin's handler — see there for why the fixture is COMPLETED. */
+    @State("a completed transaction exists for the pact detail read")
+    fun stateCompletedTransactionForAgentDetail() = runOnVertxContext {
+        if (transactionRepository.findById(agentTxId) != null) return@runOnVertxContext
+        val today = LocalDate.now()
+        val transaction = Transaction(
+            id = agentTxId,
+            referenceNumber = "TXN-PACT-AGENT-001",
+            type = TransactionType.DEBIT,
+            sourceAccountId = agentTxSourceAccountId,
+            targetAccountId = agentTxTargetAccountId,
+            amount = Money.of(BigDecimal("250.00"), "CZK"),
+            fxRate = null,
+            baseAmount = Money.of(BigDecimal("250.00"), "CZK"),
+            status = TransactionStatus.COMPLETED,
+            description = "Pact fixture for the agent detail read",
+            valueDate = today,
+            bookingDate = today,
+            initiatedAt = Instant.parse("2026-01-01T00:00:00Z"),
+            completedAt = Instant.parse("2026-01-01T00:05:00Z"),
+            failedAt = null,
+            failureReason = null,
+            idempotencyKey = "pact-agent-detail-$agentTxId",
+            version = 0L,
+        )
+        transactionRepository.save(
+            transaction = transaction,
+            outboxMessage = OutboxMessage(
+                aggregateId = transaction.id,
+                eventType = "openbank.transactions.transaction.initiated",
+                payload = """{"transactionId":"${transaction.id}"}""",
+            ),
+        )
+        Unit
+    }
+
+    /** Mirror of the git-pact twin's handler — deliberately seeds nothing; that IS the state. */
+    @State("no transaction exists for the id")
+    fun stateNoTransactionForUnknownId() {
+        // Intentionally empty — a fresh Testcontainer DB satisfies it by construction.
+    }
+
+    /**
+     * Bridges a reactive-Panache block into Pact-JVM's synchronous `@State` callback — Pact-JVM
+     * invokes `@State` directly via reflection on the JUnit thread, which has no Vert.x context
+     * (same shape as the git-pact twin's `runOnVertxContext`).
+     */
+    private fun <T> runOnVertxContext(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     @PactVerifyProvider("a transaction.initiated event for fraud screening")
     fun produceTransactionInitiated(): String {

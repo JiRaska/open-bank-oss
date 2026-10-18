@@ -165,6 +165,32 @@ paths:
         '403': {$ref: '#/components/responses/Forbidden'}
 
   /api/v1/balances/{accountId}/holds:
+    get:
+      tags: [Balances]
+      summary: List the account's active holds
+      description: >-
+        Active (neither released nor expired) reservations only — released holds are history,
+        not a reservation. Owner-scoped the same way as the balance reads: without the
+        `X-Customer-Party-Id` header the caller must carry a service role, with it the header
+        party must own the account (else 404, indistinguishable from a missing account).
+      operationId: getHolds
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      responses:
+        '200':
+          description: Active holds for the account (empty array when none)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [holds]
+                properties:
+                  holds:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HoldResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Balances]
       summary: Place a hold on funds

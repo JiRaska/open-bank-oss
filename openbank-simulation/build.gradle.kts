@@ -67,6 +67,46 @@ dependencies {
     implementation(project(":openbank-sepa-payment"))
     implementation(project(":openbank-settlement-service"))
 
+    // Money-path SCT Inst adoption: the harness drives the REAL `SctInstPayment` aggregate and
+    // the real `SctInstSchemeRules.requireSchemeCurrency` admission (EPC SCT Inst rulebook,
+    // #11913 EUR-only) from sepa-instant. The domain package is framework-free (ADR-0002), so
+    // only the domain POJOs land on the classpath.
+    implementation(project(":openbank-sepa-instant"))
+
+    // Money-path clearing adoption: the harness drives the REAL clearing-service domain
+    // aggregates (ClearingItem/ClearingBatch/ClearingCycleResult/NetSettlementPosting) and the
+    // framework-free NetSettlementJournalFactory (the real settleable-currency set and the
+    // seeded cash-clearing/scheme-settlement GL pairs), so ClearingCycleScenario exercises
+    // production clearing semantics rather than a re-model. The domain package is framework-free
+    // (ADR-0002); pulling the whole project(...) is the established convention here (only the
+    // domain POJOs and the pure factory are referenced from this module).
+    implementation(project(":openbank-clearing-service"))
+
+    // Money-path SEPA Direct Debit adoption: the harness drives the REAL sdd-service domain —
+    // the SddMandate aggregate, the pure MandateLifecycle state machine, the fail-closed
+    // CollectionAuthorisationPolicy and the RefundPolicy window rules (ADR-0036) — so
+    // SddCollectionScenario exercises production SDD semantics rather than a re-model. The
+    // domain package is framework-free (ADR-0002); pulling the whole project(...) is the
+    // established convention here (only the domain POJOs are referenced from this module).
+    implementation(project(":openbank-sdd-service"))
+
+    // Money-path SWIFT adoption: the harness drives the REAL swift-service domain — the
+    // `SwiftMessage` aggregate, its real `validate()` admission (BIC/reference/amount/charge-code/
+    // value-date) and the real `moneyOfMinorUnits` currency-scale factory — so SwiftMessageScenario
+    // exercises production cross-border semantics rather than a re-model. The domain package is
+    // framework-free (ADR-0002); pulling the whole project(...) is the established convention here
+    // (only the domain POJOs are referenced from this module).
+    implementation(project(":openbank-swift-service"))
+
+    // Money-path FX adoption: the harness drives the REAL fx-service domain — the `FxConversion`
+    // aggregate, the `CnbFixingRate` per-unit normalisation, the `FxRate.inverted()` spread-side
+    // logic, the `FxConversionMath` cross-scale margin arithmetic and the fail-closed
+    // `ScreeningPolicy` (ADR-0032) — so FxConversionScenario exercises production FX semantics
+    // rather than a re-model. The domain package is framework-free (ADR-0002); pulling the whole
+    // project(...) is the established convention here (only the domain POJOs are referenced from
+    // this module).
+    implementation(project(":openbank-fx-service"))
+
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
     // FeeBillingScenario exercises the exact idempotency-key/GL-direction shape production

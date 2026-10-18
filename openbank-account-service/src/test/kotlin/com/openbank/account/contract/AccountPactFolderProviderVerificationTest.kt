@@ -380,6 +380,20 @@ class AccountPactFolderProviderVerificationTest {
     }
 
     /**
+     * The negative state for the agent-service id lookup pact: deliberately seeds NOTHING.
+     *
+     * The pact asks for an account id this provider does not hold (`00000000-0000-4000-8000-
+     * 000000000099`), and the point of the interaction is that the route answers 404 rather than a
+     * 200 carrying an empty body — the agent's `get_account` tool forwards whatever it receives to
+     * the model, so "no such account" arriving as `{}` would read as an account with no fields.
+     * A handler that seeded anything would destroy the case it exists to pin.
+     */
+    @State("no account exists for the id")
+    fun noAccountForUnknownId() {
+        // Intentionally empty.
+    }
+
+    /**
      * Seeds the ACTIVE CZK SAVINGS account interest-service's ADR-0339 B tax-profile resolution
      * reads to map an account to its owning party (pact: "an ACTIVE CZK account exists for
      * tax-profile resolution"). The pact binds `partyId` non-null — a renamed field would arrive

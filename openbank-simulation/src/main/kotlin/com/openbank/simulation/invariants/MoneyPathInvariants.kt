@@ -4,10 +4,23 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingItem
+import com.openbank.clearing.domain.model.ClearingStatus
+import com.openbank.fx.domain.model.FxConversion
+import com.openbank.fx.domain.model.FxConversionMath
+import com.openbank.fx.domain.model.FxConversionStatus
+import com.openbank.sdd.domain.model.MandateStatus
+import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
+import com.openbank.simulation.model.ClearingSettlementPosting
+import com.openbank.simulation.model.FxSettlementPosting
+import com.openbank.simulation.model.SddCollectionStatus
 import com.openbank.simulation.runner.World
+import com.openbank.swift.domain.model.SwiftStatus
 import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 
@@ -241,6 +254,432 @@ object MoneyPathInvariants {
         }
     }
 
+    /**
+     * Money-path SCT Inst adoption: every `SctInstPayment` driven by
+     * [com.openbank.simulation.scenario.SctInstPaymentScenario] must reach a terminal status
+     * (SETTLED / REJECTED / TIMEOUT / RECALLED) by the time a step has fully settled — the
+     * instant-payment analogue of [sepaPaymentCompleteness]. A payment stuck PENDING or
+     * PROCESSING after the drain means a timeout or recall path failed to fire, exactly the
+     * "mid-flight money" defect class the scenario's fault injection exists to surface.
+     */
+    val sctInstCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SctInstStatus.SETTLED,
+            SctInstStatus.REJECTED,
+            SctInstStatus.TIMEOUT,
+            SctInstStatus.RECALLED,
+        )
+
+        override val name = "sct-inst-completeness"
+        override fun check(world: World): Violation? {
+            world.sctInstPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "sct-inst payment ${payment.paymentId} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path clearing adoption: every `ClearingItem` the scenario seeded is either terminal
+     * (SETTLED / FAILED / REVERSED) or accounted for, and every `ClearingBatch` is terminal. The
+     * accounted-for case is the #11974 reported-not-dropped law: an item still PENDING whose rail
+     * HAS cycled since it was seeded must be counted in that rail's latest cycle result
+     * `unsettleablePending` (its currency has no settlement GL pair — reported, never silently
+     * skipped). An item whose rail has not cycled since seeding is legitimately PENDING (the
+     * #12004 rail-isolation probe), and a railless item can never be selected by any cycle.
+     */
+    val clearingCompleteness = object : Invariant {
+        private val terminal = setOf(
+            ClearingStatus.SETTLED,
+            ClearingStatus.FAILED,
+            ClearingStatus.REVERSED,
+        )
+
+        override val name = "clearing-completeness"
+        override fun check(world: World): Violation? {
+            world.clearing.batches.forEach { batch ->
+                if (batch.status !in terminal) {
+                    return Violation(name, "clearing batch ${batch.id} stuck in ${batch.status}")
+                }
+            }
+            world.clearing.items.forEach { item ->
+                if (item.status in terminal) return@forEach
+                val rail = item.rail
+                    ?: return Violation(
+                        name,
+                        "clearing item ${item.id} has no rail: no cycle can ever select it (#12004)",
+                    )
+                if (world.clearing.cycleEpoch(rail) == world.clearing.seedEpochOf(item.id)) {
+                    return@forEach // the rail has not cycled since the item was seeded — PENDING is expected
+                }
+                val last = world.clearing.cycles.lastOrNull { it.rail == rail }
+                if (last == null || last.unsettleablePending[item.currency] == null) {
+                    return Violation(
+                        name,
+                        "clearing item ${item.id} (${item.currency} on $rail) was skipped by cycle " +
+                            "${last?.cycleId}: not batched, not terminal, not reported unsettleable",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path clearing adoption: the batch bookkeeping law, per batch. A SETTLED batch has
+     * exactly its items (itemCount, Σ amounts == totalDebit == totalCredit, zero net position —
+     * the real NET bilateral model) and exactly one net-settlement journal for totalDebit; a
+     * FAILED batch moved no money (no journal — a settlement leg for a dead batch would be the
+     * classic "money without a clearing" defect); a REVERSED batch's journal was unwound. The
+     * cross-entry drift itself is covered by conservationOfMoney — this invariant pins the
+     * batch-to-ledger correspondence the clearing cycle's durable outbox intent (ADR-0281)
+     * promises.
+     */
+    val clearingBatchConservation = object : Invariant {
+        override val name = "clearing-batch-conservation"
+        override fun check(world: World): Violation? {
+            world.clearing.batches.forEach { batch ->
+                val items = world.clearing.itemsOf(batch.id)
+                val posting = world.clearing.postings[batch.id]
+                when (batch.status) {
+                    ClearingStatus.SETTLED -> return checkSettled(batch, items, posting)
+                    ClearingStatus.FAILED -> {
+                        if (posting != null) {
+                            return Violation(
+                                name,
+                                "FAILED batch ${batch.id} posted a settlement journal: money moved for a dead batch",
+                            )
+                        }
+                        if (items.any { it.status != ClearingStatus.FAILED }) {
+                            return Violation(name, "FAILED batch ${batch.id} has non-FAILED items")
+                        }
+                    }
+                    ClearingStatus.REVERSED -> {
+                        if (posting == null || !posting.reversed) {
+                            return Violation(
+                                name,
+                                "REVERSED batch ${batch.id}: settlement journal not reversed (money not unwound)",
+                            )
+                        }
+                        if (items.any { it.status != ClearingStatus.REVERSED }) {
+                            return Violation(name, "REVERSED batch ${batch.id} has non-REVERSED items")
+                        }
+                    }
+                    else -> return Violation(name, "clearing batch ${batch.id} in non-terminal ${batch.status}")
+                }
+            }
+            return null
+        }
+
+        private fun checkSettled(
+            batch: ClearingBatch,
+            items: List<ClearingItem>,
+            posting: ClearingSettlementPosting?,
+        ): Violation? {
+            if (items.size != batch.itemCount || items.any { it.status != ClearingStatus.SETTLED }) {
+                return Violation(name, "settled batch ${batch.id}: ${items.size}/${batch.itemCount} items settled")
+            }
+            val sum = items.fold(BigDecimal.ZERO) { acc, item -> acc + item.amount }
+            if (sum.compareTo(batch.totalDebit) != 0) {
+                return Violation(
+                    name,
+                    "settled batch ${batch.id}: items sum $sum != totalDebit ${batch.totalDebit}",
+                )
+            }
+            if (batch.totalCredit.compareTo(batch.totalDebit) != 0 || batch.netPosition.signum() != 0) {
+                return Violation(name, "settled batch ${batch.id}: NET bilateral totals drifted")
+            }
+            if (posting == null || posting.reversed) {
+                return Violation(name, "settled batch ${batch.id}: no unreversed net-settlement journal")
+            }
+            if (posting.amount.compareTo(batch.totalDebit) != 0) {
+                return Violation(name, "settled batch ${batch.id}: journal ${posting.amount} != totalDebit")
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path SEPA Direct Debit adoption: every mandate left the setup confirmation (a B2B
+     * mandate parked in PENDING_CONFIRMATION never collected and never will — the debtor-bank
+     * confirmation is part of setup), and every collection reached a terminal outcome. All
+     * [com.openbank.simulation.model.SddCollectionStatus] values are terminal by construction;
+     * the check exists so a future non-terminal status fails here, not in the money sweep.
+     */
+    val sddCompleteness = object : Invariant {
+        private val terminal = SddCollectionStatus.entries.toSet()
+
+        override val name = "sdd-completeness"
+        override fun check(world: World): Violation? {
+            world.sdd.mandates.forEach { mandate ->
+                if (mandate.status == MandateStatus.PENDING_CONFIRMATION) {
+                    return Violation(
+                        name,
+                        "sdd mandate ${mandate.id} parked in PENDING_CONFIRMATION: never confirmed by debtor bank",
+                    )
+                }
+            }
+            world.sdd.collections.forEach { collection ->
+                if (collection.status !in terminal) {
+                    return Violation(name, "sdd collection ${collection.id} stuck in ${collection.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path SEPA Direct Debit adoption: the collection-to-journal correspondence. A SETTLED
+     * collection has exactly its debit journal (never reversed) and, when refunded, exactly its
+     * refund journal; a REJECTED / REFUSED / FAILED collection moved no money (the fail-closed
+     * authorisation and the pre-money fault mapping must never book a leg); a REVERSED
+     * collection's debit journal was unwound; and a one-off (OOFF) mandate never settles more
+     * than one collection — the money-side mirror of the policy's MD01 reuse reject. The
+     * cross-entry drift itself is covered by conservationOfMoney.
+     */
+    val sddMoneyConservation = object : Invariant {
+        override val name = "sdd-money-conservation"
+        override fun check(world: World): Violation? {
+            world.sdd.collections.forEach { collection ->
+                when (collection.status) {
+                    SddCollectionStatus.SETTLED -> {
+                        if (collection.debitJournalId == null || collection.reversed) {
+                            return Violation(name, "settled sdd collection ${collection.id} has no live debit journal")
+                        }
+                    }
+                    SddCollectionStatus.REJECTED, SddCollectionStatus.REFUSED, SddCollectionStatus.FAILED -> {
+                        if (collection.debitJournalId != null || collection.refundJournalId != null) {
+                            return Violation(
+                                name,
+                                "${collection.status} sdd collection ${collection.id} booked a journal: " +
+                                    "money moved for a non-settled collection",
+                            )
+                        }
+                    }
+                    SddCollectionStatus.REVERSED -> {
+                        if (collection.debitJournalId == null || !collection.reversed) {
+                            return Violation(
+                                name,
+                                "reversed sdd collection ${collection.id}: debit journal not unwound",
+                            )
+                        }
+                        if (collection.refundJournalId != null) {
+                            return Violation(name, "reversed sdd collection ${collection.id} carries a refund journal")
+                        }
+                    }
+                }
+                if (collection.refundJournalId != null && collection.status != SddCollectionStatus.SETTLED) {
+                    return Violation(name, "refund journal on a ${collection.status} sdd collection ${collection.id}")
+                }
+            }
+            world.sdd.mandates
+                .filter { it.sequenceType == SequenceType.OOFF }
+                .forEach { mandate ->
+                    val settled = world.sdd.collectionsOf(mandate.id).count { it.status == SddCollectionStatus.SETTLED }
+                    if (settled > 1) {
+                        return Violation(name, "one-off sdd mandate ${mandate.id} settled $settled collections")
+                    }
+                }
+            return null
+        }
+    }
+
+    /**
+     * Money-path SWIFT adoption: every `SwiftMessage` driven by
+     * [com.openbank.simulation.scenario.SwiftMessageScenario] must reach a terminal status
+     * (COMPLETED / ACKNOWLEDGED / REJECTED / FAILED) by the time a step has fully settled — the
+     * cross-border analogue of [sepaPaymentCompleteness]. A message stuck PENDING/VALIDATED/SENT
+     * after the drain means a scheme, settlement or operator path failed to fire, exactly the
+     * "mid-flight money" defect class the scenario's fault injection exists to surface.
+     */
+    val swiftCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SwiftStatus.COMPLETED,
+            SwiftStatus.ACKNOWLEDGED,
+            SwiftStatus.REJECTED,
+            SwiftStatus.FAILED,
+        )
+
+        override val name = "swift-completeness"
+        override fun check(world: World): Violation? {
+            world.swift.messages.forEach { message ->
+                if (message.status !in terminal) {
+                    return Violation(name, "swift message ${message.id} stuck in ${message.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path SWIFT adoption: the message-to-settlement-journal correspondence. A COMPLETED
+     * (or operator-ACKNOWLEDGED) message has exactly its one live settlement journal — same
+     * amount, same currency, never reversed — and idempotency keys are unique across the book
+     * (a replay must never create a second message); a REJECTED message moved no money (the
+     * scheme-verdict and pre-money fault rejects must never book a leg); a FAILED message's
+     * journal was unwound by the post-commit-conflict reversal. The cross-entry drift itself is
+     * covered by conservationOfMoney.
+     */
+    val swiftMoneyConservation = object : Invariant {
+        override val name = "swift-money-conservation"
+        override fun check(world: World): Violation? {
+            val byKey = world.swift.messages.groupingBy { it.idempotencyKey }.eachCount()
+            byKey.forEach { (key, count) ->
+                if (count > 1) {
+                    return Violation(name, "idempotency key $key replayed into $count swift messages")
+                }
+            }
+            world.swift.messages.forEach { message ->
+                val posting = world.swift.postingOf(message.id)
+                when (message.status) {
+                    SwiftStatus.COMPLETED, SwiftStatus.ACKNOWLEDGED -> {
+                        if (posting == null || posting.reversed) {
+                            return Violation(name, "settled swift message ${message.id} has no live settlement journal")
+                        }
+                        if (posting.amount.compareTo(message.amount.amount) != 0 ||
+                            posting.currency != message.currency
+                        ) {
+                            return Violation(
+                                name,
+                                "swift message ${message.id} journal ${posting.amount} ${posting.currency} " +
+                                    "!= message ${message.amount.amount} ${message.currency}",
+                            )
+                        }
+                    }
+                    SwiftStatus.REJECTED -> {
+                        if (posting != null) {
+                            return Violation(
+                                name,
+                                "rejected swift message ${message.id} booked a journal: money moved for a dead message",
+                            )
+                        }
+                    }
+                    SwiftStatus.FAILED -> {
+                        if (posting == null || !posting.reversed) {
+                            return Violation(
+                                name,
+                                "failed swift message ${message.id}: settlement journal not reversed (money not unwound)",
+                            )
+                        }
+                    }
+                    else -> return Violation(name, "swift message ${message.id} in non-terminal ${message.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path FX adoption: every `FxConversion` driven by
+     * [com.openbank.simulation.scenario.FxConversionScenario] must reach a terminal status
+     * (SETTLED / FAILED / REVERSED) by the time a step has fully settled — the conversion
+     * analogue of [swiftCompleteness]. A conversion stuck PENDING after the drain means a
+     * screening, posting or reversal path failed to fire, exactly the "mid-flight money" defect
+     * class the scenario's fault injection exists to surface.
+     */
+    val fxCompleteness = object : Invariant {
+        private val terminal = setOf(
+            FxConversionStatus.SETTLED,
+            FxConversionStatus.FAILED,
+            FxConversionStatus.REVERSED,
+        )
+
+        override val name = "fx-completeness"
+        override fun check(world: World): Violation? {
+            world.fx.conversions.forEach { conversion ->
+                if (conversion.status !in terminal) {
+                    return Violation(name, "fx conversion ${conversion.id} stuck in ${conversion.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Money-path FX adoption: the conversion-to-journal-pair correspondence, with the real
+     * `FxConversionMath` re-derived from the STORED applied rate (a conversion whose persisted
+     * `toAmount`/`fee` no longer matches its own rate is the silent-repricing defect class).
+     * A SETTLED conversion has both journals live (never reversed) and its recorded amounts
+     * re-verify through the real math; a FAILED conversion (sanctions block, uncleared review,
+     * unaffordable debit, write fault) moved no money at all; a REVERSED conversion's both
+     * journals were unwound. Idempotency keys are unique across the book. The cross-entry drift
+     * itself is covered by conservationOfMoney.
+     */
+    val fxMoneyConservation = object : Invariant {
+        override val name = "fx-money-conservation"
+        override fun check(world: World): Violation? {
+            val byKey = world.fx.conversions.groupingBy { it.idempotencyKey }.eachCount()
+            byKey.forEach { (key, count) ->
+                if (count > 1) {
+                    return Violation(name, "idempotency key $key replayed into $count fx conversions")
+                }
+            }
+            world.fx.conversions.forEach { conversion ->
+                val posting = world.fx.postingOf(conversion.id)
+                when (conversion.status) {
+                    FxConversionStatus.SETTLED -> {
+                        val violation = checkSettled(conversion, posting)
+                        if (violation != null) return violation
+                    }
+                    FxConversionStatus.FAILED -> {
+                        if (posting != null) {
+                            return Violation(
+                                name,
+                                "failed fx conversion ${conversion.id} booked a journal: money moved for a dead conversion",
+                            )
+                        }
+                    }
+                    FxConversionStatus.REVERSED -> {
+                        if (posting == null || !posting.czkReversed || !posting.foreignReversed) {
+                            return Violation(
+                                name,
+                                "reversed fx conversion ${conversion.id}: journal pair not fully unwound",
+                            )
+                        }
+                    }
+                    else -> return Violation(
+                        name,
+                        "fx conversion ${conversion.id} in non-terminal ${conversion.status}",
+                    )
+                }
+            }
+            return null
+        }
+
+        /** The settled correspondence: a live journal pair plus amounts re-verified through the real math. */
+        private fun checkSettled(conversion: FxConversion, posting: FxSettlementPosting?): Violation? {
+            val settledJournalsLive = posting != null && !posting.czkReversed && !posting.foreignReversed
+            val journalPairPresent = posting?.czkJournalId != null && posting.foreignJournalId != null
+            if (!settledJournalsLive || !journalPairPresent) {
+                return Violation(name, "settled fx conversion ${conversion.id} has no live journal pair")
+            }
+            val expectedTo = FxConversionMath.convertedAmountMinorUnits(
+                conversion.fromAmountMinorUnits,
+                conversion.fromCurrency,
+                conversion.toCurrency,
+                conversion.appliedRate,
+            )
+            if (conversion.toAmountMinorUnits != expectedTo) {
+                return Violation(
+                    name,
+                    "fx conversion ${conversion.id} toAmount=${conversion.toAmountMinorUnits} " +
+                        "but its stored rate re-derives $expectedTo",
+                )
+            }
+            val expectedFee = FxConversionMath.feeMinorUnits(conversion.fromAmountMinorUnits)
+            if (conversion.feeMinorUnits != expectedFee) {
+                return Violation(
+                    name,
+                    "fx conversion ${conversion.id} fee=${conversion.feeMinorUnits} " +
+                        "but the real margin math derives $expectedFee",
+                )
+            }
+            return null
+        }
+    }
+
     /** All Layer-3 invariants, in check order. */
     val ALL: List<Invariant> = listOf(
         conservationOfMoney,
@@ -250,6 +689,15 @@ object MoneyPathInvariants {
         auditCompleteness,
         sepaPaymentCompleteness,
         settlementCompleteness,
+        sctInstCompleteness,
+        clearingCompleteness,
+        clearingBatchConservation,
+        sddCompleteness,
+        sddMoneyConservation,
+        swiftCompleteness,
+        swiftMoneyConservation,
+        fxCompleteness,
+        fxMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

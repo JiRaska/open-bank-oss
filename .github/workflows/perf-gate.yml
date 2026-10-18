@@ -8,6 +8,11 @@
 #
 # v1 scope: read-only Product Catalog and Flaky Test Hunter paths. Money-path services follow
 # only once the isolated harness and synthetic-data boundary are proven (issue #3348).
+# v1.1: adds the read-only FX rate sheet — FX lookup sits inside every cross-currency
+# payment, so its read latency is additive to the money path without touching it.
+# v1.2: adds the balance pending-approvals read — the one balance read that answers 200
+# on a fresh database; the id-scoped balance rows need seeded fixtures (perf gate has
+# none by design).
 name: Performance gate
 
 on:
@@ -16,11 +21,11 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Space-separated service modules to test (blank = declared v1 scope)"
+        description: "Space-separated service modules to test (blank = declared scope)"
         required: false
         # A dispatch input's default is still a non-empty override.  Keeping this empty means
         # an operator-triggered run measures the same declared Product Catalog + Flaky Test
-        # Hunter denominator as the scheduled run, unless they deliberately narrow it.
+        # Hunter + FX denominator as the scheduled run, unless they deliberately narrow it.
         default: ""
 
 permissions:
@@ -47,12 +52,82 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
-          # summary can say what the run was SUPPOSED to measure, not only what it did.
-          # Both subjects are non-mutating reads booted against disposable PostgreSQL.  Keep
-          # money-path flows out of this GitHub-hosted lane until their isolated target and
-          # synthetic identities exist (perf/scenarios.yaml).
-          DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]
+          # The declared scope (ADR-0243, issue #3348; FX, Balance, Sanctions, Consent,
+          # Ledger, Interest, KYC, Transaction, SEPA Payment, Domestic Payment, SEPA
+          # Instant, Standing Order, Party, Notification, Account, Clearing, SDD, Billing,
+          # Document, AML, Fraud, Audit, Lending, Dispute, Card Issuance, Communication,
+          # Delegation, AnaCredit, KYB, Onboarding, SCA, PSD2, Incentive, Loyalty,
+          # Engagement, Referral, Campaign, PID, Agent, AuthzPolicyAuditor,
+          # GovernanceAuditor, Statement, Swift, Treasury, RiskEngine,
+          # CardProcessing, TppRegistry, PensionFund, TaxReporting,
+          # CaseCoordinator, DevOpsAgent, DocsTruthAgent, FinOpsAgent,
+          # ReleaseSteward and ControlLivenessSentinel added as third through
+          # fifty-seventh
+          # read-only subjects). Kept as a named constant so the summary
+          # can say what the run was
+          # SUPPOSED to measure, not only what it did. All subjects are non-mutating
+          # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
+          # this GitHub-hosted lane until their isolated target and synthetic identities
+          # exist (perf/scenarios.yaml).
+          DECLARED = [
+              "openbank-product-catalog",
+              "openbank-flaky-test-hunter",
+              "openbank-fx-service",
+              "openbank-balance-service",
+              "openbank-sanctions-service",
+              "openbank-consent-service",
+              "openbank-ledger-service",
+              "openbank-interest-service",
+              "openbank-kyc-service",
+              "openbank-transaction-service",
+              "openbank-sepa-payment",
+              "openbank-domestic-payment",
+              "openbank-sepa-instant",
+              "openbank-standing-order-service",
+              "openbank-party-service",
+              "openbank-notification-service",
+              "openbank-account-service",
+              "openbank-clearing-service",
+              "openbank-sdd-service",
+              "openbank-billing-service",
+              "openbank-document-service",
+              "openbank-aml-service",
+              "openbank-fraud-service",
+              "openbank-audit-service",
+              "openbank-lending-service",
+              "openbank-dispute-service",
+              "openbank-card-issuance-service",
+              "openbank-communication-service",
+              "openbank-delegation-service",
+              "openbank-anacredit-service",
+              "openbank-kyb-service",
+              "openbank-onboarding-service",
+              "openbank-sca-service",
+              "openbank-psd2-service",
+              "openbank-incentive-service",
+              "openbank-loyalty-service",
+              "openbank-engagement-service",
+              "openbank-referral-service",
+              "openbank-campaign-service",
+              "openbank-pid-service",
+              "openbank-agent-service",
+              "openbank-authz-policy-auditor",
+              "openbank-governance-auditor",
+              "openbank-statement-service",
+              "openbank-swift-service",
+              "openbank-treasury-service",
+              "openbank-risk-engine",
+              "openbank-card-processing-service",
+              "openbank-tpp-registry-service",
+              "openbank-pension-fund-service",
+              "openbank-tax-reporting-service",
+              "openbank-case-coordinator-agent",
+              "openbank-devops-agent",
+              "openbank-docs-truth-agent",
+              "openbank-finops-agent",
+              "openbank-release-steward",
+              "openbank-control-liveness-sentinel",
+          ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
           matrix, skipped = [], []
@@ -71,7 +146,137 @@ jobs:
               if not port or not db:
                   skipped.append((svc, "cannot derive port/DB"))
                   continue
-              matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1)})
+              # A declared quarkus.redis host means readiness includes the Redis health check
+              # (measured on openbank-fx-service: /api/v1/fx/rates answered 200 while
+              # /q/health/ready stayed 503 — the Redis check was DOWN with no broker). Boot a
+              # throwaway redis alongside postgres so the readiness gate can ever go green.
+              needs_redis = bool(re.search(r"^  redis:\n(?:.*\n)?\s*hosts:", raw, re.M))
+              # Temporal is needed only where a worker registers at boot BY DEFAULT, and the
+              # gate key is NOT uniform across the fleet — measured, per service:
+              #   transaction / sepa-payment  no enabled key → unconditional → dies without
+              #                               a server (gRPC UNAVAILABLE at boot, #13104)
+              #   domestic-payment            gate is openbank.domestic.worker.enabled
+              #                               (default TRUE) → dies without a server;
+              #                               its `temporal.enabled: false` key is UNREAD
+              #                               (measured this PR: boot fails without Temporal
+              #                               despite that key)
+              #   fx-service                  gate openbank.temporal.enabled defaults false
+              #                               → boots fine without (pilot subject)
+              #   flaky-test-hunter           gate TEMPORAL_ENABLED defaults false → same
+              # A grep for `enabled:` in the temporal block cannot decide this (domestic
+              # proves it), so NEED is a measured declaration; the NAMESPACE still comes
+              # from each service's own config — never a list kept here.
+              NEEDS_TEMPORAL = {
+                  "openbank-transaction-service",
+                  "openbank-sepa-payment",
+                  "openbank-domestic-payment",
+                  # openbank.lending.worker.enabled defaults TRUE and
+                  # OriginationTimersWorkerRegistrar registers at StartupEvent —
+                  # dies at boot without a server (measured this PR). Note the
+                  # registrar's WorkerFactory is ALSO Linux-only: the perf-gate
+                  # runner is ubuntu, so a server is sufficient there; a macOS dev
+                  # boot additionally needs -Dopenbank.lending.worker.enabled=false.
+                  "openbank-lending-service",
+                  # its campaign scheduler worker registers against Temporal at BOOT and
+                  # quarkusDev dies with gRPC UNAVAILABLE without a server (measured this
+                  # PR: Connection refused localhost:7233); namespace openbank from its
+                  # own config (OPENBANK_TEMPORAL_NAMESPACE default)
+                  "openbank-campaign-service",
+              }
+              # openbank-incentive-service injects JsonWebToken as a CONSTRUCTOR parameter
+              # (IncentiveResource), so quarkus.oidc.enabled=false leaves the bean
+              # unsatisfied and ArC fails the boot (measured this PR:
+              # UnsatisfiedResolutionException for JsonWebToken). It additionally
+              # refuses to start without a 32+-char PROMO_CODE_PEPPER
+              # (IncentiveApplication startup gate). Both facts are measured
+              # declarations, wired as extra boot args below — OIDC stays ENABLED
+              # for these subjects, with discovery pointed at an unreachable fake
+              # issuer (the smoke probe carries no token, so no JWKS fetch ever
+              # happens and quarkus.security.auth.enabled-in-dev-mode=false keeps
+              # @RolesAllowed permissive, as measured locally).
+              OIDC_REQUIRED = {
+                  "openbank-incentive-service",
+                  # same constructor-injected JsonWebToken (two injection points,
+                  # "Found 2 deployment problems" — measured this PR)
+                  "openbank-campaign-service",
+              }
+              # Kafka dev-services: in dev mode Quarkus STARTS a kafka-native
+              # container (docker.io/apache/kafka-native, a ~590 MB pull) for any
+              # service whose yaml declares smallrye-kafka channels without a
+              # bootstrap-servers address and without devservices disabled. The
+              # first forty-three subjects configure one or the other (measured:
+              # none of them pulls an image at boot), so the gate never
+              # provisioned Kafka. openbank-agent-service and
+              # openbank-statement-service (incoming account-events plus an
+              # outbox outgoing channel, no bootstrap-servers) would pull
+              # kafka-native on every runner boot (measured this PR for
+              # agent-service: the pull starts during quarkusDev). The probes
+              # read JDBC state, not messaging, so the broker stays
+              # unprovisioned and devservices is switched off instead — the
+              # SmallRye incoming connector logs connection-refused without one,
+              # which the disabled messaging health check already absorbs.
+              KAFKA_DEVSERVICES_OFF = {
+                  "openbank-agent-service",
+                  # measured: same kafka-native devservices pull at boot (incoming
+                  # account-events-in + outgoing statement-events-out, no
+                  # bootstrap-servers address in config)
+                  "openbank-statement-service",
+                  # measured: same pull (one smallrye-kafka channel, no
+                  # bootstrap-servers address in config)
+                  "openbank-tax-reporting-service",
+                  # measured: same pull (two smallrye-kafka channels, no
+                  # bootstrap-servers address in config)
+                  "openbank-case-coordinator-agent",
+              }
+              # Observability dev-services: the ADR-0202/0167 agent/sentinel
+              # modules carry quarkus-observability-devservices-lgtm, so dev
+              # mode pulls and starts docker.io/grafana/otel-lgtm (~1 GB) at
+              # boot even with Kafka/OIDC disabled (measured this PR on
+              # openbank-case-coordinator-agent: the container goes unhealthy
+              # on a fresh Docker daemon and IsolatedDevModeMain dies with
+              # ContainerLaunchException, wedging the dev port in a restart
+              # loop). The probes read JDBC state, not telemetry, so ALL
+              # devservices switch off globally — the datasource always has
+              # explicit configuration, so nothing else is lost.
+              DEVSERVICES_OFF = {
+                  "openbank-case-coordinator-agent",
+                  # measured: same lgtm pull at boot (no kafka channels, so it
+                  # is the observability devservice alone that must be off)
+                  "openbank-devops-agent",
+                  # measured: same lgtm pull at boot (no kafka channels)
+                  "openbank-docs-truth-agent",
+                  # measured: same lgtm pull at boot (no kafka channels)
+                  "openbank-finops-agent",
+                  # measured: same lgtm pull at boot (no kafka channels)
+                  "openbank-release-steward",
+                  # measured: same lgtm pull at boot (no kafka channels)
+                  "openbank-control-liveness-sentinel",
+              }
+              temporal = None
+              if svc in NEEDS_TEMPORAL:
+                  # The gap between the block header and `namespace:` varies per service
+                  # (transaction: 1 line, domestic-payment: 2, lending: ~15 of which most
+                  # are #6085 build-time caution comments) — allow up to twenty indented
+                  # continuation lines, so a sibling `task-queue:` cannot satisfy the
+                  # match.
+                  temporal = re.search(
+                      r"^  temporal:\n(?:[ \t][^\n]*\n){0,20}?[ \t]+namespace:\s*\$\{[^:]*:([^}]*)\}", raw, re.M
+                  ) or re.search(
+                      r"^  temporal:\n(?:[ \t][^\n]*\n){0,20}?[ \t]+namespace:\s*([^\s${]+)", raw, re.M
+                  )
+                  if not temporal:
+                      skipped.append((svc, "NEEDS_TEMPORAL but no namespace derivable"))
+                      continue
+              matrix.append({
+                  "service": svc,
+                  "port": int(port.group(1)),
+                  "db": db.group(1),
+                  "redis": "true" if needs_redis else "false",
+                  "temporal": (temporal.group(1).strip() if temporal else ""),
+                  "oidc_required": "true" if svc in OIDC_REQUIRED else "false",
+                  "kafka_devservices": "true" if svc in KAFKA_DEVSERVICES_OFF else "false",
+                  "devservices_off": "true" if svc in DEVSERVICES_OFF else "false",
+              })
           for svc, why in skipped:
               print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
           print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
@@ -136,6 +341,24 @@ jobs:
       SERVICE: ${{ matrix.service }}
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
+      NEEDS_REDIS: ${{ matrix.redis }}
+      # Non-empty only for the derive step's NEEDS_TEMPORAL declaration (the three payment
+      # rails whose workers register at boot by default — see the derive step for the
+      # measured per-service gate keys). Namespace read from the service's own config;
+      # every other subject gets an empty value and the boot skips the server entirely.
+      TEMPORAL_NS: ${{ matrix.temporal }}
+      # "true" only for the derive step's OIDC_REQUIRED declaration (constructor-injected
+      # JsonWebToken — OIDC must stay enabled or ArC fails the boot; see the derive step).
+      OIDC_REQUIRED: ${{ matrix.oidc_required }}
+      # "true" only for the derive step's KAFKA_DEVSERVICES_OFF declaration (smallrye-kafka
+      # channels without a configured broker — dev mode would otherwise pull kafka-native
+      # at boot; see the derive step).
+      KAFKA_DEVSERVICES: ${{ matrix.kafka_devservices }}
+      # "true" only for the derive step's DEVSERVICES_OFF declaration (the
+      # ADR-0202/0167 agent/sentinel modules pull the grafana/otel-lgtm
+      # observability container at boot — devservices switch off globally;
+      # see the derive step).
+      DEVSERVICES_OFF: ${{ matrix.devservices_off }}
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
@@ -185,14 +408,105 @@ jobs:
             exit 1
           fi
 
+          # Only services whose application.yaml declares quarkus.redis.hosts get a broker:
+          # their readiness includes the Redis health check and can never go green without
+          # one. redis:7.2-alpine matches the dast-zap-baseline and api-fuzz-authenticated
+          # throwaway brokers.
+          if [ "${NEEDS_REDIS}" = "true" ]; then
+            echo "==> [${SERVICE}] starting redis (application.yaml declares quarkus.redis.hosts)"
+            docker rm -f perf-redis >/dev/null 2>&1 || true
+            docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
+          fi
+
+          # Only the NEEDS_TEMPORAL subjects (the three payment rails — see the derive
+          # step) get a dev server: their workers register against Temporal at BOOT and
+          # quarkusDev dies with gRPC UNAVAILABLE without one (measured on all three:
+          # connection refused on localhost:7233). temporalio/temporal:1.8.2
+          # `server start-dev` is IN-MEMORY (no extra database) and creates the namespace
+          # it is given — the api-fuzz-authenticated harness's image and readiness probe.
+          if [ -n "${TEMPORAL_NS}" ]; then
+            echo "==> [${SERVICE}] starting Temporal dev server (namespace ${TEMPORAL_NS})"
+            docker rm -f perf-temporal >/dev/null 2>&1 || true
+            docker run -d --name perf-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            TEMPORAL_UP=0
+            for _ in $(seq 1 30); do
+              if docker exec perf-temporal temporal operator namespace describe \
+                   --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1; then
+                TEMPORAL_UP=1; break
+              fi
+              sleep 2
+            done
+            if [ "$TEMPORAL_UP" != "1" ]; then
+              echo "::error::[${SERVICE}] Temporal dev server never became ready"
+              docker logs perf-temporal 2>&1 | tail -20; exit 1
+            fi
+          fi
+
+          # Two advisory flags keep the boot green without provisioning OPA or Kafka, both
+          # measured on openbank-sanctions-service (fifth subject):
+          #   - authz.enforce=false is the ADR-0034 D5 advisory mode — the @Authorize
+          #     interceptor logs "PDP unavailable" and proceeds instead of 503ing the
+          #     route (same flag api-fuzz-authenticated boots with; OIDC is already off).
+          #   - quarkus.messaging.health.enabled=false drops the SmallRye messaging check:
+          #     without a broker it is DOWN for a service with outgoing channels
+          #     (sanctions), UP for one with only incoming (balance) — SmallRye is
+          #     asymmetric here, and the lane times HTTP read handlers, not messaging.
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
+          # OIDC_ARGS: every subject except OIDC_REQUIRED boots with OIDC off (the
+          # unauthenticated-harness default). OIDC_REQUIRED subjects carry a
+          # constructor-injected JsonWebToken and die with the bean unsatisfied when
+          # OIDC is off (measured on openbank-incentive-service) — for them OIDC stays
+          # enabled but discovery is pointed at an unreachable fake issuer with a lazy
+          # JWKS path; the probe carries no token, so nothing is ever fetched.
+          OIDC_ARGS=(-Dquarkus.oidc.enabled=false)
+          if [ "${OIDC_REQUIRED}" = "true" ]; then
+            OIDC_ARGS=(
+              -Dquarkus.oidc.discovery-enabled=false
+              -Dquarkus.oidc.auth-server-url=http://localhost:65535/auth/realms/openbank
+              -Dquarkus.oidc.jwks-path=/protocol/openid-connect/certs
+              -Dquarkus.oidc.client-id=perf-gate
+              -Dquarkus.oidc.credentials.secret=perf-gate
+            )
+          fi
+          # IncentiveApplication refuses to start without a 32+-char pepper
+          # (openbank.incentive.code-pepper, ${PROMO_CODE_PEPPER:} — measured this PR).
+          PEPPER_ARGS=()
+          if [ "${SERVICE}" = "openbank-incentive-service" ]; then
+            PEPPER_ARGS=(-DPROMO_CODE_PEPPER=perf-gate-pepper-0123456789abcdef)
+          fi
+          # KAFKA_DEVSERVICES subjects declare smallrye-kafka channels with no
+          # broker address, so dev mode would pull and start kafka-native
+          # (~590 MB) at boot (measured on openbank-agent-service). The smoke
+          # reads JDBC state, not messaging — switch devservices off and let
+          # the disabled messaging health check absorb the brokerless channel.
+          KAFKA_ARGS=()
+          if [ "${KAFKA_DEVSERVICES}" = "true" ]; then
+            KAFKA_ARGS=(-Dquarkus.kafka.devservices.enabled=false)
+          fi
+          # DEVSERVICES_OFF subjects (the ADR-0202/0167 agent/sentinel modules)
+          # carry quarkus-observability-devservices-lgtm, so dev mode pulls and
+          # starts grafana/otel-lgtm (~1 GB) at boot (measured this PR on
+          # openbank-case-coordinator-agent: the container goes unhealthy on a
+          # fresh Docker daemon and the boot dies with ContainerLaunchException).
+          # Switch ALL devservices off globally — the datasource always has
+          # explicit configuration, so nothing else is lost.
+          DEVSERVICES_ARGS=()
+          if [ "${DEVSERVICES_OFF}" = "true" ]; then
+            DEVSERVICES_ARGS=(-Dquarkus.devservices.enabled=false)
+          fi
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.username=openbank \
             -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
-            -Dquarkus.oidc.enabled=false \
+            "${OIDC_ARGS[@]}" \
+            "${PEPPER_ARGS[@]}" \
+            "${KAFKA_ARGS[@]}" \
+            "${DEVSERVICES_ARGS[@]}" \
             -Dquarkus.security.auth.enabled-in-dev-mode=false \
+            -Dauthz.enforce=false \
+            -Dquarkus.messaging.health.enabled=false \
             -Dquarkus.management.enabled=false \
             -Dquarkus.console.basic=true \
             --console=plain --quiet \
@@ -244,7 +558,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg >/dev/null 2>&1 || true
+          docker rm -f perf-pg perf-redis perf-temporal >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()

@@ -5,6 +5,7 @@
 package com.openbank.simulation.runner
 
 import com.openbank.sepa.domain.model.SepaPayment
+import com.openbank.sepainstant.domain.model.SctInstPayment
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.simulation.adapters.AuditLog
 import com.openbank.simulation.adapters.BalanceProjection
@@ -13,10 +14,14 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
+import com.openbank.simulation.model.ClearingCycleBook
+import com.openbank.simulation.model.FxConversionBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
+import com.openbank.simulation.model.SddCollectionBook
 import com.openbank.simulation.model.SimPaymentSaga
 import com.openbank.simulation.model.StatementCloseBook
+import com.openbank.simulation.model.SwiftMessageBook
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -53,6 +58,37 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // here so the Layer-3 invariants can assert every one reaches a terminal state.
     val sepaPayments = mutableListOf<SepaPayment>()
     val settlements = mutableListOf<Settlement>()
+
+    // Money-path SCT Inst adoption: the REAL `SctInstPayment` (sepa-instant) aggregate driven by
+    // SctInstPaymentScenario — same terminal-state completeness invariant as the SEPA pair above.
+    val sctInstPayments = mutableListOf<SctInstPayment>()
+
+    // Money-path clearing adoption: the REAL `ClearingItem`/`ClearingBatch`/`ClearingCycleResult`
+    // aggregates (clearing-service) driven by ClearingCycleScenario, with the per-rail cycle book
+    // the completeness/conservation invariants assert over — same terminal-state role as the
+    // SEPA/settlement/sct-inst lists above.
+    val clearing = ClearingCycleBook()
+
+    // Money-path SEPA Direct Debit adoption: the REAL `SddMandate` aggregates (sdd-service) driven
+    // through the real MandateLifecycle state machine by SddCollectionScenario, plus the
+    // per-collection record the money-side invariants assert over (production has no collection
+    // aggregate — the debit goes straight through the transaction path).
+    val sdd = SddCollectionBook()
+
+    // Money-path SWIFT adoption: the REAL `SwiftMessage` aggregates (swift-service) driven through
+    // the real validate() admission and the production transition mapping (scheme verdict →
+    // settlement → operator ack/reject) by SwiftMessageScenario, plus the per-message settlement
+    // posting the money-side invariants assert over (production persists no settlement record —
+    // the booking is a transaction-service journal keyed by the message, ADR-0108).
+    val swift = SwiftMessageBook()
+
+    // Money-path FX adoption: the REAL `FxConversion` aggregates (fx-service) priced with the real
+    // `CnbFixingRate.ratePerUnit` normalisation, `FxRate.inverted()` spread-side logic and
+    // `FxConversionMath` margin arithmetic, driven by FxConversionScenario, plus the per-conversion
+    // CZK+foreign journal pair the money-side invariants assert over (production persists no
+    // settlement record — the booking is a transaction-service journal pair keyed by the
+    // conversion).
+    val fx = FxConversionBook()
 
     // ADR-0143 phase 2d/2e: the billing fee-conservation invariant's state (Σ fees assessed == Σ
     // fee journals posted per cycle/account/fee/currency). Populated by FeeBillingScenario every

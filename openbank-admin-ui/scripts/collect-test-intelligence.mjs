@@ -249,6 +249,36 @@ const simulationScenarios = [
   { classname: 'com.openbank.simulation.scenario.FeeBillingScenarioTest', components: ['openbank-billing-service'], scope: 'Billing fee domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.InterestAccrualScenarioTest', components: ['openbank-interest-service'], scope: 'Interest accrual domain scenario (pure JVM)' },
   { classname: 'com.openbank.simulation.scenario.StatementCloseScenarioTest', components: ['openbank-statement-service'], scope: 'Statement close domain scenario (pure JVM)' },
+  // #8364 PD/LGD calibration governance: the replay is deterministic, spans every
+  // IFRS 9 stage bucket and discriminates between parameter sets — money-path
+  // lending evidence that previously never reached the matrix because the class
+  // was missing from this mapping (the JUnit XML existed, the projection did not).
+  { classname: 'com.openbank.simulation.scenario.LendingEclCalibrationScenarioTest', components: ['openbank-lending-service'], scope: 'IFRS 9 ECL calibration replay scenario (pure JVM, #8364)' },
+  // Cross-cutting conservation invariants: same simulation harness, class-level
+  // granularity. Each maps to the domain whose bookkeeping it proves balanced.
+  { classname: 'com.openbank.simulation.invariants.BillingFeeConservationInvariantTest', components: ['openbank-billing-service'], scope: 'Billing fee conservation invariant sweep (pure JVM)' },
+  { classname: 'com.openbank.simulation.invariants.InterestConservationInvariantTest', components: ['openbank-interest-service'], scope: 'Interest accrual conservation invariant sweep (pure JVM)' },
+  { classname: 'com.openbank.simulation.invariants.StatementCloseIntegrityInvariantTest', components: ['openbank-statement-service'], scope: 'Statement close integrity invariant sweep (pure JVM)' },
+  // Money-path SCT Inst adoption: drives the real sepa-instant SctInstPayment status machine
+  // and the real SctInstSchemeRules EUR-only admission under the fault injector.
+  { classname: 'com.openbank.simulation.scenario.SctInstPaymentScenarioTest', components: ['openbank-sepa-instant'], scope: 'SCT Inst instant-payment settlement, timeout and recall scenario (pure JVM, EUR scheme legs)' },
+  // Money-path clearing adoption: drives the real clearing-service ClearingItem/ClearingBatch
+  // aggregates and the real NetSettlementJournalFactory settleable-currency/GL-pair resolution
+  // under the fault injector (per-rail, per-currency batches with net-settlement legs).
+  { classname: 'com.openbank.simulation.scenario.ClearingCycleScenarioTest', components: ['openbank-clearing-service'], scope: 'Clearing cycle batching, net-settlement posting, conflict reversal and reported-not-dropped scenario (pure JVM)' },
+  // Money-path SEPA Direct Debit adoption: drives the real sdd-service SddMandate aggregate through
+  // the real MandateLifecycle state machine, the real CollectionAuthorisationPolicy decisions and
+  // the real RefundPolicy windows under the fault injector (EUR debit/refund legs).
+  { classname: 'com.openbank.simulation.scenario.SddCollectionScenarioTest', components: ['openbank-sdd-service'], scope: 'SEPA Direct Debit mandate lifecycle, collection authorisation, EUR debit/refund and idle-expiry scenario (pure JVM, EUR scheme legs)' },
+  // Money-path SWIFT adoption: drives the real swift-service SwiftMessage aggregate through the
+  // real validate() admission and the production scheme → settlement → operator transition
+  // mapping under the fault injector (multi-currency correspondent settlement legs).
+  { classname: 'com.openbank.simulation.scenario.SwiftMessageScenarioTest', components: ['openbank-swift-service'], scope: 'SWIFT cross-border message admission, scheme verdict, correspondent settlement, conflict reversal and operator acknowledgement scenario (pure JVM, multi-currency legs)' },
+  // Money-path FX adoption: drives the real fx-service domain — CnbFixingRate per-unit
+  // normalisation, FxRate.inverted() spread-side logic, FxConversionMath cross-scale margin
+  // arithmetic and the fail-closed ScreeningPolicy — under the fault injector (CZK customer leg +
+  // foreign GL journal pair per conversion).
+  { classname: 'com.openbank.simulation.scenario.FxConversionScenarioTest', components: ['openbank-fx-service'], scope: 'FX conversion pricing, sanctions screening, CZK customer leg + foreign journal pair, conflict reversal scenario (pure JVM)' },
 ]
 
 async function simulationScenarioEvidence() {

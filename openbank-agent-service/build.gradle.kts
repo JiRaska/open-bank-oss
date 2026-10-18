@@ -52,6 +52,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Consumer-driven pacts (ADR-0063): pins the downstream contracts the MCP read tool serializes
+    // (first hop: account lookup — see AgentAccountLookupPactConsumerTest). pact rootDir forwarding
+    // is centralised in build-logic (openbank.quarkus-service.gradle.kts).
+    testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))

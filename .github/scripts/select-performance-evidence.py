@@ -22,6 +22,61 @@ UNKNOWN = 4
 EXPECTED_GATE = (
     ("perf-reports-openbank-product-catalog", "k6 smoke (openbank-product-catalog)"),
     ("perf-reports-openbank-flaky-test-hunter", "k6 smoke (openbank-flaky-test-hunter)"),
+    ("perf-reports-openbank-fx-service", "k6 smoke (openbank-fx-service)"),
+    ("perf-reports-openbank-balance-service", "k6 smoke (openbank-balance-service)"),
+    ("perf-reports-openbank-sanctions-service", "k6 smoke (openbank-sanctions-service)"),
+    ("perf-reports-openbank-consent-service", "k6 smoke (openbank-consent-service)"),
+    ("perf-reports-openbank-ledger-service", "k6 smoke (openbank-ledger-service)"),
+    ("perf-reports-openbank-interest-service", "k6 smoke (openbank-interest-service)"),
+    ("perf-reports-openbank-kyc-service", "k6 smoke (openbank-kyc-service)"),
+    ("perf-reports-openbank-transaction-service", "k6 smoke (openbank-transaction-service)"),
+    ("perf-reports-openbank-sepa-payment", "k6 smoke (openbank-sepa-payment)"),
+    ("perf-reports-openbank-domestic-payment", "k6 smoke (openbank-domestic-payment)"),
+    ("perf-reports-openbank-sepa-instant", "k6 smoke (openbank-sepa-instant)"),
+    ("perf-reports-openbank-standing-order-service", "k6 smoke (openbank-standing-order-service)"),
+    ("perf-reports-openbank-party-service", "k6 smoke (openbank-party-service)"),
+    ("perf-reports-openbank-notification-service", "k6 smoke (openbank-notification-service)"),
+    ("perf-reports-openbank-account-service", "k6 smoke (openbank-account-service)"),
+    ("perf-reports-openbank-clearing-service", "k6 smoke (openbank-clearing-service)"),
+    ("perf-reports-openbank-sdd-service", "k6 smoke (openbank-sdd-service)"),
+    ("perf-reports-openbank-billing-service", "k6 smoke (openbank-billing-service)"),
+    ("perf-reports-openbank-document-service", "k6 smoke (openbank-document-service)"),
+    ("perf-reports-openbank-aml-service", "k6 smoke (openbank-aml-service)"),
+    ("perf-reports-openbank-fraud-service", "k6 smoke (openbank-fraud-service)"),
+    ("perf-reports-openbank-audit-service", "k6 smoke (openbank-audit-service)"),
+    ("perf-reports-openbank-lending-service", "k6 smoke (openbank-lending-service)"),
+    ("perf-reports-openbank-dispute-service", "k6 smoke (openbank-dispute-service)"),
+    ("perf-reports-openbank-card-issuance-service", "k6 smoke (openbank-card-issuance-service)"),
+    ("perf-reports-openbank-communication-service", "k6 smoke (openbank-communication-service)"),
+    ("perf-reports-openbank-delegation-service", "k6 smoke (openbank-delegation-service)"),
+    ("perf-reports-openbank-anacredit-service", "k6 smoke (openbank-anacredit-service)"),
+    ("perf-reports-openbank-kyb-service", "k6 smoke (openbank-kyb-service)"),
+    ("perf-reports-openbank-onboarding-service", "k6 smoke (openbank-onboarding-service)"),
+    ("perf-reports-openbank-sca-service", "k6 smoke (openbank-sca-service)"),
+    ("perf-reports-openbank-psd2-service", "k6 smoke (openbank-psd2-service)"),
+    ("perf-reports-openbank-incentive-service", "k6 smoke (openbank-incentive-service)"),
+    ("perf-reports-openbank-loyalty-service", "k6 smoke (openbank-loyalty-service)"),
+    ("perf-reports-openbank-engagement-service", "k6 smoke (openbank-engagement-service)"),
+    ("perf-reports-openbank-referral-service", "k6 smoke (openbank-referral-service)"),
+    ("perf-reports-openbank-campaign-service", "k6 smoke (openbank-campaign-service)"),
+    ("perf-reports-openbank-pid-service", "k6 smoke (openbank-pid-service)"),
+    ("perf-reports-openbank-agent-service", "k6 smoke (openbank-agent-service)"),
+    ("perf-reports-openbank-authz-policy-auditor", "k6 smoke (openbank-authz-policy-auditor)"),
+    ("perf-reports-openbank-governance-auditor", "k6 smoke (openbank-governance-auditor)"),
+    ("perf-reports-openbank-statement-service", "k6 smoke (openbank-statement-service)"),
+    ("perf-reports-openbank-swift-service", "k6 smoke (openbank-swift-service)"),
+    ("perf-reports-openbank-treasury-service", "k6 smoke (openbank-treasury-service)"),
+    ("perf-reports-openbank-risk-engine", "k6 smoke (openbank-risk-engine)"),
+    ("perf-reports-openbank-card-processing-service", "k6 smoke (openbank-card-processing-service)"),
+    ("perf-reports-openbank-tpp-registry-service", "k6 smoke (openbank-tpp-registry-service)"),
+    ("perf-reports-openbank-pension-fund-service", "k6 smoke (openbank-pension-fund-service)"),
+    ("perf-reports-openbank-tax-reporting-service", "k6 smoke (openbank-tax-reporting-service)"),
+    ("perf-reports-openbank-case-coordinator-agent", "k6 smoke (openbank-case-coordinator-agent)"),
+    ("perf-reports-openbank-devops-agent", "k6 smoke (openbank-devops-agent)"),
+    ("perf-reports-openbank-docs-truth-agent", "k6 smoke (openbank-docs-truth-agent)"),
+    ("perf-reports-openbank-finops-agent", "k6 smoke (openbank-finops-agent)"),
+    ("perf-reports-openbank-release-steward", "k6 smoke (openbank-release-steward)"),
+    ("perf-reports-openbank-control-liveness-sentinel", "k6 smoke (openbank-control-liveness-sentinel)"),
 )
 BASELINE_ARTIFACT = "k6-money-path-summary"
 OVERRIDE_SCOPE = re.compile(
@@ -251,6 +306,281 @@ def self_test() -> int:
                 "started_at": "2026-09-01T12:05:00Z",
                 "conclusion": "failure",
             },
+            {
+                "name": "k6 smoke (openbank-fx-service)",
+                "started_at": "2026-09-01T12:06:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-balance-service)",
+                "started_at": "2026-09-01T12:07:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sanctions-service)",
+                "started_at": "2026-09-01T12:08:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-consent-service)",
+                "started_at": "2026-09-01T12:09:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-ledger-service)",
+                "started_at": "2026-09-01T12:10:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-interest-service)",
+                "started_at": "2026-09-01T12:11:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-kyc-service)",
+                "started_at": "2026-09-01T12:12:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-transaction-service)",
+                "started_at": "2026-09-01T12:13:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sepa-payment)",
+                "started_at": "2026-09-01T12:14:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-domestic-payment)",
+                "started_at": "2026-09-01T12:15:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sepa-instant)",
+                "started_at": "2026-09-01T12:16:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-standing-order-service)",
+                "started_at": "2026-09-01T12:17:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-party-service)",
+                "started_at": "2026-09-01T12:18:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-notification-service)",
+                "started_at": "2026-09-01T12:19:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-account-service)",
+                "started_at": "2026-09-01T12:20:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-clearing-service)",
+                "started_at": "2026-09-01T12:21:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sdd-service)",
+                "started_at": "2026-09-01T12:22:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-billing-service)",
+                "started_at": "2026-09-01T12:23:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-document-service)",
+                "started_at": "2026-09-01T12:24:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-aml-service)",
+                "started_at": "2026-09-01T12:25:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-fraud-service)",
+                "started_at": "2026-09-01T12:26:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-audit-service)",
+                "started_at": "2026-09-01T12:27:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-lending-service)",
+                "started_at": "2026-09-01T12:28:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-dispute-service)",
+                "started_at": "2026-09-01T12:29:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-card-issuance-service)",
+                "started_at": "2026-09-01T12:30:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-communication-service)",
+                "started_at": "2026-09-01T12:31:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-delegation-service)",
+                "started_at": "2026-09-01T12:32:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-anacredit-service)",
+                "started_at": "2026-09-01T12:33:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-kyb-service)",
+                "started_at": "2026-09-01T12:34:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-onboarding-service)",
+                "started_at": "2026-09-01T12:35:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-sca-service)",
+                "started_at": "2026-09-01T12:36:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-psd2-service)",
+                "started_at": "2026-09-01T12:37:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-incentive-service)",
+                "started_at": "2026-09-01T12:38:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-loyalty-service)",
+                "started_at": "2026-09-01T12:39:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-engagement-service)",
+                "started_at": "2026-09-01T12:40:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-referral-service)",
+                "started_at": "2026-09-01T12:41:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-campaign-service)",
+                "started_at": "2026-09-01T12:42:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-pid-service)",
+                "started_at": "2026-09-01T12:43:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-agent-service)",
+                "started_at": "2026-09-01T12:44:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-authz-policy-auditor)",
+                "started_at": "2026-09-01T12:45:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-governance-auditor)",
+                "started_at": "2026-09-01T12:46:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-statement-service)",
+                "started_at": "2026-09-01T12:47:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-swift-service)",
+                "started_at": "2026-09-01T12:48:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-treasury-service)",
+                "started_at": "2026-09-01T12:49:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-risk-engine)",
+                "started_at": "2026-09-01T12:50:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-card-processing-service)",
+                "started_at": "2026-09-01T12:51:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-tpp-registry-service)",
+                "started_at": "2026-09-01T12:52:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-pension-fund-service)",
+                "started_at": "2026-09-01T12:53:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-tax-reporting-service)",
+                "started_at": "2026-09-01T12:54:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-case-coordinator-agent)",
+                "started_at": "2026-09-01T12:55:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-devops-agent)",
+                "started_at": "2026-09-01T12:56:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-docs-truth-agent)",
+                "started_at": "2026-09-01T12:57:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-finops-agent)",
+                "started_at": "2026-09-01T12:58:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-release-steward)",
+                "started_at": "2026-09-01T12:59:00Z",
+                "conclusion": "failure",
+            },
+            {
+                "name": "k6 smoke (openbank-control-liveness-sentinel)",
+                "started_at": "2026-09-01T13:00:00Z",
+                "conclusion": "failure",
+            },
         ]
     }
     scope, policies = gate_policies(jobs, attempt_start)
@@ -261,6 +591,171 @@ def self_test() -> int:
         ),
         "perf-reports-openbank-flaky-test-hunter": ArtifactWindow(
             instant("2026-09-01T12:05:00Z")
+        ),
+        "perf-reports-openbank-fx-service": ArtifactWindow(
+            instant("2026-09-01T12:06:00Z")
+        ),
+        "perf-reports-openbank-balance-service": ArtifactWindow(
+            instant("2026-09-01T12:07:00Z")
+        ),
+        "perf-reports-openbank-sanctions-service": ArtifactWindow(
+            instant("2026-09-01T12:08:00Z")
+        ),
+        "perf-reports-openbank-consent-service": ArtifactWindow(
+            instant("2026-09-01T12:09:00Z")
+        ),
+        "perf-reports-openbank-ledger-service": ArtifactWindow(
+            instant("2026-09-01T12:10:00Z")
+        ),
+        "perf-reports-openbank-interest-service": ArtifactWindow(
+            instant("2026-09-01T12:11:00Z")
+        ),
+        "perf-reports-openbank-kyc-service": ArtifactWindow(
+            instant("2026-09-01T12:12:00Z")
+        ),
+        "perf-reports-openbank-transaction-service": ArtifactWindow(
+            instant("2026-09-01T12:13:00Z")
+        ),
+        "perf-reports-openbank-sepa-payment": ArtifactWindow(
+            instant("2026-09-01T12:14:00Z")
+        ),
+        "perf-reports-openbank-domestic-payment": ArtifactWindow(
+            instant("2026-09-01T12:15:00Z")
+        ),
+        "perf-reports-openbank-sepa-instant": ArtifactWindow(
+            instant("2026-09-01T12:16:00Z")
+        ),
+        "perf-reports-openbank-standing-order-service": ArtifactWindow(
+            instant("2026-09-01T12:17:00Z")
+        ),
+        "perf-reports-openbank-party-service": ArtifactWindow(
+            instant("2026-09-01T12:18:00Z")
+        ),
+        "perf-reports-openbank-notification-service": ArtifactWindow(
+            instant("2026-09-01T12:19:00Z")
+        ),
+        "perf-reports-openbank-account-service": ArtifactWindow(
+            instant("2026-09-01T12:20:00Z")
+        ),
+        "perf-reports-openbank-clearing-service": ArtifactWindow(
+            instant("2026-09-01T12:21:00Z")
+        ),
+        "perf-reports-openbank-sdd-service": ArtifactWindow(
+            instant("2026-09-01T12:22:00Z")
+        ),
+        "perf-reports-openbank-billing-service": ArtifactWindow(
+            instant("2026-09-01T12:23:00Z")
+        ),
+        "perf-reports-openbank-document-service": ArtifactWindow(
+            instant("2026-09-01T12:24:00Z")
+        ),
+        "perf-reports-openbank-aml-service": ArtifactWindow(
+            instant("2026-09-01T12:25:00Z")
+        ),
+        "perf-reports-openbank-fraud-service": ArtifactWindow(
+            instant("2026-09-01T12:26:00Z")
+        ),
+        "perf-reports-openbank-audit-service": ArtifactWindow(
+            instant("2026-09-01T12:27:00Z")
+        ),
+        "perf-reports-openbank-lending-service": ArtifactWindow(
+            instant("2026-09-01T12:28:00Z")
+        ),
+        "perf-reports-openbank-dispute-service": ArtifactWindow(
+            instant("2026-09-01T12:29:00Z")
+        ),
+        "perf-reports-openbank-card-issuance-service": ArtifactWindow(
+            instant("2026-09-01T12:30:00Z")
+        ),
+        "perf-reports-openbank-communication-service": ArtifactWindow(
+            instant("2026-09-01T12:31:00Z")
+        ),
+        "perf-reports-openbank-delegation-service": ArtifactWindow(
+            instant("2026-09-01T12:32:00Z")
+        ),
+        "perf-reports-openbank-anacredit-service": ArtifactWindow(
+            instant("2026-09-01T12:33:00Z")
+        ),
+        "perf-reports-openbank-kyb-service": ArtifactWindow(
+            instant("2026-09-01T12:34:00Z")
+        ),
+        "perf-reports-openbank-onboarding-service": ArtifactWindow(
+            instant("2026-09-01T12:35:00Z")
+        ),
+        "perf-reports-openbank-sca-service": ArtifactWindow(
+            instant("2026-09-01T12:36:00Z")
+        ),
+        "perf-reports-openbank-psd2-service": ArtifactWindow(
+            instant("2026-09-01T12:37:00Z")
+        ),
+        "perf-reports-openbank-incentive-service": ArtifactWindow(
+            instant("2026-09-01T12:38:00Z")
+        ),
+        "perf-reports-openbank-loyalty-service": ArtifactWindow(
+            instant("2026-09-01T12:39:00Z")
+        ),
+        "perf-reports-openbank-engagement-service": ArtifactWindow(
+            instant("2026-09-01T12:40:00Z")
+        ),
+        "perf-reports-openbank-referral-service": ArtifactWindow(
+            instant("2026-09-01T12:41:00Z")
+        ),
+        "perf-reports-openbank-campaign-service": ArtifactWindow(
+            instant("2026-09-01T12:42:00Z")
+        ),
+        "perf-reports-openbank-pid-service": ArtifactWindow(
+            instant("2026-09-01T12:43:00Z")
+        ),
+        "perf-reports-openbank-agent-service": ArtifactWindow(
+            instant("2026-09-01T12:44:00Z")
+        ),
+        "perf-reports-openbank-authz-policy-auditor": ArtifactWindow(
+            instant("2026-09-01T12:45:00Z")
+        ),
+        "perf-reports-openbank-governance-auditor": ArtifactWindow(
+            instant("2026-09-01T12:46:00Z")
+        ),
+        "perf-reports-openbank-statement-service": ArtifactWindow(
+            instant("2026-09-01T12:47:00Z")
+        ),
+        "perf-reports-openbank-swift-service": ArtifactWindow(
+            instant("2026-09-01T12:48:00Z")
+        ),
+        "perf-reports-openbank-treasury-service": ArtifactWindow(
+            instant("2026-09-01T12:49:00Z")
+        ),
+        "perf-reports-openbank-risk-engine": ArtifactWindow(
+            instant("2026-09-01T12:50:00Z")
+        ),
+        "perf-reports-openbank-card-processing-service": ArtifactWindow(
+            instant("2026-09-01T12:51:00Z")
+        ),
+        "perf-reports-openbank-tpp-registry-service": ArtifactWindow(
+            instant("2026-09-01T12:52:00Z")
+        ),
+        "perf-reports-openbank-pension-fund-service": ArtifactWindow(
+            instant("2026-09-01T12:53:00Z")
+        ),
+        "perf-reports-openbank-tax-reporting-service": ArtifactWindow(
+            instant("2026-09-01T12:54:00Z")
+        ),
+        "perf-reports-openbank-case-coordinator-agent": ArtifactWindow(
+            instant("2026-09-01T12:55:00Z")
+        ),
+        "perf-reports-openbank-devops-agent": ArtifactWindow(
+            instant("2026-09-01T12:56:00Z")
+        ),
+        "perf-reports-openbank-docs-truth-agent": ArtifactWindow(
+            instant("2026-09-01T12:57:00Z")
+        ),
+        "perf-reports-openbank-finops-agent": ArtifactWindow(
+            instant("2026-09-01T12:58:00Z")
+        ),
+        "perf-reports-openbank-release-steward": ArtifactWindow(
+            instant("2026-09-01T12:59:00Z")
+        ),
+        "perf-reports-openbank-control-liveness-sentinel": ArtifactWindow(
+            instant("2026-09-01T13:00:00Z")
         ),
     }
     artifacts = {

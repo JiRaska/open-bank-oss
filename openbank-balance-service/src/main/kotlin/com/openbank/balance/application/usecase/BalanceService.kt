@@ -25,6 +25,7 @@ private const val SQLSTATE_UNIQUE_VIOLATION = "23505"
 private const val HOLD_REFERENCE_CONSTRAINT = "uq_balance_holds_reference"
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // 1:1 impl of BalanceUseCase — each function is one port operation
 class BalanceService(
     private val balanceRepo: BalanceRepository,
     private val holdRepo: HoldRepository,
@@ -107,6 +108,10 @@ class BalanceService(
 
     override suspend fun getBalances(accountId: UUID): List<Balance> =
         balanceRepo.findAllByAccountId(accountId).map { withValueDateBasis(it) }
+
+    // Active holds only: released or expired reservations are history, not a reservation. The
+    // agent's get_balance_holds read tool (ADR-0195-style read surface) is the first caller.
+    override suspend fun getHolds(accountId: UUID): List<BalanceHold> = holdRepo.findActiveByAccountId(accountId)
 
     override suspend fun placeHold(cmd: PlaceHoldCommand): BalanceHold {
         // Idempotent replay (ADR-0287, #8351): the referenceId names one durable business fact, so a
