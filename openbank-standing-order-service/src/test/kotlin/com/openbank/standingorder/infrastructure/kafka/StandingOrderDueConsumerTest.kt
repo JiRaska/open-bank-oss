@@ -5,10 +5,11 @@
 package com.openbank.standingorder.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
 import com.openbank.standingorder.infrastructure.client.CreateSepaPaymentRequest
-import com.openbank.standingorder.infrastructure.client.InitiateTransactionRequest
 import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
 import com.openbank.standingorder.infrastructure.client.TransactionServiceClient
 import io.mockk.coEvery
@@ -17,9 +18,11 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -126,8 +129,8 @@ class StandingOrderDueConsumerTest {
             every { accountClient.getByIban("DE89370400440532013000") } returns
                 Uni.createFrom().item(Response.ok(lookupBody).build())
             val req = slot<InitiateTransactionRequest>()
-            every { transactionClient.initiate(capture(req)) } returns
-                Uni.createFrom().item(Response.status(201).build())
+            every { transactionClient.initiateTransaction(capture(req)) } returns
+                Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
             coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
 
             consumer.consume(dueEvent(paymentType = "DOMESTIC"))
@@ -153,7 +156,7 @@ class StandingOrderDueConsumerTest {
             consumer.consume(dueEvent(paymentType = "INTERNAL"))
 
             coVerify(exactly = 1) { useCase.recordFailure(orderId) }
-            coVerify(exactly = 0) { transactionClient.initiate(any()) }
+            coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
         }
 
     /**
@@ -178,7 +181,7 @@ class StandingOrderDueConsumerTest {
             consumer.consume(dueEvent(paymentType = "INTERNAL"))
 
             coVerify(exactly = 1) { useCase.recordFailure(orderId) }
-            coVerify(exactly = 0) { transactionClient.initiate(any()) }
+            coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
         }
 
     @Test
@@ -193,23 +196,49 @@ class StandingOrderDueConsumerTest {
         consumer.consume(dueEvent(paymentType = "INTERNAL", orderPartyId = null))
 
         coVerify(exactly = 1) { useCase.recordFailure(orderId) }
-        coVerify(exactly = 0) { transactionClient.initiate(any()) }
+        coVerify(exactly = 0) { transactionClient.initiateTransaction(any()) }
     }
 
+    // A rejection (4xx) reaches the consumer as the REST client's exception, never as a Response. It
+    // is the previous "non-2xx" behaviour: recorded as a failed execution, not retried (a refused
+    // transfer refuses identically on every delivery). The real-socket proof is TransactionClientOutcomeIT.
     @Test
-    fun `a rejected internal transfer records a failure, not a confirmed execution`(): Unit = runBlocking {
-        val lookupBody = mapper.writeValueAsString(
-            mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
-        )
-        every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
-        every { transactionClient.initiate(any()) } returns Uni.createFrom().item(Response.status(422).build())
-        coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
+    fun `a rejected internal transfer (4xx) is recorded as a failed execution and never confirmed`(): Unit =
+        runBlocking {
+            val lookupBody = mapper.writeValueAsString(
+                mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
+            )
+            every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { transactionClient.initiateTransaction(any()) } returns
+                Uni.createFrom().failure(WebApplicationException(422))
+            coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
 
-        consumer.consume(dueEvent(paymentType = "DOMESTIC"))
+            consumer.consume(dueEvent(paymentType = "DOMESTIC"))
 
-        coVerify(exactly = 1) { useCase.recordFailure(orderId) }
-        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
-    }
+            coVerify(exactly = 1) { useCase.recordFailure(orderId) }
+            coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+            io.mockk.verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
+        }
+
+    // A 5xx says nothing about whether the transfer booked: retried, rethrown for the connector to
+    // dead-letter, and NOT recorded as a failure.
+    @Test
+    fun `an unavailable transaction-service (5xx) is retried and rethrown, not recorded as a failure`(): Unit =
+        runBlocking {
+            val lookupBody = mapper.writeValueAsString(
+                mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
+            )
+            every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
+            every { transactionClient.initiateTransaction(any()) } returns
+                Uni.createFrom().failure(WebApplicationException(503))
+
+            assertThatThrownBy { runBlocking { consumer.consume(dueEvent(paymentType = "DOMESTIC")) } }
+                .isInstanceOf(WebApplicationException::class.java)
+
+            io.mockk.verify(exactly = 3) { transactionClient.initiateTransaction(any()) }
+            coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+            coVerify(exactly = 0) { useCase.recordFailure(any()) }
+        }
 
     @Test
     fun `DOMESTIC order with no creditorIban records a failure without calling account-service`(): Unit = runBlocking {
