@@ -121,6 +121,8 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // PageInfoContractBindingTest pins the spec's pagination fields to the server's real PageInfo.
+    testImplementation(project(":openbank-libs-runtime"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

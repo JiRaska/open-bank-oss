@@ -4,20 +4,21 @@
 
 // Unit register lookup (ADR-0334, openbank-pension-fund-service): the unit holdings of one
 // contract per fund, valued at each fund's latest published NAV, and the orders still waiting for
-// a forward price. The contract id is validated as a UUID before any call (search rule #2).
+// a forward price. The operator finds the client by name, then picks one of the client's contracts.
 
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { Layers } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
-import { fundUrl, getJson, PENSION_FUND } from '@/components/pension/api'
-import { contractValuationSchema, fundListSchema, type ContractValuation } from '@/components/pension/contracts'
+import { fundUrl, getJson, PENSION, PENSION_FUND, pensionUrl } from '@/components/pension/api'
+import { contractValuationSchema, fundListSchema, pensionContractListSchema, type ContractValuation, type PensionContract } from '@/components/pension/contracts'
 import { FundRef } from '@/components/pension/FundRef'
-import { isUuid } from '@/components/pension/model'
+import { statusLabel } from '@/components/pension/model'
+import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export default function PensionHoldingsPage() {
@@ -32,24 +33,32 @@ function Holdings() {
   const { t, language } = useLanguage()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const num = (v: number, digits = 2) => v.toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: Math.max(digits, 6) })
-  const [query, setQuery] = useState('')
-  const [hint, setHint] = useState<string | null>(null)
+  const [party, setParty] = useState<PartyHit | null>(null)
+  const [contracts, setContracts] = useState<PensionContract[] | null>(null)
+  const [contractsKind, setContractsKind] = useState<UnavailableKind | null>(null)
   const [valuation, setValuation] = useState<ContractValuation | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [fundNames, setFundNames] = useState<ReadonlyMap<string, string>>(new Map())
 
-  const lookUp = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!isUuid(query)) { setHint(t('Zadejte ID smlouvy ve formátu UUID.', 'Enter the contract id as a UUID.')); return }
-    setHint(null)
+  const lookUp = async (contractId: string) => {
     const [res, funds] = await Promise.all([
-      getJson(fundUrl(`/contracts/${encodeURIComponent(query.trim())}/holdings`), contractValuationSchema),
+      getJson(fundUrl(`/contracts/${encodeURIComponent(contractId)}/holdings`), contractValuationSchema),
       getJson(fundUrl('/funds'), fundListSchema),
     ])
     if (funds.ok) setFundNames(new Map(funds.data.map(f => [f.id, f.name])))
     if (!res.ok) { setUnavailable({ kind: res.kind }); setValuation(null); return }
     setUnavailable(null)
     setValuation(res.data)
+  }
+
+  const choose = async (hit: PartyHit) => {
+    setParty(hit); setContracts(null); setContractsKind(null); setValuation(null); setUnavailable(null)
+    const res = await getJson(pensionUrl('/contracts', { q: hit.id, limit: '100' }), pensionContractListSchema)
+    if (!res.ok) { setContractsKind(res.kind); return }
+    const own = res.data.filter(c => c.participantPartyId === hit.id)
+    // A pasted contract id is not a party id: when nothing belongs to it as a party, read it as a contract.
+    if (own.length === 0 && !hit.legalName) { void lookUp(hit.id); return }
+    setContracts(own)
   }
 
   return (
@@ -60,13 +69,36 @@ function Holdings() {
         icon={<Layers size={20} aria-hidden="true" />}
       />
 
-      <form className="card" onSubmit={lookUp} style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div style={{ flex: '1 1 320px' }}>
-          <input className="input" value={query} onChange={e => setQuery(e.target.value)} placeholder={t('ID smlouvy (UUID)', 'Contract id (UUID)')} aria-label={t('ID smlouvy', 'Contract id')} style={{ width: '100%' }} />
-          {hint && <div role="alert" style={{ fontSize: 12, color: 'var(--danger-text)', marginTop: 4 }}>{hint}</div>}
+      <PartySearch onSelect={hit => void choose(hit)} selectedId={party?.id} />
+
+      {party && (
+        <div className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>{t('Klient', 'Client')}: <strong>{party.legalName || party.tradingName || partyDisplayName(party)}</strong></div>
+          {contractsKind ? <DataUnavailable kind={contractsKind} service={PENSION} feature={t('smlouvy klienta', 'client contracts')} lang={language} dense />
+            : contracts === null ? null
+            : contracts.length === 0 ? <DataUnavailable kind="no_data" service={PENSION} feature={t('smlouvy klienta', 'client contracts')} lang={language} dense />
+            : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead><tr>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Produkt', 'Product')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('Počátek', 'Start')}</th>
+                  <th scope="col" />
+                </tr></thead>
+                <tbody>
+                  {contracts.slice(0, 25).map(c => (
+                    <tr key={c.contractId}>
+                      <td>{`${c.productLine} · ${c.jurisdiction}`}</td>
+                      <td>{statusLabel(c.status, t)}</td>
+                      <td>{c.startDate ?? '—'}</td>
+                      <td><button type="button" className="btn btn-secondary btn-sm" onClick={() => void lookUp(c.contractId)}>{t('Zobrazit jednotky', 'Show holdings')}</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
         </div>
-        <button type="submit" className="btn btn-primary btn-sm">{t('Vyhledat', 'Look up')}</button>
-      </form>
+      )}
 
       <div className="card" style={{ overflowX: 'auto' }}>
         {unavailable ? (

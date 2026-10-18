@@ -335,7 +335,12 @@ class TestIntelligenceValidationTest {
     @Test
     fun `an idempotency key on a non-operator trigger is rejected before any workflow is started`() {
         assertThatThrownBy {
-            runBlocking { service.startDetached(RunTrigger.SCHEDULED, "flaky-test-hunter-operator-manual-2026-08-22") }
+            runBlocking {
+                service.startDetached(
+                    RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK,
+                    "flaky-test-hunter-operator-manual-2026-08-22",
+                )
+            }
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("only supported for operator workflows")
     }

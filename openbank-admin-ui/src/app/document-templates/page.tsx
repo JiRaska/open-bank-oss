@@ -18,6 +18,7 @@ import { sandboxedPreviewDocument } from '@/lib/documents/sandboxedPreview'
 import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { looksLikeUuid } from '@/lib/validation/iban'
 import { PageHeader, StatusBadge, Tabs, type TabItem, type Tone } from '@/components/ui'
 
@@ -956,6 +957,25 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
   const [loading, setLoading] = useState(false)
   const [doc, setDoc] = useState<DocumentMeta | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [client, setClient] = useState<PartyHit | null>(null)
+  const [clientDocs, setClientDocs] = useState<DocumentMeta[] | null>(null)
+  const [clientLoading, setClientLoading] = useState(false)
+
+  // Primary flow: pick a client, list THEIR documents (bounded; document-service GET ?partyRef=).
+  const pickClient = useCallback(async (party: PartyHit) => {
+    setClient(party); setClientDocs(null); setDoc(null); setInvalid(false); setUnavailable(null)
+    setClientLoading(true)
+    try {
+      const res = await fetch(svcUrl(SERVICE, `${DOCUMENTS_PATH}?partyRef=${encodeURIComponent(party.id)}&page=0&size=25`), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+      if (!res.ok) { setUnavailable({ kind: await classifyBffFailure(res) }); return }
+      const body = await res.json() as unknown
+      setClientDocs(Array.isArray(body) ? (body as DocumentMeta[]).slice(0, 25) : [])
+    } catch {
+      setUnavailable({ kind: 'unreachable' })
+    } finally {
+      setClientLoading(false)
+    }
+  }, [])
 
   const lookup = useCallback(async () => {
     const id = idInput.trim()
@@ -986,15 +1006,38 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
 
   return (
     <div>
+      <PartySearch
+        selectedId={client?.id}
+        busy={clientLoading}
+        onSelect={p => void pickClient(p)}
+        placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
+      />
+      {clientLoading && <div role="status" style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>{t('Načítám dokumenty klienta…', 'Loading the client’s documents…')}</div>}
+      {clientDocs && clientDocs.length === 0 && !doc && (
+        <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
+          <DataUnavailable kind="no_data" feature={t('Dokumenty klienta', 'Client documents')} lang={language} dense />
+        </div>
+      )}
+      {clientDocs && clientDocs.length > 0 && (
+        <div className="card" style={{ padding: '8px 0', marginBottom: '16px' }} aria-label={t('Dokumenty klienta', 'Client documents')}>
+          {client && <div style={{ padding: '4px 16px', fontSize: '12px', color: 'var(--text-muted)' }}>{partyDisplayName(client)}</div>}
+          {clientDocs.map(d => (
+            <button key={d.id} type="button" className="btn btn-secondary" style={{ display: 'flex', width: '100%', justifyContent: 'space-between', border: 'none', borderRadius: 0 }} onClick={() => setDoc(d)}>
+              <span>{d.templateCode ?? t('Dokument', 'Document')}{d.templateVersion ? ` v${d.templateVersion}` : ''}</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{d.createdAt ?? ''} {d.status ?? ''}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="card" style={{ padding: '16px 20px', marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: '260px' }}>
           <Hash size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
           <input
             id="document-id"
-            aria-label={t('ID dokumentu', 'Document ID')}
+            aria-label={t('Technické ID dokumentu (pokročilé)', 'Technical document ID (advanced)')}
             className="input"
             style={{ paddingLeft: '30px', width: '100%', fontFamily: 'var(--font-mono)' }}
-            placeholder={t('ID dokumentu (UUID)…', 'Document ID (UUID)…')}
+            placeholder={t('Technické ID dokumentu (pokročilé)…', 'Technical document ID (advanced)…')}
             value={idInput}
             onChange={e => { setIdInput(e.target.value); setInvalid(false) }}
             onKeyDown={e => { if (e.key === 'Enter') lookup() }}
@@ -1007,7 +1050,7 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
 
       {invalid && (
         <div className="card" style={{ padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: 'var(--warning-text)', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)' }}>
-          {t('Zadejte platné UUID dokumentu (např. z e-mailu s potvrzením podpisu).', 'Enter a valid document UUID (e.g. from a signature-confirmation email).')}
+          {t('Zadejte platné technické ID dokumentu (např. z e-mailu s potvrzením podpisu).', 'Enter a valid technical document ID (e.g. from a signature-confirmation email).')}
         </div>
       )}
 
@@ -1021,8 +1064,8 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
         <div className="card" style={{ padding: 0 }}>
           <DataUnavailable kind="no_data" feature={t('Vyhledání dokumentu', 'Document lookup')} lang={language} dense
             detail={t(
-              'Zadejte ID vygenerovaného dokumentu — seznam všech dokumentů zatím backend nevystavuje (jen vyhledání podle ID).',
-              'Enter a generated document ID — the backend does not yet expose a bulk list, only lookup by ID.',
+              'Vyhledejte klienta a vyberte jeho dokument; technické ID je jen pokročilá možnost.',
+              'Find a client and pick one of their documents; the technical ID is an advanced fallback.',
             )} />
         </div>
       )}
