@@ -73,3 +73,7 @@ v náhledu. Seedování návrhu zachová existující publikovanou verzi stejné
 znění publikujte existujícím kontrolovaným postupem.
 
 Ostré renderování odmítá také dříve publikovanou šablonu obsahující `LEGAL-REVIEW-REQUIRED`, ještě před vytvořením nebo uložením PDF. Existující řádky seedu s pevným ID se nepřepisují; data volajícího tuto kontrolu nemohou obejít.
+
+## Propagace trace přes outbox
+
+Řádek outboxu ukládá W3C `traceparent` požadavku, který ho zapsal (`document_outbox.trace_context`, migrace `V16`, nullable). Dispatcher publikuje záznam s hlavičkou `traceparent` a producer span navazuje na uložený kontext, takže span konzumenta se propojí s původním požadavkem místo toho, aby trace začínala na vlákně plánovače. Řádky zapsané mimo jakýkoli span hodnotu nenesou a publikují se jako dříve.

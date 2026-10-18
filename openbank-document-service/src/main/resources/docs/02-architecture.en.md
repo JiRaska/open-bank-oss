@@ -73,3 +73,7 @@ Drafts remain available for authoring review and preview. Seeding a draft preser
 published version of the same code; publish reviewed wording through the existing reviewed process.
 
 Live rendering also refuses any previously published template containing `LEGAL-REVIEW-REQUIRED`, before creating or storing a PDF. Existing fixed-ID seed rows are not rewritten; caller data cannot bypass this guard.
+
+## Outbox trace propagation
+
+The outbox row stores the W3C `traceparent` of the request that wrote it (`document_outbox.trace_context`, migration `V16`, nullable). The dispatcher publishes the record with that `traceparent` header and parents its producer span on the stored context, so a consumer span links to the originating request instead of starting a trace at the scheduler thread. Rows written outside any span carry no value and are published as before.
