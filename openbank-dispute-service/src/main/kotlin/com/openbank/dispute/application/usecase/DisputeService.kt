@@ -32,6 +32,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @ApplicationScoped
@@ -158,7 +159,20 @@ class DisputeService(
      */
     override fun addEvidence(disputeId: UUID, evidence: DisputeEvidence): Uni<DisputeEvidence> =
         evidenceRepo.findLatestByDisputeId(disputeId).flatMap { previous ->
-            val stamped = evidence.copy(disputeId = disputeId, submittedAt = OffsetDateTime.now(clock))
+            // The recordHash below commits to submittedAt's toString(). Two database realities
+            // break a naively-stamped value on read-back: timestamptz truncates nanoseconds to
+            // microseconds, and the reactive pg client returns timestamptz in UTC while the bank
+            // clock stamps in Europe/Prague — so both the precision AND the offset must be
+            // canonicalised before hashing, or every legitimately-created chain verifies BROKEN.
+            // Audit-service hit the identical defect (#3505, micro truncation); the offset half
+            // is this service's own, because it hashes OffsetDateTime rather than Instant. The
+            // DisputeLifecycleE2E evidence-chain journey pins this over a real database.
+            val stamped = evidence.copy(
+                disputeId = disputeId,
+                submittedAt = OffsetDateTime.now(clock)
+                    .truncatedTo(ChronoUnit.MICROS)
+                    .withOffsetSameInstant(java.time.ZoneOffset.UTC),
+            )
             val chained = EvidenceChain.append(stamped, previous)
             evidenceRepo.save(chained).flatMap { saved ->
                 val event = DisputeTimelineEvent(
