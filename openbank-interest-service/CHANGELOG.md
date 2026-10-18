@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.23.0...interest-service-v0.24.0) (2026-10-18)
+
+
+### Features
+
+* **interest:** give interest-service its own catalog read grant ([#13181](https://github.com/JiRaska/open-bank-oss/issues/13181)) ([c90df18](https://github.com/JiRaska/open-bank-oss/commit/c90df18b680a81902a3c5bb197f2f05daf6167df))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.22.1...interest-service-v0.23.0) (2026-10-16)
 
 
