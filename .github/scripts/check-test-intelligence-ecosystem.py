@@ -875,7 +875,7 @@ def check(root: Path) -> list[str]:
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
-        "pitest.yml": ("--mutation-report", "--mutation-threshold 70", "Build mutation Test Intelligence envelope"),
+        "pitest.yml": ("--mutation-report", '--mutation-threshold "$PITEST_MUTATION_THRESHOLD"', "Build mutation Test Intelligence envelope"),
     }.items():
         workflow = text(root / ".github/workflows" / workflow_name)
         for needle in required:

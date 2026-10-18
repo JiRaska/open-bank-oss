@@ -99,3 +99,7 @@ Nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true` v gitops env, nech pod nastartovat,
 ## Integrační testy a příznak service-account (fail closed)
 
 OPA považuje každého volajícího, jehož token neprokazuje osobu, za service account (`input.principal.service_account`, fail closed). Prostá identita `@TestSecurity` nenese JWT, takže se počítá jako stroj a přichází o oprávnění vyhrazená lidem. Integrační testy, které vystupují jako skuteční zaměstnanci, proto přidávají lidské claimy přes `@OidcSecurity`. Proto modul testuje s `quarkus-test-security-oidc`.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
