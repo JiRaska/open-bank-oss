@@ -80,18 +80,19 @@ test.describe('sanctions maker-checker workflow', () => {
     await page.getByRole('button', { name: /Submit decision|Odeslat rozhodnutí/ }).click()
 
     await expect(page.getByText(/Awaiting a second approver|Čeká na druhého schvalovatele/)).toBeVisible()
-    await expect(page.getByText(approval.id, { exact: true })).toBeVisible()
+    // The raw approval id is no longer shown to operators: the second operator finds it in the queue.
+    await expect(page.getByText(approval.id, { exact: true })).toHaveCount(0)
     expect(reviewRequests).toBe(1)
 
     const queueRow = page.getByText(approval.action).locator('..').locator('..')
     await queueRow.getByRole('button', { name: /Select|Vybrat/ }).click()
-    await expect(page.getByLabel(/Approval id|ID žádosti/)).toHaveValue(approval.id)
+    await expect(queueRow.getByRole('button', { name: /Selected|Vybráno/ })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#sanctions-approval-id')).toContainText(approval.action)
     await page.getByRole('button', { name: /Approve|Schválit/, exact: true }).click()
 
     const dialog = page.getByRole('alertdialog')
     await expect(dialog).toContainText(approval.action)
     await expect(dialog).toContainText(approval.makerId)
-    await expect(dialog).toContainText(approval.id)
     const confirm = dialog.getByRole('button', { name: /Confirm approval|Potvrdit schválení/ })
     await confirm.click()
     await expect(dialog.getByRole('alert')).toContainText(/Decision failed|Rozhodnutí selhalo/)

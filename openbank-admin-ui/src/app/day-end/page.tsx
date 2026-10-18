@@ -31,6 +31,7 @@ import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ShortId } from '@/components/ui'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { RegulatoryPeriodPanel } from '@/components/closings/RegulatoryPeriodPanel'
 import { DayCloseParticipantsPanel } from '@/components/closings/DayCloseParticipantsPanel'
@@ -959,7 +960,7 @@ function RunRows({ run, expandable, isOpen, fState, excludedCount, onToggle, sta
                 <tbody>
                   {fState.map(f => (
                     <tr key={f.id} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 10px 6px 0', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)' }}>{f.accountId}</td>
+                      <td style={{ padding: '6px 10px 6px 0', color: 'var(--text-secondary)' }}><ShortId value={f.accountId} copyLabel={t('Kopírovat ID účtu', 'Copy account ID')} /></td>
                       <td style={{ padding: '6px 10px', fontWeight: 600, color: 'var(--text-primary)' }}>{f.pocketCurrency}</td>
                       <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{fmtPeriod(f)}</td>
                       <td style={{ padding: '6px 10px' }}>
