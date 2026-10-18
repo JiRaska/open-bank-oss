@@ -278,7 +278,7 @@ spec:
                 port: http-web
                 apiVersion: v2
                 pathPrefix: /tools/alertmanager
-            # 12h retention (FinOps per ADR-0027; the 5Gi PVC below is sized for it).
+            # 30d retention (ADR-0088 D3; was 12h under ADR-0027 until 2026-09-30, see below).
             # GOTCHA (governance-as-code, ADR-0029): for Prometheus >= 3.11 the operator
             # renders this into the Prometheus *config file* (storage.tsdb.retention.time)
             # and NO LONGER passes the --storage.tsdb.retention.time CLI flag. So
