@@ -14,17 +14,12 @@ package com.openbank.clients.transaction
 sealed interface TransactionCallOutcome<out T> {
 
     /**
-     * A 2xx status was PROVEN. The booking happened whether or not its body can be read - a caller
-     * must treat this as booked and must not retry it.
-     *
-     * - [body] is the parsed response when it could be read;
-     * - a 204 and an empty 200/201 are `Booked(status, body = null, bodyError = null)`: booked, and
-     *   there is no id to be had;
-     * - an unreadable body is `Booked(status, body = null, bodyError = <why>)`;
-     * - a `WebApplicationException` that carries a 2xx status (a client that failed while reading the
-     *   answer) is also `Booked(status, null, bodyError = <that exception>)`.
+     * HTTP 2xx, with an optional decoded body or its read error. This generic result alone does
+     * NOT prove a booking: [TransactionClient.initiate] and [TransactionClient.reverse] validate
+     * readable COMPLETED status before exposing it. [TransactionClient.list] is a read and does
+     * not apply that write-completion rule; page entries may have any transaction status.
      */
-    data class Booked<T>(val status: Int, val body: T?, val bodyError: Exception?) : TransactionCallOutcome<T>
+    data class HttpSuccess<T>(val status: Int, val body: T?, val bodyError: Exception?) : TransactionCallOutcome<T>
 
     /** 409: a concurrent-state conflict. Whether it proves an earlier identical booking is the caller's call. */
     data object Conflict : TransactionCallOutcome<Nothing>

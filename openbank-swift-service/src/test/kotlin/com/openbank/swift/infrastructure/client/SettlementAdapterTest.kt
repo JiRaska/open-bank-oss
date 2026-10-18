@@ -95,27 +95,23 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `a 204 is NOT a booking - it carries none`(): Unit = runBlocking {
+    fun `a 204 is not a booking - the facade treats it as uncertain and the caller retries`() {
         every { client.initiateTransaction(any()) } returns Uni.createFrom().item(Response.status(204).build())
 
-        val outcome = adapter.settle(message())
-
-        assertThat(outcome.settled).isFalse()
-        assertThat(outcome.transactionId).isNull()
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
     }
 
     @Test
-    fun `a 2xx with an unreadable body is still a booking, just without an id`(): Unit = runBlocking {
+    fun `a 2xx with an unreadable body is uncertain, never a booking - it is retried`() {
         val response = mockk<Response>(relaxed = true)
         every { response.status } returns 201
         every { response.hasEntity() } returns true
         every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException("garbled")
         every { client.initiateTransaction(any()) } returns Uni.createFrom().item(response)
 
-        val outcome = adapter.settle(message())
-
-        assertThat(outcome.settled).isTrue()
-        assertThat(outcome.transactionId).isNull()
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
     }
 
     @Test

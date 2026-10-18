@@ -181,8 +181,7 @@ class SwiftSettlementPactConsumerTest {
             // Reflected off the client, NOT retyped: this is the path the real client issues.
             .post(clientDerivedTransactionsPath())
             .then()
-            // SettlementAdapter.ACCEPTED_STATUSES is {200, 201, 202}; anything else leaves the
-            // message SENT with settled = false and no retry path.
+            // The shared TransactionClient facade requires a readable COMPLETED body on a 2xx.
             .statusCode(201)
             .extract().jsonPath()
 

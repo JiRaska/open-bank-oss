@@ -70,8 +70,8 @@ v transaction-service přes jeho generovaného, typovaného klienta. `valueDate`
 v základním ISO tvaru MT103 (`YYYYMMDD`), zatímco transaction-service parsuje ISO-8601 (`YYYY-MM-DD`),
 proto adaptér hodnotu před odesláním převede; dříve odcházelo surové `YYYYMMDD` a zaúčtování nemohlo být
 přijato. Uložená hodnota, která už nejde parsovat, nic neodešle a zpráva zůstane `SENT`. Za zaúčtování se
-počítá jen HTTP 200/201/202; `409`, `400`/`422` a jakékoli jiné 2xx (včetně `204`) nechají zprávu
-ve stavu `SENT`; `5xx` nebo přerušené spojení se ohlásí jako nedostupnost a volající ho zopakuje.
+počítá 2xx jen tehdy, když sdílený klient přečte transakci ve stavu COMPLETED (cokoli jiného, včetně `204`,
+je nejisté a volající zopakuje); `409` a `400`/`422` nechají zprávu ve stavu `SENT`; `5xx` nebo přerušené spojení se ohlásí jako nedostupnost a volající ho zopakuje.
 API kontrakt této služby (`valueDate` `^\d{8}$`) se nemění.
 
 | Vstup | Odpověď |

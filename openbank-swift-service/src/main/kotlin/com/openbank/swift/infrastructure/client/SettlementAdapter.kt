@@ -7,7 +7,6 @@ package com.openbank.swift.infrastructure.client
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
-import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
@@ -59,7 +58,8 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
 
         return try {
             when (val outcome = transactions.initiate(request).awaitSuspending()) {
-                is TransactionCallOutcome.Booked -> booked(message, outcome)
+                is TransactionCallOutcome.HttpSuccess ->
+                    SettlementOutcome(settled = true, transactionId = outcome.body?.id)
                 // transaction-service WAS reached and refused: the message stays SENT, as it always did.
                 TransactionCallOutcome.Conflict -> refused(message, HTTP_CONFLICT)
                 is TransactionCallOutcome.Rejected -> refused(message, outcome.status)
@@ -91,15 +91,6 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         instructionType = "ONE_OFF",
     )
 
-    private fun booked(
-        message: SwiftMessage,
-        outcome: TransactionCallOutcome.Booked<TransactionResponse>,
-    ): SettlementOutcome {
-        // Only 200/201/202 are a booking. A 204 (or any other 2xx) carries no booking, so it does not settle.
-        if (outcome.status !in ACCEPTED_STATUSES) return refused(message, outcome.status)
-        return SettlementOutcome(settled = true, transactionId = outcome.body?.id)
-    }
-
     private fun refused(message: SwiftMessage, status: Int): SettlementOutcome {
         log.warnf(
             "transaction-service returned HTTP %d for SWIFT message %s settlement; message stays SENT",
@@ -110,7 +101,6 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     }
 
     private companion object {
-        val ACCEPTED_STATUSES = setOf(200, 201, 202)
         const val HTTP_CONFLICT = 409
     }
 }
