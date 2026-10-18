@@ -164,7 +164,18 @@ interface CardLookupPort {
  * (ADR-0252 phase 0, #4348): a skipped no-op and a real success sharing one signal cannot be told
  * apart afterwards, by anyone, at any effort.
  */
-enum class PostingOutcome { POSTED, SKIPPED_DISABLED, FAILED }
+enum class PostingOutcome {
+    POSTED,
+    SKIPPED_DISABLED,
+    FAILED,
+
+    /**
+     * The answer could not be read, so it is NOT known whether the ledger booked the debit (a body
+     * that does not bind, a connection cut). Neither a success nor a failure; a re-driver must use the
+     * same idempotency key, which transaction-service dedupes.
+     */
+    UNKNOWN,
+}
 
 data class PostingResult(val outcome: PostingOutcome, val transactionId: UUID?, val detail: String?)
 
