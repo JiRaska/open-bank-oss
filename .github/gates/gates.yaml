@@ -108,6 +108,20 @@ gates:
       # merge carries the reason onto main.
       python3 .github/scripts/check-coverage-floor-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
 
+  - id: trace-contract-evidence
+    name: "A module that asserts a TraceContract also emits its verifiedAs marker (ADR-0273, enforced)"
+    group: kotlin
+    mode: enforced
+    min_subjects: 15   # 23 modules use the trace-contract assertion API on 2026-10-17
+    budget_seconds: 30   # walks every src/test/kotlin tree once; ~2s idle, 21s on a loaded laptop
+    rationale: "The Test Intelligence trace column is filled only by TraceContract.verifiedAs printing OPENBANK_TRACE_CONTRACT_V1:<id> into the JUnit XML; a test that chains requiresSpan/hasNoErrorSpan without verifiedAs asserts the trace and reports nothing, so the module reads as having no trace evidence while its tests are green. The self-test builds exactly that fixture and must go red."
+    review_after: "2027-10-17"
+    selftest: python3 .github/scripts/check-trace-contract-evidence.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-trace-contract-evidence.py"]
+    run: |
+      python3 .github/scripts/check-trace-contract-evidence.py
+
   - id: pitest-threshold-single-source
     name: "pitest.yml reads one mutation threshold in every lane (enforced)"
     group: lint
