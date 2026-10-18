@@ -578,6 +578,15 @@ def bounded_kover_report(workflow: str) -> bool:
     ) is not None
 
 
+def admin_collector_source(root: Path) -> str:
+    """The collector plus the run-envelope projection it shares with the per-commit evidence
+    publisher (#13201): together they are the admin projection this gate reads."""
+    return "\n".join(text(root / relative) for relative in (
+        "openbank-admin-ui/scripts/collect-test-intelligence.mjs",
+        "openbank-admin-ui/src/lib/test-intelligence-run-projection.mjs",
+    ))
+
+
 def check(root: Path) -> list[str]:
     errors: list[str] = []
     schema_file = root / "openbank-libs/governance/test-intelligence-run.schema.json"
@@ -831,7 +840,7 @@ def check(root: Path) -> list[str]:
             errors.append(f"admin deployment cannot project Pact Broker verification evidence: {needle}")
     if "[ ! -d openbank-simulation ] || printf '%s\\n' openbank-simulation" not in deploy:
         errors.append("admin deployment omits the unreleased deterministic-simulation envelope")
-    collector = text(root / "openbank-admin-ui/scripts/collect-test-intelligence.mjs")
+    collector = admin_collector_source(root)
     for needle in ("const tooling = exists(path.join(repo, simulation)) ? [simulation] : []",
                    "const envelope = runEnvelope(simulation)"):
         if needle not in collector:
@@ -866,7 +875,7 @@ def check(root: Path) -> list[str]:
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
-        "pitest.yml": ("--mutation-report", "--mutation-threshold 70", "Build mutation Test Intelligence envelope"),
+        "pitest.yml": ("--mutation-report", '--mutation-threshold "$PITEST_MUTATION_THRESHOLD"', "Build mutation Test Intelligence envelope"),
     }.items():
         workflow = text(root / ".github/workflows" / workflow_name)
         for needle in required:
@@ -1009,7 +1018,7 @@ def check(root: Path) -> list[str]:
     ):
         if needle not in synthetic_workflow:
             errors.append(message)
-    collector = text(root / "openbank-admin-ui/scripts/collect-test-intelligence.mjs")
+    collector = admin_collector_source(root)
     for needle, message in (
         ("evidence.kind !== 'synthetic'", "Admin projection ignores retained synthetic run evidence"),
         ("latestCi.set", "Admin projection cannot select the latest synthetic CI verdict"),
