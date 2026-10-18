@@ -292,4 +292,16 @@ class CloseParticipationServiceTest {
         assertThatThrownBy { CloseParticipantsModeValidator(badConfig).onStart(StartupEvent()) }
             .isInstanceOf(IllegalStateException::class.java)
     }
+
+    @Test
+    fun `a replayed waiver keeps the existing WAIVED row instead of appending a duplicate`() {
+        val waived = CloseParticipationRecord(
+            LocalDate.of(2026, 10, 16), "interest", ParticipationOutcome.WAIVED, 0, 0, "outage", "operator",
+            Instant.parse("2026-10-17T03:00:00Z"), false,
+        )
+        val guard = CloseParticipationService.waiveGuard(LocalDate.of(2026, 10, 16), "interest")
+
+        assertThat(guard.check(waived, AccountingDayStatus.CUTOFF)).isEqualTo(AppendVerdict.KeepExisting)
+        assertThat(guard.check(null, AccountingDayStatus.CUTOFF)).isEqualTo(AppendVerdict.Append)
+    }
 }

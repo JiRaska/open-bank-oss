@@ -250,7 +250,7 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 - **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
   `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
-  reports RAN / SKIPPED / REFUSED for a day), `POST …/{participant}/waive` (operator), `GET` (read
+  reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
   roles). New table `ledger_close_participation` (V31, append-only history). `AccountingDayScheduler`
   now also requires every declared participant to have reported before `CUTOFF → TIED_OUT`
   (`openbank.ledger.close.participants-mode`, ships `shadow`). **STRIDE-S/E:** the PUT is admitted

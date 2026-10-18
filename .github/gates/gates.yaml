@@ -3854,6 +3854,7 @@ gates:
     group: kotlin
     mode: advisory
     budget_seconds: 30  # one rglob over */src/main/**.kt; measured ~2s locally
+    verified: "2026-10-18 — 1 participant (interest) declared in rules.yaml, ledger application.yaml and wired by InterestCloseParticipationScheduler; 0 findings; --self-test flags principal drift, a missing reporter and an undeclared ledger participant"
     rationale: >-
       The participant set is the denominator of the day-close completeness check; a set kept in
       three files without a comparison drifts exactly like the hand-kept gate scopes this repo has

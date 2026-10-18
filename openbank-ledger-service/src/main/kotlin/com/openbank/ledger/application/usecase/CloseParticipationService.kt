@@ -233,9 +233,15 @@ class CloseParticipationService(
             }
         }
 
-        /** Day must exist and be in CUTOFF; the participant's LATEST report must not be RAN. */
+        /**
+         * Day must exist and be in CUTOFF; the participant's LATEST report must not be RAN. A waiver
+         * replayed onto a participant that is already WAIVED returns the existing row instead of
+         * appending a duplicate, which is what makes `PUT …/waiver` idempotent on its path
+         * (ADR-0294 idiom).
+         */
         fun waiveGuard(businessDate: LocalDate, participant: String) = AppendGuard { latest, dayStatus ->
             when {
+                latest?.outcome == ParticipationOutcome.WAIVED -> AppendVerdict.KeepExisting
                 dayStatus == null -> AppendVerdict.Reject(
                     AccountingDayNotFoundException(
                         "Accounting day $businessDate has not been opened - nothing to waive",

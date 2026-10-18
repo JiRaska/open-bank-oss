@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [accounting-close, ledger, interest]
-summary: "Product services that post on a calendar report a per-accounting-day participation record to ledger-service; a day leaves CUTOFF only when every declared participant reported or an operator waived it, and a refused post is reported, not dropped."
+summary: "Calendar-driven product services report a per-accounting-day participation record to ledger-service; a day leaves CUTOFF only when every declared participant reported or an operator waived it, and a refused post is reported."
 followup: "#13167 — billing, lending, treasury, pension and pension-fund participants follow interest one PR each"
 ---
 
@@ -65,7 +65,7 @@ narrowed by that binding, so no new OPA action or bundle restamp is needed.
 CUTOFF day only when the tie-out is OK **and** every declared participant has a record for the day.
 A participant that has not reported holds the day in CUTOFF, where ADR-0207's stuck-CUTOFF gauge
 and alert already page. An operator may **waive** a missing participant
-(`POST …/participants/{name}/waive`, `ledger.approve`, mandatory reason), which records an explicit
+(`PUT …/participants/{name}/waiver`, `ledger.approve`, mandatory reason), which records an explicit
 `WAIVED` row with the operator's identity — the ADR-0078 "recorded exception with a reason", never
 a silent pass. The check ships in `shadow` (`openbank.ledger.close.participants-mode`), counting the
 days it *would* have held, for the same reason ADR-0207 shipped the day lock that way.

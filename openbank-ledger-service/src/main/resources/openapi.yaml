@@ -775,8 +775,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}/waive:
-    post:
+  /api/v1/ledger/accounting-days/{businessDate}/participants/{participant}/waiver:
+    put:
       tags: [AccountingDay]
       summary: Waive a missing day-close participant (ADR-0342 D3)
       description: >

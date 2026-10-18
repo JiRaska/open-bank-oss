@@ -216,6 +216,14 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  close_participants_declared:
+    detect: ["rules.yaml close_participants vs openbank-ledger-service application.yaml openbank.ledger.close.participants vs services constructing a CloseParticipationReporter in src/main"]
+    require:
+      - "every declared day-close participant is waited for by the ledger, with the same principal, and reported by its service (ADR-0342 D2)"
+    gate: close-participants-declared
+    enforced: advisory
+    target_enforce_date: "2027-01-17"   # ADR-0342: enforce once billing and lending participants have landed through it
+    ci_producer: ".github/scripts/check-close-participants.py"
   money_rounding_inline_construction:
     detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
     require:

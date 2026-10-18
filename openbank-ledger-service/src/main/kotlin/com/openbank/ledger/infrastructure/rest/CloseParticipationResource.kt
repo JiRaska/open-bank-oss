@@ -17,7 +17,6 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
-import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -36,7 +35,7 @@ import java.time.LocalDate
  * - `PUT …/{participant}` — a product service reports its outcome for the day. Admitted under
  *   `ledger.create`, the grant each participant already holds to post journals; the use case then
  *   narrows it to the ONE service-account declared for that participant.
- * - `POST …/{participant}/waive` — an operator records that a missing participant is not required
+ * - `PUT …/{participant}/waiver` — an operator records that a missing participant is not required
  *   for this day. `ledger.approve`, like every other day transition.
  * - `GET` — the day's completeness: every declared participant with its latest record, or MISSING.
  *   `complete` is false while any participant is missing OR its latest report is REFUSED.
@@ -99,8 +98,8 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
         return Response.ok(saved.toResponse()).build()
     }
 
-    @POST
-    @Path("/{participant}/waive")
+    @PUT
+    @Path("/{participant}/waiver")
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "ledger.approve", resource = "#participant")
     @Operation(summary = "Waive a missing participant for this day; the reason is mandatory and recorded")
@@ -151,9 +150,27 @@ data class ReportParticipationRequest(
 
 data class WaiveParticipationRequest(val reason: String?)
 
+/**
+ * What the completeness view shows per participant: the latest [ParticipationOutcome], or [MISSING]
+ * for a declared participant that has not reported. A wire vocabulary of its own, because MISSING is
+ * the absence of a record and never a stored outcome.
+ */
+enum class ParticipantDayStatus {
+    RAN,
+    SKIPPED,
+    REFUSED,
+    WAIVED,
+    MISSING,
+    ;
+
+    companion object {
+        fun of(outcome: ParticipationOutcome): ParticipantDayStatus = valueOf(outcome.name)
+    }
+}
+
 data class ParticipationResponse(
     val participant: String,
-    val status: String,
+    val status: ParticipantDayStatus,
     val journalsPosted: Int,
     val itemsProcessed: Int,
     val reason: String?,
@@ -162,10 +179,8 @@ data class ParticipationResponse(
     val late: Boolean,
 ) {
     companion object {
-        const val MISSING = "MISSING"
-
         fun missing(participant: String) =
-            ParticipationResponse(participant, MISSING, 0, 0, null, null, null, late = false)
+            ParticipationResponse(participant, ParticipantDayStatus.MISSING, 0, 0, null, null, null, late = false)
     }
 }
 
@@ -179,7 +194,7 @@ data class CloseCompletenessResponse(
 
 private fun CloseParticipationRecord.toResponse() = ParticipationResponse(
     participant = participant,
-    status = outcome.name,
+    status = ParticipantDayStatus.of(outcome),
     journalsPosted = journalsPosted,
     itemsProcessed = itemsProcessed,
     reason = reason,
