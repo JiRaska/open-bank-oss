@@ -86,3 +86,17 @@ Tato služba **nemá vrstvu `Idempotency-Key`**. Vstupní Kafka cesta je at-leas
 - **Release:** `version.txt = 0.4.0`, vlastněno release-please. Obě osy jsou nezávislé a nesmí se nutit do rovnosti.
 
 > **Pozn. ke specifikaci:** `openapi.yaml` `servers[0].url` uvádí port `8125`; služba ve skutečnosti naslouchá na `8112` (viz `application.yaml`). `8112` berte jako autoritativní; URL serveru ve specifikaci je zastaralý příklad.
+
+## Spravované šablony notifikací: kdo smí co
+
+`/api/v1/notification-templates` (ADR-0333 D6) odděluje přípravu návrhu od publikace:
+
+| Endpoint | OPA akce | Role |
+|---|---|---|
+| `POST /` (návrh) | `commstemplate.create` | `ROLE_OPERATOR`, `ROLE_ADMIN` |
+| `GET /`, `GET /{id}` | `commstemplate.read` | `ROLE_OPERATOR`, `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+| `POST /preview` | `commstemplate.preview` | `ROLE_OPERATOR`, `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+| `POST /{id}/publish` | `commstemplate.publish` | `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+
+Strojové identity jsou odmítnuty u všech akcí bez ohledu na roli. Publikace navíc odmítne
+autora revize (`409`), a to i administrátora.

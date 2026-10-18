@@ -92,22 +92,49 @@ class PartyRepositoryImpl(
     // gin_trgm_ops indexes cover the names; the rest are bounded by the same page limit). The
     // term arrives already LIKE-escaped from SearchRequest, so `%`/`_` typed by the user match
     // literally (ESCAPE '\'). Keyset pagination by partyId for constant cost at any depth.
-    // Birth number stays out by design (data-minimisation, see openapi.yaml) — the RČ blind
-    // index is used for dedup, not search.
-    override suspend fun searchByBusinessKeys(escapedTerm: String, limit: Int, afterId: UUID?): List<Party> =
-        Panache.withSession {
-            val pattern = "%${escapedTerm.lowercase()}%"
-            val predicate =
-                "(lower(legalName) like ?1 escape '\\' or lower(tradingName) like ?1 escape '\\' " +
-                    "or lower(email) like ?1 escape '\\' or lower(phone) like ?1 escape '\\' " +
-                    "or lower(taxId) like ?1 escape '\\' or lower(registrationNumber) like ?1 escape '\\') "
-            val query = if (afterId != null) {
-                find("$predicate and partyId > ?2 order by partyId", pattern, afterId)
-            } else {
-                find("$predicate order by partyId", pattern)
-            }
-            query.page(0, limit).list()
-        }.awaitSuspending().map { it.toDomain() }
+    // Personal identifiers (tax id, birth number…) are NOT substring-matched here — that would let
+    // the surface enumerate them by prefix; findByIdentifier matches them exactly instead.
+    // [birthDates] narrows a name match to the date(s) of birth parsed out of the term.
+    override suspend fun searchByBusinessKeys(
+        escapedTerm: String,
+        limit: Int,
+        afterId: UUID?,
+        birthDates: List<String>,
+    ): List<Party> = Panache.withSession {
+        // Every word must match somewhere (AND), each word anywhere in a name/contact field (OR),
+        // accent- and case-insensitively: "novak jan" finds "Jan Novák". The term is folded the
+        // same way in Kotlin (foldForSearch) as party_fold() folds the columns (V27).
+        val params = mutableMapOf<String, Any>()
+        val words = foldForSearch(escapedTerm).split(' ').filter { it.isNotBlank() }.ifEmpty { listOf("") }
+        var predicate = words.withIndex().joinToString(" and ", prefix = "(", postfix = ") ") { (i, word) ->
+            val n = "w$i"
+            params[n] = "%$word%"
+            "(cast(function('party_fold', legalName) as String) like :$n escape '\\' " +
+                "or cast(function('party_fold', tradingName) as String) like :$n escape '\\' " +
+                "or lower(email) like :$n escape '\\' or lower(phone) like :$n escape '\\' " +
+                "or lower(registrationNumber) like :$n escape '\\')"
+        }
+        if (birthDates.isNotEmpty()) {
+            params["birthDates"] = birthDates
+            predicate += "and dateOfBirth in :birthDates "
+        }
+        if (afterId != null) {
+            params["afterId"] = afterId
+            predicate += "and partyId > :afterId "
+        }
+        find("$predicate order by partyId", params).page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findByIdentifier(normalized: String, limit: Int): List<Party> = Panache.withSession {
+        find(
+            "function('regexp_replace', lower(taxId), '[^a-z0-9]', '', 'g') = ?1 " +
+                "or function('regexp_replace', lower(registrationNumber), '[^a-z0-9]', '', 'g') = ?1 " +
+                // a phone typed as digits lands here too; match its national/international tail
+                "or cast(function('regexp_replace', phone, '[^0-9]', '', 'g') as String) like ?2 order by partyId",
+            normalized,
+            "%" + normalized.filter { it.isDigit() }.takeLast(PHONE_TAIL_DIGITS).ifEmpty { "-" },
+        ).page(0, limit).list()
+    }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun countAll(): Long = Panache.withSession { count() }.awaitSuspending()
 
@@ -442,3 +469,13 @@ class PartyPayeeRepositoryImpl :
         createdAt = createdAt,
     )
 }
+
+/** National numbers differ in prefix (0 / +420 / 00420); the last 9 digits identify the line. */
+private const val PHONE_TAIL_DIGITS = 9
+
+/** Lower-case and strip diacritics (Novák → novak, Müller → muller, Łódź → łodz); mirrors party_fold(). */
+internal fun foldForSearch(s: String): String = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
+    .replace(Regex("\\p{M}+"), "")
+    .lowercase()
+    .trim()
+    .replace(Regex("\\s+"), " ")

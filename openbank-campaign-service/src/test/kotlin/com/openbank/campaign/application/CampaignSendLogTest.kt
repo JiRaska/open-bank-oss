@@ -51,6 +51,14 @@ class CampaignSendLogTest {
             override suspend fun conversionContextFor(campaignId: java.util.UUID, partyId: java.util.UUID) =
                 com.openbank.campaign.application.port.out.ConversionContext(null, false)
 
+            override suspend fun reserveHandoff(
+                sendId: UUID,
+                campaignId: UUID,
+                partyId: UUID,
+                stepOrder: Int,
+                channel: com.openbank.campaign.domain.model.Channel,
+            ) = Unit
+
             override suspend fun record(send: SendRecord) = Unit
             override suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long) = 0
             override suspend fun countSendsForPartyInCampaign(campaignId: UUID, partyId: UUID) = 0

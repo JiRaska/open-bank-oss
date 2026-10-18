@@ -121,3 +121,7 @@ Per-service path-scoped CI (buildují se jen změněné služby). Release osu vl
 ### FINREP Pact fixture
 
 Broker ověření FINREP odvozuje reportovaný měsíc z požadavků vybraného kontraktu a používá vlastní testovací databázi. Reset fixture odmítne cizí closed-period ID a ponechá zapnutý trigger neměnné evidence. Regresní testy pokrývají historický červen 2026 i současný červen 2000 v obou pořadích, včetně odmítnutí DELETE evidence. Produkční validace frozen evidence se nemění.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

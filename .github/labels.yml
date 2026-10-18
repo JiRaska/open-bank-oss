@@ -15,6 +15,10 @@
 # namespace (`runs-on`, rules.yaml: ci_runners) and are NOT issue labels — keep them out.
 
 labels:
+  # --- merge train (ADR-0343, merge-train.yml) -----------------------------------------
+  - name: merge-train
+    color: "0e8a16"
+    description: "Merge-train carrier PR (ADR-0343): verifies a batch as one tree; auto-closed, never merge."
   # --- VEX / vulnerability triage (ADR-0030 D1, vex-triage.yml) -------------------------
   - name: vex-triage
     color: "b60205"

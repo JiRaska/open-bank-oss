@@ -13,6 +13,7 @@ import com.openbank.pension.application.onboarding.KycProfile
 import com.openbank.pension.application.onboarding.PartyKycPort
 import com.openbank.pension.application.onboarding.SignatureOutcome
 import com.openbank.pension.application.onboarding.SignatureVerificationPort
+import com.openbank.pension.application.port.out.PensionMetrics
 import io.quarkus.arc.profile.UnlessBuildProfile
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -33,7 +34,10 @@ class ScaSignatureVerificationAdapter : SignatureVerificationPort {
     @RestClient
     lateinit var client: ScaConsumeRestClient
 
-    private val gate by lazy { ScaConsumeGate { id, req -> client.consume(id, req) } }
+    @Inject
+    lateinit var metrics: PensionMetrics
+
+    private val gate by lazy { ScaConsumeGate(metrics) { id, req -> client.consume(id, req) } }
 
     override suspend fun verify(
         partyId: UUID,
@@ -55,7 +59,10 @@ class ScaDocumentVerificationAdapter : ScaVerificationPort {
     @RestClient
     lateinit var client: ScaConsumeRestClient
 
-    private val gate by lazy { ScaConsumeGate { id, req -> client.consume(id, req) } }
+    @Inject
+    lateinit var metrics: PensionMetrics
+
+    private val gate by lazy { ScaConsumeGate(metrics) { id, req -> client.consume(id, req) } }
 
     override suspend fun verify(
         partyId: UUID,
