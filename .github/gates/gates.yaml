@@ -6631,6 +6631,34 @@ gates:
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
+  - id: admin-ui-request-trace-fixtures
+    name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
+    group: supplychain
+    mode: enforced
+    rationale: "Trace instrumentation must be falsified before merge; deploy-only advisory fixtures cannot protect PR changes to collectors or their wrappers."
+    # Review temporary measurement protection after the ordinary-build receipt/comparison window.
+    review_after: "2026-11-17"
+    min_subjects: 3  # successful executed Node fixtures, read from the real TAP summary
+    budget_seconds: 90
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/run-admin-ui-node-trace-fixtures.py"
+      - ".github/scripts/admin_ui_trace_ipc.py"
+      - ".github/scripts/aggregate-admin-ui-http-trace.py"
+      - ".github/scripts/find-latest-main-artifacts.py"
+      - ".github/scripts/test-admin-ui-request-trace.py"
+      - ".github/scripts/trace-admin-ui-curl.py"
+      - ".github/scripts/trace-admin-ui-stage.py"
+      - ".github/workflows/admin-ui-deploy.yml"
+      - "openbank-admin-ui/scripts/collect-gate-health.mjs"
+      - "openbank-admin-ui/scripts/collect-quality-report.mjs"
+      - "openbank-admin-ui/scripts/generate-infra-lifecycle.mjs"
+      - "openbank-admin-ui/scripts/request-send-trace.mjs"
+      - "openbank-admin-ui/scripts/request-send-trace.test.mjs"
+      - "openbank-infra/scripts/build-push-admin-ui.sh"
+    selftest: python3 .github/scripts/test-admin-ui-request-trace.py
+    run: python3 .github/scripts/run-admin-ui-node-trace-fixtures.py
+
   - id: workflow-supply-chain
     name: "workflow action pins, bounded agent and image admission, and fail-closed service CI"
     group: supplychain

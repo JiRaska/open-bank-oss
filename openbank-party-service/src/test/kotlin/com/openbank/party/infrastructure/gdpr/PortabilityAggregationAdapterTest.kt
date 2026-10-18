@@ -20,6 +20,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -47,6 +48,24 @@ class PortabilityAggregationAdapterTest {
 
     private fun <T> failing(status: Int): Uni<T> = Uni.createFrom().failure(WebApplicationException(status))
 
+    private fun okPage(page: TransactionPage): Response = mockk<Response>(relaxed = true).also {
+        every { it.status } returns 200
+        every { it.hasEntity() } returns true
+        every { it.readEntity(TransactionPage::class.java) } returns page
+    }
+
+    @Test
+    fun `a listed transaction need not be completed to remain in the portability export`(): Unit = runBlocking {
+        every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
+            AccountPageBody(data = listOf(AccountSummaryBody(id = accountId, accountNumber = "X", status = "ACTIVE"))),
+        )
+        every { transactionClient.listTransactions(accountId, any(), any()) } returns Uni.createFrom().item(
+            okPage(TransactionPage(data = listOf(TransactionResponse(id = txId, status = "FAILED")))),
+        )
+        val result = adapter.fetchAccountsWithTransactions(partyId)
+        assertThat(result.single().transactions.single().transactionId).isEqualTo(txId.toString())
+    }
+
     @Test
     fun `accounts are assembled with their transactions, counterparty identity absent in v1`(): Unit = runBlocking {
         every { accountClient.listByParty(partyId, any(), null) } returns Uni.createFrom().item(
@@ -63,17 +82,19 @@ class PortabilityAggregationAdapterTest {
             ),
         )
         every { transactionClient.listTransactions(accountId, any(), any()) } returns Uni.createFrom().item(
-            TransactionPage(
-                data = listOf(
-                    TransactionResponse(
-                        id = txId,
-                        referenceNumber = "TRX-000001",
-                        bookingDate = LocalDate.parse("2026-07-01"),
-                        amount = BigDecimal("1200.00"),
-                        currencyCode = "CZK",
-                        type = "DEBIT",
-                        status = "COMPLETED",
-                        description = "Nájem",
+            okPage(
+                TransactionPage(
+                    data = listOf(
+                        TransactionResponse(
+                            id = txId,
+                            referenceNumber = "TRX-000001",
+                            bookingDate = LocalDate.parse("2026-07-01"),
+                            amount = BigDecimal("1200.00"),
+                            currencyCode = "CZK",
+                            type = "DEBIT",
+                            status = "COMPLETED",
+                            description = "Nájem",
+                        ),
                     ),
                 ),
             ),

@@ -5,6 +5,9 @@
 package com.openbank.standingorder.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.messaging.EventRetry
@@ -15,7 +18,6 @@ import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
 import com.openbank.standingorder.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -200,33 +202,37 @@ class StandingOrderDueConsumer(
     }
 
     /**
-     * Books the own-account transfer and says, explicitly, what the answer meant. Success is ONLY a
-     * normal return of the generated call; there is no status-proof mechanism here yet (a central
-     * typed facade is planned), so the interim rule is deliberately conservative:
+     * Books the own-account transfer and says, explicitly, what the answer meant. The answer is
+     * classified by `TransactionClient` (ADR-0319), which separates HTTP status from completion:
      *
-     * - **normal return** - accepted.
-     * - **400 / 422** - the only business rejections: `false`, so the caller records the failed
-     *   execution.
-     * - **everything else** - 401/403 (identity/config), 404, 409, any other 4xx, 5xx, timeouts, and
-     *   in particular a response body that fails to bind (a Jackson error or a ProcessingException)
-     *   - is rethrown for [EventRetry] and then the connector's retry/DLQ. The 2xx status of an
-     *   unreadable answer is NOT proven, so the execution is neither confirmed nor failed; a retry
-     *   re-presents the same idempotency key and transaction-service replays the booked transfer.
+     * - **HttpSuccess for a write** - accepted only with a readable COMPLETED transaction.
+     * - **Rejected (400 / 422)** - the only business rejections: `false`, so the caller records the
+     *   failed execution.
+     * - **everything else** - uncertain completion, 409, 401/403 (identity/config), 404, 5xx and timeouts are thrown for
+     *   [EventRetry] and then the connector's retry/DLQ; a retry re-presents the same idempotency
+     *   key and transaction-service replays the booked transfer.
      */
-    private suspend fun submitTransfer(orderId: UUID, request: InitiateTransactionRequest): Boolean = try {
-        val txResponse = transactionClient.initiateTransaction(request).awaitSuspending()
-        log.infof("[standing-order-exec] order %s internal transfer accepted (transaction %s)", orderId, txResponse.id)
-        true
-    } catch (e: WebApplicationException) {
-        val status = e.response.status
-        if (status !in REJECTION_STATUSES) throw e
-        log.warnf(
-            "[standing-order-exec] order %s internal transfer rejected (HTTP %d) — recording failure",
-            orderId,
-            status,
-        )
-        false
-    }
+    private suspend fun submitTransfer(orderId: UUID, request: InitiateTransactionRequest): Boolean =
+        when (val outcome = TransactionClient(transactionClient).initiate(request).awaitSuspending()) {
+            is TransactionCallOutcome.HttpSuccess -> {
+                log.infof(
+                    "[standing-order-exec] order %s internal transfer accepted (transaction %s)",
+                    orderId,
+                    outcome.body?.id,
+                )
+                true
+            }
+            is TransactionCallOutcome.Rejected -> {
+                log.warnf(
+                    "[standing-order-exec] order %s internal transfer rejected (HTTP %d) — recording failure",
+                    orderId,
+                    outcome.status,
+                )
+                false
+            }
+            // 409 is neither booked nor a merit rejection: rethrow so the retry replays the same key.
+            TransactionCallOutcome.Conflict -> throw TransactionHttpException(CONFLICT)
+        }
 
     /**
      * Resolves [creditorIban] and returns its accountId ONLY when it belongs to the same party as
@@ -286,7 +292,6 @@ class StandingOrderDueConsumer(
     }
 
     private companion object {
-        /** Bad Request, Unprocessable Entity: transaction-service refusing THIS transfer on its merits. */
-        val REJECTION_STATUSES = setOf(400, 422)
+        const val CONFLICT = 409
     }
 }

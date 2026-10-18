@@ -232,3 +232,13 @@ stateDiagram-v2
 ## transaction-service client (ADR-0319)
 
 The outbound call to transaction-service no longer uses a hand-written REST interface and DTOs. The service extends the interface generated from transaction-service's own `openapi.yaml` (module `openbank-client-transaction`, versioned by the provider's API-contract version). Auth, config key and request filters stay in this service's `@RegisterRestClient` sub-interface. A drifted path or field now fails compilation, and the consumer pact is replayed against the provider on every PR.
+
+## Transaction-service completion boundary
+
+The shared transaction client separates HTTP success from business completion. The provider
+can return a failed transaction or an in-progress idempotent replay with a 2xx status. The
+ledger-posting adapter reports POSTED only after a readable transaction confirms COMPLETED.
+An absent or unreadable body, FAILED, an in-progress state or an unknown status remains UNKNOWN;
+that does not establish the absence of a ledger effect. Reconciliation retains the existing
+clearing-derived idempotency key and never submits the clearing under a new key. HTTP 400/422
+and 409 retain their existing classifications. This does not enable posting or deploy an image.

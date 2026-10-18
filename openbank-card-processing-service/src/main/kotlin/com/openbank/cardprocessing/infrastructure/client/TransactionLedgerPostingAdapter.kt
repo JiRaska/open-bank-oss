@@ -10,6 +10,9 @@ import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -57,6 +60,9 @@ class TransactionLedgerPostingAdapter(
     private val lastDisabledWarnAt = AtomicLong(0)
     private val suppressedDisabledWarns = AtomicInteger(0)
 
+    // The single place a transaction-service answer is classified (ADR-0319); never call the raw client.
+    private val transactions = TransactionClient(client)
+
     override suspend fun postClearedSpend(
         authorization: CardAuthorization,
         clearedAmountMinorUnits: Long,
@@ -68,7 +74,7 @@ class TransactionLedgerPostingAdapter(
             return PostingResult(PostingOutcome.SKIPPED_DISABLED, null, DISABLED_DETAIL)
         }
         return try {
-            val response = client.initiateTransaction(
+            val outcome = transactions.initiate(
                 InitiateTransactionRequest(
                     // Derived from the clearing, not random: transaction-service dedupes on it, so
                     // a retried clearing must present the same key or the customer is debited twice.
@@ -84,13 +90,39 @@ class TransactionLedgerPostingAdapter(
                     instructionType = INSTRUCTION_ONE_OFF,
                 ),
             ).awaitSuspending()
-            outcomeOf(response.id, response.status)
+            when (outcome) {
+                // The write facade has proven a readable COMPLETED transaction, not merely HTTP 2xx.
+                is TransactionCallOutcome.HttpSuccess ->
+                    PostingResult(PostingOutcome.POSTED, outcome.body?.id, outcome.body?.status ?: BOOKED_DETAIL)
+                TransactionCallOutcome.Conflict -> {
+                    log.errorf("ledger posting for authorization %s answered 409", authorization.id)
+                    PostingResult(PostingOutcome.FAILED, null, CONFLICT_DETAIL)
+                }
+                is TransactionCallOutcome.Rejected -> {
+                    log.errorf(
+                        "ledger posting for authorization %s rejected (HTTP %d)",
+                        authorization.id,
+                        outcome.status,
+                    )
+                    PostingResult(
+                        PostingOutcome.FAILED,
+                        null,
+                        "HTTP ${outcome.status}" + (outcome.problem?.let { ": $it" } ?: ""),
+                    )
+                }
+            }
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            // An unreadable answer proves nothing: the debit may or may not be booked. It is neither
-            // POSTED nor FAILED but UNKNOWN, and the re-driver posts it again under the same key.
-            if (isUnreadableResponse(e)) {
-                log.warnf(e, "ledger posting for authorization %s has an unreadable answer", authorization.id)
-                return PostingResult(PostingOutcome.UNKNOWN, null, UNREADABLE_DETAIL)
+            // Unproven completion is not a settlement verdict: the debit may or may not be booked. It must NOT be
+            // rethrown (this runs after the clearing committed and nobody retries the caller) and must
+            // not be called POSTED or FAILED: it is UNKNOWN and counted; the LedgerPostingRedriver posts it
+            // again under the same key.
+            if (isUncertainResponse(e)) {
+                log.warnf(
+                    e,
+                    "ledger posting for authorization %s has unproven transaction completion",
+                    authorization.id,
+                )
+                return PostingResult(PostingOutcome.UNKNOWN, null, UNCERTAIN_DETAIL)
             }
             // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
             // here may propagate and undo a fact the acquirer has already asserted. The FAILED
@@ -98,27 +130,6 @@ class TransactionLedgerPostingAdapter(
             log.errorf(e, "ledger posting failed for authorization %s", authorization.id)
             PostingResult(PostingOutcome.FAILED, null, e.message)
         }
-    }
-
-    /**
-     * A 2xx is not "booked": for a duplicate key transaction-service answers with the EXISTING
-     * transaction in whatever state it is in. Only COMPLETED is the debit in the books; FAILED and
-     * REVERSED mean it is not (the re-driver will meet the same answer until a human acts - the
-     * ceiling and the alert); PENDING, PROCESSING and anything unrecognised are not settled yet, so
-     * UNKNOWN and posted again later.
-     */
-    private fun outcomeOf(id: UUID?, status: String?): PostingResult = when (status?.uppercase()) {
-        "COMPLETED" -> PostingResult(PostingOutcome.POSTED, id, status)
-        "FAILED", "REVERSED" -> PostingResult(
-            PostingOutcome.FAILED,
-            id,
-            "transaction-service holds the transaction as $status",
-        )
-        else -> PostingResult(
-            PostingOutcome.UNKNOWN,
-            id,
-            "transaction-service status is ${status ?: "absent"}, not settled",
-        )
     }
 
     /** Loud, but once a minute with a count: a re-driver sweeping a backlog must not log one line per row. */
@@ -139,7 +150,8 @@ class TransactionLedgerPostingAdapter(
         )
     }
 
-    private fun isUnreadableResponse(e: Throwable): Boolean = e is ProcessingException ||
+    private fun isUncertainResponse(e: Throwable): Boolean = e is TransactionCompletionUncertainException ||
+        e is ProcessingException ||
         generateSequence(e) { it.cause }.any { it is MismatchedInputException || it is JsonParseException }
 
     private fun toMajorUnits(minorUnits: Long, currencyCode: String): BigDecimal {
@@ -153,7 +165,9 @@ class TransactionLedgerPostingAdapter(
         const val TYPE_DEBIT = "DEBIT"
         const val RAIL_CARD = "CARD"
         const val INSTRUCTION_ONE_OFF = "ONE_OFF"
-        const val UNREADABLE_DETAIL = "transaction-service answer unreadable; booking unknown"
+        const val BOOKED_DETAIL = "transaction completion confirmed"
+        const val CONFLICT_DETAIL = "transaction-service answered 409"
+        const val UNCERTAIN_DETAIL = "transaction completion unproven; booking unknown"
         const val DISABLED_WARN_INTERVAL_MILLIS = 60_000L
         const val DISABLED_DETAIL = "openbank.card-processing.ledger-posting-enabled=false"
 

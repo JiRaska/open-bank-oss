@@ -220,3 +220,13 @@ silently re-suspend a credential the customer was just given back.
   WARN-logged with a rate limit, and consumer pacts to fraud-service and transaction-service (each
   with a recorded 401) are replayed by both providers on every PR — the CARD-rail ledger posting
   had no contract at all before this.
+
+- **2026-10-18** — The transaction-service outbound client now uses the shared status facade.
+  HTTP 2xx proves receipt, not settlement: the provider can return FAILED or an in-progress
+  idempotent replay. A ledger posting is reported POSTED only for a readable COMPLETED
+  transaction. Missing, malformed or any other business state remains UNKNOWN; it does not
+  prove that no ledger effect happened. The clearing-derived idempotency key is preserved for
+  reconciliation; no retry creates a new key. HTTP 400/422 and 409 retain their existing
+  classifications. This changes response interpretation, not the caller identity, permissions,
+  endpoint, feature flag or image. Real broker settlement and a production rollout are not
+  established by the client regression tests.
