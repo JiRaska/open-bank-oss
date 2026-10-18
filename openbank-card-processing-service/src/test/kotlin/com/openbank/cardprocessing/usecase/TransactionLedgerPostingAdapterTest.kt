@@ -187,7 +187,8 @@ class TransactionLedgerPostingAdapterTest {
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         expected.forEach { (status, outcome) ->
-            coEvery { client.initiate(any()) } returns TransactionResponse(UUID.randomUUID(), status)
+            every { client.initiateTransaction(any()) } returns
+                Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = status))
             val result = adapter.postClearedSpend(authorization("CZK"), 1_000, "clr-status")
             assertThat(result.outcome).describedAs("status %s", status).isEqualTo(outcome)
         }
@@ -195,7 +196,8 @@ class TransactionLedgerPostingAdapterTest {
 
     @Test
     fun `an answer with no status at all is UNKNOWN, never POSTED`(): Unit = runBlocking {
-        coEvery { client.initiate(any()) } returns TransactionResponse(UUID.randomUUID(), null)
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = null))
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         val result = adapter.postClearedSpend(authorization("CZK"), 1_000, "clr-nostatus")
