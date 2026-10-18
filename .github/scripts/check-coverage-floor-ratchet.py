@@ -158,7 +158,7 @@ def lowering_justified(trailer_text: str) -> bool:
 
 def covers(before: list[int], after: list[int]) -> bool:
     """True iff every base floor has a head floor in the SAME position (rule order) that is >= it."""
-    return len(after) >= len(before) and all(new >= old for old, new in zip(before, after))
+    return len(after) >= len(before) and all(new >= old for old, new in zip(before, after, strict=False))
 
 
 def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None],
