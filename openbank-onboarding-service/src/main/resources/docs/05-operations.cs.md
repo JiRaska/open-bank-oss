@@ -106,3 +106,7 @@ V payloadu `/api/v1/info`:
 - **Osa API kontraktu:** `openapi.yaml:info.version` (`1.0.0`), nezávislá na release verzi (ADR-0048).
 - **CI:** path-scoped per-service pipeline; fast-jar build, build/push image, ArgoCD vyzvedne tag.
 - **Přísnost review:** ačkoli onboarding-service nedrží peníze ani stav systému záznamu, ADR-0068 ji řadí pod **money-path review rigour** (2 schválení + threat model), protože je KYC-decision-adjacent.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

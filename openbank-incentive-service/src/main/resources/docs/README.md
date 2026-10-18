@@ -19,3 +19,7 @@ Customer reservation and release endpoints accept the configured customer-edge s
 The service includes the Quarkus OpenTelemetry extension for HTTP and database instrumentation. Collector configuration and access controls determine where production traces are exported; an in-memory test recorder does not establish production collector readiness. Treat database trace attributes as potentially sensitive operational data and apply the deployment's telemetry access and retention controls.
 
 `IncentiveTraceContractIT` exercises a real offer-creation HTTP request and checks that the request, offer INSERT and outbox INSERT share one trace. Its dedicated profile enables the tracing SDK and disables the scheduler and outbox dispatcher to keep unrelated background spans out of the assertion. A test-only in-memory exporter records the runtime-generated spans; Kafka output uses an in-memory connector. This trace check complements the relational outbox checks in `IncentiveRestContractIT` and does not prove delivery to a broker or collector.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
