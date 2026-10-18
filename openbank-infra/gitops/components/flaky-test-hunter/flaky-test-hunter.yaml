@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/part-of: flaky-test-hunter
       annotations:
         # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
-        openbank.tech/policy-checksum: "f7f0f01ea6db0a93"
+        openbank.tech/policy-checksum: "b6c3072111d47d4a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -64,16 +64,11 @@ spec:
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED
               value: "true"
-            # The periodic sweep. Set EXPLICITLY here rather than left to the application.yaml
-            # default, because this is the only place an operator looks to answer "when does this
-            # agent run" — and until now the answer was "it doesn't". The agent was trigger-only,
-            # so its findings table was empty, which renders as "nothing to act on" rather than
-            # "nothing has ever looked".
-            # weekly on Sunday at 06:30 UTC, offset from the other control-plane agents, which share one LiteLLM
-            # gateway and one Prometheus and each carry their own daily token budget.
-            # Six fields (second minute hour day month weekday) — Quarkus, not crontab.
-            - name: FLAKY_TEST_HUNTER_CHECK_CRON
-              value: "0 30 6 ? * SUN"
+            # No sweep cron, on purpose (2026-10-17). This pod mounts no repository checkout and
+            # no test-results artifacts, so the weekly sweep it used to run scanned an empty tree
+            # and had never produced a finding. "When does this agent run" is now answered by the
+            # Admin UI: every Test Intelligence snapshot it collects is posted to
+            # /api/v1/flaky-test-hunter/evidence/analyze, which is this agent's only real input.
             - name: GITHUB_API_URL
               value: https://api.github.com
             - name: GITHUB_REPO
