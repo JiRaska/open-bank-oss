@@ -23,6 +23,34 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
   services:
+    openbank-account-service:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+    openbank-ap2-service:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+    openbank-domestic-payment:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+    openbank-fraud-service:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+    openbank-interest-service:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+    openbank-sanctions-service:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+    openbank-transaction-service:
+      issue: "#13079"
+      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
+      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
     openbank-agent-service:
       issue: "#12948"
       reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
