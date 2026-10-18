@@ -146,9 +146,17 @@ was written against it and leaked the token before the fix.
   differs from the base (modified or added). A PR that touches a generator path is disqualified
   by `qualifies()` before it can enter a train; the overlay is the backstop for the case where it
   somehow did.
-- *Bundle provenance.* `publish` refuses a bundle whose head is not the sha the plan recorded, is
-  not a descendant of the plan's base, or carries a different number of commits than the plan
-  says, and refuses the whole plan if `origin/main` has moved since it was built.
+- *Build is untrusted; publish verifies.* Because `build` ran PR code, `plan.json` and every
+  bundle are attacker-controlled output, and `publish` believes none of it: each member is
+  re-fetched live and must still have the plan's head sha, be open, armed and green with
+  `qualifies()` re-run on live checks and files; the fast lane is reclassified from live diffs;
+  each bundle is proven commit by commit — `PR-Number:` trailers in plan order, every commit's
+  tree equal to an execution-free `git merge-tree` of the verified PR head onto the previous
+  commit, and the one optional regeneration commit confined to the `DERIVED_OUTPUTS` declared in
+  `origin/main`'s `regen-derived.sh` (annotation-only files may change `policy-checksum` lines
+  and nothing else); bundle names may not escape the artifact directory; the plan's base must be
+  an ancestor of live `main`; and the merge is `--match-head-commit <verified sha>`, with the
+  status posted on that same sha.
 
 **What is deliberately NOT required: a review decision.** The train does not check
 `reviewDecision == APPROVED`. `main-protection` has no review rule, and the repository has a single
