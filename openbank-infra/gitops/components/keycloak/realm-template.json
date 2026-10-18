@@ -797,6 +797,15 @@
       }
     },
     {
+      "name": "fx:read",
+      "description": "FX rate sheet read (fx-rates-read journey, #12847). fx-service's FxScopeRoleMapper maps this scope to FX_SCOPE_READ, admitted by fx_rest_ext.rego on fx.list/fx.read only. Not a realm default: only a client that lists it receives it.",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
       "name": "pension:legal-approve",
       "description": "Pension catalog legal approval; requires separately assigned legal realm role",
       "protocol": "openid-connect",
@@ -893,6 +902,7 @@
         "roles"
       ],
       "optionalClientScopes": [
+        "catalog:read",
         "pension:legal-approve",
         "pension:product-approve"
       ],
@@ -1011,7 +1021,7 @@
       "clientId": "openbank-interest",
       "fullScopeAllowed": false,
       "name": "OpenBank Interest Service",
-      "description": "Per-service M2M client for interest-service's ledger capitalization posts (issue #10486). Holds ROLE_API only; ledger.create is granted by identity in ledger_rest_ext.rego.",
+      "description": "Per-service M2M client for interest-service: ledger posts (#10486) and catalog reads (#8481). Holds ROLE_API and the narrow catalog:read scope; ledger.create and catalog.read are granted by identity in the upstream rego.",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
@@ -1023,7 +1033,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__INTEREST_CLIENT_SECRET__"
     },
@@ -1370,6 +1381,26 @@
       "secret": "__TAX_REPORTING_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-ledger-pension-co",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Ledger (pension company)",
+      "description": "Own client for the pension company's ledger instance (ledger-pension-co), replacing its copy of the shared openbank-services secret. Holds NO realm role: the instance has no permitted outbound call.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__LEDGER_PENSION_CO_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "fullScopeAllowed": false,
       "name": "OpenBank Analytics Sink",
@@ -1622,6 +1653,27 @@
       ],
       "optionalClientScopes": [],
       "secret": "__SYNTHETIC_CATALOG_READ_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-synthetic-fx-read",
+      "name": "OpenBank Synthetic Journey: FX rate sheet read",
+      "description": "Synthetic-only identity for the fx-rates-read k6 journey (ADR-0252, #12847). No realm roles; its only grant is the fx:read client scope, which fx-service's FxScopeIdentityAugmentor maps to FX_SCOPE_READ and fx_rest_ext.rego admits on fx.list/fx.read only.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "fx:read"
+      ],
+      "optionalClientScopes": [],
+      "secret": "__SYNTHETIC_FX_READ_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-grafana",
@@ -2113,6 +2165,12 @@
       ]
     },
     {
+      "username": "service-account-openbank-ledger-pension-co",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-ledger-pension-co",
+      "realmRoles": []
+    },
+    {
       "username": "service-account-openbank-analytics-sink",
       "enabled": true,
       "serviceAccountClientId": "openbank-analytics-sink",
@@ -2196,6 +2254,12 @@
       "username": "service-account-openbank-synthetic-catalog-read",
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-catalog-read",
+      "realmRoles": []
+    },
+    {
+      "username": "service-account-openbank-synthetic-fx-read",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-fx-read",
       "realmRoles": []
     },
     {

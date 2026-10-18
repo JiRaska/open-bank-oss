@@ -17,6 +17,7 @@ import com.openbank.pension.application.port.`in`.StrategyChangeDocument
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.StrategyNotPermittedException
 import com.openbank.pension.application.port.out.StrategySuitabilityPort
 import com.openbank.pension.application.port.out.StrategySuitabilityRequest
@@ -45,6 +46,7 @@ class PensionContractService(
     /** Document-bound SCA for a strategy change (ADR-0335 `pension-strategy-change:` namespace). */
     private val sca: ScaVerificationPort,
     private val providerBoundary: ProviderBoundary,
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) : PensionContractUseCase {
 
     override suspend fun createDraft(command: CreateDraftCommand): PensionContract {
@@ -143,37 +145,53 @@ class PensionContractService(
      * acknowledged warnings), then the single-use SCA challenge over the exact change document.
      */
     override suspend fun electStrategy(command: ElectStrategyCommand): PensionContract {
-        command.caller.requireParticipant()
         val today = LocalDate.now(clock)
         val from = command.effectiveFrom ?: today
-        require(!from.isBefore(today)) { "a strategy change cannot take effect in the past" }
-        val contract = get(command.caller, command.contractId)
-        val current = contract.currentStrategy
-        if (current.strategyCode == command.strategyCode && current.effectiveFrom == from) return contract
-        val approval = suitability.authorize(
-            StrategySuitabilityRequest(
-                contractId = contract.id,
-                jurisdiction = contract.jurisdiction,
-                productLine = contract.productLine,
-                packVersion = contract.packVersion,
-                strategyCode = command.strategyCode,
-                acknowledged = command.acknowledgedWarnings,
-                language = command.language,
-            ),
-        )
-        val challenge = command.scaChallengeId?.takeIf { it.isNotBlank() }
-        val signed = challenge != null &&
-            sca.verify(
-                contract.participantPartyId,
-                challenge,
-                StrategyChangeDocument.hash(contract.id, command.strategyCode, from, command.acknowledgedWarnings),
-                ScaOperation.STRATEGY_CHANGE,
+        val (saved, approval) = try {
+            command.caller.requireParticipant()
+            require(!from.isBefore(today)) { "a strategy change cannot take effect in the past" }
+            val contract = get(command.caller, command.contractId)
+            val current = contract.currentStrategy
+            if (current.strategyCode == command.strategyCode && current.effectiveFrom == from) return contract
+            val approval = suitability.authorize(
+                StrategySuitabilityRequest(
+                    contractId = contract.id,
+                    jurisdiction = contract.jurisdiction,
+                    productLine = contract.productLine,
+                    packVersion = contract.packVersion,
+                    strategyCode = command.strategyCode,
+                    acknowledged = command.acknowledgedWarnings,
+                    language = command.language,
+                ),
             )
-        if (!signed) throw StrategyChangeScaFailedException()
-        val saved = transition(command.caller, command.contractId, null) {
-            it.electStrategy(command.strategyCode, from, clock.instant())
+            val challenge = command.scaChallengeId?.takeIf { it.isNotBlank() }
+            val signed = challenge != null &&
+                sca.verify(
+                    contract.participantPartyId,
+                    challenge,
+                    StrategyChangeDocument.hash(contract.id, command.strategyCode, from, command.acknowledgedWarnings),
+                    ScaOperation.STRATEGY_CHANGE,
+                )
+            if (!signed) throw StrategyChangeScaFailedException()
+            val result = transition(command.caller, command.contractId, null) {
+                it.electStrategy(command.strategyCode, from, clock.instant())
+            }
+            result to approval
+        } catch (e: IllegalArgumentException) {
+            metrics.strategyChange("refused")
+            throw e
+        } catch (e: IllegalStateException) {
+            metrics.strategyChange("refused")
+            throw e
+        } catch (e: StrategyNotPermittedException) {
+            metrics.strategyChange("refused")
+            throw e
+        } catch (e: StrategyChangeScaFailedException) {
+            metrics.strategyChange("refused")
+            throw e
         }
         suitability.record(approval)
+        metrics.strategyChange("stored")
         // #12379: the participant is told when the new strategy takes effect, after it is stored.
         ParticipantNotices.send(
             notifier,

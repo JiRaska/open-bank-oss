@@ -17,6 +17,7 @@ import type {
 import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
 } from '@/components/testing/TestIntelligenceFlow'
+import { EvidenceFreshness } from '@/components/testing/EvidenceFreshness'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
 
@@ -574,22 +575,27 @@ export default function TestIntelligencePage() {
   const testLoading = loading
   const qualityLoading = false
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const fetchReport = useCallback(async (silent: boolean) => {
+    if (!silent) setLoading(true)
     try {
-      const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
+      // `no-cache` revalidates with the route's ETag: an unchanged poll is a bodyless 304.
+      const response = await fetch('/api/test-intelligence', { cache: 'no-cache' })
       if (!response.ok) throw new Error(`Test intelligence request failed with HTTP ${response.status}`)
       const result = await response.json() as TestIntelligenceReport
       if (!Array.isArray(result.components) || !Array.isArray(result.warnings) || !result.totals) {
         throw new Error('Invalid test intelligence report')
       }
       setReport(result)
-    } catch { setReport(null) } finally { setLoading(false) }
+    } catch { if (!silent) setReport(null) } finally { if (!silent) setLoading(false) }
   }, [])
+  const load = useCallback(() => fetchReport(false), [fetchReport])
   useEffect(() => {
     const timer = window.setTimeout(() => { void load() }, 0)
-    return () => window.clearTimeout(timer)
-  }, [load])
+    // Poll only while visible; the server serves every poll from one cached snapshot, and a
+    // failed poll keeps the last good report on screen.
+    const poll = window.setInterval(() => { if (document.visibilityState === 'visible') void fetchReport(true) }, 60_000)
+    return () => { window.clearTimeout(timer); window.clearInterval(poll) }
+  }, [load, fetchReport])
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'posture', label: t('Přehled', 'Posture'), icon: <Activity size={13} /> },
@@ -614,6 +620,7 @@ export default function TestIntelligencePage() {
       subtitle={t('Jednotný pohled na běhy, pokrytí kódu, trace kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, trace contracts, mutation, performance, and sandbox synthetic journeys.')}
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
+    {report && <EvidenceFreshness evidence={report.evidence} components={report.components.length} />}
     {report && <TestIntelligenceFlow report={report} />}
     {report && <AssuranceBoard report={report} selectTab={setTab} />}
     {report && <EvidenceGapQueue report={report} selectTab={setTab} />}

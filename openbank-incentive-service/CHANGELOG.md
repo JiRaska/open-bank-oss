@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.7.2...incentive-service-v0.8.0) (2026-10-18)
+
+
+### Features
+
+* **incentive:** enable runtime tracing and verify offer trace continuity ([#12902](https://github.com/JiRaska/open-bank-oss/issues/12902)) ([905baaa](https://github.com/JiRaska/open-bank-oss/commit/905baaa3f4f6ec981b2af4292aedf5f4584d6525))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.7.1...incentive-service-v0.7.2) (2026-10-14)
 
 
