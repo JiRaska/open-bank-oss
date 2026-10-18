@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.1...admin-ui-v3.5.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** drop the inputless weekly sweep and open real tracking issues ([#13155](https://github.com/JiRaska/open-bank-oss/issues/13155)) ([5fd2d53](https://github.com/JiRaska/open-bank-oss/commit/5fd2d5368e48e2f225b0bde1518b52d2b354a209))
+
 ## [3.5.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.0...admin-ui-v3.5.1) (2026-10-18)
 
 
