@@ -27,13 +27,12 @@ into the commit, so the reason survives on `main`.
 WHAT IT DOES NOT DO
 -------------------
 It does not know whether the NEW value is honest — a floor raised to a number the build cannot
-reach fails koverVerify on its own. It does not parse Kotlin: block comments are stripped and
-`minValue = <int>` is matched as a bare integer literal, which is how every floor in the fleet
+reach fails koverVerify on its own. It does not parse Kotlin: comments and string literals are blanked, only a
+`minValue` inside kover > verify > rule > bound counts, and it is matched as a bare integer literal, which is how every floor in the fleet
 is written (including the one-line `bound { minValue = 60 }` form). Any OTHER `minValue =`
 assignment (a variable, an expression) is refused outright rather than guessed at, so the regex
-cannot be talked past. Floors within one file are compared as a sorted multiset (at least as
-many, and HEAD's k-th smallest >= the base's k-th smallest), so reordering bounds cannot hide a
-lowering. Renames are not followed: a moved build script shows up as a deletion of the old path,
+cannot be talked past. Floors within one file are compared POSITIONALLY (rule order): the k-th floor at HEAD must be
+>= the k-th at base, so a decoy value cannot stand in for a lowered real floor. Renames are not followed: a moved build script shows up as a deletion of the old path,
 which counts as every floor in it removed.
 
 Usage:  check-coverage-floor-ratchet.py --base <merge-base> [--body <pr body>]
@@ -51,12 +50,6 @@ import tempfile
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-# A bare integer literal, terminated by whitespace, a closing brace, a line comment or the line
-# end — the one-line `bound { minValue = 60 }` form counts, `minValue = 60 * factor` does not.
-FLOOR_RE = re.compile(r"\bminValue\s*=\s*(\d+)(?=\s*(?:\}|//|$))", re.MULTILINE)
-ANY_MINVALUE_RE = re.compile(r"^.*\bminValue\s*=.*$", re.MULTILINE)
-BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
-LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 TRAILER = "coverage-floor-lowered:"
 ISSUE_RE = re.compile(r"(?:#\d+|https://github\.com/[\w.-]+/[\w.-]+/issues/\d+)")
 
@@ -65,19 +58,93 @@ class UnparseableFloor(ValueError):
     """A `minValue =` the strict shape does not recognise — refused, never guessed."""
 
 
-def floors(text: str | None) -> list[int] | None:
-    """Every Kover `minValue` in a build script, sorted; None when the file is absent.
+def strip_comments_and_strings(text: str) -> str:
+    """Blank out comments and string/char literals, keeping newlines and length.
 
-    Block and line comments are stripped first so a commented-out literal is not a floor. Any remaining `minValue =` that is not a bare integer literal raises, which the
-    caller turns into a failure.
+    Kotlin block comments nest. Raw strings are triple-quoted; regular strings honour backslash
+    escapes. Everything blanked becomes spaces so a decoy `minValue = 99` inside any of them can
+    never reach the matcher.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+
+    def blank(chunk: str) -> str:
+        return "".join(c if c == "\n" else " " for c in chunk)
+
+    while i < n:
+        two = text[i:i + 2]
+        if two == "//":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            out.append(blank(text[i:j])); i = j
+        elif two == "/*":
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth += 1; j += 2
+                elif text.startswith("*/", j):
+                    depth -= 1; j += 2
+                else:
+                    j += 1
+            out.append(blank(text[i:j])); i = j
+        elif text.startswith('"""', i):
+            j = text.find('"""', i + 3)
+            j = n if j < 0 else j + 3
+            out.append(blank(text[i:j])); i = j
+        elif text[i] in "\"'":
+            q, j = text[i], i + 1
+            while j < n and text[j] != q and text[j] != "\n":
+                j += 2 if text[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append(blank(text[i:j])); i = j
+        else:
+            out.append(text[i]); i += 1
+    return "".join(out)
+
+
+TOKEN_RE = re.compile(r"\{|\}|\bminValue\b[^\n}]*|[A-Za-z_]\w*")
+CONTEXT = (("kover", "koverReport"), ("verify",), ("rule",), ("bound",))
+
+
+def in_floor_context(stack: list[str]) -> bool:
+    """True iff the open blocks contain kover|koverReport > verify > rule > bound, in that order."""
+    want = 0
+    for name in stack:
+        if name in CONTEXT[want] and (want := want + 1) == len(CONTEXT):
+            return True
+    return False
+
+
+def floors(text: str | None) -> list[int] | None:
+    """Kover `minValue`s in source order, only those inside kover > verify > rule > bound.
+
+    None when the file is absent. Comments and string literals are blanked first; a `minValue`
+    outside the nesting is not a floor. A floor-position `minValue =` that is not a bare integer
+    literal raises, which the caller turns into a failure.
     """
     if text is None:
         return None
-    code = LINE_COMMENT_RE.sub("", BLOCK_COMMENT_RE.sub("", text))
-    for line in ANY_MINVALUE_RE.findall(code):
-        if not FLOOR_RE.search(line):
-            raise UnparseableFloor(line.strip())
-    return sorted(int(m.group(1)) for m in FLOOR_RE.finditer(code))
+    code = strip_comments_and_strings(text)
+    stack: list[str] = []
+    last = ""
+    found: list[int] = []
+    for m in TOKEN_RE.finditer(code):
+        tok = m.group(0)
+        if tok == "{":
+            stack.append(last); last = ""
+        elif tok == "}":
+            if stack:
+                stack.pop()
+            last = ""
+        elif tok.startswith("minValue") and re.match(r"minValue\s*=", tok):
+            if in_floor_context(stack):
+                lit = re.fullmatch(r"minValue\s*=\s*(\d+)\s*", tok)
+                if not lit:
+                    raise UnparseableFloor(tok.strip())
+                found.append(int(lit.group(1)))
+        else:
+            last = tok
+    return found
 
 
 def lowering_justified(trailer_text: str) -> bool:
@@ -90,12 +157,8 @@ def lowering_justified(trailer_text: str) -> bool:
 
 
 def covers(before: list[int], after: list[int]) -> bool:
-    """True iff each floor in `before` has its own distinct floor in `after` that is >= it."""
-    pool = iter(after)  # ascending; each base floor consumes the smallest head floor that still covers it
-    for old in before:
-        if not any(new >= old for new in pool):
-            return False
-    return True
+    """True iff every base floor has a head floor in the SAME position (rule order) that is >= it."""
+    return len(after) >= len(before) and all(new >= old for old, new in zip(before, after))
 
 
 def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None],
@@ -106,11 +169,9 @@ def evaluate(base: dict[str, list[int] | None], head: dict[str, list[int] | None
         before, after = base.get(path), head.get(path)
         if not before:
             continue  # file or floor absent at base: adding a floor is always allowed
-        after = sorted(after or [])
-        before = sorted(before)
-        # Greedy matching: every base floor must be matched by a DISTINCT head floor that is >= it.
-        # Extra head floors (an added bound, even a lower one) just stay unmatched, so adding a
-        # floor beside existing ones is allowed, while swapping bounds cannot hide a lowering.
+        after = list(after or [])
+        # Positional: the k-th floor at head must be >= the k-th at base. Floors appended after
+        # the existing ones are allowed; a decoy inserted earlier shifts positions and fails.
         if not covers(before, after):
             lowered.append(f"{path}: Kover floor lowered or removed — base {before}, head {after} "
                            f"(a missing floor is a floor of 0)")
@@ -234,14 +295,39 @@ def self_test() -> int:
          {script: [65], "b/build.gradle.kts": [50]}, {script: [65], "b/build.gradle.kts": [49]}, "", 1)
     case("second bound of two lowered — MUST flag",
          {script: [34, 38]}, {script: [34, 30]}, "", 1)
-    case("two bounds swapped with one lowered — MUST flag (a positional compare would miss it)",
+    case("two bounds swapped with one lowered — MUST flag",
          {script: [34, 38]}, {script: [38, 33]}, "", 1)
-    case("a LOWER bound added beside existing ones — must not flag (adding a floor is allowed)",
-         {script: [34, 38]}, {script: [10, 34, 38]}, "", 0)
-    case("a bound added and one lowered — MUST flag", {script: [34, 38]}, {script: [10, 34, 37]}, "", 1)
-    case("two bounds reordered, values intact — must not flag",
-         {script: [34, 38]}, {script: [38, 34]}, "", 0)
+    case("a bound appended after existing ones — must not flag (adding a floor is allowed)",
+         {script: [34, 38]}, {script: [34, 38, 10]}, "", 0)
+    case("a bound added in front shifts positions — MUST flag", {script: [34, 38]}, {script: [10, 34, 38]}, "", 1)
+    case("a bound added and one lowered — MUST flag", {script: [34, 38]}, {script: [34, 37, 10]}, "", 1)
+    case("two bounds reordered — MUST flag (positional)", {script: [34, 38]}, {script: [38, 34]}, "", 1)
     case("one of two bounds removed — MUST flag", {script: [34, 38]}, {script: [38]}, "", 1)
+
+    # Parser-differential bypasses: drive the REAL parser end to end, base text vs head text.
+    def wrap(*bodies: str) -> str:
+        return "kover {\n reports {\n verify {\n" + "".join(
+            f" rule {{\n  bound {{\n   {b}\n  }}\n }}\n" for b in bodies) + " }\n }\n}\n"
+
+    def text_case(label: str, base_text: str, head_text: str, expected: int) -> None:
+        nonlocal ok
+        got = len(evaluate({script: floors(base_text)}, {script: floors(head_text)}, ""))
+        if got != expected:
+            ok = False
+        print(f"  [{'ok ' if got == expected else 'FAIL'}] {label}: found={got} expected={expected}")
+
+    base_t = wrap("minValue = 65")
+    text_case("lowered + decoy in a block comment — MUST flag", base_t,
+              "/* minValue = 90 */\n" + wrap("minValue = 60"), 1)
+    text_case("lowered + decoy in a string literal — MUST flag", base_t,
+              'val d = "minValue = 90"\nval r = """\nminValue = 90\n"""\n' + wrap("minValue = 60"), 1)
+    text_case("lowered + decoy outside kover/verify/rule/bound — MUST flag", base_t,
+              "other { minValue = 90 }\n" + wrap("minValue = 60"), 1)
+    text_case("lowered + new extra rule with a higher value — MUST flag (positional)", base_t,
+              wrap("minValue = 60", "minValue = 90"), 1)
+    text_case("unchanged floor — must not flag", base_t, wrap("minValue = 65"), 0)
+    text_case("raised floor — must not flag", base_t, wrap("minValue = 70"), 0)
+    text_case("raised floor + new rule appended — must not flag", base_t, wrap("minValue = 70", "minValue = 10"), 0)
 
     # The parser against the shape every fleet floor is written in.
     sample = """kover {
@@ -263,7 +349,7 @@ pitest { mutationThreshold = 0 }
     parser_ok = parsed == [60]
     ok = ok and parser_ok
     print(f"  [{'ok ' if parser_ok else 'FAIL'}] parser reads the fleet floor shape and ignores pitest: {parsed}")
-    inline = floors("    minValue = 95 // 97.30 % measured, minus 2\n")
+    inline = floors("kover { verify { rule { bound {\n    minValue = 95 // 97.30 % measured, minus 2\n} } } }\n")
     inline_ok = inline == [95]
     ok = ok and inline_ok
     print(f"  [{'ok ' if inline_ok else 'FAIL'}] parser accepts a trailing comment: {inline}")
@@ -271,14 +357,14 @@ pitest { mutationThreshold = 0 }
     one_ok = one_liner == [60]
     ok = ok and one_ok
     print(f"  [{'ok ' if one_ok else 'FAIL'}] parser reads the one-line bound form: {one_liner}")
-    commented = floors("/* minValue = 99 */\n// minValue = 98\n    minValue = 40\n")
+    commented = floors("/* minValue = 99 */\n// minValue = 98\n" + "kover { verify { rule { bound {\n    minValue = 40\n} } } }\n")
     commented_ok = commented == [40]
     ok = ok and commented_ok
     print(f"  [{'ok ' if commented_ok else 'FAIL'}] parser ignores block and line comments: {commented}")
     refused = 0
     for expression in ("    minValue = floorFor(project)\n", "    minValue = 60 * factor\n"):
         try:
-            floors(expression)
+            floors("kover { verify { rule { bound {\n" + expression + "} } } }\n")
         except UnparseableFloor:
             refused += 1
     expr_ok = refused == 2
