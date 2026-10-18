@@ -95,3 +95,5 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 `PUT .../participants/{participant}/waiver` (operator, mandatory reason) is allowed only for an existing `CUTOFF` day and only for a participant with no `RAN` report: `404` for a day that was never opened (so also any future day), `409` for a day that is not in `CUTOFF` or a participant that already ran. A waiver is appended, never overwriting an earlier row; it may supersede a `REFUSED` report.
 
 `openbank.ledger.close.participants-mode` is `off`, `shadow` (default, counts would-hold decisions and still ties out) or `enforce`; any other value fails the service start.
+
+In `enforce`, the accounting-day service applies the participant check to both scheduler and manual operator `CUTOFF → TIED_OUT` transitions, under the existing transactional day lock. A missing or REFUSED participant returns 409 until a valid report or an explicit reasoned operator waiver is recorded. A caller cannot omit this policy. The default remains `shadow`; this change does not authorize enabling enforcement.

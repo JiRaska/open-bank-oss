@@ -18,6 +18,7 @@ import com.openbank.ledger.application.usecase.JournalNotFoundException
 import com.openbank.ledger.application.usecase.JournalReversalConflictException
 import com.openbank.ledger.application.usecase.YearCloseConflictException
 import com.openbank.ledger.application.usecase.YearCloseNotFoundException
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
 import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.LedgerValidationException
 import com.openbank.libs.close.AccountingDayClosed
@@ -214,4 +215,13 @@ class CloseParticipantForbiddenExceptionMapper : ExceptionMapper<CloseParticipan
             .entity(mapOf("error" to (exception.message ?: "Forbidden")))
             .type(MediaType.APPLICATION_JSON)
             .build()
+}
+
+// 409 (ADR-0342 D3): enforce mode keeps the day in CUTOFF until reports or explicit waivers complete it.
+@Provider
+class CloseParticipantsPendingExceptionMapper : ExceptionMapper<CloseParticipantsPendingException> {
+    override fun toResponse(exception: CloseParticipantsPendingException): Response = Response.status(CONFLICT)
+        .entity(mapOf("error" to (exception.message ?: "Day-close participants are pending")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
 }

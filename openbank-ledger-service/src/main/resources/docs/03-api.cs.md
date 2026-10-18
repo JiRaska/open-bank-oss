@@ -93,3 +93,5 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 `PUT .../participants/{participant}/waiver` (operátor, povinný důvod) je povolen jen pro existující den v `CUTOFF` a jen pro účastníka bez hlášení `RAN`: `404` pro den, který nebyl otevřen (tedy i pro budoucí den), `409` pro den mimo `CUTOFF` nebo účastníka, který již proběhl. Prominutí se přidává jako nový záznam, nikdy nepřepisuje předchozí; může nahradit hlášení `REFUSED`.
 
 `openbank.ledger.close.participants-mode` je `off`, `shadow` (výchozí, počítá by-hold rozhodnutí a den přesto uzavře) nebo `enforce`; jakákoli jiná hodnota zastaví start služby.
+
+V režimu `enforce` aplikační služba účetního dne kontroluje účastníky při automatickém i ručním přechodu operátora `CUTOFF → TIED_OUT`, pod stávajícím transakčním zámkem dne. Chybějící účastník nebo REFUSED vrací 409 do přijetí platného hlášení či výslovné výjimky operátora s důvodem. Volající tuto kontrolu nemůže vynechat. Výchozí režim zůstává `shadow`; změna nepovoluje aktivaci vynucování.

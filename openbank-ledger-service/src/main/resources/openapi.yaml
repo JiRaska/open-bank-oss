@@ -712,7 +712,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Illegal transition (not the immediate successor), or a concurrent transition won
+          description: >
+            Illegal transition (not the immediate successor), a concurrent transition won, or
+            enforce mode requires a missing or REFUSED day-close participant to report or be explicitly waived.
 
   /api/v1/ledger/accounting-days/{businessDate}/participants:
     get:

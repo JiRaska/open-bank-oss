@@ -687,3 +687,5 @@ set) apply equally to the new `ledger.approval.decide` action.
   derives the switch list from source and fails if any is live. The chart of accounts is applied by a
   Flyway callback script mounted from a ConfigMap into this instance only, so no pension account reaches the
   bank's database. Rollback: delete the Argo app and its namespace; the bank's ledger is untouched.
+
+- **2026-10-19** — Day-close participant enforcement is owned by `AccountingDayService`, for both scheduler and manual operator CUTOFF → TIED_OUT transitions. Callers cannot omit a required participant set; the existing repository day lock and atomic completeness check remain. Missing/REFUSED participants require a valid report or explicit WAIVED record with operator identity and mandatory reason. The default stays shadow; no enforcement activation is authorized. Pure service tests model the persistence contract; HTTP/DB test source uses a test security identity and does not establish JWT signature validation or live identity configuration.

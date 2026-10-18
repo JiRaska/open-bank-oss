@@ -21,7 +21,9 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -234,6 +236,54 @@ class DayCloseParticipantsIT {
                 )
             }
         }.isInstanceOf(CloseParticipantForbiddenException::class.java)
+    }
+
+    /** Future cutoff instant keeps any cron verdict ineligible while the manual HTTP path is tested. */
+    private fun seedManualDay(date: LocalDate) {
+        onEventLoop {
+            val now = Instant.now()
+            val opened = AccountingDayRecord.open(date, now.minusSeconds(60), SEED_ACTOR)
+            val cut = opened.transitionTo(AccountingDayStatus.CUTOFF, SEED_ACTOR, now.plus(Duration.ofHours(1)))
+            accountingDays.saveOpened(
+                cut,
+                OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
+            )
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `manual HTTP tie-out cannot bypass a missing participant in enforce mode`() {
+        val date = LocalDate.of(2019, 6, 10)
+        seedManualDay(date)
+        given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+        assertThat(onEventLoop { participation.completeness(date) }.missing).containsExactly("interest")
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `manual HTTP tie-out cannot bypass REFUSED in enforce mode`() {
+        val date = LocalDate.of(2019, 6, 11)
+        seedManualDay(date)
+        interestReports(date, ParticipationOutcome.REFUSED, 0, "posting refused")
+        given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `manual HTTP tie-out succeeds after a reasoned operator waiver is recorded`() {
+        val date = LocalDate.of(2019, 6, 12)
+        seedManualDay(date)
+        given().contentType("application/json").body("""{"reason":"accepted outage, INC-4"}""")
+            .put("/api/v1/ledger/accounting-days/$date/participants/interest/waiver").then().statusCode(200)
+        val waiver = onEventLoop { participation.completeness(date) }.reported.getValue("interest")
+        assertThat(waiver.outcome).isEqualTo(ParticipationOutcome.WAIVED)
+        assertThat(waiver.reason).isEqualTo("accepted outage, INC-4")
+        assertThat(waiver.reportedBy).isEqualTo("manual-close-operator")
+        given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.TIED_OUT)
     }
 
     private companion object {

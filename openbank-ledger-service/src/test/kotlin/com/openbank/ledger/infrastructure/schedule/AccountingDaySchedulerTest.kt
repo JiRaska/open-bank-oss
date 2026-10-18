@@ -291,7 +291,7 @@ class AccountingDaySchedulerTest {
             coVerify(exactly = 1) {
                 useCase.transition(
                     match {
-                        it.businessDate == yesterday && it.requiredParticipants == setOf("interest")
+                        it.businessDate == yesterday && it.to == AccountingDayStatus.TIED_OUT
                     },
                 )
             }

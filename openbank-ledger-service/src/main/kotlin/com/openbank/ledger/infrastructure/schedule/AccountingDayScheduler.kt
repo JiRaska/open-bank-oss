@@ -250,13 +250,6 @@ class AccountingDayScheduler(
                             businessDate = day.businessDate,
                             to = AccountingDayStatus.TIED_OUT,
                             transitionedBy = SYSTEM_ACTOR,
-                            // Re-judged inside the transition's transaction (enforce only): the check
-                            // above is advisory and can be overtaken by a REFUSED report.
-                            requiredParticipants = closeParticipation.declaredParticipants()
-                                .takeIf {
-                                    closeParticipantsConfig.participantsMode() ==
-                                        CloseParticipantsConfig.MODE_ENFORCE
-                                },
                         ),
                     )
                     log.infof(

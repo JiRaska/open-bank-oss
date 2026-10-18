@@ -23,13 +23,6 @@ data class TransitionAccountingDayCommand(
     val businessDate: LocalDate,
     val to: AccountingDayStatus,
     val transitionedBy: String,
-    /**
-     * When non-null, the transition commits only if every one of these day-close participants has a
-     * latest report for the day that is not REFUSED - judged INSIDE the transition's own
-     * transaction, under the same per-day lock reports and waivers take. A completeness read made
-     * before the transaction can be overtaken by a REFUSED report landing in between.
-     */
-    val requiredParticipants: Set<String>? = null,
 )
 
 data class GetAccountingDayQuery(val businessDate: LocalDate)
