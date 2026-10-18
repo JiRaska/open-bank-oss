@@ -2441,6 +2441,25 @@ gates:
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
+  # Per-service CLAUDE.md files are loaded as agent instructions, and nothing checked the code they
+  # name. 2026-10-17: agent-service named 5 classes that do not exist, onboarding-service 2 (and
+  # described a four-eyes gate it does not have); the first gate run also found a wrong test name in
+  # loyalty-service. Backticked CamelCase identifiers must occur in a tracked source file (markdown
+  # does not count). ENFORCED: 0 findings on the corrected tree, --selftest carries the pre-fix shape.
+  - id: claude-md-identifiers-exist
+    name: "per-service CLAUDE.md names only classes that exist (#13168, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 60   # ~4 s CPU; wall time is I/O-bound on a loaded runner
+    rationale: "A per-service CLAUDE.md that names a class which does not exist sends the next agent after code that is not there; nothing else compares the prose with the tree."
+    review_after: "2027-04-17"
+    min_subjects: 7   # 14 per-service CLAUDE.md files with src/main measured 2026-10-17
+    selftest: python3 .github/scripts/check-claude-md-identifiers.py --selftest
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-claude-md-identifiers.py"]
+    run: |
+      python3 .github/scripts/check-claude-md-identifiers.py --enforce
+
   # The charter schedule in agents.yaml (EU AI Act inventory, admin-ui snapshot) and the *_CRON the
   # pod actually runs are two hand-kept copies of one fact. Measured 2026-10-17: 5 of 9 scheduled
   # agents disagreed — the crons were deliberate 15-minute offsets (shared LiteLLM gateway) and the
