@@ -18,22 +18,51 @@ import org.eclipse.microprofile.jwt.JsonWebToken
  *
  * All claim reads fall back to the defaults used in production code:
  *  - `sub`             → "test-sub" (non-null, prevents 401 in getMyParty)
- *  - `email_verified`  → false  (null → false in registerParty)
- *  - `email`           → null   (falls back to request body `email` field)
+ *  - `email_verified`  → null     (null → false in registerParty)
+ *  - `email`           → null     (falls back to request body `email` field)
+ *
+ * The E2E suites ([com.openbank.party.e2e]) exercise journeys that read these claims
+ * directly — verified-email self-registration and the GDPR subject-self branch — so the
+ * defaults are [configure]-able per journey and must be [reset] in a `finally`. Every other
+ * test class observes the defaults above, byte-identical to the historical frozen behaviour.
  */
 @Mock
 @RequestScoped
 class TestJsonWebToken : JsonWebToken {
 
-    override fun getName(): String = "test-sub"
+    override fun getName(): String = configuredSubject
 
     override fun getRawToken(): String = "test-token"
 
-    override fun getClaimNames(): Set<String> = setOf("sub")
+    override fun getClaimNames(): Set<String> = setOf("sub", "email", "email_verified")
 
     @Suppress("UNCHECKED_CAST")
     override fun <T : Any?> getClaim(claimName: String): T? = when (claimName) {
-        "sub" -> getName() as T?
+        "sub" -> configuredSubject as? T
+        "email" -> configuredEmail as? T
+        "email_verified" -> configuredEmailVerified as? T
         else -> null
+    }
+
+    companion object {
+        private const val DEFAULT_SUBJECT = "test-sub"
+
+        private var configuredSubject: String = DEFAULT_SUBJECT
+        private var configuredEmail: String? = null
+        private var configuredEmailVerified: Boolean? = null
+
+        /** Point the request-scoped principal's claims at the given subject for one journey. */
+        fun configure(sub: String, email: String? = null, emailVerified: Boolean? = null) {
+            configuredSubject = sub
+            configuredEmail = email
+            configuredEmailVerified = emailVerified
+        }
+
+        /** Restore the frozen defaults so no other test class observes E2E claims. */
+        fun reset() {
+            configuredSubject = DEFAULT_SUBJECT
+            configuredEmail = null
+            configuredEmailVerified = null
+        }
     }
 }
