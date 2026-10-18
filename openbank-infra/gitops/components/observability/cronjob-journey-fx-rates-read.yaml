@@ -1,0 +1,277 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: fx-rates-read (ADR-0252). The bank-owned canary customer reads the published FX
+# rate sheet, one live pair quote and the ČNB reference history through the PUBLIC customer
+# edge — the same read paths the mobile app's in-form currency conversion and rate trend
+# take.
+#
+# Why the public edge and not fx-service's ClusterIP: the customer-relevant question is
+# whether a customer's app can reach the rates at all — an in-cluster call would prove the
+# service answers and nothing about the path a customer takes. The token comes from the
+# public token endpoint for the same reason.
+#
+# Why this journey exists at all: fx-service's ČNB fixing URL was a 404 for the service's
+# whole life and every test layer stayed green (#2204) — a 404 is a valid HTTP response, so
+# "the request succeeded" never was evidence. These checks pin the SHAPE of the answer
+# (non-empty rate sheet, positive parseable rate, present timestamp, non-empty ČNB
+# history): a fixer that goes silent, starts answering an empty sheet, or emits rows
+# without a rate turns the journey red even while every transport-level probe stays green.
+#
+# Identity: the SAME canary customer the wealth and vop journeys drive —
+# openbank-synthetic-retail (ADR-0331), whose service-account user is a SYNTHETIC party
+# with ROLE_CUSTOMER only. customer-edge's /customer/v1/fx/rates* routes require exactly
+# `customer.fx.read` (class-level @RolesAllowed covers ROLE_CUSTOMER, and the base OPA
+# policy admits any customer.* action for ROLE_CUSTOMER), so no new client, role or policy
+# is needed. Every request carries x-openbank-synthetic: true.
+#
+# Side effects: none. All three calls are reads; the journey mints nothing, writes nothing
+# and moves no money. It covers openbank-fx-service's read path without touching the
+# conversion/posting paths, which stay blocked by ADR-0252 phase 1 like every money-moving
+# journey.
+#
+# The secret arrives through the OPTIONAL ExternalSecret journey-fx-rates-read-oidc,
+# reading the same OpenBao KV entry (keycloak/synthetic-retail) the wealth and vop
+# ExternalSecrets read. Until the identity is provisioned
+# (openbank-infra/scripts/provision-synthetic-customer.sh) the script logs "credential
+# absent" and fails every check: a red run, never a crash loop and never a green one.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-fx-rates-read-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: fx-rates-read
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<3000'],
+      },
+      tags: { journey: 'fx-rates-read' },
+    };
+
+    // Read-shaped by design: the journey mints nothing and moves no money. Override the
+    // bases only for the catalog's documented falsification; the normal targets are the
+    // real public edge and the public token endpoint.
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'https://kc.open-bank.tech/realms/openbank-customers/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.SYNTHETIC_CLIENT_ID || 'openbank-synthetic-retail';
+    const CLIENT_SECRET = __ENV.SYNTHETIC_CLIENT_SECRET || '';
+
+    // EUR/CZK is the bank's home-pair quote and is seeded by both the commercial sheet and
+    // the ČNB fixing ingest, so it is the deterministic pair to pin. Fixed on purpose — a
+    // rotating pair would make the shape assertions nondeterministic.
+    const PAIR = { base: 'EUR', quote: 'CZK' };
+
+    const CHECKS = [
+      'fx rate sheet answers 200',
+      'fx rate sheet is a non-empty array',
+      'fx rate sheet rows carry a positive rate',
+      'fx pair quote answers 200',
+      'fx pair quote restates the requested pair',
+      'fx pair quote carries a positive parseable rate',
+      'fx pair quote carries a timestamp',
+      'fx cnb history answers 200',
+      'fx cnb history is a non-empty array',
+      'fx cnb history newest row carries a positive rate',
+    ];
+
+    function failAll() {
+      const verdicts = {};
+      for (const name of CHECKS) verdicts[name] = () => false;
+      check(null, verdicts);
+    }
+
+    // Never log the secret, the token, headers or response bodies: retained Job logs must
+    // stay secret-free. Status codes only.
+    function fetchToken() {
+      if (!CLIENT_SECRET) {
+        console.error('fx-rates-read credential absent: SYNTHETIC_CLIENT_SECRET is not set (ExternalSecret journey-fx-rates-read-oidc not provisioned); refusing to probe unauthenticated');
+        return null;
+      }
+      const res = http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+      if (res.status !== 200) {
+        console.error(`fx-rates-read token request failed: status=${res.status}`);
+        return null;
+      }
+      let token = null;
+      try { token = res.json('access_token'); } catch (_) { /* reported below */ }
+      if (typeof token !== 'string' || token.length === 0) {
+        console.error('fx-rates-read token response carried no access_token');
+        return null;
+      }
+      return token;
+    }
+
+    function json(res) {
+      try { return res.json(); } catch (_) { return null; }
+    }
+
+    function positiveRate(row) {
+      const r = row && row.rate != null ? Number(row.rate) : NaN;
+      return Number.isFinite(r) && r > 0;
+    }
+
+    export default function () {
+      const token = fetchToken();
+      if (token === null) { failAll(); return; }
+
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'x-openbank-synthetic': 'true',
+      };
+
+      // 1 — the published rate sheet (what the app's list screen renders).
+      const sheet = http.get(`${CUSTOMER_BASE}/customer/v1/fx/rates`, {
+        headers,
+        tags: { endpoint: 'fx-rates-list', service: 'customer-edge' },
+      });
+      if (sheet.status !== 200) {
+        console.error(`fx-rates-read sheet unexpected response: status=${sheet.status} content_type=${sheet.headers['Content-Type'] || 'absent'}`);
+      }
+      const sheetBody = sheet.status === 200 ? json(sheet) : null;
+      const sheetRows = Array.isArray(sheetBody) ? sheetBody : [];
+
+      check(sheet, {
+        'fx rate sheet answers 200': (r) => r.status === 200,
+        'fx rate sheet is a non-empty array': () => sheetRows.length > 0,
+        // The edge projects upstream rows down to {base, quote, rate, ...} and already
+        // answers 502 "malformed fx rates" on a shape it cannot read; this check pins the
+        // value invariant (#2204: a 404/empty fixer is a valid HTTP answer, never evidence).
+        'fx rate sheet rows carry a positive rate': () =>
+          sheetRows.length > 0 && sheetRows.every(positiveRate),
+      });
+
+      // 2 — one live pair quote (what the in-form conversion uses). The app POSTs this
+      // route by convention even though the edge treats it as a read.
+      const pair = http.post(
+        `${CUSTOMER_BASE}/customer/v1/fx/rates/${PAIR.base}/${PAIR.quote}`,
+        '',
+        { headers, tags: { endpoint: 'fx-rate-pair', service: 'customer-edge' } },
+      );
+      if (pair.status !== 200) {
+        console.error(`fx-rates-read pair unexpected response: status=${pair.status} content_type=${pair.headers['Content-Type'] || 'absent'}`);
+      }
+      const pairBody = pair.status === 200 ? json(pair) : null;
+
+      check(pair, {
+        'fx pair quote answers 200': (r) => r.status === 200,
+        'fx pair quote restates the requested pair': () =>
+          !!pairBody && pairBody.base === PAIR.base && pairBody.quote === PAIR.quote,
+        'fx pair quote carries a positive parseable rate': () => positiveRate(pairBody),
+        'fx pair quote carries a timestamp': () =>
+          !!pairBody && typeof pairBody.timestamp === 'string' && pairBody.timestamp.length > 0,
+      });
+
+      // 3 — the ČNB reference history (the trend screen). This is the leg that actually
+      // exercises the fixing ingest end to end: a dead ČNB source yields an empty history
+      // even while the commercial sheet still answers, and the non-empty check goes red.
+      const history = http.get(
+        `${CUSTOMER_BASE}/customer/v1/fx/rates/${PAIR.base}/${PAIR.quote}/history`,
+        { headers, tags: { endpoint: 'fx-rate-history', service: 'customer-edge' } },
+      );
+      if (history.status !== 200) {
+        console.error(`fx-rates-read history unexpected response: status=${history.status} content_type=${history.headers['Content-Type'] || 'absent'}`);
+      }
+      const historyBody = history.status === 200 ? json(history) : null;
+      const historyRows = Array.isArray(historyBody) ? historyBody : [];
+
+      check(history, {
+        'fx cnb history answers 200': (r) => r.status === 200,
+        'fx cnb history is a non-empty array': () => historyRows.length > 0,
+        'fx cnb history newest row carries a positive rate': () =>
+          historyRows.length > 0 && positiveRate(historyRows[0]),
+      });
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-fx-rates-read
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: fx-rates-read
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '8,23,38,53 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "3600"
+spec:
+  schedule: "8,23,38,53 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: fx-rates-read
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/journey.js
+              env:
+                # Optional on purpose: an unseeded KV entry must yield a red run with an
+                # explicit "credential absent" error, not CreateContainerConfigError.
+                - name: SYNTHETIC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-fx-rates-read-oidc
+                      key: SYNTHETIC_CLIENT_SECRET
+                      optional: true
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-fx-rates-read-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule
