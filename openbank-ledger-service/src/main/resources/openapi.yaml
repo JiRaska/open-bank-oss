@@ -11,10 +11,10 @@ info:
   # 1.23.0 -> 1.24.0 (#12501): additive frozen and live calendar-year-to-date flow reads.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  # 1.25.0 -> 1.26.0 (ADR-0341 D3): additive. GET /accounting-classes[/resolve] and an alternative way to
+  # 1.26.0 -> 1.27.0 (ADR-0341 D3): additive. GET /accounting-classes[/resolve] and an alternative way to
   # name a journal line's account (accountingClass + accountingRole) -- glAccountId stops being required,
   # which relaxes the request and breaks no caller.
-  version: 1.26.0
+  version: 1.27.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
