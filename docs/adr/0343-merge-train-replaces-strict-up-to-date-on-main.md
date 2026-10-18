@@ -67,10 +67,14 @@ the gitops App**, and the strict up-to-date policy is turned off. Concretely:
    context of `main-protection` (other than `merge-train` itself) `success` at the head, no
    `agent-pr-guard` refusal, and no App-posted `merge-train` failure on that head (a culprit waits
    for a push). `codex/` branches are excluded. A PR touching **anything under `.github/`** —
-   workflows, gate scripts, `gates.yaml`, generators, the regen inventory — or a generator
-   elsewhere (`docs/adr/*.sh`, `gen-*` under `openbank-infra/gitops/`) never qualifies; it takes the
-   owner's manual lane (see *Security* for why the boundary is the whole directory). Oldest first;
-   the required set is read live from the ruleset.
+   workflows, gate scripts, `gates.yaml`, generators, the regen inventory — or **any file the
+   generator runner would execute** never qualifies; it takes the owner's manual lane (see
+   *Security* for why the boundary is the whole directory). "Would execute" is derived from
+   `origin/main`'s `regen-derived.sh` itself — its `find <root> -name '<pattern>'` enumeration at
+   any depth, the programs its inventory invokes, and the libraries `gen-index.sh` sources — never
+   from a fixed-depth glob, which a deeper file walks past. A PR's file list is
+   `git diff --name-only <base>...<verified head>`, never the PR files API, which stops at 3000
+   entries. Oldest first; the required set is read live from the ruleset.
 3. **Fast lane.** `settle` computes it every tick from live data: a candidate whose changed files
    are disjoint from what `main` changed since its merge-base and from every other candidate, and
    touch no protected path (`openbank-libs/**`, `build-logic/**`, `openbank-infra/gitops/**`,
@@ -133,7 +137,9 @@ reach the later step. Each fix narrowed the gap; only separating runners closes 
 - *No shared runner.* `build` is the only job that runs code over PR data, and it holds no
   secret: read-only `GITHUB_TOKEN`, `persist-credentials: false`, generators taken from
   `origin/main` and run under an allowlisted environment (no token, no `RUNNER_TEMP`, no
-  `GITHUB_*`). `publish` and `settle` mint the App token on fresh runners, check out `main`, run
+  `GITHUB_*`). Before any generator runs, `build` also removes from the working tree every file
+  the runner would execute that is not on `main`, at any depth, so a generator a PR adds can never
+  run even if every upstream check missed it. `publish` and `settle` mint the App token on fresh runners, check out `main`, run
   this script as it exists on `origin/main` under `python3 -I -S`, set
   `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` and `core.hooksPath=/dev/null` on every
   git call, and never check out, install or execute anything from a train. The
