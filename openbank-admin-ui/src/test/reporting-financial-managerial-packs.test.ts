@@ -98,3 +98,10 @@ describe('financial and managerial packs', () => {
     }
   })
 })
+
+describe('finance-loan-vintage period filter', () => {
+  it('compares the Date column against month-start dates, never a bare YYYY-MM string', () => {
+    const sql = getReport('finance-loan-vintage')!.sql({ fromMonth: '2026-01', toMonth: '2026-10' })
+    expect(sql).toContain("vintage_month BETWEEN toDate('2026-01-01') AND toDate('2026-10-01')")
+  })
+})

@@ -20,7 +20,14 @@ object F0102Mapper {
             .filter { it.accountType == "LIABILITY" }
             .fold(BigDecimal.ZERO) { total, line -> total.add(line.net) }
             .negate()
-        val deposits = creditBalance(lines, "2001", "2002", "2100", "2101", "2102", "2103")
+        val deposits = creditBalance(
+            lines,
+            "2001", "2002", "2100", "2101", "2102", "2103",
+            // Treasury: deposits from credit institutions (2300/2301), ČNB lombard borrowing (2320, a
+            // deposit from a central bank) and their accrued interest payable (2310/2311), which is
+            // part of the amortised-cost carrying amount.
+            "2300", "2301", "2310", "2311", "2320",
+        )
         val taxPayable = creditBalance(lines, "2200")
         val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(
