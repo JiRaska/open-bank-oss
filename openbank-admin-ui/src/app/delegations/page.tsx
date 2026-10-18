@@ -370,7 +370,7 @@ function ProjectionHealth({ consumers, known, loading }: { consumers: Projection
           <tbody>
             {consumers.map(c => (
               <tr key={c.groupId}>
-                <td style={{ fontSize: '12px' }}>{c.groupId}</td>
+                <td style={{ fontSize: '12px' }}>{c.groupId}{/* raw-id-ok: Kafka consumer-group name, technical by nature */}</td>
                 <td style={{ fontSize: '12px' }}>{c.state ?? '—'}</td>
                 <td style={{ fontSize: '12px' }}>{c.lag === null ? '—' : c.lag}</td>
               </tr>

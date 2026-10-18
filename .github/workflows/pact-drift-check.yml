@@ -310,6 +310,7 @@ jobs:
         run: >-
           python3 .github/scripts/publish-admin-ui-pacts.py prepare
           --marker "${RUNNER_TEMP}/pact-regen-marker"
+          --archive-proved "${RUNNER_TEMP}/expected-jvm-pacts.txt"
           --bundle "${RUNNER_TEMP}/admin-ui-pacts.json"
 
       - name: Hand off verified admin UI contracts

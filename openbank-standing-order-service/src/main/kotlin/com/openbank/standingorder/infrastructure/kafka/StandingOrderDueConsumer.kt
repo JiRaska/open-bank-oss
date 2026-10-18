@@ -5,16 +5,17 @@
 package com.openbank.standingorder.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
 import com.openbank.standingorder.infrastructure.client.CreateSepaPaymentRequest
-import com.openbank.standingorder.infrastructure.client.InitiateTransactionRequest
 import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
 import com.openbank.standingorder.infrastructure.client.TransactionServiceClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -188,21 +189,43 @@ class StandingOrderDueConsumer(
             amount = toMajorUnits(node.path("amountMinorUnits").asLong(), currency),
             currencyCode = currency,
             description = node.path("remittanceInfo").asText(null)?.takeIf { it.isNotBlank() },
-            valueDate = LocalDate.now(clock).toString(),
+            valueDate = LocalDate.now(clock),
         )
-        val txResponse = transactionClient.initiate(request).awaitSuspending()
-        if (txResponse.statusInfo.family == Response.Status.Family.SUCCESSFUL) {
-            log.infof("[standing-order-exec] order %s internal transfer accepted (HTTP %d)", orderId, txResponse.status)
-            runCatching { useCase.confirmExecution(orderId) }
-                .onFailure { log.warnf(it, "[standing-order-exec] confirmExecution failed for order %s", orderId) }
-        } else {
-            log.warnf(
-                "[standing-order-exec] order %s internal transfer rejected (HTTP %d) — recording failure",
-                orderId,
-                txResponse.status,
-            )
+        if (!submitTransfer(orderId, request)) {
             recordFailureSafely(orderId)
+            return
         }
+        runCatching { useCase.confirmExecution(orderId) }
+            .onFailure { log.warnf(it, "[standing-order-exec] confirmExecution failed for order %s", orderId) }
+    }
+
+    /**
+     * Books the own-account transfer and says, explicitly, what the answer meant. Success is ONLY a
+     * normal return of the generated call; there is no status-proof mechanism here yet (a central
+     * typed facade is planned), so the interim rule is deliberately conservative:
+     *
+     * - **normal return** - accepted.
+     * - **400 / 422** - the only business rejections: `false`, so the caller records the failed
+     *   execution.
+     * - **everything else** - 401/403 (identity/config), 404, 409, any other 4xx, 5xx, timeouts, and
+     *   in particular a response body that fails to bind (a Jackson error or a ProcessingException)
+     *   - is rethrown for [EventRetry] and then the connector's retry/DLQ. The 2xx status of an
+     *   unreadable answer is NOT proven, so the execution is neither confirmed nor failed; a retry
+     *   re-presents the same idempotency key and transaction-service replays the booked transfer.
+     */
+    private suspend fun submitTransfer(orderId: UUID, request: InitiateTransactionRequest): Boolean = try {
+        val txResponse = transactionClient.initiateTransaction(request).awaitSuspending()
+        log.infof("[standing-order-exec] order %s internal transfer accepted (transaction %s)", orderId, txResponse.id)
+        true
+    } catch (e: WebApplicationException) {
+        val status = e.response.status
+        if (status !in REJECTION_STATUSES) throw e
+        log.warnf(
+            "[standing-order-exec] order %s internal transfer rejected (HTTP %d) — recording failure",
+            orderId,
+            status,
+        )
+        false
     }
 
     /**
@@ -260,5 +283,10 @@ class StandingOrderDueConsumer(
     private suspend fun recordFailureSafely(orderId: UUID) {
         runCatching { useCase.recordFailure(orderId) }
             .onFailure { log.warnf(it, "[standing-order-exec] recordFailure failed for order %s", orderId) }
+    }
+
+    private companion object {
+        /** Bad Request, Unprocessable Entity: transaction-service refusing THIS transfer on its merits. */
+        val REJECTION_STATUSES = setOf(400, 422)
     }
 }

@@ -39,6 +39,17 @@ export function Drawer({ title, description, onClose, children, width = 480 }: D
         />
         <Dialog.Content
           aria-modal="true"
+          // Radix focuses the first tabbable child, which can be a copy button in the header.
+          // A drawer child marked `data-drawer-initial-focus` (normally its Close button) wins.
+          onOpenAutoFocus={event => {
+            const preferred = event.currentTarget instanceof HTMLElement
+              ? event.currentTarget.querySelector<HTMLElement>('[data-drawer-initial-focus]')
+              : null
+            if (preferred) {
+              event.preventDefault()
+              preferred.focus()
+            }
+          }}
           style={{
             position: 'fixed',
             insetBlock: 0,
