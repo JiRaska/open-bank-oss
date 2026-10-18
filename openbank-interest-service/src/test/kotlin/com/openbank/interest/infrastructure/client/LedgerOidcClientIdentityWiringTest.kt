@@ -23,8 +23,8 @@ import org.yaml.snakeyaml.Yaml
  *    secret variable. A missing named client does not fail the build; it fails the first post.
  *
  * Batch 2 moved [TransactionServiceClient] (the remittance leg, transaction.create) onto the same
- * named client. The converse still keeps this narrow: the other rest-clients (account,
- * product-catalog) stay on the default client until their own edges are migrated.
+ * named client, and #8481 moved the product-catalog read there too, so every rest-client in this
+ * service now selects the named client; the default (shared) definition remains configured only.
  */
 class LedgerOidcClientIdentityWiringTest {
 
@@ -39,10 +39,12 @@ class LedgerOidcClientIdentityWiringTest {
     fun `the money-path clients select the named oidc-client and not the default one`() {
         // #10486 batch 2: the withholding-tax remittance leg (transaction.create) joined the ledger post.
         // #10486 batch 5: the accrual run's account reads (account.list, account.read) joined too.
+        // #8481: the product-catalog read (catalog.read) joined as the last edge; none uses the default client now.
         listOf(
             LedgerRestClient::class.java,
             TransactionServiceClient::class.java,
             AccountServiceClient::class.java,
+            ProductCatalogClient::class.java,
         ).forEach { client ->
             val named = client.getAnnotation(OidcClientFilter::class.java)
             assertThat(named).describedAs("@OidcClientFilter on %s", client.simpleName).isNotNull
@@ -69,15 +71,8 @@ class LedgerOidcClientIdentityWiringTest {
     }
 
     @Test
-    fun `the default oidc-client stays the shared one for the not-yet-migrated edges`() {
+    fun `the default oidc-client definition stays the shared one and no rest-client selects it any more`() {
         assertThat(oidcClient["client-id"]).isEqualTo("openbank-services")
-        listOf(ProductCatalogClient::class.java)
-            .forEach { client ->
-                assertThat(providers(client))
-                    .describedAs("%s still uses the default (shared) client", client.simpleName)
-                    .contains(OidcClientRequestReactiveFilter::class.java)
-                assertThat(client.getAnnotation(OidcClientFilter::class.java)).isNull()
-            }
     }
 
     private fun providers(type: Class<*>): List<Class<*>> =

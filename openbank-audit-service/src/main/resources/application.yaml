@@ -129,8 +129,8 @@ mp:
       # the audit-service KafkaUser ACL (kafka-audit-mtls.yaml) does NOT grant Read on (only
       # "audit-service" is granted) — every consumer poll got a silent
       # org.apache.kafka.common.errors.GroupAuthorizationException. A properties file (not an env
-      # var) is used here, matching the pattern already established for transaction-service's
-      # payment-scheme-accepted channel; it carries the exact hyphenated/dotted property name
+      # var) is used here, matching the pattern already established for card-issuance-service's party-events-in
+      # channel; it carries the exact hyphenated/dotted property name
       # unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping
       # for channel discovery. See issue #686.
       #

@@ -123,10 +123,14 @@ def source(root, sha):
     return result
 
 
-def prepare(root, sha, marker):
+def prepare(root, sha, marker, archive_proved=frozenset()):
+    """`archive_proved` names the JVM-generated contracts the drift job restored from its
+    validated shard archives. Their freshness is proved by exact archive coverage (#13006), and
+    `tar -x` keeps the generation-time mtime, which precedes the marker — so for those files the
+    mtime test cannot be the proof. Every other contract must still be rewritten after it."""
     files = source(root, sha)
     cutoff = marker.stat().st_mtime_ns
-    if any((root / name).stat().st_mtime_ns <= cutoff for name in files):
+    if any(name not in archive_proved and (root / name).stat().st_mtime_ns <= cutoff for name in files):
         raise ValueError("Every contract must be regenerated after the generation marker")
     return {"sourceSha": sha, "files": {
         name: {"sha256": hashlib.sha256(content).hexdigest(),
@@ -220,13 +224,16 @@ def main():
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--marker", type=Path)
     parser.add_argument("--providers-output", type=Path)
+    parser.add_argument("--archive-proved", type=Path,
+                        help="file listing pacts/ paths restored from the validated JVM archives")
     args = parser.parse_args()
     sha = os.environ.get("GITHUB_SHA", "")
     try:
         if args.mode == "prepare":
             if args.marker is None:
                 raise ValueError("Regeneration marker is required")
-            args.bundle.write_text(json.dumps(prepare(args.root, sha, args.marker)) + "\n")
+            proved = frozenset(args.archive_proved.read_text().split()) if args.archive_proved else frozenset()
+            args.bundle.write_text(json.dumps(prepare(args.root, sha, args.marker, proved)) + "\n")
         else:
             build_url = (f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
                          f"/actions/runs/{os.environ['GITHUB_RUN_ID']}")

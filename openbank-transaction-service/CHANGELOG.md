@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.30.0...transaction-service-v1.30.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **transaction:** remove the dead payment.scheme-accepted path (ADR-0108) ([#13158](https://github.com/JiRaska/open-bank-oss/issues/13158)) ([0140013](https://github.com/JiRaska/open-bank-oss/commit/014001337a587b8895e88c589212340fa9fbbf3e))
+
 ## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.29.0...transaction-service-v1.30.0) (2026-10-18)
 
 

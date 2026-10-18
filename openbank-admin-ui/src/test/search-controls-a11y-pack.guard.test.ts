@@ -12,7 +12,7 @@ describe('operator search accessibility contract', () => {
       swift: 'Hledat SWIFT zprávy',
       sanctions: 'Hledat sankční kontroly',
       'product-catalog': 'Hledat v katalogu produktů',
-      audit: 'ID agregátu',
+      audit: 'Technické ID (pokročilé)',
       pid: 'Hledat PID případy',
     }
     for (const [route, label] of Object.entries(expected)) {
