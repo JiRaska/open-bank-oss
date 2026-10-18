@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.5.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.0...admin-ui-v3.5.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** make DWH reports work against the live ClickHouse ([#13218](https://github.com/JiRaska/open-bank-oss/issues/13218)) ([01ad53e](https://github.com/JiRaska/open-bank-oss/commit/01ad53eac2c28997c671160f384b7988c4320e78))
+
+
+### Security
+
+* **notification:** reserve commstemplate.publish for ROLE_COMMS_APPROVER ([#13133](https://github.com/JiRaska/open-bank-oss/issues/13133)) ([de2b093](https://github.com/JiRaska/open-bank-oss/commit/de2b0936fd079f9affd5f24b4eaf7532c54d6f55))
+
 ## [3.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.2...admin-ui-v3.5.0) (2026-10-17)
 
 

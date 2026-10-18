@@ -36,15 +36,21 @@ data class ManagedTemplateDraftRequest(
 
 data class ManagedTemplatePreviewRequest(val draft: ManagedTemplateDraftRequest, val variables: Map<String, String?>)
 
-/** Staff-only editorial surface. No customer or edge token can publish customer copy. */
+/**
+ * Staff-only editorial surface. No customer or edge token can publish customer copy.
+ *
+ * Maker and checker are distinct job functions (ADR-0333 D6, same split as ADR-0285 D6):
+ * operators draft, ROLE_COMMS_APPROVER publishes, ADMIN is break-glass for both. Publishing
+ * additionally refuses the draft's own maker, so ADMIN cannot release its own copy either.
+ */
 @Path("/api/v1/notification-templates")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
-@RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
 class ManagedTemplateResource(private val store: PgManagedTemplateStore, private val identity: SecurityIdentity) {
     private fun actor(): String = identity.principal?.name.orEmpty()
 
     @POST
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "commstemplate.create", resource = "")
     suspend fun create(request: ManagedTemplateDraftRequest): Response {
         val created = store.create(
@@ -59,6 +65,7 @@ class ManagedTemplateResource(private val store: PgManagedTemplateStore, private
     }
 
     @GET
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_COMMS_APPROVER", "ROLE_ADMIN")
     @Authorize(action = "commstemplate.read", resource = "")
     suspend fun list(@QueryParam("template") template: NotificationTemplate?): Response {
         template ?: return Response.status(Response.Status.BAD_REQUEST).build()
@@ -67,12 +74,14 @@ class ManagedTemplateResource(private val store: PgManagedTemplateStore, private
 
     @GET
     @Path("/{id}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_COMMS_APPROVER", "ROLE_ADMIN")
     @Authorize(action = "commstemplate.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): Response = store.find(id)?.let { Response.ok(it).build() }
         ?: Response.status(Response.Status.NOT_FOUND).build()
 
     @POST
     @Path("/preview")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_COMMS_APPROVER", "ROLE_ADMIN")
     @Authorize(action = "commstemplate.preview", resource = "")
     fun preview(request: ManagedTemplatePreviewRequest): Response {
         val draft = request.draft
@@ -90,12 +99,13 @@ class ManagedTemplateResource(private val store: PgManagedTemplateStore, private
     @POST
     @Path("/{id}/publish")
     @Consumes(MediaType.WILDCARD)
+    @RolesAllowed("ROLE_COMMS_APPROVER", "ROLE_ADMIN")
     @Authorize(action = "commstemplate.publish", resource = "#id")
     suspend fun publish(@PathParam("id") id: UUID): Response {
         val draft = store.find(id) ?: return Response.status(Response.Status.NOT_FOUND).build()
         if (draft.createdBy == actor()) {
             return Response.status(Response.Status.CONFLICT)
-                .entity(mapOf("error" to "a different operator must publish the revision")).build()
+                .entity(mapOf("error" to "the maker of a revision cannot publish it")).build()
         }
         return store.publish(id, actor())?.let { Response.ok(it).build() }
             ?: Response.status(Response.Status.CONFLICT).build()
