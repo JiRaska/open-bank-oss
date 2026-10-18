@@ -88,6 +88,26 @@ gates:
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
 
+  - id: coverage-floor-ratchet
+    name: "Kover coverage floors only go up (ADR-0020, enforced)"
+    group: kotlin
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    min_subjects: 50   # 77 build.gradle.kts files carry a Kover minValue on 2026-10-17
+    budget_seconds: 20
+    rationale: "Every module's floor is a static minValue that koverVerify enforces, so a PR could lower it and every gate stayed green: fx-service went 65 -> 60 in #12773 with nothing to notice. A lowered or removed floor now needs a `coverage-floor-lowered: #<issue>` trailer naming the issue that owns the debt; raising or adding a floor is always allowed."
+    review_after: "2027-10-17"
+    selftest: python3 .github/scripts/check-coverage-floor-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py"]
+    run: |
+      # Compares every Kover minValue at HEAD against the PR's merge base, position by position.
+      # The trailer is read from the PR body (optional: a PR with no body can still justify a
+      # lowering in a commit message of its range) and from `git log base..HEAD`, so the squash
+      # merge carries the reason onto main.
+      python3 .github/scripts/check-coverage-floor-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
+
   - id: pitest-threshold-single-source
     name: "pitest.yml reads one mutation threshold in every lane (enforced)"
     group: lint

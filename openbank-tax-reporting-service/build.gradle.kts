@@ -46,3 +46,21 @@ dependencies {
     // #12425: consumer pacts for the pension reporting read models, written to pacts/.
     testImplementation(libs.pact.consumer)
 }
+
+// Coverage floor (ADR-0020, ratchet-only). This module had no verify{} rule, so koverVerify
+// passed trivially — "ungated" read exactly like "gated". 80.94% LINE (1452/1794) measured
+// locally on 2026-10-17 over this service's own sources (the fleet filter excludes
+// com.openbank.libs.*), minus 2. Raise-only from here; gate `coverage-floor-ratchet` holds the
+// direction.
+kover {
+    reports {
+        verify {
+            rule {
+                bound {
+                    minValue = 78
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
+    }
+}
