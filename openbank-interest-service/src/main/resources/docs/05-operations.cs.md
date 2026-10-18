@@ -126,3 +126,7 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey na JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, build/push image, ArgoCD zvedne tag.
 - **Release osa** (release-please) je řízena `version.txt` + Conventional Commits; **osa API kontraktu** je `openapi.yaml: info.version` (ADR-0048). Nevynucujte jejich rovnost.
 - GitOps: u konfliktů image-tagů berte `--ours` (čerstvě sestavený tag); u RBAC/config berte `--theirs` nebo řešte ručně.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

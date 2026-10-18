@@ -85,7 +85,7 @@ tests:
               cronjob: stale
             exp_annotations:
               summary: "CronJob t/stale has not succeeded for 2d 3h 40m 0s"
-              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled, or the CronJob may be suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob stale -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled. A CronJob with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob stale -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
           - exp_labels:
               severity: warning
               team: platform
@@ -93,7 +93,7 @@ tests:
               cronjob: never
             exp_annotations:
               summary: "CronJob t/never has not succeeded for 2d 12h 0m 0s"
-              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled, or the CronJob may be suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob never -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled. A CronJob with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob never -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
       - alertname: CronJobMaxSuccessAgeUndeclared
         eval_time: 60h
         exp_alerts:
@@ -131,3 +131,48 @@ tests:
       - alertname: CronJobMaxSuccessAgeUndeclared
         eval_time: 60h
         exp_alerts: []
+
+  # A CronJob that is deliberately suspended (spec.suspend=true, e.g. platform/p3-shadow-case-injector
+  # since #10606) never runs, so its success age grows without bound and the alert would fire forever.
+  # `paused` is stale and suspended -> quiet. `resumed` is the SAME shape with suspend=0 -> fires, so
+  # the quiet result cannot be a vacuous pass (an alert that never fires also leaves `paused` quiet).
+  # `nosuspendmetric` has no kube_cronjob_spec_suspend series at all -> must still fire: the filter
+  # may only remove a CronJob that is positively reported as suspended.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="paused",annotation_openbank_tech_max_success_age_seconds="3600"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="resumed",annotation_openbank_tech_max_success_age_seconds="3600"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="nosuspendmetric",annotation_openbank_tech_max_success_age_seconds="3600"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="paused"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="resumed"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="nosuspendmetric"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="t",cronjob="paused"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_spec_suspend{job="kube-state-metrics",namespace="t",cronjob="resumed"}'
+        values: '0x3600'
+    alert_rule_test:
+      - alertname: CronJobSuccessStale
+        eval_time: 60h
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: t
+              cronjob: resumed
+            exp_annotations:
+              summary: "CronJob t/resumed has not succeeded for 2d 12h 0m 0s"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled. A CronJob with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob resumed -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: t
+              cronjob: nosuspendmetric
+            exp_annotations:
+              summary: "CronJob t/nosuspendmetric has not succeeded for 2d 12h 0m 0s"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled. A CronJob with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob nosuspendmetric -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
