@@ -123,3 +123,7 @@ Nikdy needituj aplikovanou migraci. Pokud checksum mismatch blokuje start, nasta
 V produkci vyžaduje TLS listener AML služby na portu 8443 klientský certifikát. Dosavadní HTTP listener na portu 8117 zůstává zapnutý pro readiness a objevování v Admin UI; jde o oddělenou cestu od mTLS volání. Při nasazení ověřte, že volající na 8443 předkládají certifikáty důvěryhodné privátní CA a že readiness stále kontroluje 8117. Připravený pod ani úspěšná HTTP sonda nedokazují funkčnost listeneru s ověřením klienta. Požadavek na klientský certifikát je konfigurační volba Quarkusu při buildu, proto patří do produkčního profilu, ne do proměnné prostředí nasazení.
 
 Generovaná politika příchozího provozu nyní povoluje migrovaným namespace pouze port 8443. Admin UI a bezpečnostní skener si ponechávají port 8117; provoz uvnitř namespace AML zůstává povolen. Volajícího, který stále potřebuje HTTP, je třeba určit před zpřísněním jeho pravidla.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

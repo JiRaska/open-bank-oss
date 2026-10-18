@@ -40,3 +40,7 @@ set on 2026-10-17 from a measured 80.94 % (1452/1794 lines) minus two points, AD
 only ever moves up: lowering it needs a `coverage-floor-lowered: #<issue>` trailer on the PR (gate
 `coverage-floor-ratchet`). Before this the module had no `verify {}` rule, so `koverVerify` passed
 on any number.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
