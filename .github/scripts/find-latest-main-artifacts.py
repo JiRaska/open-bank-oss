@@ -68,12 +68,24 @@ def github_run_path(repo: str, token: str, run_id: int) -> str:
     return path
 
 
+SERVICES_CI = ".github/workflows/services-ci.yml"
+# The one artifact of this family that Services CI does not produce: admin-ui is built and
+# tested by ci.yml, which uploads the same v1 envelope under this name.
+PRODUCERS = {"test-intelligence-openbank-admin-ui": ".github/workflows/ci.yml"}
+
+
+def producer_of(artifact_name: str) -> str:
+    return PRODUCERS.get(artifact_name, SERVICES_CI)
+
+
 def latest_main_artifact(
     artifact_name: str,
     fetch_page: Callable[[str, int], list[dict]],
     fetch_run_path: Callable[[int], str],
 ) -> str | None:
-    """Use only Services CI, not a newer targeted provider run with empty suites."""
+    """Use only the artifact's own producer (Services CI for services), never a newer
+    targeted provider run with empty suites."""
+    producer = producer_of(artifact_name)
     for page in range(1, MAX_PAGES + 1):
         artifacts = fetch_page(artifact_name, page)
         for artifact in artifacts:
@@ -85,7 +97,7 @@ def latest_main_artifact(
                 run_id = workflow_run.get("id")
                 if not isinstance(run_id, int):
                     raise ArtifactApiError("eligible artifact has no run id")
-                if fetch_run_path(run_id) == ".github/workflows/services-ci.yml":
+                if fetch_run_path(run_id) == producer:
                     return str(artifact_id)
         # Exact-name results are newest-first. A short page proves there is no
         # next page; continuing would spend quota to rediscover the same absence.
@@ -164,6 +176,21 @@ class LookupTests(unittest.TestCase):
         ]
         paths = {90: ".github/workflows/verify-provider.yml", 80: ".github/workflows/services-ci.yml"}
         self.assertEqual(latest_main_artifact("test", lambda *_: artifacts, paths.__getitem__), "8")
+
+    def test_admin_ui_artifact_is_accepted_from_its_own_producer(self) -> None:
+        # `test-intelligence-openbank-admin-ui` is uploaded by ci.yml, never by Services CI.
+        # Requiring services-ci.yml for it scanned every page and failed every admin-ui
+        # deploy build from #12480 on (exceeded the bounded lookup).
+        artifacts = [
+            {"id": 9, "expired": False, "workflow_run": {"head_branch": "main", "id": 90}},
+            {"id": 8, "expired": False, "workflow_run": {"head_branch": "main", "id": 80}},
+        ]
+        paths = {90: ".github/workflows/ci.yml", 80: ".github/workflows/services-ci.yml"}
+        self.assertEqual(latest_main_artifact("test-intelligence-openbank-admin-ui",
+                                              lambda *_: artifacts, paths.__getitem__), "9")
+        # The producer stays exact for every other artifact: ci.yml cannot stand in for a service.
+        self.assertEqual(latest_main_artifact("test-intelligence-openbank-ledger-service",
+                                              lambda *_: artifacts, paths.__getitem__), "8")
 
     def test_missing_run_provenance_fails_closed(self) -> None:
         artifact = {"id": 9, "expired": False, "workflow_run": {"head_branch": "main"}}

@@ -834,7 +834,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1344,6 +1345,7 @@
         "roles"
       ],
       "optionalClientScopes": [
+        "catalog:read",
         "pension:legal-approve",
         "pension:product-approve"
       ],

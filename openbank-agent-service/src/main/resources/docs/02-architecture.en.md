@@ -70,3 +70,7 @@ The service has no domain-event outbox, but its `agent_audit_outbox` durably rec
 - `quarkus-smallrye-fault-tolerance` on the outbound calls.
 - The chat loop degrades gracefully: a model 429 / "request too large" / backend outage returns a friendly message rather than a 5xx; a whole tool round of errors stops offering tools so the model must answer in text.
 - Fail-closed PDP: any OPA transport error is a DENY (with `pdpError=true` for the BLOCK-mode safety fallback).
+
+## Scheduled-job heartbeat
+
+The agent audit outbox poller registers the fleet workflow-liveness heartbeat `agent-audit-outbox-dispatch` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: it is registered only while `agent.audit.kafka.enabled` is true, so a disabled dispatcher cannot report success, and a poll with a failed send does not count. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.

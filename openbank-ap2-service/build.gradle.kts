@@ -8,16 +8,7 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.jackson.module.kotlin)
@@ -27,15 +18,12 @@ dependencies {
     // verification reuses the JDK JCA (like openbank-sca-service) — no JOSE dependency.
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
-    testImplementation(libs.quarkus.junit5)
     // ListenerAuthParity kit (#12511): production listener shape over real TLS.
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.assertj)
     // Ap2ApiContractTest drives the real endpoint and compares the wire JSON against the committed
     // openapi.yaml, which it PARSES rather than greps. jackson-dataformat-yaml carries no version:
     // it is managed by the enforcedPlatform(quarkus.bom) above (testImplementation extends
     // implementation), so it can never drift from the Jackson the runtime already uses.
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml")
 }
 
