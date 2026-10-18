@@ -19,7 +19,7 @@ info:
   # 1.27.0 -> 1.28.0: additive only — GET /api/v1/reporting/parties/{id}/tax-facts (ADR-0340 B1,
   # the CRS/FATCA TIN boundary: the derived statuses and residencies WITH TINs, readable by
   # service-account-openbank-tax-reporting alone, audit-logged without TINs).
-  version: 1.28.0
+  version: 1.29.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -87,14 +87,25 @@ paths:
         tax id / company registration number (ADR-0055, extended by ADR-0228).
         Blank, '*', or a term shorter than 2 characters returns an empty page (no
         full-table enumeration from this surface — use GET /api/v1/parties to list).
-        Page size is clamped to [1,100]. Birth number is never searchable here
-        (GDPR data-minimisation; it stays encrypted in pid-service).
+        Names are matched accent- and case-insensitively, per word and partially
+        ("novak ja" finds "Jan Novák"; every word must match).
+        Page size is clamped to [1,100]. Country-agnostic: a term that looks like a
+        national/personal identifier (6-20 alphanumerics with >= 4 digits once spaces, dots,
+        slashes and dashes are stripped - birth number, PESEL, SSN, NINO, personnummer, tax
+        id...) is matched EXACTLY against the normalised tax id / registration number, never
+        as a substring; a Czech/Slovak birth number also resolves via the RC blind index.
+        A date of birth in the term (yyyy-mm-dd, d.m.yyyy, d/m/yyyy; an ambiguous d/m vs m/d
+        matches both) narrows the name match; the name part must still be >= 2 characters.
+        Results carry dateOfBirth so namesakes can be told apart.
       operationId: searchParties
       parameters:
         - name: q
           in: query
           required: true
-          description: Name fragment (>= 2 chars after trim)
+          description: >-
+            Name/email/phone fragment (>= 2 chars after trim), optionally with a date of
+            birth ("Novak 15.6.1985", "Smith 1985-06-15"), or a complete national identifier
+            (a birth number such as YYMMDD/NNNN, a US SSN, a UK NINO).
           schema:
             type: string
             minLength: 2

@@ -140,3 +140,7 @@ validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` vio
 
 - URL versioning: preserved `/api/v1`, newest `/api/v2`.
 - The OpenAPI contract version (`openapi.yaml:info.version`) is the API-contract axis; any breaking change must bump it per `oasdiff` classification and update the contract + a contract test ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Published revision of a legacy product (ADR-0341)
+
+`GET /api/v2/legacy-products/{productId}/published-revision` resolves the published catalog revision of a v1 banking product from its v1 product id, for callers that still know a product only by an account's `productId`. An optional `effectiveAt` query parameter selects the instant; without it the revision effective now is returned. The caller pins the returned revision `id`, and later reads use the pin, not this lookup. It answers 404 when the product is unknown or none of its revisions is published yet. It needs the catalog read role. The API contract version is 2.5.0; the change is additive.
