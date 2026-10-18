@@ -14,6 +14,7 @@ import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.LocalDate
@@ -63,6 +64,9 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
                 TransactionCallOutcome.Conflict -> refused(message, HTTP_CONFLICT)
                 is TransactionCallOutcome.Rejected -> refused(message, outcome.status)
             }
+        } catch (e: CancellationException) {
+            // Cancellation is not an outage: rethrow so the coroutine unwinds instead of being retried as one.
+            throw e
         } catch (ex: Exception) {
             // No proven status (5xx, dropped connection): retried by the caller, never decided here.
             throw SettlementUnavailableException(

@@ -16,6 +16,7 @@ import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -73,6 +74,16 @@ class SettlementAdapterTest {
         assertThatThrownBy { runBlocking { adapter.settle(message()) } }
             .isInstanceOf(SettlementUnavailableException::class.java)
             .hasMessageContaining("transaction-service unreachable")
+    }
+
+    @Test
+    fun `coroutine cancellation propagates and is not turned into SettlementUnavailableException`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(CancellationException("cancelled"))
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(CancellationException::class.java)
+            .isNotInstanceOf(SettlementUnavailableException::class.java)
     }
 
     @Test
