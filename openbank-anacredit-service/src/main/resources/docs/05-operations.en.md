@@ -121,3 +121,7 @@ The deployment must configure the intended OTLP exporter endpoint and collector 
 This local trace contract proves HTTP/SQL correlation; it does not prove export to a
 collector, delivery to Tempo, or retention in a deployed environment. Verify those
 separately before relying on exported traces for operational investigation.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

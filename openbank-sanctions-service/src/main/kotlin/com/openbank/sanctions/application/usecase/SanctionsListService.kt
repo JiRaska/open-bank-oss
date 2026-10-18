@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
@@ -14,19 +15,25 @@ import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.quarkus.logging.Log
+import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
 import java.time.Clock
+import java.time.Duration
 import java.time.ZonedDateTime
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 private suspend fun SanctionsListRepositoryImpl.requireList(listType: String): SanctionsList =
     findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
 
 private val INCOMPLETE_IMPORTS = setOf(ListImportOutcome.FAILED_KEPT_EXISTING, ListImportOutcome.EMPTY_FEED)
 
+@Suppress("TooManyFunctions") // one use-case service: CRUD, refresh orchestration and the scheduler tick
+// @Startup: the heartbeat gauge must exist from boot, not from the first request that touches this lazy bean.
+@Startup
 @ApplicationScoped
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
@@ -34,7 +41,18 @@ class SanctionsListService(
     private val clock: Clock,
     private val publisher: SanctionsChangePublisher,
     private val publicationFence: SanctionsImportPublicationFence? = null,
+    metrics: DomainMetrics? = null,
 ) {
+    // Null in unit tests that build the service by hand; the CDI constructor always supplies it.
+    private val liveness = metrics?.registerWorkflowLiveness(
+        "sanctions-list-refresh",
+        Duration.ofSeconds(REFRESH_TICK_SECONDS),
+    )
+
+    // Lists whose last refresh / publication attempt did not succeed. In memory by necessity: a thrown
+    // refresh persists nothing. A restart clears them, but a restart also re-zeroes the gauge.
+    private val refreshUnhealthy: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val publishUnhealthy: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
     // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
@@ -44,7 +62,8 @@ class SanctionsListService(
         importer: SanctionsImportService,
         publisher: SanctionsChangePublisher,
         publicationFence: SanctionsImportPublicationFence,
-    ) : this(repo, importer, Clock.systemUTC(), publisher, publicationFence)
+        metrics: DomainMetrics,
+    ) : this(repo, importer, Clock.systemUTC(), publisher, publicationFence, metrics)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -64,7 +83,12 @@ class SanctionsListService(
         )
     }
 
-    suspend fun refresh(listType: String): SanctionsList {
+    /**
+     * [onDeferred] is invoked when the list did NOT actually refresh (FAILED_KEPT_EXISTING /
+     * EMPTY_FEED / an inherited incomplete import). Such a refresh returns normally, so without
+     * the callback a caller cannot tell it from success.
+     */
+    suspend fun refresh(listType: String, onDeferred: () -> Unit = {}): SanctionsList {
         Log.info("Manual refresh triggered for list: $listType")
         val list = repo.requireList(listType)
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
@@ -107,9 +131,11 @@ class SanctionsListService(
                     (permit.inheritedIncomplete && result.outcome != ListImportOutcome.IMPORTED)
                 ) {
                     permit.deferUntilNextRefresh()
-                    return@duringRefresh checkNotNull(repo.markRetryPendingFenced(listType, permit)) {
+                    val deferred = checkNotNull(repo.markRetryPendingFenced(listType, permit)) {
                         "Failed to defer sanctions list refresh for $listType"
                     }
+                    onDeferred()
+                    return@duringRefresh deferred
                 }
                 publisher.publishFenced(currentList.id, enumType, permit)
                 markCompleted(result, currentList, permit)
@@ -117,7 +143,9 @@ class SanctionsListService(
         }
         // Unit-test constructor exercises the same orchestration with a mocked publisher.
         val result = importer.importList(enumType, list.sourceUrl)
-        if (result.outcome !in INCOMPLETE_IMPORTS) {
+        if (result.outcome in INCOMPLETE_IMPORTS) {
+            onDeferred()
+        } else {
             publisher.publishPending(list.id, enumType)
         }
         return markCompleted(result, list)
@@ -176,16 +204,13 @@ class SanctionsListService(
         val now = ZonedDateTime.now(clock).withSecond(0).withNano(0)
         for (list in repo.listSanctionsLists()) {
             try {
-                if (list.enabled && list.isDueForScheduledRefresh(now)) {
-                    Log.infof("Scheduled refresh for %s", list.listType)
-                    refresh(list.listType)
-                } else {
-                    // A disabled feed can still have committed changes from a previous import.
-                    // Drain its journal without importing or waiting for the feed to be enabled.
-                    val type = LIST_TYPES[list.listType] ?: continue
-                    publisher.publishPending(list.id, type)
-                }
+                refreshOrDrain(list, now)
             } catch (ex: Exception) {
+                // Remember WHICH attempt failed: the cron minute passes, so the next tick finds
+                // nothing due and would otherwise read as healthy a minute after the failure.
+                val refreshFailed = list.enabled && list.isDueForScheduledRefresh(now)
+                val failed = if (refreshFailed) refreshUnhealthy else publishUnhealthy
+                failed.add(list.listType)
                 // observed-by: every enabled list is revisited on the next tick. Pending journal
                 // evidence is retained on failure and retried even outside the feed's cron minute.
                 // Aborting the sweep would let one unavailable list starve the other lists.
@@ -197,6 +222,28 @@ class SanctionsListService(
                 )
             }
         }
+        // Success means every list's LAST attempt succeeded, not merely that nothing was due this
+        // tick: a daily feed that failed at its cron minute stays stale until it actually refreshes.
+        if (refreshUnhealthy.isEmpty() && publishUnhealthy.isEmpty()) liveness?.recordSuccess()
+    }
+
+    private suspend fun refreshOrDrain(list: SanctionsList, now: ZonedDateTime) {
+        if (list.enabled && list.isDueForScheduledRefresh(now)) {
+            Log.infof("Scheduled refresh for %s", list.listType)
+            // A deferred refresh returns normally, so it is reported through the callback.
+            var deferred = false
+            refresh(list.listType) { deferred = true }
+            if (deferred) refreshUnhealthy.add(list.listType) else refreshUnhealthy.remove(list.listType)
+            publishUnhealthy.remove(list.listType)
+            return
+        }
+        // A disabled feed owes no refresh, so it cannot hold the heartbeat stale.
+        if (!list.enabled) refreshUnhealthy.remove(list.listType)
+        // A disabled feed can still have committed changes from a previous import.
+        // Drain its journal without importing or waiting for the feed to be enabled.
+        val type = LIST_TYPES[list.listType] ?: return
+        publisher.publishPending(list.id, type)
+        publishUnhealthy.remove(list.listType)
     }
 
     private fun normalizeCronDays(raw: String?): String? {
@@ -250,6 +297,7 @@ class SanctionsListService(
 
     companion object {
         private val LIST_TYPES = SanctionsListType.entries.associateBy { it.name }
+        private const val REFRESH_TICK_SECONDS = 60L
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
     }
 }

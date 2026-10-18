@@ -63,4 +63,17 @@ describe('route permission projection (ADR-0229 D3)', () => {
       expect(pathAllowedByRoles('/communication/edit/sample', [role])).toBe(false)
     }
   })
+
+  it('splits notification-template drafting from publishing (ADR-0333 D6)', () => {
+    // Mirrors ManagedTemplateResource @RolesAllowed and the commstemplate-publish OPA rule:
+    // operators draft, ROLE_COMMS_APPROVER publishes, and both can open the page.
+    for (const role of ['ROLE_OPERATOR', 'ROLE_COMMS_APPROVER', 'ROLE_ADMIN']) {
+      expect(pathAllowedByRoles('/communication/notification-templates', [role])).toBe(true)
+    }
+    expect(pathAllowedByRoles('/communication/notification-templates', ['ROLE_VIEWER'])).toBe(false)
+    expect(hasPermission(['ROLE_OPERATOR'], 'communication:templates:publish')).toBe(false)
+    expect(hasPermission(['ROLE_COMMS_APPROVER'], 'communication:templates:publish')).toBe(true)
+    expect(hasPermission(['ROLE_COMMS_APPROVER'], 'communication:templates:manage')).toBe(false)
+    expect(hasPermission(['ROLE_OPERATOR'], 'communication:templates:manage')).toBe(true)
+  })
 })
