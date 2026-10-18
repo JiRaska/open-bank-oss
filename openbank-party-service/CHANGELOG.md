@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.28.0...party-service-v0.29.0) (2026-10-18)
+
+
+### Features
+
+* **client-transaction:** classify transaction-service answers in one facade ([#13227](https://github.com/JiRaska/open-bank-oss/issues/13227)) ([3059929](https://github.com/JiRaska/open-bank-oss/commit/30599292ce6711d928fa25b96bf16eb57fa61138))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.27.0...party-service-v0.28.0) (2026-10-18)
 
 
