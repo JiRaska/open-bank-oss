@@ -114,6 +114,25 @@ class PublicationTest(unittest.TestCase):
         self.marker.touch()
         with self.assertRaises(ValueError): publisher.prepare(self.root, self.sha, self.marker)
 
+    def test_archive_restored_jvm_contracts_are_proved_by_the_archive_not_mtime(self):
+        # The drift job restores JVM-generated admin-ui pacts with `tar -x`, which keeps their
+        # generation-time mtime — older than the marker. Main was red on exactly this (#10076).
+        jvm = {"pacts/openbank-admin-ui-openbank-product-catalog.json",
+               "pacts/openbank-admin-ui-openbank-flaky-test-hunter.json",
+               "pacts/openbank-admin-ui-openbank-case-coordinator-agent.json"}
+        os.utime(self.marker, ns=(10, 10))
+        for name in self.bundle["files"]:
+            if name not in jvm:
+                os.utime(self.root / name, ns=(20, 20))  # PactJS: rewritten after the marker
+        for name in jvm:
+            os.utime(self.root / name, ns=(1, 1))  # restored with the archive's old mtime
+        with self.assertRaises(ValueError): publisher.prepare(self.root, self.sha, self.marker)
+        bundle = publisher.prepare(self.root, self.sha, self.marker, frozenset(jvm))
+        self.assertEqual(set(bundle["files"]), set(self.bundle["files"]))
+        # The exemption is per file: a PactJS contract that was NOT rewritten still fails.
+        os.utime(self.root / "pacts/openbank-admin-ui-openbank-billing-service.json", ns=(1, 1))
+        with self.assertRaises(ValueError): publisher.prepare(self.root, self.sha, self.marker, frozenset(jvm))
+
     def test_untrusted_events_never_contact_broker(self):
         for event, ref in [("pull_request", "refs/heads/main"), ("push", "refs/heads/topic"),
                            ("workflow_run", "refs/heads/main")]:
