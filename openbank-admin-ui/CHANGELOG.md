@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.0...admin-ui-v3.7.1) (2026-10-18)
+
+
+### Security
+
+* **admin-ui:** remove dynamic data from regulatory error logs ([#13288](https://github.com/JiRaska/open-bank-oss/issues/13288)) ([75d35f2](https://github.com/JiRaska/open-bank-oss/commit/75d35f2207bcec7c5d128fecc55a84a69ea13299))
+
 ## [3.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.6.0...admin-ui-v3.7.0) (2026-10-18)
 
 
