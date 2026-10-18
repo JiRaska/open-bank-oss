@@ -86,3 +86,7 @@ Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authori
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Volání vypořádání do transaction-service
+
+Vypořádání se vyžaduje přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319), která je nově jediným místem interpretujícím HTTP odpověď transaction-service. Stav 2xx se prokazuje ze stavového řádku dříve, než se čte tělo; přijme se jen HTTP 201 s čitelným tělem odpovídajícím požadavku (typ, zdrojový účet, částka, měna, platební schéma, typ instrukce), přičemž `COMPLETED` znamená vypořádáno a `PENDING`/`PROCESSING` zůstává nevypořádáno s identifikátorem transakce. Vše ostatní - 409, 400/422, jiné kódy 2xx, nečitelné nebo neodpovídající tělo i jakékoli 3xx/401/403/404/5xx nebo selhání spojení - končí jako `SettlementUnavailableException`, takže se platba zopakuje se stejným idempotentním klíčem (`sct-inst-settlement-<paymentId>`) a opakování přehraje stejné zaúčtování místo vytvoření druhého. Konfigurace se nezměnila.
