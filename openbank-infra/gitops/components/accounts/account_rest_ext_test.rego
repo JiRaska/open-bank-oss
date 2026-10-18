@@ -256,3 +256,35 @@ test_tax_reporting_false_or_bad_client_binding_denied if {
 		not rest.allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, changed), "action": "account.list"}
 	}
 }
+
+# #8481 / ADR-0341 — interest-service's own principal reads the published catalog (catalog.read)
+# and nothing else; the shared openbank-services principal and other ROLE_API holders stay denied.
+interest_catalog := {"type": "HUMAN", "service_account": true, "client_id": "openbank-interest", "id": "service-account-openbank-interest", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+
+test_interest_catalog_read_allowed if {
+	rest.allow.allow with input as {"principal": interest_catalog, "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+		with data.rules as rules_mock
+}
+
+test_interest_catalog_read_needs_scope_role if {
+	not rest.allow.allow with input as {"principal": object.union(interest_catalog, {"roles": ["ROLE_API"]}), "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+		with data.rules as rules_mock
+}
+
+test_interest_catalog_grant_is_read_only if {
+	every action in ["catalog.author", "catalog.publish", "catalog.pensionApproval.decide"] {
+		not rest.allow.allow with input as {"principal": interest_catalog, "action": action, "resource": {"type": "catalog", "id": "r-1"}}
+			with data.rules as rules_mock
+	}
+}
+
+test_shared_and_other_api_principals_denied_catalog_read if {
+	every principal in [
+		object.union(shared, {"roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}),
+		{"type": "HUMAN", "service_account": true, "client_id": "openbank-billing", "id": "service-account-openbank-billing", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		object.union(interest_catalog, {"client_id": "another-client"}),
+	] {
+		not rest.allow.allow with input as {"principal": principal, "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+			with data.rules as rules_mock
+	}
+}
