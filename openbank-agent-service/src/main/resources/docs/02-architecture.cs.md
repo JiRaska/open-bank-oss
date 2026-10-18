@@ -70,3 +70,7 @@ Služba nemá doménový event outbox, ale `agent_audit_outbox` před odeslání
 - `quarkus-smallrye-fault-tolerance` na odchozích voláních.
 - Chatová smyčka degraduje s grácií: model 429 / „request too large" / výpadek backendu vrátí přívětivou zprávu místo 5xx; celé kolo chyb nástrojů přestane nabízet nástroje, takže model musí odpovědět textem.
 - Fail-closed PDP: jakákoli chyba transportu OPA je DENY (s `pdpError=true` pro bezpečnostní fallback v režimu BLOCK).
+
+## Heartbeat naplánované úlohy
+
+Úloha (poller auditního outboxu agenta) registruje celoflotilový heartbeat `agent-audit-outbox-dispatch` (`DomainMetrics.registerWorkflowLiveness`, nasazený při startu) a úspěch zapisuje jen na cestě úspěchu: registruje se jen při `agent.audit.kafka.enabled=true`, takže vypnutý dispatcher nemůže hlásit úspěch; poll se selhanou odesílkou se nepočítá. `WorkflowLivenessStale` upozorní, když stáří překročí dvojnásobek očekávaného intervalu.
