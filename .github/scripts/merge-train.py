@@ -140,6 +140,45 @@ def zpaths(out: str) -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
+@dataclass
+class Change:
+    status: str
+    old_mode: str
+    new_mode: str
+    paths: list[str]          # one path, or old AND new for a rename/copy entry
+
+
+def changed_entries(git, *revs: str, cached: bool = False) -> list[Change]:
+    """THE one way to ask git what changed. `--no-renames`: with rename detection on, a rename is
+    reported under its NEW path only, so renaming a generator to `docs/x.md` would hide that the
+    generator was deleted. `--raw -z`: NUL-separated, with modes (the symlink/gitlink check needs
+    them). Every path of every entry is returned, and a rename/copy entry yields BOTH paths."""
+    args = ["diff", "--no-renames", "--no-ext-diff", "--raw", "-z"] + (["--cached"] if cached else []) + list(revs)
+    toks = git(*args).stdout.split("\0")
+    out: list[Change] = []
+    i = 0
+    while i < len(toks):
+        meta = toks[i]
+        if not meta.startswith(":"):
+            i += 1
+            continue
+        fields = meta[1:].split()
+        status = fields[4] if len(fields) > 4 else "?"
+        n = 2 if status[:1] in ("R", "C") else 1
+        out.append(Change(status, fields[0], fields[1], toks[i + 1:i + 1 + n]))
+        i += 1 + n
+    return out
+
+
+def changed_paths(git, *revs: str, cached: bool = False) -> list[str]:
+    seen: list[str] = []
+    for c in changed_entries(git, *revs, cached=cached):
+        for path in c.paths:
+            if path not in seen:
+                seen.append(path)
+    return seen
+
+
 class Untrainable:
     """Every path the generator runner would EXECUTE, derived from origin/main's regen-derived.sh:
     its `find <root> -name '<pattern>'` enumeration (any depth, as `find` recurses), every program
@@ -410,7 +449,7 @@ class TrainBuilder:
         dropped: list[int] = []
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
-            staged = zpaths(self.git("diff", "--cached", "-z", "--name-only").stdout) if r.returncode == 0 else []
+            staged = changed_paths(self.git, cached=True) if r.returncode == 0 else []
             if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
@@ -419,7 +458,13 @@ class TrainBuilder:
             self.git("commit", "-q", "-m", squash_message(m))
             applied.append(m.number)
         if applied:
-            self.overlay_trusted_generators(base)
+            try:
+                self.overlay_trusted_generators(base)
+            except RuntimeError as exc:
+                # A member changed what the runner would execute: nobody rides this train.
+                log(f"::warning::train refused before any generator ran: {exc}")
+                self.git("checkout", "-q", "--detach", "-f", base)
+                return base, [], dropped + applied
             self.quarantine_new_executables(base)
             try:
                 self.regenerate()
@@ -456,7 +501,8 @@ class TrainBuilder:
             archive = subprocess.run(["git", "archive", base, "--", *roots], cwd=self.workdir,
                                      capture_output=True, check=True, env=self.env).stdout
             subprocess.run(["tar", "-x", "-C", self.workdir], input=archive, check=True, capture_output=True)
-        dirty = [e[3:] for e in zpaths(self.git("status", "--porcelain", "-z").stdout) if len(e) > 3 and self.untrainable(e[3:])]
+        dirty = [e[3:] for e in zpaths(self.git("status", "--porcelain", "--no-renames", "-z").stdout)
+                 if len(e) > 3 and self.untrainable(e[3:])]
         if dirty:
             raise RuntimeError(f"generator paths differ from the trusted base after overlay: {dirty[:5]}")
 
@@ -533,20 +579,14 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
         raise Reject(f"bundle carries {len(rest)} commits beyond its members", member_fault=False)
     if rest:
         regen = rest[0]
-        raw = git("diff-tree", "-r", "--raw", "-z", "--no-commit-id", f"{regen}^", regen).stdout.split("\0")
-        i = 0
-        while i < len(raw) - 1:
-            meta, path = raw[i], raw[i + 1]
-            i += 2
-            if not meta.startswith(":"):
-                continue
-            new_mode = meta[1:].split()[1]
-            if unsafe_path(path):
-                raise Reject("regeneration commit touches a path with a control character")
-            if new_mode in SPECIAL_MODES:
-                raise Reject(f"regeneration commit adds a symlink/gitlink: {path}")
-            if not any(glob_match(g, path) for g in outputs):
-                raise Reject(f"regeneration commit touches {path}, which is not a declared derived output")
+        for change in changed_entries(git, f"{regen}^", regen):
+            for path in change.paths:
+                if unsafe_path(path):
+                    raise Reject("regeneration commit touches a path with a control character")
+                if change.new_mode in SPECIAL_MODES:
+                    raise Reject(f"regeneration commit adds a symlink/gitlink: {path}")
+                if not any(glob_match(g, path) for g in outputs):
+                    raise Reject(f"regeneration commit touches {path}, which is not a declared derived output")
         own = git("commit-tree", git.tree(regen), "-p", own, "-m", OWN_REGEN_MSG).stdout.strip()
         own_tree = git.tree(regen)
     if not applied:
@@ -716,7 +756,7 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
-    the file list is `git diff --name-only <base>...<verified head>` — the PR files API stops at
+    the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
     member_required = [c for c in required if c != STATUS_CONTEXT]
     armed = [p for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)])
@@ -731,7 +771,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if fetched != p["head"]["sha"]:
             log(f"#{n:>6} skip      fetched head differs from the API head (pushed meanwhile)")
             continue
-        files = zpaths(git("diff", "-z", "--name-only", f"{base}...{fetched}").stdout)
+        files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
         ok, why = qualifies(view, member_required, gh.checks(fetched), app, untrainable)
@@ -748,11 +788,11 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
 def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tuple[list[Member], list[Member]]:
     """(fast lane, train). Computed from live git data only."""
     for m in cands:
-        m.files = zpaths(git("diff", "-z", "--name-only", f"{base}...{m.head_sha}").stdout)
+        m.files = changed_paths(git, f"{base}...{m.head_sha}")
     fast, train = [], []
     for m in cands:
         mb = git("merge-base", base, m.head_sha).stdout.strip()
-        main_files = zpaths(git("diff", "-z", "--name-only", f"{mb}..{base}").stdout)
+        main_files = changed_paths(git, mb, base)
         others = [f for o in cands if o is not m for f in o.files]
         ok, _ = fast_lane_eligible(m.files, main_files, others, fragments)
         (fast if ok else train).append(m)
@@ -1151,6 +1191,13 @@ def _synthetic_origin(root: str) -> None:
     # heredoc script. Each leaves a marker if it is ever executed.
     pr("pN", {SYN_NEWLINE_GENERATOR: f"touch {os.path.join(os.path.dirname(root), 'newline-gen-ran')}\n", "docs/n.md": "n\n"})
     pr("pQ", {"docs/q\nr.md": "q\n"})
+    # Review 7: rename a gate script to a harmless-looking path; with rename detection git reports
+    # only the NEW name, hiding that the generator runner's inventory was deleted.
+    g("checkout", "-q", "-b", "pV", "main")
+    os.makedirs(os.path.join(root, "docs"), exist_ok=True)
+    g("mv", REGEN_INVENTORY, "docs/x.md")
+    g("commit", "-q", "-m", "pV")
+    g("checkout", "-q", "main")
     pr("pY", {SYN_SHADOW_MODULE: f"open({os.path.join(os.path.dirname(root), 'shadow-ran')!r}, 'w').write('x')\n",
               "docs/y.md": "y\n"})
     # A bundle generator deeper than any fixed-depth glob reaches; it would leave a marker if run.
@@ -1273,7 +1320,7 @@ def self_test() -> int:
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
-                       "pX": 33, "pF": 34, "pN": 51, "pY": 52, "pQ": 53}
+                       "pX": 33, "pF": 34, "pN": 51, "pY": 52, "pQ": 53, "pV": 61}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -1411,6 +1458,23 @@ def self_test() -> int:
             _tip, applied, dropped = b.build(base0, [Member(51, "pN", "", head, "pN", "t", ref=head)])
             check("newline path: forced past qualifies, build drops it and it still never runs",
                   applied == [] and dropped == [51] and not os.path.exists(nl_marker), f"{applied} {dropped}")
+            reset()
+
+            # NEGATIVE (review 7): renaming regen-derived.sh to docs/x.md.
+            sg = Git(clone("settle"))
+            sg("fetch", "-q", "origin", "pV")
+            rn = changed_paths(sg, f"{base0}...FETCH_HEAD")
+            check("rename: changed_paths reports BOTH the deleted gate script and the new name",
+                  REGEN_INVENTORY in rn and "docs/x.md" in rn, str(rn))
+            open_only("pV")
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+            check("rename: a PR renaming regen-derived.sh to docs/x.md never qualifies", all(m.number != 61 for m in cands))
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",), untrainable=Untrainable(SYN_INVENTORY))
+            b.git("fetch", "-q", "origin", "pV")
+            hv = b.git("rev-parse", "FETCH_HEAD").stdout.strip()
+            _tip, applied, dropped = b.build(base0, [Member(61, "pV", "", hv, "pV", "t", ref=hv)])
+            check("rename: forced past qualifies, build's staged check drops it", applied == [] and dropped == [61], f"{applied} {dropped}")
             reset()
 
             # NEGATIVE (review 6b): a module shadowing `yaml` next to main's heredoc bundle script.
