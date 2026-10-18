@@ -2965,6 +2965,29 @@ gates:
     run: |
       python3 .github/scripts/auto-update-armed-prs.py --check-declaration
 
+  # ADR-0343: the merge train is the bot that replaces strict up-to-date on main. Its wiring is
+  # load-bearing in the same way as the updater's: the App token (a GITHUB_TOKEN push triggers no
+  # CI, so a train would never be verified), a concurrency group that never cancels a train in
+  # flight, SHADOW as the committed default — and the INVARIANT: the token never shares a runner
+  # with PR data. So `build` (the only job running code over PR data) must hold no App token or
+  # App secret, while `publish` and `settle` must run this script from origin/main under
+  # `python3 -I -S` with isolated git config and run, install or check out nothing else. Each is
+  # a one-line regression this gate turns into a red diff.
+  - id: merge-train-declaration
+    name: "merge-train keeps its App token, non-cancelling concurrency, OPA and shadow default (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
+    review_after: "2027-04-18"
+    budget_seconds: 120   # self-test drives ~25 settle/build/publish ticks over a synthetic origin (~30 s measured)
+    min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/merge-train.py"]
+    run: |
+      python3 .github/scripts/merge-train.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops

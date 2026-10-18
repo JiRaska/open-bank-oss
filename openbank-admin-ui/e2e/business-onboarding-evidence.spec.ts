@@ -95,12 +95,12 @@ test('renders the review queue with an honest count, listed representatives, and
   await expect(page.getByRole('button', { name: 'Confirm the representation rule' }).first()).toBeVisible()
 
   // The filter can narrow to one case and admits when nothing matches.
-  await page.getByPlaceholder('Name, identifier, or case ID').fill('12345678')
+  await page.getByPlaceholder('Company name or company ID').fill('12345678')
   await expect(page.getByText('Kovárna Praha s.r.o.', { exact: true })).toBeVisible()
   await expect(page.getByText('(unknown name)')).toBeHidden()
-  await page.getByPlaceholder('Name, identifier, or case ID').fill('99999999')
+  await page.getByPlaceholder('Company name or company ID').fill('99999999')
   await expect(page.getByText('No case matches this filter')).toBeVisible()
-  await page.getByPlaceholder('Name, identifier, or case ID').fill('')
+  await page.getByPlaceholder('Company name or company ID').fill('')
   await expect(page.getByText('(unknown name)')).toBeVisible()
 })
 

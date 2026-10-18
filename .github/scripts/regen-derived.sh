@@ -71,6 +71,33 @@ GENERATORS=(
   "bundles|__BUNDLES__|openbank-libs/governance/rules.yaml openbank-libs/governance/agents.yaml .rego"
 )
 
+# --- what the generators WRITE (read by the merge train from origin/main, ADR-0343) ------------
+# The merge train's privileged job accepts a train's single regeneration commit only if every path
+# it touches matches one of these globs (`*` never crosses `/`). It reads this list from
+# origin/main, never from a train. The CONTENT of these files is then proven by main's own
+# derived-freshness gates, which CI runs on the exact train tree. Deliberately absent: the Rollout
+# manifests the bundle scripts restamp IN PLACE (the policy-checksum annotation). The rest of such
+# a file is not derived, no freshness gate re-derives it, so a path-level bound cannot cover it —
+# a train whose regeneration touches one is refused and takes the manual lane.
+# shellcheck disable=SC2034  # read by merge-train.py from origin/main's copy, not by this script
+DERIVED_OUTPUTS=(
+  "openbank-libs/governance/rules-opa-data.yaml"
+  "openbank-libs/governance/agents-opa-data.yaml"
+  "openbank-libs/governance/case-collaboration-opa-data.yaml"
+  "docs/compliance/eu-ai-act.md"
+  "openbank-admin-ui/ai-governance-snapshot.json"
+  "docs/adr/README.md"
+  "docs/adr/DIGEST.md"
+  "docs/adr/CURRENT.md"
+  "docs/adr/index.json"
+  "docs/cards/capability-matrix.md"
+  ".release-please-manifest.json"
+  "release-please-config.json"
+  "openbank-infra/gitops/components/observability/dashboard-openbank-slo.yaml"
+  "openbank-infra/gitops/components/*/*-opa-bundle.yaml"
+  "openbank-infra/gitops/components/*/*/*-opa-bundle.yaml"
+)
+
 changed_files() {
   local base
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo "")"
