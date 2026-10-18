@@ -6,11 +6,12 @@
 
 import { useRef, useState } from 'react'
 import { FileSignature, Search } from 'lucide-react'
+import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
-import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { PageHeader, ShortId, StatCard, StatusBadge, statusTone } from '@/components/ui'
 import { parseConsentEvidenceList, type ConsentEvidence } from '@/lib/consents/consentContract'
 
 // consent-service (ADR-0126) exposes NO "list all consents" endpoint — every read is keyed by
@@ -151,11 +152,11 @@ export default function ConsentsPage() {
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
             {lensSelect}
             <input
-              aria-label={t('ID grantee', 'Grantee ID')}
+              aria-label={t('Příjemce souhlasu', 'Consent recipient')}
               value={term}
               onChange={e => setTerm(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') lookup() }}
-              placeholder={t('ID grantee', 'Grantee id')}
+              placeholder={t('Příjemce souhlasu, např. party-service:marketing-comms', 'Consent recipient, e.g. party-service:marketing-comms')}
               style={{
                 flex: '1 1 320px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
                 background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',
@@ -258,8 +259,8 @@ export default function ConsentsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th>{t('Party', 'Party')}</th>
-                <th>{t('Grantee', 'Grantee')}</th>
+                <th>{t('Klient', 'Customer')}</th>
+                <th>{t('Příjemce', 'Recipient')}</th>
                 <th>{t('Rozsahy', 'Scopes')}</th>
                 <th>{t('Stav', 'Status')}</th>
                 <th>{t('Platnost do', 'Valid to')}</th>
@@ -268,10 +269,13 @@ export default function ConsentsPage() {
             <tbody>
               {rows.map(c => (
                 <tr key={c.id}>
-                  <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px' }}>{c.partyId}</td>
                   <td>
-                    <div style={{ fontWeight: 600 }}>{c.granteeName}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{c.granteeId}</div>
+                    {party && party.id === c.partyId
+                      ? <Link href={`/parties/${c.partyId}`}>{partyDisplayName(party)}</Link>
+                      : <ShortId value={c.partyId} copyLabel={t('Kopírovat ID klienta', 'Copy customer ID')} />}
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 600 }} title={c.granteeId}>{c.granteeName || c.granteeId}</div>
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
