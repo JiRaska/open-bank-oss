@@ -133,13 +133,40 @@ still shared a runner, `HOME` and `.git` between the generators and the token, w
 generator code steered by hostile data (a symlink, a file written outside the worktree) could
 reach the later step. Each fix narrowed the gap; only separating runners closes it.
 
+**The security boundary — a stated assumption, not an emergent property.** The `build` job holds
+no secret, runs on an ephemeral runner, and **nothing it produces is trusted**. `publish`
+re-derives every member commit with `git merge-tree`, bounds the regeneration commit to `main`'s
+inventory and refuses symlinks and gitlinks; CI then proves the regeneration content with
+`main`'s freshness gates on the exact tree; `settle` merges only what that CI passed on a tree
+`publish` recorded. **Arbitrary code execution inside `build` therefore buys an attacker nothing
+beyond a red or wasted train.** This is the line of defence. Everything that hardens `build`
+itself — the untrainable filter, the quarantine, `PYTHONSAFEPATH`, the scrubbed environment — is
+defence in depth: it exists to keep `build` honest so trains are not wasted, and a gap in it is a
+reliability defect, not a security one. Reviews should test the boundary, and the self-test does:
+it plays a fully compromised `build` that emits, in turn, a regeneration commit rewriting a
+non-derived file, swapped PR content under a member's own commit, an extra commit, a symlink, a
+smuggled second parent, a train over an older `main`, and a regeneration commit with wrong
+content inside the inventory. `publish` rejects the first six; the seventh is published, goes red
+on the freshness gate, and `settle` merges nothing. The residual cost of a compromised `build` is
+named honestly: a red or refused train blames its member (a `merge-train` failure status or a
+manual-lane comment) until that member's author pushes again.
+
 **How the three clauses are held.**
 - *No shared runner.* `build` is the only job that runs code over PR data, and it holds no
   secret: read-only `GITHUB_TOKEN`, `persist-credentials: false`, generators taken from
   `origin/main` and run under an allowlisted environment (no token, no `RUNNER_TEMP`, no
-  `GITHUB_*`). Before any generator runs, `build` also removes from the working tree every file
-  the runner would execute that is not on `main`, at any depth, so a generator a PR adds can never
-  run even if every upstream check missed it. `publish` and `settle` mint the App token on fresh runners, check out `main`, run
+  `GITHUB_*`), with `PYTHONSAFEPATH=1` so neither a script's directory nor the cwd is ever on
+  `sys.path` — `main`'s payments bundle scripts run `python3 -` from their own directory, where a
+  PR-added `re.py` would otherwise shadow `re`. Before any generator runs, `build` removes from the
+  working tree every file that is not on `main` *except* the files `main`'s inventory declares as
+  generator inputs (a new ADR, a new `version.txt`); those are never untrainable, and
+  `PYTHONSAFEPATH` keeps them unimportable. Hiding every added file instead was measured and
+  rejected: the generators then miss the PR's own inputs, the derived files come out wrong, and
+  `main`'s freshness gate reds the train and blames an innocent member. Every git path list is
+  read with `-z` and split on NUL, and any path containing a control character is refused
+  outright — git quotes such names in its default output, so string checks silently miss them
+  while `find` and `fnmatch` still match them. (All of this is defence in depth; see the boundary
+  above.) `publish` and `settle` mint the App token on fresh runners, check out `main`, run
   this script as it exists on `origin/main` under `python3 -I -S`, set
   `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` and `core.hooksPath=/dev/null` on every
   git call, and never check out, install or execute anything from a train. The
