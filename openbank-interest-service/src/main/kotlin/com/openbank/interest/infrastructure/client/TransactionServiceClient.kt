@@ -12,7 +12,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
 /**
  * REST client for `openbank-transaction-service`, GENERATED from its own `openapi.yaml`
- * (`openbank-client-transaction`, ADR-0319) - — books the withholding-tax remittance cash leg
+ * (`openbank-client-transaction`, ADR-0319) — books the withholding-tax remittance cash leg
  * to the finanční úřad (#999). OIDC service-to-service auth is propagated by
  * the NAMED oidc-client `ledger` (interest-service's own Keycloak client `openbank-interest`,
  * ROLE_API only; #10486 batch 2 - the name predates this second use); this consumer runs on a plain reactive `@Incoming` handler

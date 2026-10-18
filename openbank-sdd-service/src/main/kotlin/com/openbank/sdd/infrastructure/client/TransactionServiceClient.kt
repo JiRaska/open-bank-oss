@@ -12,7 +12,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 
 /**
  * REST client for `openbank-transaction-service`, GENERATED from its own `openapi.yaml`
- * (`openbank-client-transaction`, ADR-0319) - — books the debtor-side debit for an authorised
+ * (`openbank-client-transaction`, ADR-0319) — books the debtor-side debit for an authorised
  * SEPA Direct Debit collection (#1000). OIDC service-to-service auth is propagated by
  * the named oidc-client `m2m`; this consumer runs on a plain `@Incoming` suspend handler
  * (not a Temporal activity), so the filter-based token attachment is safe here — unlike
