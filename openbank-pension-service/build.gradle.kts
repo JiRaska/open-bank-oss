@@ -7,27 +7,17 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     // ADR-0334 S8: FundAdministrationPort -> pension-fund-service over REST, with pension-service's
     // OWN client-credentials token (Keycloak client openbank-pension, ROLE_API only).
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     // ADR-0334 S3: monthly incentive claim run + subscription sweep.
     implementation(libs.quarkus.scheduler)
@@ -48,15 +38,12 @@ dependencies {
 
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.quarkus.test.security)
     // Provider replay classes remain in src/test/kotlin and compile with the test source set.
     testImplementation(libs.pact.provider)
     testImplementation(libs.quarkus.test.security.oidc)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
