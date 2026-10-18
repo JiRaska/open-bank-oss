@@ -71,3 +71,7 @@ Confirm the bearer token comes from the `openbank` realm and carries `ROLE_VIEWE
 ## Release
 
 Per-service SemVer via release-please (the commit message is the changelog). Do not hand-edit `version.txt`, `CHANGELOG.md`, or `openapi.yaml:info.version`. Use `/bump openbank-dispute-service` for version sync and `/ship-check` before merge (ADR-0029).
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

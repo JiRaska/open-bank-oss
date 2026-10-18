@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.0...notification-service-v0.39.1) (2026-10-18)
+
+
+### Security
+
+* **notification:** reserve commstemplate.publish for ROLE_COMMS_APPROVER ([#13133](https://github.com/JiRaska/open-bank-oss/issues/13133)) ([de2b093](https://github.com/JiRaska/open-bank-oss/commit/de2b0936fd079f9affd5f24b4eaf7532c54d6f55))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.38.0...notification-service-v0.39.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
 ## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.1...notification-service-v0.38.0) (2026-10-16)
 
 

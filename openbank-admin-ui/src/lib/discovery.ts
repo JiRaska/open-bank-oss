@@ -39,6 +39,11 @@ export interface DiscoveredService {
    * "asleep, will wake on demand" from "not deployed here" and "deployed but down".
    */
   scaledToZero: boolean
+  /**
+   * Image reference of the workload's first container, read from the pod TEMPLATE — the
+   * desired build, known without contacting any pod (and without waking a scaled-to-zero one).
+   */
+  image?: string
 }
 
 // Namespace → UI group. Adding a whole new domain namespace requires THREE steps
@@ -168,7 +173,7 @@ interface WorkloadList {
     metadata: { name: string; namespace: string; labels?: Record<string, string> }
     spec?: {
       replicas?: number
-      template?: { spec?: { containers?: Array<{ ports?: Array<{ name?: string; containerPort: number }> }> } }
+      template?: { spec?: { containers?: Array<{ image?: string; ports?: Array<{ name?: string; containerPort: number }> }> } }
     }
     status?: { replicas?: number; readyReplicas?: number; availableReplicas?: number }
   }>
@@ -245,6 +250,7 @@ export async function discoverServices(): Promise<DiscoveredService[] | null> {
           replicas,
           readyReplicas,
           scaledToZero: desired === 0 && readyReplicas === 0,
+          image: d.spec?.template?.spec?.containers?.[0]?.image,
         }
       })
       .sort((a, b) => a.name.localeCompare(b.name))

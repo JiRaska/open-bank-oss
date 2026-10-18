@@ -1,6 +1,6 @@
 # API
 
-REST kontrakt je definován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1, `info.version` 1.1.0) a servírován z `TransactionResource`. Všechny cesty jsou pod `/api/v1` (`openbank.api.version = 1`, ADR-0048). `X-API-Version` / `X-Service-Version` a `/api/v1/info` servíruje `openbank-libs`.
+REST kontrakt je definován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1, `info.version` 1.21.0) a servírován z `TransactionResource`. Všechny cesty jsou pod `/api/v1` (`openbank.api.version = 1`, ADR-0048). `X-API-Version` / `X-Service-Version` a `/api/v1/info` servíruje `openbank-libs`.
 
 > Poznámka: `servers` v `openapi.yaml` uvádí pro lokální vývoj port 8101, ale běžící aplikace se váže na **8102** (`application.yaml`). POST iniciační endpoint je implementován v `TransactionResource`, ale zatím není vyjmenován v `openapi.yaml` — kontrakt pro `POST /api/v1/transactions` berte jako zdokumentovaný zde, dokud nebude spec přegenerován (TBD).
 
@@ -24,11 +24,11 @@ Odpověď `200` — `TransactionPage`:
 ```json
 {
   "data": [ { "...": "TransactionResponse" } ],
-  "pagination": { "nextCursor": "…", "hasMore": true }
+  "pagination": { "limit": 20, "hasNextPage": true, "nextCursor": "…", "previousCursor": null, "totalCount": null }
 }
 ```
 
-Cursor stránkování používá `libs.api.pagination.CursorEncoder`; služba načte `limit + 1` řádků pro výpočet `hasMore` a `nextCursor` vrací jen pokud existují další stránky.
+Cursor stránkování používá `libs.api.pagination.CursorEncoder`; služba načte `limit + 1` řádků pro výpočet `hasNextPage` a `nextCursor` vrací jen pokud existují další stránky. Spec `hasMore` dál deklaruje jen proto, že odstranění publikované vlastnosti odpovědi je breaking (oasdiff); server ho nikdy neposílal.
 
 ## Vyhledávání — `GET /api/v1/transactions/search`
 
@@ -103,5 +103,5 @@ Doménové invarianty, které musí vyjít jako 422, záměrně vyhazují `Illeg
 
 ## Verzování
 
-- **Osa API kontraktu:** `openapi.yaml:info.version` (1.1.0); její major == URL `/api/v{N}` == `openbank.api.version` (1). Změna API klasifikuje svůj bump z OpenAPI diffu (ADR-0048).
+- **Osa API kontraktu:** `openapi.yaml:info.version` (1.21.0); její major == URL `/api/v{N}` == `openbank.api.version` (1). Změna API klasifikuje svůj bump z OpenAPI diffu (ADR-0048).
 - **Osa release:** `version.txt` (1.2.1), vlastní release-please — nezávislá na API ose.
