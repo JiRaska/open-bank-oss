@@ -128,3 +128,7 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Zaúčtování odvodu srážkové daně
+
+Konzument odvodu srážkové daně zaúčtovává debet přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319). Dávku vypořádá jen prokázané 2xx, i když tělo odpovědi nelze přečíst. Odpověď 409 je idempotentní úspěch. Odmítnutí 400/422 vyhodí `WithholdingRemittanceBookingFailedException`, takže konektor událost přesměruje do DLQ. Jakákoli jiná odpověď nebo ztracené spojení se vyhodí a zopakuje se se stejným idempotentním klíčem. Datum splatnosti, které není ISO datum, se odmítne jednorázově před opakováním a skončí v DLQ. Konfigurace se nezměnila.

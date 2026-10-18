@@ -137,3 +137,7 @@ Per-service CI pipeline (`.github/workflows/ci-account-service.yml`):
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Calls to transaction-service
+
+The welcome-bonus credit is sent through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319), which classifies the HTTP answer in one place. A proven 2xx status counts as granted whether or not its body can be read, because the money has moved. A 409 or a 400/422 refusal still fails the grant, as the client's own exception did before. Any other status, or a dropped connection, is thrown so the caller retries; this is safe because the request carries the idempotency key `welcome-bonus-<accountId>`. No configuration changed.

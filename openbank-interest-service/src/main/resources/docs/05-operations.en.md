@@ -128,3 +128,7 @@ Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Withholding remittance booking
+
+The withholding-tax remittance consumer books its debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a proven 2xx settles the batch, even when the response body is unreadable. A 409 is an idempotent success. A 400/422 refusal throws `WithholdingRemittanceBookingFailedException` so the connector dead-letters the event. Any other answer or a dropped connection is thrown and retried with the same idempotency key. A due date that is not an ISO date is rejected once, before any retry, and dead-lettered. No configuration changed.
