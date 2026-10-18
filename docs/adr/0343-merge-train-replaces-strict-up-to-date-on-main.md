@@ -53,117 +53,114 @@ platform will not provide it for this repository.
 
 We will run a **merge train**: a scheduled bot workflow that batches armed, green PRs, verifies
 the batch as one tree with the ordinary CI, and merges the verified PRs in train order. The
-`merge-train` commit status it posts becomes a required context on `main-protection`, and the
-strict up-to-date policy is turned off. Concretely:
+`merge-train` commit status it posts becomes a required context on `main-protection`, **pinned to
+the gitops App**, and the strict up-to-date policy is turned off. Concretely:
 
 1. **Driver.** `.github/workflows/merge-train.yml` runs every 10 minutes and on
-   `workflow_dispatch`, under the concurrency group `merge-train` with `cancel-in-progress: false`
-   (a train in flight is never cancelled by the next tick; the tick waits). It is **one job with
-   three ordered steps** (see *Security*): A rebuilds the trains with no App token in existence;
-   B compares the tree CI ran on with the tree A built; C mints the gitops GitHub App token — as
-   `auto-update-armed-prs.yml` does, because a push made with `GITHUB_TOKEN` triggers no
-   workflows — and pushes, posts and merges. All logic lives in `.github/scripts/merge-train.py`
-   (python3 stdlib + `gh`/`git`), which carries `rebuild`, `publish`, `--dry-run`, `--shadow`,
-   `--self-test` and `--check-declaration`.
+   `workflow_dispatch`, under the concurrency group `merge-train` with `cancel-in-progress: false`.
+   It is **three jobs, each on its own runner** (see *Security*): `settle` (App token) judges the
+   train whose CI has finished; `build` (no secrets) builds the next train; `publish` (App token)
+   verifies it by re-derivation and hands it to CI. All logic is
+   `.github/scripts/merge-train.py` (python3 stdlib + `git`), which also carries `--shadow`,
+   `--self-test` and `--check-declaration`. One train is in flight at a time.
 2. **Candidates.** Open, non-draft, same-repository PRs with auto-merge armed, every required
-   context of `main-protection` (other than `merge-train` itself) `success` at the PR head, and no
-   `agent-pr-guard` refusal on that head. Branches under `codex/` are excluded. Oldest PR first,
-   at most `TRAIN_BATCH_SIZE` (default 8) per train. The required set is read live from the
-   ruleset, never from a list in the script. A PR that touches a **generator path**
-   (`.github/scripts/**`, `docs/adr/*.sh`, any `gen-*` under `openbank-infra/gitops/`) never
-   qualifies: it would be running its own change with the generators' authority. It goes to the
-   owner's manual lane (below).
-3. **Fast lane.** Before any train is built, a candidate whose changed files are disjoint from
-   `git diff --name-only <merge-base> origin/main` and touch none of `openbank-libs/**`,
-   `build-logic/**`, `openbank-infra/gitops/**`, `docs/adr/**`, `.github/**`,
-   `*/src/main/resources/openapi.yaml`, nor any path fragment in the `regen-derived.sh` generator
-   inventory, gets `merge-train` = success directly. Its own CI already answered the only question
-   a train could ask: nothing it changed interacts with anything that moved.
-4. **Train.** In step A, over **live** `origin/main` as the base: `git merge --squash` of each
-   candidate's verified head sha, in order, committed with the PR title as subject, the PR body's
-   first paragraph and a `PR-Number: #n` trailer. A PR that does not apply cleanly is **dropped
-   from this train** with a fixed-text PR comment, not failed. After stacking, the generator paths
-   are overlaid from `origin/main`, asserted unchanged, and `bash .github/scripts/regen-derived.sh
-   --all` plus `bash docs/adr/gen-index.sh` run under a scrubbed, allowlisted environment; any diff
-   is committed as `chore(train): regenerate derived files`. The derived-file class is the majority
-   of the measured breaks, and the train is the one place where regeneration sees the whole batch.
-   Step A builds the whole batch **and every bisect half** (2N-1 trains over the same base) up
-   front, so that nothing is built after the token exists.
-5. **Verification.** Per train the bisect asks for, step C pushes the commit step A built to
-   `train/<run_id>-<attempt>` and keeps one **draft PR** labelled `merge-train` open from it to
-   `main` — `ci.yml` and `services-ci.yml` run on `push` only for `main`, so the draft PR is the
-   CI carrier; each bisect step force-pushes the next train to the same branch. Step B reads the
-   carrier's live head, requires its tree to equal the tree step A recorded, and only then reads
-   the required contexts there. `issue-hygiene` is excluded from the wait set: it judges a PR's
-   body, not the tree, and was already green on every member. The carrier is closed and the branch
-   deleted when the run ends. If `main` moved between step A and step C, the tick ends without
-   acting and the next one rebuilds.
-6. **Green.** For each PR in order: post status `merge-train` = success on the PR head
-   (`verified on train <sha> over main <sha>`), then squash-merge it through `gh`. Between merges
-   the script asserts that `main` advanced **only** by the train's own merge. If a foreign commit
-   landed, it stops and defers the rest to the next train — unless the foreign commit's files are
-   disjoint from the whole train's files under the fast-lane rule, in which case it continues: the
-   argument that admits a PR to the fast lane admits the train past a disjoint foreign merge.
-7. **Red.** Bisect by halving over the halves step A built (each its own train over the same
-   `main`), verified the same way. A half of one that is red is the culprit: it gets a fixed-text
-   PR comment pointing at the run and a `merge-train` = failure status on its head, which blocks it until the
-   author pushes. Only the longest verified **prefix** merges; every other green PR is deferred to
-   the next train, because it was verified over `main`, not over the prefix. Two PRs that are each
-   green alone and red together have no single culprit; the first merges, the second is retried on
-   the new `main` by the next train and fails there on its own, which identifies it.
-8. **Ruleset.** `merge-train` is added to the required contexts and
-   `strict_required_status_checks_policy` is set to `false`. This PR changes no ruleset; the owner
-   does it with the commands in *Rollout*. `check-ruleset-context-parity.py` is extended so that a
-   required context may also be satisfied by a tracked script that declares it as the
-   `STATUS_CONTEXT` it posts via the commit-status API — otherwise the gate would, correctly, red
-   every PR the moment `merge-train` became required, since no `pull_request` job emits it.
+   context of `main-protection` (other than `merge-train` itself) `success` at the head, no
+   `agent-pr-guard` refusal, and no App-posted `merge-train` failure on that head (a culprit waits
+   for a push). `codex/` branches are excluded. A PR touching **anything under `.github/`** —
+   workflows, gate scripts, `gates.yaml`, generators, the regen inventory — or a generator
+   elsewhere (`docs/adr/*.sh`, `gen-*` under `openbank-infra/gitops/`) never qualifies; it takes the
+   owner's manual lane (see *Security* for why the boundary is the whole directory). Oldest first;
+   the required set is read live from the ruleset.
+3. **Fast lane.** `settle` computes it every tick from live data: a candidate whose changed files
+   are disjoint from what `main` changed since its merge-base and from every other candidate, and
+   touch no protected path (`openbank-libs/**`, `build-logic/**`, `openbank-infra/gitops/**`,
+   `docs/adr/**`, `.github/**`, `*/src/main/resources/openapi.yaml`, any regen-inventory source
+   read from `origin/main`), gets `merge-train` = success directly. Its own CI already answered
+   the only question a train could ask. Nothing about the fast lane is stored between jobs.
+4. **Train (`build`).** Over live `origin/main`: `git merge --squash` of each member's verified
+   head sha in order; a member that conflicts or is empty is dropped. The generator paths are
+   overlaid from `origin/main`, then `regen-derived.sh --all` and `gen-index.sh` run under an
+   allowlisted environment and any diff becomes one regeneration commit. The train goes to
+   `publish` as one git bundle; it is untrusted.
+5. **Verification (`publish`).** The batch is recomputed live. Every member squash is rebuilt with
+   `git merge-tree --write-tree` onto publish's **own** chain and must equal the bundle's commit
+   tree for that step; publish's own drop list must match. The bundle's single extra commit, if
+   any, may touch only the `DERIVED_OUTPUTS` declared in `origin/main`'s `regen-derived.sh`, and
+   may add no symlink or gitlink; the final tree may carry no symlink or gitlink `main` lacks.
+   Publish then commits its own chain (`git commit-tree` over the verified trees), pushes it to
+   `train/<run_id>-<attempt>`, records `tree=<sha>` as an App status on that commit, and opens a
+   draft carrier PR labelled `merge-train` so `ci.yml` and `services-ci.yml` run on it.
+   `issue-hygiene` is not waited for: it judges a PR body, not a tree.
+6. **Green (`settle`, a later tick).** On the carrier's exact head: an App-created record whose
+   tree equals the commit's tree, a chain of publish's own commits whose base is live `main`, and
+   every required context green. Then, per member in order: the live head must still be the
+   recorded head; `merge-train` = success is posted on it and it is squash-merged with the head sha
+   pinned. Between merges `main` must have advanced only by the train's own merge; a foreign
+   merge stops the run and the rest wait for the next tick.
+7. **Red.** A red train of N > 1 members halves across ticks: each member gets an App
+   `merge-train` = pending `bisect size N/2` status, and the next batch is capped by the size on
+   its oldest member — so the left half runs first, then the right. A red train of one member is
+   the culprit: `merge-train` = failure and a fixed-text comment. A train `publish` cannot verify
+   for a member-attributable reason (symlink, regeneration outside the inventory) halves the same
+   way and, at one member, sends that PR to the manual lane. Two PRs green alone and red together
+   resolve themselves: the first merges, the second is red alone over the new `main`.
+8. **Ruleset.** `merge-train` is added to the required contexts **with the App's
+   `integration_id`**, and `strict_required_status_checks_policy` is set to `false`. Without the
+   pin, any workflow granted `statuses: write` — including one a PR edits — could post
+   `merge-train` on its own head. This PR changes no ruleset; the owner runs the commands in
+   *Rollout*. `check-ruleset-context-parity.py` accepts a required context declared as the
+   `STATUS_CONTEXT` of a tracked script, so the gate does not red every PR the moment
+   `merge-train` becomes required.
 
-### Security — the privileged step acts only on trees it built itself
+### Security — the invariant
 
-**Invariant.** *The step that holds the App token acts only on trees it built itself, from
-verified heads, with trusted generators.* Everything else — PR heads, CI results, anything an
-earlier design handed between jobs — is untrusted, and is used at most as a hint compared hash
-against hash with what the script built.
+> **The token never shares a runner with PR data; privileged jobs act only on trees they
+> re-derived with execution-free git; regeneration content is proven by main's own freshness
+> gates on the exact tree.**
 
-**Why the invariant, not a list of checks.** Every member of a train is PR-authored, and the
-derived-file generators *execute* over the train tree. The first prototype ran them with the App
-token in the inherited environment — a review bypass for every PR, reachable by anyone who can arm
-auto-merge; the self-test's exfiltration probe leaked the token before the fix. The second split
-the work into a token-less build job and a privileged publish job, and the third had publish
-validate what build produced, field by field. Each review found the next field that validation did
-not cover — a plan-chosen branch name reaching `git push`/`--delete`, a stale base accepted
-because it was an ancestor of `main`, a record not bound to the batch it claimed, plan text
-interpolated into a comment, a regeneration commit accepted because its lines *looked* like a
-checksum restamp. All five share one cause: the privileged side was *consuming* another
-process's output. Validation of consumed output is open-ended; not consuming it is not.
+**Threat.** Every member of a train is PR-authored, and the derived-file generators execute over
+the train tree. Whoever can steer what runs next to the App token can post `merge-train` and merge
+— a review bypass for every PR, reachable by anyone who can arm auto-merge. Four designs were
+reviewed before this one: generators sharing a job with the token (the self-test's probe leaked
+it); a split whose privileged job validated the build's output field by field (each review found
+the next unvalidated field — branch names, a stale base, an unbound record, interpolated text, a
+regeneration commit judged by its shape); and a single job that rebuilt everything itself but
+still shared a runner, `HOME` and `.git` between the generators and the token, where trusted
+generator code steered by hostile data (a symlink, a file written outside the worktree) could
+reach the later step. Each fix narrowed the gap; only separating runners closes it.
 
-**How the workflow holds it.**
-- *Step A (no App token exists yet).* The base is live `origin/main`, read in this step. Candidates
-  are listed live and `qualifies()` runs on live checks and live files; each head is fetched and
-  must equal the API's head sha, and the train squashes that **sha**, never a movable ref. A PR
-  that touches a generator path never qualifies. The generator paths are overlaid from
-  `origin/main` and the train is refused if one still differs (modified or added), so only trusted
-  generators run — over PR *data*. They run with an explicit allowlist (`PATH`, `HOME`, locale,
-  the git identity), never an inherited environment: no token, no `RUNNER_TEMP`, no `GITHUB_*`.
-  Every record — key, commit, tree, applied, dropped — is computed here for the batch it was
-  built for.
-- *Step B.* CI is untrusted by nature; it only reports on a tree. The tree is read off the
-  carrier's live head and must be byte-identical to the tree step A recorded.
-- *Step C (App token minted here, and only here).* It acts only if live `main` still equals the
-  base step A used, and only for members whose live head still equals the verified sha and that
-  still qualify. It pushes this run's own commits to `train/<run_id>-<attempt>` — a name derived
-  from the run, checked against `^train/[0-9]+-[0-9]+$` and `git check-ref-format`; nothing else
-  is ever pushed or deleted. Statuses are posted on the verified sha and merges use
-  `--match-head-commit` with it. Comments are fixed text; no PR-, branch- or commit-derived string
-  is interpolated.
-- *The declaration gate* holds the order textually: the rebuild step precedes the token mint,
-  references no App secret, and no artifact or generator invocation appears in the workflow.
-
-**Residual assumption, stated.** Steps A and C share a job and a filesystem; the state step A
-writes for step C is this script's own output, not a generator's. That is sound only while the
-generators execute no PR-supplied code — which is what the generator-path disqualification and
-the overlay assertion enforce — and step C re-reads `main`, every head and every check live
-before acting regardless.
+**How the three clauses are held.**
+- *No shared runner.* `build` is the only job that runs code over PR data, and it holds no
+  secret: read-only `GITHUB_TOKEN`, `persist-credentials: false`, generators taken from
+  `origin/main` and run under an allowlisted environment (no token, no `RUNNER_TEMP`, no
+  `GITHUB_*`). `publish` and `settle` mint the App token on fresh runners, check out `main`, run
+  this script as it exists on `origin/main` under `python3 -I -S`, set
+  `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` and `core.hooksPath=/dev/null` on every
+  git call, and never check out, install or execute anything from a train. The
+  `merge-train-declaration` gate holds this per job.
+- *Re-derived trees only.* `publish` treats the bundle as a claim: it recomputes the batch live,
+  rebuilds each member squash with `git merge-tree --write-tree` (which writes objects, not files)
+  over its own commits, and accepts the bundle only where the trees are identical; it then pushes
+  **its own** commits, never the bundle's, to a branch name derived from the run
+  (`^train/[0-9]+-[0-9]+$` and `git check-ref-format`, the only refs it ever pushes or deletes).
+  `settle` reads publish's record back from the commit it is on — an App-created status, so its
+  creator is checked — requires the commit's tree to equal it, and walks publish's own commits to
+  find the members and the base. Statuses go on verified head shas and merges pin them.
+  Comments are fixed text.
+- *Regeneration content proven by main's gates.* The one thing publish cannot re-derive without
+  running code is what the generators wrote. Publish bounds it — only paths in `DERIVED_OUTPUTS`
+  read from `origin/main`, no symlink or gitlink — and CI proves it. Every entry of
+  `DERIVED_OUTPUTS` has a checker that recomputes it from its sources and compares, inside a
+  required context: the enforced gates `adr-registry-integrity-check`,
+  `eu-ai-act-inventory-drift`, `ai-governance-snapshot-drift`, `card-capability-matrix-drift`,
+  `slo-dashboard-drift` and `release-registration-consistency` (the `gates (…)` shards), and
+  `opa-policy.yml`, which runs the three OPA data generators with `--check` and regenerates every
+  bundle ConfigMap to diff it against the committed one. Those gates, `run-gates.py` and the
+  workflows that run them are `main`'s in every train, **because no member may touch
+  `.github/`** — which is why the disqualification covers the whole directory, not just the
+  generators. A Rollout manifest that a bundle script restamps in place is deliberately *not* a
+  derived output: the rest of that file is not derived and no gate re-derives it, so a train
+  whose regeneration touches one is refused and takes the manual lane.
 
 **What is deliberately NOT required: a review decision.** The train does not check
 `reviewDecision == APPROVED`. `main-protection` has no review rule, and the repository has a single
@@ -173,11 +170,12 @@ governance PRs without his own review — together with `agent-pr-guard`, which 
 the member's head and treats as a refusal. Adding an approval requirement would require the sole
 human to approve his own PRs, which GitHub forbids, and would stall the train entirely.
 
-**Manual lane.** A PR that modifies a generator path cannot ride a train, by the rule above. In
-phase 0 that costs nothing (strict is still on). In phase 1 such a PR needs the `merge-train`
-status from a human: the owner reviews it and posts the status by hand
-(`gh api -X POST repos/JiRaska/open-bank-oss/statuses/<head-sha> -f state=success -f context=merge-train -f description="manual lane: generator change reviewed by owner"`),
-or merges with the ruleset bypass he already holds. Both leave an audit trail naming the human.
+**Manual lane.** PRs touching `.github/` or a generator, PRs adding a symlink, and trains whose
+regeneration leaves the inventory cannot ride a train. In phase 0 that costs nothing (strict is
+still on). In phase 1 such a PR needs the `merge-train` status from a human: the owner reviews it
+and posts the status by hand with the App pin in mind (an owner-token status does not satisfy a
+context pinned to the App), or merges with the ruleset bypass he already holds. Both leave an
+audit trail naming the human. Its volume is a phase-0 measurement.
 
 ### What the train is NOT
 
@@ -190,7 +188,9 @@ exactly as today, and a refusal there removes the PR from the candidate set.
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
-train builds, verifies and posts `merge-train` statuses, but **never merges**; strict stays on and
+train builds, verifies and posts `merge-train` statuses, but **never merges**; because nothing
+merges, a green train is rebuilt on the next tick, so shadow measures verdicts and bisect
+behaviour, not throughput; strict stays on and
 nothing requires the context yet. Expected observation: the status appears on armed green PRs,
 the train carrier PRs come and go, culprits get comments. Two weeks of shadow is the measurement
 that decides phase 1: how many trains went red, how many members were bisected out, and whether
@@ -205,23 +205,25 @@ enumeration on its own (it already does when strict is off) and can be retired i
 ```sh
 # 1. find the ruleset id
 RS=$(gh api repos/JiRaska/open-bank-oss/rulesets --jq '.[] | select(.name=="main-protection") | .id')
-# 2. read the current rules, add merge-train to required_status_checks, turn strict off
+# 2. read the current rules, add merge-train PINNED to the App, turn strict off
+#    APP_ID = the gitops App's id (the value of the GITOPS_APP_ID secret)
 gh api "repos/JiRaska/open-bank-oss/rulesets/$RS" > /tmp/rs.json
-python3 - <<'PY'
-import json
+APP_ID=<gitops-app-id> python3 - <<'PY'
+import json, os
 rs = json.load(open('/tmp/rs.json'))
 for r in rs['rules']:
     if r['type'] == 'required_status_checks':
         p = r['parameters']
-        if not any(c['context'] == 'merge-train' for c in p['required_status_checks']):
-            p['required_status_checks'].append({'context': 'merge-train'})
+        p['required_status_checks'] = [c for c in p['required_status_checks'] if c['context'] != 'merge-train']
+        # Pin the context to the gitops App, so no other actor's status can satisfy it.
+        p['required_status_checks'].append({'context': 'merge-train', 'integration_id': int(os.environ['APP_ID'])})
         p['strict_required_status_checks_policy'] = False
 json.dump({'rules': rs['rules']}, open('/tmp/rs-patch.json', 'w'))
 PY
 gh api -X PUT "repos/JiRaska/open-bank-oss/rulesets/$RS" --input /tmp/rs-patch.json
 # 3. verify by reading it back — the PUT answers 200 whether or not the rule changed
 gh api repos/JiRaska/open-bank-oss/rules/branches/main \
-  --jq '.[] | select(.type=="required_status_checks") | .parameters | {strict: .strict_required_status_checks_policy, ctx: [.required_status_checks[].context]}'
+  --jq '.[] | select(.type=="required_status_checks") | .parameters | {strict: .strict_required_status_checks_policy, ctx: [.required_status_checks[] | {context, integration_id}]}'
 ```
 
 **Rollback.** Re-enable strict and remove the context, in that order (removing the context
@@ -273,11 +275,10 @@ undo in git.
   required context enforces it for every PR, since nothing else posts `merge-train`.
 - One more bot with the App token that can merge PRs. Its blast radius is bounded by the same
   ruleset as any other merger (`agent-pr-guard`, signatures) — it only ever squashes PRs that
-  were already armed — and by the invariant above: the token exists only in the step that acts on
-  trees the script built itself.
-- Step A builds 2N-1 trains per tick (15 at the default batch of 8), each with a full
-  regeneration, so that nothing is built after the token exists. That is CPU, not CI fan-out; the
-  carrier pushes, which are the expensive part, are still one per bisect step actually taken.
+  were already armed — and by the invariant above: the token never shares a runner with PR data.
+- Bisection spans ticks: a red batch of 8 costs up to three more carrier CI runs (halves of 4, 2,
+  1) to isolate one culprit, each a tick or more apart. That is slower than bisecting within one
+  run, and is the price of `settle` never consuming state a build produced.
 - PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
   routinely) take the manual lane in phase 1. The volume of that lane is a phase-0 measurement.
 - Carrier PRs: up to one every 10 minutes, closed on completion. They carry the `merge-train`
