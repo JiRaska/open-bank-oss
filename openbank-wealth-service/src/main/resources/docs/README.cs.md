@@ -37,3 +37,7 @@ Tento vztah je Pact kontrakt (`pacts/openbank-customer-edge-openbank-wealth-serv
 - `WealthPactFolderProviderVerificationTest` ho přehrává na každém PR proti skutečnému Postgresu.
 - `WealthNegativeAuthProviderVerificationTest` dokazuje, že volající bez identity dostane 401.
 - `WealthPactBrokerProviderVerificationTest` publikuje ověření při pushi do main, aby `can-i-deploy` uměl odpovědět o customer-edge.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.

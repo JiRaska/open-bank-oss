@@ -100,3 +100,7 @@ v existujících likviditních testech a v `RiskLiquidityApiIT`.
 ## Povinné minimální rezervy ČNB
 
 Risk engine odebírá `openbank.fx.cnb-policy-rate.published` do vlastní tabulky faktů o sazbách. Opakované doručení je idempotentní podle nástroje a data účinnosti; opravená sazba aktualizuje uložené faktum. Endpoint minimálních rezerv odvozuje výsledek z odsouhlaseného snapshotu a sazby rezerv i úročení účinných k datu tohoto běhu. Chybějící fakta vedou k `424 NOT_EVALUABLE` s důvodem namísto výpočtu s náhradní číselnou sazbou; neznámý běh vrací 404 a neodsouhlasený běh 409. Analýza se počítá při čtení a neukládá se jako samostatný výsledek.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.

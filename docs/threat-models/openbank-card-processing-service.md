@@ -218,3 +218,5 @@ silently re-suspend a credential the customer was just given back.
   WARN-logged with a rate limit, and consumer pacts to fraud-service and transaction-service (each
   with a recorded 401) are replayed by both providers on every PR — the CARD-rail ledger posting
   had no contract at all before this.
+
+- **2026-10-17** — **OPA PolicyDecisionPoint now comes from libs-runtime (#13136).** The per-service AuthzProducer is removed and the service opts into the shared `OpaPolicyDecisionPointProducer` with `openbank.authz.opa-pdp-producer.enabled: true` (a build-time switch). `opa.url` and `opa.path` keep their keys and defaults. The timeout key `opa.timeout-ms` and its 500 ms default are unchanged. No change to policy, actions, roles, the sidecar edge or fail-closed behaviour; the PDP object is the same `OpaSidecarPolicyDecisionPoint`. Rollback: revert the PR.

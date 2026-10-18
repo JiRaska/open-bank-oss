@@ -24,3 +24,7 @@ those rows before retrying the migration. On rollback, disable the annual-summar
 roll back the application first. Do not drop the issuance table after any event has been emitted or
 its outbox row purged: doing so removes the only durable guard against re-issuing that regulatory
 document trigger. No lossless rollback exists once that evidence is gone.
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

@@ -25,3 +25,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Orchestrace:** synchronní platební sága (hold → zaúčtování → debet/kredit → dokončení, s kompenzací)
 - **Auth:** Keycloak OIDC; čtení vyžaduje `ROLE_API`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`, iniciace vyžaduje `ROLE_OPERATOR`
 - **Money-path služba** (viz `rules.yaml: money_path_services`) — 2 schválení + threat model u každé změny
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

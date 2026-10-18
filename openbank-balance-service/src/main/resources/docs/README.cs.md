@@ -23,3 +23,7 @@ Self-publish přes `/q/openbank/docs` (Docs-as-Service — viz [ADR 0019](../../
 - **Outbox:** `balance_outbox` → Kafka `openbank.balance.events`
 - **Konzumenti:** account-service (aktualizace cache). Zákaznické upozornění na nízký zůstatek je plánované v ADR-0333; notification-service tento event zatím nekonzumuje.
 - **Producenty pro nás:** transaction-service event-driven update zůstatku po každé transakci
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

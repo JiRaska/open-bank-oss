@@ -25,3 +25,7 @@ This documentation is published directly by the service at the management endpoi
 - **Orchestration:** synchronous payment saga (hold → ledger post → debit/credit → complete, with compensation)
 - **Auth:** Keycloak OIDC; reads require `ROLE_API`/`ROLE_VIEWER`/`ROLE_OPERATOR`/`ROLE_ADMIN`, initiation requires `ROLE_OPERATOR`
 - **Money-path service** (see `rules.yaml: money_path_services`) — 2 approvals + threat model on every change
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

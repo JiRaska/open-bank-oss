@@ -24,3 +24,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Idempotence:** hlavička `Idempotency-Key` povolená (CORS); Redis (Valkey) je zapojen jako závislost
 - **Auth:** Keycloak OIDC; per-operace `@RolesAllowed` (least-privilege); `settle` navíc `@Authorize` přes OPA (advisory)
 - **Money-path:** **ANO** — služba je v `rules.yaml: money_path_services` (vyžaduje 2 schválení + threat model)
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

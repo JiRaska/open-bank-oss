@@ -106,7 +106,7 @@ not change any existing request's outcome until explicitly flipped.
   documents in libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -209,7 +209,7 @@ not change any existing request's outcome until explicitly flipped.
   dependency introduced, no behavior change. Attack surface, trust boundaries, and STRIDE rows above are
   unaffected. No DB change; rollback = revert the commit.
 - **2026-07-08** — ADR-0155 four-eyes enforcement, rolled out from the sepa-payment pilot
-  (issue #413). New endpoint `PATCH /api/v1/sepa-instant/approvals/{id}` + `ApprovalConfig`
+  (issue #413). New endpoint `PATCH /api/v1/sepa-instant/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
   shared, opt-in) on `sctInstPayment.recall`. New STRIDE supplement §4a. `authz.four-eyes.enforce`
   defaults `false` — no behavior change to any existing request in this PR; flipping it is a
