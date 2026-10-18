@@ -13,18 +13,22 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.cardprocessing.infrastructure.client.CardClearingLedgerKey
-import com.openbank.cardprocessing.infrastructure.client.InitiateTransactionRequest
-import com.openbank.cardprocessing.infrastructure.client.TransactionResponse
 import com.openbank.cardprocessing.infrastructure.client.TransactionServiceClient
+import com.openbank.clients.transaction.api.TransactionsApi
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -61,7 +65,11 @@ class CardClearingTransactionPactConsumerTest {
 
     // The real REST client ignores unknown properties (Quarkus default); bind the same way, since
     // transaction-service answers with many more fields than this consumer reads.
-    private val mapper = jacksonObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    private val mapper = jacksonObjectMapper()
+        .registerModule(JavaTimeModule())
+        // Quarkus' mapper writes java.time as ISO strings; the bare test mapper would write an array.
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
 
     /** Exactly what `TransactionLedgerPostingAdapter.postClearedSpend` builds for a 123.45 CZK clearing. */
     private val clearingDebit = InitiateTransactionRequest(
@@ -72,7 +80,7 @@ class CardClearingTransactionPactConsumerTest {
         amount = BigDecimal("123.45"),
         currencyCode = "CZK",
         description = "Potraviny",
-        valueDate = "2026-09-05",
+        valueDate = LocalDate.parse("2026-09-05"),
         rail = "CARD",
         instructionType = "ONE_OFF",
     )
@@ -170,9 +178,14 @@ class CardClearingTransactionPactConsumerTest {
         const val EXPECTED_TRANSACTIONS_PATH = "/api/v1/transactions"
 
         fun clientDerivedTransactionsPath(): String {
-            val base = TransactionServiceClient::class.java.getAnnotation(Path::class.java).value
-            val sub = TransactionServiceClient::class.java.methods
-                .single { it.name == "initiate" }
+            // The route is on the GENERATED interface TransactionServiceClient extends (ADR-0319);
+            // a @Path restated on the consumer sub-interface would take precedence, so read that first.
+            val base = (
+                TransactionServiceClient::class.java.getAnnotation(Path::class.java)
+                    ?: TransactionsApi::class.java.getAnnotation(Path::class.java)
+                ).value
+            val sub = TransactionsApi::class.java.methods
+                .single { it.name == "initiateTransaction" }
                 .getAnnotation(Path::class.java)
                 ?.value
                 .orEmpty()

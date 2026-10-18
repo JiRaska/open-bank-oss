@@ -56,6 +56,10 @@ quarkus:
         secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
       grant:
         type: client
+  # ADR-0319: the generated transaction-service client binds its responses with this mapper. A field
+  # the provider adds must never fail a bind AFTER the transfer has committed (Quarkus' default, pinned).
+  jackson:
+    fail-on-unknown-properties: false
   rest-client:
     sepa-payment-service:
       url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8115}
