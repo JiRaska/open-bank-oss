@@ -127,3 +127,7 @@ naplníš přes `POST /api/v1/security/scan`. Rozpracované ICT incidenty se NEV
 ## Poznámky k lokálnímu vývoji
 
 Scanner prověřuje služby pomocí URL — v dev módu by seznam služeb měl být přepsán v `application.yaml` tak, aby odkazoval na lokálně běžící služby. Alternativně spusť s `QUARKUS_PROFILE=test`, kde je seznam služeb prázdný a skeny produkují prázdné reporty.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

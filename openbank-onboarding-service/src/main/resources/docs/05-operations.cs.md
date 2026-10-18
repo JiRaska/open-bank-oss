@@ -106,3 +106,7 @@ V payloadu `/api/v1/info`:
 - **Osa API kontraktu:** `openapi.yaml:info.version` (`1.0.0`), nezávislá na release verzi (ADR-0048).
 - **CI:** path-scoped per-service pipeline; fast-jar build, build/push image, ArgoCD vyzvedne tag.
 - **Přísnost review:** ačkoli onboarding-service nedrží peníze ani stav systému záznamu, ADR-0068 ji řadí pod **money-path review rigour** (2 schválení + threat model), protože je KYC-decision-adjacent.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

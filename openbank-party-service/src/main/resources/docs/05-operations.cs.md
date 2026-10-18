@@ -97,3 +97,7 @@ Způsobeno přepsanou aplikovanou migrací. Nastav `QUARKUS_FLYWAY_REPAIR_AT_STA
 - Per-service path-scoped CI (buildne jen při změnách v `openbank-party-service/**`).
 - fast-jar Docker image (nikdy uber-jar) přes `openbank-infra/scripts/build-push-service.sh party`.
 - Verzování je per-service SemVer; `version.txt` vlastní release-please (neměň ručně). `openapi.yaml:info.version` je nezávislá osa API kontraktu (ADR-0048).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

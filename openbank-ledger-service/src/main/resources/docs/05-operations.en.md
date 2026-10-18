@@ -123,3 +123,7 @@ Per-service path-scoped CI (only changed services build). Release axis is owned 
 ### FINREP Pact fixture
 
 Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

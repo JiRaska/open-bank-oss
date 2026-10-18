@@ -108,3 +108,7 @@ Opakovaný submit se stejným `idempotencyKey` vrátí stávající zprávu. `40
 - **API osa:** `openapi.yaml: info.version` (1.0.0) bumpováno nezávisle z OpenAPI diffu.
 - CI je path-scoped (buildí se jen změněné služby). CD přes ArgoCD při bumpu image tagu.
 - **Money-path:** každý PR vyžaduje 2 schválení + udržovaný [threat model](../../../../docs/threat-models/openbank-swift-service.md).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

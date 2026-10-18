@@ -30,3 +30,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Zástupné adaptéry (za porty):** renderování šablon (bezlogické `{{token}}`, ADR-0162), generování PDF
   (stub, ADR-0162), objektové úložiště (Postgres BYTEA; S3 + WORM je ADR-0161), PAdES pečetění (no-op;
   EU DSS je ADR-0007/0162).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

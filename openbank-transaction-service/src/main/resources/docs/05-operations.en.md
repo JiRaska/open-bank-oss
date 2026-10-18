@@ -78,3 +78,7 @@ Exact latency SLO numbers are TBD until measured in the sandbox; the saga's down
 ## Deploy
 
 GitOps via ArgoCD (sandbox tracks the deploy branch). For image-tag merge conflicts in gitops manifests, take `--ours` (the freshly-built tag), never blind `--theirs`. Verified-signature ruleset requires the commit email match the registered GPG key.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

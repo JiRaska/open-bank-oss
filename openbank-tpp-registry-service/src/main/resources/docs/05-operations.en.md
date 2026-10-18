@@ -84,3 +84,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ## Release
 
 Released component (has `version.txt`, currently `0.3.0`). Versioning/changelog are owned by release-please from Conventional Commits — do not hand-edit `version.txt` or `CHANGELOG.md`. The `openapi.yaml:info.version` is a separate API-contract axis (ADR-0048).
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

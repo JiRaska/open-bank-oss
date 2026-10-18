@@ -96,3 +96,7 @@ This is by design: the `Idempotency-Key` matched an existing `cards.idempotency_
 
 - Versioning: per-service `version.txt` (currently `0.3.0`), owned by release-please from Conventional Commits. Do not hand-edit.
 - CD: ArgoCD picks up the new image tag from the gitops manifests.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

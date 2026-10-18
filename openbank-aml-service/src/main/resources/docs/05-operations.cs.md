@@ -123,3 +123,7 @@ Nikdy needituj aplikovanou migraci. Pokud checksum mismatch blokuje start, nasta
 V produkci vyžaduje TLS listener AML služby na portu 8443 klientský certifikát. Dosavadní HTTP listener na portu 8117 zůstává zapnutý pro readiness a objevování v Admin UI; jde o oddělenou cestu od mTLS volání. Při nasazení ověřte, že volající na 8443 předkládají certifikáty důvěryhodné privátní CA a že readiness stále kontroluje 8117. Připravený pod ani úspěšná HTTP sonda nedokazují funkčnost listeneru s ověřením klienta. Požadavek na klientský certifikát je konfigurační volba Quarkusu při buildu, proto patří do produkčního profilu, ne do proměnné prostředí nasazení.
 
 Generovaná politika příchozího provozu nyní povoluje migrovaným namespace pouze port 8443. Admin UI a bezpečnostní skener si ponechávají port 8117; provoz uvnitř namespace AML zůstává povolen. Volajícího, který stále potřebuje HTTP, je třeba určit před zpřísněním jeho pravidla.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

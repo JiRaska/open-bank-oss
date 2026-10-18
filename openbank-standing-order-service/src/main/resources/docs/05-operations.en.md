@@ -130,3 +130,7 @@ fast-path that skipped the domain call on the happy path left a successfully-pai
 re-picked it on every daily sweep — `executionCount` inflating and a duplicate
 `standing-order.due.v1` outbox row emitted per sweep. Regression proof:
 `StandingOrderOnceCompletionIT` (sweep → confirm → second sweep schedules nothing).
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

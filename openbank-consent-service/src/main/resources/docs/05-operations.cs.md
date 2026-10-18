@@ -104,3 +104,7 @@ Příčina: byla editována aplikovaná migrace. Dočasná oprava: nastav `QUARK
 - **Verze API kontraktu:** `openapi.yaml info.version` (`1.0.0`) je samostatná osa (ADR 0048).
 - **Money-path:** každá změna vyžaduje 2 schválení + aktuální threat model (`docs/threat-models/openbank-consent-service.md`, ADR 0030) a nikdy se nemerguje automaticky.
 - **CD:** image se buildí na hostu (fast-jar) a rolluje přes ArgoCD z gitops manifestů.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

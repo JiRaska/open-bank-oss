@@ -28,3 +28,7 @@ Pozn.: v `src/main` dnes nic proposal token nevydává (#5900), takže se tyto �
 testech, dokud nebude cesta potvrzení zapojena.
 
 Provozní diagnostické logy návrhů a rozhodnutí politik obsahují výsledek a hashovanou referenci tokenu, nikdy identitu zákazníka, názvy nástrojů, důvody rozhodnutí ani deserializovaný obsah. Atribuované auditní události zůstávají samostatným záznamem: zachovávají identitu aktéra, zdroj i pole auditního payloadu potřebná k vysvětlení rozhodnutí. Zprávy výjimek a stack trace se v těchto diagnostických cestách nezapisují, protože mohou obsahovat data požadavku. Pro diagnostiku zůstávají HTTP status, TTL tokenu a vygenerované identifikátory akcí.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

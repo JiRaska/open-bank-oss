@@ -109,3 +109,7 @@ Nikdy needituj aplikované migrace. Pokud živá DB blokuje start, dočasně nas
 - **Release osa:** release-please vlastní `version.txt` (aktuálně `0.2.0`); ručně nebumpovat.
 - **Konflikty image tagů v GitOps:** u image řádků ber `--ours` (CLAUDE.md), nikdy slepě `--theirs`.
 - **Money-path gate:** PR vyžadují 2 schválení + aktuální threat model (`docs/threat-models/openbank-clearing-service.md`).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

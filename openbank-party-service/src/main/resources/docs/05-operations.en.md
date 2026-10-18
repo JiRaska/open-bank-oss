@@ -97,3 +97,7 @@ Caused by a rewritten applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=tru
 - Per-service path-scoped CI (only builds when `openbank-party-service/**` changes).
 - fast-jar Docker image (never uber-jar) via `openbank-infra/scripts/build-push-service.sh party`.
 - Versioning is per-service SemVer; `version.txt` is owned by release-please (do not hand-bump). `openapi.yaml:info.version` is the independent API-contract axis (ADR-0048).
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

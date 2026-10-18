@@ -96,3 +96,7 @@ Cron `MandateExpiryScheduler` je **defaultně vypnutý** (`openbank.sdd.expiry.e
 - Per-service CI staví fast-jar a kontejnerový image (host-side `quarkusBuild`, ne in-Docker Gradle — viz GitOps pravidla v CLAUDE.md).
 - **Release** je automatický přes release-please z Conventional Commits (scope `sdd`). Needituj ručně `version.txt` / `CHANGELOG.md`. `version.txt` je aktuálně `0.2.0`; `quarkus.application.version` v `application.yaml` je `0.1.1` (známý drift — sjednotí je skill `bump` při příští změně).
 - **Flyway** běží při startu (`migrate-at-start: true`); `validate-on-migrate` je vypnuté a opakování připojení je nakonfigurováno kvůli pořadí cold-startu vůči DB.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

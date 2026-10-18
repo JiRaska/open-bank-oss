@@ -36,3 +36,7 @@ Every GL account with a balance must be in the `FinrepCoverage` allowlist; an un
 | 4200, 4201 / 5200, 5201 | Money-market interest income / expense | F02.00 r0010, r0051 / r0090, r0120 |
 
 Accrued interest receivable (1520/1521) is one account shared by interbank placements and the ČNB deposit facility, so the facility's accrued interest is reported with loans and advances rather than with cash. Splitting it requires a separate ledger account per counterparty type.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.

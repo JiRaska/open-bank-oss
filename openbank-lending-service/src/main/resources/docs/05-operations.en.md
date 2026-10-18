@@ -119,3 +119,7 @@ Never rewrite an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` tr
 ## Deploy
 
 GitOps (ArgoCD) per the platform pattern. For image-tag merge conflicts take `--ours` (freshly-built tag), `--theirs` for RBAC/config/env (CLAUDE.md). Version bumps and changelog are owned by release-please from Conventional Commits — never hand-edit `version.txt` or `CHANGELOG.md`.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
