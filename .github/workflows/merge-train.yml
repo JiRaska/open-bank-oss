@@ -1,11 +1,16 @@
 # Merge train for `main` (ADR-0343).
 #
-# Batches armed, green PRs; builds `train/<ts>` = main + squash of each in order; regenerates the
-# derived files over the whole batch; carries the train through the ordinary PR CI on a draft PR
-# labelled `merge-train`; then posts the `merge-train` commit status on each member and merges
-# them in order. A red train is bisected and the culprit is told which contexts failed. The
-# decision logic and its self-test live in .github/scripts/merge-train.py; gate
-# `merge-train-declaration` holds the wiring below in place.
+# Batches armed, green PRs; builds `train/<ts>` = main + squash of each in order (plus every
+# bisect half); regenerates the derived files over the whole batch; carries each train the bisect
+# asks for through the ordinary PR CI on a draft PR labelled `merge-train`; then posts the
+# `merge-train` commit status on each member and merges them in order. The decision logic and its
+# self-test live in .github/scripts/merge-train.py; gate `merge-train-declaration` holds the
+# wiring below in place.
+#
+# TWO JOBS, ONE TRUST BOUNDARY. The train tree is PR-authored code and the generators RUN inside
+# it. `build` therefore holds no secret at all (read-only GITHUB_TOKEN, checkout without
+# credentials) and hands its result over as an artifact of git bundles; `publish` is the only job
+# that mints the App token, and it runs git and gh only — never a file from a train tree.
 #
 # PHASE 0 (now): MERGE_TRAIN_SHADOW=true — statuses and comments are posted, nothing is merged,
 # strict up-to-date stays on. PHASE 1: the owner adds `merge-train` to the required contexts,
@@ -18,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Enumerate, classify and build the train locally; push, post and merge nothing"
+        description: "Build the plan only; push, post and merge nothing (publish job is skipped)"
         type: boolean
         default: false
       batch_size:
@@ -41,29 +46,21 @@ env:
   MERGE_TRAIN_SHADOW: "true"
 
 jobs:
-  train:
-    name: merge train
+  build:
+    name: build trains (no secrets)
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
     permissions:
-      # Pushes, statuses, comments and merges use the GitHub App token below. GITHUB_TOKEN stays
-      # read-only: a push made with it triggers no workflows, so the train would never be built.
       contents: read
+    outputs:
+      has_work: ${{ steps.plan.outputs.has_work }}
     steps:
-      - name: Mint the GitHub App installation token
-        id: app_token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.GITOPS_APP_ID }}
-          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: the train squashes PR heads onto main and needs their merge-bases.
           fetch-depth: 0
-          # The App token is what pushes the train branch, so a push triggers the PR lane's CI.
-          token: ${{ steps.app_token.outputs.token }}
-          persist-credentials: true
+          # No credential survives into the tree that generators run in.
+          persist-credentials: false
 
       - name: Install OPA
         run: |
@@ -89,19 +86,66 @@ jobs:
       - name: Install pyyaml (hash-pinned)
         run: bash .github/scripts/install-pyyaml-hash-pinned.sh
 
-      - name: Run the train
+      - name: Build the plan and the train bundles
+        id: plan
+        env:
+          # Read-only, and the script strips it (and everything else not allowlisted) from the
+          # environment the generators run in. Only the publish job ever holds the App token.
+          GH_TOKEN: ${{ github.token }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/merge-train.py build \
+            --repo "${GITHUB_REPOSITORY}" --branch main \
+            --batch-size "${TRAIN_BATCH_SIZE}" --out "${RUNNER_TEMP}/train"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: merge-train-plan
+          path: ${{ runner.temp }}/train
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    name: verify + publish (App token, git and gh only)
+    needs: build
+    if: needs.build.outputs.has_work == 'true' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      # Pushes, statuses, comments and merges use the App token below. GITHUB_TOKEN stays
+      # read-only: a push made with it triggers no workflows, so the train would never be built.
+      contents: read
+    steps:
+      - name: Mint the GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      # The checkout is this workflow's own ref (main), used for the script and as the git
+      # database the bundles are fetched into. No train tree is ever checked out here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
+          persist-credentials: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: merge-train-plan
+          path: ${{ runner.temp }}/train
+
+      - name: Verify, post statuses, merge in order
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
           SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
         run: |
           set -euo pipefail
           git config user.name "openbank-gitops-bot[bot]"
           git config user.email "openbank-gitops-bot[bot]@users.noreply.github.com"
-          # shellcheck disable=SC2086  # DRY_RUN / SHADOW are empty or a single flag each
-          python3 .github/scripts/merge-train.py \
-            --repo "${GITHUB_REPOSITORY}" --branch main \
-            --batch-size "${TRAIN_BATCH_SIZE}" --wait-minutes 90 --poll-seconds 60 \
-            ${SHADOW} ${DRY_RUN}
+          # shellcheck disable=SC2086  # SHADOW is empty or a single flag
+          python3 .github/scripts/merge-train.py publish \
+            --plan "${RUNNER_TEMP}/train" --wait-minutes 90 --poll-seconds 60 ${SHADOW}

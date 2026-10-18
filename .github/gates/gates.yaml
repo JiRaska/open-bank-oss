@@ -2903,16 +2903,18 @@ gates:
   # ADR-0343: the merge train is the bot that replaces strict up-to-date on main. Its wiring is
   # load-bearing in the same way as the updater's: the App token (a GITHUB_TOKEN push triggers no
   # CI, so a train would never be verified), a concurrency group that never cancels a train in
-  # flight, OPA on PATH for the regeneration step, and SHADOW as the committed default — a
-  # regression to live mode is a one-line env change that this gate turns into a red diff.
+  # flight, OPA on PATH for the regeneration step, SHADOW as the committed default — and the TRUST
+  # BOUNDARY: the generators run PR-authored trees, so the job that runs them (`build`) must hold
+  # no App token and the job that holds it (`publish`) must run nothing from a train tree. Each
+  # of those is a one-line regression that this gate turns into a red diff.
   - id: merge-train-declaration
     name: "merge-train keeps its App token, non-cancelling concurrency, OPA and shadow default (enforced)"
     group: registry
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 60   # self-test builds a synthetic git repo and runs ~12 trains (~8 s measured)
-    min_subjects: 8   # 9 workflow declarations + the read-only token assertion, 2026-10-18
+    budget_seconds: 90   # self-test builds a synthetic git repo and ~30 trains (~15 s measured)
+    min_subjects: 15   # 8 workflow + 2+3 build-job + 4+3 publish-job declarations + read-only token, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
     selftest_expect: pass
