@@ -138,7 +138,6 @@ tests:
               service: card-processing
             exp_annotations:
               summary: Card spend is missing from the books and will not be retried
-              subject_period: continuous
               description: >-
                 One or more cleared card transactions exhausted their ledger posting attempts. They are kept in card_clearings with posting_status FAILED or UNKNOWN. Do NOT reset blindly: follow the runbook remedy (prove transaction-service has no booking for the ledger key first, then make the rows due again).
               runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
