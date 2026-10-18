@@ -121,3 +121,7 @@ Vlastní čítače Micrometeru nesou předponu `openbank.` (vynucuje CI brána `
 ## Deploy
 
 GitOps (ArgoCD) dle platformního vzoru. Při konfliktech image-tagů ber `--ours` (čerstvě sestavený tag), `--theirs` pro RBAC/config/env (CLAUDE.md). Verzování a changelog vlastní release-please z Conventional Commits — nikdy ručně needituj `version.txt` ani `CHANGELOG.md`.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

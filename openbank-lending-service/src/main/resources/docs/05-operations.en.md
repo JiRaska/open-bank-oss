@@ -123,3 +123,7 @@ Custom Micrometer counters carry the `openbank.` prefix (enforced by the `metric
 ## Deploy
 
 GitOps (ArgoCD) per the platform pattern. For image-tag merge conflicts take `--ours` (freshly-built tag), `--theirs` for RBAC/config/env (CLAUDE.md). Version bumps and changelog are owned by release-please from Conventional Commits — never hand-edit `version.txt` or `CHANGELOG.md`.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
