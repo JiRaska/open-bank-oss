@@ -163,7 +163,10 @@ manual-lane comment) until that member's author pushes again.
   `PYTHONSAFEPATH` keeps them unimportable. Hiding every added file instead was measured and
   rejected: the generators then miss the PR's own inputs, the derived files come out wrong, and
   `main`'s freshness gate reds the train and blames an innocent member. Every git path list is
-  read with `-z` and split on NUL, and any path containing a control character is refused
+  read with `-z` and split on NUL; every gating diff goes through one helper that passes
+  `--no-renames` and returns both paths of any rename or copy (with rename detection on, git names
+  only the NEW path, so renaming `regen-derived.sh` to `docs/x.md` would hide that a gate script
+  was deleted); and any path containing a control character is refused
   outright — git quotes such names in its default output, so string checks silently miss them
   while `find` and `fnmatch` still match them. (All of this is defence in depth; see the boundary
   above.) `publish` and `settle` mint the App token on fresh runners, check out `main`, run
