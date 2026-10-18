@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.27.0...party-service-v0.28.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui,party:** find clients by name, national ID or birth date instead of UUID; fix state incentives ([#13199](https://github.com/JiRaska/open-bank-oss/issues/13199)) ([3c3f742](https://github.com/JiRaska/open-bank-oss/commit/3c3f742dc0c39af010d9fa2fa8a3a7ad34b74713))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.26.0...party-service-v0.27.0) (2026-10-16)
 
 
