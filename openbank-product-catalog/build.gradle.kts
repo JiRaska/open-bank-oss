@@ -79,18 +79,9 @@ tasks.configureEach {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     // Resource-server auth (issue #401): validate caller tokens for @Authenticated / @RolesAllowed.
     // The @Authorize interceptor, Roles and the Authorize annotation already arrive transitively via
     // :openbank-libs (which api-exports :openbank-libs-runtime + :openbank-libs-domain).
-    implementation(libs.quarkus.oidc)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation("com.networknt:json-schema-validator:1.5.9")
@@ -112,10 +103,7 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.quarkus.test.security.oidc)
