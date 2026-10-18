@@ -323,3 +323,13 @@ money-path service, not adjacent.
 - **2026-09-21** — **Accrual-run account reads move to the service's own machine identity (#10486 batch 5).** `AccountServiceClient` (`GET /api/v1/accounts/active`, `GET /api/v1/accounts/{id}/balance`) now mints its bearer from the NAMED oidc-client `ledger`, Keycloak client `openbank-interest` (`ROLE_API` only), which its ledger and remittance legs already use. account-service grants it `account.list` and `account.read` (`service-interest-account-read`). **STRIDE-S/E:** no new credential; the existing secret now also reaches those two reads. **Repudiation improves:** the reads name this service. Rollback: revert the commit.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+- **2026-10-17** — **Catalog reads move to the service's own machine identity (#8481, ADR-0341 step 1).**
+  `ProductCatalogClient` now selects the NAMED oidc-client `ledger` (Keycloak client `openbank-interest`)
+  instead of the shared `openbank-services` token, and that client gains the narrow `catalog:read` scope
+  (mapped by product-catalog to `CATALOG_SCOPE_READ`). `account_rest_ext.rego` (the bundle product-catalog
+  runs, `accounts` namespace) grants `service-account-openbank-interest` exactly `catalog.read` — events,
+  revision by id, offering by id — and nothing on `catalog.author`/`catalog.publish`/approvals; the shared
+  principal gets no catalog grant. **Risk class:** least privilege improves (a stolen interest credential
+  reads published terms, cannot author or publish); a revoked scope fails the sync closed and the cursor
+  does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
+  then idles on 403 (catalog sync stays off by default until the follow-up PR).

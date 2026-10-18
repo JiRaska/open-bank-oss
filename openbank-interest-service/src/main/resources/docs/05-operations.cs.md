@@ -52,6 +52,8 @@ Naplánované úlohy (konfigurační klíče pod `openbank.interest`):
 
 Placeholder tajemství jsou jen pro dev; produkce musí injektovat reálné hodnoty přes Vault (ADR-0017).
 
+Všechna odchozí volání mezi službami (ledger, transaction-service, account-service, party-service a od #8481 i čtení produktového katalogu) se autentizují pojmenovaným oidc-clientem `ledger`: Keycloak klient `openbank-interest` s vlastním secretem `OIDC_LEDGER_CLIENT_SECRET`, nikdy sdílený principal `openbank-services`. Čtení produktového katalogu má pro `service-account-openbank-interest` v `account_rest_ext.rego` oprávnění `catalog.read` (pouze publikovaná verze); sdílený klient s `OIDC_CLIENT_SECRET` zůstává nakonfigurovaný jako výchozí, ale žádný rest-client jej nevybírá.
+
 ## Health checky
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC běží.
