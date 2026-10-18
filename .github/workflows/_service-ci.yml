@@ -415,6 +415,55 @@ jobs:
           retention-days: 14
           overwrite: true
 
+  # ── publish-evidence: commit-addressed Test Intelligence store (#13201) ─────────────────
+  # admin-ui reads each component's evidence for the commit it is RUNNING from
+  # `<store>/<component>/<sha8>/test-intelligence.json`. This job publishes that object from
+  # the run envelope `build` just retained. Main pushes only — a dispatch may build a
+  # historical ref whose envelope is not about GITHUB_SHA, and a PR's commit is never
+  # deployed. It observes the build and must never gate it (#6614): job-level
+  # continue-on-error, and nothing `needs` it. Write-once: the bucket refuses any PUT that
+  # is not `If-None-Match: *`, so a re-run answers 412 and the first publication stands.
+  publish-evidence:
+    name: ${{ inputs.service }} (publish test evidence)
+    needs: build
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            openbank-admin-ui/scripts/publish-test-evidence.mjs
+            openbank-admin-ui/src/lib/test-intelligence-run-projection.mjs
+            .github/scripts/publish-test-evidence.sh
+            openbank-libs/governance/rules.yaml
+            ${{ inputs.service }}/version.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Download this run's Test Intelligence envelope
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+
+      - name: Assume the evidence-writer role (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-test-evidence-writer
+          aws-region: eu-north-1
+
+      # Same upload path as test-evidence-reconcile.yml: the tests ran on GITHUB_SHA itself.
+      - name: Publish write-once
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          bash .github/scripts/publish-test-evidence.sh "${SERVICE}" "${GITHUB_SHA}" "${GITHUB_SHA}" \
+            identical "${RUNNER_TEMP}/evidence/run.json"
+
   # ── contract: Pact provider verification + consumer-pact publishing ─────────────────────
   # In-cluster ARC pool only (the Pact Broker has no public ingress, ADR-0056) and only on the
   # events that must publish a verification result: a push to main (the SHA auto-deploy gates

@@ -58,6 +58,7 @@
 /openbank-libs-runtime/                 @JiRaska
 /openbank-libs-benchmarks/              @JiRaska
 /openbank-client-product-catalog/       @JiRaska
+/openbank-client-transaction/           @JiRaska
 
 # --- CI / security tooling ---
 /.github/                               @JiRaska

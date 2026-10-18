@@ -19,12 +19,10 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 [Payment / saga callers] --> (REST POST /api/v1/transactions) --> [transaction-service] --> [(Postgres: transactions)]
 [Operator] --------------> (initiate) ------------------------^                                  |
 [Viewer / service] ------> (GET list/search/{id}) -----------^                                  +--> [(tx_outbox)] --> [Kafka]
-[Kafka: payment.scheme-accepted] --> (SchemeAcceptedConsumer) --> [transaction-service]
-                                                                        +--> [Kafka: payment.scheme-accepted.dlq]  (on failure)
 ```
 
-- **External entities:** payment flows / service callers + operators (initiate), viewers/service (read history), Kafka rail services (ACSC events).
-- **Trust boundaries:** caller↔service (OIDC; OPA per ADR-0034 is a tracked follow-up); service↔Postgres; service↔Kafka (inbound `payment.scheme-accepted` + outbound `tx_outbox`).
+- **External entities:** payment flows / service callers + operators (initiate), viewers/service (read history). Rail services settle through the REST initiate endpoint (ADR-0108).
+- **Trust boundaries:** caller↔service (OIDC; OPA per ADR-0034 is a tracked follow-up); service↔Postgres; service↔Kafka (outbound `tx_outbox` only; the inbound `payment.scheme-accepted` boundary was removed 2026-10-17).
 - **Assets:** transaction records, counterparty data, the searchable history index.
 
 ### Outbound reversal evidence for complaint investigations
@@ -37,18 +35,15 @@ and the original booking is already on an authorized complaint path; the bounded
 use the identifier to traverse arbitrary transactions. Missing legacy fields stay unlinked.
 Disclosure still requires the complaint case assignment, purpose, policy decision and read audit.
 
-### 2a. Kafka inbound trust boundary — `payment.scheme-accepted` (ADR-0108)
+### 2a. Kafka inbound trust boundary — `payment.scheme-accepted` (REMOVED 2026-10-17)
 
-`SchemeAcceptedConsumer` opens a new **inbound trust boundary**: any Kafka producer able to publish to `payment.scheme-accepted` can trigger a settlement transaction in the money-path engine.
-
-| Threat | Vector | Mitigation |
-|---|---|---|
-| **S**poofing — rogue producer | An attacker or misconfigured service publishes a forged `SchemeAcceptedEvent` to trigger an unauthorised settlement | Strimzi mTLS + ACL: only the `sepa-payment`, `sepa-instant`, `domestic-payment`, and `swift-service` service accounts hold `Write` on `payment.scheme-accepted`; all other producers are denied at the broker. The topic is not auto-created (explicit Strimzi `KafkaTopic` manifest). |
-| **T**ampering — message in flight | Alter `amount`, `currency`, or `debtorAccountId` between producer and consumer | Kafka mTLS encrypts and authenticates the channel end-to-end; broker ACLs prevent a third party from producing to this topic. |
-| **R**epudiation — deny settlement | Claim the ACSC event was never emitted | Producer-side outbox pattern in sepa/domestic/swift services; `originatingPaymentId` is stored on the `transactions` row for audit trail and reconciliation. |
-| **I**nfo disclosure | Consumer logs expose PII from the event payload | Log only `paymentId`, `rail`, `amount`, `currency` — no IBAN, no party data. First 200 chars of raw payload logged only on deserialization failure. |
-| **D**oS — message flood | High-volume publish to saturate the consumer group | Consumer is `@Blocking` (one thread per partition); `group.id` isolation means only transaction-service consumes; DLQ prevents partition stall on processing error. Topic partition count is 1 in sandbox (rate-limited); prod should tune. |
-| **E**oP — settlement without SCA | Drive a customer-facing debit without SCA (ADR-0021) | `initiatedByPartyId` is **null** on `SchemeAcceptedConsumer`-generated commands — the SCA gate in `TransactionService` only fires for non-null party. Rail settlements are system-initiated, consistent with clearing/interest postings. |
+Removed. SchemeAcceptedConsumer, its channel, the `payment.scheme-accepted` topic and its DLQ, the
+rail Write ACLs and the transaction-service Read ACL no longer exist. No producer ever published to
+the topic: the four rails settle over HTTP (sepa-payment `SettlementAdapter` -> transaction-service
+REST, ADR-0108), which stays the only settlement path and is covered by §3 (OIDC + OPA) and the
+initiate-endpoint threats above. Removing an unused consumer deletes the forged-event settlement
+vector it opened (spoofing, tampering and elevation of privilege rows of the former table), so the
+attack surface shrinks. Do not re-introduce an event path without a new threat analysis and ADR.
 
 ## 3. Authn/Authz
 
@@ -348,6 +343,7 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 
 ## 6. Change log
 
+- **2026-10-17** — **Dead `payment.scheme-accepted` event path removed** (ADR-0108 REST path unchanged). SchemeAcceptedConsumer consumed a topic no service ever produced to; the four rails settle over REST. Removed the consumer, channel, topic, DLQ, rail Write ACLs, transaction-service Read ACL and the msg-override ConfigMap. §2a is retired: the forged-event settlement vector no longer exists, the REST initiate path (OIDC + OPA, §3) is the sole settlement entry. Residual risk: none added.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `transaction_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-10-03** — `transaction.sweep` gets an explicit human-only allow reason in
@@ -463,7 +459,7 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   **gRPC trust boundary** to the Temporal frontend; mitigated by `PaymentWorkflowImplTest` (asserts the
   success path never releases/reverses and compensation unwinds correctly), `PaymentActivitiesImplTest`
   (port-args identical to the orchestrator), and the flag defaulting OFF. See §5.
-- **2026-06-25** — ADR-0108 rail settlement consumer. Opens new Kafka inbound trust boundary (`payment.scheme-accepted`); threat analysis in §2a. Spoofing mitigated by Strimzi mTLS + per-service-account ACL. DLQ topic (`payment.scheme-accepted.dlq`) provisioned. `originatingPaymentId` stored for reconciliation audit trail.
+- **2026-06-25** — ADR-0108 rail settlement consumer. Opens new Kafka inbound trust boundary (`payment.scheme-accepted`); threat analysis in §2a. Spoofing mitigated by Strimzi mTLS + per-service-account ACL. DLQ topic (payment.scheme-accepted.dlq) provisioned. `originatingPaymentId` stored for reconciliation audit trail.
 - **2026-06-25** — #2013 mTLS + write-ACL hardening. **⚠️ PREMATURE — see 2026-06-29.** `KafkaUser` manifests (`authentication: tls`) were deployed in `openbank-infra/gitops/components/payments/kafka-scheme-accepted-acl.yaml`, but **no TLS-auth listener existed on the cluster** (only anonymous `plain:9092`), so no client could present those identities and the §2a gap was *not* actually closed. The ACLs only denied the legitimate (anonymous) consumer → settlements stuck in PROCESSING. The ACLs were removed in #2554 to unblock settlement.
 - **2026-06-29** — ADR-0137 Kafka mTLS migration. §2a **genuinely enforced**, topic-scoped. Added a `tls:9093` mutual-TLS listener; re-introduced the five `KafkaUser`s (now named by service identity — one cert per service) and their ACLs; wired all five services to connect over mTLS using Strimzi-minted keystores projected `messaging`→`payments` by External Secrets. Spoofing mitigation now real: `payment.scheme-accepted` is deny-by-default via its ACLs (SimpleAuthorizer per-resource), so only the four rail principals may `Write` and only `transaction-service` may `Read`/commit on group `transaction-scheme-accepted-cg`; `User:ANONYMOUS` (anyone on the kept plaintext listener) is denied because ACLs bind to the principal, not the listener. The cluster-global `allow.everyone.if.no.acl.found` flag is deliberately left `true` (flipping it is a separate fleet-wide program); this topic does not depend on it. Note: the four rails still settle over HTTP today, so the producer `Write` grants are provisioned ahead of the ADR-0108 event path being wired.
 

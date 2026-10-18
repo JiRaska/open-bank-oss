@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { PiggyBank } from 'lucide-react'
+import { PartySearch } from '@/components/party/PartySearch'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
@@ -35,6 +36,7 @@ function ContractSearch() {
   const { t, language } = useLanguage()
   const router = useRouter()
   const [query, setQuery] = useState('')
+  const [partyId, setPartyId] = useState<string | null>(null)
   const [hint, setHint] = useState<string | null>(null)
   const [status, setStatus] = useState<string>('ACTIVE')
   const [rows, setRows] = useState<PensionContract[] | null>(null)
@@ -49,14 +51,15 @@ function ContractSearch() {
     const params: Record<string, string> = { status, limit: String(PAGE_SIZE * 4) }
     // Live search while typing; a bare UUID opens the contract instead of searching (see open()).
     // Under two characters the query would match nearly everything, so it is not sent.
-    if (q.length >= 2 && !isUuid(q)) params.q = q
+    if (partyId) params.q = partyId
+    else if (q.length >= 2 && !isUuid(q)) params.q = q
     const res = await getJson(pensionUrl('/contracts', params), pensionContractListSchema)
     if (request !== latestRequest.current) return
     if (!res.ok) { setUnavailable({ kind: res.kind }); setRows(null); return }
     setUnavailable(null)
     setRows(res.data)
     setShown(PAGE_SIZE)
-  }, [status, query])
+  }, [status, query, partyId])
 
   useEffect(() => {
     const requests = latestRequest
@@ -73,7 +76,7 @@ function ContractSearch() {
       return
     }
     if (q.length < 2) {
-      setHint(t('Zadejte alespoň 2 znaky: datum narození, reference (VS), produkt nebo UUID.', 'Enter at least 2 characters: birth date, payment reference, product, or UUID.'))
+      setHint(t('Zadejte alespoň 2 znaky: datum narození, reference (VS) nebo produkt.', 'Enter at least 2 characters: birth date, payment reference, or product.'))
       return
     }
     setHint(null)
@@ -88,19 +91,30 @@ function ContractSearch() {
         icon={<PiggyBank size={20} aria-hidden="true" />}
       />
 
+      <PartySearch
+        selectedId={partyId ?? undefined}
+        placeholder={t('Jméno, rodné číslo nebo datum narození klienta', 'Client name, national id or date of birth')}
+        onSelect={hit => { setPartyId(hit.id); setQuery('') }}
+      />
+      {partyId && (
+        <button type="button" className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }} onClick={() => setPartyId(null)}>
+          {t('Zrušit filtr klienta', 'Clear client filter')}
+        </button>
+      )}
+
       <form className="card" onSubmit={open} style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 320px' }}>
           <input
             className="input"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder={t('Datum narození, reference (VS), produkt nebo UUID', 'Birth date, payment reference, product, or UUID')}
+            placeholder={t('Datum narození, reference (VS) nebo produkt', 'Birth date, payment reference, or product')}
             aria-label={t('Hledat smlouvy', 'Search contracts')}
             style={{ width: '100%' }}
           />
           {hint && <div role="alert" style={{ fontSize: 12, color: 'var(--danger-text)', marginTop: 4 }}>{hint}</div>}
         </div>
-        <button type="submit" className="btn btn-primary btn-sm">{t('Hledat', 'Search')}</button>
+        <button type="submit" className="btn btn-primary btn-sm">{t('Filtrovat seznam', 'Filter list')}</button>
       </form>
 
       <div className="card" style={{ overflowX: 'auto' }}>
