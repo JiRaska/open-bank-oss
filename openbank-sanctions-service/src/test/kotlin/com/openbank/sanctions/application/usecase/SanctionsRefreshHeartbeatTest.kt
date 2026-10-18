@@ -94,7 +94,7 @@ class SanctionsRefreshHeartbeatTest {
 
     private fun dueList() = aList("OFAC_SDN").copy(enabled = true, refreshRequestedAt = Instant.EPOCH)
 
-    private fun tickWith(result: ListImportResult) = runBlocking {
+    private fun tickWith(result: ListImportResult): Unit = runBlocking {
         val list = dueList()
         coEvery { repo.listSanctionsLists() } returns listOf(list)
         coEvery { repo.findByListType("OFAC_SDN") } returns list
@@ -164,7 +164,7 @@ class SanctionsRefreshHeartbeatTest {
         assertThat(successRecorded()).isEqualTo(1.0)
     }
 
-    private fun fencedTick(result: ListImportResult, inheritedIncomplete: Boolean) = runBlocking {
+    private fun fencedTick(result: ListImportResult, inheritedIncomplete: Boolean): Unit = runBlocking {
         val list = dueList()
         val fence = mockk<SanctionsImportPublicationFence>()
         val permit = SanctionsPublicationPermit(SanctionsListType.OFAC_SDN, 1, inheritedIncomplete)

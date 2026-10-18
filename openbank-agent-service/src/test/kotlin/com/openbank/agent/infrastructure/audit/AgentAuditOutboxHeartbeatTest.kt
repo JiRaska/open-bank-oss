@@ -33,7 +33,7 @@ class AgentAuditOutboxHeartbeatTest {
         val instance = mockk<Instance<MeterRegistry>>()
         every { instance.isResolvable } returns true
         every { instance.get() } returns registry
-        return AgentAuditOutboxDispatcher(outbox, emitterInstance, enabled).also {
+        return AgentAuditOutboxDispatcher(outbox, emitterInstance, enabled, java.time.Duration.ofSeconds(5)).also {
             it.metrics = DomainMetrics().apply { registryInstance = instance }
             it.registerHeartbeat()
         }

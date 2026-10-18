@@ -206,7 +206,7 @@ class AgentAuditOutboxDispatcher @Inject constructor(
     // The SAME key and default as the @Scheduled expression below, so the heartbeat's expected
     // interval cannot drift from the real poll cadence when an environment overrides it.
     @ConfigProperty(name = "agent.audit.outbox.poll-interval", defaultValue = "5s")
-    private val pollInterval: Duration = Duration.ofSeconds(DEFAULT_POLL_SECONDS),
+    private val pollInterval: Duration,
 ) {
     @Inject
     lateinit var metrics: DomainMetrics
@@ -251,7 +251,6 @@ class AgentAuditOutboxDispatcher @Inject constructor(
         if (allPublished) liveness?.recordSuccess()
     }
     private companion object {
-        const val DEFAULT_POLL_SECONDS = 5L
         const val BATCH_SIZE = 25
     }
 }
