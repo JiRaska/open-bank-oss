@@ -148,4 +148,5 @@ jobs:
           git config user.email "openbank-gitops-bot[bot]@users.noreply.github.com"
           # shellcheck disable=SC2086  # SHADOW is empty or a single flag
           python3 .github/scripts/merge-train.py publish \
+            --repo "${GITHUB_REPOSITORY}" --branch main \
             --plan "${RUNNER_TEMP}/train" --wait-minutes 90 --poll-seconds 60 ${SHADOW}

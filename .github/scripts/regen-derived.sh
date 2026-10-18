@@ -70,6 +70,36 @@ GENERATORS=(
   "bundles|__BUNDLES__|openbank-libs/governance/rules.yaml openbank-libs/governance/agents.yaml .rego"
 )
 
+# --- what the generators WRITE ----------------------------------------------------------------
+# The merge train's publish job (ADR-0343, merge-train.py) accepts a train's regeneration commit
+# only if every path it touches is declared here, read from origin/main — never from the train.
+# A regeneration commit is the one commit in a train that nobody reviewed; this list is what
+# bounds it. Full-rewrite outputs are fnmatch globs over the repo-relative path. The
+# ANNOTATION-ONLY entries are files the bundle scripts restamp in place (the Rollout pod-roll
+# annotation): there, only lines containing `policy-checksum` may change.
+DERIVED_OUTPUTS=(
+  "openbank-libs/governance/rules-opa-data.yaml"
+  "openbank-libs/governance/agents-opa-data.yaml"
+  "openbank-libs/governance/case-collaboration-opa-data.yaml"
+  "docs/compliance/eu-ai-act.md"
+  "openbank-admin-ui/ai-governance-snapshot.json"
+  "docs/adr/README.md"
+  "docs/adr/DIGEST.md"
+  "docs/adr/CURRENT.md"
+  "docs/adr/index.json"
+  "docs/cards/capability-matrix.md"
+  ".release-please-manifest.json"
+  "release-please-config.json"
+  "openbank-infra/gitops/components/observability/dashboard-openbank-slo.yaml"
+  "openbank-infra/gitops/components/*/*-opa-bundle.yaml"
+  "openbank-infra/gitops/components/*/*/*-opa-bundle.yaml"
+)
+DERIVED_ANNOTATION_ONLY=(
+  "openbank-infra/gitops/components/*/*.yaml"
+  "openbank-infra/gitops/components/*/*/*.yaml"
+)
+export DERIVED_OUTPUTS DERIVED_ANNOTATION_ONLY
+
 changed_files() {
   local base
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo "")"

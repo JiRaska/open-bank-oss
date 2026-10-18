@@ -24,11 +24,17 @@ job holding the App token while it ran them would hand any candidate PR a token 
            (`git archive origin/main -- <generator paths>` overlaid onto the train tree) and run
            with a scrubbed allowlisted environment; a member that changes a generator path never
            qualifies, and the overlay asserts it anyway.
-  publish  (App token) download the plan, check the base is still origin/main, and for each
-           train the pure bisect asks for: fetch the bundle, verify its ancestry, push, carry it
-           through PR CI on a draft PR, read the required contexts off its head. Then post the
-           `merge-train` status per member and squash-merge in order. Only git and gh run here;
-           no file from any train tree is ever executed.
+  publish  (App token) treats EVERYTHING the build job produced as attacker-controlled: the
+           build job ran PR code, so plan.json and the bundles are its output. publish
+           re-derives every security-relevant fact live with git and gh only — each member is
+           re-fetched (head sha must equal the plan's, armed, open, green, qualifies() re-run on
+           live checks and files), the fast lane is reclassified from live diffs, and every
+           bundle is proven commit by commit: `PR-Number:` trailers in plan order, each commit's
+           tree equal to an execution-free `git merge-tree` of the verified PR head onto the
+           previous commit, and the one optional regeneration commit confined to the derived
+           output set declared in origin/main's regen-derived.sh. Only then: push, carry the
+           train through PR CI on a draft PR, post the `merge-train` status on the verified head
+           and squash-merge with --match-head-commit. No file from any train tree is ever executed.
 
 WHAT IT DOES, per tick
 ----------------------
@@ -442,13 +448,14 @@ def prebuild(builder: TrainBuilder, base: str, members: list[Member], out_dir: s
 
 # --------------------------------------------------------------------------- orchestration (publish)
 def run_train(hub, base_sha: str, members: list[Member], trains: dict[str, TrainRecord], verify,
-              fragments: list[str], train_files: list[str]) -> Outcome:
-    """Bisect over PRE-BUILT trains, then the status/merge phase. `verify(record) -> (status, failing)`."""
+              fragments: list[str], train_files: list[str], invalid: frozenset[int] = frozenset()) -> Outcome:
+    """Bisect over PRE-BUILT trains, then the status/merge phase. `verify(record) -> (status, failing)`.
+    `invalid` = members that failed live revalidation: any train carrying one is unusable."""
     out = Outcome()
 
     def verify_batch(batch: list[Member]) -> tuple[str, list[str]]:
         rec = trains.get(train_key(batch))
-        if rec is None:
+        if rec is None or set(rec.applied) & invalid:
             return "unknown", []
         for n, why in rec.dropped.items():
             if n not in out.dropped:
@@ -486,7 +493,7 @@ def run_train(hub, base_sha: str, members: list[Member], trains: dict[str, Train
                     out.mergeable = out.mergeable[:i]
                     break
         hub.post_status(m.head_sha, "success", f"verified on train over main {base_sha[:12]}")
-        merged = hub.merge(m.number)
+        merged = hub.merge(m.number, m.head_sha)
         if merged:
             expected = merged
         elif not (hub.dry_run or hub.shadow):
@@ -583,18 +590,19 @@ class Hub:
             return
         api("POST", f"/repos/{self.repo}/issues/{number}/comments", {"body": f"{COMMENT_MARK}\n{text}"})
 
-    def merge(self, number: int) -> str | None:
-        """Squash-merge; returns the merge commit sha once the PR reads MERGED, else None."""
+    def merge(self, number: int, head_sha: str) -> str | None:
+        """Squash-merge exactly the verified head; returns the merge commit sha once MERGED, else None."""
         if self.dry_run or self.shadow:
-            log(f"  [{'dry-run' if self.dry_run else 'shadow'}] would squash-merge #{number}")
+            log(f"  [{'dry-run' if self.dry_run else 'shadow'}] would squash-merge #{number} @ {head_sha[:12]}")
             return None
         # Auto-merge is armed on every member, so once the required `merge-train` status lands
         # GitHub may merge it before this call; a refusal here is therefore not an error.
-        self.gh("pr", "merge", str(number), "--squash", check=False)
+        # --match-head-commit: a push between verification and merge makes GitHub refuse.
+        self.gh("pr", "merge", str(number), "--squash", "--match-head-commit", head_sha, check=False)
         for _ in range(36):
             pr = get(f"/repos/{self.repo}/pulls/{number}")
             if pr.get("merged"):
-                return pr["merge_commit_sha"]
+                return pr["merge_commit_sha"] if pr.get("head", {}).get("sha") == head_sha else None
             time.sleep(5)
         return None
 
@@ -647,17 +655,98 @@ def verify_bundle(git, plan_dir: str, rec: TrainRecord, base_sha: str) -> str | 
     return None
 
 
+def derived_output_patterns(script_text: str) -> tuple[list[str], list[str]]:
+    """(full-rewrite globs, annotation-only globs) from regen-derived.sh's DERIVED_* arrays."""
+    def block(name: str) -> list[str]:
+        m = re.search(rf"^{name}=\((.*?)^\)", script_text, re.MULTILINE | re.DOTALL)
+        return re.findall(r'"([^"]+)"', m.group(1)) if m else []
+    return block("DERIVED_OUTPUTS"), block("DERIVED_ANNOTATION_ONLY")
+
+
+def safe_bundle_name(name: str) -> bool:
+    return bool(name) and "/" not in name and "\\" not in name and ".." not in name and not os.path.isabs(name) \
+        and name.endswith(".bundle")
+
+
+def revalidate(entry: dict, live: dict | None, required: list[str], live_checks: dict[str, str | None]) -> tuple[Member | None, str]:
+    """A plan entry is only as good as the LIVE PR behind it. `live` is the PR view as build()
+    builds it (plus title/body), `live_checks` the head's contexts right now. Pure."""
+    if live is None:
+        return None, "PR not found live"
+    if live.get("state", "open") != "open":
+        return None, f"PR is {live.get('state')}"
+    if live.get("head_sha") != entry["head_sha"]:
+        return None, f"head moved: plan {entry['head_sha'][:12]}, live {str(live.get('head_sha'))[:12]}"
+    ok, why = qualifies(live, required, live_checks)
+    if not ok:
+        return None, f"no longer qualifies: {why}"
+    return Member(entry["number"], live.get("title", ""), live.get("body", "") or "", live["head_sha"],
+                  live.get("head_ref", ""), live.get("created_at", ""), files=list(live.get("files") or [])), "ok"
+
+
+def regen_commit_problem(git, commit: str, outputs: list[str], annotation_only: list[str]) -> str | None:
+    """The regeneration commit is the one unreviewed commit in a train; bound it to the declared outputs."""
+    if git("log", "-1", "--format=%s", commit).stdout.strip() != REGEN_COMMIT_SUBJECT:
+        return f"extra commit {commit[:12]} is neither a member squash nor the regeneration commit"
+    for path in git("diff", "--name-only", f"{commit}^", commit).stdout.split():
+        if any(fnmatch.fnmatch(path, g) for g in outputs):
+            continue
+        if any(fnmatch.fnmatch(path, g) for g in annotation_only):
+            lines = [ln for ln in git("diff", "-U0", f"{commit}^", commit, "--", path).stdout.splitlines()
+                     if (ln.startswith("+") or ln.startswith("-")) and not ln.startswith(("+++", "---"))]
+            if all("policy-checksum" in ln for ln in lines):
+                continue
+            return f"regeneration commit changes more than the policy-checksum annotation in {path}"
+        return f"regeneration commit touches {path}, which no generator is declared to write"
+    return None
+
+
+def verify_train(git, plan_dir: str, rec: TrainRecord, base_sha: str, heads: dict[int, str],
+                 outputs: list[str], annotation_only: list[str]) -> str | None:
+    """Prove a bundle is base + the plan's squashes (rebuilt execution-free) + at most one bounded
+    regeneration commit. `heads` maps PR number -> LIVE-verified head sha. Returns why not, or None."""
+    if not safe_bundle_name(rec.bundle):
+        return f"unsafe bundle name {rec.bundle!r}"
+    problem = verify_bundle(git, plan_dir, rec, base_sha)
+    if problem:
+        return problem
+    commits = git("rev-list", "--reverse", f"{base_sha}..{rec.sha}").stdout.split()
+    if len(commits) not in (len(rec.applied), len(rec.applied) + 1):
+        return f"{len(commits)} commits for {len(rec.applied)} members"
+    prev = base_sha
+    for i, c in enumerate(commits):
+        numbers = [int(n) for n in re.findall(r"^PR-Number: #(\d+)$", git("log", "-1", "--format=%B", c).stdout, re.MULTILINE)]
+        if i == len(rec.applied):
+            if numbers:
+                return f"commit {c[:12]} carries a PR-Number trailer beyond the plan's members"
+            return regen_commit_problem(git, c, outputs, annotation_only)
+        if numbers != [rec.applied[i]]:
+            return f"commit {c[:12]} trailer {numbers} != plan member #{rec.applied[i]}"
+        head = heads.get(rec.applied[i])
+        if not head:
+            return f"member #{rec.applied[i]} has no live-verified head"
+        mt = git("merge-tree", "--write-tree", prev, head, check=False)
+        if mt.returncode != 0:
+            return f"#{rec.applied[i]} does not merge cleanly onto {prev[:12]} (merge-tree rc={mt.returncode})"
+        want = mt.stdout.split()[0]
+        got = git("rev-parse", f"{c}^{{tree}}").stdout.strip()
+        if want != got:
+            return f"commit {c[:12]} tree {got[:12]} != squash of #{rec.applied[i]} onto {prev[:12]} ({want[:12]})"
+        prev = c
+    return None
+
+
 class GitHubVerifier:
     """Push a pre-built train, carry it through CI on a draft PR, read the required contexts off its head.
     Runs git and gh only; nothing from the train tree is checked out or executed."""
 
     def __init__(self, hub: Hub, git, plan_dir: str, base_sha: str, required: list[str],
-                 wait_minutes: int, poll_seconds: int):
+                 wait_minutes: int, poll_seconds: int, prove):
         self.hub, self.git, self.plan_dir, self.base_sha, self.required = hub, git, plan_dir, base_sha, required
-        self.wait_minutes, self.poll_seconds = wait_minutes, poll_seconds
+        self.wait_minutes, self.poll_seconds, self.prove = wait_minutes, poll_seconds, prove
 
     def __call__(self, rec: TrainRecord) -> tuple[str, list[str]]:
-        problem = verify_bundle(self.git, self.plan_dir, rec, self.base_sha)
+        problem = self.prove(rec)
         if problem:
             log(f"::error::refusing to publish {rec.branch}: {problem}")
             return "unknown", []
@@ -753,12 +842,28 @@ def build(args: argparse.Namespace) -> int:
     return 0
 
 
+def live_pr_view(repo: str, number: int) -> dict | None:
+    code, p = api("GET", f"/repos/{repo}/pulls/{number}")
+    if code != 200:
+        return None
+    return {"number": number, "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
+            "same_repo": (p.get("head", {}).get("repo") or {}).get("full_name") == repo,
+            "head_ref": p["head"]["ref"], "head_sha": p["head"]["sha"], "created_at": p["created_at"],
+            "title": p.get("title", ""), "body": p.get("body") or "", "files": pr_files(repo, number)}
+
+
 def publish(args: argparse.Namespace) -> int:
+    """Everything in `plan` came out of a job that ran PR code. Nothing in it is believed; it is a
+    set of CLAIMS that this function re-derives live, with git and gh, before acting on any."""
     plan = json.loads(pathlib.Path(args.plan, PLAN_FILE).read_text())
-    repo, branch, base_sha = plan["repo"], plan["branch"], plan["base_sha"]
+    repo, branch, base_sha = str(plan["repo"]), str(plan["branch"]), str(plan.get("base_sha") or "")
+    if repo != args.repo or branch != args.branch:
+        log(f"::error::plan is for {repo}@{branch}, this job is {args.repo}@{args.branch}")
+        return 2
     hub = Hub(repo, branch, args.run_url, args.dry_run, args.shadow)
     mode = "dry-run" if args.dry_run else "shadow" if args.shadow else "LIVE"
     required, strict = required_policy(repo, branch)
+    member_required = [c for c in required if c != STATUS_CONTEXT]
     log(f"required={required} strict={strict} mode={mode} plan base {base_sha[:12] or '(none)'}")
     if STATUS_CONTEXT not in required and not (args.shadow or args.dry_run):
         log(f"::error::{STATUS_CONTEXT} is not a required context yet — refusing to merge outside shadow mode (ADR-0343 phase 1 not reached)")
@@ -773,25 +878,76 @@ def publish(args: argparse.Namespace) -> int:
 
     git("fetch", "-q", "origin", branch)
     live_main = git("rev-parse", f"origin/{branch}").stdout.strip()
+    if git("merge-base", "--is-ancestor", base_sha, live_main, check=False).returncode != 0:
+        log(f"::error::plan base {base_sha[:12]} is not an ancestor of {branch} ({live_main[:12]}) — refusing the plan")
+        return 2
     if live_main != base_sha:
-        log(f"::warning::main moved ({live_main[:12]} != plan base {base_sha[:12]}); the plan is stale, the next tick re-plans")
-        write_summary([f"merge-train: stale plan over {base_sha[:12]}, main is {live_main[:12]}"])
-        return 0
+        log(f"main moved since the plan ({base_sha[:12]} -> {live_main[:12]}); the foreign-advance rule decides per merge")
 
-    fragments = regen_inventory_fragments(REGEN_INVENTORY.read_text()) if REGEN_INVENTORY.exists() else []
-    for d in plan["fast_lane"]:
-        m = Member.from_json(d)
-        hub.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base_sha[:12]} and the batch")
-    members = [Member.from_json(d) for d in plan["members"]]
-    trains = {k: TrainRecord.from_json(r) for k, r in plan["trains"].items()}
+    # Trusted inputs come from origin/main, never from the plan or a train tree.
+    trusted_regen = git("show", f"origin/{branch}:{REGEN_INVENTORY.as_posix()}", check=False).stdout
+    fragments = regen_inventory_fragments(trusted_regen)
+    outputs, annotation_only = derived_output_patterns(trusted_regen)
+    if not outputs:
+        log("::error::origin/main declares no DERIVED_OUTPUTS — cannot bound a regeneration commit, refusing")
+        return 2
+
+    # 1. Re-derive every member live. The plan's head_sha is a claim; the live PR decides.
+    entries = [("fast", e) for e in plan.get("fast_lane", [])] + [("train", e) for e in plan.get("members", [])]
+    live: dict[int, Member] = {}
+    invalid: set[int] = set()
+    for lane, e in entries:
+        n = int(e["number"])
+        view = live_pr_view(repo, n)
+        checks = head_checks(repo, view["head_sha"]) if view else {}
+        m, why = revalidate(e, view, member_required, checks)
+        if m is None:
+            log(f"#{n} ({lane}) REJECTED live: {why}")
+            invalid.add(n)
+        else:
+            live[n] = m
+    if live:
+        git("fetch", "-q", "origin", *[f"+refs/pull/{n}/head:refs/train/pr-{n}" for n in live])
+    heads: dict[int, str] = {}
+    for n, m in list(live.items()):
+        fetched = git("rev-parse", f"refs/train/pr-{n}").stdout.strip()
+        if fetched != m.head_sha:
+            log(f"#{n} REJECTED: refs/pull/{n}/head is {fetched[:12]}, live API says {m.head_sha[:12]}")
+            invalid.add(n)
+            del live[n]
+        else:
+            heads[n] = fetched
+
+    # 2. Reclassify the fast lane from live diffs; the plan's classification is ignored.
+    fast_numbers = [int(e["number"]) for e in plan.get("fast_lane", []) if int(e["number"]) in live]
+    for n in fast_numbers:
+        m = live[n]
+        mb = git("merge-base", f"origin/{branch}", m.head_sha).stdout.strip()
+        main_files = git("diff", "--name-only", f"{mb}..origin/{branch}").stdout.split()
+        others = [f for o, om in live.items() if o != n for f in om.files]
+        ok, why = fast_lane_eligible(m.files, main_files, others, fragments)
+        if ok:
+            log(f"#{n} FAST LANE (live): {why}")
+            hub.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base_sha[:12]} and the batch")
+        else:
+            log(f"#{n} plan said fast lane, live says no ({why}) — nothing posted, next tick re-plans")
+
+    # 3. Trains: members in plan order; every bundle is proven before it is pushed.
+    members = [live[int(e["number"])] if int(e["number"]) in live else Member.from_json(e) for e in plan.get("members", [])]
+    trains = {k: TrainRecord.from_json(r) for k, r in plan.get("trains", {}).items()}
     out = Outcome()
     if members:
         train_required = [c for c in required if c != STATUS_CONTEXT and c not in TREE_INDEPENDENT_CONTEXTS]
-        verifier = GitHubVerifier(hub, git, args.plan, base_sha, train_required, args.wait_minutes, args.poll_seconds)
-        out = run_train(hub, base_sha, members, trains, verifier, fragments, plan.get("train_files", []))
-    line = (f"merge-train over {base_sha[:12]} ({mode}): {out.trains} train(s), fast-lane {len(plan['fast_lane'])}, "
+
+        def prove(rec: TrainRecord) -> str | None:
+            return verify_train(git, args.plan, rec, base_sha, heads, outputs, annotation_only)
+
+        verifier = GitHubVerifier(hub, git, args.plan, base_sha, train_required, args.wait_minutes, args.poll_seconds, prove)
+        train_files = [f for m in members for f in m.files]
+        out = run_train(hub, base_sha, members, trains, verifier, fragments, train_files, frozenset(invalid))
+    line = (f"merge-train over {base_sha[:12]} ({mode}): {out.trains} train(s), fast-lane {len(fast_numbers)}, "
             f"verified {[m.number for m in out.mergeable]}, culprits {dict(out.culprits)}, "
-            f"dropped {dict(out.dropped)}, deferred {[m.number for m in out.deferred]}"
+            f"dropped {dict(out.dropped)}, deferred {[m.number for m in out.deferred]}, rejected live {sorted(invalid)}"
             + (", UNVERIFIED" if out.unverified else ""))
     log(line)
     write_summary([line])
@@ -896,7 +1052,7 @@ class FakeHub(Hub):
     def comment(self, number, text):
         self.comments.append((number, text))
 
-    def merge(self, number):
+    def merge(self, number, head_sha=""):
         if self.shadow:
             return None
         self.merged.append(number)
@@ -941,6 +1097,7 @@ def _synthetic_repo(root: str) -> dict[str, str]:
     g("config", "commit.gpgsign", "false")
     w("services/s1.txt", "s1\n")
     w("count.txt", "1\n")
+    w("rollouts/a.yaml", "kind: Rollout\nmetadata:\n  annotations:\n    openbank.tech/policy-checksum: \"old\"\nspec:\n  replicas: 1\n")
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
     w("ci.py", "import os,pathlib,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
@@ -1167,6 +1324,97 @@ def self_test() -> int:
                 check("bundle: a plan claiming a different commit count is refused", "commits" in (verify_bundle(cg, bundles, lying, info["base"]) or ""))
                 check("bundle: a missing file is refused", "missing" in (verify_bundle(cg, bundles, TrainRecord("x", "x", good.sha, [], {}, 1, "nope.bundle"), info["base"]) or ""))
 
+            # ---- publish-side proofs: the plan and the bundles are UNTRUSTED (build ran PR code) ----
+            outputs, annot = ["derived/*"], ["rollouts/*.yaml"]
+            check("derived outputs: parsed from the real regen-derived.sh",
+                  "docs/adr/index.json" in derived_output_patterns(REGEN_INVENTORY.read_text())[0] if REGEN_INVENTORY.exists() else True)
+            heads = {i + 1: builder.git("rev-parse", n).stdout.strip() for i, n in enumerate(("p1", "p2"))}
+            heads_r = {1: builder.git("rev-parse", "pR").stdout.strip()}
+
+            def forge(branch: str, start: str, applied: list[int], edits: dict[str, str], message: str, bundle_name: str | None = None) -> TrainRecord:
+                """A bundle an attacker-controlled build job might hand over."""
+                builder.git("checkout", "-q", "-f", "-B", branch, start)
+                for rel, text in edits.items():
+                    pathlib.Path(d, rel).parent.mkdir(parents=True, exist_ok=True)
+                    pathlib.Path(d, rel).write_text(text)
+                builder.git("add", "-A")
+                builder.git("commit", "-q", "-m", message)
+                sha = builder.git("rev-parse", "HEAD").stdout.strip()
+                n = int(builder.git("rev-list", "--count", f"{info['base']}..{sha}").stdout.strip())
+                rec = TrainRecord(train_key([Member(a, "", "", "", "", "") for a in applied]), branch, sha, applied, {}, n)
+                own = os.path.join(bundles, f"forged-{branch.replace('/', '_')}.bundle")
+                builder.git("bundle", "create", own, branch, f"^{info['base']}")
+                rec.bundle = bundle_name if bundle_name is not None else os.path.basename(own)
+                return rec
+
+            with tempfile.TemporaryDirectory() as clone:
+                sh(["git", "clone", "-q", "--branch", "main", d, clone])
+
+                def cg(*a, check=True):
+                    return sh(["git", *a], cwd=clone, check=check, env=generator_env())
+                # genuine trains prove clean: [p1,p2] (no regen) and [pR] (with a regen commit in derived/)
+                good12 = prebuild(builder, info["base"], members("p1", "p2"), bundles, "G")[ "1-2"]
+                goodR = prebuild(builder, info["base"], members("pR"), bundles, "R")["1"]
+                check("proof: a genuine two-member train verifies", verify_train(cg, bundles, good12, info["base"], heads, outputs, annot) is None,
+                      str(verify_train(cg, bundles, good12, info["base"], heads, outputs, annot)))
+                check("proof: a genuine train with a regeneration commit in the declared outputs verifies",
+                      verify_train(cg, bundles, goodR, info["base"], heads_r, outputs, annot) is None,
+                      str(verify_train(cg, bundles, goodR, info["base"], heads_r, outputs, annot)))
+                # NEGATIVE: forged head_sha — the plan names a head the live PR does not have
+                entry = {"number": 1, "head_sha": "f" * 40}
+                live_view = {"number": 1, "state": "open", "draft": False, "auto_merge": {"x": 1}, "same_repo": True,
+                             "head_ref": "p1", "head_sha": heads[1], "files": ["docs/one.md"], "title": "p1", "body": "", "created_at": "t"}
+                m_, why = revalidate(entry, live_view, ["all-green"], {"all-green": "success"})
+                check("proof: forged plan head_sha is rejected by live revalidation", m_ is None and "head moved" in why, why)
+                m_, why = revalidate({"number": 1, "head_sha": heads[1]}, live_view, ["all-green"], {"all-green": "success"})
+                check("proof: matching head + armed + green revalidates", m_ is not None and m_.head_sha == heads[1], why)
+                m_, why = revalidate({"number": 1, "head_sha": heads[1]}, {**live_view, "auto_merge": None}, ["all-green"], {"all-green": "success"})
+                check("proof: a member disarmed since the plan is rejected", m_ is None, why)
+                m_, why = revalidate({"number": 1, "head_sha": heads[1]}, {**live_view, "state": "closed"}, ["all-green"], {"all-green": "success"})
+                check("proof: a member closed since the plan is rejected", m_ is None, why)
+                # NEGATIVE: a plan whose member head differs from the live head -> tree mismatch
+                check("proof: a train squashed from a different head than the live one is rejected (tree)",
+                      "tree" in (verify_train(cg, bundles, good12, info["base"], {1: heads[2], 2: heads[1]}, outputs, annot) or ""))
+                # NEGATIVE: fast_lane entry touching docs/adr/ — the plan's classification is ignored
+                ok_, why = fast_lane_eligible(["docs/adr/0001-x.md"], [], [], frags)
+                check("proof: a plan fast_lane entry whose LIVE files touch docs/adr/ is not posted", not ok_ and "protected" in why, why)
+                # NEGATIVE: extra non-regen commit on top of a genuine train
+                extra = forge("train/X1", good12.sha, [1, 2], {"evil.txt": "x\n"}, "innocent looking")
+                check("proof: a bundle carrying an extra non-regeneration commit is rejected",
+                      "extra commit" in (verify_train(cg, bundles, extra, info["base"], heads, outputs, annot) or ""),
+                      str(verify_train(cg, bundles, extra, info["base"], heads, outputs, annot)))
+                # NEGATIVE: a regeneration commit touching a path no generator writes
+                badregen = forge("train/X2", good12.sha, [1, 2], {"evil.txt": "x\n"}, REGEN_COMMIT_SUBJECT)
+                check("proof: a regeneration commit touching a non-inventory path is rejected",
+                      "no generator is declared" in (verify_train(cg, bundles, badregen, info["base"], heads, outputs, annot) or ""),
+                      str(verify_train(cg, bundles, badregen, info["base"], heads, outputs, annot)))
+                # annotation-only files: checksum line may change, anything else may not
+                okann = forge("train/X3", good12.sha, [1, 2], {"rollouts/a.yaml": "kind: Rollout\nmetadata:\n  annotations:\n    openbank.tech/policy-checksum: \"new\"\nspec:\n  replicas: 1\n"}, REGEN_COMMIT_SUBJECT)
+                check("proof: a regeneration commit restamping only the policy-checksum line is accepted",
+                      verify_train(cg, bundles, okann, info["base"], heads, outputs, annot) is None,
+                      str(verify_train(cg, bundles, okann, info["base"], heads, outputs, annot)))
+                badann = forge("train/X4", good12.sha, [1, 2], {"rollouts/a.yaml": "kind: Rollout\nmetadata:\n  annotations:\n    openbank.tech/policy-checksum: \"new\"\nspec:\n  replicas: 99\n"}, REGEN_COMMIT_SUBJECT)
+                check("proof: a regeneration commit changing more than the annotation is rejected",
+                      "more than the policy-checksum" in (verify_train(cg, bundles, badann, info["base"], heads, outputs, annot) or ""))
+                # NEGATIVE: a commit with the right trailer but the wrong content
+                wrong = forge("train/X5", info["base"], [1], {"docs/one.md": "tampered\n"}, "p1\n\nPR-Number: #1")
+                check("proof: a squash whose tree is not the squash of the live head is rejected",
+                      "tree" in (verify_train(cg, bundles, wrong, info["base"], heads, outputs, annot) or ""))
+                # NEGATIVE: trailers out of order
+                swapped = verify_train(cg, bundles, TrainRecord("2-1", good12.branch, good12.sha, [2, 1], {}, 2, good12.bundle), info["base"], heads, outputs, annot) or ""
+                check("proof: trailers that do not match the plan order are rejected", "trailer" in swapped, swapped)
+                # NEGATIVE: bundle names that escape the plan directory
+                for bad in ("../x.bundle", "/tmp/x.bundle", "a/b.bundle", "x.txt", ""):
+                    check(f"proof: bundle name {bad!r} is refused before any file is touched", not safe_bundle_name(bad)
+                          and "unsafe" in (verify_train(cg, bundles, TrainRecord("1-2", good12.branch, good12.sha, [1, 2], {}, 2, bad), info["base"], heads, outputs, annot) or ""))
+                check("proof: a plain bundle name is accepted", safe_bundle_name("train-1-2.bundle"))
+                # invalid member: a train carrying it is unusable even if the bundle is perfect
+                hub = FakeHub(info["base"])
+                ms = members("p1", "p2")
+                o = run_train(hub, info["base"], ms, prebuild(builder, info["base"], ms, None, "I"), local_verify, [], [], frozenset({2}))
+                check("proof: a train carrying a live-rejected member is deferred, nothing merges", hub.merged == [] and o.unverified)
+            builder.git("checkout", "-q", "-f", "main")
+
             # Conflict drop: pC conflicts textually with pA -> dropped with a comment, pA still merges.
             hub = FakeHub(info["base"])
             o = train(hub, ("pA", "pC"))
@@ -1243,8 +1491,8 @@ def main() -> int:
         if not args.repo or not args.out:
             ap.error("build needs --repo (or GITHUB_REPOSITORY) and --out")
         return build(args)
-    if not args.plan:
-        ap.error("publish needs --plan")
+    if not args.plan or not args.repo:
+        ap.error("publish needs --plan and --repo (or GITHUB_REPOSITORY)")
     return publish(args)
 
 
