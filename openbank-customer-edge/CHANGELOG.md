@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.2...customer-edge-v1.4.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
 ## [1.3.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.1...customer-edge-v1.3.2) (2026-10-17)
 
 

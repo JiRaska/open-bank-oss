@@ -61,3 +61,7 @@ emerges, design it against that consumer, not by resurrecting this apparatus spe
 - **Reactive everywhere** — Hibernate Reactive + Mutiny, bridged to Kotlin coroutines via `awaitSuspending`.
 - **Observability** — Micrometer/Prometheus metrics and OpenTelemetry tracing (OTLP exporter), SmallRye Health probes.
 - **Security headers** — strict set configured globally (CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, nosniff, referrer/permissions policy).
+
+## Scheduled-job heartbeat
+
+The audit hash-chain verification registers the fleet workflow-liveness heartbeat `audit-chain-verify` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a completed verification counts even when it finds a broken chain (the heartbeat answers whether the control ran; `openbank.audit.chain.intact` answers whether it passed), a verification that throws does not. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.
