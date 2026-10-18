@@ -49,7 +49,7 @@ describe('GET /api/test-intelligence', () => {
     process.env.OPENBANK_TEST_INTELLIGENCE = file
 
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.syntheticJourneys.map((journey: { state: string }) => journey.state)).toEqual(['passed', 'unknown'])
     expect(body.requiredControls.map((control: { state: string }) => control.state)).toEqual(['passed', 'unknown'])
     expect(body.requiredControls[0].observedAt).toBe(observedAt)
@@ -69,7 +69,7 @@ describe('GET /api/test-intelligence', () => {
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.schemaVersion).toBe(1)
     expect(body.components[0].coverage.state).toBe('not-run')
     expect(body.totals.missingEvidence).toBe(1)
@@ -82,7 +82,7 @@ describe('GET /api/test-intelligence', () => {
   it('returns explicit unavailable evidence when the bundle is absent', async () => {
     process.env.OPENBANK_TEST_INTELLIGENCE = '/does/not/exist.json'
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.components).toEqual([])
     expect(body.warnings[0]).toMatch(/not bundled/i)
   })
@@ -124,7 +124,7 @@ describe('GET /api/test-intelligence', () => {
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
 
     expect(body.components.map((component: { evidence: Array<{ state: string }> }) => component.evidence[0].state))
       .toEqual(['unknown', 'skipped', 'not-run', 'blocked'])
@@ -159,7 +159,7 @@ describe('GET /api/test-intelligence', () => {
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     process.env.OPENBANK_TEST_INTELLIGENCE_STALE_AFTER_DAYS = '1'
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
 
     expect(body.components[0].evidence).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'unit', state: 'stale' }),
@@ -216,7 +216,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [1, value] }] } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.clientExperiences[0].rum).toMatchObject({
       state: 'passed', policy: 'consent-gated', source: 'tempo', sampledSpansLast7d: 12, errorSpansLast7d: 2,
     })
@@ -254,7 +254,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ batches: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-app' } }] } }, { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-copilot-service' } }] } }] }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.clientExperiences[0].rum).toMatchObject({ state: 'passed', backendCorrelations: { inspectedTraces: 2, correlatedTraces: 1, backendServices: ['openbank-copilot-service'], truncated: false } })
   })
 
@@ -284,7 +284,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ batches: [{ resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-admin-ui' } }] } }, { resource: { attributes: [{ key: 'service.name', value: { stringValue: 'openbank-copilot-service' } }] } }] }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.clientExperiences[0].rum).toMatchObject({
       state: 'passed', policy: 'authenticated', source: 'tempo', sampledSpansLast7d: 1,
       backendCorrelations: { inspectedTraces: 1, correlatedTraces: 1, backendServices: ['openbank-admin-ui', 'openbank-copilot-service'], truncated: false },
@@ -323,7 +323,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ status: 'success', data: { result: matchesBffOnly ? [{ value: [1, '400'] }] : [] } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.clientExperiences[0].rum).toMatchObject({ state: 'not-run', sampledSpansLast7d: 0 })
     expect(body.clientExperiences[0].rum.detail).toContain('No authenticated Admin UI browser RUM trace')
     // The admin span-counter query must select the browser's distinct identity by EXACT match,
@@ -362,7 +362,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify(payload), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.syntheticJourneys[0].state).toBe('passed')
     expect(body.syntheticJourneys[0].live.failuresWithinWindow).toBe(0)
     expect(queries.some(query => query.includes('kube_job_status_completion_time'))).toBe(true)
@@ -394,7 +394,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify(payload), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.syntheticJourneys[0].live.recentRuns).toEqual([
       { id: 'journey-public-edge-123', state: 'passed', observedAt: new Date(completed * 1000).toISOString() },
     ])
@@ -421,7 +421,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ status: 'success', data: { result: [{ value: [now, String(now)] }] } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     // An empty list here is ambiguous with "no runs happened yet" — the failure must be named.
     expect(body.syntheticJourneys[0].live.recentRuns).toEqual([])
     expect(body.syntheticJourneys[0].live.recentRunsError).toMatch(/prometheus responded 500/)
@@ -449,7 +449,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ status: 'success', data: { result: value === undefined ? [] : [{ value: [now, value] }] } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.syntheticJourneys[0]).toMatchObject({
       state: 'passed',
       live: { performance: { source: 'prometheus', windowSeconds: 900, worstP95Ms: 1834.8, worstCheckPassRatePercent: 99.7 } },
@@ -484,7 +484,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify({ status: 'success', data: { result } }), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.syntheticJourneys[0]).toMatchObject({
       state: 'passed',
       live: { performance: { worstP95Ms: null, worstCheckPassRatePercent: null } },
@@ -514,7 +514,7 @@ describe('GET /api/test-intelligence', () => {
       return new Response(JSON.stringify(payload), { status: 200 })
     }))
     const { GET } = await import('@/app/api/test-intelligence/route')
-    const body = await (await GET()).json()
+    const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
     expect(body.syntheticJourneys[0]).toMatchObject({ state: 'unknown', live: { activeJobs: 1, lastSuccessfulAt: null } })
   })
 })

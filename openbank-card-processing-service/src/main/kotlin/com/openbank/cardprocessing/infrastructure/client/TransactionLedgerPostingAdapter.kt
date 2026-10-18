@@ -10,7 +10,9 @@ import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.calendar.AccountingClock
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.ProcessingException
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -66,7 +68,7 @@ class TransactionLedgerPostingAdapter(
             return PostingResult(PostingOutcome.SKIPPED_DISABLED, null, DISABLED_DETAIL)
         }
         return try {
-            val response = client.initiate(
+            val response = client.initiateTransaction(
                 InitiateTransactionRequest(
                     // Derived from the clearing, not random: transaction-service dedupes on it, so
                     // a retried clearing must present the same key or the customer is debited twice.
@@ -77,11 +79,11 @@ class TransactionLedgerPostingAdapter(
                     amount = toMajorUnits(clearedAmountMinorUnits, authorization.currencyCode),
                     currencyCode = authorization.currencyCode,
                     description = authorization.merchantName,
-                    valueDate = AccountingClock(clock).today().toString(),
+                    valueDate = AccountingClock(clock).today(),
                     rail = RAIL_CARD,
                     instructionType = INSTRUCTION_ONE_OFF,
                 ),
-            )
+            ).awaitSuspending()
             outcomeOf(response.id, response.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // An unreadable answer proves nothing: the debit may or may not be booked. It is neither

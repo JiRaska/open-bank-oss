@@ -78,7 +78,11 @@ GET /api/v1/parties/search?q=Novak&limit=20&cursor=<opaque>
 ```
 
 - **List** is page/size paginated (size clamped to `[1,100]`); optional `status` filter (PENDING_KYC / ACTIVE / SUSPENDED / CLOSED) powers the onboarding cockpit funnel (ADR-0068). Response echoes `statusFilter`. The handler sets a cosmetic `X-Party-List-Mode: enriched|standard` header driven by the `party-list-enriched` flag.
-- **Search** (ADR-0055) is a case-insensitive trigram substring match over legal/trading name, keyset-cursor paginated. A blank/`*`/sub-2-char term returns an empty page (no full-table enumeration). Gated by the `party-search` feature flag (`@FeatureFlag`). Returns a **data-minimised** summary; **birth number is never searchable**.
+- **Search** (ADR-0055) is keyset-cursor paginated and gated by the `party-search` feature flag (`@FeatureFlag`). A blank/`*`/sub-2-char term returns an empty page (no full-table enumeration). It is country-agnostic and answers what an operator actually holds:
+  - **Name / surname** — accent- and case-insensitive, per word and partial (`novak ja` finds `Jan Novák`; every word must match). Backed by `party_fold()` + trigram indexes (Flyway `V27`).
+  - **National / personal identifier** of any country (birth number, PESEL, SSN, NINO, tax id…) — an **exact** match after stripping separators, never a substring, so identifiers cannot be enumerated by prefix. A CZ/SK birth number also resolves through the RČ blind index; the raw birth number is never compared in SQL. A phone number matches on its last 9 digits.
+  - **Name + date of birth** (`Novák 15.6.1985`, `Smith 1985-06-15`, `Doe 12/31/1985`; an ambiguous d/m vs m/d matches both) — the date narrows the name match; a bare date returns nothing.
+  - Returns a **data-minimised** summary including `dateOfBirth`, so namesakes can be told apart.
 
 ### Update party
 

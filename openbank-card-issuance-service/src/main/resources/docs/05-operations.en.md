@@ -85,6 +85,9 @@ Never edit an applied migration. If a checksum mismatch blocks startup, set `QUA
 
 This is by design: the `Idempotency-Key` matched an existing `cards.idempotency_key`. Use a fresh key for a genuinely new card.
 
+### Kafka consumer group or offset reset looks ignored
+- The consumer `group.id` and `auto.offset.reset` are not taken from dotted YAML keys (SmallRye quotes them, so the connector never sees them). In the cluster they come from the `card-issuance-service-msg-override` ConfigMap (a properties file loaded with `config_ordinal=500`). If a consumer polls with the wrong group or offset, check that ConfigMap first, not `application.yaml`.
+
 ## Testing & CI
 
 - Unit: `CardTest` (state machine), `CardServiceTest`, `CardOutboxDispatchTest`.

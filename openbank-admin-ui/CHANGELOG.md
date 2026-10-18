@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.6.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.2...admin-ui-v3.6.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui:** publish Test Intelligence evidence per running commit ([#13208](https://github.com/JiRaska/open-bank-oss/issues/13208)) ([de6d9ac](https://github.com/JiRaska/open-bank-oss/commit/de6d9ac2c8c02ee8d0b9efb42d4092878e2dece8))
+
+
+### Bug Fixes
+
+* **admin-ui:** join Test Intelligence to the running commit behind one cached snapshot ([#13203](https://github.com/JiRaska/open-bank-oss/issues/13203)) ([5b2ac4e](https://github.com/JiRaska/open-bank-oss/commit/5b2ac4ef59e698368cb3c6fcfe0884fe58ab9f29))
+
+## [3.5.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.1...admin-ui-v3.5.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** drop the inputless weekly sweep and open real tracking issues ([#13155](https://github.com/JiRaska/open-bank-oss/issues/13155)) ([5fd2d53](https://github.com/JiRaska/open-bank-oss/commit/5fd2d5368e48e2f225b0bde1518b52d2b354a209))
+
 ## [3.5.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.0...admin-ui-v3.5.1) (2026-10-18)
 
 

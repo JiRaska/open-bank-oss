@@ -214,34 +214,59 @@ journeys:
   - id: customer-authentication
     title: "Customer login and strong authentication"
     capability: >-
-      A customer can authenticate, obtain the intended scopes and complete an SCA challenge
-      without a real person's credentials or device being used as monitoring infrastructure.
-    status: planned
-    severity: page
+      A customer can authenticate and obtain the intended scopes, and the edge accepts that
+      session and refuses a wrong, missing or tampered credential -- without a real person's
+      credentials or device being used as monitoring infrastructure. Completing an SCA challenge
+      is NOT yet checked (needs the phase-3 canary authenticator, #4348).
+    status: active
+    severity: ticket
     money_moving: false
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-customer-authentication.yaml
+    schedule: "2,17,32,47 * * * *"
     target_schedule: "*/15 * * * *"
+    runtime_note: >-
+      Runs the authentication HALF of the capability: token issuance for the canary
+      (openbank-synthetic-retail, ADR-0331), the claims customer-edge trusts, the edge resolving
+      the same party, three refusal paths (wrong secret, no token, tampered token) and the
+      passkey ceremony's reachability. It does NOT complete an SCA challenge or a passkey
+      assertion: ADR-0066 forbids a customer password and ADR-0331 states the identity does not
+      unlock SCA. That needs the phase-3 canary authenticator (#4348), so the SCA half of the
+      capability above is still UNCHECKED and must not be read as covered by this journey. If the
+      secret is missing the script logs "credential absent" and fails every check.
     falsification: >-
-      Remove the synthetic client's SCA policy or break the challenge callback route: the
-      journey must fail on the missing authenticated session, not merely accept an OIDC redirect.
-    blocked_by: >-
-      ADR-0252 phase 1 and phase 3 (#4348) — requires a bank-owned synthetic identity plus a
-      canary authenticator whose secrets are held outside the script and whose sessions are tainted.
+      Remove ROLE_CUSTOMER from the canary's service-account user or the party_id mapper from its
+      client: "the token has the customers-realm issuer, ROLE_CUSTOMER..." or "the token names one
+      party" must fail. Point CUSTOMER_BASE at a host answering 200 to every path: the three
+      refusal checks must fail rather than read as availability.
 
   - id: account-overview
     title: "Account overview and balances"
     capability: >-
       An authenticated customer can list their accounts and see a balance consistent with the
       ledger after the read-model propagation window.
-    status: planned
-    severity: page
+    status: active
+    severity: ticket
     money_moving: false
+    covers:
+      - openbank-account-service
+      - openbank-balance-service
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml
+    schedule: "5,20,35,50 * * * *"
     target_schedule: "*/15 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and public customer edge. Read-only, but it depends on a durable
+      FIXTURE the owner creates once: one ACTIVE account of the canary's SYNTHETIC party whose
+      balance equals FIXTURE_BALANCE / FIXTURE_CURRENCY on the CronJob, seeded by a single
+      tainted posting and never moved by any journey. Until the fixture exists the listing and
+      balance checks fail, which is missing fixture evidence and not a balance-service result.
+      Severity is `ticket` until the fixture is seeded and the first green run is observed.
     falsification: >-
-      Pause the balance projection consumer: authentication and account listing may still pass,
-      but the journey must fail when the expected ledger-backed balance does not converge.
-    blocked_by: >-
-      ADR-0252 phase 1 (#4348) — needs a durable synthetic party/account fixture and a cleanup
-      contract; a shared real account would make the assertion nondeterministic.
+      Pause the balance projection consumer, or change FIXTURE_BALANCE on the CronJob by one
+      cent: authentication and the account listing still pass, but "the balance equals the
+      seeded fixture balance" must fail. Opening a second ACTIVE account for the canary party
+      must fail the listing check, and pointing CUSTOMER_BASE at a host that serves 200 for
+      every path must fail the 401 and 403 negative checks rather than read as availability.
 
   - id: sepa-credit-transfer
     title: "SEPA credit-transfer lifecycle"
