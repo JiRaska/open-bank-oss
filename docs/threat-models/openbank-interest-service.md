@@ -80,7 +80,7 @@ money-path service, not adjacent.
   completion. **STRIDE-D:** a ledger outage only delays the report (re-offered every tick; the day
   waits). A capitalization the ledger refuses with `ACCOUNTING_DAY_CLOSED` is now counted and
   reported `REFUSED` instead of only logged; the claim semantics on a rejected post are unchanged.
-  Rollback: revert; dropping V18 loses only past-run evidence.
+  Rollback: revert the application while preserving additive V18 past-run evidence; schema removal needs a separate reviewed retention/rollback plan.
 
 - **2026-10-14** — **Tax-profile resolution now reads party attributes** (ADR-0339 B, #12811). The
   constant-only tax-profile stub is replaced by `PartyTaxProfileProvider`: account

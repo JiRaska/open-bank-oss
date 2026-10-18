@@ -265,7 +265,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   the day in CUTOFF under `enforce`, which the existing stuck-CUTOFF alert pages and the waiver
   releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
   counts, service names and bounded automatic failure categories. Operator identities and free-text waiver reasons are intentional audit personal data, not anonymous counts. The closed-day 409 body now also carries
-  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert; V31 drop is safe while `shadow`.
+  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert the application while preserving additive V31 audit history; schema removal needs a separate reviewed retention/rollback plan.
 
 - **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
   identity (PR #13127).** Previously the deployment projected account-service's `OIDC_CLIENT_SECRET`,

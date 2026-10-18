@@ -36,9 +36,7 @@ CREATE TABLE ledger_close_participation (
 CREATE INDEX idx_close_participation_day
     ON ledger_close_participation (business_date, participant, seq DESC);
 
--- Rollback:
---   DROP INDEX IF EXISTS idx_close_participation_day;
---   DROP TABLE IF EXISTS ledger_close_participation;
--- Safe while openbank.ledger.close.participants-mode is shadow (the shipped default): nothing holds
--- a day on the strength of these rows. Under enforce, dropping the table holds every CUTOFF day
--- until each participant re-reports or is waived.
+-- Application rollback: revert the feature while retaining this additive table and its audit history.
+-- Shadow mode does not make recorded reports, operator identities or waivers disposable.
+-- Schema removal requires a separate reviewed retention/rollback plan; deleting the table loses
+-- evidence and breaks participant reads/checks until the schema and records are restored.
