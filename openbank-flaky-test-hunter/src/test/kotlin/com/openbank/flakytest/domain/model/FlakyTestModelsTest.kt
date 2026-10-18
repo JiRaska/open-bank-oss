@@ -53,7 +53,7 @@ class FlakyTestModelsTest {
             findingsDetected = listOf(finding),
             findingsProposed = 1,
             tokensUsed = 0,
-            trigger = RunTrigger.SCHEDULED,
+            trigger = RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK,
         )
         assertThat(report.findingsProposed).isEqualTo(1)
         assertThat(report.findingsDetected).hasSize(1)
