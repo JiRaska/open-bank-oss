@@ -128,6 +128,7 @@ survives in it.
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
    SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... SYNTHETIC_FX_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
+   TAX_REPORTING_CLIENT_SECRET=... LEDGER_PENSION_CO_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
    MARKETING_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
@@ -360,6 +361,33 @@ ExternalSecret exists for it; when its component is added, the consuming env var
 pension-fund-service admits `pension-fund.reporting.read` and pension-service admits
 `pension.reporting.aggregate` for this identity alone among machines; it reaches nothing else on
 either service.
+
+### Pension company ledger instance (ledger-pension-co)
+
+Same recipe, one client, with one difference: **no `add-roles` step**. The instance used to project
+the bank's `account-service` KV entry, which is the shared `openbank-services` secret. Its own
+client replaces that copy. The ledger module registers an OIDC-filtered rest client
+(FX revaluation), so the Deployment must carry a provisioned secret. But that job is switched off
+for this instance, so the service account holds no realm role and is granted nothing upstream.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-ledger-pension-co` | `keycloak/ledger-pension-co` | `ledger-service-oidc` (ledger-pension-co) | `LEDGER_PENSION_CO_CLIENT_SECRET` |
+
+```sh
+jq '.clients[] | select(.clientId=="openbank-ledger-pension-co") | del(.secret)' \
+  openbank-infra/gitops/components/keycloak/realm-template.json \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-ledger-pension-co --fields id --format csv --noquotes)
+# NO add-roles step. The service account must hold no realm role.
+$KC get clients/$ID/client-secret -r openbank | jq -j .value \
+  | bao kv put openbank/keycloak/ledger-pension-co client_id="$ID" client_secret=-
+```
+
+Verify without revealing: the service account's `role-mappings/realm` holds no `ROLE_*` role, and the
+stored secret length equals Keycloak's. Seed it BEFORE the manifest syncs, because the env ref is
+required. Then `kubectl -n ledger-pension-co annotate externalsecret ledger-service-oidc force-sync="$(date +%s)" --overwrite`
+must report `SecretSynced`, and the ledger pod must roll and become Ready.
 
 ### Treasury deal postings (ADR-0315)
 

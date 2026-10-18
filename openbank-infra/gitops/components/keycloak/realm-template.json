@@ -902,6 +902,7 @@
         "roles"
       ],
       "optionalClientScopes": [
+        "catalog:read",
         "pension:legal-approve",
         "pension:product-approve"
       ],
@@ -1377,6 +1378,26 @@
         "roles"
       ],
       "secret": "__TAX_REPORTING_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-ledger-pension-co",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Ledger (pension company)",
+      "description": "Own client for the pension company's ledger instance (ledger-pension-co), replacing its copy of the shared openbank-services secret. Holds NO realm role: the instance has no permitted outbound call.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__LEDGER_PENSION_CO_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-analytics-sink",
@@ -2140,6 +2161,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-ledger-pension-co",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-ledger-pension-co",
+      "realmRoles": []
     },
     {
       "username": "service-account-openbank-analytics-sink",
