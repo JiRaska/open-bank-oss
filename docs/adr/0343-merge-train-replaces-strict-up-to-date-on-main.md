@@ -58,12 +58,12 @@ strict up-to-date policy is turned off. Concretely:
 
 1. **Driver.** `.github/workflows/merge-train.yml` runs every 10 minutes and on
    `workflow_dispatch`, under the concurrency group `merge-train` with `cancel-in-progress: false`
-   (a train in flight is never cancelled by the next tick; the tick waits). It is **two jobs with
-   one trust boundary** (see *Security*): `build` holds no secret and produces the trains as git
-   bundles; `publish` mints the gitops GitHub App installation token — as
+   (a train in flight is never cancelled by the next tick; the tick waits). It is **one job with
+   three ordered steps** (see *Security*): A rebuilds the trains with no App token in existence;
+   B compares the tree CI ran on with the tree A built; C mints the gitops GitHub App token — as
    `auto-update-armed-prs.yml` does, because a push made with `GITHUB_TOKEN` triggers no
-   workflows — and runs git and gh only. All logic lives in `.github/scripts/merge-train.py`
-   (python3 stdlib + `gh`/`git`), which carries `build`, `publish`, `--dry-run`, `--shadow`,
+   workflows — and pushes, posts and merges. All logic lives in `.github/scripts/merge-train.py`
+   (python3 stdlib + `gh`/`git`), which carries `rebuild`, `publish`, `--dry-run`, `--shadow`,
    `--self-test` and `--check-declaration`.
 2. **Candidates.** Open, non-draft, same-repository PRs with auto-merge armed, every required
    context of `main-protection` (other than `merge-train` itself) `success` at the PR head, and no
@@ -79,36 +79,34 @@ strict up-to-date policy is turned off. Concretely:
    `*/src/main/resources/openapi.yaml`, nor any path fragment in the `regen-derived.sh` generator
    inventory, gets `merge-train` = success directly. Its own CI already answered the only question
    a train could ask: nothing it changed interacts with anything that moved.
-4. **Train.** In the `build` job: `train/<utc-ts>` = `origin/main` + `git merge --squash` of each
-   candidate in order, committed with the PR title as subject, the PR body's first paragraph, and
-   a `PR-Number: #n` trailer. A PR that does not apply cleanly is **dropped from this train** with
-   a PR comment, not failed. After stacking, the generator paths are overlaid from the trusted
-   base (`git archive origin/main -- .github/scripts docs/adr openbank-infra/gitops`), the overlay
-   is asserted to have changed nothing, and `bash .github/scripts/regen-derived.sh --all` plus
-   `bash docs/adr/gen-index.sh` run under a scrubbed, allowlisted environment; any diff is
-   committed as `chore(train): regenerate derived files`. The derived-file class is the majority
-   of the measured breaks, and the train is the one place where regeneration sees the whole
-   batch. The build job builds the whole batch **and every bisect half** (2N-1 trains over the
-   same base) and uploads one git bundle per train plus a `plan.json`, so that the publish side
-   never needs to build anything.
-5. **Verification.** In the `publish` job, per train the bisect asks for: the bundle is fetched
-   and proven to be `origin/main` + exactly the commits the plan recorded (head sha, ancestry,
-   commit count); the branch is pushed and a **draft PR** labelled `merge-train` is opened from
-   it to `main` — `ci.yml` and `services-ci.yml` run on `push` only for `main`, so the draft PR
-   is the CI carrier. The train waits for the required contexts on the train head.
-   `issue-hygiene` is excluded from the wait set: it judges a PR's body, not the tree, and was
-   already green on every member. The carrier PR is closed and the branch deleted afterwards,
-   green or red. If `origin/main` is no longer the plan's base when `publish` starts, the plan is
-   stale and the tick ends; the next one re-plans.
+4. **Train.** In step A, over **live** `origin/main` as the base: `git merge --squash` of each
+   candidate's verified head sha, in order, committed with the PR title as subject, the PR body's
+   first paragraph and a `PR-Number: #n` trailer. A PR that does not apply cleanly is **dropped
+   from this train** with a fixed-text PR comment, not failed. After stacking, the generator paths
+   are overlaid from `origin/main`, asserted unchanged, and `bash .github/scripts/regen-derived.sh
+   --all` plus `bash docs/adr/gen-index.sh` run under a scrubbed, allowlisted environment; any diff
+   is committed as `chore(train): regenerate derived files`. The derived-file class is the majority
+   of the measured breaks, and the train is the one place where regeneration sees the whole batch.
+   Step A builds the whole batch **and every bisect half** (2N-1 trains over the same base) up
+   front, so that nothing is built after the token exists.
+5. **Verification.** Per train the bisect asks for, step C pushes the commit step A built to
+   `train/<run_id>-<attempt>` and keeps one **draft PR** labelled `merge-train` open from it to
+   `main` — `ci.yml` and `services-ci.yml` run on `push` only for `main`, so the draft PR is the
+   CI carrier; each bisect step force-pushes the next train to the same branch. Step B reads the
+   carrier's live head, requires its tree to equal the tree step A recorded, and only then reads
+   the required contexts there. `issue-hygiene` is excluded from the wait set: it judges a PR's
+   body, not the tree, and was already green on every member. The carrier is closed and the branch
+   deleted when the run ends. If `main` moved between step A and step C, the tick ends without
+   acting and the next one rebuilds.
 6. **Green.** For each PR in order: post status `merge-train` = success on the PR head
    (`verified on train <sha> over main <sha>`), then squash-merge it through `gh`. Between merges
    the script asserts that `main` advanced **only** by the train's own merge. If a foreign commit
    landed, it stops and defers the rest to the next train — unless the foreign commit's files are
    disjoint from the whole train's files under the fast-lane rule, in which case it continues: the
    argument that admits a PR to the fast lane admits the train past a disjoint foreign merge.
-7. **Red.** Bisect by halving over the pre-built halves (each its own train over the same `main`),
-   verified the same way. A half of one that is red is the culprit: it gets a PR comment naming the
-   failing contexts and a `merge-train` = failure status on its head, which blocks it until the
+7. **Red.** Bisect by halving over the halves step A built (each its own train over the same
+   `main`), verified the same way. A half of one that is red is the culprit: it gets a fixed-text
+   PR comment pointing at the run and a `merge-train` = failure status on its head, which blocks it until the
    author pushes. Only the longest verified **prefix** merges; every other green PR is deferred to
    the next train, because it was verified over `main`, not over the prefix. Two PRs that are each
    green alone and red together have no single culprit; the first merges, the second is retried on
@@ -120,43 +118,52 @@ strict up-to-date policy is turned off. Concretely:
    `STATUS_CONTEXT` it posts via the commit-status API — otherwise the gate would, correctly, red
    every PR the moment `merge-train` became required, since no `pull_request` job emits it.
 
-### Security — the train tree is untrusted code
+### Security — the privileged step acts only on trees it built itself
 
-**Threat.** Every member of a train is PR-authored code, and the derived-file generators
-(`regen-derived.sh`, `gen-index.sh`, the OPA bundle scripts) *execute* inside the train tree. A
-single job that held the App token while it ran them would hand any candidate PR a token that can
-post the `merge-train` status and merge — a review bypass for every PR in the repository, reachable
-by anyone who can arm auto-merge. The first prototype of this script had exactly that shape
-(generators ran with `os.environ` inherited, token included); the self-test's exfiltration probe
-was written against it and leaked the token before the fix.
+**Invariant.** *The step that holds the App token acts only on trees it built itself, from
+verified heads, with trusted generators.* Everything else — PR heads, CI results, anything an
+earlier design handed between jobs — is untrusted, and is used at most as a hint compared hash
+against hash with what the script built.
 
-**Mitigation, in layers, each held by the self-test:**
-- *Job split.* `build` mints no token, checks out with `persist-credentials: false`, and reads
-  GitHub with the read-only `GITHUB_TOKEN`. It is the only job that runs anything from a train
-  tree. `publish` mints the App token and runs git and gh only; the trains reach it as git bundles
-  through an artifact, and it checks out the workflow's own ref, never a train. The
-  `merge-train-declaration` gate asserts both halves textually per job (no App token or
-  `GITOPS_APP_*` in `build`; no generator or `build` mode in `publish`).
-- *Scrubbed environment.* Generators run under an explicit allowlist (`PATH`, `HOME`, locale,
-  temp dirs, the git identity) — never an inherited `os.environ`. The synthetic generator in the
-  self-test records the environment it ran in; the test sets `GH_TOKEN` in the parent process and
-  asserts the generator saw an empty one and no `*TOKEN*` key at all.
-- *Trusted generators.* The build overlays every generator path from `origin/main` onto the
-  train tree before running anything, and refuses the whole train if a generator path still
-  differs from the base (modified or added). A PR that touches a generator path is disqualified
-  by `qualifies()` before it can enter a train; the overlay is the backstop for the case where it
-  somehow did.
-- *Build is untrusted; publish verifies.* Because `build` ran PR code, `plan.json` and every
-  bundle are attacker-controlled output, and `publish` believes none of it: each member is
-  re-fetched live and must still have the plan's head sha, be open, armed and green with
-  `qualifies()` re-run on live checks and files; the fast lane is reclassified from live diffs;
-  each bundle is proven commit by commit — `PR-Number:` trailers in plan order, every commit's
-  tree equal to an execution-free `git merge-tree` of the verified PR head onto the previous
-  commit, and the one optional regeneration commit confined to the `DERIVED_OUTPUTS` declared in
-  `origin/main`'s `regen-derived.sh` (annotation-only files may change `policy-checksum` lines
-  and nothing else); bundle names may not escape the artifact directory; the plan's base must be
-  an ancestor of live `main`; and the merge is `--match-head-commit <verified sha>`, with the
-  status posted on that same sha.
+**Why the invariant, not a list of checks.** Every member of a train is PR-authored, and the
+derived-file generators *execute* over the train tree. The first prototype ran them with the App
+token in the inherited environment — a review bypass for every PR, reachable by anyone who can arm
+auto-merge; the self-test's exfiltration probe leaked the token before the fix. The second split
+the work into a token-less build job and a privileged publish job, and the third had publish
+validate what build produced, field by field. Each review found the next field that validation did
+not cover — a plan-chosen branch name reaching `git push`/`--delete`, a stale base accepted
+because it was an ancestor of `main`, a record not bound to the batch it claimed, plan text
+interpolated into a comment, a regeneration commit accepted because its lines *looked* like a
+checksum restamp. All five share one cause: the privileged side was *consuming* another
+process's output. Validation of consumed output is open-ended; not consuming it is not.
+
+**How the workflow holds it.**
+- *Step A (no App token exists yet).* The base is live `origin/main`, read in this step. Candidates
+  are listed live and `qualifies()` runs on live checks and live files; each head is fetched and
+  must equal the API's head sha, and the train squashes that **sha**, never a movable ref. A PR
+  that touches a generator path never qualifies. The generator paths are overlaid from
+  `origin/main` and the train is refused if one still differs (modified or added), so only trusted
+  generators run — over PR *data*. They run with an explicit allowlist (`PATH`, `HOME`, locale,
+  the git identity), never an inherited environment: no token, no `RUNNER_TEMP`, no `GITHUB_*`.
+  Every record — key, commit, tree, applied, dropped — is computed here for the batch it was
+  built for.
+- *Step B.* CI is untrusted by nature; it only reports on a tree. The tree is read off the
+  carrier's live head and must be byte-identical to the tree step A recorded.
+- *Step C (App token minted here, and only here).* It acts only if live `main` still equals the
+  base step A used, and only for members whose live head still equals the verified sha and that
+  still qualify. It pushes this run's own commits to `train/<run_id>-<attempt>` — a name derived
+  from the run, checked against `^train/[0-9]+-[0-9]+$` and `git check-ref-format`; nothing else
+  is ever pushed or deleted. Statuses are posted on the verified sha and merges use
+  `--match-head-commit` with it. Comments are fixed text; no PR-, branch- or commit-derived string
+  is interpolated.
+- *The declaration gate* holds the order textually: the rebuild step precedes the token mint,
+  references no App secret, and no artifact or generator invocation appears in the workflow.
+
+**Residual assumption, stated.** Steps A and C share a job and a filesystem; the state step A
+writes for step C is this script's own output, not a generator's. That is sound only while the
+generators execute no PR-supplied code — which is what the generator-path disqualification and
+the overlay assertion enforce — and step C re-reads `main`, every head and every check live
+before acting regardless.
 
 **What is deliberately NOT required: a review decision.** The train does not check
 `reviewDecision == APPROVED`. `main-protection` has no review rule, and the repository has a single
@@ -266,12 +273,11 @@ undo in git.
   required context enforces it for every PR, since nothing else posts `merge-train`.
 - One more bot with the App token that can merge PRs. Its blast radius is bounded by the same
   ruleset as any other merger (`agent-pr-guard`, signatures) — it only ever squashes PRs that
-  were already armed — and by the job split above, which keeps the token out of every process
-  that runs PR-authored code.
-- The build job builds 2N-1 trains per tick (15 at the default batch of 8), each with a full
-  regeneration, so that the publish job never has to build. That is CPU in a job with no
-  secrets and no CI fan-out; the carrier PRs, which are the expensive part, are still at most
-  one per bisect step actually taken.
+  were already armed — and by the invariant above: the token exists only in the step that acts on
+  trees the script built itself.
+- Step A builds 2N-1 trains per tick (15 at the default batch of 8), each with a full
+  regeneration, so that nothing is built after the token exists. That is CPU, not CI fan-out; the
+  carrier pushes, which are the expensive part, are still one per bisect step actually taken.
 - PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
   routinely) take the manual lane in phase 1. The volume of that lane is a phase-0 measurement.
 - Carrier PRs: up to one every 10 minutes, closed on completion. They carry the `merge-train`
