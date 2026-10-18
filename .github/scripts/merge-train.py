@@ -19,7 +19,8 @@ THE INVARIANT
   * The one thing a privileged job cannot re-derive execution-free — the regeneration commit's
     CONTENT — is bounded by path (DERIVED_OUTPUTS, read from origin/main) and then proven by main's
     own derived-freshness gates, which CI runs on the exact train tree. Gate scripts, workflows and
-    generators in that tree are main's, because a PR touching any of `.github/` never qualifies.
+    generators in that tree are main's, because a PR touching any of them never qualifies (only
+    prose and gate-input data under `.github/` ride a train — `Untrainable`).
 
 THREE JOBS, EACH ON ITS OWN RUNNER
 ----------------------------------
@@ -27,7 +28,8 @@ THREE JOBS, EACH ON ITS OWN RUNNER
            generators from origin/main, regenerates in a scrubbed environment, and uploads ONE git
            bundle holding ONE train. Everything it produces is untrusted.
   publish  App token, fresh clone of origin/main, this script taken from origin/main and run with
-           `python3 -I -S`, isolated git config. Recomputes the batch live, rebuilds every member
+           `python3 -I -S`, isolated git config. Admits build's declared batch (members.txt) only
+           where each entry is a live train candidate at its live head, rebuilds every member
            squash with `git merge-tree --write-tree` onto its OWN commits, and requires each tree
            to equal the bundle's commit for that step. Accepts the bundle's single regeneration
            commit only within DERIVED_OUTPUTS, with no symlink or gitlink. Rejects any train whose
@@ -81,6 +83,7 @@ CARRIER_LABEL = "merge-train"
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BUNDLE_FILE = "train.bundle"
+MANIFEST_FILE = "members.txt"   # build's declared batch: "<number> <head sha>" per line, in order
 BUNDLE_REF = "refs/heads/merge-train-bundle"
 # Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
@@ -94,7 +97,14 @@ PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
 # the regeneration-content argument rests on CI running main's copies of them. Everything ELSE the
 # generator runner executes is derived from origin/main's regen-derived.sh by `Untrainable` —
 # never from a fixed-depth glob, which a deeper file walks straight past.
-UNTRAINABLE_PREFIXES = (".github/",)
+# Under `.github/` the default is UNTRAINABLE; only prose and gate-input data (*.md, *.txt) ride a
+# train, and not where such a file still decides what executes: workflows and actions (any file),
+# pip requirement pins (they choose what gets installed) and agent prompts (they instruct an agent
+# that holds tools). gates.yaml (run commands), every script and every extension-less file stay out.
+UNTRAINABLE_PREFIXES = (".github/workflows/", ".github/actions/", ".github/agent-prompts/")
+GITHUB_DIR = ".github/"
+GITHUB_TRAINABLE_SUFFIXES = (".md", ".txt")
+GITHUB_UNTRAINABLE_NAME_GLOBS = ("*requirements*",)
 SOURCED_BY_GEN_INDEX = "docs/adr/*.sh"         # gen-index.sh sources its sibling libraries
 GENERATOR_OVERLAY_ROOTS = (".github/scripts", "docs/adr", "openbank-infra/gitops")
 REGEN_COMMANDS = ("bash .github/scripts/regen-derived.sh --all", "bash docs/adr/gen-index.sh")
@@ -182,8 +192,8 @@ def changed_paths(git, *revs: str, cached: bool = False) -> list[str]:
 class Untrainable:
     """Every path the generator runner would EXECUTE, derived from origin/main's regen-derived.sh:
     its `find <root> -name '<pattern>'` enumeration (any depth, as `find` recurses), every program
-    its GENERATORS inventory and REGEN_COMMANDS invoke, the libraries gen-index.sh sources, and all
-    of `.github/`. If main's script cannot be parsed, it fails CLOSED: any `gen-*` file anywhere."""
+    its GENERATORS inventory and REGEN_COMMANDS invoke, the libraries gen-index.sh sources, and
+    everything under `.github/` except prose and gate-input data (see GITHUB_TRAINABLE_SUFFIXES). If main's script cannot be parsed, it fails CLOSED: any `gen-*` file anywhere."""
 
     def __init__(self, regen_text: str):
         m = re.search(r"find\s+(\S+)\s+-name\s+'([^']+)'", regen_text or "")
@@ -198,6 +208,9 @@ class Untrainable:
         if glob_match(SOURCED_BY_GEN_INDEX, path):
             return True
         name = path.rsplit("/", 1)[-1]
+        if path.startswith(GITHUB_DIR):
+            return (not name.endswith(GITHUB_TRAINABLE_SUFFIXES)
+                    or any(fnmatch.fnmatch(name, g) for g in GITHUB_UNTRAINABLE_NAME_GLOBS))
         if self.find_root is None:
             return name.startswith("gen-")
         return path.startswith(self.find_root + "/") and fnmatch.fnmatch(name, self.find_name)
@@ -501,8 +514,19 @@ class TrainBuilder:
             archive = subprocess.run(["git", "archive", base, "--", *roots], cwd=self.workdir,
                                      capture_output=True, check=True, env=self.env).stdout
             subprocess.run(["tar", "-x", "-C", self.workdir], input=archive, check=True, capture_output=True)
-        dirty = [e[3:] for e in zpaths(self.git("status", "--porcelain", "--no-renames", "-z").stdout)
-                 if len(e) > 3 and self.untrainable(e[3:])]
+        entries = [e for e in zpaths(self.git("status", "--porcelain", "--no-renames", "--untracked-files=all", "-z").stdout)
+                   if len(e) > 3]
+        # The overlay exists to put main's GENERATORS back. A trainable data file under an overlay
+        # root (a baseline, an ADR) is the member's content and must stay so — otherwise the regen
+        # commit carries main's copy as a revert and publish rejects it as a non-derived path.
+        data = [e for e in entries if not self.untrainable(e[3:])]
+        modified = [e[3:] for e in data if not e.startswith("??")]
+        if modified:
+            self.git("checkout", "HEAD", "--", *modified)
+        for e in data:
+            if e.startswith("??"):
+                os.unlink(os.path.join(self.workdir, e[3:]))
+        dirty = [e[3:] for e in entries if self.untrainable(e[3:])]
         if dirty:
             raise RuntimeError(f"generator paths differ from the trusted base after overlay: {dirty[:5]}")
 
@@ -803,14 +827,55 @@ def main_regen_text(git, base: str) -> str:
     return git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout
 
 
-def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member]]:
-    """(fast lane, this tick's train batch) — the same function in build, publish and settle."""
+def plan_train(gh, git, repo: str, base: str) -> tuple[list[Member], list[Member], dict[int, int | None]]:
+    """(fast lane, every train candidate in order, bisect sizes) from live data."""
     required = gh.required()
     regen_text = main_regen_text(git, base)
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
     fragments = regen_inventory_fragments(regen_text)
     fast, train = partition(git, base, cands, fragments)
-    return fast, select_batch(train, {n: bisect_size(a) for n, a in apps.items()}, batch_size)
+    return fast, train, {n: bisect_size(a) for n, a in apps.items()}
+
+
+def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member]]:
+    """(fast lane, this tick's train batch) — the same function in build and settle."""
+    fast, train, sizes = plan_train(gh, git, repo, base)
+    return fast, select_batch(train, sizes, batch_size)
+
+
+MANIFEST_RE = re.compile(r"^([0-9]{1,9}) ([0-9a-f]{40})$")
+
+
+def write_manifest(path: str, batch: list[Member]) -> None:
+    pathlib.Path(path).write_text("".join(f"{m.number} {m.head_sha}\n" for m in batch))
+
+
+def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int | None],
+                   batch_size: int) -> list[Member]:
+    """The batch build declared, admitted only member by member against LIVE data. The manifest is
+    untrusted (build ran generators over PR data), so it can only SELECT: every entry must be a
+    live train candidate at exactly its live head, and the selection obeys the same size cap as
+    select_batch. Re-planning instead would reject a legitimate bundle whenever any candidate
+    changed state in the minutes between build and publish. Raises Reject."""
+    lines = manifest_text.splitlines()
+    if not lines:
+        raise Reject("bundle carries no member manifest", member_fault=False)
+    live = {m.number: m for m in train}
+    want: dict[int, str] = {}
+    for ln in lines:
+        mm = MANIFEST_RE.fullmatch(ln)
+        if not mm or int(mm.group(1)) in want:
+            raise Reject("member manifest is malformed", member_fault=False)
+        want[int(mm.group(1))] = mm.group(2)
+    for n, head in want.items():
+        if n not in live or live[n].head_sha != head:
+            raise Reject(f"declared member #{n} is no longer a live train candidate at that head — the next tick rebuilds",
+                         member_fault=False)
+    batch = [m for m in train if m.number in want]
+    cap = max(1, min(sizes.get(batch[0].number) or batch_size, batch_size))
+    if len(batch) > cap:
+        raise Reject(f"declared batch of {len(batch)} exceeds the cap of {cap}", member_fault=False)
+    return batch
 
 
 def live_base(gh, git) -> str:
@@ -832,6 +897,7 @@ def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_si
     tip, applied, dropped = builder.build(base, batch)
     log(f"build over {base[:12]}: applied {applied}, dropped {dropped}")
     if applied:
+        write_manifest(os.path.join(out_dir, MANIFEST_FILE), batch)
         git("update-ref", BUNDLE_REF, tip)
         git("bundle", "create", os.path.join(out_dir, BUNDLE_FILE), BUNDLE_REF, f"^{base}")
     return applied
@@ -853,10 +919,18 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         return "in-flight"
     branch = train_branch(run_id, attempt)
     base = live_base(gh, git)
-    _fast, batch = plan_batch(gh, git, repo, base, batch_size)
+    _fast, train, sizes = plan_train(gh, git, repo, base)
     bundle = os.path.join(bundle_dir, BUNDLE_FILE)
-    if not batch or not os.path.isfile(bundle):
+    if not train or not os.path.isfile(bundle):
         return "idle"
+    manifest = os.path.join(bundle_dir, MANIFEST_FILE)
+    try:
+        batch = declared_batch(pathlib.Path(manifest).read_text() if os.path.isfile(manifest) else "",
+                               train, sizes, batch_size)
+    except Reject as exc:
+        log(f"::warning::train rejected: {exc}")
+        return "rejected"
+    log(f"publish: declared batch {[m.number for m in batch]}")
     outputs = derived_output_patterns(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
     if not outputs:
         log("::error::origin/main declares no DERIVED_OUTPUTS — refusing")
@@ -1048,6 +1122,7 @@ SYN_DEEP_GENERATOR = "openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh"
 SYN_HEREDOC_SCRIPT = "openbank-infra/gitops/p/gen-p-opa-bundle.sh"
 SYN_NEWLINE_GENERATOR = "openbank-infra/gitops/x/gen-a\nb-opa-bundle.sh"
 SYN_SHADOW_MODULE = "openbank-infra/gitops/p/yaml.py"
+SYN_BASELINE = ".github/scripts/x-baseline.txt"     # gate-input data inside a generator overlay root
 
 
 class FakeGitHub:
@@ -1158,6 +1233,7 @@ def _synthetic_origin(root: str) -> None:
     w("count.txt", "1\n")
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
     w(REGEN_INVENTORY, SYN_INVENTORY)
+    w(SYN_BASELINE, "base\n")
     w("ci.py", "import os,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
@@ -1192,6 +1268,7 @@ def _synthetic_origin(root: str) -> None:
     pr("pW", {".github/gates/gates.yaml": "gates: []\n"})
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
+    pr("pT", {SYN_BASELINE: "loosened\n"})
     # Review 6: a generator whose NAME carries a newline, and a module shadowing `yaml` next to the
     # heredoc script. Each leaves a marker if it is ever executed.
     pr("pN", {SYN_NEWLINE_GENERATOR: f"touch {os.path.join(os.path.dirname(root), 'newline-gen-ran')}\n", "docs/n.md": "n\n"})
@@ -1242,6 +1319,24 @@ def self_test() -> int:
               "openbank-infra/gitops/components/a/b/c/d/gen-x-opa-bundle.sh"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
         check(f"qualifies: member touching {f} is refused (manual lane)", not ok and "manual lane" in why, why)
+    # Anything under .github/ that can change what EXECUTES stays in the manual lane: code of any
+    # extension, workflows/actions of any extension, gates.yaml (its run commands), pip requirement
+    # pins (they choose what is installed), and agent prompts (they instruct an agent holding tools).
+    for f in (".github/scripts/x.py", ".github/scripts/x.js", ".github/scripts/x.cjs", ".github/scripts/x.init.gradle",
+              ".github/scripts/lib/probe.sh", ".github/workflows/y.yml", ".github/workflows/notes.md",
+              ".github/workflows/requirements/schemathesis.txt", ".github/actions/a/action.yml",
+              ".github/actions/a/README.md", ".github/gates/gates.yaml", ".github/scripts/pyyaml-requirements.txt",
+              ".github/agent-prompts/pr-steward.md", ".github/CODEOWNERS", ".github/labels.yml",
+              ".github/scripts/noext", "docs/adr/new.sh"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: member touching {f} is refused (manual lane)", not ok and "manual lane" in why, why)
+    # Prose and gate-INPUT data under .github/ ride trains (ADR-0343 §Security: a baseline is read
+    # by main's gate scripts in the train's CI exactly as in the PR's own CI).
+    for f in (".github/CLAUDE.md", ".github/PULL_REQUEST_TEMPLATE.md",
+              ".github/scripts/configproperty-kotlin-defaults-baseline.txt",
+              ".github/gates/allow-all-pdp-exceptions.txt", ".github/scripts/gh-transient-patterns.txt"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: member touching only {f} is trainable", ok and not U(f), why)
     for f in ("openbank-libs/governance/rules.yaml", "docs/adr/0343-x.md", "openbank-infra/gitops/components/x/x.yaml"):
         check(f"untrainable: data file {f} is NOT untrainable", not U(f))
     for f in ("docs/a\nb.md", "svc/tab\there.txt", "svc/esc\x1b.txt", "svc/del\x7f.txt"):
@@ -1325,7 +1420,7 @@ def self_test() -> int:
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
-                       "pX": 33, "pF": 34, "pN": 51, "pY": 52, "pQ": 53, "pV": 61}
+                       "pX": 33, "pF": 34, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -1396,6 +1491,60 @@ def self_test() -> int:
             rec = json.loads(pathlib.Path(probe).read_text())
             check("exfiltration probe: the generator saw no GH_TOKEN and no *TOKEN* key",
                   rec["GH_TOKEN"] == "" and not any("TOKEN" in k for k in rec["keys"]), str(rec)[:160])
+            reset()
+
+            # A baseline edit under a generator overlay root: the overlay puts main's GENERATORS
+            # back, never main's copy of a trainable data file over the member's (which the regen
+            # commit would then carry as a revert, and publish would reject as a non-derived path).
+            open_only("pT")
+            drain()
+            check("baseline: a member loosening a baseline under .github/scripts rides a train and merges intact",
+                  gh.merged == [62] and pathlib.Path(origin, SYN_BASELINE).read_text() == "loosened\n",
+                  f"{gh.merged} {gh.comments}")
+            reset()
+
+            # A candidate turning green BETWEEN build and publish reshapes the live batch. Publish
+            # takes the build's declared members (each re-checked live) instead of re-planning, so
+            # a legitimate bundle is not rejected for a race (run 39139647341: #13209 went green).
+            open_only("p2")
+            counter[0] += 1
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            open_only("p1")      # older, so it sorts FIRST in the live batch
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("race: a candidate going green after build does not reject the built train",
+                  st == "published", st)
+            reset()
+            # NEGATIVE: a declared member that is no longer a live candidate at that head.
+            open_only("p1", "p2")
+            counter[0] += 1
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            gh.prs[2]["auto_merge"] = None
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("race: a declared member that was disarmed after build is refused",
+                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), st)
+            gh.prs[2]["auto_merge"] = {"x": 1}
+            # NEGATIVE: a manifest naming a PR that was never a candidate (forged by the build job).
+            pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {gh.prs[1]['head']['sha']}\n2 {gh.prs[2]['head']['sha']}\n35 {gh.g('rev-parse', 'pW').stdout.strip()}\n")
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("manifest: a member that is not a live candidate is refused", st == "rejected", st)
+            pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {'0' * 40}\n")
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("manifest: a member at a head other than its live head is refused", st == "rejected", st)
+            pathlib.Path(out, MANIFEST_FILE).write_text("1 HEAD; rm -rf /\n")
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("manifest: a malformed line is refused", st == "rejected", st)
+            pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {gh.prs[1]['head']['sha']}\n2 {gh.prs[2]['head']['sha']}\n")
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 1)
+            check("manifest: a declared batch over the size cap is refused", st == "rejected", st)
+            os.unlink(os.path.join(out, MANIFEST_FILE))
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("manifest: a bundle with no member manifest is refused", st == "rejected", st)
             reset()
 
             # NEGATIVE: a symlink in the train tree.
@@ -1572,6 +1721,7 @@ def self_test() -> int:
                 d = os.path.join(root, f"compromised-{i}")
                 os.makedirs(d)
                 b.git("bundle", "create", os.path.join(d, BUNDLE_FILE), BUNDLE_REF, f"^{base0}")
+                write_manifest(os.path.join(d, MANIFEST_FILE), [Member(1, "p1", "", h1, "p1", "t")])
                 status = mode_publish(gh, Git(clone("publish")), "o/r", d, str(900 + i), "1", 8)
                 mode_settle(gh, Git(clone("settle")), "o/r", False)
                 check(f"compromised build: {label} -> publish {want}, nothing merges",
@@ -1587,6 +1737,7 @@ def self_test() -> int:
             d = os.path.join(root, "compromised-stale")
             os.makedirs(d)
             b.git("bundle", "create", os.path.join(d, BUNDLE_FILE), BUNDLE_REF, f"^{base0}")
+            write_manifest(os.path.join(d, MANIFEST_FILE), [Member(1, "p1", "", h1, "p1", "t")])
             status = mode_publish(gh, Git(clone("publish")), "o/r", d, "999", "1", 8)
             check("compromised build: a train over an older main -> publish rejected, nothing merges",
                   status == "rejected" and gh.merged == [], f"publish={status}")

@@ -221,3 +221,13 @@ silently re-suspend a credential the customer was just given back.
   had no contract at all before this.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-18** — The transaction-service outbound client now uses the shared status facade.
+  HTTP 2xx proves receipt, not settlement: the provider can return FAILED or an in-progress
+  idempotent replay. A ledger posting is reported POSTED only for a readable COMPLETED
+  transaction. Missing, malformed or any other business state remains UNKNOWN; it does not
+  prove that no ledger effect happened. The clearing-derived idempotency key is preserved for
+  reconciliation; no retry creates a new key. HTTP 400/422 and 409 retain their existing
+  classifications. This changes response interpretation, not the caller identity, permissions,
+  endpoint, feature flag or image. Real broker settlement and a production rollout are not
+  established by the client regression tests.
