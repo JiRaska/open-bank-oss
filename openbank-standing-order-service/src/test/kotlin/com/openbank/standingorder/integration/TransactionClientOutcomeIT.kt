@@ -5,6 +5,7 @@
 package com.openbank.standingorder.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
 import com.openbank.standingorder.infrastructure.client.SepaPaymentClient
@@ -22,7 +23,6 @@ import io.quarkus.test.junit.QuarkusTest
 import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
-import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -134,7 +134,7 @@ class TransactionClientOutcomeIT {
         val consumer = consumer()
 
         assertThatThrownBy { runBlocking { consumer.consume(dueEvent("stub-503")) } }
-            .isInstanceOf(WebApplicationException::class.java)
+            .isInstanceOf(TransactionHttpException::class.java)
 
         assertThat(posts("stub-503")).describedAs("EventRetry default attempts").isEqualTo(3)
         coVerify(exactly = 0) { useCase.recordFailure(any()) }
@@ -146,7 +146,7 @@ class TransactionClientOutcomeIT {
         val consumer = consumer()
 
         assertThatThrownBy { runBlocking { consumer.consume(dueEvent("stub-429")) } }
-            .isInstanceOf(WebApplicationException::class.java)
+            .isInstanceOf(TransactionHttpException::class.java)
 
         assertThat(posts("stub-429")).isEqualTo(3)
         coVerify(exactly = 0) { useCase.recordFailure(any()) }
@@ -158,7 +158,7 @@ class TransactionClientOutcomeIT {
         listOf("stub-403", "stub-409").forEach { marker ->
             assertThatThrownBy { runBlocking { consumer.consume(dueEvent(marker)) } }
                 .describedAs(marker)
-                .isInstanceOf(WebApplicationException::class.java)
+                .isInstanceOf(TransactionHttpException::class.java)
             assertThat(posts(marker)).describedAs(marker).isEqualTo(3)
         }
         coVerify(exactly = 0) { useCase.recordFailure(any()) }
@@ -187,14 +187,11 @@ class TransactionClientOutcomeIT {
     }
 
     @Test
-    fun `a 2xx body that cannot bind is NOT confirmed - rethrown so the retry converges`(): Unit = runBlocking {
-        val consumer = consumer()
+    fun `an unbindable 2xx body is confirmed, never retried`(): Unit = runBlocking {
+        consumer().consume(dueEvent("stub-unbindable"))
 
-        assertThatThrownBy { runBlocking { consumer.consume(dueEvent("stub-unbindable")) } }
-            .isInstanceOf(Exception::class.java)
-
-        assertThat(posts("stub-unbindable")).describedAs("retried with the same idempotency key").isEqualTo(3)
-        coVerify(exactly = 0) { useCase.confirmExecution(any()) }
+        assertThat(posts("stub-unbindable")).describedAs("booked: never re-posted").isEqualTo(1)
+        coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
         coVerify(exactly = 0) { useCase.recordFailure(any()) }
     }
 }

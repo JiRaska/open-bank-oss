@@ -89,12 +89,13 @@ class TransactionLedgerPostingHttpIT {
     }
 
     @Test
-    fun `a 2xx body that cannot bind is UNKNOWN - not thrown, not POSTED, not FAILED`(): Unit = runBlocking {
-        val result = adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2")
+    fun `a 2xx body that cannot bind is POSTED - the 2xx status proves the booking, so it is not UNKNOWN`(): Unit =
+        runBlocking {
+            val result = adapter().postClearedSpend(authorization("stub-unbindable"), 12_345, "clr-2")
 
-        assertThat(result.outcome).isEqualTo(PostingOutcome.UNKNOWN)
-        assertThat(result.transactionId).isNull()
-    }
+            assertThat(result.outcome).isEqualTo(PostingOutcome.POSTED)
+            assertThat(result.transactionId).isNull()
+        }
 
     @Test
     fun `a real 422 is FAILED so the gap stays visible`(): Unit = runBlocking {

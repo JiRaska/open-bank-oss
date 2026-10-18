@@ -70,6 +70,12 @@ class StandingOrderDueConsumerTest {
         return mapper.writeValueAsString(payload)
     }
 
+    private fun <T : Any> ok(type: Class<T>, body: T): Response = mockk<Response>(relaxed = true).also {
+        every { it.status } returns 200
+        every { it.hasEntity() } returns true
+        every { it.readEntity(type) } returns body
+    }
+
     @Test
     fun `SEPA_CREDIT due event initiates a SEPA transfer and confirms execution on 2xx`(): Unit = runBlocking {
         val req = slot<CreateSepaPaymentRequest>()
@@ -130,7 +136,12 @@ class StandingOrderDueConsumerTest {
                 Uni.createFrom().item(Response.ok(lookupBody).build())
             val req = slot<InitiateTransactionRequest>()
             every { transactionClient.initiateTransaction(capture(req)) } returns
-                Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
+                Uni.createFrom().item(
+                    ok(
+                        TransactionResponse::class.java,
+                        TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"),
+                    ),
+                )
             coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
 
             consumer.consume(dueEvent(paymentType = "DOMESTIC"))
@@ -233,7 +244,7 @@ class StandingOrderDueConsumerTest {
                 Uni.createFrom().failure(WebApplicationException(503))
 
             assertThatThrownBy { runBlocking { consumer.consume(dueEvent(paymentType = "DOMESTIC")) } }
-                .isInstanceOf(WebApplicationException::class.java)
+                .isInstanceOf(com.openbank.clients.transaction.TransactionHttpException::class.java)
 
             io.mockk.verify(exactly = 3) { transactionClient.initiateTransaction(any()) }
             coVerify(exactly = 0) { useCase.confirmExecution(any()) }

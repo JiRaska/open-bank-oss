@@ -17,6 +17,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -61,11 +62,19 @@ class TransactionLedgerPostingAdapterTest {
         updatedAt = now,
     )
 
+    private fun <T : Any> ok(type: Class<T>, body: T): Response = mockk<Response>(relaxed = true).also {
+        every { it.status } returns 200
+        every { it.hasEntity() } returns true
+        every { it.readEntity(type) } returns body
+    }
+
     @Test
     fun `a two-decimal currency is posted with two decimals`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
         every { client.initiateTransaction(capture(sent)) } returns
-            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
+            Uni.createFrom().item(
+                ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")),
+            )
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         val authorization = authorization("CZK")
@@ -132,7 +141,9 @@ class TransactionLedgerPostingAdapterTest {
     fun `a zero-decimal currency is posted whole, not divided by a hundred`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
         every { client.initiateTransaction(capture(sent)) } returns
-            Uni.createFrom().item(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED"))
+            Uni.createFrom().item(
+                ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")),
+            )
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         adapter.postClearedSpend(authorization("JPY"), 12_345, "clr-2")

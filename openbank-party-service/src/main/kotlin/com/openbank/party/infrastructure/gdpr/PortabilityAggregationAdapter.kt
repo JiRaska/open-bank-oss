@@ -4,6 +4,9 @@
 
 package com.openbank.party.infrastructure.gdpr
 
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.application.port.out.PortabilityAggregationPort
 import com.openbank.party.domain.model.PortabilityAccount
@@ -39,6 +42,9 @@ class PortabilityAggregationAdapter(
 
     private val log = Logger.getLogger(PortabilityAggregationAdapter::class.java)
 
+    // The single place a transaction-service answer is classified (ADR-0319); never call the raw client.
+    private val transactions = TransactionClient(transactionClient)
+
     override suspend fun fetchAccountsWithTransactions(partyId: UUID): List<PortabilityAccount> =
         accountClient.listByParty(partyId, ACCOUNT_PAGE_SIZE, null)
             .onFailure().recoverWithUni(recover(ACCOUNTS, partyId, null))
@@ -58,9 +64,10 @@ class PortabilityAggregationAdapter(
             ?: emptyList()
 
     private suspend fun fetchTransactions(accountId: UUID): List<PortabilityTransaction> =
-        transactionClient.listTransactions(accountId, TRANSACTION_PAGE_SIZE, null)
+        transactions.list(accountId, TRANSACTION_PAGE_SIZE, null)
             .onFailure().recoverWithUni(recover(TRANSACTIONS, accountId, null))
             .awaitSuspending()
+            .let { (it as? TransactionCallOutcome.Booked)?.body }
             ?.data
             ?.map { tx ->
                 PortabilityTransaction(
@@ -108,7 +115,7 @@ class PortabilityAggregationAdapter(
      * swallowed.
      */
     private fun <T> recover(service: String, partyId: UUID, fallback: T?): (Throwable) -> Uni<T?> = { t ->
-        val status = (t as? WebApplicationException)?.response?.status
+        val status = (t as? TransactionHttpException)?.status ?: (t as? WebApplicationException)?.response?.status
         if (status == UNAUTHORIZED || status == FORBIDDEN) {
             log.errorf(
                 "gdpr.portability.%s DENIED status=%d partyId=%s — export must not proceed",
