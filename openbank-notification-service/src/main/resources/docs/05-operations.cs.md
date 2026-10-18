@@ -109,3 +109,7 @@ Neparsovatelný payload se zaloguje a potvrdí (nezaklíní partition). Prozkoum
 - Per-service path-scoped CI; release-please vlastní `version.txt` (aktuálně `0.4.0`) a changelog z Conventional Commits.
 - CI běží testy proti izolovanému PostgreSQL na test JVM přes Testcontainers (#578); Kafka je v testech in-memory (jen `@Incoming` kanál), `@Scheduled` outbox tick je pod testem vypnutý.
 - CD přes ArgoCD při bumpu image tagu (GitOps); u konfliktů image tagu berte `--ours`.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

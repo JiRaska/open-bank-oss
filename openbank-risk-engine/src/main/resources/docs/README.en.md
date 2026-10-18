@@ -100,3 +100,7 @@ existing liquidity tests and `RiskLiquidityApiIT` are updated.
 ## ČNB minimum reserves
 
 The risk engine consumes `openbank.fx.cnb-policy-rate.published` into its local policy-rate fact table. A redelivery is idempotent on instrument and effective date; a revised rate updates the stored fact. The minimum-reserves endpoint derives its result from a tied-out snapshot and the reserve ratio and remuneration effective on that run's as-of date. Missing facts produce `424 NOT_EVALUABLE` with a reason instead of a default numeric rate; an unknown run remains 404 and an untied run remains 409. The analysis is calculated on read and is not persisted as a separate result.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
