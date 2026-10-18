@@ -58,4 +58,7 @@ interface GenericCatalogRepository {
         at: Instant,
     ): ProductRevision
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision?
+
+    /** The published revision of the offering the v1 banking product [productId] is mapped to (ADR-0341). */
+    suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision?
 }
