@@ -248,6 +248,21 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
+  identity (PR #13127).** Previously the deployment projected account-service's `OIDC_CLIENT_SECRET`,
+  so its outbound calls authenticated as another service's client. It now authenticates as its own
+  Keycloak client `openbank-ledger-pension-co`, whose secret lives under its own Vault key
+  `keycloak/ledger-pension-co` and which holds NO realm role; `QUARKUS_OIDC_CLIENT_CLIENT_ID` selects
+  it. **STRIDE-S/E:** the credential is no longer reusable across services (a leak of it impersonates
+  only this co-instance, and a leak of account-service's secret no longer reaches the pension books),
+  and the client carries no privilege to widen. No inbound endpoint, port or NetworkPolicy changes.
+  **Residual risk (behaviour change):** the operator-triggered FX revaluation call from the
+  co-instance to fx-service now arrives as a principal fx-service names in no rule, so it is DENIED
+  there. The co-instance therefore cannot run FX revaluation until a named fx-service rule exists;
+  none is added here, and one should be added only if the pension books ever need revaluation (fail
+  closed is the intended default). Rollback: revert the commit and the realm/ExternalSecret change
+  together.
+
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `ledger_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
@@ -575,7 +590,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline

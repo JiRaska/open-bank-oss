@@ -8,7 +8,7 @@ describe('KYC table loading contract', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/kyc/page.tsx'), 'utf8')
     expect(source).toContain('<div className="card" aria-busy={loading}')
     expect(source).toContain("aria-label={t('Obnovit KYC případy', 'Refresh KYC cases')}")
-    expect(source).toContain("aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}")
+    expect(source).not.toContain('kyc-party-id')
     expect(source).toContain('setLoading(true)')
   })
 })

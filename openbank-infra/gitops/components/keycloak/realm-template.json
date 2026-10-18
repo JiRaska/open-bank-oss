@@ -902,6 +902,7 @@
         "roles"
       ],
       "optionalClientScopes": [
+        "catalog:read",
         "pension:legal-approve",
         "pension:product-approve"
       ],
@@ -1020,7 +1021,7 @@
       "clientId": "openbank-interest",
       "fullScopeAllowed": false,
       "name": "OpenBank Interest Service",
-      "description": "Per-service M2M client for interest-service's ledger capitalization posts (issue #10486). Holds ROLE_API only; ledger.create is granted by identity in ledger_rest_ext.rego.",
+      "description": "Per-service M2M client for interest-service: ledger posts (#10486) and catalog reads (#8481). Holds ROLE_API and the narrow catalog:read scope; ledger.create and catalog.read are granted by identity in the upstream rego.",
       "enabled": true,
       "publicClient": false,
       "standardFlowEnabled": false,
@@ -1032,7 +1033,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__INTEREST_CLIENT_SECRET__"
     },
@@ -1379,6 +1381,26 @@
       "secret": "__TAX_REPORTING_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-ledger-pension-co",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Ledger (pension company)",
+      "description": "Own client for the pension company's ledger instance (ledger-pension-co), replacing its copy of the shared openbank-services secret. Holds NO realm role: the instance has no permitted outbound call.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__LEDGER_PENSION_CO_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-analytics-sink",
       "fullScopeAllowed": false,
       "name": "OpenBank Analytics Sink",
@@ -1646,6 +1668,7 @@
       "fullScopeAllowed": false,
       "defaultClientScopes": [
         "basic",
+        "profile",
         "fx:read"
       ],
       "optionalClientScopes": [],
@@ -2139,6 +2162,12 @@
       "realmRoles": [
         "ROLE_API"
       ]
+    },
+    {
+      "username": "service-account-openbank-ledger-pension-co",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-ledger-pension-co",
+      "realmRoles": []
     },
     {
       "username": "service-account-openbank-analytics-sink",

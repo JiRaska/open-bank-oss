@@ -10,7 +10,7 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
-import { Drawer, PageHeader } from '@/components/ui'
+import { Drawer, PageHeader, ShortId } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import {
   ONBOARDING_STAGES as STAGES,
@@ -393,11 +393,11 @@ function RecordDrawer({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{record.legalName ?? '—'}</h2>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: '4px' }}>
-              {record.partyId}
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              <ShortId value={record.partyId} copyLabel={t('Kopírovat ID klienta', 'Copy customer ID')} />
             </div>
           </div>
-          <button type="button" onClick={onClose} className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
+          <button type="button" onClick={onClose} data-drawer-initial-focus className="btn btn-secondary" style={{ padding: '4px 8px' }} aria-label={t('Zavřít detail onboardingu', 'Close onboarding details')}>
             <X size={14} aria-hidden="true" />
           </button>
         </div>
@@ -419,7 +419,7 @@ function RecordDrawer({
           <DrawerRow label={t('E-mail', 'Email')} value={record.email ?? '—'} mono />
           <DrawerRow label={t('Stav party', 'Party status')} value={record.partyStatus} />
           <DrawerRow label={t('Stav KYC', 'KYC status')} value={record.kycStatus?.replace('_', ' ') ?? '—'} />
-          <DrawerRow label={t('KYC případ', 'KYC case ID')} value={record.kycCaseId ? record.kycCaseId.slice(0, 8) + '…' : '—'} mono />
+          <DrawerRow label={t('KYC případ', 'KYC case')} value={record.kycCaseId ? t('Založen', 'Opened') : '—'} />
           <DrawerRow label={t('SCA zapsáno', 'SCA enrolled')} value={record.scaEnrolled ? `✓ (${record.deviceCount} ${t('zařízení', 'device(s)')})` : '—'} />
           <DrawerRow label={t('Vytvořeno', 'Created')} value={new Date(record.createdAt).toLocaleString(dateLocale)} />
           <DrawerRow label={t('Aktualizováno', 'Updated')} value={new Date(record.updatedAt).toLocaleString(dateLocale)} />

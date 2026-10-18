@@ -113,6 +113,15 @@ spec:
               value: https://referral-service.referral.svc:8443
             - name: NODE_EXTRA_CA_CERTS
               value: /mnt/referral-ca/ca.crt
+            # Commit-addressed Test Intelligence evidence store (#13201). Read with NO
+            # credential: the bucket policy admits only requests arriving through the VPC's
+            # S3 gateway endpoint (openbank-infra/aws/envs/sandbox-platform/test-evidence-store.tf).
+            # The name MUST match "${local.cluster_name}-test-evidence" there. Unset or
+            # unreachable, the page falls back to the bundled snapshot and says so.
+            # This pod has no egress NetworkPolicy, so no egress rule is needed; if one is
+            # ever added it must allow TCP 443 to the S3 prefix list.
+            - name: OPENBANK_EVIDENCE_STORE_URL
+              value: https://openbank-sandbox-test-evidence.s3.eu-north-1.amazonaws.com
 
             # agent-service (MCP) is NOT reached via the discovery proxy: the
             # /api/agent/mcp and /api/agent/chat routes resolve it from this env

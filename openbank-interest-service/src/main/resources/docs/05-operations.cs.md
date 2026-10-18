@@ -52,6 +52,8 @@ Naplánované úlohy (konfigurační klíče pod `openbank.interest`):
 
 Placeholder tajemství jsou jen pro dev; produkce musí injektovat reálné hodnoty přes Vault (ADR-0017).
 
+Všechna odchozí volání mezi službami (ledger, transaction-service, account-service, party-service a od #8481 i čtení produktového katalogu) se autentizují pojmenovaným oidc-clientem `ledger`: Keycloak klient `openbank-interest` s vlastním secretem `OIDC_LEDGER_CLIENT_SECRET`, nikdy sdílený principal `openbank-services`. Čtení produktového katalogu má pro `service-account-openbank-interest` v `account_rest_ext.rego` oprávnění `catalog.read` (pouze publikovaná verze); sdílený klient s `OIDC_CLIENT_SECRET` zůstává nakonfigurovaný jako výchozí, ale žádný rest-client jej nevybírá.
+
 ## Health checky
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC běží.
@@ -124,3 +126,7 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey na JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, build/push image, ArgoCD zvedne tag.
 - **Release osa** (release-please) je řízena `version.txt` + Conventional Commits; **osa API kontraktu** je `openapi.yaml: info.version` (ADR-0048). Nevynucujte jejich rovnost.
 - GitOps: u konfliktů image-tagů berte `--ours` (čerstvě sestavený tag); u RBAC/config berte `--theirs` nebo řešte ručně.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

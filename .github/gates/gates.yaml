@@ -88,6 +88,54 @@ gates:
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
 
+  - id: coverage-floor-ratchet
+    name: "Kover coverage floors only go up (ADR-0020, enforced)"
+    group: kotlin
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    min_subjects: 50   # 77 build.gradle.kts files carry a Kover minValue on 2026-10-17
+    budget_seconds: 20
+    rationale: "Every module's floor is a static minValue that koverVerify enforces, so a PR could lower it and every gate stayed green: fx-service went 65 -> 60 in #12773 with nothing to notice. A lowered or removed floor now needs a `coverage-floor-lowered: #<issue>` trailer naming the issue that owns the debt; raising or adding a floor is always allowed."
+    review_after: "2027-10-17"
+    selftest: python3 .github/scripts/check-coverage-floor-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py"]
+    run: |
+      # Compares every Kover minValue at HEAD against the PR's merge base, position by position.
+      # The trailer is read from the PR body (optional: a PR with no body can still justify a
+      # lowering in a commit message of its range) and from `git log base..HEAD`, so the squash
+      # merge carries the reason onto main.
+      python3 .github/scripts/check-coverage-floor-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
+
+  - id: trace-contract-evidence
+    name: "A module that asserts a TraceContract also emits its verifiedAs marker (ADR-0273, enforced)"
+    group: kotlin
+    mode: enforced
+    min_subjects: 15   # 23 modules use the trace-contract assertion API on 2026-10-17
+    budget_seconds: 30   # walks every src/test/kotlin tree once; ~2s idle, 21s on a loaded laptop
+    rationale: "The Test Intelligence trace column is filled only by TraceContract.verifiedAs printing OPENBANK_TRACE_CONTRACT_V1:<id> into the JUnit XML; a test that chains requiresSpan/hasNoErrorSpan without verifiedAs asserts the trace and reports nothing, so the module reads as having no trace evidence while its tests are green. The self-test builds exactly that fixture and must go red."
+    review_after: "2027-10-17"
+    selftest: python3 .github/scripts/check-trace-contract-evidence.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-trace-contract-evidence.py"]
+    run: |
+      python3 .github/scripts/check-trace-contract-evidence.py
+
+  - id: pitest-threshold-single-source
+    name: "pitest.yml reads one mutation threshold in every lane (enforced)"
+    group: lint
+    mode: enforced
+    min_subjects: 5   # 7 threshold sites in pitest.yml on 2026-10-17
+    budget_seconds: 10
+    rationale: "The enforced authz lane ran Gradle at 70 while its Test Intelligence envelope was built at 63, so the dashboard could show PASS for a run the lane failed. The threshold is now env.PITEST_MUTATION_THRESHOLD and every --mutation-threshold, -Ppitest.mutationThreshold and $SCORE comparison must read it; the self-test re-introduces the 63 and must go red."
+    review_after: "2027-10-17"
+    selftest: python3 .github/scripts/check-pitest-threshold-single-source.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pitest-threshold-single-source.py", ".github/workflows/pitest.yml"]
+    run: |
+      python3 .github/scripts/check-pitest-threshold-single-source.py
+
   - id: fleet-scanning-test-edges
     name: "services-ci builds tests that read other modules' trees (derived, enforced)"
     group: lint
@@ -754,6 +802,32 @@ gates:
       python3 .github/scripts/check-public-workload-ha.py --enforce \
         --baseline .github/public-workload-ha-baseline.txt
 
+  # Per-service alert baseline is DERIVED from the deployed-workload inventory (every workload
+  # declaring a `management` port). Same shape as the NetworkPolicy gate below: regenerate, then
+  # fail on any diff -- including an UNTRACKED output, hence --intent-to-add -- so a new service
+  # without its inventory entry is red until the generator has been run.
+  - id: gen-service-alert-rules-drift-gate
+    name: "per-service alert baseline drift gate (observability audit 2026-10-17)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30
+    rationale: "A workload added without its alert-baseline inventory entry would ship with no per-service alerts and nothing would say so; this regenerates the inventory and fails on any diff, including an untracked output."
+    review_after: "2027-10-17"
+    min_subjects: 20
+    selftest_inputs: ["openbank-infra/scripts/gen-service-alert-rules.py"]
+    selftest: python3 openbank-infra/scripts/gen-service-alert-rules.py --self-test
+    selftest_expect: pass
+    run: |
+      out=$(python3 openbank-infra/scripts/gen-service-alert-rules.py)
+      echo "$out"
+      echo "SUBJECTS=$(echo "$out" | sed -n 's/.*: \([0-9][0-9]*\) workloads.*/\1/p')"
+      f=openbank-infra/gitops/components/observability/prometheus-rules-service-inventory.yaml
+      git add --intent-to-add "$f"
+      if ! git diff --exit-code -- "$f"; then
+        echo "::error::Service alert baseline drift -- run python3 openbank-infra/scripts/gen-service-alert-rules.py and commit the result."
+        exit 1
+      fi
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
@@ -910,6 +984,28 @@ gates:
       python3 .github/scripts/check-entity-column-names.py --self-test
     run: |
       python3 .github/scripts/check-entity-column-names.py
+
+  # A Redis-backed four-eyes ApprovalStore reads `redis://localhost:6379` from application.yaml,
+  # and a pod has no Redis on localhost, so the deployed host must come from the workload's
+  # QUARKUS_REDIS_HOSTS. swift-service and clearing-service shipped without it: Ready pods, a
+  # resolvable bean, and every approval-queue call a 500 "Connection refused" in the sandbox.
+  - id: approval-store-redis-host
+    name: "Redis-backed ApprovalStore services deploy with a real Redis host (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Nothing at deploy time notices a Redis host left at the loopback default: probes never touch
+      Redis and the CDI bean resolves, so the first sign is a 500 on the four-eyes approval queue of
+      a money-path service.
+    review_after: 2027-04-17
+    min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
+    selftest_expect: pass
+    selftest: |
+      python3 .github/scripts/check-approval-store-redis-host.py --self-test
+    run: |
+      python3 .github/scripts/check-approval-store-redis-host.py
 
   # A @Provider in openbank-libs-* is registered in EVERY consumer, and ArC loads its type
   # closure at init — so naming a type from a `compileOnly` dependency is a boot failure for
@@ -2106,6 +2202,26 @@ gates:
     run: |
       python3 .github/scripts/check-slo-registry.py
 
+  # The SLO dashboard is DERIVED from pyrra-slo-money-path.yaml. It used to hardcode a four-service
+  # rail regex while Pyrra carried 28 SLO pairs, so 24 services had an error budget and no panel.
+  - id: slo-dashboard-drift
+    name: "SLO dashboard matches the Pyrra SLO file (derived, enforced)"
+    group: registry
+    mode: enforced
+    rationale: >-
+      dashboard-openbank-slo.yaml named four payment rails by regex while pyrra-slo-money-path.yaml
+      declares an SLO pair for every money-path service. A hand-kept service list in a dashboard
+      reads as full coverage when it is short. The dashboard is now generated from the Pyrra file,
+      and this gate fails when the committed file drifts from what the generator would write.
+    review_after: '2027-04-17'
+    min_subjects: 20
+    budget_seconds: 30   # parses one YAML and renders JSON; ~2s observed
+    selftest: python3 .github/scripts/gen-slo-dashboard.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/gen-slo-dashboard.py", ".github/scripts/slo-dashboard-base.json"]
+    run: |
+      python3 .github/scripts/gen-slo-dashboard.py --check
+
   # ADR-0148: the prompt registry (openbank-libs/governance/prompts/) must stay resolvable —
   # every prompt file names a real charter, uses <name>.v<N>.md, is non-empty, and never
   # re-uses a shipped version (a prompt is immutable, like a Flyway migration).
@@ -2350,6 +2466,45 @@ gates:
     selftest_inputs: [".github/scripts/check-agent-charter-registry.sh"]
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
+
+  # Per-service CLAUDE.md files are loaded as agent instructions, and nothing checked the code they
+  # name. 2026-10-17: agent-service named 5 classes that do not exist, onboarding-service 2 (and
+  # described a four-eyes gate it does not have); the first gate run also found a wrong test name in
+  # loyalty-service. Backticked CamelCase identifiers must occur in a tracked source file (markdown
+  # does not count). ENFORCED: 0 findings on the corrected tree, --selftest carries the pre-fix shape.
+  - id: claude-md-identifiers-exist
+    name: "per-service CLAUDE.md names only classes that exist (#13168, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 60   # ~4 s CPU; wall time is I/O-bound on a loaded runner
+    rationale: "A per-service CLAUDE.md that names a class which does not exist sends the next agent after code that is not there; nothing else compares the prose with the tree."
+    review_after: "2027-04-17"
+    min_subjects: 7   # 14 per-service CLAUDE.md files with src/main measured 2026-10-17
+    selftest: python3 .github/scripts/check-claude-md-identifiers.py --selftest
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-claude-md-identifiers.py"]
+    run: |
+      python3 .github/scripts/check-claude-md-identifiers.py --enforce
+
+  # The charter schedule in agents.yaml (EU AI Act inventory, admin-ui snapshot) and the *_CRON the
+  # pod actually runs are two hand-kept copies of one fact. Measured 2026-10-17: 5 of 9 scheduled
+  # agents disagreed — the crons were deliberate 15-minute offsets (shared LiteLLM gateway) and the
+  # charter was never updated, so the governed record described times nothing runs at. Both files
+  # stay individually valid, so only a comparison sees it. ENFORCED: green on the corrected tree,
+  # and --selftest feeds it the pre-fix drift shape.
+  - id: agent-schedule-matches-charter
+    name: "agent charter schedule equals deployed cron (#13168, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10
+    rationale: "The charter schedule (EU AI Act inventory) and the deployed *_CRON are two hand-kept copies of one fact; both stay individually valid, so only a comparison sees them drift."
+    review_after: "2027-04-17"
+    min_subjects: 4   # 8 deployed agent crons compared 2026-10-17
+    selftest: python3 .github/scripts/check-agent-schedule-matches-charter.py --selftest
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-agent-schedule-matches-charter.py"]
+    run: |
+      python3 .github/scripts/check-agent-schedule-matches-charter.py --enforce
 
   # ADR-0031 D9 phase 3 (issue #5281): flaky-test-hunter is the only chartered agent with a real
   # GitHub write path. The two properties that make that acceptable — the write is confined to one
@@ -2809,6 +2964,29 @@ gates:
     selftest_inputs: [".github/scripts/auto-update-armed-prs.py"]
     run: |
       python3 .github/scripts/auto-update-armed-prs.py --check-declaration
+
+  # ADR-0343: the merge train is the bot that replaces strict up-to-date on main. Its wiring is
+  # load-bearing in the same way as the updater's: the App token (a GITHUB_TOKEN push triggers no
+  # CI, so a train would never be verified), a concurrency group that never cancels a train in
+  # flight, SHADOW as the committed default — and the INVARIANT: the token never shares a runner
+  # with PR data. So `build` (the only job running code over PR data) must hold no App token or
+  # App secret, while `publish` and `settle` must run this script from origin/main under
+  # `python3 -I -S` with isolated git config and run, install or check out nothing else. Each is
+  # a one-line regression this gate turns into a red diff.
+  - id: merge-train-declaration
+    name: "merge-train keeps its App token, non-cancelling concurrency, OPA and shadow default (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
+    review_after: "2027-04-18"
+    budget_seconds: 120   # self-test drives ~25 settle/build/publish ticks over a synthetic origin (~30 s measured)
+    min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/merge-train.py"]
+    run: |
+      python3 .github/scripts/merge-train.py --check-declaration
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
@@ -3577,16 +3755,16 @@ gates:
   # exact slash-less string the code expects. Ratchet, not a flat fail: the 3 files measured
   # 2026-09-26 are baselined per file (count, so a second slash-less site in a baselined file
   # still fails), and a healed entry is reported stale. #11008 (open) fixes all three; this gate
-  # is what stops a fourth from shipping the same way in the meantime. Advisory until #11008
-  # merges and the fleet has run clean against the tightened check for a full cycle.
+  # is what stops a fourth from shipping the same way in the meantime. ENFORCED 2026-10-17: #11008 merged,
+  # the baseline is empty and the fleet is clean.
   - id: jaxrs-path-prefix-leading-slash
-    name: "JAX-RS path-prefix literal missing its leading slash (#10997, advisory)"
+    name: "JAX-RS path-prefix literal missing its leading slash (#10997, enforced)"
     group: kotlin
-    mode: advisory
-    verified: "2026-09-26 — measured 3 files / 6 sites, all in openbank-psd2-service, all covered by open PR #11008"
+    mode: enforced
+    verified: "2026-10-17 — promoted: #11008 merged 2026-09-28; 0 sites fleet-wide on origin/main, baseline emptied; the detector now understands the removePrefix(\"/\") normalisation #11008 used (it flagged its own fix: 5 false sites, exit 1, while advisory)"
     budget_seconds: 15   # ~1.2s locally; generous for a slower runner
     rationale: "A slash-less UriInfo.path prefix check never matches under RESTEasy Reactive, so the gate it guards silently never runs; this stops a new occurrence while #11008 fixes the 3 known ones."
-    review_after: "2026-12-31"
+    review_after: "2027-04-17"
     min_subjects: 1000   # 2521 service src/main .kt files scanned 2026-09-26
     selftest: python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --self-test
     selftest_expect: pass
@@ -3805,7 +3983,7 @@ gates:
     mode: advisory
     rationale: "Business packages drifting back into openbank-libs-domain, or a libs module missing from LIBS_MODULES, silently restores the 57-module rebuild fan-out ADR-0317 removes (or the #2983 no-rebuild defect)."
     review_after: "2027-03-31"
-    verified: "2026-09-26 — advisory until ADR-0317 phases 2-3 move the remaining packages; 0 findings on the phase-1 tree, sabotage of each rule (a/b/c) goes red under --enforce"
+    verified: "2026-10-17 — stays advisory: the issues this gate cited (#2983, #3357) are closed, but the real blocker is ADR-0317 phase 4 ('enforce once phases 1-3 land'; delivery-status partial, phases 2-4 tracked by #11604, open). Re-measured: 0 findings over 116 subjects, so it would pass today; promotion waits on the ADR, not on the tree. review_after 2027-03-31"
     budget_seconds: 10
     min_subjects: 50   # 109 measured 2026-09-26 (libs-domain sources + 2 build files + libs modules)
     selftest_inputs: [".github/scripts/check-libs-core-purity.py"]
@@ -4740,7 +4918,7 @@ gates:
     name: "dotted mp.messaging key guard (application.yaml, #686, advisory)"
     group: data
     mode: advisory
-    verified: "2026-08-09 — fleet still not clean per #686; no target date set for --enforce yet"
+    verified: "2026-10-17 — stays advisory: #686 and #2945 are closed but #11683 (open) records the actual blocker — 195 dotted leaf keys fleet-wide (client.id, value/key (de)serializer, group.id...), of which the enforced kafka-dotted-key-ratchet watches only group.id / auto.offset.reset. The agreed action (#8780) is to retire this gate or widen the ratchet, and that needs an owner ruling per key family on whether the dotted form is inert in the deployed path. Not promotable: it would fail on 195 sites"
     selftest: bash .github/scripts/check-dotted-mp-messaging-keys.sh --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-dotted-mp-messaging-keys.sh"]
@@ -6629,3 +6807,24 @@ gates:
     selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]
+
+  # #13172: an ExternalSecret reading `creds/<role>` for a role the openbao-config CronJob never
+  # creates fails every reconcile with `unknown role` and nothing pages (the service keeps its
+  # static secret). The declared set is derived from configure.sh, not listed a second time.
+  - id: dynamic-db-roles-declared
+    name: "ExternalSecret dynamic-db roles are declared in gitops (#13172, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      A role read by an ExternalSecret but absent from configure_service in
+      dynamic-db-credentials.yaml is never created by the CronJob; the secret then fails with
+      `unknown role` on every reconcile while the pod runs on a static secret. Derived, so the
+      two files cannot drift.
+    review_after: '2027-04-17'
+    min_subjects: 4   # 8 measured 2026-10-17
+    selftest: python3 .github/scripts/check-dynamic-db-roles-declared.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-dynamic-db-roles-declared.py"]
+    run: |
+      python3 .github/scripts/check-dynamic-db-roles-declared.py --root .

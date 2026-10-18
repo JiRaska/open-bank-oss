@@ -56,7 +56,40 @@ class ManagedTemplateResourceIT {
     }
 
     @Test
-    fun `different operator publishes immutable revision and maker cannot self publish`() {
+    fun `operator cannot publish a revision even when another operator authored it`() {
+        val makerDraft = insertDraft("maker")
+        given().post("/api/v1/notification-templates/$makerDraft/publish")
+            .then().statusCode(403)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT state FROM managed_notification_templates WHERE id = ?")
+                .use { statement ->
+                    statement.setObject(1, makerDraft)
+                    statement.executeQuery().use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getString(1)).isEqualTo("DRAFT")
+                    }
+                }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "checker", roles = ["ROLE_COMMS_APPROVER"])
+    fun `comms approver reads drafts but cannot author one`() {
+        given().queryParam("template", "TRANSACTION_COMPLETED")
+            .get("/api/v1/notification-templates")
+            .then().statusCode(200)
+        given().contentType("application/json")
+            .body(
+                """{"template":"TRANSACTION_COMPLETED","language":"CS","channel":"EMAIL",
+                "subject":"s","body":"b"}""",
+            )
+            .post("/api/v1/notification-templates")
+            .then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "checker", roles = ["ROLE_COMMS_APPROVER"])
+    fun `comms approver publishes immutable revision and maker cannot self publish`() {
         val makerDraft = insertDraft("maker")
         given().post("/api/v1/notification-templates/$makerDraft/publish")
             .then().statusCode(200)
