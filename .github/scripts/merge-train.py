@@ -129,6 +129,17 @@ def glob_match(pattern: str, path: str) -> bool:
     return re.fullmatch(rx, path) is not None
 
 
+def unsafe_path(path: str) -> bool:
+    """A path with a control character (newline, tab, ESC...) is refused outright. git QUOTES such
+    paths in its default output, so every string comparison against them silently misses."""
+    return any(ord(c) < 32 or ord(c) == 127 for c in path)
+
+
+def zpaths(out: str) -> list[str]:
+    """Split git `-z` output. Callers must pass `-z`: only NUL cannot occur inside a path."""
+    return [p for p in out.split("\0") if p]
+
+
 class Untrainable:
     """Every path the generator runner would EXECUTE, derived from origin/main's regen-derived.sh:
     its `find <root> -name '<pattern>'` enumeration (any depth, as `find` recurses), every program
@@ -204,6 +215,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         if ref.startswith(pre):
             return False, f"excluded prefix {pre}"
     for f in pr.get("files") or []:
+        if unsafe_path(f):
+            return False, "a path contains a control character — manual lane, never a train"
         if untrainable(f):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
     if (app or {}).get(STATUS_CONTEXT, ("", ""))[0] == "failure":
@@ -310,7 +323,10 @@ def base_env() -> dict[str, str]:
     env = {k: os.environ[k] for k in GENERATOR_ENV_ALLOWLIST if k in os.environ}
     env.update({"GIT_AUTHOR_NAME": "openbank-gitops-bot", "GIT_COMMITTER_NAME": "openbank-gitops-bot",
                 "GIT_AUTHOR_EMAIL": "gitops-bot@openbank.invalid", "GIT_COMMITTER_EMAIL": "gitops-bot@openbank.invalid",
-                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"})
+                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0",
+                # Never put the script's directory or the cwd on sys.path: main's bundle scripts run
+                # `python3 -` from their own directory, where a PR-added re.py would shadow `re`.
+                "PYTHONSAFEPATH": "1"})
     return env
 
 
@@ -379,6 +395,10 @@ class TrainBuilder:
         self.untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
         self.env = generator_env()
         self.quarantined: list[str] = []
+        # Path fragments main's inventory declares as generator INPUTS (set from origin/main by
+        # mode_build). Only added files under these stay visible while the generators run.
+        self.declared_inputs: list[str] = []
+        self.keep_declared_inputs = True
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         return sh(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.workdir, check=check, env=self.env)
@@ -390,8 +410,8 @@ class TrainBuilder:
         dropped: list[int] = []
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
-            staged = self.git("diff", "--cached", "--name-only").stdout.split() if r.returncode == 0 else []
-            if r.returncode != 0 or not staged or any(self.untrainable(f) for f in staged):
+            staged = zpaths(self.git("diff", "--cached", "-z", "--name-only").stdout) if r.returncode == 0 else []
+            if r.returncode != 0 or not staged or any(unsafe_path(f) or self.untrainable(f) for f in staged):
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
                 dropped.append(m.number)
@@ -408,15 +428,22 @@ class TrainBuilder:
         return self.git("rev-parse", "HEAD").stdout.strip(), applied, dropped
 
     def quarantine_new_executables(self, base: str) -> None:
-        """Before any generator runs: remove from the working tree every file the runner would
-        execute that does not exist in origin/main, at any depth. A generator added by a PR can
-        never run, whichever check upstream missed it."""
-        in_base = set(self.git("ls-tree", "-r", "--name-only", base).stdout.split())
-        on_disk = self.git("ls-files", "--cached", "--others", "--exclude-standard").stdout.split()
-        self.quarantined = [f for f in on_disk if self.untrainable(f) and f not in in_base]
+        """Before any generator runs: remove from the working tree every file that is not on
+        origin/main — except the files main's inventory declares as generator INPUTS (a new ADR, a
+        new version.txt), which the generators must see or the train is wrong. A kept file is
+        never untrainable, and PYTHONSAFEPATH keeps it off sys.path, so it cannot be imported in
+        place of a module. A generator or a module added by a PR therefore never runs."""
+        in_base = set(zpaths(self.git("ls-tree", "-r", "-z", "--name-only", base).stdout))
+        on_disk = zpaths(self.git("ls-files", "-z", "--cached", "--others", "--exclude-standard").stdout)
+
+        def keep(f: str) -> bool:
+            return (self.keep_declared_inputs and not unsafe_path(f) and not self.untrainable(f)
+                    and any(frag in f for frag in self.declared_inputs))
+        self.quarantined = [f for f in on_disk if f not in in_base and not keep(f)]
         for f in self.quarantined:
             os.unlink(os.path.join(self.workdir, f))
-            log(f"::warning::quarantined {f}: not on main, would be executed by the generator runner")
+        if self.quarantined:
+            log(f"quarantined {len(self.quarantined)} file(s) not on main while the generators run")
 
     def restore_quarantined(self) -> None:
         tracked = [f for f in self.quarantined if self.git("cat-file", "-e", f"HEAD:{f}", check=False).returncode == 0]
@@ -429,7 +456,7 @@ class TrainBuilder:
             archive = subprocess.run(["git", "archive", base, "--", *roots], cwd=self.workdir,
                                      capture_output=True, check=True, env=self.env).stdout
             subprocess.run(["tar", "-x", "-C", self.workdir], input=archive, check=True, capture_output=True)
-        dirty = [ln[3:].strip() for ln in self.git("status", "--porcelain").stdout.splitlines() if self.untrainable(ln[3:].strip())]
+        dirty = [e[3:] for e in zpaths(self.git("status", "--porcelain", "-z").stdout) if len(e) > 3 and self.untrainable(e[3:])]
         if dirty:
             raise RuntimeError(f"generator paths differ from the trusted base after overlay: {dirty[:5]}")
 
@@ -439,7 +466,9 @@ class TrainBuilder:
             if r.returncode != 0:
                 log(f"::warning::regen command failed ({cmd}): {r.stderr.strip()[-300:]}")
         self.restore_quarantined()
-        changed = self.git("ls-files", "-m", "-o", "--exclude-standard").stdout.split()
+        changed = zpaths(self.git("ls-files", "-z", "-m", "-o", "--exclude-standard").stdout)
+        if any(unsafe_path(f) for f in changed):
+            raise RuntimeError("a generator wrote a path with a control character — refusing the train")
         if not changed:
             return False
         self.git("add", "--", *changed)
@@ -512,6 +541,8 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
             if not meta.startswith(":"):
                 continue
             new_mode = meta[1:].split()[1]
+            if unsafe_path(path):
+                raise Reject("regeneration commit touches a path with a control character")
             if new_mode in SPECIAL_MODES:
                 raise Reject(f"regeneration commit adds a symlink/gitlink: {path}")
             if not any(glob_match(g, path) for g in outputs):
@@ -700,7 +731,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if fetched != p["head"]["sha"]:
             log(f"#{n:>6} skip      fetched head differs from the API head (pushed meanwhile)")
             continue
-        files = git("diff", "--name-only", f"{base}...{fetched}").stdout.split()
+        files = zpaths(git("diff", "-z", "--name-only", f"{base}...{fetched}").stdout)
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
         ok, why = qualifies(view, member_required, gh.checks(fetched), app, untrainable)
@@ -717,11 +748,11 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
 def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tuple[list[Member], list[Member]]:
     """(fast lane, train). Computed from live git data only."""
     for m in cands:
-        m.files = git("diff", "--name-only", f"{base}...{m.head_sha}").stdout.split()
+        m.files = zpaths(git("diff", "-z", "--name-only", f"{base}...{m.head_sha}").stdout)
     fast, train = [], []
     for m in cands:
         mb = git("merge-base", base, m.head_sha).stdout.strip()
-        main_files = git("diff", "--name-only", f"{mb}..{base}").stdout.split()
+        main_files = zpaths(git("diff", "-z", "--name-only", f"{mb}..{base}").stdout)
         others = [f for o in cands if o is not m for f in o.files]
         ok, _ = fast_lane_eligible(m.files, main_files, others, fragments)
         (fast if ok else train).append(m)
@@ -751,7 +782,9 @@ def live_base(gh, git) -> str:
 def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
     base = live_base(gh, git)
     _fast, batch = plan_batch(gh, git, repo, base, batch_size)
-    builder.untrainable = Untrainable(main_regen_text(git, base))
+    regen_text = main_regen_text(git, base)
+    builder.untrainable = Untrainable(regen_text)
+    builder.declared_inputs = regen_inventory_fragments(regen_text)
     os.makedirs(out_dir, exist_ok=True)
     if not batch:
         log("build: no train this tick")
@@ -972,6 +1005,9 @@ SYN_INVENTORY = ('GENERATORS=(\n  "syn|python3 x|services/ docs/ count.txt bad.t
                  'DERIVED_OUTPUTS=(\n  "derived/*"\n)\n'
                  "  done < <(find openbank-infra/gitops -name 'gen-*opa-bundle*.sh' | sort)\n")
 SYN_DEEP_GENERATOR = "openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh"
+SYN_HEREDOC_SCRIPT = "openbank-infra/gitops/p/gen-p-opa-bundle.sh"
+SYN_NEWLINE_GENERATOR = "openbank-infra/gitops/x/gen-a\nb-opa-bundle.sh"
+SYN_SHADOW_MODULE = "openbank-infra/gitops/p/yaml.py"
 
 
 class FakeGitHub:
@@ -1001,9 +1037,6 @@ class FakeGitHub:
     def main_sha(self): return self.g("rev-parse", "main").stdout.strip()
     def open_prs(self): return [p for p in list(self.prs.values()) + list(self.carriers.values()) if p["state"] == "open"]
     def pr(self, n): return self.prs[n]
-
-    def pr_files(self, n):
-        return self.g("diff", "--name-only", f"main...{self.prs[n]['head']['sha']}").stdout.split()
 
     def checks(self, sha):
         if any(p["head"]["sha"] == sha for p in self.prs.values()):
@@ -1086,6 +1119,8 @@ def _synthetic_origin(root: str) -> None:
                "want='\\n'.join(sorted(os.listdir('services')))+'\\n'\n"
                "if not os.path.exists('derived/index.txt') or open('derived/index.txt').read()!=want: fail.append('derived')\n"
                "print(','.join(fail)); sys.exit(1 if fail else 0)\n")
+    # Like payments/gen-vop-opa-bundle.sh: heredoc python run from the script's own directory.
+    w(SYN_HEREDOC_SCRIPT, 'cd "$(dirname "$0")"\npython3 - <<\'PY\'\ntry:\n    import yaml  # noqa\nexcept ImportError:\n    pass\nPY\n')
     subprocess.run([sys.executable, SYN_GENERATOR], cwd=root, check=True, env=env)
     g("add", "-A")
     g("commit", "-q", "-m", "base")
@@ -1112,6 +1147,12 @@ def _synthetic_origin(root: str) -> None:
     pr("pW", {".github/gates/gates.yaml": "gates: []\n"})
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
+    # Review 6: a generator whose NAME carries a newline, and a module shadowing `yaml` next to the
+    # heredoc script. Each leaves a marker if it is ever executed.
+    pr("pN", {SYN_NEWLINE_GENERATOR: f"touch {os.path.join(os.path.dirname(root), 'newline-gen-ran')}\n", "docs/n.md": "n\n"})
+    pr("pQ", {"docs/q\nr.md": "q\n"})
+    pr("pY", {SYN_SHADOW_MODULE: f"open({os.path.join(os.path.dirname(root), 'shadow-ran')!r}, 'w').write('x')\n",
+              "docs/y.md": "y\n"})
     # A bundle generator deeper than any fixed-depth glob reaches; it would leave a marker if run.
     pr("pD", {SYN_DEEP_GENERATOR: f"touch {os.path.join(os.path.dirname(root), 'deep-generator-ran')}\n",
               "docs/d.md": "d\n"})
@@ -1151,6 +1192,9 @@ def self_test() -> int:
         check(f"qualifies: member touching {f} is refused (manual lane)", not ok and "manual lane" in why, why)
     for f in ("openbank-libs/governance/rules.yaml", "docs/adr/0343-x.md", "openbank-infra/gitops/components/x/x.yaml"):
         check(f"untrainable: data file {f} is NOT untrainable", not U(f))
+    for f in ("docs/a\nb.md", "svc/tab\there.txt", "svc/esc\x1b.txt", "svc/del\x7f.txt"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: a DATA path with a control character {f!r} is refused", not ok and "control character" in why, why)
     check("untrainable: an unparsable runner fails closed (any gen-* at any depth)",
           Untrainable("")("openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh") and Untrainable("")("x/y/z/gen-q.py"))
     check("qualifies: an App failure (culprit) on the head waits for a push",
@@ -1229,7 +1273,7 @@ def self_test() -> int:
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
-                       "pX": 33, "pF": 34}
+                       "pX": 33, "pF": 34, "pN": 51, "pY": 52, "pQ": 53}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -1246,7 +1290,7 @@ def self_test() -> int:
                     return s, "in-flight"
                 counter[0] += 1
                 bdir = clone("build")
-                b = TrainBuilder(bdir, regen_commands=regen or (f"{sys.executable} {SYN_GENERATOR}",),
+                b = TrainBuilder(bdir, regen_commands=regen or (f"{sys.executable} -I {SYN_GENERATOR}",),
                                  overlay_roots=(".github/scripts",))
                 b.env["PROBE_OUT"] = probe
                 out = os.path.join(root, f"bundle-{counter[0]}")
@@ -1337,11 +1381,143 @@ def self_test() -> int:
             check("deep generator: forced past qualifies, build drops it and it still never runs",
                   applied == [] and dropped == [41] and not os.path.exists(marker), f"{applied} {dropped}")
             b.git("checkout", "-q", "-f", "--detach", head)       # the file present in the working tree
+            b.declared_inputs = regen_inventory_fragments(SYN_INVENTORY)   # as mode_build sets it from main
             b.quarantine_new_executables(base0)
             b.regenerate()
             check("deep generator: quarantine removes a not-on-main executable before any generator runs",
                   b.quarantined == [SYN_DEEP_GENERATOR] and not os.path.exists(marker)
                   and os.path.exists(os.path.join(bdir, SYN_DEEP_GENERATOR)), f"{b.quarantined}")
+            reset()
+
+            # NEGATIVE (review 6a): a newline in a generator's NAME. git quotes such a path in its
+            # default output, so string checks miss it while `find`/fnmatch still match it.
+            nl_marker, sh_marker = os.path.join(root, "newline-gen-ran"), os.path.join(root, "shadow-ran")
+            open_only("pN")
+            sg = Git(clone("settle"))
+            cands, _apps = live_candidates(gh, sg, "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+            check("newline path: the PR never qualifies (control character, fail closed)", all(m.number != 51 for m in cands))
+            open_only("pQ")
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+            check("newline path: a DATA file with a newline is refused live too (read with -z, not split on lines)",
+                  all(m.number != 53 for m in cands), str([m.number for m in cands]))
+            gh.prs[53]["state"] = "closed"
+            drain()
+            check("newline path: nothing merges and the generator never ran", gh.merged == [] and not os.path.exists(nl_marker))
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",),
+                             untrainable=Untrainable(SYN_INVENTORY))
+            b.git("fetch", "-q", "origin", "pN")
+            head = b.git("rev-parse", "FETCH_HEAD").stdout.strip()
+            _tip, applied, dropped = b.build(base0, [Member(51, "pN", "", head, "pN", "t", ref=head)])
+            check("newline path: forced past qualifies, build drops it and it still never runs",
+                  applied == [] and dropped == [51] and not os.path.exists(nl_marker), f"{applied} {dropped}")
+            reset()
+
+            # NEGATIVE (review 6b): a module shadowing `yaml` next to main's heredoc bundle script.
+            def shadow_run(quarantine: bool, safepath: bool) -> bool:
+                if os.path.exists(sh_marker):
+                    os.unlink(sh_marker)
+                d = clone("build")
+                bb = TrainBuilder(d, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",),
+                                  untrainable=Untrainable(SYN_INVENTORY))
+                bb.declared_inputs = regen_inventory_fragments(SYN_INVENTORY)
+                if not safepath:
+                    bb.env.pop("PYTHONSAFEPATH", None)
+                if not quarantine:
+                    bb.quarantine_new_executables = lambda base: None
+                bb.git("fetch", "-q", "origin", "pY")
+                h = bb.git("rev-parse", "FETCH_HEAD").stdout.strip()
+                bb.build(base0, [Member(52, "pY", "", h, "pY", "t", ref=h)])
+                return os.path.exists(sh_marker)
+            check("shadow module: CONTROL — with neither layer the shadow yaml.py IS imported", shadow_run(False, False))
+            check("shadow module: PYTHONSAFEPATH alone keeps it inert", not shadow_run(False, True))
+            check("shadow module: quarantine alone keeps it inert", not shadow_run(True, False))
+            open_only("pY")
+            drain()
+            check("shadow module: through real ticks it is inert (the PR is data; the module never runs)",
+                  not os.path.exists(sh_marker), str(gh.merged))
+            reset()
+
+            # Contrast: quarantining EVERY added file (not only non-inputs) hides a PR's new input
+            # from the generators, so the train is wrong and main's freshness gate goes red.
+            def regen_ok(keep: bool) -> bool:
+                d = clone("build")
+                bb = TrainBuilder(d, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",),
+                                  untrainable=Untrainable(SYN_INVENTORY))
+                bb.declared_inputs, bb.keep_declared_inputs = regen_inventory_fragments(SYN_INVENTORY), keep
+                bb.git("fetch", "-q", "origin", "pR")
+                h = bb.git("rev-parse", "FETCH_HEAD").stdout.strip()
+                bb.build(base0, [Member(21, "pR", "", h, "pR", "t", ref=h)])
+                return subprocess.run([sys.executable, "ci.py"], cwd=d, capture_output=True).returncode == 0
+            check("quarantine: declared inputs stay visible, so a PR adding one regenerates correctly", regen_ok(True))
+            check("quarantine: CONTRAST — hiding every added file makes the same train red", not regen_ok(False))
+
+            # THE BOUNDARY: a fully compromised build emits an arbitrary bundle. Publish and settle
+            # must refuse to merge every variant; the only reachable outcome is a red or wasted train.
+            open_only("p1")
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",))
+            b.git("fetch", "-q", "origin", "p1")
+            h1 = b.git("rev-parse", "FETCH_HEAD").stdout.strip()
+            honest, _a, _d = b.build(base0, [Member(1, "p1", "", h1, "p1", "t", ref=h1)])
+
+            def commit_on(parent, edits, msg, link=None, parents=None):
+                b.git("checkout", "-q", "-f", "--detach", parent)
+                for rel, text in edits.items():
+                    pth = pathlib.Path(bdir, rel)
+                    pth.parent.mkdir(parents=True, exist_ok=True)
+                    pth.write_text(text)
+                if link:
+                    os.symlink(link[1], os.path.join(bdir, link[0]))
+                b.git("add", "-A")
+                if parents:
+                    tree = b.git("write-tree").stdout.strip()
+                    return b.git("commit-tree", tree, *[x for q in parents for x in ("-p", q)], "-m", msg).stdout.strip()
+                b.git("commit", "-q", "--allow-empty", "-m", msg)
+                return b.git("rev-parse", "HEAD").stdout.strip()
+
+            derived_now = pathlib.Path(origin, "derived/index.txt").read_text()
+            variants = [
+                ("a regeneration commit rewriting a non-derived file (ci.py)",
+                 commit_on(honest, {"ci.py": "print('')\n"}, REGEN_COMMIT_SUBJECT), "rejected"),
+                ("swapped PR content under the member's own commit",
+                 commit_on(base0, {"docs/one.md": "not what the PR says\n"}, "p1"), "rejected"),
+                ("an extra commit beyond the regeneration commit",
+                 commit_on(commit_on(honest, {"derived/index.txt": derived_now}, REGEN_COMMIT_SUBJECT), {"docs/x.md": "x\n"}, "x"), "rejected"),
+                ("a regeneration commit adding a symlink",
+                 commit_on(honest, {}, REGEN_COMMIT_SUBJECT, link=("derived/link", "/etc/passwd")), "rejected"),
+                ("a merge commit smuggling a second parent",
+                 commit_on(honest, {}, REGEN_COMMIT_SUBJECT, parents=[honest, h1]), "rejected"),
+                ("a regeneration commit with WRONG content inside the inventory",
+                 commit_on(honest, {"derived/index.txt": "garbage\n"}, REGEN_COMMIT_SUBJECT), "published"),
+            ]
+            for i, (label, rev, want) in enumerate(variants):
+                gh.statuses.clear()
+                gh.comments.clear()
+                for c in gh.carriers.values():
+                    c["state"] = "closed"
+                b.git("update-ref", BUNDLE_REF, rev)
+                d = os.path.join(root, f"compromised-{i}")
+                os.makedirs(d)
+                b.git("bundle", "create", os.path.join(d, BUNDLE_FILE), BUNDLE_REF, f"^{base0}")
+                status = mode_publish(gh, Git(clone("publish")), "o/r", d, str(900 + i), "1", 8)
+                mode_settle(gh, Git(clone("settle")), "o/r", False)
+                check(f"compromised build: {label} -> publish {want}, nothing merges",
+                      status == want and gh.merged == [], f"publish={status} merged={gh.merged}")
+            # ... and a train over an older main, after main moved.
+            gh.statuses.clear()
+            gh.g("checkout", "-q", "-f", "main")
+            pathlib.Path(origin, "svc").mkdir(exist_ok=True)
+            pathlib.Path(origin, "svc/later.txt").write_text("x\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "main moves")
+            b.git("update-ref", BUNDLE_REF, honest)
+            d = os.path.join(root, "compromised-stale")
+            os.makedirs(d)
+            b.git("bundle", "create", os.path.join(d, BUNDLE_FILE), BUNDLE_REF, f"^{base0}")
+            status = mode_publish(gh, Git(clone("publish")), "o/r", d, "999", "1", 8)
+            check("compromised build: a train over an older main -> publish rejected, nothing merges",
+                  status == "rejected" and gh.merged == [], f"publish={status}")
             reset()
 
             # NEGATIVE (review 5): the files API is capped at 3000; a long PR hides a path there.
