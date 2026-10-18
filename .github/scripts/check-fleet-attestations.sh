@@ -187,6 +187,10 @@ main.go:74: error during command execution: no matching attestations:'
 if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
 img="${!#}"
 [ -n "${TUF_LOG:-}" ] && printf '%s\n' "${TUF_ROOT:-UNSET}" >> "$TUF_LOG"
+# Real cosign materialises its trusted-root cache under $TUF_ROOT on the first call. A stub
+# that skips this cannot see where that directory lands (#13166 put it inside the worker's
+# result directory, whose exact entry count makes every image UNKNOWN).
+[ -n "${TUF_ROOT:-}" ] && mkdir -p "$TUF_ROOT"
 case "$img" in
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
@@ -878,7 +882,10 @@ probe_one_image() {
   # it, a probe loses the race with "getting Rekor public keys: creating cached local store:
   # resource temporarily unavailable" -- UNKNOWN, no verdict -- and the retry hits the same
   # contended lock, so the whole auto-deploy Build job exits 2 and nothing is pinned.
-  export TUF_ROOT="$result/tuf"
+  # A SIBLING of the result directory, never inside it: the collector requires exactly six
+  # entries there, and cosign's cache inside it turned every image UNKNOWN fleet-wide. The
+  # sibling is still private to this worker and removed with $pool_dir.
+  export TUF_ROOT="${result}.tuf"
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
   # retried, so a genuinely unattested image still fails fast and no result is retried into
