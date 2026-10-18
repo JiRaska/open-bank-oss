@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.libs.domain.money.Money
 import com.openbank.sepainstant.application.port.out.SettlementUnavailableException
@@ -153,12 +154,14 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `HTTP 201 with a pending transaction keeps payment processing`() {
+    fun `HTTP 201 with a pending transaction is unproven - the facade throws, the payment is retried`() {
         val txId = UUID.randomUUID()
         val response = created(completed(txId, status = "PENDING"))
         every { client.initiateTransaction(any()) } returns Uni.createFrom().item(response)
 
-        assertThat(adapter.settle(payment()).await().indefinitely().settled).isFalse()
+        assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+            .hasRootCauseInstanceOf(TransactionCompletionUncertainException::class.java)
     }
 
     @Test

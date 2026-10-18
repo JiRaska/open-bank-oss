@@ -28,8 +28,8 @@ import java.time.LocalDate
  * Self-injection pattern mirrors [AmlCaseAdapter]: fault-tolerance annotations on an
  * `open` method called via the CDI proxy.
  *
- * A 201 response confirms settlement only when its transaction is COMPLETED and matches
- * the request. A 409 is a concurrent-state conflict, not proof of an idempotent booking.
+ * A 201 response confirms settlement only when its transaction is COMPLETED (enforced by the
+ * shared [TransactionClient]; PENDING/PROCESSING is thrown as uncertain and retried) and matches the request. A 409 is a concurrent-state conflict, not proof of an idempotent booking.
  */
 @ApplicationScoped
 class SettlementAdapter(@RestClient private val client: TransactionServiceClient) : SettlementPort {
@@ -80,8 +80,10 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         outcome: TransactionCallOutcome<TransactionResponse>,
     ): SettlementOutcome {
         // Only 201 maps to a result (200/202 stay "unexpected", as before); 409 and 400/422 are
-        // "not proof of booking" and all of them end as SettlementUnavailableException.
-        val booked = outcome as? TransactionCallOutcome.Booked
+        // "not proof of booking" and all of them end as SettlementUnavailableException. The facade has
+        // already required a readable COMPLETED transaction (anything else was thrown as
+        // TransactionCompletionUncertainException), so the status is not re-interpreted here.
+        val booked = outcome as? TransactionCallOutcome.HttpSuccess
         if (booked == null || booked.status != Response.Status.CREATED.statusCode) {
             throw SettlementUnavailableException(
                 "Unexpected answer from transaction-service for payment ${payment.paymentId}: $outcome",
@@ -106,15 +108,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         if (!matchesRequest) {
             throw SettlementUnavailableException("Settlement response does not match payment ${payment.paymentId}")
         }
-        return when (tx.status) {
-            "COMPLETED" -> {
-                log.infof("Settled instant payment %s → transaction %s", payment.paymentId, id)
-                SettlementOutcome(settled = true, transactionId = id)
-            }
-            "PENDING", "PROCESSING" -> SettlementOutcome(settled = false, transactionId = id)
-            else -> throw SettlementUnavailableException(
-                "Settlement is not completed for payment ${payment.paymentId}",
-            )
-        }
+        log.infof("Settled instant payment %s → transaction %s", payment.paymentId, id)
+        return SettlementOutcome(settled = true, transactionId = id)
     }
 }

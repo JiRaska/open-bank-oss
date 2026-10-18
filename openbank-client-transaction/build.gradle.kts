@@ -11,9 +11,9 @@
 //
 // `returnResponse=true` (not the pilot's typed bodies): every operation returns
 // `Uni<jakarta.ws.rs.core.Response>` so the HTTP status is explicit and the body is read lazily.
-// A typed `Uni<T>` fails on an unreadable 2xx body WITHOUT a status, which on a money path turns a
-// booked debit into an error. The raw Response must not reach callers: `TransactionClient` is the
-// single place that classifies it (Booked / Conflict / Rejected / throw) - see its KDoc. Consumers must
+// A typed `Uni<T>` can fail on body binding without exposing the HTTP status. The raw Response
+// must not reach callers: `TransactionClient` classifies HTTP success / Conflict / Rejected / throw
+// and separately requires readable COMPLETED status for writes - see its KDoc. Consumers must
 // NOT call the generated TransactionsApi directly.
 //
 // VERSIONING (ADR-0319 D2, ADR-0048): the artifact version is the provider's API-CONTRACT version,
