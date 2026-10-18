@@ -199,7 +199,7 @@ interface RateRevisionPinRepository {
     /**
      * Pin [accountId] to the revision [config] caches. Writes a pin ONLY when [config] is catalog-sourced
      * AND no pin exists yet AND the account has no non-reversed accrual under a catalog-sourced config
-     * (such an account was pinned by the V19 backfill; an account with only operator-config history is
+     * (such an account was pinned by the V20 backfill; an account with only operator-config history is
      * pinned here, at its first catalog-sourced accrual). First writer wins; an existing pin is never
      * replaced.
      *

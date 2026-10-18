@@ -129,7 +129,7 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 
 Při zapnuté synchronizaci katalogu účet akruuje podle publikované revize, ke které je **připnut**, nikdy
 podle "aktuálně platné" sazby. Řádek v `account_rate_revision_pins` vzniká při prvním akruálu účtu pod
-katalogovou sazbou. Migrace V19 doplnila pin každému existujícímu účtu podle jeho posledního nezrušeného
+katalogovou sazbou. Migrace V20 doplnila pin každému existujícímu účtu podle jeho posledního nezrušeného
 akruálu pod katalogovou konfigurací; účty s provozní sazbou pin nemají a zůstávají na provozní sémantice.
 
 **Chování fail-closed.** Účet je odmítnut (`POST /accrue` vrací `409`; denní běh účet přeskočí s WARN a

@@ -95,16 +95,16 @@ internal class RevisionPinSupersedeIT {
         publish("0.020000000000000000", LocalDate.of(2027, 4, 1), "c-d")
         val legacy = UUID.randomUUID()
         val first = accrueOn(legacy, LocalDate.of(2027, 4, 5))
-        // Simulate an account that accrued BEFORE V18: drop its pin, keep its accrual history.
+        // Simulate an account that accrued BEFORE V19: drop its pin, keep its accrual history.
         dataSource.connection.use { c ->
             c.prepareStatement("DELETE FROM account_rate_revision_pins WHERE account_id = ?").use {
                 it.setObject(1, legacy)
                 it.executeUpdate()
             }
         }
-        // Run the V19 backfill exactly as shipped.
+        // Run the V20 backfill exactly as shipped.
         val sql = javaClass.classLoader.getResourceAsStream(
-            "db/migration/V19__backfill_account_rate_revision_pins.sql",
+            "db/migration/V20__backfill_account_rate_revision_pins.sql",
         )!!
             .bufferedReader().readText()
         dataSource.connection.use { c -> c.createStatement().use { it.execute(sql) } }
@@ -185,7 +185,7 @@ internal class RevisionPinSupersedeIT {
                 it.executeUpdate()
             }
         }
-        val script = "db/migration/V19__backfill_account_rate_revision_pins.sql"
+        val script = "db/migration/V20__backfill_account_rate_revision_pins.sql"
         val sql = javaClass.classLoader.getResourceAsStream(script)!!.bufferedReader().readText()
         dataSource.connection.use { c -> c.createStatement().use { it.execute(sql) } }
 

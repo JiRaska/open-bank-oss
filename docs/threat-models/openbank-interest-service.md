@@ -324,7 +324,7 @@ money-path service, not adjacent.
 - **2026-10-17** — **Catalog sync on by default; accounts pinned to a revision (ADR-0341 step 1b).**
   `interest.catalog-sync.enabled` now defaults true, so published rates reach `interest_rate_configs`
   as a local cache keyed by revision id (`catalog_interest_rate_snapshots`). New table
-  `account_rate_revision_pins` (V18) pins an account to the revision it first accrues under; a later
+  `account_rate_revision_pins` (V19) pins an account to the revision it first accrues under; a later
   revision reprices NEW accounts only, so a catalog publish can no longer silently change an existing
   contract's rate (the integrity threat this closes: a maker-checker publish was previously an
   unreviewed repricing of every live account). Catalog-sourced rows are refused by
@@ -333,4 +333,4 @@ money-path service, not adjacent.
   `interest.rate.changed` event. **Residual:** pinning happens at first accrual, not account opening
   (account-service carries no revision yet - the last adoption step); an account that opens and
   accrues under revision A before B is effective stays on A. Rollback: set
-  `INTEREST_CATALOG_SYNC_ENABLED=false`; V18 is additive and is retained.
+  `INTEREST_CATALOG_SYNC_ENABLED=false`; V19 is additive and is retained.

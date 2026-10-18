@@ -111,7 +111,7 @@ By design: `interest-service` moves no cash. The `interest.withholding.remitted.
 
 With catalog sync on, an account accrues from the published revision it was **pinned** to, never from
 "the currently effective" rate. A row in `account_rate_revision_pins` is written at the account's first
-catalog-sourced accrual. V19 backfilled a pin for every existing account from its latest non-reversed
+catalog-sourced accrual. V20 backfilled a pin for every existing account from its latest non-reversed
 accrual under a catalog-sourced config; operator-managed accounts get no pin and keep operator semantics.
 
 **Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`; the daily run skips the

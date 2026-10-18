@@ -429,7 +429,7 @@ class RateRevisionPinRepositoryImpl @Inject constructor(
                 Uni.createFrom().item(false)
             } else {
                 // First writer wins; a concurrent first accrual of the same account loses harmlessly.
-                // Skipped only when the account already accrued under a catalog-sourced config (V19 pinned it).
+                // Skipped only when the account already accrued under a catalog-sourced config (V20 pinned it).
                 s.createNativeQuery<Int>(
                     "INSERT INTO account_rate_revision_pins " +
                         "(id, account_id, product_id, currency, revision_id, pinned_at) " +

@@ -6,7 +6,7 @@
 -- to that revision on its first accrual; later revisions supersede the rate for NEW accounts only.
 -- Changing an existing account's terms is an explicit re-pin (a new row under a new revision), not
 -- a side effect of a catalog publish. catalog_interest_rate_snapshots stays the local cache, keyed
--- by revision id. Purely additive: pre-V18 binaries neither read nor write this table.
+-- by revision id. Purely additive: pre-V19 binaries neither read nor write this table.
 
 CREATE TABLE account_rate_revision_pins (
     id           UUID PRIMARY KEY,
@@ -22,6 +22,6 @@ CREATE INDEX idx_account_rate_revision_pins_revision ON account_rate_revision_pi
 
 -- Rollback:
 --   DROP TABLE account_rate_revision_pins;
--- Pre-V18 binaries resolve the rate by effective date again (a published successor then applies to
+-- Pre-V19 binaries resolve the rate by effective date again (a published successor then applies to
 -- existing accounts from its effective_from). Retain the table in production rather than dropping
 -- it: it is the only record of which revision each account accrued under.
