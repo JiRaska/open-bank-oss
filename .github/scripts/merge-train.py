@@ -13,40 +13,47 @@ native answer and is unavailable to a user-owned repository. This script is the 
 
 THE INVARIANT
 -------------
-The privileged step acts only on trees it built itself, from verified heads, with trusted
-generators. Nothing produced by code a PR could influence is ever consumed — it is at most a hint
-compared hash-against-hash with what this script built. Concretely, one job, three steps:
+  * The App token never shares a runner with PR data being processed by code.
+  * Privileged jobs act only on trees they re-derived themselves with execution-free git
+    (`git merge-tree --write-tree`, `git commit-tree`, `git ls-tree`) — never on files a build wrote.
+  * The one thing a privileged job cannot re-derive execution-free — the regeneration commit's
+    CONTENT — is bounded by path (DERIVED_OUTPUTS, read from origin/main) and then proven by main's
+    own derived-freshness gates, which CI runs on the exact train tree. Gate scripts, workflows and
+    generators in that tree are main's, because a PR touching any of `.github/` never qualifies.
 
-  A  rebuild   (no App token; GITHUB_TOKEN read-only)
-               Read origin/main LIVE and use it as the base. List candidates LIVE, run qualifies()
-               on live checks and live files, fetch each head and require the fetched sha to equal
-               the API's head sha. Rebuild every train the bisect can ask for (2N-1) with plain
-               `git merge --squash` of those verified shas, in batch order. Overlay the generator
-               paths from origin/main, assert they then equal the base, and run the generators in a
-               scrubbed, allowlisted environment. Record each train's commit, tree, applied set and
-               dropped set — all computed here, keyed by the batch it was built for.
-  B  verify    CI is untrusted by nature: it only reports on a tree. The tree CI ran on is read off
-               the carrier PR's LIVE head and compared with the tree step A recorded. Any mismatch,
-               including one byte, rejects the train.
-  C  publish   (App token minted only now) Push THIS script's own commits — never anything read
-               from a plan — to `train/<run_id>-<attempt>`, a name derived here and validated with
-               the regex and `git check-ref-format`; nothing else is ever pushed or deleted. Post
-               `merge-train` on the verified head and merge with --match-head-commit.
-  Comments carry fixed text; no PR- or plan-derived string is interpolated.
+THREE JOBS, EACH ON ITS OWN RUNNER
+----------------------------------
+  build    no secrets. Lists candidates live, squashes the verified heads in order, overlays the
+           generators from origin/main, regenerates in a scrubbed environment, and uploads ONE git
+           bundle holding ONE train. Everything it produces is untrusted.
+  publish  App token, fresh clone of origin/main, this script taken from origin/main and run with
+           `python3 -I -S`, isolated git config. Recomputes the batch live, rebuilds every member
+           squash with `git merge-tree --write-tree` onto its OWN commits, and requires each tree
+           to equal the bundle's commit for that step. Accepts the bundle's single regeneration
+           commit only within DERIVED_OUTPUTS, with no symlink or gitlink. Rejects any train whose
+           tree has a symlink/gitlink main does not. Then commits its OWN chain (commit-tree over
+           the verified trees), pushes it to `train/<run_id>-<attempt>`, records `tree=<sha>` as an
+           App status on that commit, and opens the draft carrier PR so CI runs.
+  settle   a later tick; App token; same isolation. For each App-authored carrier whose CI is done:
+           the App record must exist on the exact head, its tree must equal the commit's tree, the
+           chain's base must be live main, and every required context must be green on that sha.
+           Green: `merge-train` success on each verified member head, merge with the head sha
+           pinned. Red: halve (an App `bisect size N` status) or, at one member, name the culprit.
+           Also computes the fast lane from live data. Comments are fixed text.
 
 MODES
 -----
-  rebuild --state DIR --run-id N --attempt N   step A; writes DIR/state.json (no App token)
-  publish --state DIR --run-id N --attempt N   steps B + C; --shadow posts, never merges
-  --dry-run                                    rebuild only prints; publish refuses to run
-  --self-test                                  pure logic + a synthetic git repository (no network)
-  --check-declaration                          merge-train.yml still wires the steps per ADR-0343
+  build --out DIR                  (no secrets) DIR/train.bundle, or nothing
+  publish --bundle DIR             (App token)  verify + push own commits + open carrier
+  settle                           (App token)  judge finished carriers, merge, bisect, fast lane
+  --shadow                         settle posts statuses and comments, never merges
+  --self-test                      pure logic + a synthetic repository driven through real ticks
+  --check-declaration              merge-train.yml still wires the three jobs per ADR-0343
 """
 from __future__ import annotations
 
 import argparse
 import base64
-import datetime as dt
 import fnmatch
 import json
 import os
@@ -56,57 +63,86 @@ import shlex
 import subprocess
 import sys
 import tempfile
-import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
 API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 WORKFLOW = pathlib.Path(".github/workflows/merge-train.yml")
-REGEN_INVENTORY = pathlib.Path(".github/scripts/regen-derived.sh")
+REGEN_INVENTORY = ".github/scripts/regen-derived.sh"
 
 # The commit-status context this script owns. check-ruleset-context-parity.py reads this
 # declaration, which is what lets the context be REQUIRED although no pull_request job emits it.
 STATUS_CONTEXT = "merge-train"
+RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed
+BOT_LOGIN = "openbank-gitops-bot[bot]"          # the only creator whose statuses/PRs are trusted
 EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 CARRIER_LABEL = "merge-train"
-# The ONLY refs this script ever pushes or deletes. Derived from the run, never read from input.
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-# Contexts that judge the PR object (its body, its issue link), not the tree. Green on every
-# member already; a carrier PR cannot meaningfully re-earn them and must not wait on them.
+BUNDLE_FILE = "train.bundle"
+BUNDLE_REF = "refs/heads/merge-train-bundle"
+# Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
 OK_STATES = frozenset({"success"})
-# Fast-lane exclusions. Prefixes are directory prefixes; globs are fnmatch over the whole path.
+# Fast-lane exclusions.
 PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/", "docs/adr/", ".github/")
 PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
-# Code step A EXECUTES against a rebuilt tree. A PR touching any of these never qualifies (it would
-# run its own change with the generators' authority); step A also overlays these paths from the
-# trusted base before running anything and refuses the train if one still differs.
-GENERATOR_PREFIXES = (".github/scripts/",)
-GENERATOR_GLOBS = ("docs/adr/*.sh", "openbank-infra/gitops/*/gen-*", "openbank-infra/gitops/*/*/gen-*",
-                   "openbank-infra/gitops/*/*/*/gen-*")
+# A member touching any of these never rides a train: generators, gate scripts, gates.yaml, the
+# regen inventory and the WORKFLOWS that run the freshness gates all live under `.github/`, and
+# the regeneration-content argument rests on CI running main's copies of them.
+UNTRAINABLE_PREFIXES = (".github/",)
+UNTRAINABLE_GLOBS = ("docs/adr/*.sh", "openbank-infra/gitops/*/gen-*", "openbank-infra/gitops/*/*/gen-*",
+                     "openbank-infra/gitops/*/*/*/gen-*")
 GENERATOR_OVERLAY_ROOTS = (".github/scripts", "docs/adr", "openbank-infra/gitops")
 REGEN_COMMANDS = ("bash .github/scripts/regen-derived.sh --all", "bash docs/adr/gen-index.sh")
-# The ONLY environment the generators see. No token of any kind, and no RUNNER_TEMP / GITHUB_*
-# paths (the state file and the step-handoff files live there).
+SPECIAL_MODES = ("120000", "160000")           # symlink, gitlink
 GENERATOR_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
                            "PYTHONIOENCODING", "PYTHONDONTWRITEBYTECODE", "SSL_CERT_FILE")
 REGEN_COMMIT_SUBJECT = "chore(train): regenerate derived files"
+OWN_MEMBER_RE = re.compile(r"^merge-train: member #([0-9]+)\n\nPR-Number: #\1\nPR-Head: ([0-9a-f]{40})\n$")
+OWN_REGEN_MSG = "merge-train: regenerate derived files\n"
+BISECT_RE = re.compile(r"^bisect size ([0-9]+)$")
+RECORD_RE = re.compile(r"^tree=([0-9a-f]{40})$")
 COMMENT_MARK = "<!-- merge-train -->"
-STATE_FILE = "state.json"
-# Fixed comment text. Nothing from a PR, a plan, a branch or a commit is ever interpolated.
+# Fixed comment text. Nothing from a PR, a bundle, a branch or a commit is ever interpolated.
 DROP_MESSAGE = ("merge-train: this PR did not apply cleanly on top of main together with the PRs ahead of "
-                "it in this train, so it was left out of the train. Rebase on main; the next train "
-                "picks it up again.")
+                "it in this train, so it was left out. Rebase on main; the next train picks it up again.")
 CULPRIT_MESSAGE = ("merge-train: a train over main isolated this PR as the cause of a failing required "
                    "check, and its `merge-train` status is now failure. Push a fix; the next train that "
                    "passes clears it. The workflow run linked from the status has the details.")
+MANUAL_LANE_MESSAGE = ("merge-train: the train containing only this PR could not be verified by the merge "
+                       "train (for example, it adds a symlink or its regeneration touches a file outside the "
+                       "derived-output inventory). It needs the owner's manual lane; see ADR-0343.")
 
 
 def log(msg: str) -> None:
     print(msg, flush=True)
+
+
+# --------------------------------------------------------------------------- pure: paths
+def glob_match(pattern: str, path: str) -> bool:
+    """fnmatch where `*` never crosses a `/` (fnmatch's `*` does)."""
+    rx = "".join("[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c) for c in pattern)
+    return re.fullmatch(rx, path) is not None
+
+
+def is_untrainable_path(path: str) -> bool:
+    return any(path.startswith(p) for p in UNTRAINABLE_PREFIXES) or any(glob_match(g, path) for g in UNTRAINABLE_GLOBS)
+
+
+def derived_output_patterns(script_text: str) -> list[str]:
+    m = re.search(r"^DERIVED_OUTPUTS=\((.*?)^\)", script_text, re.MULTILINE | re.DOTALL)
+    return re.findall(r'"([^"]+)"', m.group(1)) if m else []
+
+
+def regen_inventory_fragments(script_text: str) -> list[str]:
+    """The source path fragments of regen-derived.sh's GENERATORS inventory ("id|cmd|frag frag")."""
+    frags: list[str] = []
+    for m in re.finditer(r'^\s*"([^"|]+)\|([^"|]+)\|([^"]*)"', script_text, re.MULTILINE):
+        frags += m.group(3).split()
+    return frags
 
 
 # --------------------------------------------------------------------------- pure: candidates
@@ -118,18 +154,13 @@ class Member:
     head_sha: str
     head_ref: str
     created_at: str
-    ref: str = ""            # local git ref holding the VERIFIED head
+    ref: str = ""
     files: list[str] = field(default_factory=list)
 
 
-def is_generator_path(path: str) -> bool:
-    if any(path.startswith(p) for p in GENERATOR_PREFIXES):
-        return True
-    return any(fnmatch.fnmatch(path, g) for g in GENERATOR_GLOBS)
-
-
-def qualifies(pr: dict, required: list[str], checks: dict[str, str | None]) -> tuple[bool, str]:
-    """`checks` maps context -> conclusion/state (None = still running, absent = never reported)."""
+def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
+              app: dict[str, tuple[str, str]] | None = None) -> tuple[bool, str]:
+    """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses."""
     if pr.get("state", "open") != "open":
         return False, f"state {pr.get('state')}"
     if pr.get("draft"):
@@ -143,8 +174,10 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None]) -> t
         if ref.startswith(pre):
             return False, f"excluded prefix {pre}"
     for f in pr.get("files") or []:
-        if is_generator_path(f):
-            return False, f"modifies a generator path ({f}) — manual lane, never a train"
+        if is_untrainable_path(f):
+            return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
+    if (app or {}).get(STATUS_CONTEXT, ("", ""))[0] == "failure":
+        return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
     for name, state in checks.items():
@@ -164,15 +197,6 @@ def order_candidates(prs: list[dict]) -> list[dict]:
     return sorted(prs, key=lambda p: (p.get("created_at") or "", p["number"]))
 
 
-# --------------------------------------------------------------------------- pure: fast lane
-def regen_inventory_fragments(script_text: str) -> list[str]:
-    """The source path fragments of regen-derived.sh's GENERATORS inventory ("id|cmd|frag frag")."""
-    frags: list[str] = []
-    for m in re.finditer(r'^\s*"([^"|]+)\|([^"|]+)\|([^"]*)"', script_text, re.MULTILINE):
-        frags += m.group(3).split()
-    return frags
-
-
 def is_protected(path: str, fragments: list[str]) -> str | None:
     for pre in PROTECTED_PREFIXES:
         if path.startswith(pre):
@@ -180,8 +204,7 @@ def is_protected(path: str, fragments: list[str]) -> str | None:
     for g in PROTECTED_GLOBS:
         if fnmatch.fnmatch(path, g):
             return g
-    # Same semantics as regen-derived.sh's matches_any(): a fixed-string substring match.
-    for frag in fragments:
+    for frag in fragments:          # same semantics as regen-derived.sh's matches_any()
         if frag in path:
             return f"regen-derived inventory ({frag})"
     return None
@@ -202,14 +225,20 @@ def fast_lane_eligible(pr_files: list[str], main_files: list[str], other_files: 
     return True, "disjoint from main and from the batch, no protected path"
 
 
-def foreign_advance_tolerable(foreign_files: list[str], train_files: list[str],
-                              fragments: list[str]) -> bool:
-    """A foreign merge during the train is harmless iff it would have fast-laned past the train."""
-    ok, _ = fast_lane_eligible(foreign_files, train_files, [], fragments)
-    return ok
+def bisect_size(app: dict[str, tuple[str, str]]) -> int | None:
+    state, desc = app.get(STATUS_CONTEXT, ("", ""))
+    m = BISECT_RE.fullmatch(desc or "") if state == "pending" else None
+    return int(m.group(1)) if m else None
 
 
-# --------------------------------------------------------------------------- pure: messages, names
+def select_batch(train_cands: list[Member], sizes: dict[int, int | None], default: int) -> list[Member]:
+    """Oldest first. A bisect size on the OLDEST candidate caps the batch (halving across ticks)."""
+    if not train_cands:
+        return []
+    limit = sizes.get(train_cands[0].number) or default
+    return train_cands[:max(1, min(limit, default))]
+
+
 def first_paragraph(body: str | None) -> str:
     text = (body or "").replace("\r", "")
     for para in re.split(r"\n\s*\n", text):
@@ -224,220 +253,132 @@ def squash_message(m: Member) -> str:
     return f"{m.title}\n\n{para}\n\nPR-Number: #{m.number}\n" if para else f"{m.title}\n\nPR-Number: #{m.number}\n"
 
 
-def train_key(members: list[Member]) -> str:
-    return "-".join(str(m.number) for m in members)
-
-
-def ref_format_ok(name: str) -> bool:
-    return subprocess.run(["git", "check-ref-format", f"refs/heads/{name}"], capture_output=True).returncode == 0
+def own_member_message(n: int, head: str) -> str:
+    return f"merge-train: member #{n}\n\nPR-Number: #{n}\nPR-Head: {head}\n"
 
 
 def train_branch(run_id: str, attempt: str) -> str:
-    """The one branch name this run may push or delete. Derived from the run; validated twice."""
     name = f"train/{run_id}-{attempt}"
     assert_train_branch(name)
     return name
 
 
 def assert_train_branch(name: str) -> None:
-    if not TRAIN_BRANCH_RE.fullmatch(name or "") or not ref_format_ok(name):
+    ok = bool(TRAIN_BRANCH_RE.fullmatch(name or "")) and subprocess.run(
+        ["git", "check-ref-format", f"refs/heads/{name}"], capture_output=True).returncode == 0
+    if not ok:
         raise ValueError(f"refusing ref {name!r}: not of the form train/<run_id>-<attempt>")
 
 
-def base_current(live_main: str, base: str) -> str | None:
-    """Step C may act only over the exact main step A rebuilt on."""
-    if not SHA_RE.fullmatch(base or "") or not SHA_RE.fullmatch(live_main or ""):
-        return "base or live main is not a full sha"
-    if live_main != base:
-        return f"main moved since the rebuild ({base[:12]} -> {live_main[:12]}); the next tick rebuilds"
-    return None
-
-
-# --------------------------------------------------------------------------- pure: bisect + binding
-@dataclass
-class Outcome:
-    mergeable: list[Member] = field(default_factory=list)      # longest verified prefix
-    culprits: dict[int, list[str]] = field(default_factory=dict)
-    deferred: list[Member] = field(default_factory=list)
-    dropped: dict[int, str] = field(default_factory=dict)
-    trains: int = 0
-    unverified: bool = False
-
-
-def bisect(members: list[Member], verify, out: Outcome, prefix_open: bool = True) -> None:
-    """verify(members) -> (status, failing) with status in {green, red, unknown}.
-
-    Depth-first, left half first. `prefix_open` is True while every train to the left of this
-    one was green, i.e. while a green result here still extends the mergeable PREFIX. A green
-    train to the right of a red one is verified over main, not over the prefix, so it is deferred.
-    """
-    if not members:
-        return
-    status, failing = verify(members)
-    out.trains += 1
-    if status == "unknown":
-        out.unverified = True
-        out.deferred += members
-        return
-    if status == "green":
-        if prefix_open:
-            out.mergeable += members
-        else:
-            out.deferred += members
-        return
-    if len(members) == 1:
-        out.culprits[members[0].number] = failing
-        return
-    mid = len(members) // 2
-    bisect(members[:mid], verify, out, prefix_open)
-    # The right half can never extend the prefix: the whole was red, so even a green right half
-    # is only verified over main, not over the left half. A red whole whose two halves are both
-    # green has no single culprit (the pair conflicts): the left half merges, the right half is
-    # deferred and fails on its own against the new main, which is what identifies it.
-    bisect(members[mid:], verify, out, False)
-
-
-def bisect_tree(members: list[Member]) -> list[list[Member]]:
-    """Every batch the bisect above can ask for, whole first: 2N-1 lists for N members."""
-    if not members:
-        return []
-    out = [members]
-    if len(members) > 1:
-        mid = len(members) // 2
-        out += bisect_tree(members[:mid]) + bisect_tree(members[mid:])
-    return out
-
-
-@dataclass
-class TrainRecord:
-    key: str
-    sha: str
-    tree: str
-    applied: list[int]
-    dropped: dict[int, str]            # reason is for the log only; it never reaches a comment
-    commits: int
-
-    def to_json(self) -> dict:
-        return {"key": self.key, "sha": self.sha, "tree": self.tree, "applied": self.applied,
-                "dropped": sorted(self.dropped), "commits": self.commits}
-
-    @staticmethod
-    def from_json(d: dict) -> "TrainRecord":
-        return TrainRecord(d["key"], d["sha"], d["tree"], [int(x) for x in d["applied"]],
-                           {int(n): "dropped in rebuild" for n in d["dropped"]}, int(d["commits"]))
-
-
-def bind_problem(batch: list[Member], rec: TrainRecord | None) -> str | None:
-    """A record is usable for exactly the batch it was built for: same key, applied an ordered
-    subsequence of the batch, applied + dropped == the batch."""
-    if rec is None:
-        return "no train was built for this batch"
-    numbers = [m.number for m in batch]
-    if rec.key != train_key(batch):
-        return f"record key {rec.key} is not batch {train_key(batch)}"
-    it = iter(numbers)
-    if not all(n in it for n in rec.applied):
-        return f"applied {rec.applied} is not an ordered subset of batch {numbers}"
-    if set(rec.applied) | set(rec.dropped) != set(numbers) or set(rec.applied) & set(rec.dropped):
-        return f"applied {rec.applied} + dropped {sorted(rec.dropped)} != batch {numbers}"
-    if not SHA_RE.fullmatch(rec.sha) or not SHA_RE.fullmatch(rec.tree):
-        return "record sha/tree is not a full sha"
-    return None
-
-
-def ci_tree_problem(git, ci_head: str, own: TrainRecord) -> str | None:
-    """Step B: the tree CI ran on must be byte-identical to the tree this script built."""
-    if not SHA_RE.fullmatch(ci_head or ""):
-        return f"CI head {ci_head!r} is not a full sha"
-    r = git("rev-parse", "--verify", "--quiet", f"{ci_head}^{{tree}}", check=False)
-    if r.returncode != 0:
-        return f"CI head {ci_head[:12]} is not present locally"
-    tree = r.stdout.strip()
-    if tree != own.tree:
-        return f"CI ran on tree {tree[:12]}, this run built {own.tree[:12]}"
-    return None
-
-
-# --------------------------------------------------------------------------- git: step A
+# --------------------------------------------------------------------------- git
 def sh(cmd: list[str], cwd: str | None = None, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=check, env=env)
 
 
-def generator_env() -> dict[str, str]:
+def base_env() -> dict[str, str]:
+    """Allowlisted environment with isolated git config. No token of any kind."""
     env = {k: os.environ[k] for k in GENERATOR_ENV_ALLOWLIST if k in os.environ}
     env.update({"GIT_AUTHOR_NAME": "openbank-gitops-bot", "GIT_COMMITTER_NAME": "openbank-gitops-bot",
                 "GIT_AUTHOR_EMAIL": "gitops-bot@openbank.invalid", "GIT_COMMITTER_EMAIL": "gitops-bot@openbank.invalid",
-                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0"})
     return env
 
 
+def generator_env() -> dict[str, str]:
+    """The ONLY environment build's generators see: no token, no RUNNER_TEMP, no GITHUB_*."""
+    return base_env()
+
+
+class Git:
+    """Isolated git: no system/global config, no hooks, no fsmonitor; credentials only per call."""
+
+    def __init__(self, workdir: str, token: str | None = None):
+        self.workdir, self.token = workdir, token
+
+    def __call__(self, *args: str, check: bool = True, auth: bool = False) -> subprocess.CompletedProcess:
+        env = base_env()
+        if auth and self.token:
+            basic = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
+            env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+                        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
+        return sh(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
+                  cwd=self.workdir, check=check, env=env)
+
+    def tree(self, rev: str) -> str:
+        r = self("rev-parse", "--verify", "--quiet", f"{rev}^{{tree}}", check=False)
+        return r.stdout.strip() if r.returncode == 0 else ""
+
+    def special_entries(self, rev: str) -> set[tuple[str, str, str]]:
+        """{(mode, oid, path)} for every symlink/gitlink in the tree of `rev`."""
+        entries = set()
+        for rec in self("ls-tree", "-r", "-z", rev).stdout.split("\0"):
+            if not rec:
+                continue
+            meta, _, path = rec.partition("\t")
+            mode, _typ, oid = meta.split()
+            if mode in SPECIAL_MODES:
+                entries.add((mode, oid, path))
+        return entries
+
+
+class Pusher:
+    """The only code path that writes refs: a full sha to the run's own train branch, or its delete."""
+
+    def __init__(self, git, branch: str, remote: str):
+        assert_train_branch(branch)
+        self.git, self.branch, self.remote = git, branch, remote
+
+    def push(self, sha: str) -> None:
+        assert_train_branch(self.branch)
+        if not SHA_RE.fullmatch(sha):
+            raise ValueError(f"refusing to push non-sha {sha!r}")
+        self.git("push", "-q", "-f", self.remote, f"{sha}:refs/heads/{self.branch}", auth=True)
+
+    def delete(self) -> None:
+        assert_train_branch(self.branch)
+        self.git("push", "-q", self.remote, "--delete", f"refs/heads/{self.branch}", check=False, auth=True)
+
+
+# --------------------------------------------------------------------------- build (untrusted)
 class TrainBuilder:
-    """Rebuilds train commits from VERIFIED heads in a working copy. Pure git + trusted generators."""
+    """Squashes verified heads in a working copy and regenerates with main's generators. No secrets."""
 
     def __init__(self, workdir: str, regen_commands: tuple[str, ...] = REGEN_COMMANDS,
                  overlay_roots: tuple[str, ...] = GENERATOR_OVERLAY_ROOTS):
-        self.workdir = workdir
-        self.regen_commands = regen_commands
-        self.overlay_roots = overlay_roots
+        self.workdir, self.regen_commands, self.overlay_roots = workdir, regen_commands, overlay_roots
         self.env = generator_env()
 
     def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-        return sh(["git", *args], cwd=self.workdir, check=check, env=self.env)
+        return sh(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.workdir, check=check, env=self.env)
 
-    def build(self, base: str, members: list[Member]) -> TrainRecord:
+    def build(self, base: str, members: list[Member]) -> tuple[str, list[int], list[int]]:
         self.git("checkout", "-q", "--detach", "-f", base)
         self.git("clean", "-qfdx")
-        applied: list[Member] = []
-        dropped: dict[int, str] = {}
+        applied: list[int] = []
+        dropped: list[int] = []
         for m in members:
             r = self.git("merge", "--squash", "--no-commit", m.ref, check=False)
-            if r.returncode != 0:
-                conflicts = self.git("diff", "--name-only", "--diff-filter=U", check=False).stdout.split()
+            staged = self.git("diff", "--cached", "--name-only").stdout.split() if r.returncode == 0 else []
+            if r.returncode != 0 or not staged:
                 self.git("merge", "--abort", check=False)
                 self.git("reset", "-q", "--hard", "HEAD")
-                dropped[m.number] = f"conflicts in {conflicts[:5]}"
-                continue
-            staged = self.git("diff", "--cached", "--name-only").stdout.split()
-            if not staged:
-                self.git("reset", "-q", "--hard", "HEAD")
-                dropped[m.number] = "empty after squash"
-                continue
-            tampered = [f for f in staged if is_generator_path(f)]
-            if tampered:
-                # Belt: qualifies() already refused it. Braces: never run a member's generator.
-                self.git("reset", "-q", "--hard", "HEAD")
-                dropped[m.number] = f"modifies a generator path ({tampered[0]})"
+                dropped.append(m.number)
                 continue
             self.git("commit", "-q", "-m", squash_message(m))
-            applied.append(m)
-        commits = len(applied)
+            applied.append(m.number)
         if applied:
-            try:
-                self.overlay_trusted_generators(base)
-            except RuntimeError as exc:
-                log(f"::error::train {train_key(members)}: {exc}")
-                self.git("reset", "-q", "--hard", base)
-                for m in applied:
-                    dropped[m.number] = f"train refused: {exc}"
-                applied, commits = [], 0
-            else:
-                if self.regenerate():
-                    commits += 1
-        sha = self.git("rev-parse", "HEAD").stdout.strip()
-        tree = self.git("rev-parse", "HEAD^{tree}").stdout.strip()
-        return TrainRecord(train_key(members), sha, tree, [m.number for m in applied], dropped, commits)
+            self.overlay_trusted_generators(base)
+            self.regenerate()
+        return self.git("rev-parse", "HEAD").stdout.strip(), applied, dropped
 
     def overlay_trusted_generators(self, base: str) -> None:
-        """Replace every generator path in the tree with the TRUSTED BASE's copy, and refuse if a
-        generator path still differs from the base (modified, or added and so not in the base)."""
-        roots = [p for p in self.overlay_roots
-                 if self.git("cat-file", "-e", f"{base}:{p}", check=False).returncode == 0]
+        roots = [p for p in self.overlay_roots if self.git("cat-file", "-e", f"{base}:{p}", check=False).returncode == 0]
         if roots:
             archive = subprocess.run(["git", "archive", base, "--", *roots], cwd=self.workdir,
                                      capture_output=True, check=True, env=self.env).stdout
             subprocess.run(["tar", "-x", "-C", self.workdir], input=archive, check=True, capture_output=True)
-        added = [f for f in self.git("diff", "--name-only", "--diff-filter=A", base, "HEAD").stdout.split() if is_generator_path(f)]
-        dirty = [ln[3:].strip() for ln in self.git("status", "--porcelain").stdout.splitlines() if is_generator_path(ln[3:].strip())]
+        added = [f for f in self.git("diff", "--name-only", "--diff-filter=A", base, "HEAD").stdout.split() if is_untrainable_path(f)]
+        dirty = [ln[3:].strip() for ln in self.git("status", "--porcelain").stdout.splitlines() if is_untrainable_path(ln[3:].strip())]
         if added or dirty:
             raise RuntimeError(f"generator paths differ from the trusted base after overlay: added={added[:5]} modified={dirty[:5]}")
 
@@ -445,8 +386,6 @@ class TrainBuilder:
         for cmd in self.regen_commands:
             r = subprocess.run(shlex.split(cmd), cwd=self.workdir, text=True, capture_output=True, env=self.env)
             if r.returncode != 0:
-                # A generator that cannot run is a red train, not a silent skip: commit nothing
-                # for it and let CI say so on the carrier.
                 log(f"::warning::regen command failed ({cmd}): {r.stderr.strip()[-300:]}")
         changed = self.git("ls-files", "-m", "-o", "--exclude-standard").stdout.split()
         if not changed:
@@ -455,79 +394,121 @@ class TrainBuilder:
         self.git("commit", "-q", "-m", REGEN_COMMIT_SUBJECT)
         return True
 
-    def files_of(self, a: str, b: str) -> list[str]:
-        return self.git("diff", "--name-only", f"{a}...{b}").stdout.split()
+
+# --------------------------------------------------------------------------- publish (trusted)
+class Reject(Exception):
+    def __init__(self, reason: str, member_fault: bool = True):
+        super().__init__(reason)
+        self.member_fault = member_fault
 
 
-def prebuild(builder: TrainBuilder, base: str, members: list[Member]) -> dict[str, TrainRecord]:
-    """Rebuild the whole batch and every bisect half over the same base."""
-    trains: dict[str, TrainRecord] = {}
-    for batch in bisect_tree(members):
-        rec = builder.build(base, batch)
-        trains[rec.key] = rec
-        log(f"  rebuilt {rec.key}: applied={rec.applied} dropped={sorted(rec.dropped)} tree={rec.tree[:12]}")
-    return trains
+@dataclass
+class Verified:
+    tip: str
+    tree: str
+    applied: list[int]
+    dropped: list[int]
 
 
-# --------------------------------------------------------------------------- orchestration
-def run_train(hub, base_sha: str, members: list[Member], trains: dict[str, TrainRecord], verify,
-              fragments: list[str], train_files: list[str], invalid: frozenset[int] = frozenset()) -> Outcome:
-    """Bisect over this run's OWN trains, then the status/merge phase. `verify(rec) -> (status, failing)`."""
-    out = Outcome()
+def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: str,
+                        outputs: list[str]) -> Verified:
+    """Re-derive the train execution-free and require the bundle to match it step by step.
+    Returns publish's OWN commit chain (commit-tree over verified trees) — the bundle's commits are
+    never pushed. Raises Reject."""
+    if not SHA_RE.fullmatch(bundle_tip):
+        raise Reject("bundle tip is not a full sha", member_fault=False)
+    chain = git("rev-list", "--reverse", "--first-parent", f"{base}..{bundle_tip}").stdout.split()
+    every = git("rev-list", f"{base}..{bundle_tip}").stdout.split()
+    if not chain or len(every) != len(chain):
+        raise Reject("bundle is not one linear chain over the live base", member_fault=False)
+    if git("rev-parse", f"{chain[0]}^").stdout.strip() != base:
+        raise Reject("bundle chain does not start at the live base", member_fault=False)
+    for c in chain:
+        if len(git("rev-list", "--parents", "-n", "1", c).stdout.split()) != 2:
+            raise Reject(f"bundle commit {c[:12]} is not a single-parent commit", member_fault=False)
 
-    def verify_batch(batch: list[Member]) -> tuple[str, list[str]]:
-        rec = trains.get(train_key(batch))
-        problem = bind_problem(batch, rec)
-        if problem or set(rec.applied) & invalid:
-            log(f"::warning::batch {train_key(batch)} unusable: {problem or 'carries a member rejected live'}")
-            return "unknown", []
-        for n in rec.dropped:
-            if n not in out.dropped:
-                out.dropped[n] = rec.dropped[n]
-                hub.comment(n, DROP_MESSAGE)
-        kept = [m for m in batch if m.number in rec.applied]
-        batch[:] = kept   # bisect halves what APPLIED, so a dropped member is never a culprit
-        if not kept:
-            return "green", []
-        status, failing = verify(rec)
-        log(f"  train {rec.key} ({rec.applied}) -> {status} {failing}")
-        return status, failing
+    own, own_tree = base, git.tree(base)
+    applied: list[int] = []
+    dropped: list[int] = []
+    idx = 0
+    for m in members:
+        r = git("merge-tree", "--write-tree", own, m.head_sha, check=False)
+        if r.returncode not in (0, 1):
+            raise Reject(f"merge-tree failed for #{m.number}: rc={r.returncode}", member_fault=False)
+        tree = r.stdout.split()[0] if r.stdout.split() else ""
+        if r.returncode == 1 or tree == own_tree:
+            dropped.append(m.number)
+            continue
+        if idx >= len(chain):
+            raise Reject(f"bundle has no commit for #{m.number}", member_fault=False)
+        if git.tree(chain[idx]) != tree:
+            raise Reject(f"bundle commit for #{m.number} differs from the merge-tree rebuild", member_fault=False)
+        own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
+        own_tree = tree
+        applied.append(m.number)
+        idx += 1
+    rest = chain[idx:]
+    if len(rest) > 1:
+        raise Reject(f"bundle carries {len(rest)} commits beyond its members", member_fault=False)
+    if rest:
+        regen = rest[0]
+        raw = git("diff-tree", "-r", "--raw", "-z", "--no-commit-id", f"{regen}^", regen).stdout.split("\0")
+        i = 0
+        while i < len(raw) - 1:
+            meta, path = raw[i], raw[i + 1]
+            i += 2
+            if not meta.startswith(":"):
+                continue
+            new_mode = meta[1:].split()[1]
+            if new_mode in SPECIAL_MODES:
+                raise Reject(f"regeneration commit adds a symlink/gitlink: {path}")
+            if not any(glob_match(g, path) for g in outputs):
+                raise Reject(f"regeneration commit touches {path}, which is not a declared derived output")
+        own = git("commit-tree", git.tree(regen), "-p", own, "-m", OWN_REGEN_MSG).stdout.strip()
+        own_tree = git.tree(regen)
+    if not applied:
+        raise Reject("no member applied", member_fault=False)
+    extra = git.special_entries(own) - git.special_entries(base)
+    if extra:
+        raise Reject(f"train tree contains a symlink/gitlink main does not: {sorted(p for _, _, p in extra)[:3]}")
+    return Verified(own, own_tree, applied, dropped)
 
-    bisect(list(members), verify_batch, out)
-    out.deferred = [m for m in out.deferred if m.number not in out.dropped]
 
-    for n in out.culprits:
-        m = next(x for x in members if x.number == n)
-        hub.post_status(m.head_sha, "failure", f"isolated as the cause of a red train over main {base_sha[:12]}")
-        hub.comment(n, CULPRIT_MESSAGE)
-
-    expected = base_sha
-    for i, m in enumerate(out.mergeable):
-        if not (hub.dry_run or hub.shadow):
-            actual = hub.main_sha()
-            if actual != expected:
-                foreign = hub.compare_files(expected, actual)
-                if foreign_advance_tolerable(foreign, train_files, fragments):
-                    log(f"  main advanced by a disjoint foreign merge ({actual[:12]}); continuing")
-                    expected = actual
-                else:
-                    log(f"::warning::main advanced by a foreign merge touching train files ({actual[:12]}); deferring {[x.number for x in out.mergeable[i:]]}")
-                    out.deferred = out.mergeable[i:] + out.deferred
-                    out.mergeable = out.mergeable[:i]
-                    break
-        hub.post_status(m.head_sha, "success", f"verified on train over main {base_sha[:12]}")
-        merged = hub.merge(m.number, m.head_sha)
-        if merged:
-            expected = merged
-        elif not (hub.dry_run or hub.shadow):
-            log(f"::warning::#{m.number} did not merge; deferring the rest")
-            out.deferred = out.mergeable[i + 1:] + out.deferred
-            out.mergeable = out.mergeable[:i + 1]
+# --------------------------------------------------------------------------- settle (trusted)
+def parse_own_chain(git: Git, tip: str, limit: int = 64) -> tuple[str, list[tuple[int, str]]] | None:
+    """Walk publish's own commits down from `tip`. -> (base, [(pr, head)]) or None if not ours."""
+    members: list[tuple[int, str]] = []
+    cur = tip
+    for _ in range(limit):
+        msg = git("log", "-1", "--format=%B", cur).stdout.rstrip("\n") + "\n"
+        m = OWN_MEMBER_RE.fullmatch(msg)
+        if not (m or (msg == OWN_REGEN_MSG and cur == tip)):
             break
-    return out
+        if m:
+            members.append((int(m.group(1)), m.group(2)))
+        parents = git("rev-list", "--parents", "-n", "1", cur).stdout.split()[1:]
+        if len(parents) != 1:
+            return None
+        cur = parents[0]
+    else:
+        return None
+    if not members:
+        return None
+    return cur, list(reversed(members))
 
 
-# --------------------------------------------------------------------------- GitHub side
+def record_problem(record_desc: str | None, record_creator: str | None, sha_tree: str) -> str | None:
+    if record_creator != BOT_LOGIN:
+        return "no merge-train/record status from the App on this exact sha"
+    m = RECORD_RE.fullmatch(record_desc or "")
+    if not m:
+        return "malformed record"
+    if not sha_tree or m.group(1) != sha_tree:
+        return f"tree {sha_tree[:12] or '?'} is not the recorded tree {m.group(1)[:12]}"
+    return None
+
+
+# --------------------------------------------------------------------------- GitHub
 def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
     req = urllib.request.Request(API + path, method=method,
                                  data=json.dumps(body).encode() if body is not None else None)
@@ -561,345 +542,285 @@ def paginate(path: str, key: str | None = None) -> list:
         page += 1
 
 
-def required_policy(repo: str, branch: str) -> tuple[list[str], bool]:
-    rules = get(f"/repos/{repo}/rules/branches/{branch}")
-    ctx: list[str] = []
-    strict = False
-    for r in rules:
-        if r.get("type") == "required_status_checks":
-            p = r["parameters"]
-            ctx += [c["context"] for c in p["required_status_checks"]]
-            strict |= p.get("strict_required_status_checks_policy") is True
-    return sorted(set(ctx)), strict
+class GitHub:
+    """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
+    def __init__(self, repo: str, branch: str, run_url: str):
+        self.repo, self.branch, self.run_url = repo, branch, run_url
+        self.remote = f"https://github.com/{repo}.git"
 
-def head_checks(repo: str, sha: str) -> dict[str, str | None]:
-    latest: dict[str, dict] = {}
-    for check in paginate(f"/repos/{repo}/commits/{sha}/check-runs", "check_runs"):
-        if check["name"] not in latest or check["id"] > latest[check["name"]]["id"]:
-            latest[check["name"]] = check
-    out = {name: (c["conclusion"] if c["status"] == "completed" else None) for name, c in latest.items()}
-    for st in sorted(get(f"/repos/{repo}/commits/{sha}/status")["statuses"], key=lambda s: s["id"], reverse=True):
-        out.setdefault(st["context"], None if st["state"] == "pending" else st["state"])
-    return out
+    def head_refspec(self, n: int) -> str:
+        return f"refs/pull/{int(n)}/head"
 
-
-def pr_files(repo: str, number: int) -> list[str]:
-    return [f["filename"] for f in paginate(f"/repos/{repo}/pulls/{number}/files")]
-
-
-def pr_view(repo: str, p: dict) -> dict:
-    return {"number": p["number"], "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
-            "same_repo": (p.get("head", {}).get("repo") or {}).get("full_name") == repo,
-            "head_ref": p["head"]["ref"], "head_sha": p["head"]["sha"], "created_at": p["created_at"],
-            "title": p.get("title", ""), "body": p.get("body") or ""}
-
-
-def git_auth_env(token: str) -> dict[str, str]:
-    """Credentials for ONE git process, via env-scoped config — never argv, never on disk."""
-    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return {**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"}
-
-
-class Pusher:
-    """The only code path that writes refs. It accepts a sha and pushes it to the run's own branch."""
-
-    def __init__(self, git, branch: str, repo_url: str, env: dict | None):
-        assert_train_branch(branch)
-        self.git, self.branch, self.repo_url, self.env = git, branch, repo_url, env
-
-    def push(self, sha: str) -> None:
-        assert_train_branch(self.branch)
-        if not SHA_RE.fullmatch(sha):
-            raise ValueError(f"refusing to push non-sha {sha!r}")
-        self.git("push", "-q", "-f", self.repo_url, f"{sha}:refs/heads/{self.branch}", env=self.env)
-
-    def delete(self) -> None:
-        assert_train_branch(self.branch)
-        self.git("push", "-q", self.repo_url, "--delete", f"refs/heads/{self.branch}", check=False, env=self.env)
-
-
-class Hub:
-    """Every GitHub side effect, in one place, so --shadow and the self-test can swap it."""
-
-    def __init__(self, repo: str, branch: str, run_url: str, dry_run: bool, shadow: bool):
-        self.repo, self.branch, self.run_url, self.dry_run, self.shadow = repo, branch, run_url, dry_run, shadow
-
-    def gh(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-        return sh(["gh", *args, "-R", self.repo], check=check)
-
-    def post_status(self, sha: str, state: str, description: str) -> None:
-        if not SHA_RE.fullmatch(sha):
-            raise SystemExit(f"::error::refusing to post a status on non-sha {sha!r}")
-        code, data = api("POST", f"/repos/{self.repo}/statuses/{sha}",
-                         {"state": state, "context": STATUS_CONTEXT, "description": description[:140],
-                          "target_url": self.run_url})
-        if code != 201:
-            raise SystemExit(f"::error::POST status on {sha} -> {code}: {data}")
-
-    def comment(self, number: int, text: str) -> None:
-        api("POST", f"/repos/{self.repo}/issues/{int(number)}/comments",
-            {"body": f"{COMMENT_MARK}\n{text}\n\n{self.run_url}"})
-
-    def merge(self, number: int, head_sha: str) -> str | None:
-        """Squash-merge exactly the verified head; returns the merge commit sha once MERGED, else None."""
-        if self.dry_run or self.shadow:
-            log(f"  [{'dry-run' if self.dry_run else 'shadow'}] would squash-merge #{number} @ {head_sha[:12]}")
-            return None
-        # Auto-merge is armed on every member, so once the required `merge-train` status lands
-        # GitHub may merge it before this call; a refusal here is therefore not an error.
-        # --match-head-commit: a push between verification and merge makes GitHub refuse.
-        self.gh("pr", "merge", str(int(number)), "--squash", "--match-head-commit", head_sha, check=False)
-        for _ in range(36):
-            pr = get(f"/repos/{self.repo}/pulls/{int(number)}")
-            if pr.get("merged"):
-                return pr["merge_commit_sha"] if pr.get("head", {}).get("sha") == head_sha else None
-            time.sleep(5)
-        return None
+    def required(self) -> list[str]:
+        ctx: list[str] = []
+        for r in get(f"/repos/{self.repo}/rules/branches/{self.branch}"):
+            if r.get("type") == "required_status_checks":
+                ctx += [c["context"] for c in r["parameters"]["required_status_checks"]]
+        return sorted(set(ctx))
 
     def main_sha(self) -> str:
         return get(f"/repos/{self.repo}/git/ref/heads/{self.branch}")["object"]["sha"]
 
-    def compare_files(self, base: str, head: str) -> list[str]:
-        return [f["filename"] for f in paginate(f"/repos/{self.repo}/compare/{base}...{head}", "files")]
+    def open_prs(self) -> list[dict]:
+        return paginate(f"/repos/{self.repo}/pulls?state=open&base={self.branch}")
 
-    def open_carrier(self, branch: str) -> int | None:
+    def pr(self, n: int) -> dict:
+        return get(f"/repos/{self.repo}/pulls/{int(n)}")
+
+    def pr_files(self, n: int) -> list[str]:
+        return [f["filename"] for f in paginate(f"/repos/{self.repo}/pulls/{int(n)}/files")]
+
+    def checks(self, sha: str) -> dict[str, str | None]:
+        latest: dict[str, dict] = {}
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check["name"] not in latest or check["id"] > latest[check["name"]]["id"]:
+                latest[check["name"]] = check
+        out = {name: (c["conclusion"] if c["status"] == "completed" else None) for name, c in latest.items()}
+        for st in sorted(get(f"/repos/{self.repo}/commits/{sha}/status")["statuses"], key=lambda s: s["id"], reverse=True):
+            out.setdefault(st["context"], None if st["state"] == "pending" else st["state"])
+        return out
+
+    def app_statuses(self, sha: str) -> dict[str, tuple[str, str]]:
+        """The App's own latest status per context on `sha` — statuses by anyone else are ignored."""
+        out: dict[str, tuple[str, str]] = {}
+        for st in sorted(paginate(f"/repos/{self.repo}/commits/{sha}/statuses"), key=lambda s: s["id"], reverse=True):
+            if (st.get("creator") or {}).get("login") == BOT_LOGIN:
+                out.setdefault(st["context"], (st["state"], st.get("description") or ""))
+        return out
+
+    def post_status(self, sha: str, state: str, description: str, context: str = STATUS_CONTEXT) -> None:
+        if not SHA_RE.fullmatch(sha):
+            raise SystemExit(f"::error::refusing a status on non-sha {sha!r}")
+        code, data = api("POST", f"/repos/{self.repo}/statuses/{sha}",
+                         {"state": state, "context": context, "description": description[:140], "target_url": self.run_url})
+        if code != 201:
+            raise SystemExit(f"::error::POST status on {sha} -> {code}: {data}")
+
+    def comment(self, n: int, text: str) -> None:
+        api("POST", f"/repos/{self.repo}/issues/{int(n)}/comments", {"body": f"{COMMENT_MARK}\n{text}\n\n{self.run_url}"})
+
+    def merge(self, n: int, head: str) -> str | None:
+        """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
+        code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
+        return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+
+    def create_carrier(self, branch: str) -> int | None:
         assert_train_branch(branch)
-        body = (f"{COMMENT_MARK}\nMerge-train carrier (ADR-0343). Each bisect step force-pushes the next train "
-                f"to this branch; CI runs on every push. Closed automatically when the run ends. Never merge this PR.\n")
-        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
-            fh.write(body)
-        r = self.gh("pr", "create", "--draft", "--base", self.branch, "--head", branch,
-                    "--title", f"merge-train carrier {branch}", "--body-file", fh.name, "--label", CARRIER_LABEL, check=False)
-        os.unlink(fh.name)
-        if r.returncode != 0:
-            log(f"::warning::carrier PR not created: {r.stderr.strip()[-300:]}")
+        code, data = api("POST", f"/repos/{self.repo}/pulls", {
+            "title": f"merge-train carrier {branch}", "head": branch, "base": self.branch, "draft": True,
+            "body": f"{COMMENT_MARK}\nMerge-train carrier (ADR-0343): CI on this head verifies one train. "
+                    "Closed automatically by the next settle. Never merge this PR."})
+        if code != 201:
+            log(f"::warning::carrier PR not created: {code} {data}")
             return None
-        m = re.search(r"/pull/(\d+)", r.stdout)
-        return int(m.group(1)) if m else None
+        api("POST", f"/repos/{self.repo}/issues/{data['number']}/labels", {"labels": [CARRIER_LABEL]})
+        return int(data["number"])
 
-    def carrier_head(self, number: int) -> str:
-        return get(f"/repos/{self.repo}/pulls/{int(number)}")["head"]["sha"]
-
-    def close_carrier(self, number: int | None) -> None:
-        if number is not None:
-            self.gh("pr", "close", str(int(number)), check=False)
+    def close_carrier(self, n: int) -> None:
+        api("PATCH", f"/repos/{self.repo}/pulls/{int(n)}", {"state": "closed"})
 
 
-class GitHubVerifier:
-    """Step B + the push half of step C, per train the bisect asks for."""
-
-    def __init__(self, hub: Hub, git, pusher: Pusher, required: list[str], wait_minutes: int, poll_seconds: int):
-        self.hub, self.git, self.pusher, self.required = hub, git, pusher, required
-        self.wait_minutes, self.poll_seconds = wait_minutes, poll_seconds
-        self.carrier: int | None = None
-
-    def __call__(self, rec: TrainRecord) -> tuple[str, list[str]]:
-        self.pusher.push(rec.sha)                      # this run's own commit, never input
-        if self.carrier is None:
-            self.carrier = self.hub.open_carrier(self.pusher.branch)
-            if self.carrier is None:
-                return "unknown", []
-        deadline = time.time() + self.wait_minutes * 60
-        while time.time() < deadline:
-            ci_head = self.hub.carrier_head(self.carrier)
-            if ci_head != rec.sha:
-                # Someone else moved the branch, or GitHub has not caught up yet. Fetch and judge
-                # by TREE: only a byte-identical tree is the train this run built.
-                self.git("fetch", "-q", "origin", f"refs/heads/{self.pusher.branch}", check=False)
-                problem = ci_tree_problem(self.git, ci_head, rec)
-                if problem:
-                    log(f"::error::train {rec.key}: {problem} — rejected")
-                    return "unknown", []
-            checks = head_checks(self.hub.repo, ci_head)
-            failing = [c for c in self.required if checks.get(c) not in (None, *OK_STATES) and c in checks]
-            pending = [c for c in self.required if c not in checks or checks[c] is None]
-            if failing:
-                return "red", failing
-            if not pending:
-                if ci_tree_problem(self.git, ci_head, rec):
-                    return "unknown", []
-                return "green", []
-            time.sleep(self.poll_seconds)
-        log(f"::warning::train {rec.key} did not finish CI within {self.wait_minutes} min — unverified")
-        return "unknown", []
-
-    def finish(self) -> None:
-        self.hub.close_carrier(self.carrier)
-        self.pusher.delete()
+def is_carrier(pr: dict, repo: str) -> bool:
+    return ((pr.get("user") or {}).get("login") == BOT_LOGIN and TRAIN_BRANCH_RE.fullmatch(pr["head"]["ref"]) is not None
+            and (pr["head"].get("repo") or {}).get("full_name") == repo)
 
 
-# --------------------------------------------------------------------------- modes
-def rebuild(args: argparse.Namespace) -> int:
-    """Step A. Holds no App token; GH_TOKEN here is the read-only GITHUB_TOKEN, and the generators
-    never see it (scrubbed env). Everything recorded is computed here from live data."""
-    repo, branch = args.repo, args.branch
-    train_branch(args.run_id, args.attempt)       # fail early on a malformed run id
-    state_dir = pathlib.Path(args.state)
-    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    required, strict = required_policy(repo, branch)
+def pr_view(repo: str, p: dict, files: list[str]) -> dict:
+    return {"number": p["number"], "state": p.get("state"), "draft": p.get("draft"), "auto_merge": p.get("auto_merge"),
+            "same_repo": (p["head"].get("repo") or {}).get("full_name") == repo, "head_ref": p["head"]["ref"],
+            "head_sha": p["head"]["sha"], "created_at": p.get("created_at", ""), "title": p.get("title", ""),
+            "body": p.get("body") or "", "files": files}
+
+
+def live_candidates(gh, git, repo: str, required: list[str], limit: int = 64) -> tuple[list[Member], dict[int, dict]]:
+    """Open PRs that qualify RIGHT NOW, with their heads fetched and the fetched sha == the API sha."""
     member_required = [c for c in required if c != STATUS_CONTEXT]
-    log(f"required={required} strict={strict}")
-    workdir = args.workdir or os.getcwd()
-
-    def git(*a: str, check: bool = True) -> subprocess.CompletedProcess:
-        return sh(["git", *a], cwd=workdir, check=check, env=generator_env())
-
-    git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
-    base = git("rev-parse", f"refs/remotes/origin/{branch}").stdout.strip()   # LIVE main; nothing else
-    trusted_regen = git("show", f"{base}:{REGEN_INVENTORY.as_posix()}", check=False).stdout
-    fragments = regen_inventory_fragments(trusted_regen)
-
-    candidates: list[Member] = []
-    for p in order_candidates(paginate(f"/repos/{repo}/pulls?state=open&base={branch}")):
-        if TRAIN_BRANCH_RE.fullmatch(p["head"]["ref"]):
-            continue
-        view = pr_view(repo, p)
-        armed = bool(view["auto_merge"]) and not view["draft"]
-        view["files"] = pr_files(repo, p["number"]) if armed else []
-        ok, why = qualifies(view, member_required, head_checks(repo, view["head_sha"]) if armed else {})
+    out: list[Member] = []
+    apps: dict[int, dict] = {}
+    for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)]):
+        armed = bool(p.get("auto_merge")) and not p.get("draft")
+        view = pr_view(repo, p, gh.pr_files(p["number"]) if armed else [])
+        app = gh.app_statuses(view["head_sha"]) if armed else {}
+        ok, why = qualifies(view, member_required, gh.checks(view["head_sha"]) if armed else {}, app)
         log(f"#{p['number']:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
         if ok:
-            candidates.append(Member(view["number"], view["title"], view["body"], view["head_sha"],
-                                     view["head_ref"], view["created_at"], files=view["files"]))
-        if len(candidates) >= args.batch_size:
+            out.append(Member(view["number"], view["title"], view["body"], view["head_sha"], view["head_ref"],
+                              view["created_at"], files=view["files"]))
+            apps[view["number"]] = app
+        if len(out) >= limit:
             break
-
-    verified: list[Member] = []
-    if candidates:
-        git("fetch", "-q", "origin", *[f"+refs/pull/{m.number}/head:refs/merge-train/pr-{m.number}" for m in candidates])
-    for m in candidates:
+    if out:
+        git("fetch", "-q", "origin", *[f"+{gh.head_refspec(m.number)}:refs/merge-train/pr-{m.number}" for m in out])
+    verified = []
+    for m in out:
         fetched = git("rev-parse", f"refs/merge-train/pr-{m.number}").stdout.strip()
         if fetched != m.head_sha:
-            log(f"#{m.number} skip: fetched head {fetched[:12]} != API head {m.head_sha[:12]} (pushed meanwhile)")
+            log(f"#{m.number} skip: fetched head differs from the API head (pushed meanwhile)")
             continue
-        m.ref = fetched                               # squash the SHA, never a movable ref
-        m.files = git("diff", "--name-only", f"{base}...{fetched}").stdout.split()
+        m.ref = fetched
         verified.append(m)
+    return verified, apps
 
-    fast: list[Member] = []
-    train_members: list[Member] = []
-    for m in verified:
+
+def partition(git, base: str, cands: list[Member], fragments: list[str]) -> tuple[list[Member], list[Member]]:
+    """(fast lane, train). Computed from live git data only."""
+    for m in cands:
+        m.files = git("diff", "--name-only", f"{base}...{m.head_sha}").stdout.split()
+    fast, train = [], []
+    for m in cands:
         mb = git("merge-base", base, m.head_sha).stdout.strip()
         main_files = git("diff", "--name-only", f"{mb}..{base}").stdout.split()
-        others = [f for o in verified if o is not m for f in o.files]
-        ok, why = fast_lane_eligible(m.files, main_files, others, fragments)
-        log(f"#{m.number} {'FAST LANE' if ok else 'train'}: {why}")
-        (fast if ok else train_members).append(m)
-
-    trains: dict[str, TrainRecord] = {}
-    train_files: list[str] = []
-    if train_members and not args.dry_run:
-        wt = tempfile.mkdtemp(prefix="merge-train-wt-")
-        git("worktree", "add", "-q", "--detach", wt, base)
-        try:
-            builder = TrainBuilder(wt)
-            trains = prebuild(builder, base, train_members)
-            whole = trains.get(train_key(train_members))
-            train_files = builder.files_of(base, whole.sha) if whole else []
-        finally:
-            git("worktree", "remove", "--force", wt, check=False)
-        for rec in trains.values():                   # keep the objects reachable for step C
-            git("update-ref", f"refs/merge-train/train-{rec.key}", rec.sha)
-
-    state = {"repo": repo, "branch": branch, "base": base, "run_id": args.run_id, "attempt": args.attempt,
-             "built_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-             "fast_lane": [{"number": m.number, "head_sha": m.head_sha} for m in fast],
-             "members": [{"number": m.number, "head_sha": m.head_sha, "files": m.files} for m in train_members],
-             "trains": {k: r.to_json() for k, r in trains.items()}, "train_files": train_files}
-    (state_dir / STATE_FILE).write_text(json.dumps(state, indent=1))
-    has_work = bool(fast or train_members)
-    write_output("has_work", "true" if has_work and not args.dry_run else "false")
-    log(f"rebuild over {base[:12]}: fast-lane {[m.number for m in fast]}, train {[m.number for m in train_members]}, trains {len(trains)}")
-    return 0
+        others = [f for o in cands if o is not m for f in o.files]
+        ok, _ = fast_lane_eligible(m.files, main_files, others, fragments)
+        (fast if ok else train).append(m)
+    return fast, train
 
 
-def publish(args: argparse.Namespace) -> int:
-    """Steps B + C. Reads state written by step A of THIS job, then re-checks everything that can
-    move (main, each head, armed/green) live before acting; refs and trees are re-derived locally."""
-    if args.dry_run:
-        log("::error::publish has no dry-run; run rebuild --dry-run instead")
-        return 2
-    state = json.loads(pathlib.Path(args.state, STATE_FILE).read_text())
-    repo, branch, base = args.repo, args.branch, str(state.get("base", ""))
-    branch_name = train_branch(args.run_id, args.attempt)
-    if (state.get("run_id"), state.get("attempt")) != (args.run_id, args.attempt):
-        log("::error::state was written by a different run — refusing")
-        return 2
-    hub = Hub(repo, branch, args.run_url, False, args.shadow)
-    required, strict = required_policy(repo, branch)
-    member_required = [c for c in required if c != STATUS_CONTEXT]
-    log(f"required={required} strict={strict} mode={'shadow' if args.shadow else 'LIVE'} base {base[:12]}")
-    if STATUS_CONTEXT not in required and not args.shadow:
-        log(f"::error::{STATUS_CONTEXT} is not a required context yet — refusing to merge outside shadow mode (ADR-0343 phase 1 not reached)")
-        return 2
-    problem = base_current(hub.main_sha(), base)
-    if problem:
-        log(f"::warning::{problem}")
-        write_summary([f"merge-train: {problem}"])
-        return 0
-    workdir = args.workdir or os.getcwd()
+def plan_batch(gh, git, repo: str, base: str, batch_size: int) -> tuple[list[Member], list[Member]]:
+    """(fast lane, this tick's train batch) — the same function in build, publish and settle."""
+    required = gh.required()
+    cands, apps = live_candidates(gh, git, repo, required)
+    fragments = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
+    fast, train = partition(git, base, cands, fragments)
+    return fast, select_batch(train, {n: bisect_size(a) for n, a in apps.items()}, batch_size)
 
-    def git(*a: str, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
-        return sh(["git", *a], cwd=workdir, check=check, env=env)
 
-    # Every head is re-read live; anything that moved, disarmed, closed or went red is out.
-    live: dict[int, Member] = {}
-    invalid: set[int] = set()
-    for e in state["fast_lane"] + state["members"]:
-        n = int(e["number"])
-        p = get(f"/repos/{repo}/pulls/{n}")
-        view = pr_view(repo, p)
-        view["files"] = pr_files(repo, n)
-        ok, why = qualifies(view, member_required, head_checks(repo, view["head_sha"]))
-        if not ok or view["head_sha"] != e["head_sha"]:
-            log(f"#{n} rejected live: {why if not ok else 'head moved since the rebuild'}")
-            invalid.add(n)
+def live_base(gh, git) -> str:
+    git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/remotes/origin/{gh.branch}")
+    return git("rev-parse", f"refs/remotes/origin/{gh.branch}").stdout.strip()
+
+
+# --------------------------------------------------------------------------- the three modes
+def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_size: int) -> list[int]:
+    base = live_base(gh, git)
+    _fast, batch = plan_batch(gh, git, repo, base, batch_size)
+    os.makedirs(out_dir, exist_ok=True)
+    if not batch:
+        log("build: no train this tick")
+        return []
+    tip, applied, dropped = builder.build(base, batch)
+    log(f"build over {base[:12]}: applied {applied}, dropped {dropped}")
+    if applied:
+        git("update-ref", BUNDLE_REF, tip)
+        git("bundle", "create", os.path.join(out_dir, BUNDLE_FILE), BUNDLE_REF, f"^{base}")
+    return applied
+
+
+def mark_unverifiable(gh, batch: list[Member]) -> None:
+    """A train publish cannot verify is halved like a red one; at one member it is the manual lane."""
+    if len(batch) == 1:
+        gh.post_status(batch[0].head_sha, "failure", "not verifiable by the merge train: manual lane")
+        gh.comment(batch[0].number, MANUAL_LANE_MESSAGE)
+        return
+    for m in batch:
+        gh.post_status(m.head_sha, "pending", f"bisect size {max(1, len(batch) // 2)}")
+
+
+def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str, batch_size: int) -> str:
+    """Returns one of: idle, in-flight, rejected, published."""
+    if any(is_carrier(p, repo) for p in gh.open_prs()):
+        return "in-flight"
+    branch = train_branch(run_id, attempt)
+    base = live_base(gh, git)
+    _fast, batch = plan_batch(gh, git, repo, base, batch_size)
+    bundle = os.path.join(bundle_dir, BUNDLE_FILE)
+    if not batch or not os.path.isfile(bundle):
+        return "idle"
+    outputs = derived_output_patterns(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
+    if not outputs:
+        log("::error::origin/main declares no DERIVED_OUTPUTS — refusing")
+        return "rejected"
+    try:
+        if git("bundle", "verify", bundle, check=False).returncode != 0:
+            raise Reject("bundle does not verify against this clone (stale base or corrupt)", member_fault=False)
+        git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
+        tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
+        v = verify_bundle_train(git, base, batch, tip, outputs)
+    except Reject as exc:
+        log(f"::warning::train rejected: {exc}")
+        if exc.member_fault:
+            mark_unverifiable(gh, batch)
+        return "rejected"
+    for n in v.dropped:
+        gh.comment(n, DROP_MESSAGE)
+    Pusher(git, branch, gh.remote).push(v.tip)
+    gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
+    gh.create_carrier(branch)
+    log(f"published {branch} over {base[:12]}: members {v.applied}, dropped {v.dropped}")
+    return "published"
+
+
+def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
+    """Judge every finished App carrier, then post the fast lane from live data."""
+    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": []}
+    required = gh.required()
+    train_required = [c for c in required if c != STATUS_CONTEXT and c not in TREE_INDEPENDENT_CONTEXTS]
+    for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
+        sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
+        checks = gh.checks(sha)
+        failing = [c for c in train_required if checks.get(c) not in (None, *OK_STATES)]
+        if not failing and any(checks.get(c) is None for c in train_required):
+            summary["in_flight"] = True
             continue
-        live[n] = Member(n, view["title"], view["body"], view["head_sha"], view["head_ref"], view["created_at"],
-                         files=view["files"])
-
-    fragments = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY.as_posix()}", check=False).stdout)
-    for e in state["fast_lane"]:
-        m = live.get(int(e["number"]))
-        if m:
-            hub.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
-
-    members = [live.get(int(e["number"])) or Member(int(e["number"]), "", "", e["head_sha"], "", "") for e in state["members"]]
-    trains: dict[str, TrainRecord] = {}
-    for k, r in state["trains"].items():
-        rec = TrainRecord.from_json(r)
-        # The commit must be the one step A left in THIS repository, with the tree step A recorded.
-        local = git("rev-parse", "--verify", "--quiet", f"refs/merge-train/train-{rec.key}", check=False).stdout.strip()
-        tree = git("rev-parse", "--verify", "--quiet", f"{local}^{{tree}}", check=False).stdout.strip() if local else ""
-        if local != rec.sha or tree != rec.tree or git("merge-base", "--is-ancestor", base, rec.sha, check=False).returncode:
-            log(f"::error::train {k}: local object does not match the rebuild record — dropped")
-            continue
-        trains[k] = rec
-    out = Outcome()
-    if members:
-        pusher = Pusher(git, branch_name, f"https://github.com/{repo}.git", git_auth_env(os.environ["GH_TOKEN"]))
-        train_required = [c for c in required if c != STATUS_CONTEXT and c not in TREE_INDEPENDENT_CONTEXTS]
-        verifier = GitHubVerifier(hub, git, pusher, train_required, args.wait_minutes, args.poll_seconds)
-        try:
-            out = run_train(hub, base, members, trains, verifier, fragments, state.get("train_files", []), frozenset(invalid))
-        finally:
-            verifier.finish()
-    line = (f"merge-train over {base[:12]} ({'shadow' if args.shadow else 'live'}): {out.trains} train(s), "
-            f"fast-lane {len(state['fast_lane'])}, verified {[m.number for m in out.mergeable]}, "
-            f"culprits {sorted(out.culprits)}, dropped {sorted(out.dropped)}, deferred {[m.number for m in out.deferred]}, "
-            f"rejected live {sorted(invalid)}" + (", UNVERIFIED" if out.unverified else ""))
-    log(line)
-    write_summary([line])
-    return 0
-
-
-def write_summary(lines: list[str]) -> None:
-    path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if path:
-        with open(path, "a") as fh:
-            fh.write("\n".join(lines) + "\n")
+        got = git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode == 0
+        fetched = git("rev-parse", "refs/merge-train/settle").stdout.strip() if got else ""
+        rec_state, rec_desc = gh.app_statuses(sha).get(RECORD_CONTEXT, ("", ""))
+        problem = None if fetched == sha else "carrier branch missing or moved under the carrier"
+        problem = problem or record_problem(rec_desc if rec_state == "success" else None,
+                                            BOT_LOGIN if rec_state == "success" else None, git.tree(sha))
+        chain = None if problem else parse_own_chain(git, sha)
+        if not problem and chain is None:
+            problem = "head is not a chain of the train's own commits"
+        live_main = gh.main_sha()
+        if not problem and chain[0] != live_main:
+            problem = "main moved since publish — the next tick rebuilds"
+        if problem:
+            log(f"::warning::carrier #{carrier}: {problem}")
+            summary["rejected"].append(carrier)
+        elif not failing:
+            expected = live_main
+            for n, head in chain[1]:
+                pr = gh.pr(n)
+                if pr.get("state") != "open" or pr["head"]["sha"] != head:
+                    log(f"#{n} changed since the train was verified; stopping")
+                    break
+                if not shadow and gh.main_sha() != expected:
+                    log("main advanced by a foreign merge; stopping, the next tick rebuilds")
+                    break
+                gh.post_status(head, "success", f"verified on train over main {chain[0][:12]}")
+                if shadow:
+                    continue
+                merged = gh.merge(n, head)
+                if not merged:
+                    log(f"#{n} did not merge; stopping")
+                    break
+                expected = merged
+                summary["merged"].append(n)
+        else:
+            members = chain[1]
+            if len(members) == 1:
+                n, head = members[0]
+                gh.post_status(head, "failure", f"isolated as the cause of a red train over main {chain[0][:12]}")
+                gh.comment(n, CULPRIT_MESSAGE)
+                summary["culprits"].append(n)
+            else:
+                for n, head in members:
+                    gh.post_status(head, "pending", f"bisect size {max(1, len(members) // 2)}")
+                summary["bisected"].append([n for n, _ in members])
+        gh.close_carrier(carrier)
+        if TRAIN_BRANCH_RE.fullmatch(branch):
+            Pusher(git, branch, gh.remote).delete()
+    # Fast lane, from live data only — nothing here reads a stored classification.
+    base = live_base(gh, git)
+    cands, apps = live_candidates(gh, git, repo, required)
+    fragments = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
+    fast, _train = partition(git, base, cands, fragments)
+    for m in fast:
+        if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
+            gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
+        summary["fast"].append(m.number)
+    return summary
 
 
 def write_output(key: str, value: str) -> None:
@@ -910,30 +831,40 @@ def write_output(key: str, value: str) -> None:
 
 
 # --------------------------------------------------------------------------- declaration gate
-DECLARATION = [
+TOP = [
     ("schedule", "schedule:"),
     ("manual dispatch", "workflow_dispatch:"),
     ("concurrency group", "group: merge-train"),
     ("never cancels a train in flight", "cancel-in-progress: false"),
     ("shadow mode is the default", "MERGE_TRAIN_SHADOW: \"true\""),
-    ("regen needs opa", "openpolicyagent.org/downloads/"),
-    ("checkout leaves no credential behind", "persist-credentials: false"),
-    ("step A runs rebuild", "merge-train.py rebuild"),
-    ("step C runs publish", "merge-train.py publish"),
-    ("App token is minted", "actions/create-github-app-token@"),
-    ("publish holds the App token", "GH_TOKEN: ${{ steps.app_token.outputs.token }}"),
-    ("branch derives from the run id", "--run-id \"${{ github.run_id }}\""),
 ]
-FORBIDDEN = [
-    ("no build output is handed over as an artifact", "upload-artifact"),
-    ("no build output is consumed from an artifact", "download-artifact"),
-    ("generators never run from the workflow directly", "regen-derived.sh"),
-]
+_ISOLATION = [("script from origin/main", "show origin/main:.github/scripts/merge-train.py"),
+              ("isolated python", "python3 -I -S"), ("no system git config", "GIT_CONFIG_NOSYSTEM: \"1\""),
+              ("no global git config", "GIT_CONFIG_GLOBAL: /dev/null"), ("no credential left", "persist-credentials: false"),
+              ("mints the App token", "actions/create-github-app-token@")]
+JOB_MUST = {
+    "build": [("build runs build", "merge-train.py build"), ("build: no credential left", "persist-credentials: false"),
+              ("build regenerates with opa", "openpolicyagent.org/downloads/"),
+              ("build hands over a bundle", "actions/upload-artifact@")],
+    "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
+                                                              ("publish runs publish", "\" publish")],
+    "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle")],
+}
+JOB_FORBID = {
+    "build": [("build must not mint the App token", "create-github-app-token"), ("build must not see App secrets", "GITOPS_APP_")],
+    "publish": [("publish runs no repo script", "python3 .github/"), ("publish runs no generator", "regen-derived.sh"),
+                ("publish installs no opa", "openpolicyagent.org"), ("publish installs no pyyaml", "install-pyyaml")],
+    "settle": [("settle runs no repo script", "python3 .github/"), ("settle runs no generator", "regen-derived.sh"),
+               ("settle takes no artifact", "download-artifact"), ("settle installs no opa", "openpolicyagent.org")],
+}
 
 
-def workflow_steps(text: str) -> list[str]:
-    """The text of every step (`      - ` items under `steps:`), in order."""
-    return [s for s in re.split(r"^      - ", text, flags=re.MULTILINE)[1:]]
+def job_sections(text: str) -> dict[str, str]:
+    m = re.search(r"^jobs:\s*$", text, re.MULTILINE)
+    if not m:
+        return {}
+    parts = re.split(r"^  ([A-Za-z0-9_-]+):\s*$", text[m.end():], flags=re.MULTILINE)
+    return {parts[i]: parts[i + 1] for i in range(1, len(parts) - 1, 2)}
 
 
 def check_declaration() -> int:
@@ -942,64 +873,28 @@ def check_declaration() -> int:
         print("SUBJECTS=0")
         return 1
     text = WORKFLOW.read_text()
-    fails = [label for label, needle in DECLARATION if needle not in text]
-    # A mention in a comment is not an invocation; the forbidden list judges executable lines only.
     code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
-    fails += [label for label, needle in FORBIDDEN if needle in code]
-    if "contents: write" in text:
-        fails.append("GITHUB_TOKEN must stay read-only (pushes use the App token)")
-    steps = workflow_steps(text)
-
-    def idx(needle: str) -> int:
-        return next((i for i, s in enumerate(steps) if needle in s), -1)
-    i_rebuild, i_mint, i_publish = idx("merge-train.py rebuild"), idx("create-github-app-token"), idx("merge-train.py publish")
-    if not (0 <= i_rebuild < i_mint < i_publish):
-        fails.append(f"step order must be rebuild < mint App token < publish (got {i_rebuild}, {i_mint}, {i_publish})")
-    if i_rebuild >= 0 and ("app_token" in steps[i_rebuild] or "GITOPS_APP" in steps[i_rebuild]):
-        fails.append("the rebuild step must not reference the App token or its secrets")
-    if any("GITOPS_APP" in s for s in steps[:max(i_mint, 0)]):
-        fails.append("no step before the mint may reference the App secrets")
+    jobs = job_sections(code)
+    fails = [label for label, needle in TOP if needle not in code]
+    if "contents: write" in code:
+        fails.append("GITHUB_TOKEN must stay read-only (writes use the App token)")
+    for job in JOB_MUST:
+        sec = jobs.get(job)
+        if sec is None:
+            fails.append(f"job `{job}` missing")
+            continue
+        fails += [label for label, needle in JOB_MUST[job] if needle not in sec]
+        fails += [label for label, needle in JOB_FORBID[job] if needle in sec]
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
-    n = len(DECLARATION) + len(FORBIDDEN) + 4
+    n = len(TOP) + 1 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
     print(f"SUBJECTS={n}")
     print("merge-train declaration OK" if not fails else f"{len(fails)} declaration failure(s)")
     return 1 if fails else 0
 
 
 # --------------------------------------------------------------------------- self-test
-class FakeHub(Hub):
-    def __init__(self, main: str = "base"):
-        super().__init__("o/r", "main", "http://run", dry_run=False, shadow=False)
-        self.statuses: list[tuple[str, str, str]] = []
-        self.comments: list[tuple[int, str]] = []
-        self.merged: list[int] = []
-        self.main = main
-        self.foreign: list[str] = []
-
-    def post_status(self, sha, state, description):
-        self.statuses.append((sha, state, description))
-
-    def comment(self, number, text):
-        self.comments.append((number, text))
-
-    def merge(self, number, head_sha=""):
-        if self.shadow:
-            return None
-        self.merged.append(number)
-        self.main = f"merge-{number}"
-        return self.main
-
-    def main_sha(self):
-        return self.main
-
-    def compare_files(self, base, head):
-        return self.foreign
-
-
 SYN_GENERATOR = ".github/scripts/regen.py"
-# The synthetic generator doubles as an exfiltration PROBE: it records the environment it ran in,
-# to the path in PROBE_OUT (handed in explicitly by the test; it is not in the allowlist either).
 SYN_GENERATOR_SRC = (
     "import json,os,pathlib\n"
     "os.makedirs('derived',exist_ok=True)\n"
@@ -1007,30 +902,120 @@ SYN_GENERATOR_SRC = (
     "pathlib.Path(os.environ.get('PROBE_OUT') or os.devnull).write_text("
     "json.dumps({'GH_TOKEN': os.environ.get('GH_TOKEN',''), 'keys': sorted(os.environ)}))\n"
 )
+SYN_REQUIRED = ["gates (data)", "Validate manifests", "derived", "issue-hygiene", STATUS_CONTEXT]
+# The GENERATORS fragments make docs/, services/, count.txt and bad.txt protected, so PRs touching
+# them ride trains (as real inventory sources do) instead of the fast lane; svc/ stays fast-lane.
+SYN_INVENTORY = ('GENERATORS=(\n  "syn|python3 x|services/ docs/ count.txt bad.txt"\n)\n'
+                 'DERIVED_OUTPUTS=(\n  "derived/*"\n)\n')
 
 
-def _synthetic_repo(root: str) -> dict[str, str]:
-    """A repo whose CI has three contexts, each falsifiable:
-       gates (data)        count.txt must equal the number of files under services/
-       Validate manifests  bad.txt must not exist
-       derived             derived/index.txt must equal the regenerated listing of services/"""
-    env = {**generator_env(), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+class FakeGitHub:
+    """A GitHub stand-in over a synthetic origin: PRs are local branches, CI is ci.py on train heads
+    (PR heads report green, as their own CI did), merges are squashes onto origin's main."""
 
-    def g(*a, check=True):
-        return subprocess.run(["git", *a], cwd=root, text=True, capture_output=True, check=check, env=env)
+    def __init__(self, origin: str, scratch: str):
+        self.origin, self.scratch, self.branch, self.run_url, self.remote = origin, scratch, "main", "http://run", origin
+        self.prs: dict[int, dict] = {}
+        self.statuses: dict[str, list[tuple[str, str, str, str]]] = {}
+        self.comments: list[tuple[int, str]] = []
+        self.merged: list[int] = []
+        self.carriers: dict[int, dict] = {}
+        self._ci: dict[str, dict] = {}
+        self.foreign_after_merge: str | None = None
+
+    def g(self, *a, check=True):
+        return sh(["git", "-c", "core.hooksPath=/dev/null", *a], cwd=self.origin, check=check, env=base_env())
+
+    def add_pr(self, n: int, branch: str, created: str):
+        self.prs[n] = {"number": n, "state": "open", "draft": False, "auto_merge": {"x": 1}, "title": branch, "body": "",
+                       "created_at": created, "user": {"login": "someone"},
+                       "head": {"ref": branch, "sha": self.g("rev-parse", branch).stdout.strip(), "repo": {"full_name": "o/r"}}}
+
+    def head_refspec(self, n): return f"refs/heads/{self.prs[n]['head']['ref']}"
+    def required(self): return list(SYN_REQUIRED)
+    def main_sha(self): return self.g("rev-parse", "main").stdout.strip()
+    def open_prs(self): return [p for p in list(self.prs.values()) + list(self.carriers.values()) if p["state"] == "open"]
+    def pr(self, n): return self.prs[n]
+
+    def pr_files(self, n):
+        return self.g("diff", "--name-only", f"main...{self.prs[n]['head']['sha']}").stdout.split()
+
+    def checks(self, sha):
+        if any(p["head"]["sha"] == sha for p in self.prs.values()):
+            out = {c: "success" for c in SYN_REQUIRED[:4]}
+        else:
+            if sha not in self._ci:
+                wt = tempfile.mkdtemp(dir=self.scratch)
+                self.g("worktree", "add", "-q", "--detach", wt, sha)
+                r = subprocess.run([sys.executable, "ci.py"], cwd=wt, text=True, capture_output=True)
+                failing = [c for c in r.stdout.strip().split(",") if c]
+                self.g("worktree", "remove", "--force", wt)
+                self._ci[sha] = {**{c: ("failure" if c in failing else "success") for c in SYN_REQUIRED[:3]}, "issue-hygiene": "success"}
+            out = dict(self._ci[sha])
+        for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
+            out.setdefault(ctx, None if state == "pending" else state)
+        return out
+
+    def app_statuses(self, sha):
+        out = {}
+        for ctx, state, desc, creator in reversed(self.statuses.get(sha, [])):
+            if creator == BOT_LOGIN:
+                out.setdefault(ctx, (state, desc))
+        return out
+
+    def post_status(self, sha, state, description, context=STATUS_CONTEXT, creator=BOT_LOGIN):
+        self.statuses.setdefault(sha, []).append((context, state, description, creator))
+
+    def comment(self, n, text): self.comments.append((n, text))
+
+    def merge(self, n, head):
+        if self.prs[n]["head"]["sha"] != head:
+            return None
+        self.g("checkout", "-q", "-f", "main")
+        if self.g("merge", "--squash", head, check=False).returncode != 0:
+            self.g("merge", "--abort", check=False)
+            self.g("reset", "-q", "--hard")
+            return None
+        self.g("commit", "-q", "-m", f"#{n}")
+        sha = self.main_sha()
+        self.prs[n]["state"] = "closed"
+        self.merged.append(n)
+        if self.foreign_after_merge:
+            p = pathlib.Path(self.origin, self.foreign_after_merge)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("foreign\n")
+            self.g("add", "-A")
+            self.g("commit", "-q", "-m", "foreign")
+            self.foreign_after_merge = None
+        return sha
+
+    def create_carrier(self, branch):
+        n = 9000 + len(self.carriers)
+        self.carriers[n] = {"number": n, "state": "open", "draft": True, "user": {"login": BOT_LOGIN}, "created_at": "",
+                            "head": {"ref": branch, "sha": self.g("rev-parse", branch).stdout.strip(), "repo": {"full_name": "o/r"}}}
+        return n
+
+    def close_carrier(self, n): self.carriers[n]["state"] = "closed"
+
+
+def _synthetic_origin(root: str) -> None:
+    env = base_env()
+
+    def g(*a):
+        return subprocess.run(["git", *a], cwd=root, text=True, capture_output=True, check=True, env=env)
 
     def w(rel, text):
         p = pathlib.Path(root, rel)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
 
+    os.makedirs(root)
     g("init", "-q", "-b", "main")
-    g("config", "commit.gpgsign", "false")
     w("services/s1.txt", "s1\n")
     w("count.txt", "1\n")
-    w("rollouts/a.yaml", "kind: Rollout\nmetadata:\n  annotations:\n    openbank.tech/policy-checksum: \"old\"\nspec:\n  replicas: 1\n")
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
-    w("ci.py", "import os,pathlib,sys\nfail=[]\n"
+    w(REGEN_INVENTORY, SYN_INVENTORY)
+    w("ci.py", "import os,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
                "want='\\n'.join(sorted(os.listdir('services')))+'\\n'\n"
@@ -1039,32 +1024,29 @@ def _synthetic_repo(root: str) -> dict[str, str]:
     subprocess.run([sys.executable, SYN_GENERATOR], cwd=root, check=True, env=env)
     g("add", "-A")
     g("commit", "-q", "-m", "base")
-    base = g("rev-parse", "HEAD").stdout.strip()
 
-    def pr(name, edits):
+    def pr(name, edits, link=None):
         g("checkout", "-q", "-b", name, "main")
         for rel, text in edits.items():
             w(rel, text)
+        if link:
+            os.symlink(link[1], os.path.join(root, link[0]))
         g("add", "-A")
         g("commit", "-q", "-m", name)
         g("checkout", "-q", "main")
 
-    # Semantic pair: each alone green (count 2 == 2 services), together red (count 2, 3 services).
     pr("pA", {"services/a.txt": "a\n", "count.txt": "2\n"})
     pr("pB", {"services/b.txt": "b\n", "count.txt": "2\n"})
-    # Textual conflict with pA on count.txt.
-    pr("pC", {"count.txt": "7\n", **{f"services/c{i}.txt": "c\n" for i in range(1, 7)}})
-    # Independent docs PRs + one bad one (#3 of the bisect batch).
     pr("p1", {"docs/one.md": "1\n"})
     pr("p2", {"docs/two.md": "2\n"})
     pr("p3", {"bad.txt": "x\n"})
     pr("p4", {"docs/four.md": "4\n"})
-    # Needs regeneration: adds a service and bumps the count, but does not touch derived/index.txt.
     pr("pR", {"services/r.txt": "r\n", "count.txt": "2\n"})
-    # Tampers with the generator: a malicious regen.py that would write the token to the tree.
-    pr("pG", {SYN_GENERATOR: "import os,pathlib\npathlib.Path('leaked.txt').write_text(os.environ.get('GH_TOKEN','none'))\n",
-              "docs/g.md": "g\n"})
-    return {"base": base}
+    pr("pL", {"docs/l.md": "l\n"}, link=("docs-link", "/etc/passwd"))
+    pr("pG", {SYN_GENERATOR: "import os,pathlib\npathlib.Path('leaked.txt').write_text(os.environ.get('GH_TOKEN','none'))\n"})
+    pr("pW", {".github/gates/gates.yaml": "gates: []\n"})
+    pr("pX", {"docs/adr/0001-x.md": "x\n"})
+    pr("pF", {"svc/fast.txt": "f\n"})
 
 
 def self_test() -> int:
@@ -1076,320 +1058,301 @@ def self_test() -> int:
         if not cond:
             fails.append(f"{label}: {detail}")
 
-    # ---- qualifies ----------------------------------------------------------------------
+    # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]
     green = {"all-green": "success", "Gitleaks": "success"}
-    base_pr = {"draft": False, "auto_merge": {"enabled_by": "x"}, "same_repo": True, "head_ref": "feat/x", "number": 1,
-               "files": ["openbank-fx-service/A.kt"], "state": "open"}
-    check("qualifies: armed + green (merge-train itself not needed)", qualifies(base_pr, req, green)[0])
-    check("qualifies: closed refused", not qualifies({**base_pr, "state": "closed"}, req, green)[0])
-    check("qualifies: draft refused", not qualifies({**base_pr, "draft": True}, req, green)[0])
-    check("qualifies: unarmed refused", not qualifies({**base_pr, "auto_merge": None}, req, green)[0])
-    check("qualifies: codex/ excluded", not qualifies({**base_pr, "head_ref": "codex/x"}, req, green)[0])
-    check("qualifies: fork refused", not qualifies({**base_pr, "same_repo": False}, req, green)[0])
-    check("qualifies: pending refused", not qualifies(base_pr, req, {**green, "Gitleaks": None})[0])
-    check("qualifies: failure refused", not qualifies(base_pr, req, {**green, "Gitleaks": "failure"})[0])
-    check("qualifies: never-reported refused", not qualifies(base_pr, req, {"all-green": "success"})[0])
-    check("qualifies: agent-pr-guard refusal", not qualifies(base_pr, req, {**green, "gates / agent-pr-guard": "failure"})[0])
-    check("qualifies: no required set -> refuse", not qualifies(base_pr, [], green)[0])
-    ok, why = qualifies({**base_pr, "files": [".github/scripts/regen-derived.sh"]}, req, green)
-    check("qualifies: a PR touching regen-derived.sh is disqualified (manual lane)", not ok and "generator" in why, why)
-    for p, want in [(".github/scripts/x.py", True), ("docs/adr/gen-index.sh", True), ("docs/adr/lib-frontmatter.sh", True),
-                    ("openbank-infra/gitops/components/x/gen-x-opa-bundle.sh", True),
-                    ("docs/adr/0343-x.md", False), ("openbank-fx-service/A.kt", False), (".github/workflows/ci.yml", False)]:
-        check(f"generator path: {p} -> {want}", is_generator_path(p) == want)
-    ordered = order_candidates([{"number": 9, "created_at": "2026-02-01T00:00:00Z"}, {"number": 3, "created_at": "2026-01-01T00:00:00Z"}])
-    check("order: oldest first", [p["number"] for p in ordered] == [3, 9])
+    base_pr = {"draft": False, "auto_merge": {"x": 1}, "same_repo": True, "head_ref": "feat/x", "state": "open",
+               "files": ["openbank-fx-service/A.kt"]}
+    check("qualifies: armed + green", qualifies(base_pr, req, green)[0])
+    for label, over, checks in [("closed", {"state": "closed"}, green), ("draft", {"draft": True}, green),
+                                ("unarmed", {"auto_merge": None}, green), ("codex/", {"head_ref": "codex/x"}, green),
+                                ("fork", {"same_repo": False}, green), ("pending", {}, {**green, "Gitleaks": None}),
+                                ("failure", {}, {**green, "Gitleaks": "failure"}), ("never reported", {}, {"all-green": "success"}),
+                                ("agent-pr-guard", {}, {**green, "gates / agent-pr-guard": "failure"})]:
+        check(f"qualifies: {label} refused", not qualifies({**base_pr, **over}, req, checks)[0])
+    check("qualifies: no required set refused", not qualifies(base_pr, [], green)[0])
+    for f in (".github/scripts/regen-derived.sh", ".github/gates/gates.yaml", ".github/scripts/check-x.py",
+              ".github/workflows/ci.yml", "docs/adr/gen-index.sh", "openbank-infra/gitops/components/x/gen-x-opa-bundle.sh"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green)
+        check(f"qualifies: member touching {f} is refused (manual lane)", not ok and "manual lane" in why, why)
+    check("qualifies: an App failure (culprit) on the head waits for a push",
+          not qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", "x")})[0])
+    check("order: oldest first", [p["number"] for p in order_candidates(
+        [{"number": 9, "created_at": "2026-02"}, {"number": 3, "created_at": "2026-01"}])] == [3, 9])
 
-    # ---- fast lane -----------------------------------------------------------------------
-    frags = regen_inventory_fragments(REGEN_INVENTORY.read_text()) if REGEN_INVENTORY.exists() else []
-    check("inventory: fragments parsed from regen-derived.sh", "prompts/registry.yaml" in frags, str(frags))
-    check("fast lane: disjoint service file qualifies",
-          fast_lane_eligible(["openbank-fx-service/src/main/kotlin/A.kt"], ["openbank-ledger-service/x.kt"], [], frags)[0])
-    check("fast lane: docs/adr/ does NOT qualify", not fast_lane_eligible(["docs/adr/0343-x.md"], [], [], frags)[0])
-    check("fast lane: overlap with main diff does NOT qualify",
-          not fast_lane_eligible(["openbank-fx-service/A.kt"], ["openbank-fx-service/A.kt"], [], frags)[0])
-    check("fast lane: overlap with another candidate does NOT qualify",
-          not fast_lane_eligible(["openbank-fx-service/A.kt"], [], ["openbank-fx-service/A.kt"], frags)[0])
-    check("fast lane: openapi.yaml does NOT qualify",
-          not fast_lane_eligible(["openbank-fx-service/src/main/resources/openapi.yaml"], [], [], frags)[0])
-    check("fast lane: regen inventory source does NOT qualify", not fast_lane_eligible(["prompts/registry.yaml"], [], [], frags)[0])
-    check("fast lane: .github/ and build-logic/ do NOT qualify",
-          not fast_lane_eligible([".github/workflows/x.yml"], [], [], frags)[0]
-          and not fast_lane_eligible(["build-logic/x.kts"], [], [], frags)[0])
-    check("foreign advance: disjoint tolerated, overlapping not",
-          foreign_advance_tolerable(["a/x.kt"], ["b/y.kt"], frags) and not foreign_advance_tolerable(["a/x.kt"], ["a/x.kt"], frags))
+    # ---- paths / fast lane / batch ---------------------------------------------------------
+    check("glob: `*` does not cross `/`", glob_match("a/*-opa-bundle.yaml", "a/x-opa-bundle.yaml")
+          and not glob_match("a/*-opa-bundle.yaml", "a/b/x-opa-bundle.yaml"))
+    real = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
+    outs = derived_output_patterns(real)
+    check("inventory: DERIVED_OUTPUTS parsed from the real regen-derived.sh", "docs/adr/index.json" in outs, str(outs))
+    check("inventory: no Rollout manifest is a derived output",
+          not any(glob_match(g, "openbank-infra/gitops/components/ledger/ledger-service.yaml") for g in outs))
+    frags = regen_inventory_fragments(real)
+    check("fast lane: disjoint service file qualifies", fast_lane_eligible(["svc/a.kt"], ["other/x"], [], frags)[0])
+    for f in ("docs/adr/0343-x.md", "openbank-fx-service/src/main/resources/openapi.yaml", ".github/x.yml",
+              "build-logic/x.kts", "prompts/registry.yaml"):
+        check(f"fast lane: {f} does NOT qualify", not fast_lane_eligible([f], [], [], frags)[0])
+    check("fast lane: overlap with main or the batch does NOT qualify",
+          not fast_lane_eligible(["a"], ["a"], [], frags)[0] and not fast_lane_eligible(["a"], [], ["a"], frags)[0])
+    mk = lambda *ns: [Member(n, "", "", "a" * 40, "", "") for n in ns]  # noqa: E731
+    check("batch: default size", [m.number for m in select_batch(mk(1, 2, 3), {}, 2)] == [1, 2])
+    check("batch: a bisect size on the oldest caps it", [m.number for m in select_batch(mk(1, 2, 3, 4), {1: 2}, 8)] == [1, 2])
+    check("bisect status: only a pending `bisect size N` counts",
+          bisect_size({STATUS_CONTEXT: ("pending", "bisect size 2")}) == 2
+          and bisect_size({STATUS_CONTEXT: ("success", "bisect size 2")}) is None
+          and bisect_size({STATUS_CONTEXT: ("pending", "bisect size 2; rm -rf")}) is None)
 
-    # ---- messages ------------------------------------------------------------------------
-    m = Member(42, "fix(fx): rate", "## Summary\n\nFirst para line 1\nline 2\n\nsecond", "s", "r", "t")
-    msg = squash_message(m)
-    check("squash message: title, first paragraph, trailer",
-          msg.startswith("fix(fx): rate\n\nFirst para line 1\nline 2\n") and msg.rstrip().endswith("PR-Number: #42"), msg)
-
-    # ---- review-3 negative 1: branch names come from the run, never from input -----------
-    check("branch: train/<run_id>-<attempt> is derived and valid", train_branch("123", "1") == "train/123-1")
-    for hostile in ("refs/heads/main", "../x", "main", "train/1-1/../main", "train/abc-1", "train/1-1.lock",
-                    "train/1-1 ", "train/-1"):
+    # ---- branch names ----------------------------------------------------------------------
+    check("branch: derived from the run", train_branch("123", "1") == "train/123-1")
+    for hostile in ("refs/heads/main", "../x", "main", "train/1-1/../main", "train/abc-1", "train/1-1.lock", "train/-1"):
         try:
             assert_train_branch(hostile)
             refused = False
         except ValueError:
             refused = True
-        check(f"branch: {hostile!r} refused by assert_train_branch", refused)
-    for rid, att in (("../x", "1"), ("1", "1/../main"), ("", "1")):
-        try:
-            train_branch(rid, att)
-            refused = False
-        except ValueError:
-            refused = True
-        check(f"branch: run id {rid!r}/{att!r} cannot produce a ref", refused)
+        check(f"branch: {hostile!r} refused", refused)
     calls: list[tuple] = []
 
-    def rec_git(*a, check=True, env=None):
+    def rec_git(*a, check=True, auth=False):
         calls.append(a)
         return subprocess.CompletedProcess(a, 0, "", "")
     try:
-        Pusher(rec_git, "refs/heads/main", "u", None)
-        made = True
+        Pusher(rec_git, "refs/heads/main", "u")
+        built = True
     except ValueError:
-        made = False
-    check("branch: a Pusher cannot even be built for refs/heads/main", not made and calls == [])
-    p_ok = Pusher(rec_git, "train/7-1", "u", None)
+        built = False
+    p_ok = Pusher(rec_git, "train/7-1", "u")
     p_ok.push("a" * 40)
     p_ok.delete()
-    check("branch: the only refs pushed/deleted are refs/heads/train/7-1",
-          [c for c in calls if "push" in c] == [("push", "-q", "-f", "u", "a" * 40 + ":refs/heads/train/7-1"),
-                                                ("push", "-q", "u", "--delete", "refs/heads/train/7-1")], str(calls))
-    try:
-        p_ok.push("HEAD")
-        pushed_symbolic = True
-    except ValueError:
-        pushed_symbolic = False
-    check("branch: a Pusher pushes full shas only", not pushed_symbolic)
+    check("branch: only refs/heads/train/7-1 is ever pushed or deleted",
+          not built and calls == [("push", "-q", "-f", "u", "a" * 40 + ":refs/heads/train/7-1"),
+                                  ("push", "-q", "u", "--delete", "refs/heads/train/7-1")], str(calls))
 
-    # ---- review-3 negative 2: stale base -------------------------------------------------
-    check("base: equal to live main is current", base_current("a" * 40, "a" * 40) is None)
-    check("base: an ancestor of live main (stale) is refused", (base_current("b" * 40, "a" * 40) or "").startswith("main moved"))
-    check("base: a non-sha base is refused", base_current("a" * 40, "main") is not None)
+    # ---- settle record ---------------------------------------------------------------------
+    t1, t2 = "a" * 40, "b" * 40
+    check("record: App record with the commit's tree is accepted", record_problem(f"tree={t1}", BOT_LOGIN, t1) is None)
+    check("record: a sha whose tree differs from the record is refused",
+          "not the recorded tree" in (record_problem(f"tree={t1}", BOT_LOGIN, t2) or ""))
+    check("record: a record by any other creator is refused", record_problem(f"tree={t1}", "someone", t1) is not None)
+    check("record: a malformed record is refused", record_problem(f"tree={t1} members=1", BOT_LOGIN, t1) is not None)
+    check("comments: fixed texts carry no placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE + MANUAL_LANE_MESSAGE)
 
-    # ---- bisect, pure --------------------------------------------------------------------
-    def mk(*ns):
-        return [Member(n, f"pr {n}", "", f"sha{n}", f"b{n}", "t") for n in ns]
-
-    def fake_trains(batch_members, dropped_text=None):
-        out = {}
-        for b in bisect_tree(batch_members):
-            out[train_key(b)] = TrainRecord(train_key(b), "a" * 40, "b" * 40, [x.number for x in b], {}, len(b))
-        return out
-
-    def verify_bad3(rec):
-        return ("red", ["Validate manifests"]) if 3 in rec.applied else ("green", [])
-
-    def pure_run(ms, verify, trains=None, invalid=frozenset()):
-        hub = FakeHub("a" * 40)
-        o = run_train(hub, "a" * 40, ms, trains if trains is not None else fake_trains(ms), verify, [], [], invalid)
-        return hub, o
-
-    hub, out = pure_run(mk(1, 2, 3, 4), verify_bad3)
-    check("bisect: culprit is #3 of four", list(out.culprits) == [3], str(out.culprits))
-    check("bisect: mergeable prefix is [1,2]", [x.number for x in out.mergeable] == [1, 2], str(out.mergeable))
-    check("bisect: #4 deferred (green alone, not verified over the prefix)", [x.number for x in out.deferred] == [4])
-    check("bisect: five trains for a 4-batch with one culprit", out.trains == 5, str(out.trains))
-    check("bisect: culprit comment is the fixed text", hub.comments == [(3, CULPRIT_MESSAGE)], str(hub.comments))
-    hub, out = pure_run(mk(1, 2, 3, 4), lambda r: ("green", []))
-    check("bisect: all-green batch is one train, all mergeable", out.trains == 1 and len(out.mergeable) == 4)
-    hub, out = pure_run(mk(1), lambda r: ("unknown", []))
-    check("bisect: unverified defers, no culprit", out.unverified and not out.culprits and len(out.deferred) == 1)
-    check("bisect tree: 2N-1 batches, whole first", len(bisect_tree(mk(1, 2, 3, 4))) == 7 and bisect_tree(mk(1, 2, 3, 4))[0] == mk(1, 2, 3, 4))
-
-    # ---- review-3 negative 3: a record is bound to its batch -----------------------------
-    ms = mk(1, 2)
-    good = TrainRecord("1-2", "a" * 40, "b" * 40, [1, 2], {}, 2)
-    check("binding: own record for its batch is usable", bind_problem(ms, good) is None)
-    outside = TrainRecord("1-2", "a" * 40, "b" * 40, [1, 2, 9], {}, 3)
-    check("binding: applied containing a PR outside the batch is refused", "ordered subset" in (bind_problem(ms, outside) or ""), str(bind_problem(ms, outside)))
-    check("binding: a record keyed for another batch is refused", bind_problem(ms, TrainRecord("1-2-9", "a" * 40, "b" * 40, [1, 2], {}, 2)) is not None)
-    check("binding: reordered applied is refused", bind_problem(ms, TrainRecord("1-2", "a" * 40, "b" * 40, [2, 1], {}, 2)) is not None)
-    check("binding: a member neither applied nor dropped is refused", bind_problem(ms, TrainRecord("1-2", "a" * 40, "b" * 40, [1], {}, 1)) is not None)
-    hub, out = pure_run(ms, lambda r: ("green", []), trains={"1-2": outside, "1": good, "2": good})
-    check("binding: run_train with an unbound record merges nothing", hub.merged == [] and out.unverified, f"{hub.merged} {out}")
-
-    # ---- review-3 negative 4: comments carry fixed text only -----------------------------
-    ms = mk(1, 2)
-    trains = {"1-2": TrainRecord("1-2", "a" * 40, "b" * 40, [2], {1: "@everyone see https://evil"}, 1),
-              "1": TrainRecord("1", "a" * 40, "b" * 40, [], {1: "@everyone"}, 0),
-              "2": TrainRecord("2", "a" * 40, "b" * 40, [2], {}, 1)}
-    hub, out = pure_run(ms, lambda r: ("green", []), trains=trains)
-    check("comments: a dropped reason '@everyone' never reaches a comment",
-          hub.comments == [(1, DROP_MESSAGE)] and not any("@everyone" in c[1] for c in hub.comments), str(hub.comments))
-    check("comments: state serialisation carries dropped NUMBERS only",
-          TrainRecord.from_json(trains["1-2"].to_json()).dropped == {1: "dropped in rebuild"} and
-          "@everyone" not in json.dumps(trains["1-2"].to_json()))
-    check("comments: the fixed texts contain no format placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE)
-
-    # ---- the trust boundary + synthetic repository (real git, real conflicts) -------------
-    saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "RUNNER_TEMP")}
-    os.environ.update({"GH_TOKEN": "ghs_SELFTEST_MUST_NOT_LEAK", "GITHUB_TOKEN": "ghs_2", "ACTIONS_RUNTIME_TOKEN": "x",
-                       "RUNNER_TEMP": "/runner/temp"})
+    # ---- real git, real ticks ----------------------------------------------------------------
+    saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP")}
+    os.environ.update({"GH_TOKEN": "ghs_SELFTEST_MUST_NOT_LEAK", "GITHUB_TOKEN": "ghs_2", "RUNNER_TEMP": "/runner/temp"})
     try:
         env = generator_env()
-        check("generator env: no *TOKEN* key, no RUNNER_TEMP", not any("TOKEN" in k for k in env) and "RUNNER_TEMP" not in env,
-              str(sorted(env)))
+        check("generator env: no *TOKEN*, no RUNNER_TEMP, isolated git config",
+              not any("TOKEN" in k for k in env) and "RUNNER_TEMP" not in env and env["GIT_CONFIG_GLOBAL"] == os.devnull)
+        with tempfile.TemporaryDirectory() as root:
+            origin = os.path.join(root, "origin")
+            _synthetic_origin(origin)
+            gh = FakeGitHub(origin, root)
+            base0 = gh.main_sha()
+            numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35,
+                       "pX": 33, "pF": 34}
+            probe = os.path.join(root, "probe.json")
+            counter = [0]
 
-        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as scratch:
-            info = _synthetic_repo(d)
-            probe = os.path.join(scratch, "probe.json")
-            builder = TrainBuilder(d, regen_commands=(f"{sys.executable} {SYN_GENERATOR}",), overlay_roots=(".github/scripts", "docs/adr"))
-            builder.env["PROBE_OUT"] = probe
+            def clone(tag):
+                counter[0] += 1
+                d = os.path.join(root, f"{tag}-{counter[0]}")
+                sh(["git", "clone", "-q", "--branch", "main", origin, d], env=base_env())
+                return d
 
-            def local_verify(rec: TrainRecord):
-                builder.git("checkout", "-q", "-f", rec.sha)
-                r = subprocess.run([sys.executable, "ci.py"], cwd=d, text=True, capture_output=True)
-                return ("green", []) if r.returncode == 0 else ("red", [c for c in r.stdout.strip().split(",") if c])
+            def tick(regen=None, batch_size=8):
+                """settle -> build -> publish, each in its own fresh clone, as on three runners."""
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False)
+                if s["in_flight"]:
+                    return s, "in-flight"
+                counter[0] += 1
+                bdir = clone("build")
+                b = TrainBuilder(bdir, regen_commands=regen or (f"{sys.executable} {SYN_GENERATOR}",),
+                                 overlay_roots=(".github/scripts",))
+                b.env["PROBE_OUT"] = probe
+                out = os.path.join(root, f"bundle-{counter[0]}")
+                mode_build(gh, Git(bdir), b, "o/r", out, batch_size)
+                return s, mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", batch_size)
 
-            def members(*names):
-                return [Member(i + 1, n, f"body of {n}", builder.git("rev-parse", n).stdout.strip(), n, f"2026-01-0{i + 1}",
-                               ref=builder.git("rev-parse", n).stdout.strip())
-                        for i, n in enumerate(names)]
+            def open_only(*branches):
+                for br in branches:
+                    gh.add_pr(numbers[br], br, f"2026-01-{numbers[br]:02d}")
 
-            def train(hub, names, b=None):
-                b = b or builder
-                ms = members(*names)
-                trains = prebuild(b, info["base"], ms)
-                whole = trains[train_key(ms)]
-                return run_train(hub, info["base"], ms, trains, local_verify, [], b.files_of(info["base"], whole.sha))
+            def drain(max_ticks=12, **kw):
+                for _ in range(max_ticks):
+                    s, st = tick(**kw)
+                    if st == "idle" and not s["in_flight"]:
+                        return
 
-            # The finding of review 1: the generator runs while GH_TOKEN is set and must not see it.
-            hub = FakeHub(info["base"])
-            o = train(hub, ("pR",))
+            def reset():
+                for p in gh.prs.values():
+                    p["state"] = "closed"
+                for c in gh.carriers.values():
+                    c["state"] = "closed"
+                gh.merged.clear()
+                gh.comments.clear()
+                gh.statuses.clear()
+                gh.g("checkout", "-q", "-f", "main")
+                gh.g("reset", "-q", "--hard", base0)
+
+            # 4-PR batch, #3 bad: bisect across ticks isolates #3; 1, 2, 4 merge.
+            open_only("p1", "p2", "p3", "p4")
+            drain()
+            check("ticks: 4-PR batch with #3 bad merges 1, 2 and 4", sorted(gh.merged) == [1, 2, 4], str(gh.merged))
+            check("ticks: #3 is the culprit (App failure + fixed comment)",
+                  (3, CULPRIT_MESSAGE) in gh.comments
+                  and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure", str(gh.comments))
+            check("ticks: every carrier was closed", all(c["state"] == "closed" for c in gh.carriers.values()))
+            reset()
+
+            # Semantic pair green alone, red together: one merges, the other is the culprit.
+            open_only("pA", "pB")
+            drain()
+            check("semantic pair: exactly one merges, the other is the culprit",
+                  gh.merged == [11] and (12, CULPRIT_MESSAGE) in gh.comments, f"{gh.merged} {gh.comments}")
+            reset()
+
+            # Regeneration: pR needs derived/index.txt regenerated; the train carries it and merges.
+            open_only("pR")
+            drain()
+            check("regen: pR merges through a train whose regeneration commit is in the inventory", gh.merged == [21], str(gh.merged))
             rec = json.loads(pathlib.Path(probe).read_text())
-            check("exfiltration probe: generator saw an EMPTY GH_TOKEN while the process had one",
-                  rec["GH_TOKEN"] == "" and os.environ["GH_TOKEN"] == "ghs_SELFTEST_MUST_NOT_LEAK", str(rec)[:200])
-            check("exfiltration probe: no *TOKEN* key reached the generator", not any("TOKEN" in k for k in rec["keys"]), str(rec["keys"]))
-            check("regen: with regeneration pR merges", hub.merged == [1], f"{o}")
+            check("exfiltration probe: the generator saw no GH_TOKEN and no *TOKEN* key",
+                  rec["GH_TOKEN"] == "" and not any("TOKEN" in k for k in rec["keys"]), str(rec)[:160])
+            reset()
 
-            # A member that rewrites the generator is dropped even when forced past qualifies().
-            hub = FakeHub(info["base"])
-            o = train(hub, ("p1", "pG"))
-            check("generator tampering: pG dropped, p1 merged, comment is the fixed text",
-                  2 in o.dropped and hub.merged == [1] and (2, DROP_MESSAGE) in hub.comments, f"{o} {hub.comments}")
-            check("generator tampering: leaked.txt was never written", not pathlib.Path(d, "leaked.txt").exists())
-            builder.git("checkout", "-q", "-f", "--detach", info["base"])
-            pathlib.Path(d, SYN_GENERATOR).write_text("print('evil')\n")
-            builder.git("commit", "-q", "-am", "tamper")
-            try:
-                builder.overlay_trusted_generators(info["base"])
-                raised = False
-            except RuntimeError:
-                raised = True
-            check("overlay: a modified generator is restored from base AND refused",
-                  raised and pathlib.Path(d, SYN_GENERATOR).read_text() == SYN_GENERATOR_SRC)
-            builder.git("checkout", "-q", "-f", "--detach", info["base"])
-            pathlib.Path(d, ".github/scripts/new-evil.sh").write_text("echo evil\n")
-            builder.git("add", "-A")
-            builder.git("commit", "-q", "-m", "adds a generator")
-            try:
-                builder.overlay_trusted_generators(info["base"])
-                raised = False
-            except RuntimeError:
-                raised = True
-            check("overlay: a generator ADDED (absent from base) makes the rebuild refuse", raised)
-            builder.git("checkout", "-q", "-f", "main")
+            # NEGATIVE: a symlink in the train tree.
+            open_only("pL")
+            drain()
+            check("symlink: a train adding a symlink never merges; the PR gets the manual-lane comment",
+                  gh.merged == [] and (31, MANUAL_LANE_MESSAGE) in gh.comments, f"{gh.merged} {gh.comments}")
+            reset()
 
-            # Controls: each of the semantic pair is green ALONE (otherwise the next case proves nothing).
-            for n in ("pA", "pB"):
-                hub = FakeHub(info["base"])
-                o = train(hub, (n,))
-                check(f"synthetic control: {n} alone is green and merges", bool(o.mergeable and hub.merged), f"{o}")
+            # NEGATIVE: a regeneration commit touching a non-inventory path.
+            open_only("pR")
+            drain(regen=(f"{sys.executable} {SYN_GENERATOR}", f"{sys.executable} -c \"open('evil.txt','w').write('x')\""))
+            check("regen outside inventory: train rejected, nothing merges", gh.merged == [] and (21, MANUAL_LANE_MESSAGE) in gh.comments,
+                  f"{gh.merged} {gh.comments}")
+            reset()
 
-            # Two PRs green alone, jointly invalid via count.txt -> the train MUST go red.
-            hub = FakeHub(info["base"])
-            o = train(hub, ("pA", "pB"))
-            check("semantic conflict: train of [pA,pB] went red (trains > 1)", o.trains == 3, f"trains={o.trains}")
-            check("semantic conflict: pA merges as the verified prefix, pB is deferred, no culprit",
-                  [x.number for x in o.mergeable] == [1] and [x.number for x in o.deferred] == [2] and not o.culprits, f"{o}")
-            check("semantic conflict: pB was NOT merged", hub.merged == [1], str(hub.merged))
+            # NEGATIVE: members touching a generator or a gate file never qualify.
+            open_only("pG", "pW")
+            drain()
+            check("gate-file members: never qualify, never merge, nothing leaks",
+                  gh.merged == [] and not gh.carriers.get(max(gh.carriers, default=0), {}).get("state") == "open"
+                  and not os.path.exists(os.path.join(origin, "leaked.txt")) and not gh.comments, f"{gh.merged} {gh.comments}")
+            reset()
 
-            # Bisect over a real tree, #3 bad.
-            hub = FakeHub(info["base"])
-            o = train(hub, ("p1", "p2", "p3", "p4"))
-            check("bisect (git): culprit is p3", list(o.culprits) == [3] and o.culprits[3] == ["Validate manifests"], f"{o}")
-            check("bisect (git): p1,p2 merged, p4 deferred", hub.merged == [1, 2] and [x.number for x in o.deferred] == [4], f"{hub.merged} {o.deferred}")
-            check("bisect (git): culprit got a failure status + fixed comment",
-                  any(st[1] == "failure" for st in hub.statuses) and (3, CULPRIT_MESSAGE) in hub.comments)
-            check("bisect (git): merged members got success statuses", sum(1 for st in hub.statuses if st[1] == "success") == 2)
+            # Fast lane: computed live in settle. A docs/adr member is never fast-laned, and settle
+            # has no input through which a stored classification could be injected.
+            open_only("pF", "pX")
+            sm = mode_settle(gh, Git(clone("settle")), "o/r", False)
+            check("fast lane: a disjoint PR gets success from settle", 34 in sm["fast"]
+                  and gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "success")
+            check("fast lane: a docs/adr member is not fast-laned, and settle takes no state input",
+                  33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
+                  and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount]) == {"gh", "git", "repo", "shadow"})
+            reset()
 
-            # Textual conflict -> dropped with the fixed comment, pA still merges.
-            hub = FakeHub(info["base"])
-            o = train(hub, ("pA", "pC"))
-            check("conflict drop: pC dropped with the fixed comment, pA merged",
-                  2 in o.dropped and hub.merged == [1] and hub.comments == [(2, DROP_MESSAGE)], f"{o} {hub.comments}")
+            # Bundle verification, directly.
+            open_only("p1", "p2")
+            pub = Git(clone("publish"))
+            base = live_base(gh, pub)
+            _f, batch = plan_batch(gh, pub, "o/r", base, 8)
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(), overlay_roots=(".github/scripts",))
+            for m in batch:
+                b.git("fetch", "-q", "origin", f"+{gh.head_refspec(m.number)}:refs/x/{m.number}")
+            tip, _applied, _d = b.build(base, batch)
 
-            # Regeneration control: pR is red WITHOUT regen; with it, the tip is the regen commit.
-            no_regen = TrainBuilder(d, regen_commands=(), overlay_roots=(".github/scripts",))
-            hub = FakeHub(info["base"])
-            o = train(hub, ("pR",), b=no_regen)
-            check("regen control: without regeneration pR is a culprit", list(o.culprits) == [1], f"{o}")
-            own = prebuild(builder, info["base"], members("pR"))["1"]
-            check("regen: own train tip is the regeneration commit",
-                  builder.git("log", "-1", "--format=%s", own.sha).stdout.strip() == REGEN_COMMIT_SUBJECT)
-            check("squash commit carries PR-Number trailer", "PR-Number: #1" in builder.git("log", "-1", "--format=%B", f"{own.sha}~1").stdout)
-            check("rebuild is deterministic in tree: same heads, same base -> same tree",
-                  prebuild(builder, info["base"], members("pR"))["1"].tree == own.tree)
+            def bundle_of(rev, tag):
+                b.git("update-ref", BUNDLE_REF, rev)
+                path = os.path.join(root, f"{tag}.bundle")
+                b.git("bundle", "create", path, BUNDLE_REF, f"^{base}")
+                pub("fetch", "-q", path, f"+{BUNDLE_REF}:refs/x/{tag}")
+                return pub("rev-parse", f"refs/x/{tag}").stdout.strip()
 
-            # ---- review-3 negatives 5 + 6: CI head tree vs own rebuilt tree ---------------
-            check("tree: CI ran on this run's own commit -> accepted", ci_tree_problem(builder.git, own.sha, own) is None)
+            def verdict(rev, base_=None):
+                try:
+                    return verify_bundle_train(pub, base_ or base, batch, rev, ["derived/*"])
+                except Reject as exc:
+                    return str(exc)
+            v = verdict(bundle_of(tip, "honest"))
+            check("bundle: an honest bundle verifies; publish pushes its OWN commits with the same tree",
+                  isinstance(v, Verified) and v.applied == [1, 2] and v.tree == pub.tree(tip) and v.tip != tip, str(v))
+            b.git("checkout", "-q", "-f", "--detach", f"{tip}~1")
+            pathlib.Path(bdir, "docs/one.md").write_text("1\n ")
+            b.git("commit", "-qam", "squash with one extra byte")
+            b.git("cherry-pick", "--allow-empty", tip)
+            v = verdict(bundle_of(b.git("rev-parse", "HEAD").stdout.strip(), "onebyte"))
+            check("bundle: a member tree one byte off the merge-tree rebuild is rejected",
+                  isinstance(v, str) and "differs from the merge-tree rebuild" in v, str(v))
+            b.git("checkout", "-q", "-f", "--detach", tip)
+            pathlib.Path(bdir, "docs/extra.md").write_text("x\n")
+            b.git("add", "-A")
+            b.git("commit", "-qm", "extra member outside the batch")
+            v = verdict(bundle_of(b.git("rev-parse", "HEAD").stdout.strip(), "extra"))
+            check("bundle: an extra commit outside the batch is rejected", isinstance(v, str) and "not a declared derived output" in v, str(v))
+            b.git("checkout", "-q", "-f", "--detach", tip)
+            os.symlink("/etc/passwd", os.path.join(bdir, "derived", "x"))
+            b.git("add", "-A")
+            b.git("commit", "-qm", REGEN_COMMIT_SUBJECT)
+            v = verdict(bundle_of(b.git("rev-parse", "HEAD").stdout.strip(), "regenlink"))
+            check("bundle: a regeneration commit adding a symlink inside the inventory is rejected",
+                  isinstance(v, str) and "symlink" in v, str(v))
+            gh.g("checkout", "-q", "-f", "main")
+            pathlib.Path(origin, "later.txt").write_text("x\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-qm", "later")
+            live = live_base(gh, pub)
+            v = verdict(pub("rev-parse", "refs/x/honest").stdout.strip(), live)
+            check("bundle: a train over a stale base is rejected", isinstance(v, str) and "live base" in v, str(v))
+            reset()
 
-            def ci_head_with(edit) -> str:
-                builder.git("checkout", "-q", "-f", "--detach", f"{own.sha}~1")
-                edit()
-                builder.git("add", "-A")
-                builder.git("commit", "-q", "-m", REGEN_COMMIT_SUBJECT)
-                return builder.git("rev-parse", "HEAD").stdout.strip()
+            # NEGATIVE: settle on a carrier head whose tree is not publish's recorded tree.
+            open_only("p1")
+            tick()
+            carrier = next(c for c in gh.carriers.values() if c["state"] == "open")
+            gh.g("checkout", "-q", "-f", "--detach", carrier["head"]["sha"])
+            pathlib.Path(origin, "docs/one.md").write_text("1\nx")
+            gh.g("commit", "-qam", own_member_message(1, gh.prs[1]["head"]["sha"]))
+            moved = gh.g("rev-parse", "HEAD").stdout.strip()
+            gh.g("update-ref", f"refs/heads/{carrier['head']['ref']}", moved)
+            gh.g("checkout", "-q", "-f", "main")
+            carrier["head"]["sha"] = moved
+            sm = mode_settle(gh, Git(clone("settle")), "o/r", False)
+            check("settle: a head whose tree is not the App-recorded tree merges nothing",
+                  gh.merged == [] and carrier["number"] in sm["rejected"], f"{gh.merged} {sm}")
+            # ... and a record posted by anyone but the App does not count either.
+            gh.post_status(moved, "success", f"tree={Git(origin).tree(moved)}", context=RECORD_CONTEXT, creator="someone")
+            gh.g("update-ref", f"refs/heads/{carrier['head']['ref']}", moved)   # settle deleted it
+            carrier["state"] = "open"
+            sm = mode_settle(gh, Git(clone("settle")), "o/r", False)
+            check("settle: a record forged by a non-App creator merges nothing", gh.merged == [] and carrier["number"] in sm["rejected"])
+            reset()
 
-            def regen_plus_checksum_line():
-                subprocess.run([sys.executable, SYN_GENERATOR], cwd=d, check=True, env=generator_env())
-                path = pathlib.Path(d, "rollouts/a.yaml")
-                path.write_text(path.read_text() + "  injected: true  # policy-checksum\n")
-            ci5 = ci_head_with(regen_plus_checksum_line)
-            p5 = ci_tree_problem(builder.git, ci5, own) or ""
-            check("tree: a regen commit adding a non-checksum line in a gitops yaml is rejected", p5.startswith("CI ran on tree"), p5)
+            # Shadow: statuses, no merges.
+            open_only("p1")
+            tick()
+            mode_settle(gh, Git(clone("settle")), "o/r", True)
+            check("shadow: settle posts success on the verified head and merges nothing",
+                  gh.merged == [] and gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "success")
+            reset()
 
-            def regen_plus_one_byte():
-                subprocess.run([sys.executable, SYN_GENERATOR], cwd=d, check=True, env=generator_env())
-                path = pathlib.Path(d, "derived/index.txt")
-                path.write_text(path.read_text() + "x")
-            ci6 = ci_head_with(regen_plus_one_byte)
-            p6 = ci_tree_problem(builder.git, ci6, own) or ""
-            check("tree: a CI tree differing by one byte from the rebuilt tree is rejected", p6.startswith("CI ran on tree"), p6)
-            ci_same = ci_head_with(lambda: subprocess.run([sys.executable, SYN_GENERATOR], cwd=d, check=True, env=generator_env()))
-            check("tree: a different commit with a byte-identical tree is accepted (tree, not sha, is the claim)",
-                  ci_same != own.sha and ci_tree_problem(builder.git, ci_same, own) is None)
-            check("tree: an unknown CI head is rejected", ci_tree_problem(builder.git, "f" * 40, own) is not None)
-            builder.git("checkout", "-q", "-f", "main")
-
-            # Shadow: statuses posted, nothing merged.
-            hub = FakeHub(info["base"])
-            hub.shadow = True
-            o = train(hub, ("p1", "p2"))
-            check("shadow: success statuses posted, zero merges", len(hub.statuses) == 2 and hub.merged == [])
-
-            # Foreign merge mid-train: overlapping -> stop before the first; disjoint -> continue.
-            hub = FakeHub("foreign")
-            hub.foreign = ["docs/two.md"]
-            o = train(hub, ("p1", "p2"))
-            check("foreign merge touching train files stops the merges", hub.merged == [] and [x.number for x in o.deferred] == [1, 2], f"{hub.merged} {o}")
-            hub = FakeHub("foreign")
-            hub.foreign = ["unrelated/file.txt"]
-            o = train(hub, ("p1", "p2"))
-            check("disjoint foreign merge is tolerated", hub.merged == [1, 2], str(hub.merged))
+            # A foreign merge landing during settle stops the merges after the first.
+            open_only("p1", "p2")
+            tick()
+            gh.foreign_after_merge = "svc/foreign.txt"
+            mode_settle(gh, Git(clone("settle")), "o/r", False)
+            check("foreign merge mid-settle: merging stops, the rest waits for the next tick", gh.merged == [1], str(gh.merged))
+            reset()
     finally:
         for k, v in saved.items():
             if v is None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-
     for f in fails:
         print(f"  [FAIL] {f}")
     print(f"SUBJECTS={len(ran)}")
@@ -1400,33 +1363,46 @@ def self_test() -> int:
 # --------------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["rebuild", "publish"])
+    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
     ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "8")))
-    ap.add_argument("--state", default="", help="directory for state.json (step A writes, step C reads)")
-    ap.add_argument("--run-id", default="", help="GITHUB_RUN_ID; the train branch derives from it")
-    ap.add_argument("--attempt", default="", help="GITHUB_RUN_ATTEMPT")
-    ap.add_argument("--wait-minutes", type=int, default=90)
-    ap.add_argument("--poll-seconds", type=int, default=60)
+    ap.add_argument("--out", default="", help="build: directory for train.bundle")
+    ap.add_argument("--bundle", default="", help="publish: directory holding train.bundle")
+    ap.add_argument("--run-id", default="")
+    ap.add_argument("--attempt", default="")
     ap.add_argument("--workdir", default="")
     ap.add_argument("--run-url", default=os.environ.get("MERGE_TRAIN_RUN_URL", ""))
-    ap.add_argument("--dry-run", action="store_true", help="rebuild: classify only, build nothing; publish refuses")
-    ap.add_argument("--shadow", action="store_true", help="publish: post statuses and comments, never merge (phase 0)")
+    ap.add_argument("--shadow", action="store_true", help="settle: post statuses and comments, never merge (phase 0)")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
     if args.check_declaration:
         return check_declaration()
-    if not args.mode:
-        ap.error("mode is required: rebuild | publish (or --self-test / --check-declaration)")
-    if not args.repo or not args.state or not args.run_id or not args.attempt:
-        ap.error("--repo, --state, --run-id and --attempt are required")
+    if not args.mode or not args.repo:
+        ap.error("mode and --repo are required (or --self-test / --check-declaration)")
     if "GH_TOKEN" not in os.environ:
-        ap.error("GH_TOKEN is required (read-only for rebuild, the App token for publish)")
-    return rebuild(args) if args.mode == "rebuild" else publish(args)
+        ap.error("GH_TOKEN is required (read-only for build, the App token for publish/settle)")
+    gh = GitHub(args.repo, args.branch, args.run_url)
+    workdir = args.workdir or os.getcwd()
+    if args.mode == "build":
+        if not args.out:
+            ap.error("build needs --out")
+        applied = mode_build(gh, Git(workdir), TrainBuilder(workdir), args.repo, args.out, args.batch_size)
+        write_output("has_train", "true" if applied else "false")
+        return 0
+    git = Git(workdir, token=os.environ["GH_TOKEN"])
+    if args.mode == "publish":
+        if not args.bundle or not args.run_id or not args.attempt:
+            ap.error("publish needs --bundle, --run-id and --attempt")
+        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size)}")
+        return 0
+    s = mode_settle(gh, git, args.repo, args.shadow)
+    log(f"settle: {s}")
+    write_output("in_flight", "true" if s["in_flight"] else "false")
+    return 0
 
 
 if __name__ == "__main__":
