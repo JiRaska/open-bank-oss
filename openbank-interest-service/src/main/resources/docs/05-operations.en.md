@@ -52,6 +52,8 @@ Scheduled jobs (config keys under `openbank.interest`):
 
 The placeholder secrets are dev-only; production must inject real values via Vault (ADR-0017).
 
+Outbound service-to-service calls (ledger, transaction-service, account-service, party-service and, since #8481, the product-catalog read) authenticate through the named `ledger` oidc-client: Keycloak client `openbank-interest` with its own secret `OIDC_LEDGER_CLIENT_SECRET`, never the shared `openbank-services` principal. The product-catalog read is granted `catalog.read` (published read only) for `service-account-openbank-interest` by `account_rest_ext.rego`; the shared `OIDC_CLIENT_SECRET` client stays configured as the default but no rest-client selects it.
+
 ## Health checks
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC running.
