@@ -161,6 +161,10 @@ kover {
                     "com.openbank.libs.testing.mtls.ListenerAuthParityConformance*",
                     "com.openbank.libs.testing.mtls.ListenerMaterial*",
                     "com.openbank.libs.testing.mtls.ProductionListenerProfile*",
+                    // Same reason: an abstract @Test harness (one case per approval-endpoint
+                    // invariant) that only runs inside an adopter service's own test source set,
+                    // where the SecurityIdentity and the endpoint class exist.
+                    "com.openbank.libs.testing.approval.ApprovalEndpointConformance*",
                 )
             }
         }
