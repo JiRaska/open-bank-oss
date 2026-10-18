@@ -22,3 +22,21 @@ The frozen closing balance sums hash-verified `FROZEN`/`LINES_V1` monthly eviden
 F02.00 follows a separate source: `/frozen-trial-balance` for frozen evidence and `/trial-balance` for live preview. These return the selected month's movements. The current F02 implementation does not assemble calendar-year-to-date movements. A cumulative closing balance must not be substituted for this flow source.
 
 Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+
+## GL classification
+
+Every GL account with a balance must be in the `FinrepCoverage` allowlist; an unlisted code makes the return report `UNCLASSIFIED_GL_ACCOUNT` instead of silently dropping the amount. The treasury and money-market chart (ADR-0315) is classified as follows:
+
+| GL | Meaning | Template rows |
+|---|---|---|
+| 1001, 1002 | Nostro accounts at correspondent banks | F01.01 r0010 and r0040 (other demand deposits) |
+| 1510 | ČNB deposit facility | F01.01 r0010 only — a central-bank balance, not an other demand deposit |
+| 1500, 1501; 1520, 1521 | Placements with credit institutions and their accrued interest receivable | F01.01 r0181, r0183 (loans and advances at amortised cost) |
+| 2300, 2301; 2310, 2311; 2320 | Deposits from credit institutions, their accrued interest payable, ČNB lombard borrowing | F01.02 r0110, r0120 |
+| 4200, 4201 / 5200, 5201 | Money-market interest income / expense | F02.00 r0010, r0051 / r0090, r0120 |
+
+Accrued interest receivable (1520/1521) is one account shared by interbank placements and the ČNB deposit facility, so the facility's accrued interest is reported with loans and advances rather than with cash. Splitting it requires a separate ledger account per counterparty type.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

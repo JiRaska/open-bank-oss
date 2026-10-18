@@ -104,3 +104,7 @@ Migrace jsou po aplikaci neměnné. Pokud checksum mismatch blokuje start na ži
 
 - Per-service path-scoped CI buildy jen změněné služby. Release je automatický přes **release-please** z Conventional Commits — nikdy ručně needitujte `version.txt` ani `CHANGELOG.md`. Aktuální release verze: `version.txt = 0.3.0`.
 - Build/push image přes `openbank-infra/scripts/build-push-service.sh openbank-psd2-service` (host-side `quarkusBuild`, fast-jar). GitOps image tagy: při merge konfliktech berte `--ours` pro image řádky.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
