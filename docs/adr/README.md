@@ -345,7 +345,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0338](0338-transformed-funds-and-complete-pension-platform.md) | Transformed funds and complete pension-platform operations | Accepted | Planned | architecture,accounting-close,resilience,onboarding | — |
 | [0339](0339-tax-residency-information-exchange-and-product-taxation-are-party-and-event-attributes-not-product-properties.md) | Tax residency, information exchange and product taxation are party and event attributes, not product properties | Proposed | Partial | tax,compliance,product-catalog,aml-sanctions | — |
 | [0340](0340-crs-fatca-information-exchange-reporting-is-a-tax-reporting-service-capability-and-the-sole-tin-consumer.md) | CRS/FATCA information-exchange reporting is a tax-reporting-service capability and the sole TIN consumer | Proposed | Planned | tax,regulatory-reporting,privacy-gdpr,compliance | — |
-| [0343](0343-merge-train-replaces-strict-up-to-date-on-main.md) | Merge train replaces strict up-to-date on main | Proposed | Planned | ci,governance,release-versioning | — |
+| [0343](0343-merge-train-replaces-strict-up-to-date-on-main.md) | Merge train replaces strict up-to-date on main | Proposed | Partial | ci,governance,release-versioning | — |
 
 ## By tag
 

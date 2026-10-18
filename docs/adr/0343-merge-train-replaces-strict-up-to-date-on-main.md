@@ -1,7 +1,8 @@
 ---
 date: 2026-10-18
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "open-bank-oss — ADR-0343 phase 1: ruleset flip + MERGE_TRAIN_SHADOW=false; shadow mode runs today"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -57,42 +58,55 @@ strict up-to-date policy is turned off. Concretely:
 
 1. **Driver.** `.github/workflows/merge-train.yml` runs every 10 minutes and on
    `workflow_dispatch`, under the concurrency group `merge-train` with `cancel-in-progress: false`
-   (a train in flight is never cancelled by the next tick; the tick waits). It acts with the
-   gitops GitHub App installation token, as `auto-update-armed-prs.yml` does, because a push made
-   with `GITHUB_TOKEN` triggers no workflows and the train branch must be built by CI. All logic
-   lives in `.github/scripts/merge-train.py` (python3 stdlib + `gh`/`git`), which carries
-   `--dry-run`, `--shadow`, `--self-test` and `--check-declaration`.
+   (a train in flight is never cancelled by the next tick; the tick waits). It is **two jobs with
+   one trust boundary** (see *Security*): `build` holds no secret and produces the trains as git
+   bundles; `publish` mints the gitops GitHub App installation token — as
+   `auto-update-armed-prs.yml` does, because a push made with `GITHUB_TOKEN` triggers no
+   workflows — and runs git and gh only. All logic lives in `.github/scripts/merge-train.py`
+   (python3 stdlib + `gh`/`git`), which carries `build`, `publish`, `--dry-run`, `--shadow`,
+   `--self-test` and `--check-declaration`.
 2. **Candidates.** Open, non-draft, same-repository PRs with auto-merge armed, every required
    context of `main-protection` (other than `merge-train` itself) `success` at the PR head, and no
    `agent-pr-guard` refusal on that head. Branches under `codex/` are excluded. Oldest PR first,
    at most `TRAIN_BATCH_SIZE` (default 8) per train. The required set is read live from the
-   ruleset, never from a list in the script.
+   ruleset, never from a list in the script. A PR that touches a **generator path**
+   (`.github/scripts/**`, `docs/adr/*.sh`, any `gen-*` under `openbank-infra/gitops/`) never
+   qualifies: it would be running its own change with the generators' authority. It goes to the
+   owner's manual lane (below).
 3. **Fast lane.** Before any train is built, a candidate whose changed files are disjoint from
    `git diff --name-only <merge-base> origin/main` and touch none of `openbank-libs/**`,
    `build-logic/**`, `openbank-infra/gitops/**`, `docs/adr/**`, `.github/**`,
    `*/src/main/resources/openapi.yaml`, nor any path fragment in the `regen-derived.sh` generator
    inventory, gets `merge-train` = success directly. Its own CI already answered the only question
    a train could ask: nothing it changed interacts with anything that moved.
-4. **Train.** `train/<utc-ts>` = `origin/main` + `git merge --squash` of each candidate in order,
-   committed with the PR title as subject, the PR body's first paragraph, and a `PR-Number: #n`
-   trailer. A PR that does not apply cleanly is **dropped from this train** with a PR comment,
-   not failed. After stacking, `bash .github/scripts/regen-derived.sh --all` and
-   `bash docs/adr/gen-index.sh` run and any diff is committed as
-   `chore(train): regenerate derived files` — the derived-file class is the majority of the
-   measured breaks, and the train is the one place where regeneration sees the whole batch.
-5. **Verification.** The train branch is pushed and a **draft PR** labelled `merge-train` is
-   opened from it to `main` — `ci.yml` and `services-ci.yml` run on `push` only for `main`, so the
-   draft PR is the CI carrier. The train waits for the required contexts on the train head.
+4. **Train.** In the `build` job: `train/<utc-ts>` = `origin/main` + `git merge --squash` of each
+   candidate in order, committed with the PR title as subject, the PR body's first paragraph, and
+   a `PR-Number: #n` trailer. A PR that does not apply cleanly is **dropped from this train** with
+   a PR comment, not failed. After stacking, the generator paths are overlaid from the trusted
+   base (`git archive origin/main -- .github/scripts docs/adr openbank-infra/gitops`), the overlay
+   is asserted to have changed nothing, and `bash .github/scripts/regen-derived.sh --all` plus
+   `bash docs/adr/gen-index.sh` run under a scrubbed, allowlisted environment; any diff is
+   committed as `chore(train): regenerate derived files`. The derived-file class is the majority
+   of the measured breaks, and the train is the one place where regeneration sees the whole
+   batch. The build job builds the whole batch **and every bisect half** (2N-1 trains over the
+   same base) and uploads one git bundle per train plus a `plan.json`, so that the publish side
+   never needs to build anything.
+5. **Verification.** In the `publish` job, per train the bisect asks for: the bundle is fetched
+   and proven to be `origin/main` + exactly the commits the plan recorded (head sha, ancestry,
+   commit count); the branch is pushed and a **draft PR** labelled `merge-train` is opened from
+   it to `main` — `ci.yml` and `services-ci.yml` run on `push` only for `main`, so the draft PR
+   is the CI carrier. The train waits for the required contexts on the train head.
    `issue-hygiene` is excluded from the wait set: it judges a PR's body, not the tree, and was
    already green on every member. The carrier PR is closed and the branch deleted afterwards,
-   green or red.
+   green or red. If `origin/main` is no longer the plan's base when `publish` starts, the plan is
+   stale and the tick ends; the next one re-plans.
 6. **Green.** For each PR in order: post status `merge-train` = success on the PR head
    (`verified on train <sha> over main <sha>`), then squash-merge it through `gh`. Between merges
    the script asserts that `main` advanced **only** by the train's own merge. If a foreign commit
    landed, it stops and defers the rest to the next train — unless the foreign commit's files are
    disjoint from the whole train's files under the fast-lane rule, in which case it continues: the
    argument that admits a PR to the fast lane admits the train past a disjoint foreign merge.
-7. **Red.** Bisect by halving: each half is rebuilt as its own train over the same `main` and
+7. **Red.** Bisect by halving over the pre-built halves (each its own train over the same `main`),
    verified the same way. A half of one that is red is the culprit: it gets a PR comment naming the
    failing contexts and a `merge-train` = failure status on its head, which blocks it until the
    author pushes. Only the longest verified **prefix** merges; every other green PR is deferred to
@@ -105,6 +119,50 @@ strict up-to-date policy is turned off. Concretely:
    required context may also be satisfied by a tracked script that declares it as the
    `STATUS_CONTEXT` it posts via the commit-status API — otherwise the gate would, correctly, red
    every PR the moment `merge-train` became required, since no `pull_request` job emits it.
+
+### Security — the train tree is untrusted code
+
+**Threat.** Every member of a train is PR-authored code, and the derived-file generators
+(`regen-derived.sh`, `gen-index.sh`, the OPA bundle scripts) *execute* inside the train tree. A
+single job that held the App token while it ran them would hand any candidate PR a token that can
+post the `merge-train` status and merge — a review bypass for every PR in the repository, reachable
+by anyone who can arm auto-merge. The first prototype of this script had exactly that shape
+(generators ran with `os.environ` inherited, token included); the self-test's exfiltration probe
+was written against it and leaked the token before the fix.
+
+**Mitigation, in layers, each held by the self-test:**
+- *Job split.* `build` mints no token, checks out with `persist-credentials: false`, and reads
+  GitHub with the read-only `GITHUB_TOKEN`. It is the only job that runs anything from a train
+  tree. `publish` mints the App token and runs git and gh only; the trains reach it as git bundles
+  through an artifact, and it checks out the workflow's own ref, never a train. The
+  `merge-train-declaration` gate asserts both halves textually per job (no App token or
+  `GITOPS_APP_*` in `build`; no generator or `build` mode in `publish`).
+- *Scrubbed environment.* Generators run under an explicit allowlist (`PATH`, `HOME`, locale,
+  temp dirs, the git identity) — never an inherited `os.environ`. The synthetic generator in the
+  self-test records the environment it ran in; the test sets `GH_TOKEN` in the parent process and
+  asserts the generator saw an empty one and no `*TOKEN*` key at all.
+- *Trusted generators.* The build overlays every generator path from `origin/main` onto the
+  train tree before running anything, and refuses the whole train if a generator path still
+  differs from the base (modified or added). A PR that touches a generator path is disqualified
+  by `qualifies()` before it can enter a train; the overlay is the backstop for the case where it
+  somehow did.
+- *Bundle provenance.* `publish` refuses a bundle whose head is not the sha the plan recorded, is
+  not a descendant of the plan's base, or carries a different number of commits than the plan
+  says, and refuses the whole plan if `origin/main` has moved since it was built.
+
+**What is deliberately NOT required: a review decision.** The train does not check
+`reviewDecision == APPROVED`. `main-protection` has no review rule, and the repository has a single
+human maintainer (documented in the governance notes): the human gate here is the *arm* step —
+auto-merge is enabled by the owner, behind a local hook that refuses to arm money-path and
+governance PRs without his own review — together with `agent-pr-guard`, which the train reads off
+the member's head and treats as a refusal. Adding an approval requirement would require the sole
+human to approve his own PRs, which GitHub forbids, and would stall the train entirely.
+
+**Manual lane.** A PR that modifies a generator path cannot ride a train, by the rule above. In
+phase 0 that costs nothing (strict is still on). In phase 1 such a PR needs the `merge-train`
+status from a human: the owner reviews it and posts the status by hand
+(`gh api -X POST repos/JiRaska/open-bank-oss/statuses/<head-sha> -f state=success -f context=merge-train -f description="manual lane: generator change reviewed by owner"`),
+or merges with the ruleset bypass he already holds. Both leave an audit trail naming the human.
 
 ### What the train is NOT
 
@@ -199,8 +257,15 @@ undo in git.
   if it is the only thing merging armed work; that is a process rule, and in phase 1 the
   required context enforces it for every PR, since nothing else posts `merge-train`.
 - One more bot with the App token that can merge PRs. Its blast radius is bounded by the same
-  ruleset as any other merger (`agent-pr-guard`, approvals, signatures) — it only ever squashes
-  PRs that were already permitted to auto-merge.
+  ruleset as any other merger (`agent-pr-guard`, signatures) — it only ever squashes PRs that
+  were already armed — and by the job split above, which keeps the token out of every process
+  that runs PR-authored code.
+- The build job builds 2N-1 trains per tick (15 at the default batch of 8), each with a full
+  regeneration, so that the publish job never has to build. That is CPU in a job with no
+  secrets and no CI fan-out; the carrier PRs, which are the expensive part, are still at most
+  one per bisect step actually taken.
+- PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
+  routinely) take the manual lane in phase 1. The volume of that lane is a phase-0 measurement.
 - Carrier PRs: up to one every 10 minutes, closed on completion. They carry the `merge-train`
   label so every PR-list query can filter them out.
 
