@@ -5,11 +5,13 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useSession } from 'next-auth/react'
 import Link from 'next/link'
 import { Bell, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { hasPermission } from '@/lib/auth/roles'
 
 type Template = 'ACCOUNT_OPENED' | 'ACCOUNT_CLOSED' | 'TRANSACTION_COMPLETED' | 'TRANSACTION_FAILED'
 type Language = 'CS' | 'EN'
@@ -43,6 +45,10 @@ const TEMPLATES = Object.keys(VARIABLES) as Template[]
 
 export default function NotificationTemplatesPage() {
   const { t } = useLanguage()
+  const { data: session } = useSession()
+  const roles = session?.user?.roles ?? []
+  const canDraft = hasPermission(roles, 'communication:templates:manage')
+  const canPublish = hasPermission(roles, 'communication:templates:publish')
   const [template, setTemplate] = useState<Template>('TRANSACTION_COMPLETED')
   const [language, setLanguage] = useState<Language>('CS')
   const [channel, setChannel] = useState<Channel>('EMAIL')
@@ -94,7 +100,7 @@ export default function NotificationTemplatesPage() {
     }
   }
 
-  return <AuthGuard permission="communication:templates:manage">
+  return <AuthGuard permission="communication:templates:view">
     <div className="page">
       <PageHeader
         icon={<Bell size={22} />}
@@ -117,7 +123,7 @@ export default function NotificationTemplatesPage() {
         <p className="text-xs text-muted-foreground">{t('Jen prostý text. Odkazy a HTML nejsou povoleny.', 'Plain text only. Links and HTML are not allowed.')}</p>
         <div className="flex gap-2">
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void perform('/preview', { draft, variables: Object.fromEntries(VARIABLES[template].map(key => [key, SAMPLE[key]])) })}>{t('Náhled', 'Preview')}</button>
-          <button type="button" className="btn btn-primary" disabled={busy || !preview} onClick={() => void perform('', draft)}>{t('Uložit návrh', 'Save draft')}</button>
+          {canDraft && <button type="button" className="btn btn-primary" disabled={busy || !preview} onClick={() => void perform('', draft)}>{t('Uložit návrh', 'Save draft')}</button>}
         </div>
         {preview && <div className="card" aria-label={t('Náhled zprávy', 'Message preview')}><strong>{preview.subject}</strong><pre className="whitespace-pre-wrap">{preview.body}</pre></div>}
       </div>
@@ -128,7 +134,7 @@ export default function NotificationTemplatesPage() {
           <div className="flex items-center justify-between"><strong>#{revision.revision} · {revision.language} · {revision.channel}</strong><span>{revision.state}</span></div>
           <p>{revision.subject}</p><p className="text-xs text-muted-foreground">{revision.body}</p>
           <p className="text-xs text-muted-foreground">{t('Vytvořil', 'Created by')}: {revision.createdBy}{revision.publishedBy ? ` · ${t('Publikoval', 'Published by')}: ${revision.publishedBy}` : ''}</p>
-          {revision.state === 'DRAFT' && <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void perform(`/${revision.id}/publish`)}>{t('Publikovat jako druhý operátor', 'Publish as a different operator')}</button>}
+          {revision.state === 'DRAFT' && canPublish && <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void perform(`/${revision.id}/publish`)}>{t('Schválit a publikovat (schvalovatel, ne autor)', 'Approve and publish (approver, not the author)')}</button>}
         </div>)}
       </div>
     </div>
