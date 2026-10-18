@@ -1597,7 +1597,13 @@ coverage:
     compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
-    money_path_floor: 40                # enforced baseline (all 13 money-path services, ratchet-only)
+    # Baseline for every entry in money_path_services (28 on 2026-10-17), ratchet-only. Enforced
+    # per module by koverVerify against the minValue in its build.gradle.kts, and the direction
+    # is enforced by gate `coverage-floor-ratchet` (a lowered minValue needs a
+    # `coverage-floor-lowered: #<issue>` trailer). Two services still sit BELOW it:
+    # standing-order 34 and sdd 38 — tracked in #13144; raise them there, do not read this
+    # number as already true of the whole list.
+    money_path_floor: 40
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)

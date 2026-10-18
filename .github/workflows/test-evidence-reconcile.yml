@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Publish Test Intelligence evidence for every RUNNING service image (#13201).
+#
+# _service-ci.yml publishes evidence for the commit it builds, but the image a service runs is
+# usually tagged with a different commit (auto-deploy rebuilds at the main tip), so that key
+# alone leaves most of the fleet a miss. This job maps each running image commit to the newest
+# tested commit PROVEN byte-identical in every build input of the service
+# (reconcile-test-evidence.py -> pact-version-tree-equivalent.sh) and publishes that run's
+# envelope under the image's commit, declaring the equivalence in the object. Unproven =>
+# nothing published. Write-once: an existing object answers 412 and stands.
+#
+# Triggers: a finished main-push Services CI run (new tested commits), a gitops change on main
+# (new running commits), and manual dispatch. It observes; nothing depends on it.
+name: Test evidence reconcile
+
+on:
+  workflow_run:
+    workflows: ["Services CI"]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "openbank-infra/gitops/components/**"
+  workflow_dispatch:
+
+# One at a time; GitHub keeps only the newest pending run, which reads the newest state anyway.
+concurrency:
+  group: test-evidence-reconcile
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    name: Publish evidence for running images
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve provable evidence per running image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/reconcile-test-evidence.py --repo "${GITHUB_REPOSITORY}" \
+            > "${RUNNER_TEMP}/plan.jsonl"
+          echo "$(wc -l < "${RUNNER_TEMP}/plan.jsonl") component(s) to publish"
+
+      - name: Assume the evidence-writer role (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-test-evidence-writer
+          aws-region: eu-north-1
+
+      - name: Publish write-once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          failed=0
+          while IFS= read -r line; do
+            component="$(jq -r .component <<< "${line}")"
+            dir="${RUNNER_TEMP}/envelopes/${component}"
+            if ! gh run download "$(jq -r .run_id <<< "${line}")" -R "${GITHUB_REPOSITORY}" \
+                 -n "$(jq -r .artifact <<< "${line}")" -D "${dir}"; then
+              echo "::warning::envelope download failed for ${component}"; failed=$((failed + 1)); continue
+            fi
+            bash .github/scripts/publish-test-evidence.sh "${component}" \
+              "$(jq -r .tested_sha <<< "${line}")" "$(jq -r .image_sha <<< "${line}")" \
+              "$(jq -r .equivalence <<< "${line}")" "${dir}/run.json" || failed=$((failed + 1))
+          done < "${RUNNER_TEMP}/plan.jsonl"
+          echo "publish failures: ${failed}"
+          [ "${failed}" -eq 0 ]

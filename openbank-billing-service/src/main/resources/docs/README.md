@@ -24,3 +24,7 @@ those rows before retrying the migration. On rollback, disable the annual-summar
 roll back the application first. Do not drop the issuance table after any event has been emitted or
 its outbox row purged: doing so removes the only durable guard against re-issuing that regulatory
 document trigger. No lossless rollback exists once that evidence is gone.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
