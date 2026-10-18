@@ -5,6 +5,7 @@
 package com.openbank.interest.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
@@ -78,7 +79,7 @@ class WithholdingRemittanceSettlementConsumerTest {
     private fun created(): Response =
         Response.status(201).entity(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")).build()
 
-    /** A proven 201 whose body cannot be read: the debit HAS booked. */
+    /** A 201 whose body cannot be read: completion is unproven, so the facade throws. */
     private fun createdWithUnreadableBody(): Response {
         val response = mockk<Response>(relaxed = true)
         every { response.status } returns 201
@@ -139,16 +140,21 @@ class WithholdingRemittanceSettlementConsumerTest {
      * distinguishes a real retry from a single call that happens to throw.
      */
     @Test
-    fun `a 201 whose body cannot be read still settles - the status was proven`(): Unit = runBlocking {
-        every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(createdWithUnreadableBody())
-        every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
+    fun `a 201 whose body cannot be read is completion-uncertain - never settled, retried under the same key`(): Unit =
+        runBlocking {
+            every { transactionClient.initiateTransaction(any()) } returns
+                Uni.createFrom().item(createdWithUnreadableBody())
+            every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
 
-        consumer.consume(record())
+            assertThatThrownBy { runBlocking { consumer.consume(record()) } }.satisfies({ failure ->
+                assertThat(
+                    generateSequence<Throwable>(failure) { it.cause.takeIf { c -> c !== it } }
+                        .any { it is TransactionCompletionUncertainException },
+                ).isTrue()
+            })
 
-        verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
-        verify(exactly = 1) { remitUseCase.settle(remittanceId) }
-    }
+            verify(exactly = 0) { remitUseCase.settle(any()) }
+        }
 
     @Test
     fun `a 422 refusal is retried and rethrown as a booking failure, never settled or acked`(): Unit = runBlocking {

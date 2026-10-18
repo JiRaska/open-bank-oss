@@ -5,6 +5,7 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
@@ -118,16 +119,19 @@ class SddCollectionDebitConsumerTest {
         }
 
     @Test
-    fun `a 201 whose body cannot be read is a booked debit - no retry, no failure`(): Unit = runBlocking {
+    fun `an unreadable 201 is completion-uncertain - thrown for retry, never debited`(): Unit = runBlocking {
         val response = mockk<Response>(relaxed = true)
         every { response.status } returns 201
         every { response.hasEntity() } returns true
         every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException("garbled")
         every { transactionClient.initiateTransaction(any()) } returns Uni.createFrom().item(response)
 
-        consumer.consume(collectionAuthorisedEvent())
-
-        verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
+        assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }.satisfies({ failure ->
+            assertThat(
+                generateSequence<Throwable>(failure) { it.cause.takeIf { c -> c !== it } }
+                    .any { it is TransactionCompletionUncertainException },
+            ).isTrue()
+        })
     }
 
     @Test

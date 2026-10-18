@@ -128,8 +128,10 @@ class SddTransactionClientEventLoopIT {
         Stub.body = """{"id":"not-a-uuid"}"""
 
         assertThatThrownBy { callOnEventLoop() }.satisfies({ failure ->
-            assertThat(generateSequence(failure) { it.cause.takeIf { c -> c !== it } })
-                .anyMatch { it is TransactionCompletionUncertainException }
+            assertThat(
+                generateSequence<Throwable>(failure) { it.cause.takeIf { c -> c !== it } }
+                    .any { it is TransactionCompletionUncertainException },
+            ).isTrue()
         })
     }
 
