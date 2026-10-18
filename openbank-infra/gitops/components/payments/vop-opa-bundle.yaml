@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "75273fa6c781976b"
+    openbank.tech/policy-checksum: "45cda02c401e28e9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -329,9 +329,10 @@ data:
     	input.action == "opsmessage.approval.decide"
     }
 
-    # ADR-0333 D6: reviewed customer notification copy is edited and published by staff.
+    # ADR-0333 D6: reviewed customer notification copy is drafted by staff (the maker side).
     # Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
-    # identity must never be able to change copy shown to a customer.
+    # identity must never be able to change copy shown to a customer. Publishing is NOT here:
+    # the checker is a distinct job function (ADR-0285 D6), see commstemplate-publish below.
     allowed_reasons contains "operator-manage-notification-template" if {
         input.principal.type == "HUMAN"
         some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
@@ -341,8 +342,32 @@ data:
             "commstemplate.create",
             "commstemplate.read",
             "commstemplate.preview",
-            "commstemplate.publish",
         }
+    }
+
+    # ADR-0333 D6 checker side, same role family as commstyle-publish (ADR-0285 D6): publishing
+    # customer notification copy belongs to ROLE_COMMS_APPROVER (ADMIN as break-glass), never to
+    # ROLE_OPERATOR, so one operator cannot author and release copy alone by colluding with a
+    # second operator account. Maker != checker is ALSO enforced by notification-service
+    # (ManagedTemplateResource.publish and the `created_by <> actor` predicate in the UPDATE);
+    # this rule only decides WHO may attempt the call.
+    allowed_reasons contains "commstemplate-publish" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action == "commstemplate.publish"
+    }
+
+    # The approver must be able to see the draft it publishes; a lone ROLE_COMMS_APPROVER has no
+    # ROLE_OPERATOR, so the maker rule above would not admit it (same reason as
+    # commstyle-read-publish-approval).
+    allowed_reasons contains "commstemplate-approver-read" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"commstemplate.read", "commstemplate.preview"}
     }
 
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
