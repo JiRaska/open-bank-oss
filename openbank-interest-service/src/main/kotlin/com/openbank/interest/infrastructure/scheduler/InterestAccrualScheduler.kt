@@ -72,12 +72,12 @@ class InterestAccrualScheduler(
                     liveness?.recordSuccess()
                 } else {
                     log.warnf(
-                        "interest accrual for %s: %d account(s) FAILED, %d balance(s) UNAVAILABLE (first: %s) - " +
-                            "the day is reported as not complete",
+                        "interest accrual for %s: %d account(s) FAILED, %d balance(s) UNAVAILABLE, " +
+                            "listingFailed=%s - the day is reported as not complete",
                         date,
                         outcome.failed,
                         outcome.unavailable,
-                        outcome.firstFailure,
+                        outcome.listingFailed,
                     )
                 }
             }
@@ -97,9 +97,8 @@ class InterestAccrualScheduler(
                         refusalReason = if (outcome.complete) {
                             null
                         } else {
-                            "${outcome.failed} failed, ${outcome.unavailable} unavailable" +
-                                (if (outcome.listingFailed) ", account listing failed" else "") +
-                                ": ${outcome.firstFailure}"
+                            "ACCRUAL_INCOMPLETE: ${outcome.failed} failed, ${outcome.unavailable} unavailable, " +
+                                "listingFailed=${outcome.listingFailed}"
                         },
                         completedAt = clock.instant(),
                     ),

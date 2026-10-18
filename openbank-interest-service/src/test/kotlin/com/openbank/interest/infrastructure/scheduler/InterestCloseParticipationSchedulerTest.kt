@@ -214,7 +214,8 @@ class InterestCloseParticipationSchedulerTest {
         val oct1 = LocalDate.of(2026, 10, 1)
         val run = runs.runs.getValue(oct1 to InterestCloseJobs.CAPITALIZATION)
         assertThat(run.refused).describedAs("failed pairs hold the day like refusals").isEqualTo(2)
-        assertThat(run.refusalReason).contains("2 pair(s) failed").contains("ledger 503")
+        assertThat(run.refusalReason).contains("CAPITALIZATION_INCOMPLETE").contains("2 pair(s) failed")
+            .doesNotContain("ledger 503")
 
         ran(oct1, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
         scheduler.reportDays(today).await().indefinitely()

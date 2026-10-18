@@ -346,3 +346,5 @@ money-path service, not adjacent.
   reads published terms, cannot author or publish); a revoked scope fails the sync closed and the cursor
   does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
   then idles on 403 (catalog sync stays off by default until the follow-up PR).
+
+- **2026-10-19** — New automatic day-close export boundaries store/report only counts and fixed failure categories, not raw account/product identifiers, exception text or closed-day response bodies. Their aggregate warnings follow the same rule; the newly added account-listing error message omits the throwable. Existing per-account capitalization/recovery logs are outside this correction and are not claimed anonymous. Ledger operator identity/free-text waiver reasons remain intentional audit personal data. Counts, REFUSED/RAN semantics, liveness and the default shadow rollout are unchanged.

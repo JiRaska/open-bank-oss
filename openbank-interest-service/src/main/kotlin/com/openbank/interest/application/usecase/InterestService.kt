@@ -189,8 +189,8 @@ class InterestService(
         }.filter { it.isNotEmpty() }.toSet()
         return collectAccruableAccounts(cursor = null, acc = emptyList(), accruableTypes = accruableTypes)
             .map<List<AccountSnapshot>?> { it }
-            .onFailure().recoverWithItem { e ->
-                log.errorf(e, "accrual for %s: account listing failed - the run is not complete", date)
+            .onFailure().recoverWithItem { _ ->
+                log.errorf("accrual for %s: account listing failed - the run is not complete", date)
                 null
             }
             .flatMap { accounts ->

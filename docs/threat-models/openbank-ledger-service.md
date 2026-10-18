@@ -264,7 +264,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   report cannot reopen or rewrite a closed day. **STRIDE-D:** a participant that never reports holds
   the day in CUTOFF under `enforce`, which the existing stuck-CUTOFF alert pages and the waiver
   releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
-  counts, service names and reasons, no customer data. The closed-day 409 body now also carries
+  counts, service names and bounded automatic failure categories. Operator identities and free-text waiver reasons are intentional audit personal data, not anonymous counts. The closed-day 409 body now also carries
   `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert; V31 drop is safe while `shadow`.
 
 - **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
@@ -689,3 +689,5 @@ set) apply equally to the new `ledger.approval.decide` action.
   bank's database. Rollback: delete the Argo app and its namespace; the bank's ledger is untouched.
 
 - **2026-10-19** — Day-close participant enforcement is owned by `AccountingDayService`, for both scheduler and manual operator CUTOFF → TIED_OUT transitions. Callers cannot omit a required participant set; the existing repository day lock and atomic completeness check remain. Missing/REFUSED participants require a valid report or explicit WAIVED record with operator identity and mandatory reason. The default stays shadow; no enforcement activation is authorized. Pure service tests model the persistence contract; HTTP/DB test source uses a test security identity and does not establish JWT signature validation or live identity configuration.
+
+- **2026-10-19** — Automatic interest day-close report reasons and new aggregate warnings export only dates, counts and fixed categories, excluding raw exceptions and customer/account/product identifiers. Operator identity and a reasoned waiver remain retained audit personal data and require GDPR review. This does not anonymize older per-account logs or authorize enforcement activation.

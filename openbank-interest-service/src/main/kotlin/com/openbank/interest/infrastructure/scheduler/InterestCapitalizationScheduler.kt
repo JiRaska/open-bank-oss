@@ -69,19 +69,17 @@ class InterestCapitalizationScheduler(
                 log.infof("interest capitalization up to %s capitalized %d pair(s)", toDate, outcome.capitalized)
                 if (outcome.refusedClosedDay > 0) {
                     log.warnf(
-                        "interest capitalization up to %s: %d posting(s) refused — accounting day closed (%s)",
+                        "interest capitalization up to %s: %d posting(s) refused — accounting day closed",
                         toDate,
                         outcome.refusedClosedDay,
-                        outcome.refusalReason,
                     )
                 }
                 if (outcome.failed > 0) {
                     log.warnf(
                         "interest capitalization up to %s: %d pair(s) FAILED for reasons other than a closed day " +
-                            "(first: %s) - the day is reported as not complete",
+                            "- the day is reported as not complete",
                         toDate,
                         outcome.failed,
-                        outcome.failureReason,
                     )
                 }
                 liveness?.recordSuccess()
@@ -99,10 +97,12 @@ class InterestCapitalizationScheduler(
                         // reported exactly like a refusal: a non-RAN outcome that holds the day. The
                         // reason says which it was.
                         refused = outcome.refusedClosedDay + outcome.failed,
-                        refusalReason = listOfNotNull(
-                            outcome.refusalReason,
-                            outcome.failureReason?.let { "${outcome.failed} pair(s) failed: $it" },
-                        ).joinToString("; ").ifBlank { null },
+                        refusalReason = if (outcome.refusedClosedDay + outcome.failed > 0) {
+                            "CAPITALIZATION_INCOMPLETE: ${outcome.refusedClosedDay} closed-day refusal(s), " +
+                                "${outcome.failed} pair(s) failed"
+                        } else {
+                            null
+                        },
                         completedAt = clock.instant(),
                     ),
                 )
