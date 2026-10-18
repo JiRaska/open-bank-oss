@@ -802,6 +802,32 @@ gates:
       python3 .github/scripts/check-public-workload-ha.py --enforce \
         --baseline .github/public-workload-ha-baseline.txt
 
+  # Per-service alert baseline is DERIVED from the deployed-workload inventory (every workload
+  # declaring a `management` port). Same shape as the NetworkPolicy gate below: regenerate, then
+  # fail on any diff -- including an UNTRACKED output, hence --intent-to-add -- so a new service
+  # without its inventory entry is red until the generator has been run.
+  - id: gen-service-alert-rules-drift-gate
+    name: "per-service alert baseline drift gate (observability audit 2026-10-17)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30
+    rationale: "A workload added without its alert-baseline inventory entry would ship with no per-service alerts and nothing would say so; this regenerates the inventory and fails on any diff, including an untracked output."
+    review_after: "2027-10-17"
+    min_subjects: 20
+    selftest_inputs: ["openbank-infra/scripts/gen-service-alert-rules.py"]
+    selftest: python3 openbank-infra/scripts/gen-service-alert-rules.py --self-test
+    selftest_expect: pass
+    run: |
+      out=$(python3 openbank-infra/scripts/gen-service-alert-rules.py)
+      echo "$out"
+      echo "SUBJECTS=$(echo "$out" | sed -n 's/.*: \([0-9][0-9]*\) workloads.*/\1/p')"
+      f=openbank-infra/gitops/components/observability/prometheus-rules-service-inventory.yaml
+      git add --intent-to-add "$f"
+      if ! git diff --exit-code -- "$f"; then
+        echo "::error::Service alert baseline drift -- run python3 openbank-infra/scripts/gen-service-alert-rules.py and commit the result."
+        exit 1
+      fi
+
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
@@ -2938,6 +2964,29 @@ gates:
     selftest_inputs: [".github/scripts/auto-update-armed-prs.py"]
     run: |
       python3 .github/scripts/auto-update-armed-prs.py --check-declaration
+
+  # ADR-0343: the merge train is the bot that replaces strict up-to-date on main. Its wiring is
+  # load-bearing in the same way as the updater's: the App token (a GITHUB_TOKEN push triggers no
+  # CI, so a train would never be verified), a concurrency group that never cancels a train in
+  # flight, SHADOW as the committed default — and the INVARIANT: the token never shares a runner
+  # with PR data. So `build` (the only job running code over PR data) must hold no App token or
+  # App secret, while `publish` and `settle` must run this script from origin/main under
+  # `python3 -I -S` with isolated git config and run, install or check out nothing else. Each is
+  # a one-line regression this gate turns into a red diff.
+  - id: merge-train-declaration
+    name: "merge-train keeps its App token, non-cancelling concurrency, OPA and shadow default (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
+    review_after: "2027-04-18"
+    budget_seconds: 120   # self-test drives ~25 settle/build/publish ticks over a synthetic origin (~30 s measured)
+    min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
+    selftest: |
+      python3 .github/scripts/merge-train.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/merge-train.py"]
+    run: |
+      python3 .github/scripts/merge-train.py --check-declaration
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"

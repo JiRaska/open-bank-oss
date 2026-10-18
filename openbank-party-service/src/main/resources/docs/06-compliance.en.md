@@ -6,7 +6,7 @@ party-service holds customer identity (PII) and the KYC/AML lifecycle, so it is 
 
 | Regulation | Relation to this service | Implementation |
 |---|---|---|
-| **GDPR** (Reg. (EU) 2016/679) | Holds the canonical PII record of every customer | Right-to-erasure endpoint (`DELETE /parties/{id}` → anonymise + tombstone), data-minimisation (no birth number, name-only search), explicit consent fields (`gdpr_consent_at/version`), retention windows |
+| **GDPR** (Reg. (EU) 2016/679) | Holds the canonical PII record of every customer | Right-to-erasure endpoint (`DELETE /parties/{id}` → anonymise + tombstone), data-minimisation (birth number only as an exact-match blind index, identifiers never searchable by prefix), explicit consent fields (`gdpr_consent_at/version`), retention windows |
 | **AMLD** (4/5/6 AML Directives) | Records KYC + AML outcomes, PEP, risk rating; drives activation gate | `kyc_status`/`aml_status`, two-key activation gate (in code, no ADR), `pep_flag`, `risk_rating`, `next_review_due`, sanctions-check metadata; column COMMENTs cite the articles |
 | **PSD2** (Reg. (EU) 2015/2366) | Identity backing account/consent flows | party is read-only resolved by `account-service`; no direct TPP access |
 | **FATCA / CRS** | Tax-residence reporting | `fatca_status`, `crs_status` columns on the party |
@@ -35,8 +35,8 @@ party-service holds customer identity (PII) and the KYC/AML lifecycle, so it is 
 
 ### Data minimisation
 
-- The **birth number (rodné číslo) is never stored or searchable here** — encrypted in `pid-service` only.
-- Name search (ADR-0055) only indexes legal/trading name; it refuses blank/`*`/sub-2-char terms to prevent full-table enumeration, and returns a **data-minimised** summary.
+- The **birth number (rodné číslo) is never stored in clear or substring-searchable here** — encrypted in `pid-service`; party-service holds only its pepper-hashed blind index, which search uses for an exact 0/1 match.
+- Fuzzy search (ADR-0055) covers names only; national identifiers (any country) match exactly after normalisation, never by substring or prefix. It refuses blank/`*`/sub-2-char terms and a bare date of birth to prevent enumeration, and returns a **data-minimised** summary (incl. `dateOfBirth` to tell namesakes apart).
 
 ### Data flows out
 
@@ -105,7 +105,7 @@ Every mutation emits a domain event on `openbank.party.events`, consumed by `aud
 - ✅ Rate limiting (`openbank.rate-limit`, 150 concurrent)
 - ✅ Security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer/Permissions-Policy)
 - ✅ Secrets must be overridden in prod (`CHANGE_ME_LOCAL_DEV_ONLY` placeholders fail-fast intent)
-- ✅ Data-minimisation: birth number off-system; name-only search
+- ✅ Data-minimisation: birth number only as a blind index; identifiers exact-match only, fuzzy search on names only
 - ✅ Poison-pill-safe Kafka consumer
 - ⚠️ OPA is advisory (not yet enforcing) — flip is a later ADR-0034 phase
 - ⚠️ OpenAPI contract drift vs implementation — to reconcile (see `03-api.md`)
