@@ -20,6 +20,17 @@ on:
 permissions:
   contents: read
 
+# THE ONE mutation-score threshold. Every lane below — the advisory money-path matrix, the
+# advisory libs matrix, the ENFORCED authz lane, and every `collect-test-run-evidence.py
+# --mutation-threshold` envelope step — reads this value. Before this it was a literal in nine
+# places and two of them disagreed: the authz Gradle lane enforced 70 while its Test Intelligence
+# envelope was built with 63, so the dashboard could show a PASS for a run the lane had failed.
+# `check-pitest-threshold-single-source.py` (gate `pitest-threshold-single-source`) fails the
+# build if a numeric threshold literal reappears in a step. Raise it here, never lower
+# (rules.yaml: coverage.money_path_depth).
+env:
+  PITEST_MUTATION_THRESHOLD: "70"
+
 jobs:
   pitest:
     name: pitest / ${{ matrix.service }}
@@ -127,7 +138,7 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "${{ matrix.service }}" \
             --mutation-report "${{ matrix.service }}/build/reports/pitest/mutations.xml" \
-            --mutation-threshold 70 \
+            --mutation-threshold "$PITEST_MUTATION_THRESHOLD" \
             --out "${{ matrix.service }}/build/reports/pitest/test-intelligence-run.json"
 
       - name: Upload pitest XML report
@@ -164,8 +175,8 @@ jobs:
           fi
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "70" ]; then
-            echo "::warning::Mutation score ${SCORE}% is below the 70% advisory threshold for ${{ matrix.service }}"
+          if [ "$SCORE" -lt "$PITEST_MUTATION_THRESHOLD" ]; then
+            echo "::warning::Mutation score ${SCORE}% is below the ${PITEST_MUTATION_THRESHOLD}% advisory threshold for ${{ matrix.service }}"
           else
             echo "::notice::Mutation score ${SCORE}% — OK"
           fi
@@ -202,11 +213,11 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Run pitest on the authz package (threshold 70 enforced)
+      - name: Run pitest on the authz package (PITEST_MUTATION_THRESHOLD enforced)
         run: |
           ./gradlew -I .github/scripts/pitest-authz.init.gradle \
             :openbank-libs-runtime:pitest \
-            -Ppitest.mutationThreshold=70
+            "-Ppitest.mutationThreshold=$PITEST_MUTATION_THRESHOLD"
         env:
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
 
@@ -217,7 +228,7 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "openbank-libs-runtime-authz" \
             --mutation-report openbank-libs-runtime/build/reports/pitest/mutations.xml \
-            --mutation-threshold 63 \
+            --mutation-threshold "$PITEST_MUTATION_THRESHOLD" \
             --out openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json
 
       - name: Upload pitest XML report
@@ -252,11 +263,11 @@ jobs:
           # 62% while PIT displays 63%.
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "70" ]; then
-            echo "::error::Mutation score ${SCORE}% is below the 70% enforced threshold for the authz decision path"
+          if [ "$SCORE" -lt "$PITEST_MUTATION_THRESHOLD" ]; then
+            echo "::error::Mutation score ${SCORE}% is below the ${PITEST_MUTATION_THRESHOLD}% enforced threshold for the authz decision path"
             exit 1
           fi
-          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor 70%)"
+          echo "::notice::Mutation score ${SCORE}% — OK (enforced floor ${PITEST_MUTATION_THRESHOLD}%)"
 
   # Advisory mutation testing over the shared libs modules (ADR-0063 gap): money, idempotency,
   # audit and outbox logic lives in openbank-libs-domain / openbank-libs-runtime and previously
@@ -306,7 +317,7 @@ jobs:
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "${{ matrix.module }}" \
             --mutation-report "${{ matrix.module }}/build/reports/pitest/mutations.xml" \
-            --mutation-threshold 70 \
+            --mutation-threshold "$PITEST_MUTATION_THRESHOLD" \
             --out "${{ matrix.module }}/build/reports/pitest/test-intelligence-run.json"
 
       - name: Upload pitest XML report
@@ -338,8 +349,8 @@ jobs:
           fi
           SCORE=$(( (DETECTED * 100 + TOTAL / 2) / TOTAL ))
           echo "Mutation score: ${SCORE}% (${DETECTED}/${TOTAL} detected)"
-          if [ "$SCORE" -lt "70" ]; then
-            echo "::warning::Mutation score ${SCORE}% is below the 70% advisory threshold for ${{ matrix.module }}"
+          if [ "$SCORE" -lt "$PITEST_MUTATION_THRESHOLD" ]; then
+            echo "::warning::Mutation score ${SCORE}% is below the ${PITEST_MUTATION_THRESHOLD}% advisory threshold for ${{ matrix.module }}"
           else
             echo "::notice::Mutation score ${SCORE}% — OK"
           fi

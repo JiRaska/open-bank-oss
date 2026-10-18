@@ -8,17 +8,8 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (openbank-libs is built on
@@ -42,13 +33,10 @@ dependencies {
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     // OpenTelemetryContextPropagator trace-continuity test (TemporalTracePropagationTest).
     testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.testcontainers.postgresql)
-    testImplementation(libs.rest.assured.kotlin)
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its system

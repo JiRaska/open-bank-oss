@@ -17,3 +17,7 @@ The generated `00-build` page in this same documentation index reports the relea
 ## Trace continuity into Temporal
 
 The fleet `WorkflowClientOptions` (built by `TemporalClientProducer` in `openbank-libs-temporal`) register an OpenTelemetry context propagator, so the check workflow and its activities run in the trace of whoever started them. `TemporalTracePropagationTest` proves an activity sees the caller's trace id, and that without the propagator it sees none.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
