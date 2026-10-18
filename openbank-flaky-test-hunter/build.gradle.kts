@@ -11,7 +11,6 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.smallrye.fault.tolerance)
-    implementation(libs.quarkus.scheduler)
     // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (openbank-libs is built on
     // reactive Panache, so a service that depends on it must use reactive too — a blocking ORM cannot
     // index the libs reactive entities). The Uni results are bridged to the suspend ports via the
