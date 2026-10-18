@@ -170,3 +170,12 @@ caller URLs before reverting the provider image or removing its TLS listener.
 ## transaction-service client (ADR-0319)
 
 The call that hands a due order to transaction-service now goes through the client generated from transaction-service's `openapi.yaml` (module `openbank-client-transaction`, ADR-0319) instead of a hand-written interface. Behaviour is unchanged; a contract drift fails compilation and the consumer pact replay.
+
+## Internal-transfer completion boundary
+
+Own-account DOMESTIC/INTERNAL transfers use the shared transaction client. HTTP 2xx alone
+does not authorize confirmation: a readable COMPLETED transaction is required. Missing,
+unreadable, failed, in-progress or unknown responses propagate as uncertain completion through
+the existing retry and dead-letter path, without confirming execution or recording a definitive
+failure. Every attempt retains the event's deterministic idempotency key. The existing handling
+of HTTP 400/422 and 409 is preserved. This change does not alter the separate SEPA rail path.
