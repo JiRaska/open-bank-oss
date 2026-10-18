@@ -96,3 +96,7 @@ This is by design: the `Idempotency-Key` matched an existing `cards.idempotency_
 
 - Versioning: per-service `version.txt` (currently `0.3.0`), owned by release-please from Conventional Commits. Do not hand-edit.
 - CD: ArgoCD picks up the new image tag from the gitops manifests.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

@@ -939,6 +939,28 @@ gates:
     run: |
       python3 .github/scripts/check-entity-column-names.py
 
+  # A Redis-backed four-eyes ApprovalStore reads `redis://localhost:6379` from application.yaml,
+  # and a pod has no Redis on localhost, so the deployed host must come from the workload's
+  # QUARKUS_REDIS_HOSTS. swift-service and clearing-service shipped without it: Ready pods, a
+  # resolvable bean, and every approval-queue call a 500 "Connection refused" in the sandbox.
+  - id: approval-store-redis-host
+    name: "Redis-backed ApprovalStore services deploy with a real Redis host (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Nothing at deploy time notices a Redis host left at the loopback default: probes never touch
+      Redis and the CDI bean resolves, so the first sign is a 500 on the four-eyes approval queue of
+      a money-path service.
+    review_after: 2027-04-17
+    min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
+    selftest_expect: pass
+    selftest: |
+      python3 .github/scripts/check-approval-store-redis-host.py --self-test
+    run: |
+      python3 .github/scripts/check-approval-store-redis-host.py
+
   # A @Provider in openbank-libs-* is registered in EVERY consumer, and ArC loads its type
   # closure at init — so naming a type from a `compileOnly` dependency is a boot failure for
   # every service that lacks it, not a compile error for anyone. #6240 did exactly that with
