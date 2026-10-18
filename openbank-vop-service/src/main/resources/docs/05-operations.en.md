@@ -83,3 +83,7 @@ Expected within the design: `close_match` is *supposed* to return the real name 
 ### Suspected name enumeration
 
 `requested_by` + `verified_at` on `vop_verification` are indexed for exactly this. A principal with a high `no_match` rate is guessing, not paying. There is **no automated detector yet** — an open item in the threat model.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

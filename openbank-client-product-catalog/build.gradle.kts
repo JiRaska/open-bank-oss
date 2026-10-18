@@ -155,6 +155,17 @@ tasks.test {
 kover {
     reports {
         filters { excludes { packages("com.openbank.clients.productcatalog.api") } }
+        verify {
+            rule {
+                bound {
+                    // Ratchet floor (ADR-0020): 34.73% LINE (91/262) measured locally on 2026-10-17
+                    // over the hand-written sources (generated api package excluded above), minus 2.
+                    // Raise-only from here; gate `coverage-floor-ratchet` holds the direction.
+                    minValue = 32
+                    coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
+                }
+            }
+        }
     }
 }
 

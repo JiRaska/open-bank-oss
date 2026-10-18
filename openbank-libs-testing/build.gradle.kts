@@ -122,6 +122,8 @@ dependencies {
     // services do (and that verification-metadata already pins) without imposing it on `api`.
     compileOnly(enforcedPlatform(libs.quarkus.bom))
     compileOnly(libs.quarkus.junit5)
+    // SecurityIdentity for ApprovalEndpointConformance; services supply it at test runtime.
+    compileOnly("io.quarkus.security:quarkus-security")
     compileOnly("io.smallrye.config:smallrye-config-source-yaml")
     testImplementation(enforcedPlatform(libs.quarkus.bom))
     testImplementation("io.smallrye.config:smallrye-config-source-yaml")
@@ -159,6 +161,10 @@ kover {
                     "com.openbank.libs.testing.mtls.ListenerAuthParityConformance*",
                     "com.openbank.libs.testing.mtls.ListenerMaterial*",
                     "com.openbank.libs.testing.mtls.ProductionListenerProfile*",
+                    // Same reason: an abstract @Test harness (one case per approval-endpoint
+                    // invariant) that only runs inside an adopter service's own test source set,
+                    // where the SecurityIdentity and the endpoint class exist.
+                    "com.openbank.libs.testing.approval.ApprovalEndpointConformance*",
                 )
             }
         }
