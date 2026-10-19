@@ -53,9 +53,6 @@ jobs:
       contents: read
     outputs:
       in_flight: ${{ steps.settle.outputs.in_flight }}
-    env:
-      GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_GLOBAL: /dev/null
     steps:
       - name: Mint the GitHub App installation token
         id: app_token
@@ -76,6 +73,10 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}
+          # Isolated git config for THIS step only. At job level it also reached actions/checkout,
+          # whose safe.directory write then failed: "could not lock config file /dev/null".
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
@@ -141,7 +142,11 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: merge-train-bundle
-          path: ${{ runner.temp }}/merge-train-bundle/train.bundle
+          # The bundle and build's declared member list (number + head sha), which publish admits
+          # only entry by entry against live data.
+          path: |
+            ${{ runner.temp }}/merge-train-bundle/train.bundle
+            ${{ runner.temp }}/merge-train-bundle/members.txt
           retention-days: 1
           if-no-files-found: error
 
@@ -153,9 +158,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    env:
-      GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_GLOBAL: /dev/null
     steps:
       - name: Mint the GitHub App installation token
         id: app_token
@@ -180,6 +182,9 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+          # Isolated git config for THIS step only (see settle).
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.0...agent-service-v1.30.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **agent-service:** persist proposals with their audit events ([#12983](https://github.com/JiRaska/open-bank-oss/issues/12983)) ([d4de764](https://github.com/JiRaska/open-bank-oss/commit/d4de7648b03700336f162d91d16765c766b0f1b6))
+
 ## [1.30.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.29.0...agent-service-v1.30.0) (2026-10-18)
 
 
