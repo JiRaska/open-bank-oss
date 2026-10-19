@@ -116,4 +116,42 @@ class BalanceOwnershipGuardTest {
 
         assertThat(response.status).isEqualTo(404)
     }
+
+    @Test
+    fun `listHolds without header keeps the service-reader path`(): Unit = runBlocking {
+        val svc = mockk<BalanceUseCase>()
+        val client = mockk<AccountServiceClient>()
+        coEvery { svc.listHolds(accountId) } returns emptyList()
+        assertThat(BalanceResource(svc, client).listHolds(accountId, null).status).isEqualTo(200)
+        coVerify(exactly = 0) { client.getPartyId(any()) }
+        coVerify(exactly = 1) { svc.listHolds(accountId) }
+    }
+
+    @Test
+    fun `listHolds with matching owner delegates`(): Unit = runBlocking {
+        val svc = mockk<BalanceUseCase>()
+        val client = mockk<AccountServiceClient>()
+        coEvery { client.getPartyId(accountId) } returns ownerPartyId
+        coEvery { svc.listHolds(accountId) } returns emptyList()
+        assertThat(BalanceResource(svc, client).listHolds(accountId, ownerPartyId).status).isEqualTo(200)
+        coVerify(exactly = 1) { svc.listHolds(accountId) }
+    }
+
+    @Test
+    fun `listHolds with wrong owner returns 404 without reading holds`(): Unit = runBlocking {
+        val svc = mockk<BalanceUseCase>()
+        val client = mockk<AccountServiceClient>()
+        coEvery { client.getPartyId(accountId) } returns ownerPartyId
+        assertThat(BalanceResource(svc, client).listHolds(accountId, otherPartyId).status).isEqualTo(404)
+        coVerify(exactly = 0) { svc.listHolds(any()) }
+    }
+
+    @Test
+    fun `listHolds for missing account returns 404 without reading holds`(): Unit = runBlocking {
+        val svc = mockk<BalanceUseCase>()
+        val client = mockk<AccountServiceClient>()
+        coEvery { client.getPartyId(accountId) } returns null
+        assertThat(BalanceResource(svc, client).listHolds(accountId, ownerPartyId).status).isEqualTo(404)
+        coVerify(exactly = 0) { svc.listHolds(any()) }
+    }
 }
