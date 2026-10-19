@@ -155,12 +155,28 @@ export default function ServicesDocsOverviewPage() {
             source?: string
             discoveryStatus?: string
           }
-          if (body.source === 'kubernetes' && Array.isArray(body.services)) {
-            const complete = body.discoveryStatus === undefined || body.discoveryStatus === 'complete'
-            liveEmpty = complete && body.services.length === 0
-            if (!complete) src = 'partial'
-            else if (!liveEmpty) src = 'kubernetes'
-            for (const s of body.services) {
+          const hasServices = Array.isArray(body.services)
+          const completeKubernetes = body.source === 'kubernetes' && body.discoveryStatus === 'complete' && hasServices
+          const partialKubernetes = body.source === 'kubernetes' && body.discoveryStatus === 'partial' && hasServices
+          const explicitStatic = body.source === 'static' && body.discoveryStatus === 'static' && hasServices
+
+          if (completeKubernetes) {
+            liveEmpty = body.services.length === 0
+            if (liveEmpty) src = catalogReady ? 'static' : 'unavailable'
+            else src = 'kubernetes'
+          } else if (partialKubernetes) {
+            src = 'partial'
+          } else if (explicitStatic) {
+            src = catalogReady ? 'static' : 'unavailable'
+          } else {
+            // Unknown or malformed source metadata cannot establish absence.
+            src = 'partial'
+          }
+
+          // Partial observations remain useful positives, but never turn absent
+          // catalog members into an authoritative undeployed result.
+          if (completeKubernetes || partialKubernetes) {
+            for (const s of body.services ?? []) {
               const registered = fleet.find(service => service.k8sName === s.name || service.container === `openbank-${s.name}`)
               const id = registered?.id ?? s.name.replace(/-service$/, '')
               const existing = byId.get(id)

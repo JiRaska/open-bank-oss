@@ -24,7 +24,7 @@ describe('service documentation fleet count', () => {
         return new Response(JSON.stringify({ available: false, services: [] }), { status: 200 })
       }
       if (input === '/api/services/health') {
-        return new Response(JSON.stringify({ source: 'static', services: [] }), { status: 200 })
+        return new Response(JSON.stringify({ source: 'static', discoveryStatus: 'static', services: [] }), { status: 200 })
       }
       if (input === '/api/services/libs/docs') {
         return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }] }), { status: 200 })
@@ -55,7 +55,7 @@ describe('service documentation fleet count', () => {
         }), { status: 200 })
       }
       if (input === '/api/services/health') {
-        return new Response(JSON.stringify({ source: 'static', services: [] }), { status: 200 })
+        return new Response(JSON.stringify({ source: 'static', discoveryStatus: 'static', services: [] }), { status: 200 })
       }
       if (input === '/api/services/libs/docs') {
         return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }] }), { status: 200 })
@@ -77,7 +77,7 @@ describe('service documentation fleet count', () => {
         return new Response(JSON.stringify({ available: false, services: [] }), { status: 200 })
       }
       if (input === '/api/services/health') {
-        return new Response(JSON.stringify({ source: 'kubernetes', services: [] }), { status: 200 })
+        return new Response(JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [] }), { status: 200 })
       }
       if (input === '/api/services/libs/docs') {
         return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }] }), { status: 200 })
@@ -103,7 +103,7 @@ describe('service documentation fleet count', () => {
         }), { status: 200 })
       }
       if (input === '/api/services/health') {
-        return new Response(JSON.stringify({ source: 'kubernetes', services: [] }), { status: 200 })
+        return new Response(JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [] }), { status: 200 })
       }
       if (input === '/api/services/libs/docs') {
         return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }] }), { status: 200 })
@@ -137,6 +137,56 @@ describe('service documentation fleet count', () => {
 
     await screen.findByText('The live inventory is incomplete. Listed workloads are confirmed, but an absent service is not evidence that it is undeployed.')
     expect(screen.getByText(/partial live cluster and bundled library/)).toBeTruthy()
+    expect(screen.queryByText(/reports zero service workloads/)).toBeNull()
+    expect(screen.queryByText(/no live workloads; catalog unavailable/)).toBeNull()
+  })
+
+  it('keeps positive Kubernetes observations but marks missing discovery metadata incomplete', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input === '/api/catalog/services') {
+        return new Response(JSON.stringify({ available: false, services: [] }), { status: 200 })
+      }
+      if (input === '/api/services/health') {
+        return new Response(JSON.stringify({
+          source: 'kubernetes',
+          discoveryStatus: 'partial',
+          services: [{ name: 'account-service', label: 'Accounts', group: 'core' }],
+        }), { status: 200 })
+      }
+      if (input === '/api/services/account/docs') {
+        return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Account docs' }], source: 'live' }), { status: 200 })
+      }
+      if (input === '/api/services/libs/docs') {
+        return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }], source: 'bundle' }), { status: 200 })
+      }
+      return new Response(null, { status: 404 })
+    }))
+
+    render(<ServicesDocsOverviewPage />)
+
+    await screen.findByText('The live inventory is incomplete. Listed workloads are confirmed, but an absent service is not evidence that it is undeployed.')
+    expect(screen.getByText(/partial live cluster and bundled library/)).toBeTruthy()
+    expect(screen.getByText('1 live from services')).toBeTruthy()
+    expect(screen.queryByText(/reports zero service workloads/)).toBeNull()
+  })
+
+  it('does not treat a Kubernetes response without discovery status as complete or empty', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input === '/api/catalog/services') {
+        return new Response(JSON.stringify({ available: false, services: [] }), { status: 200 })
+      }
+      if (input === '/api/services/health') {
+        return new Response(JSON.stringify({ source: 'kubernetes', services: [] }), { status: 200 })
+      }
+      if (input === '/api/services/libs/docs') {
+        return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }], source: 'bundle' }), { status: 200 })
+      }
+      return new Response(null, { status: 404 })
+    }))
+
+    render(<ServicesDocsOverviewPage />)
+
+    await screen.findByText('The live inventory is incomplete. Listed workloads are confirmed, but an absent service is not evidence that it is undeployed.')
     expect(screen.queryByText(/reports zero service workloads/)).toBeNull()
     expect(screen.queryByText(/no live workloads; catalog unavailable/)).toBeNull()
   })

@@ -271,12 +271,18 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
       return { ok: false, failure: 'error' }
     }
     const healthEvidence = data as { services: unknown[]; source?: unknown; discoveryStatus?: unknown }
-    if (
-      (healthEvidence.discoveryStatus !== undefined && healthEvidence.discoveryStatus !== 'complete' && healthEvidence.discoveryStatus !== 'static') ||
-      (healthEvidence.source === 'kubernetes' && healthEvidence.discoveryStatus !== 'complete') ||
-      (healthEvidence.source === 'static' && healthEvidence.discoveryStatus !== undefined && healthEvidence.discoveryStatus !== 'static')
-    ) {
-      return { ok: false, failure: 'error' }
+    if (healthEvidence.source === 'kubernetes') {
+      if (healthEvidence.discoveryStatus !== 'complete') {
+        // Partial, unavailable, and malformed inventory can contain useful
+        // positive observations, but cannot establish the absence of services.
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else if (healthEvidence.source === 'static') {
+      if (healthEvidence.discoveryStatus !== 'static') {
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else {
+      return { ok: false, failure: 'discovery_unavailable' }
     }
     const services = healthEvidence.services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
