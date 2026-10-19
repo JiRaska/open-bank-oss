@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { ShieldAlert, CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, Server, Database, Lock, Zap, CreditCard, Eye, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
@@ -202,8 +203,14 @@ export default function BcpPage() {
           services?: { name: string; status: string }[]
           byContainer?: Record<string, { status: string }>
         }
-        if (Array.isArray(data.services) && data.services.length > 0) {
-          for (const s of data.services) mapped[s.name] = toStatus(s.status)
+        if (Array.isArray(data.services)) {
+          const statusesByName = new Map<string, ('UP' | 'DOWN' | 'UNKNOWN')[]>()
+          for (const service of data.services) {
+            const observations = statusesByName.get(service.name) ?? []
+            observations.push(service.status === 'UP' || service.status === 'DOWN' ? service.status : 'UNKNOWN')
+            statusesByName.set(service.name, observations)
+          }
+          for (const [name, statuses] of statusesByName) mapped[name] = toStatus(aggregateHealthStatuses(statuses))
         } else if (data.byContainer) {
           for (const [container, entry] of Object.entries(data.byContainer)) {
             mapped[container] = toStatus(entry.status)

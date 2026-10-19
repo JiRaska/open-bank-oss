@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Admin UI evidence
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+    inputs:
+      rollback_snapshot:
+        description: "Optional snapshots/<run>-<attempt>-<sha256>.json to select again"
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/admin-ui-evidence.yml"
+      - ".github/scripts/publish-admin-ui-gate-health.mjs"
+      - "openbank-admin-ui/scripts/collect-gate-health.mjs"
+      - "openbank-admin-ui/src/lib/evidence/gateHealthSnapshot.ts"
+
+permissions:
+  contents: read
+concurrency:
+  group: admin-ui-gate-health-evidence
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      EVIDENCE_BUCKET: ${{ vars.ADMIN_UI_EVIDENCE_BUCKET }}
+      EVIDENCE_ROLE: ${{ vars.ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN }}
+      EVIDENCE_REGION: ${{ vars.ADMIN_UI_EVIDENCE_REGION }}
+      ROLLBACK_SNAPSHOT: ${{ inputs.rollback_snapshot }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+      - name: Require provisioned evidence destination
+        run: |
+          test -n "$EVIDENCE_BUCKET" && test -n "$EVIDENCE_ROLE" && test -n "$EVIDENCE_REGION" || {
+            echo '::error::Configure ADMIN_UI_EVIDENCE_BUCKET, ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN and ADMIN_UI_EVIDENCE_REGION after reviewed infrastructure provisioning.'
+            exit 1
+          }
+      - name: Collect Gate Health without an application build
+        if: env.ROLLBACK_SNAPSHOT == ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node openbank-admin-ui/scripts/collect-gate-health.mjs --runs 20 --gate-detail-runs 1 --out "$RUNNER_TEMP/gate-health.json"
+      - name: Assume evidence-only publisher role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ env.EVIDENCE_ROLE }}
+          aws-region: ${{ env.EVIDENCE_REGION }}
+      - name: Publish validated snapshot and atomic selector
+        run: |
+          if [ -n "$ROLLBACK_SNAPSHOT" ]; then
+            node .github/scripts/publish-admin-ui-gate-health.mjs --bucket "$EVIDENCE_BUCKET" --rollback "$ROLLBACK_SNAPSHOT"
+          else
+            node .github/scripts/publish-admin-ui-gate-health.mjs --bucket "$EVIDENCE_BUCKET" --file "$RUNNER_TEMP/gate-health.json"
+          fi
