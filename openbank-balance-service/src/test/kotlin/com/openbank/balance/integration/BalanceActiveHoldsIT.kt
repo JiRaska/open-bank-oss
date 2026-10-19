@@ -34,20 +34,23 @@ class BalanceActiveHoldsIT {
         val released = UUID.randomUUID()
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                "INSERT INTO balances(account_id,currency,booked_amount,available_amount,reserved_amount) " +
-                    "VALUES (?, 'CZK', 1000, 970, 30)",
+                "INSERT INTO balances(id,account_id,currency,booked_amount,available_amount,reserved_amount) " +
+                    "VALUES (?, ?, 'CZK', 1000, 970, 30)",
             ).use { ps ->
-                ps.setObject(1, account)
+                // JDBC seeds use negative ids so BIGSERIAL cannot collide with Hibernate pooled ids.
+                ps.setLong(1, account.mostSignificantBits or Long.MIN_VALUE)
+                ps.setObject(2, account)
                 ps.executeUpdate()
             }
             fun seed(id: UUID, owner: UUID, expiry: String, release: String) {
                 conn.prepareStatement(
-                    "INSERT INTO balance_holds(hold_id,account_id,amount,currency,reason,reference_id," +
-                        "expires_at,released_at) VALUES (?, ?, 10, 'CZK', 'active-read-fixture', ?, $expiry, $release)",
+                    "INSERT INTO balance_holds(id,hold_id,account_id,amount,currency,reason,reference_id," +
+                        "expires_at,released_at) VALUES (?, ?, ?, 10, 'CZK', 'active-read-fixture', ?, $expiry, $release)",
                 ).use { ps ->
-                    ps.setObject(1, id)
-                    ps.setObject(2, owner)
-                    ps.setString(3, id.toString())
+                    ps.setLong(1, id.mostSignificantBits or Long.MIN_VALUE)
+                    ps.setObject(2, id)
+                    ps.setObject(3, owner)
+                    ps.setString(4, id.toString())
                     ps.executeUpdate()
                 }
             }

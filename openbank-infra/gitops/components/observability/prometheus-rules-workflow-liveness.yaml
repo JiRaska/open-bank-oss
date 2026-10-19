@@ -110,6 +110,25 @@ spec:
               silently. The gauge carries its state forward with no lookback at
               all; the counter is read at triage time.
 
+        # The watcher must be watched. WorkflowLivenessStale cannot catch the
+        # control-liveness-sentinel's own heartbeat going missing: a stale series needs the
+        # series, and the rule above is silent about a workflow that never registered or whose pod
+        # is gone. WorkflowLivenessHeartbeatAbsent is fleet-wide (it stays quiet while any other
+        # heartbeat exists), so the sentinel needs its own absent() on its own workflow tag.
+        - alert: LivenessSentinelHeartbeatAbsent
+          expr: absent(openbank_workflow_last_success_age_seconds{workflow="liveness-sentinel-check"})
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "The control-liveness-sentinel reports no heartbeat"
+            description: >-
+              No openbank_workflow_last_success_age_seconds series exists for
+              workflow="liveness-sentinel-check". The sentinel is down, not scraped, or its
+              scheduler never registered. While this fires, an empty findings table means
+              "nothing is looking", not "no stale controls".
+
         # 3. A job still runs, and takes too long doing it (issue #6169). Liveness above cannot see
         # this: a sweep that degrades from 6s to 300s records a success every time, so the age
         # gauge stays green while the job walks toward overrunning its own slot — at which point

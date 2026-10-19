@@ -96,38 +96,68 @@ def contract_readback(received):
 
 
 def source(root, sha):
-    actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    if actual != sha:
-        raise ValueError("Checkout does not match the publication revision")
-    paths = subprocess.check_output(
-        ["git", "ls-files", "--", f"pacts/{CONSUMER}-*.json"], cwd=root, text=True,
-    ).splitlines()
-    if not paths:
-        raise ValueError("No tracked admin UI contracts")
-    result = {}
-    for name in paths:
-        path = root / name
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("Contract must be a regular file")
-        content = path.read_bytes()
-        committed = subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=root)
-        if content != committed:
-            raise ValueError("Contract differs from the verified source revision")
-        pact = json.loads(content)
-        provider = pact.get("provider", {}).get("name")
-        if pact.get("consumer", {}).get("name") != CONSUMER or not isinstance(provider, str) or not PROVIDER.fullmatch(provider):
-            raise ValueError("Invalid contract participant identity")
-        if path.name != f"{CONSUMER}-{provider}.json" or not pact.get("interactions"):
-            raise ValueError("Contract filename or interactions do not match its identity")
-        result[name] = content
-    return result
+    try:
+        actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        if actual != sha:
+            raise ValueError("Checkout does not match the publication revision")
+        paths = subprocess.check_output(
+            ["git", "ls-files", "--", f"pacts/{CONSUMER}-*.json"], cwd=root, text=True,
+        ).splitlines()
+        if not paths:
+            raise ValueError("No tracked admin UI contracts")
+        result = {}
+        for name in paths:
+            path = root / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("Contract must be a regular file")
+            content = path.read_bytes()
+            committed = subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=root)
+            if content != committed:
+                raise ValueError("Contract differs from the verified source revision")
+            pact = json.loads(content)
+            provider = pact.get("provider", {}).get("name")
+            if pact.get("consumer", {}).get("name") != CONSUMER or not isinstance(provider, str) or not PROVIDER.fullmatch(provider):
+                raise ValueError("Invalid contract participant identity")
+            if path.name != f"{CONSUMER}-{provider}.json" or not pact.get("interactions"):
+                raise ValueError("Contract filename or interactions do not match its identity")
+            result[name] = content
+        return result
+    except Exception:
+        raise PublicationFailure("source-validation") from None
 
 
-def prepare(root, sha, marker):
+def prepare(root, sha, marker, jvm_manifest):
     files = source(root, sha)
-    cutoff = marker.stat().st_mtime_ns
-    if any((root / name).stat().st_mtime_ns <= cutoff for name in files):
-        raise ValueError("Every contract must be regenerated after the generation marker")
+    try:
+        if marker.is_symlink() or not marker.is_file():
+            raise OSError("invalid marker")
+        cutoff = marker.stat().st_mtime_ns
+    except OSError:
+        raise PublicationFailure("marker-read") from None
+    try:
+        if jvm_manifest.is_symlink() or not jvm_manifest.is_file():
+            raise OSError("invalid manifest")
+        manifest = jvm_manifest.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        raise PublicationFailure("freshness-proof") from None
+    try:
+        tracked = set(subprocess.check_output(
+            ["git", "ls-files", "--", "pacts/*.json"], cwd=root, text=True,
+        ).splitlines())
+    except (OSError, subprocess.CalledProcessError):
+        raise PublicationFailure("freshness-proof") from None
+    # The workflow receipt is the exact JVM set validated against the shard archives.
+    # It covers the whole repo, while `files` is deliberately only the Admin UI bundle.
+    if manifest != sorted(set(manifest)) or not set(manifest) <= tracked:
+        raise PublicationFailure("freshness-proof")
+    jvm_files = set(manifest)
+    try:
+        stale = any((root / name).stat().st_mtime_ns <= cutoff
+                    for name in files if name not in jvm_files)
+    except OSError:
+        raise PublicationFailure("freshness") from None
+    if stale:
+        raise PublicationFailure("freshness")
     return {"sourceSha": sha, "files": {
         name: {"sha256": hashlib.sha256(content).hexdigest(),
                "content": base64.b64encode(content).decode("ascii")}
@@ -219,23 +249,35 @@ def main():
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--marker", type=Path)
+    parser.add_argument("--jvm-pacts-manifest", type=Path)
     parser.add_argument("--providers-output", type=Path)
     args = parser.parse_args()
     sha = os.environ.get("GITHUB_SHA", "")
     try:
         if args.mode == "prepare":
-            if args.marker is None:
-                raise ValueError("Regeneration marker is required")
-            args.bundle.write_text(json.dumps(prepare(args.root, sha, args.marker)) + "\n")
+            if args.marker is None or args.jvm_pacts_manifest is None:
+                raise PublicationFailure("freshness-proof")
+            bundle = prepare(args.root, sha, args.marker, args.jvm_pacts_manifest)
+            try:
+                args.bundle.write_text(json.dumps(bundle) + "\n")
+            except OSError:
+                raise PublicationFailure("bundle-write") from None
         else:
             build_url = (f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
                          f"/actions/runs/{os.environ['GITHUB_RUN_ID']}")
-            body = payload(args.root, sha, json.loads(args.bundle.read_text()), build_url)
+            try:
+                bundle = json.loads(args.bundle.read_text())
+            except (OSError, ValueError):
+                raise PublicationFailure("artifact-read") from None
+            body = payload(args.root, sha, bundle, build_url)
             providers = publish(body, os.environ)
             if args.providers_output is not None:
-                args.providers_output.write_text(json.dumps(providers) + "\n")
+                try:
+                    args.providers_output.write_text(json.dumps(providers) + "\n")
+                except OSError:
+                    raise PublicationFailure("bundle-write") from None
             print(f"Published {len(body['contracts'])} admin UI contracts at {sha}")
-    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+    except Exception as error:
         # Do not render network exceptions: they may contain the broker URL.
         stage = error.stage if isinstance(error, PublicationFailure) else "artifact-validation"
         provider = f" provider={error.provider}" if isinstance(error, PublicationFailure) and error.provider else ""
