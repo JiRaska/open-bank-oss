@@ -91,7 +91,7 @@ data class SensitivityResult(
  * deal is PREPARED once — schedules generated, stored facts indexed — and then revalued under any
  * curve bump or historical scenario without regenerating its schedule.
  */
-class TreasuryValuator(private val market: MarketState) {
+class TreasuryValuator(private val market: MarketState, private val deadline: Deadline = Deadline.NONE) {
 
     /** A prepared deal: per leg, the slot every revaluation reuses. */
     class Prepared internal constructor(
@@ -203,14 +203,17 @@ class TreasuryValuator(private val market: MarketState) {
     )
 
     /** PV of one slot in its own currency, every flow paid strictly after as-of. */
-    internal fun slotPv(slot: Slot, discount: DiscountCurve, marketState: MarketState = market): BigDecimal =
-        LegPricer.presentValue(flows(slot, discount, marketState), discount, marketState.asOf)
+    internal fun slotPv(slot: Slot, discount: DiscountCurve, marketState: MarketState = market): BigDecimal {
+        deadline.check()
+        return LegPricer.presentValue(flows(slot, discount, marketState), discount, marketState.asOf)
+    }
 
     fun value(prepared: Prepared): DealValuation = value(prepared, market)
 
     /** Values [prepared] on [state] — the base market, or a historical scenario of it. */
     fun value(prepared: Prepared, state: MarketState): DealValuation {
         val legs = prepared.slots.map { slot ->
+            deadline.check()
             val discount = state.discount(slot.currency)!!
             val fx = state.fx(slot.currency)!!
             val flows = flows(slot, discount, state)

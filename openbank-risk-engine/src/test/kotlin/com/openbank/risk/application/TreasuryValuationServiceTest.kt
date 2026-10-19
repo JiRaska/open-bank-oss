@@ -27,6 +27,7 @@ import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.application.usecase.ReportingFixings
 import com.openbank.risk.application.usecase.TreasuryValuationService
+import com.openbank.risk.application.usecase.ValuationTimeouts
 import com.openbank.risk.application.usecase.VarSettings
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.ReferenceCurveSet
@@ -35,6 +36,7 @@ import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutStatus
 import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.valuation.BucketSet
+import com.openbank.risk.domain.valuation.ComputationTimeoutException
 import com.openbank.risk.domain.valuation.DealKind
 import com.openbank.risk.domain.valuation.StoredFlowSet
 import com.openbank.risk.infrastructure.rest.toResponse
@@ -45,6 +47,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -122,7 +125,14 @@ class TreasuryValuationServiceTest {
         ),
     )
 
-    private fun service(deals: MutableList<TreasuryDeal>, historyDays: Int, minimum: Int): TreasuryValuationService {
+    private val generous = ValuationTimeouts(Duration.ofMinutes(1), Duration.ofMinutes(1), Duration.ofMinutes(1))
+
+    private fun service(
+        deals: MutableList<TreasuryDeal>,
+        historyDays: Int,
+        minimum: Int,
+        timeouts: ValuationTimeouts = generous,
+    ): TreasuryValuationService {
         val sets = history(historyDays)
         val snapshots = mockk<SnapshotUseCase>()
         coEvery { snapshots.getInstruments(runId) } returns emptyList()
@@ -139,6 +149,7 @@ class TreasuryValuationServiceTest {
             Store(),
             ReportingFixings(NoFixings),
             VarSettings(minimum, 30),
+            timeouts,
         )
     }
 
@@ -203,6 +214,40 @@ class TreasuryValuationServiceTest {
         assertThat(v.deals.count { it.unpriced != null }).isEqualTo(1)
         assertThat(runBlocking { svc.sensitivity(runId, null, null, BucketSet.IRRBB_STANDARD) }.result).isNull()
         assertThat(runBlocking { svc.valueAtRisk(runId, null, BigDecimal("0.99"), 1) }.figures).isNull()
+    }
+
+    @Test
+    fun `a computation past its wall-clock budget is stopped with a typed timeout, for pricing, reads and VaR`() {
+        val tiny = ValuationTimeouts(Duration.ofNanos(1), Duration.ofNanos(1), Duration.ofNanos(1))
+        val deals = mutableListOf(irs(UUID.randomUUID(), DealKind.ACTUAL))
+        val svc = service(deals, 5, 3, tiny)
+        val legs = deals.single().legs!!
+        assertThatThrownBy { runBlocking { svc.price(PricingCommand(asOf, null, "CZK", legs)) } }
+            .isInstanceOf(ComputationTimeoutException::class.java).hasMessageContaining("pre-trade pricing")
+        assertThatThrownBy { runBlocking { svc.sensitivity(runId, null, null, BucketSet.IRRBB_STANDARD) } }
+            .isInstanceOf(ComputationTimeoutException::class.java)
+        assertThatThrownBy { runBlocking { svc.valueAtRisk(runId, null, BigDecimal("0.99"), 1) } }
+            .isInstanceOf(ComputationTimeoutException::class.java).hasMessageContaining("VaR")
+        // Negative case: the same calls with a generous budget complete.
+        assertThat(
+            runBlocking {
+                service(deals, 5, 3).valueAtRisk(runId, null, BigDecimal("0.99"), 1)
+            }.figures,
+        ).isNotNull
+    }
+
+    @Test
+    fun `VaR request bounds - confidence above 0_5 up to 0_9999 and horizon 1 to 250`() {
+        val svc = service(mutableListOf(irs(UUID.randomUUID(), DealKind.ACTUAL)), 5, 3)
+        listOf("0.5", "0.99991", "1").forEach { c ->
+            assertThatThrownBy { runBlocking { svc.valueAtRisk(runId, null, BigDecimal(c), 1) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        listOf(0, 251).forEach { h ->
+            assertThatThrownBy { runBlocking { svc.valueAtRisk(runId, null, BigDecimal("0.99"), h) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(runBlocking { svc.valueAtRisk(runId, null, BigDecimal("0.9999"), 250) }.dataGap).contains("below")
     }
 
     @Test

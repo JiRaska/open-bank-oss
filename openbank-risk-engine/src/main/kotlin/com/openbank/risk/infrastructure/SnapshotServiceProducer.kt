@@ -36,6 +36,7 @@ import com.openbank.risk.application.usecase.ReferenceCurveSetSeeder
 import com.openbank.risk.application.usecase.ReportingFixings
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.application.usecase.TreasuryValuationService
+import com.openbank.risk.application.usecase.ValuationTimeouts
 import com.openbank.risk.application.usecase.VarSettings
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.curve.CurveBootstrap
@@ -53,6 +54,7 @@ import jakarta.enterprise.inject.Produces
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
+import java.time.Duration
 import java.util.Optional
 
 /**
@@ -72,6 +74,16 @@ class SnapshotServiceProducer {
     // IRRBB read's outlier test uses the same `irrbb-eve-outlier` limit as GET .../limits.
     @Inject
     lateinit var limitsConfig: LimitsConfig
+
+    // ADR-0344 D8 wall-clock budgets (field-injected: detekt LongParameterList on the producer).
+    @ConfigProperty(name = "openbank.risk.pricing.timeout")
+    lateinit var pricingTimeout: Duration
+
+    @ConfigProperty(name = "openbank.risk.valuation.timeout")
+    lateinit var valuationTimeout: Duration
+
+    @ConfigProperty(name = "openbank.risk.var.timeout")
+    lateinit var varTimeout: Duration
 
     @ConfigProperty(name = "openbank.risk.provenance", defaultValue = "synthetic")
     lateinit var provenance: String
@@ -249,6 +261,7 @@ class SnapshotServiceProducer {
         storedFlows,
         ReportingFixings(fixings),
         VarSettings(minimumScenarios, windowDays),
+        ValuationTimeouts(pricingTimeout, valuationTimeout, varTimeout),
     )
 
     /**

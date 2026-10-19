@@ -36,6 +36,7 @@ import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.model.TreasuryLegs
 import com.openbank.risk.domain.valuation.BucketSet
+import com.openbank.risk.domain.valuation.Deadline
 import com.openbank.risk.domain.valuation.DealKind
 import com.openbank.risk.domain.valuation.DealValuation
 import com.openbank.risk.domain.valuation.FlowSource
@@ -49,10 +50,23 @@ import com.openbank.risk.domain.valuation.ValuationModel
 import com.openbank.risk.domain.valuation.forIndexName
 import java.math.BigDecimal
 import java.security.MessageDigest
+import java.time.Duration
 import java.time.LocalDate
 import java.util.UUID
 
 /** Historical-simulation settings (`openbank.risk.var.*`); configuration, never code defaults. */
+/**
+ * Wall-clock budgets per request (`openbank.risk.{pricing,valuation,var}.timeout`): a computation
+ * past its budget stops at the next unit of work and answers 503 `COMPUTATION_TIMEOUT`.
+ */
+data class ValuationTimeouts(val pricing: Duration, val valuation: Duration, val valueAtRisk: Duration) {
+    init {
+        listOf(pricing, valuation, valueAtRisk).forEach {
+            require(!it.isNegative && !it.isZero) { "timeouts must be positive" }
+        }
+    }
+}
+
 data class VarSettings(val minimumScenarios: Int, val windowDays: Int) {
     init {
         require(minimumScenarios >= 1) { "openbank.risk.var.minimum-scenarios must be at least 1" }
@@ -81,6 +95,7 @@ class TreasuryValuationService(
     private val storedFlows: TreasuryCashFlowStore,
     private val fixings: ReportingFixings,
     private val varSettings: VarSettings,
+    private val timeouts: ValuationTimeouts,
 ) : ValuationUseCase {
 
     override suspend fun price(command: PricingCommand): PricingResult {
@@ -89,7 +104,7 @@ class TreasuryValuationService(
         val currencies = command.legs.map { it.currency.code }.toSet() + command.reportingCurrency
         val fx = fixings.inEffect(currencies, command.asOf)
         val market = market(set, command.reportingCurrency, fx)
-        val valuator = TreasuryValuator(market)
+        val valuator = TreasuryValuator(market, Deadline("pre-trade pricing", timeouts.pricing))
         val deal = ValuableDeal(PRICING_DEAL_ID, null, DealKind.HYPOTHETICAL, command.legs)
         val prepared = when (val p = valuator.prepare(deal)) {
             is TreasuryValuator.Preparation.Ready -> p.prepared
@@ -115,7 +130,7 @@ class TreasuryValuationService(
     }
 
     override suspend fun valuation(runId: UUID, bookId: String?, curveSetId: UUID?): SnapshotValuation {
-        val book = load(runId, bookId, curveSetId)
+        val book = load(runId, bookId, curveSetId, Deadline("valuation read", timeouts.valuation))
         val values = book.prepared.map { book.valuator.value(it) } + book.unpriced
         val sorted = values.sortedBy { it.dealId }
         val total = if (book.gap != null) {
@@ -134,13 +149,13 @@ class TreasuryValuationService(
         curveSetId: UUID?,
         buckets: BucketSet,
     ): SnapshotSensitivity {
-        val book = load(runId, bookId, curveSetId)
+        val book = load(runId, bookId, curveSetId, Deadline("valuation read", timeouts.valuation))
         val result = if (book.gap != null) null else book.valuator.sensitivities(book.prepared, buckets)
         return SnapshotSensitivity(book.context, buckets, result, book.gap)
     }
 
     override suspend fun fxPosition(runId: UUID, bookId: String?, curveSetId: UUID?): FxPositionAnalysis {
-        val book = load(runId, bookId, curveSetId)
+        val book = load(runId, bookId, curveSetId, Deadline("valuation read", timeouts.valuation))
         val legs = book.prepared.flatMap { book.valuator.value(it).legs }
         val lines = legs.groupBy { it.currency }.toSortedMap().map { (ccy, ls) ->
             val pv = ls.fold(BigDecimal.ZERO) { a, l -> a.add(l.pv) }
@@ -166,13 +181,13 @@ class TreasuryValuationService(
         confidence: BigDecimal,
         horizonDays: Int,
     ): VarAnalysis {
-        require(confidence > BigDecimal("0.5") && confidence < BigDecimal.ONE) {
-            "query parameter 'confidence' must be in (0.5, 1)"
+        require(confidence > MIN_CONFIDENCE && confidence <= MAX_CONFIDENCE) {
+            "query parameter 'confidence' must be in (0.5, 0.9999]"
         }
         require(horizonDays in 1..MAX_HORIZON_DAYS) {
             "query parameter 'horizonDays' must be between 1 and $MAX_HORIZON_DAYS"
         }
-        val book = load(runId, bookId, null)
+        val book = load(runId, bookId, null, Deadline("historical-simulation VaR", timeouts.valueAtRisk))
         val to = book.context.run.asOf
         val from = to.minusDays(varSettings.windowDays.toLong())
         fun result(count: Int, skipped: Int, figures: com.openbank.risk.domain.valuation.VarFigures?, gap: String?) =
@@ -246,7 +261,7 @@ class TreasuryValuationService(
         val gap: String?,
     )
 
-    private suspend fun load(runId: UUID, bookId: String?, curveSetId: UUID?): LoadedBook {
+    private suspend fun load(runId: UUID, bookId: String?, curveSetId: UUID?, deadline: Deadline): LoadedBook {
         snapshots.getInstruments(runId) // 404 unknown, 409 UNTIED — the same gate as every snapshot read
         val run = snapshots.getRun(runId)
         val set = curveSet(run.asOf, curveSetId)
@@ -267,7 +282,7 @@ class TreasuryValuationService(
         }.toSet()
         val fx = fixings.inEffect(currencies, run.asOf)
         val market = market(set, REPORTING, fx)
-        val valuator = TreasuryValuator(market)
+        val valuator = TreasuryValuator(market, deadline)
         val (prepared, unpriced) = prepareAll(valuator, valuable, notValuable)
         val gap = unpriced.takeIf { it.isNotEmpty() }?.let { u ->
             "${u.size} deal(s) cannot be valued (${u.take(LISTED).joinToString { "${it.dealId}: ${it.unpriced}" }}): " +
@@ -382,6 +397,8 @@ class TreasuryValuationService(
         val REPORTING = ReportingCurrencyTotal.REPORTING_CURRENCY
         val PRICING_DEAL_ID: UUID = UUID(0L, 0L)
         const val LISTED = 5
-        const val MAX_HORIZON_DAYS = 10
+        const val MAX_HORIZON_DAYS = 250
+        val MIN_CONFIDENCE = BigDecimal("0.5")
+        val MAX_CONFIDENCE = BigDecimal("0.9999")
     }
 }

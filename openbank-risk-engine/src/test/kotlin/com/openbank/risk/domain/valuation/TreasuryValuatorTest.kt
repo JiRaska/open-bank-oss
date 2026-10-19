@@ -197,5 +197,15 @@ class TreasuryValuatorTest {
             .isInstanceOf(IllegalArgumentException::class.java)
         org.assertj.core.api.Assertions.assertThatThrownBy { BucketSet.resolve(null, "1Y,1M") }
             .isInstanceOf(IllegalArgumentException::class.java)
+        org.assertj.core.api.Assertions.assertThatThrownBy { BucketSet.resolve(null, "1Y,1Y") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        org.assertj.core.api.Assertions.assertThatThrownBy { BucketSet.resolve(null, "1Y,51Y") }
+            .hasMessageContaining("50Y")
+        assertThat(BucketSet.resolve(null, "1Y,50Y").tenors).hasSize(2)
+        assertThat(BucketSet.resolve(null, (1..30).joinToString(",") { "${it}M" }).tenors).hasSize(30)
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            BucketSet.resolve(null, (1..31).joinToString(",") { "${it}M" })
+        }
+            .hasMessageContaining("at most 30")
     }
 }

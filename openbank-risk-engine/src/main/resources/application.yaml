@@ -758,6 +758,13 @@ openbank:
     var:
       minimum-scenarios: 250
       window-days: 400
+      # Wall-clock budget per VaR request (full revaluation per scenario); past it the work stops
+      # and the call answers 503 COMPUTATION_TIMEOUT. Same for the two budgets below.
+      timeout: 30S
+    pricing:
+      timeout: 5S
+    valuation:
+      timeout: 10S
     limits:
       parameter-set-id: openbank-risk-appetite
       parameter-sets:

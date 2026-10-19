@@ -94,6 +94,7 @@ object LegSpecJson {
 
     fun toLegs(legs: List<LegDto>?, defaults: LegDefaults = LegDefaults()): List<LegSpec> {
         val list = requireNotNull(legs?.takeIf { it.isNotEmpty() }) { "field 'legs' must hold at least one leg" }
+        require(list.size <= MAX_LEGS) { "field 'legs' holds ${list.size} legs; at most $MAX_LEGS are accepted" }
         return list.mapIndexed { i, dto -> toLeg(i, dto, defaults) }
     }
 
@@ -104,6 +105,11 @@ object LegSpecJson {
         val accrualFrequency = frequency(i, "accrualFrequency", req(d.accrualFrequency, "accrualFrequency"))
         val calendar = calendar(d.paymentCalendars ?: defaults.calendars ?: listOf(currency))
         val roll = roll(i, d.businessDayConvention ?: defaults.businessDayConvention)
+        val start = date(i, "accrualStart", req(d.accrualStart, "accrualStart"))
+        val end = date(i, "accrualEnd", req(d.accrualEnd, "accrualEnd"))
+        require(!end.isAfter(start.plusYears(MAX_SPAN_YEARS))) {
+            "legs[$i]: accrualStart $start to accrualEnd $end exceeds $MAX_SPAN_YEARS years"
+        }
         return LegSpec(
             payReceive = enumOf(i, "payReceive", req(d.payReceive, "payReceive")),
             currency = CurrencyCode.of(currency),
@@ -115,8 +121,8 @@ object LegSpecJson {
                 finalExchangeAmount = d.finalExchangeAmount,
             ),
             schedule = ScheduleSpec(
-                start = date(i, "accrualStart", req(d.accrualStart, "accrualStart")),
-                end = date(i, "accrualEnd", req(d.accrualEnd, "accrualEnd")),
+                start = start,
+                end = end,
                 accrualFrequency = accrualFrequency,
                 paymentFrequency = d.paymentFrequency?.let { frequency(i, "paymentFrequency", it) } ?: accrualFrequency,
                 stub = d.stub?.let { enumOf<StubType>(i, "stub", it) } ?: StubType.SHORT_INITIAL,
@@ -198,6 +204,14 @@ object LegSpecJson {
     }
 
     private const val MONTHS_PER_YEAR = 12
+
+    /**
+     * Request bounds (ADR-0344 D8 pricing edge). A real instrument has a handful of legs; 50 years
+     * matches the longest swap quote the curves accept. Frequencies are never finer than daily (the
+     * grammar has no sub-day unit), and libs-finance caps any schedule at 2,000 periods per leg.
+     */
+    const val MAX_LEGS = 8
+    const val MAX_SPAN_YEARS = 50L
 
     /** Kernel day-count names, with the usual market spellings (`ACT/360`, `30E/360`). */
     fun dayCount(i: Int, raw: String): DayCount {

@@ -155,6 +155,8 @@ data class BucketSet(val id: String, val tenors: List<Period>) {
     companion object {
         private const val MONTHS_PER_YEAR = 12L
         const val DEFAULT_ID = "irrbb-standard"
+        const val MAX_BUCKETS = 30
+        const val MAX_TENOR_YEARS = 50L
 
         val IRRBB_STANDARD = BucketSet(
             DEFAULT_ID,
@@ -187,8 +189,12 @@ data class BucketSet(val id: String, val tenors: List<Period>) {
                     }
                 }
                 val asOf = LocalDate.EPOCH
+                require(tenors.size <= MAX_BUCKETS) { "at most $MAX_BUCKETS buckets are accepted, got ${tenors.size}" }
                 require(tenors.zipWithNext().all { (a, b) -> asOf.plus(b).isAfter(asOf.plus(a)) }) {
-                    "buckets must be strictly increasing: $buckets"
+                    "buckets must be unique and strictly increasing: $buckets"
+                }
+                require(!asOf.plus(tenors.last()).isAfter(asOf.plusYears(MAX_TENOR_YEARS))) {
+                    "the longest bucket may be at most ${MAX_TENOR_YEARS}Y: $buckets"
                 }
                 return BucketSet("explicit", tenors)
             }

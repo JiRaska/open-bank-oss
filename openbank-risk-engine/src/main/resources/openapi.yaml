@@ -644,7 +644,9 @@ paths:
         curve set as of `asOf` (default: the newest set recorded for that date) with libs-finance:
         PV and PV by leg, PV01 (PV(+1bp) − PV, a payer of fixed is positive), key-rate DV01 on the
         IRRBB ladder and FX delta (1 % of each foreign leg's PV). Header fields it does not price are
-        accepted and ignored. Nothing is persisted.
+        accepted and ignored. Nothing is persisted. Bounds: at most 8 legs, each spanning at most 50
+        years, no frequency finer than daily, at most 2,000 periods per leg (400 otherwise); a
+        computation past `openbank.risk.pricing.timeout` answers 503 `COMPUTATION_TIMEOUT`.
       requestBody:
         required: true
         content:
@@ -664,6 +666,8 @@ paths:
           description: Unauthenticated
         '403':
           description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
         '404':
           description: No such curve set
 
@@ -695,6 +699,8 @@ paths:
           description: Unauthenticated
         '403':
           description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
         '404':
           description: No such run or curve set
         '409':
@@ -722,7 +728,7 @@ paths:
           in: query
           required: false
           schema: { type: string }
-          description: An explicit, strictly increasing tenor list (e.g. `1M,3M,1Y,5Y`); overrides bucketSetId.
+          description: An explicit, unique and strictly increasing tenor list (e.g. `1M,3M,1Y,5Y`), at most 30 buckets, longest ≤ 50Y; overrides bucketSetId.
       responses:
         '200':
           description: The sensitivities, or the data gap
@@ -736,6 +742,8 @@ paths:
           description: Unauthenticated
         '403':
           description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
         '404':
           description: No such run or curve set
         '409':
@@ -762,11 +770,11 @@ paths:
         - name: confidence
           in: query
           required: false
-          schema: { type: number, default: 0.99 }
+          schema: { type: number, exclusiveMinimum: 0.5, maximum: 0.9999, default: 0.99 }
         - name: horizonDays
           in: query
           required: false
-          schema: { type: integer, minimum: 1, maximum: 10, default: 1 }
+          schema: { type: integer, minimum: 1, maximum: 250, default: 1 }
       responses:
         '200':
           description: VaR and ES, or the data gap
@@ -780,6 +788,8 @@ paths:
           description: Unauthenticated
         '403':
           description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
         '404':
           description: No such run
         '409':
@@ -811,6 +821,8 @@ paths:
           description: Unauthenticated
         '403':
           description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
         '404':
           description: No such run or curve set
         '409':
