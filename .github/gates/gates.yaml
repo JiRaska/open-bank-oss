@@ -985,6 +985,54 @@ gates:
     run: |
       python3 .github/scripts/check-entity-column-names.py
 
+  # ADR-0344 D1: day counts and business-day calendars live in openbank-libs-domain and
+  # openbank-libs-finance only. A private DayCount, a local nextBusinessDay or a hard-coded 360/365
+  # year basis in a service is a second implementation that drifts from the first. Shrink-only
+  # baseline of today's offenders (#11670); a stale baseline line fails too.
+  - id: no-local-daycount-or-calendar
+    name: "no service defines its own day-count or calendar logic (ADR-0344 D1, enforced ratchet)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      Two implementations of ACT/360 or of a holiday roll disagree silently; the first sign is a
+      reconciliation break between services. The baseline only shrinks, and an entry whose
+      offender is gone fails as stale so the declaration cannot outlive the debt.
+    review_after: 2027-02-19
+    min_subjects: 2500   # 3000 src/main Kotlin files outside the two libraries today (2026-10-19)
+    budget_seconds: 30   # measured 3.8 s locally (2026-10-19)
+    selftest_inputs: [".github/scripts/check-no-local-daycount-or-calendar.py"]
+    selftest: |
+      python3 .github/scripts/check-no-local-daycount-or-calendar.py --self-test
+    run: |
+      python3 .github/scripts/check-no-local-daycount-or-calendar.py
+
+  # ADR-0344 D9: the treasury golden parity fixtures. Validates the format, requires one fixture
+  # per product type, and re-runs the independent Python oracle on every `independent-oracle`
+  # fixture so `expected` cannot be hand-edited to agree with buggy code. ADVISORY until the
+  # Kotlin replay test that compares the cash-flow ledger with these fixtures lands in a later
+  # ADR-0344 slice; it then graduates to enforced (rules.yaml: treasury_parity_fixtures).
+  - id: treasury-parity-fixtures
+    name: "treasury parity fixtures are well-formed, complete and oracle-true (ADR-0344 D9, advisory)"
+    group: data
+    mode: advisory
+    rationale: >-
+      A parity fixture is evidence only while its expected flows come from an oracle independent
+      of the code under test; re-deriving them on every run is what stops a fixture being edited
+      to match a defect. Advisory until the Kotlin replay test lands, since until then nothing
+      consumes the fixtures.
+    review_after: 2027-02-19
+    min_subjects: 30   # 36 fixtures across all 16 product types today (2026-10-19)
+    budget_seconds: 20   # measured 0.3 s locally (2026-10-19)
+    verified: "2026-10-19 — no Kotlin replay test consumes the fixtures yet (ADR-0344 phase 0 slice pending); 36 fixtures, 0 findings"
+    selftest_inputs:
+      - ".github/scripts/check-treasury-parity-fixtures.py"
+      - "openbank-treasury-service/src/test/parity-oracle/oracle.py"
+    selftest: |
+      python3 .github/scripts/check-treasury-parity-fixtures.py --self-test
+      python3 -m unittest discover -s openbank-treasury-service/src/test/parity-oracle -p 'test_*.py'
+    run: |
+      python3 .github/scripts/check-treasury-parity-fixtures.py
+
   # A Redis-backed four-eyes ApprovalStore reads `redis://localhost:6379` from application.yaml,
   # and a pod has no Redis on localhost, so the deployed host must come from the workload's
   # QUARKUS_REDIS_HOSTS. swift-service and clearing-service shipped without it: Ready pods, a
@@ -6273,7 +6321,8 @@ gates:
         # openbank-infra/aws and openbank-document-renderer are DEPLOYED Python (the
         # config-recorder-healer Lambda; the WeasyPrint render sidecar) and sat outside every
         # root (#6253). Not yet scripts/ or openbank-ap2-service/demo: they carry findings today.
-        find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer -name '*.py' -type f | sort
+        find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer \
+          openbank-treasury-service/src/test/parity-oracle -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \
