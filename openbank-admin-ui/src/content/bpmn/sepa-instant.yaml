@@ -25,17 +25,17 @@ steps:
     label: SCA (PSD2)
     lane: psd2
     apis:
-      - POST /api/v1/sca/challenge
+      - POST /api/v1/sca/challenges
     relatedServices:
       - sca-service
   - id: aml
     type: task
     x: 320
     y: 100
-    label: AML Screening
+    label: Open AML case
     lane: compliance
     apis:
-      - POST /api/v1/aml/transaction-screen
+      - POST /api/v1/aml/cases
     relatedServices:
       - aml-service
   - id: gw1
@@ -55,9 +55,9 @@ steps:
     label: Debit účtu
     lane: core
     apis:
-      - POST /api/v1/accounts/{id}/debit
+      - POST /api/v1/balances/{accountId}/debit
     relatedServices:
-      - account-service
+      - balance-service
   - id: submit
     type: task
     x: 700
@@ -65,7 +65,7 @@ steps:
     label: SCT Inst Odeslání
     lane: payment
     apis:
-      - POST /api/v1/sepa/instant
+      - POST /api/v1/sepa-instant
     relatedServices:
       - sepa-instant
   - id: settle
@@ -75,7 +75,7 @@ steps:
     label: Settlement (10s)
     lane: payment
     apis:
-      - POST /api/v1/clearing/instant
+      - POST /api/v1/clearing/submit
     relatedServices:
       - clearing-service
   - id: end

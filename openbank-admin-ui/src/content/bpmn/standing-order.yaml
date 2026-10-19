@@ -54,10 +54,8 @@ steps:
     y: 100
     label: Debit
     lane: core
-    apis:
-      - POST /api/v1/ledger/post
     relatedServices:
-      - ledger-service
+      - standing-order-service
   - id: transfer
     type: task
     x: 700
@@ -65,7 +63,7 @@ steps:
     label: Credit Transfer
     lane: payment
     apis:
-      - POST /api/v1/sepa/outward
+      - POST /api/v1/sepa-payments
     relatedServices:
       - sepa-payment
   - id: update
@@ -75,7 +73,7 @@ steps:
     label: Další spuštění
     lane: payment
     apis:
-      - PUT /api/v1/standing-orders/{id}
+      - PATCH /api/v1/standing-orders/{id}/record-execution
     relatedServices:
       - standing-order-service
   - id: audit
@@ -84,8 +82,6 @@ steps:
     y: 100
     label: Audit Log
     lane: compliance
-    apis:
-      - POST /api/v1/audit/log
     relatedServices:
       - audit-service
     consumes:

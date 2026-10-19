@@ -336,6 +336,10 @@ data class ApprovalRequest(
      */
     @Suppress("ThrowsCount") // one throw per guard, by design
     fun sign(partyId: UUID, scaChallengeId: UUID, at: Instant): ApprovalRequest {
+        // The expiry sweep must not change the refusal returned for the same expired request.
+        if (status == ApprovalStatus.EXPIRED) {
+            throw SignatureRefusedException(SignatureRefusal.EXPIRED, "approval request $id expired at $expiresAt")
+        }
         if (status != ApprovalStatus.PENDING && status != ApprovalStatus.AWAITING_INITIATOR) {
             throw SignatureRefusedException(SignatureRefusal.NOT_PENDING, "approval request $id is $status")
         }

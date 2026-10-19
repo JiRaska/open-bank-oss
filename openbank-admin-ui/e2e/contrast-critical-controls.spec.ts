@@ -27,7 +27,7 @@ for (const theme of ['light', 'dark'] as const) {
     test(`service-map evidence detail has AA text contrast in ${theme} theme with ${drift} drift`, async ({ page, context, baseURL }) => {
       await signInAsOperator(context, baseURL!)
       await page.route('**/api/services/health', route => route.fulfill({
-        status: 200, contentType: 'application/json', body: JSON.stringify({ services: [{ port: 8100, status: 'UP' }] }),
+        status: 200, contentType: 'application/json', body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [{ name: 'account-service', port: 8100, status: 'UP', reachable: true }] }),
       }))
       await page.route('**/api/services/governance', route => route.fulfill({
         status: 200, contentType: 'application/json', body: JSON.stringify({ available: true, byService: {

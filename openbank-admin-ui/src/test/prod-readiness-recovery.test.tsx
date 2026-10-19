@@ -8,7 +8,11 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import ReadinessPage from '@/app/system/readiness/page'
 
 const REPORT = {
+  schema_version: 1,
   generated_for: '2026-08-31',
+  collected_at: '2026-08-31T13:00:00Z',
+  source_sha: 'a'.repeat(40),
+  scope: { kind: 'service-module-matrix-v1', service_count: 1, money_path_count: 1, roster_sha256: 'b'.repeat(64) },
   dimensions: [{ code: 'C1', name: 'Code' }],
   services: [{
     service: 'ledger',
@@ -24,6 +28,10 @@ function response(body: unknown, status = 200) {
     status,
     headers: { 'content-type': 'application/json' },
   })
+}
+
+function apiResult(report = REPORT, status: 'ready' | 'stale' | 'image-baked' = 'ready') {
+  return { status, source: status === 'image-baked' ? 'image-baked' : 'runtime', report, provenance: null }
 }
 
 async function renderPage() {
@@ -45,12 +53,13 @@ describe('production readiness recovery states', () => {
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('unavailable right now'))
     expect(screen.queryByText(/No data — run prod-readiness-collector/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Services')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry loading the readiness report' })).toBeInTheDocument()
   })
 
   it('keeps the last verified report when a refresh fails', async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response(REPORT))
+      .mockResolvedValueOnce(response(apiResult()))
       .mockResolvedValueOnce(response({ error: 'unavailable' }, 503))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -66,7 +75,7 @@ describe('production readiness recovery states', () => {
   it('recovers after an explicit retry', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce(response(REPORT))
+      .mockResolvedValueOnce(response(apiResult()))
     vi.stubGlobal('fetch', fetchMock)
 
     await renderPage()
@@ -76,5 +85,80 @@ describe('production readiness recovery states', () => {
     await waitFor(() => expect(screen.getByText('ledger')).toBeInTheDocument())
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('labels the image-baked fallback and shows its collected age and scope', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(apiResult(REPORT, 'image-baked'))))
+
+    await renderPage()
+
+    await waitFor(() => expect(screen.getByText(/image-baked snapshot, not live evidence/)).toBeInTheDocument())
+    expect(screen.getByText(/1 service modules, 1 money-path/)).toBeInTheDocument()
+    expect(screen.getByText(/source commit aaaaaaaaaaaa/)).toBeInTheDocument()
+    expect(screen.getByText('ledger')).toBeInTheDocument()
+  })
+
+  it('keeps the report visible while marking an expired runtime snapshot stale', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(apiResult(REPORT, 'stale'))))
+
+    await renderPage()
+
+    await waitFor(() => expect(screen.getByText(/live snapshot is stale/)).toBeInTheDocument())
+    expect(screen.getByText('ledger')).toBeInTheDocument()
+    expect(screen.getAllByText('GO')).toHaveLength(2)
+  })
+
+  it('polls at the bounded interval only while the page is visible', async () => {
+    let poll: (() => void) | undefined
+    const nativeSetInterval = window.setInterval.bind(window)
+    const nativeClearInterval = window.clearInterval.bind(window)
+    const intervalSpy = vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => {
+      if (delay === 60_000) {
+        poll = callback as () => void
+        return 1
+      }
+      return nativeSetInterval(callback, delay)
+    })
+    vi.spyOn(window, 'clearInterval').mockImplementation(timer => {
+      if (timer !== 1) nativeClearInterval(timer)
+    })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const fetchMock = vi.fn(async () => response(apiResult()))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await renderPage()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 60_000)
+    expect(poll).toBeDefined()
+
+    await act(async () => {
+      visibility.mockReturnValue('hidden')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await Promise.resolve()
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      visibility.mockReturnValue('visible')
+      document.dispatchEvent(new Event('visibilitychange'))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      visibility.mockReturnValue('hidden')
+      poll?.()
+      await Promise.resolve()
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      visibility.mockReturnValue('visible')
+      poll?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
   })
 })
