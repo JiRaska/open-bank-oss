@@ -280,6 +280,110 @@ yq '.gates[] | select(.id=="treasury-parity-fixtures") | .mode' .github/gates/ga
 ls openbank-treasury-service/src/test/resources/parity/*.json | wc -l   # >= number of product types
 ```
 
+## Functional baseline catalogue
+
+The decision above names mechanisms; this catalogue names the **fields, views and code lists**
+a treasury front office, back office and accounting function expect, so that no slice can call
+itself complete while a column is missing. Every item is a generic requirement of a bank
+treasury system; none is tied to any product. A slice that implements a product or a view must
+check its PR against the matching list.
+
+### Deal ticket — header (every product)
+
+Legal entity (the booking entity), counterparty, counterparty's own deal reference,
+communication channel (dealing platform, voice, electronic, internal), portfolio/book,
+instrument, deal kind (`ACTUAL` / `PLANNED` / `HYPOTHETICAL`), trade date **and time**,
+effective (start) date, maturity date, validity from/to (for framework or revolving deals),
+jurisdiction / governing law, holiday calendar set, business-day convention, fixed-convention
+flag (convention frozen at trade, not re-derived from reference data), schedule generation
+direction (from start / from end), notional exchange flag, single-currency flag, free-text note,
+and the regulatory block (trade-reporting fields for derivatives, central-bank codes,
+liquidity-ratio categories).
+
+### Deal ticket — per leg (interest-bearing products)
+
+Notional and its currency; amortisation start date and frequency; accrual start date and
+accrual frequency; payment frequency; reference rate (index) with refixing frequency and
+fixing lead in business days; fixed rate or spread; accrual convention (day count); total
+rate until the first fixing; floor and cap, each on the index and on index plus spread;
+payment calendar; a "generate schedule" action that previews the cash-flow ledger before
+submission.
+
+### Deal ticket — product-specific
+
+| Product | Extra fields |
+|---|---|
+| Deposit / loan / cash | principal account, interest account, early-withdrawal terms |
+| Treasury bill / bond / bill of exchange | security (ISIN or internal id), nominal, clean price or yield, accrued interest, settlement place, custody account |
+| FX spot / forward / swap | buy and sell currency and amounts, rate, forward points, near and far leg dates and rates |
+| FRA | contract period (e.g. 3×6), reference index, fixing date, settlement convention |
+| Interest-rate swap | two legs as above, netting of same-day flows, notional exchange |
+| Repo / reverse repo | collateral security, nominal, dirty price, haircut, substitution rights, repo rate, margin calls |
+
+### Deal ticket — tabs
+
+State and timeline (state, timestamp, user, note per transition); cash and securities
+accounts used for settlement; documents (confirmations, term sheets, signed scans); payment
+orders generated from the deal; collateral; linked deals (hedge relationship, roll-over,
+netting set); credit-exposure limit check (counterparty, product, country, result,
+override); fees; central-bank codes; liquidity-ratio parameters. Actions: save, save and
+close, submit, approve, send confirmation, cancel, reverse, and open change history.
+
+### Deal overview
+
+Columns: deal id, instrument, state, original deal (for amendments and roll-overs),
+portfolio/book, deal kind, counterparty, currency, notional, rate, trade/value/maturity dates,
+last change. Filters: by instrument, by state, by portfolio, hide matured, hide authorised,
+free text, saved personal filter sets. Actions: export all, export selection, export in the
+regulatory-reporting layout, change history of a deal, position close of day (and a special
+close with chosen parameters). Record count visible on every list.
+
+### Event calendar
+
+For a period preset (yesterday, today, tomorrow, week, month, custom range): every upcoming
+refixing, interest payment, principal payment, maturity, option exercise and margin call,
+with date, event type, description, deal link and the responsible role; actionable (open the
+deal, open the payment).
+
+### Cash-flow analysis view
+
+Parameters: calculation date, portfolio/book node, reference currency, convert-to-reference
+toggle, result expression (gross / net / cumulative), payment scenario (contractual /
+behavioural / stress), monthly split toggle, future-business scenario, bank account filter.
+Output: dated flows by currency with drill-down to deal and leg.
+
+### Reports and analyses (each runnable over a portfolio node, each with provenance)
+
+Payment orders; cash flow; liquidity analysis (ladder, survival horizon, regulatory
+ratios); interest-rate risk (repricing gap by bucket set, duration, NII and EVE
+sensitivity); limits and utilisation; FX position; sensitivity (PV01, key-rate DV01,
+FX delta); value at risk; valuation (clean, dirty, accrued, by book and IFRS 9 category);
+accounting (journals by deal, by event, by period; unposted events; corrections).
+
+### Market data
+
+Import from a feed or file; market-factor browser (rates, FX, curves) with history;
+portfolio of factors a curve is built from; export; **suspicious factors** (stale, jump
+beyond threshold); **missing factors** defined in configuration but absent for a date;
+internal rate sheets published by the bank.
+
+### Reference data and configuration (code lists)
+
+Parties (counterparties, issuers, central bank) and party groups; party types; countries;
+document types; accounts (cash, securities, nostro); settlement places; standard settlement
+instructions; netting agreements; product types; loan types; central-bank code lists;
+communication channels; market factors; securities master (issues); own capital items;
+holiday calendars; period lengths (tenors); scenarios; behavioural scenarios; calculation
+settings (conventions, rounding); limit settings; conversion factors for derivative
+exposure; haircuts for collateral valuation; regulatory classification codes; portfolios
+and portfolio groups; time-bucket groups; accounting settings (posting rules, GL mapping);
+balance-sheet sides; dealing-view filters; user activity log; per-user settings; application
+version history.
+
+Each code list is effective-dated, versioned, four-eyes approved and carries the `verified`
+flag of D3; each has import and export; each exposes the dependency query of D3 so that a
+change shows what it would affect before it is approved.
+
 ## Compliance impact
 
 - PCI DSS: not applicable — no cardholder data is processed.
