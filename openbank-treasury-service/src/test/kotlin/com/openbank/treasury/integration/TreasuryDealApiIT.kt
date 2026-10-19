@@ -5,6 +5,7 @@
 package com.openbank.treasury.integration
 
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.treasury.domain.glCode
 import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -195,8 +196,8 @@ class TreasuryDealApiIT {
             .body("journals", hasSize<Any>(2))
         val reversal = ledger.journals.getValue("treasury:$dealId:reversed").second
         val settlement = ledger.journals.getValue("treasury:$dealId:settled").second
-        assertThat(reversal.lines.map { it.glCode to it.side }).isEqualTo(
-            settlement.lines.map { it.glCode to (if (it.side.name == "DEBIT") "CREDIT" else "DEBIT") }
+        assertThat(reversal.lines.map { it.glCode() to it.side }).isEqualTo(
+            settlement.lines.map { it.glCode() to (if (it.side.name == "DEBIT") "CREDIT" else "DEBIT") }
                 .map { (c, s) -> c to com.openbank.treasury.domain.model.Side.valueOf(s) },
         )
         assertThat(outboxTypes(UUID.fromString(dealId))).last().isEqualTo("treasury.deal.reversed.v1")
@@ -330,7 +331,7 @@ class TreasuryDealApiIT {
         action(lombardId, "confirm").then().statusCode(200).body("state", equalTo("CONFIRMED"))
         action(lombardId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
         val settled = ledger.journals.getValue("treasury:$lombardId:settled").second
-        assertThat(settled.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+        assertThat(settled.lines.map { "${it.side} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly("DEBIT 1001 2500000.00 CZK", "CREDIT 2320 2500000.00 CZK")
         assertThat(outboxTypes(UUID.fromString(lombardId)))
             .containsExactly(
@@ -411,7 +412,7 @@ class TreasuryDealApiIT {
         action(fxId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
             .body("journals[0].idempotencyKey", equalTo("treasury:$fxId:settled"))
         val settlement = ledger.journals.getValue("treasury:$fxId:settled").second
-        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly(
                 "DEBIT 1002 1000.00 EUR",
                 "CREDIT 1991 1000.00 EUR",
@@ -442,8 +443,8 @@ class TreasuryDealApiIT {
             .body("state", equalTo("REVERSED"))
         val settled = ledger.journals.getValue("treasury:$fxId:settled").second.lines
         val reversed = ledger.journals.getValue("treasury:$fxId:reversed").second.lines
-        assertThat(reversed.map { it.glCode to it.side.name }).isEqualTo(
-            settled.map { it.glCode to (if (it.side.name == "DEBIT") "CREDIT" else "DEBIT") },
+        assertThat(reversed.map { it.glCode() to it.side.name }).isEqualTo(
+            settled.map { it.glCode() to (if (it.side.name == "DEBIT") "CREDIT" else "DEBIT") },
         )
         val payload = jdbc { c ->
             c.prepareStatement(

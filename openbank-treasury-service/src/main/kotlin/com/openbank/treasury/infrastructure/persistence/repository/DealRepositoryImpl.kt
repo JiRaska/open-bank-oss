@@ -294,6 +294,7 @@ class DealRepositoryImpl(
             idempotencyKey = ref.idempotencyKey
             journalId = ref.journalId
             postedAt = ref.postedAt
+            resolvedAccounts = ResolvedAccountsCodec.encode(ref.accounts)
         },
     ).replaceWithVoid()
 
@@ -414,7 +415,14 @@ class DealRepositoryImpl(
     override suspend fun journals(dealId: UUID): List<LedgerJournalRef> = Panache.withSession {
         journals.find("dealId = ?1 order by postedAt asc", dealId).list()
     }.awaitSuspending().map {
-        LedgerJournalRef(it.dealId, PostingEvent.valueOf(it.event), it.idempotencyKey, it.journalId, it.postedAt)
+        LedgerJournalRef(
+            it.dealId,
+            PostingEvent.valueOf(it.event),
+            it.idempotencyKey,
+            it.journalId,
+            it.postedAt,
+            ResolvedAccountsCodec.decode(it.resolvedAccounts),
+        )
     }
 
     private suspend fun history(dealId: UUID): List<DealTransition> = Panache.withSession {

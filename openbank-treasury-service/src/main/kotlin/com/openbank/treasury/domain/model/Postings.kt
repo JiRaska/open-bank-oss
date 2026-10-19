@@ -35,7 +35,80 @@ enum class PostingEvent(val key: String) {
     REVERSED("reversed"),
 }
 
-data class PostingLine(val glCode: String, val side: Side, val amount: BigDecimal, val currency: String)
+/**
+ * Which of a product's ledger accounts a leg belongs to. Mirrors the ledger's `AccountingRole`
+ * (ADR-0341 D3) by name: the ledger, not the treasury, decides which GL account that is.
+ */
+enum class LedgerRole {
+    PRINCIPAL,
+    ACCRUED_INTEREST,
+    INTEREST_INCOME,
+    INTEREST_EXPENSE,
+
+    // ADR-0344 D7: the instrument roles of the posting-rule matrix (ledger V33 adds them to the map).
+    PREMIUM_DISCOUNT,
+    FAIR_VALUE,
+    REVALUATION_RESERVE,
+    REALISED_GAIN,
+    REALISED_LOSS,
+    UNREALISED_GAIN,
+    UNREALISED_LOSS,
+    MEMO,
+    MEMO_CONTRA,
+}
+
+/** The accounting classes treasury posts under (ADR-0341 D3); the ledger maps each to GL accounts. */
+object AccountingClasses {
+    const val NOSTRO = "NOSTRO_ACCOUNT"
+    const val FX_POSITION = "FX_SPOT_POSITION"
+
+    // ADR-0344 D7: the classes of the posting-rule matrix products (ledger V33).
+    const val CASH_IN_TRANSIT = "CASH_IN_TRANSIT"
+    const val TREASURY_LOAN = "TREASURY_LOAN"
+    const val SECURITY_AMORTISED_COST = "DEBT_SECURITY_AMORTISED_COST"
+    const val SECURITY_FVOCI = "DEBT_SECURITY_FVOCI"
+    const val SECURITY_FVTPL = "DEBT_SECURITY_FVTPL"
+    const val REPO_BORROWING = "REPO_BORROWING"
+    const val REVERSE_REPO_LENDING = "REVERSE_REPO_LENDING"
+    const val DERIVATIVE_ASSET = "DERIVATIVE_ASSET"
+    const val DERIVATIVE_LIABILITY = "DERIVATIVE_LIABILITY"
+    const val DERIVATIVE_RECEIVE_LEG = "DERIVATIVE_RECEIVE_LEG"
+    const val DERIVATIVE_PAY_LEG = "DERIVATIVE_PAY_LEG"
+    const val TRADING_RESULT = "TREASURY_TRADING_RESULT"
+    const val FORWARD_COMMITMENT = "FORWARD_COMMITMENT"
+    const val COLLATERAL_RECEIVED = "COLLATERAL_RECEIVED"
+    const val COLLATERAL_PLEDGED = "COLLATERAL_PLEDGED"
+}
+
+/**
+ * One leg of a journal. It names its account by [accountingClass] + [role] (+ [currency]) and carries
+ * no GL code: the ledger resolves the account from its own map (ADR-0341 D3).
+ */
+data class PostingLine(
+    val accountingClass: String,
+    val role: LedgerRole,
+    val side: Side,
+    val amount: BigDecimal,
+    val currency: String,
+    /**
+     * Set ONLY on a reversal leg, to the account the ORIGINAL posting of this class/role/currency
+     * actually landed on ([ResolvedAccount]). The ledger map may be re-pointed between a settlement
+     * and its reversal by a reviewed migration; a reversal that re-resolved the class would then
+     * offset a different account than the one it is reversing. Null on every other leg.
+     */
+    val glAccountId: UUID? = null,
+)
+
+/**
+ * What the ledger resolved one leg of a journal to when it was posted. Recorded with the deal's
+ * journal so a later reversal can offset exactly those accounts, whatever the map says by then.
+ */
+data class ResolvedAccount(
+    val accountingClass: String,
+    val role: LedgerRole,
+    val currency: String,
+    val glAccountId: UUID,
+)
 
 /**
  * A balanced journal for one deal event. [idempotencyKey] is `treasury:<dealId>:<event>` (ADR-0315
@@ -59,132 +132,6 @@ data class JournalSpec(
         }
         require(lines.all { it.amount.signum() > 0 }) { "every journal line amount must be positive" }
     }
-}
-
-/**
- * The treasury chart (ledger migration `V29__treasury_money_market_accounts.sql`), by currency.
- *
- * | purpose                          | CZK  | EUR  | type      |
- * |----------------------------------|------|------|-----------|
- * | Nostro                           | 1001 | 1002 | ASSET     |
- * | MM placements with banks         | 1500 | 1501 | ASSET     |
- * | Deposit facility at ČNB          | 1510 | —    | ASSET     |
- * | Accrued interest receivable (MM) | 1520 | 1521 | ASSET     |
- * | MM borrowings from banks         | 2300 | 2301 | LIABILITY |
- * | Borrowings from ČNB (lombard)    | 2320 | —    | LIABILITY |  (ledger V30)
- * | Accrued interest payable (MM)    | 2310 | 2311 | LIABILITY |
- * | MM interest income               | 4200 | 4201 | INCOME    |
- * | MM interest expense              | 5200 | 5201 | EXPENSE   |
- * | FX position (ledger V5)          | 1990 | 1991 | ASSET     |
- * | matrix accounts (ledger V31)     | 16xx–17xx, 24xx, 3100, 42xx–43xx, 52xx–53xx, 90xx/91xx memo pairs; EUR = CZK + 1 |
- *
- * Interest is recognised daily into the accrued-interest accounts (ADR-0315 D5); maturity then
- * clears them rather than booking the whole interest to income in one amount.
- */
-object TreasuryChart {
-    private val byCurrency: Map<String, Map<String, String>> = mapOf(
-        Deal.CZK to mapOf(
-            "nostro" to "1001",
-            "placement" to "1500",
-            "cnb" to "1510",
-            "borrowing" to "2300",
-            "cnb-borrowing" to "2320",
-            "income" to "4200",
-            "expense" to "5200",
-            "accrued-receivable" to "1520",
-            "accrued-payable" to "2310",
-            "fx-position" to "1990",
-            // ADR-0344 D7: the posting-rule matrix accounts (ledger V31).
-            "securities-ac" to "1600",
-            "securities-fvoci" to "1610",
-            "securities-fvtpl" to "1620",
-            "premium-discount" to "1630",
-            "accrued-securities" to "1640",
-            "accrued-loan" to "1650",
-            "loan" to "1660",
-            "accrued-derivative" to "1670",
-            "reverse-repo" to "1680",
-            "accrued-reverse-repo" to "1685",
-            "cash-transit" to "1690",
-            "derivative-asset" to "1700",
-            "derivative-liability" to "2400",
-            "accrued-payable-derivative" to "2410",
-            "accrued-payable-repo" to "2420",
-            "repo" to "2430",
-            "fvoci-reserve" to "3100",
-            "income-securities" to "4210",
-            "income-loan" to "4220",
-            "income-derivative" to "4230",
-            "income-reverse-repo" to "4240",
-            "realised-gain" to "4300",
-            "unrealised-gain" to "4310",
-            "expense-derivative" to "5230",
-            "expense-repo" to "5240",
-            "realised-loss" to "5300",
-            "unrealised-loss" to "5310",
-            "commitment-memo" to "9000",
-            "commitment-contra" to "9100",
-            "collateral-received-memo" to "9010",
-            "collateral-received-contra" to "9110",
-            "collateral-pledged-memo" to "9020",
-            "collateral-pledged-contra" to "9120",
-        ),
-        Deal.EUR to mapOf(
-            "nostro" to "1002",
-            "placement" to "1501",
-            "borrowing" to "2301",
-            "income" to "4201",
-            "expense" to "5201",
-            "accrued-receivable" to "1521",
-            "accrued-payable" to "2311",
-            "fx-position" to "1991",
-            "securities-ac" to "1601",
-            "securities-fvoci" to "1611",
-            "securities-fvtpl" to "1621",
-            "premium-discount" to "1631",
-            "accrued-securities" to "1641",
-            "accrued-loan" to "1651",
-            "loan" to "1661",
-            "accrued-derivative" to "1671",
-            "reverse-repo" to "1681",
-            "accrued-reverse-repo" to "1686",
-            "cash-transit" to "1691",
-            "derivative-asset" to "1701",
-            "derivative-liability" to "2401",
-            "accrued-payable-derivative" to "2411",
-            "accrued-payable-repo" to "2421",
-            "repo" to "2431",
-            "fvoci-reserve" to "3101",
-            "income-securities" to "4211",
-            "income-loan" to "4221",
-            "income-derivative" to "4231",
-            "income-reverse-repo" to "4241",
-            "realised-gain" to "4301",
-            "unrealised-gain" to "4311",
-            "expense-derivative" to "5231",
-            "expense-repo" to "5241",
-            "realised-loss" to "5301",
-            "unrealised-loss" to "5311",
-            "commitment-memo" to "9001",
-            "commitment-contra" to "9101",
-            "collateral-received-memo" to "9011",
-            "collateral-received-contra" to "9111",
-            "collateral-pledged-memo" to "9021",
-            "collateral-pledged-contra" to "9121",
-        ),
-    )
-
-    fun code(currency: String, purpose: String): String =
-        byCurrency[currency]?.get(purpose) ?: error("no treasury GL account for $purpose in $currency")
-
-    /** Fixed ids seeded by the ledger migration: `a0000000-0000-0000-0000-00000000<code>`. */
-    fun glAccountId(code: String): UUID = UUID.fromString("a0000000-0000-0000-0000-00000000$code")
-
-    /** The nostro GL of every currency — the only accounts a correspondent statement may reconcile. */
-    val nostroCodes: Set<String> get() = byCurrency.values.mapNotNull { it["nostro"] }.toSet()
-
-    /** Every code the treasury posts to — the ledger migration must seed each one. */
-    val postedCodes: Set<String> get() = byCurrency.values.flatMap { it.values }.toSet()
 }
 
 /**
@@ -221,19 +168,14 @@ object PostingRules {
         requireLegacy(deal)
         val p = deal.principal
         val ccy = deal.currency
-        val nostro = TreasuryChart.code(ccy, "nostro")
         val lines = when (deal.product) {
-            ProductType.MM_PLACEMENT -> listOf(
-                PostingLine(TreasuryChart.code(ccy, "placement"), Side.DEBIT, p, ccy),
-                PostingLine(nostro, Side.CREDIT, p, ccy),
-            )
-            ProductType.CNB_DEPOSIT_FACILITY -> listOf(
-                PostingLine(TreasuryChart.code(ccy, "cnb"), Side.DEBIT, p, ccy),
-                PostingLine(nostro, Side.CREDIT, p, ccy),
+            ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> listOf(
+                leg(deal, LedgerRole.PRINCIPAL, Side.DEBIT, p),
+                nostro(ccy, Side.CREDIT, p),
             )
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOf(
-                PostingLine(nostro, Side.DEBIT, p, ccy),
-                PostingLine(liabilityCode(deal), Side.CREDIT, p, ccy),
+                nostro(ccy, Side.DEBIT, p),
+                leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
             )
             ProductType.FX_SPOT -> fxSpotSettlement(deal)
             else -> error("${deal.product} has no posting rules yet (ADR-0344 D7)")
@@ -245,11 +187,12 @@ object PostingRules {
         val fx = checkNotNull(deal.fx) { "FX_SPOT deal ${deal.id} without FX terms" }
         val ccy = deal.currency
         val czk = Deal.CZK
+        val position = AccountingClasses.FX_POSITION
         val buy = listOf(
-            PostingLine(TreasuryChart.code(ccy, "nostro"), Side.DEBIT, deal.principal, ccy),
-            PostingLine(TreasuryChart.code(ccy, "fx-position"), Side.CREDIT, deal.principal, ccy),
-            PostingLine(TreasuryChart.code(czk, "fx-position"), Side.DEBIT, fx.counterAmount, czk),
-            PostingLine(TreasuryChart.code(czk, "nostro"), Side.CREDIT, fx.counterAmount, czk),
+            nostro(ccy, Side.DEBIT, deal.principal),
+            PostingLine(position, LedgerRole.PRINCIPAL, Side.CREDIT, deal.principal, ccy),
+            PostingLine(position, LedgerRole.PRINCIPAL, Side.DEBIT, fx.counterAmount, czk),
+            nostro(czk, Side.CREDIT, fx.counterAmount),
         )
         return if (fx.side == FxSide.BUY) buy else buy.map { it.copy(side = it.side.flipped()) }
     }
@@ -272,16 +215,15 @@ object PostingRules {
         if (deal.product == ProductType.FX_SPOT || !deal.product.legacy) return null
         val amount = accruedThrough(deal, date) - accruedThrough(deal, date.minusDays(1))
         if (amount.signum() <= 0) return null
-        val ccy = deal.currency
         val lines = if (deal.product.isAsset) {
             listOf(
-                PostingLine(TreasuryChart.code(ccy, "accrued-receivable"), Side.DEBIT, amount, ccy),
-                PostingLine(TreasuryChart.code(ccy, "income"), Side.CREDIT, amount, ccy),
+                leg(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, amount),
+                leg(deal, LedgerRole.INTEREST_INCOME, Side.CREDIT, amount),
             )
         } else {
             listOf(
-                PostingLine(TreasuryChart.code(ccy, "expense"), Side.DEBIT, amount, ccy),
-                PostingLine(TreasuryChart.code(ccy, "accrued-payable"), Side.CREDIT, amount, ccy),
+                leg(deal, LedgerRole.INTEREST_EXPENSE, Side.DEBIT, amount),
+                leg(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, amount),
             )
         }
         return JournalSpec(deal.id, PostingEvent.ACCRUED, lines, suffix = date.toString())
@@ -295,32 +237,19 @@ object PostingRules {
         require(accrued.signum() >= 0 && accrued <= i) { "accrued $accrued outside 0..$i for ${deal.id}" }
         val rest = i - accrued
         val ccy = deal.currency
-        val nostro = TreasuryChart.code(ccy, "nostro")
         val lines = when (deal.product) {
-            ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> {
-                val asset = TreasuryChart.code(
-                    ccy,
-                    if (deal.product ==
-                        ProductType.MM_PLACEMENT
-                    ) {
-                        "placement"
-                    } else {
-                        "cnb"
-                    },
-                )
-                listOfNotNull(
-                    PostingLine(nostro, Side.DEBIT, p + i, ccy),
-                    PostingLine(asset, Side.CREDIT, p, ccy),
-                    line(TreasuryChart.code(ccy, "accrued-receivable"), Side.CREDIT, accrued, ccy),
-                    line(TreasuryChart.code(ccy, "income"), Side.CREDIT, rest, ccy),
-                )
-            }
+            ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> listOfNotNull(
+                nostro(ccy, Side.DEBIT, p + i),
+                leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, accrued),
+                optional(deal, LedgerRole.INTEREST_INCOME, Side.CREDIT, rest),
+            )
             ProductType.FX_SPOT -> error("unreachable: FX spot has no maturity")
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOfNotNull(
-                PostingLine(liabilityCode(deal), Side.DEBIT, p, ccy),
-                line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
-                line(TreasuryChart.code(ccy, "expense"), Side.DEBIT, rest, ccy),
-                PostingLine(nostro, Side.CREDIT, p + i, ccy),
+                leg(deal, LedgerRole.PRINCIPAL, Side.DEBIT, p),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, accrued),
+                optional(deal, LedgerRole.INTEREST_EXPENSE, Side.DEBIT, rest),
+                nostro(ccy, Side.CREDIT, p + i),
             )
             else -> error("${deal.product} has no posting rules yet (ADR-0344 D7)")
         }
@@ -331,25 +260,31 @@ object PostingRules {
     fun reversal(deal: Deal, stateBeforeReversal: DealState, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec? {
         if (stateBeforeReversal != DealState.SETTLED) return null
         val flipped = settlement(deal).lines.map { it.copy(side = it.side.flipped()) }
-        val ccy = deal.currency
         val unwind = if (deal.product.isAsset) {
             listOfNotNull(
-                line(TreasuryChart.code(ccy, "income"), Side.DEBIT, accrued, ccy),
-                line(TreasuryChart.code(ccy, "accrued-receivable"), Side.CREDIT, accrued, ccy),
+                optional(deal, LedgerRole.INTEREST_INCOME, Side.DEBIT, accrued),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, accrued),
             )
         } else {
             listOfNotNull(
-                line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
-                line(TreasuryChart.code(ccy, "expense"), Side.CREDIT, accrued, ccy),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, accrued),
+                optional(deal, LedgerRole.INTEREST_EXPENSE, Side.CREDIT, accrued),
             )
         }
         return JournalSpec(deal.id, PostingEvent.REVERSED, flipped + unwind)
     }
 
-    /** The principal's liability account: interbank borrowings, or the ČNB lombard account. */
-    private fun liabilityCode(deal: Deal): String =
-        TreasuryChart.code(deal.currency, if (deal.product == ProductType.CNB_LOMBARD) "cnb-borrowing" else "borrowing")
+    private fun leg(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal) = PostingLine(
+        checkNotNull(deal.product.accountingClass) { "${deal.product} posts through the matrix (ADR-0344 D7)" },
+        role,
+        side,
+        amount,
+        deal.currency,
+    )
 
-    private fun line(code: String, side: Side, amount: BigDecimal, ccy: String): PostingLine? =
-        if (amount.signum() > 0) PostingLine(code, side, amount, ccy) else null
+    private fun nostro(currency: String, side: Side, amount: BigDecimal) =
+        PostingLine(AccountingClasses.NOSTRO, LedgerRole.PRINCIPAL, side, amount, currency)
+
+    private fun optional(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal): PostingLine? =
+        if (amount.signum() > 0) leg(deal, role, side, amount) else null
 }

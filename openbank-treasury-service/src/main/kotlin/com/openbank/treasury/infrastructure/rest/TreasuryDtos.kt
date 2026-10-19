@@ -156,13 +156,18 @@ data class PostingRuleDto(
             recognition = r.recognition.name,
             flowKind = r.selector.kind?.name,
             flowDirection = r.selector.direction?.name,
-            lines = r.lines.map { PostingRuleLineDto(it.side.name, it.glPurpose, it.amount.name) },
+            lines = r.lines.map { PostingRuleLineDto(it.side.name, it.accountingClass, it.role.name, it.amount.name) },
             version = r.version,
         )
     }
 }
 
-data class PostingRuleLineDto(val side: String, val glPurpose: String, val amountExpression: String)
+data class PostingRuleLineDto(
+    val side: String,
+    val accountingClass: String,
+    val accountingRole: String,
+    val amountExpression: String,
+)
 
 data class DealResponse(
     val dealId: UUID,

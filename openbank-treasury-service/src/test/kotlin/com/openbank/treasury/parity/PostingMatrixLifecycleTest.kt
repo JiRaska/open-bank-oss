@@ -5,8 +5,10 @@
 package com.openbank.treasury.parity
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.openbank.treasury.domain.LedgerMapGolden
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.FlowDirection
+import com.openbank.treasury.domain.glCode
 import com.openbank.treasury.domain.model.AmountExpression
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.JournalSpec
@@ -16,7 +18,6 @@ import com.openbank.treasury.domain.model.PostingMatrix
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.Recognition
 import com.openbank.treasury.domain.model.Side
-import com.openbank.treasury.domain.model.TreasuryChart
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -83,15 +84,15 @@ class PostingMatrixLifecycleTest {
 
         val balances = mutableMapOf<String, BigDecimal>()
         journals.flatMap { it.lines }.forEach { l ->
-            balances.merge(l.glCode, if (l.side == Side.DEBIT) l.amount else l.amount.negate(), BigDecimal::add)
+            balances.merge(l.glCode(), if (l.side == Side.DEBIT) l.amount else l.amount.negate(), BigDecimal::add)
         }
-        assertThat(balances.keys).allMatch { it in TreasuryChart.postedCodes }
+        assertThat(balances.keys).allMatch { it in LedgerMapGolden.treasury.values }
         val leftOver = balances.filter { (code, v) -> v.signum() != 0 && code !in CASH_AND_PNL }
         assertThat(leftOver).describedAs("${deal.product} left balance-sheet balances after maturity").isEmpty()
 
         flows.groupBy { it.currency }.forEach { (ccy, fs) ->
             val expected = fs.sumOf { f -> if (f.direction == FlowDirection.IN) f.amount!! else f.amount!!.negate() }
-            val nostro = balances[TreasuryChart.code(ccy, "nostro")] ?: BigDecimal.ZERO
+            val nostro = balances[LedgerMapGolden.gl("NOSTRO_ACCOUNT", "PRINCIPAL", ccy)] ?: BigDecimal.ZERO
             assertThat(nostro).describedAs("${deal.product} nostro $ccy").isEqualByComparingTo(expected)
         }
     }
@@ -125,17 +126,17 @@ class PostingMatrixLifecycleTest {
             checkNotNull(
                 MatrixPostings.revaluation(bond, BigDecimal("1500.00"), bond.currency, day, Ifrs9Category.FVOCI),
             )
-        assertThat(fvoci.lines.map { it.glCode to it.side }).containsExactlyInAnyOrder(
-            TreasuryChart.code(bond.currency, "securities-fvoci") to Side.DEBIT,
-            TreasuryChart.code(bond.currency, "fvoci-reserve") to Side.CREDIT,
+        assertThat(fvoci.lines.map { it.glCode() to it.side }).containsExactlyInAnyOrder(
+            LedgerMapGolden.gl("DEBT_SECURITY_FVOCI", "PRINCIPAL", bond.currency) to Side.DEBIT,
+            LedgerMapGolden.gl("DEBT_SECURITY_FVOCI", "REVALUATION_RESERVE", bond.currency) to Side.CREDIT,
         )
         val fvtplLoss =
             checkNotNull(
                 MatrixPostings.revaluation(bond, BigDecimal("-200.00"), bond.currency, day, Ifrs9Category.FVTPL),
             )
-        assertThat(fvtplLoss.lines.map { it.glCode to it.side }).containsExactlyInAnyOrder(
-            TreasuryChart.code(bond.currency, "unrealised-loss") to Side.DEBIT,
-            TreasuryChart.code(bond.currency, "securities-fvtpl") to Side.CREDIT,
+        assertThat(fvtplLoss.lines.map { it.glCode() to it.side }).containsExactlyInAnyOrder(
+            LedgerMapGolden.gl("TREASURY_TRADING_RESULT", "UNREALISED_LOSS", bond.currency) to Side.DEBIT,
+            LedgerMapGolden.gl("DEBT_SECURITY_FVTPL", "PRINCIPAL", bond.currency) to Side.CREDIT,
         )
         assertThat(
             MatrixPostings.revaluation(bond, BigDecimal("1500.00"), bond.currency, day, Ifrs9Category.AMORTISED_COST),
@@ -187,9 +188,18 @@ class PostingMatrixLifecycleTest {
          */
         val CASH_AND_PNL: Set<String> = listOf(Deal.CZK, Deal.EUR).flatMap { ccy ->
             listOf(
-                "nostro", "fx-position", "income-securities", "income-loan", "income-derivative", "income-reverse-repo",
-                "expense-derivative", "expense-repo", "realised-gain", "realised-loss", "cash-transit",
-            ).map { TreasuryChart.code(ccy, it) }
+                "NOSTRO_ACCOUNT" to "PRINCIPAL",
+                "FX_SPOT_POSITION" to "PRINCIPAL",
+                "DEBT_SECURITY_AMORTISED_COST" to "INTEREST_INCOME",
+                "TREASURY_LOAN" to "INTEREST_INCOME",
+                "DERIVATIVE_RECEIVE_LEG" to "INTEREST_INCOME",
+                "REVERSE_REPO_LENDING" to "INTEREST_INCOME",
+                "DERIVATIVE_PAY_LEG" to "INTEREST_EXPENSE",
+                "REPO_BORROWING" to "INTEREST_EXPENSE",
+                "TREASURY_TRADING_RESULT" to "REALISED_GAIN",
+                "TREASURY_TRADING_RESULT" to "REALISED_LOSS",
+                "CASH_IN_TRANSIT" to "PRINCIPAL",
+            ).map { (cls, role) -> LedgerMapGolden.gl(cls, role, ccy) }
         }.toSet()
     }
 }

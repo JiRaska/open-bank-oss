@@ -97,3 +97,7 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 V režimu `enforce` aplikační služba účetního dne kontroluje účastníky při automatickém i ručním přechodu operátora `CUTOFF → TIED_OUT`, pod stávajícím transakčním zámkem dne. Chybějící účastník nebo REFUSED vrací 409 do přijetí platného hlášení či výslovné výjimky operátora s důvodem. Volající tuto kontrolu nemůže vynechat. Výchozí režim zůstává `shadow`; změna nepovoluje aktivaci vynucování.
 
 Prominutí vyžaduje ověřený lidský JWT i v advisory režimu OPA; strojový token je odmítnut 403 i s rolí operátora. Audit používá pouze neprázdný JWT `sub`; chybějící, prázdný nebo nečitelný subject vrací 401 bez náhrady zobrazovaným jménem.
+
+## Mapa účetních tříd (ADR-0341 D3)
+
+Zdroje posílají na řádku žurnálu `accountingClass` a roli a ledger určí GL účet z vlastní tabulky `accounting_class_gl_map` (migrace V31). Čtecí strana je `GET /api/v1/accounting-classes` a `GET /api/v1/accounting-classes/resolve` pro regulatorní čtenáře a odsouhlasení. Zápisový endpoint záměrně neexistuje: mapa se mění revidovanou migrací stejně jako účtový rozvrh.

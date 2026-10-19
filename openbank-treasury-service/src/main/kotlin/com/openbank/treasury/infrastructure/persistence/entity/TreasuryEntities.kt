@@ -224,6 +224,10 @@ class DealJournalEntity : PanacheEntity() {
 
     @Column(name = "posted_at", nullable = false)
     lateinit var postedAt: Instant
+
+    /** `class|role|currency|glAccountId` per line: the accounts the ledger resolved, for a later reversal. */
+    @Column(name = "resolved_accounts", columnDefinition = "TEXT")
+    var resolvedAccounts: String? = null
 }
 
 /** A client Idempotency-Key and the command it produced; unique on the key. */

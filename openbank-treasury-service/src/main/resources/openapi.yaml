@@ -1600,7 +1600,8 @@ components:
             type: object
             properties:
               side: { type: string, enum: [DEBIT, CREDIT] }
-              glPurpose: { type: string, description: 'resolved per currency (and, for securities, per IFRS 9 category) to a GL account' }
+              accountingClass: { type: string, maxLength: 64, description: 'ledger accounting class (ADR-0341 D3); DEBT_SECURITY resolves by the book''s IFRS 9 category. The ledger maps class + role + currency to a GL account.' }
+              accountingRole: { type: string, maxLength: 32 }
               amountExpression: { type: string }
         version: { type: integer }
     JournalRef:

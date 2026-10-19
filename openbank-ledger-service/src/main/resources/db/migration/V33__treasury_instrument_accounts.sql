@@ -11,7 +11,15 @@
 -- off-balance type, so each memo asset has a contra liability and a memo journal always balances
 -- within the pair — it never touches a real balance-sheet account.
 --
--- New accounts only; nothing existing changes, and no code collides with V1..V30.
+-- New accounts only; nothing existing changes, and no code collides with V1..V32.
+--
+-- ADR-0341 D3: treasury names a journal leg by (accountingClass, role, currency), never a GL code, so
+-- this migration also maps the matrix's classes onto the new accounts in accounting_class_gl_map
+-- (V32), seeded BY CODE exactly as V32 does. The role vocabulary grows additively by the instrument
+-- roles the matrix needs (premium/discount, fair value, revaluation reserve, realised and
+-- unrealised result, memo and memo contra); V32's five roles and rows are untouched.
+-- Rollback: DELETE the V33 map rows, restore the V32 role CHECK, then delete the accounts while no
+-- journal line references them.
 
 INSERT INTO gl_accounts (id, code, name, type, currency_code, is_leaf, is_enabled) VALUES
     ('a0000000-0000-0000-0000-000000001600', '1600', 'Treasury Securities - Amortised Cost', 'ASSET', 'CZK', true, true),
@@ -80,3 +88,112 @@ INSERT INTO gl_accounts (id, code, name, type, currency_code, is_leaf, is_enable
     ('a0000000-0000-0000-0000-000000009021', '9021', 'Collateral Pledged - Memo (EUR)', 'ASSET', 'EUR', true, true),
     ('a0000000-0000-0000-0000-000000009120', '9120', 'Collateral Pledged - Memo Contra', 'LIABILITY', 'CZK', true, true),
     ('a0000000-0000-0000-0000-000000009121', '9121', 'Collateral Pledged - Memo Contra (EUR)', 'LIABILITY', 'EUR', true, true);
+
+ALTER TABLE accounting_class_gl_map DROP CONSTRAINT ck_accounting_class_gl_map_role;
+ALTER TABLE accounting_class_gl_map ADD CONSTRAINT ck_accounting_class_gl_map_role CHECK (role IN (
+    'PRINCIPAL', 'ACCRUED_INTEREST', 'INTEREST_INCOME', 'INTEREST_EXPENSE', 'FEE_INCOME',
+    'PREMIUM_DISCOUNT', 'FAIR_VALUE', 'REVALUATION_RESERVE', 'REALISED_GAIN', 'REALISED_LOSS',
+    'UNREALISED_GAIN', 'UNREALISED_LOSS', 'MEMO', 'MEMO_CONTRA'
+));
+
+-- One debt-security class per IFRS 9 category; the three share the premium/discount, accrued and
+-- income accounts and differ in the principal account. The derivative classes split asset from
+-- liability and receive leg from pay leg, as V32 splits placement from borrowing.
+INSERT INTO accounting_class_gl_map (id, accounting_class, role, currency_code, gl_account_id)
+SELECT gen_random_uuid(), m.accounting_class, m.role, m.currency_code, g.id
+FROM (VALUES
+    ('CASH_IN_TRANSIT', 'PRINCIPAL', 'CZK', '1690'),
+    ('CASH_IN_TRANSIT', 'PRINCIPAL', 'EUR', '1691'),
+    ('TREASURY_LOAN', 'PRINCIPAL', 'CZK', '1660'),
+    ('TREASURY_LOAN', 'PRINCIPAL', 'EUR', '1661'),
+    ('TREASURY_LOAN', 'ACCRUED_INTEREST', 'CZK', '1650'),
+    ('TREASURY_LOAN', 'ACCRUED_INTEREST', 'EUR', '1651'),
+    ('TREASURY_LOAN', 'INTEREST_INCOME', 'CZK', '4220'),
+    ('TREASURY_LOAN', 'INTEREST_INCOME', 'EUR', '4221'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'PRINCIPAL', 'CZK', '1600'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'PRINCIPAL', 'EUR', '1601'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'PREMIUM_DISCOUNT', 'CZK', '1630'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'PREMIUM_DISCOUNT', 'EUR', '1631'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'ACCRUED_INTEREST', 'CZK', '1640'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'ACCRUED_INTEREST', 'EUR', '1641'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'INTEREST_INCOME', 'CZK', '4210'),
+    ('DEBT_SECURITY_AMORTISED_COST', 'INTEREST_INCOME', 'EUR', '4211'),
+    ('DEBT_SECURITY_FVOCI', 'PRINCIPAL', 'CZK', '1610'),
+    ('DEBT_SECURITY_FVOCI', 'PRINCIPAL', 'EUR', '1611'),
+    ('DEBT_SECURITY_FVOCI', 'PREMIUM_DISCOUNT', 'CZK', '1630'),
+    ('DEBT_SECURITY_FVOCI', 'PREMIUM_DISCOUNT', 'EUR', '1631'),
+    ('DEBT_SECURITY_FVOCI', 'ACCRUED_INTEREST', 'CZK', '1640'),
+    ('DEBT_SECURITY_FVOCI', 'ACCRUED_INTEREST', 'EUR', '1641'),
+    ('DEBT_SECURITY_FVOCI', 'INTEREST_INCOME', 'CZK', '4210'),
+    ('DEBT_SECURITY_FVOCI', 'INTEREST_INCOME', 'EUR', '4211'),
+    ('DEBT_SECURITY_FVTPL', 'PRINCIPAL', 'CZK', '1620'),
+    ('DEBT_SECURITY_FVTPL', 'PRINCIPAL', 'EUR', '1621'),
+    ('DEBT_SECURITY_FVTPL', 'PREMIUM_DISCOUNT', 'CZK', '1630'),
+    ('DEBT_SECURITY_FVTPL', 'PREMIUM_DISCOUNT', 'EUR', '1631'),
+    ('DEBT_SECURITY_FVTPL', 'ACCRUED_INTEREST', 'CZK', '1640'),
+    ('DEBT_SECURITY_FVTPL', 'ACCRUED_INTEREST', 'EUR', '1641'),
+    ('DEBT_SECURITY_FVTPL', 'INTEREST_INCOME', 'CZK', '4210'),
+    ('DEBT_SECURITY_FVTPL', 'INTEREST_INCOME', 'EUR', '4211'),
+    ('DEBT_SECURITY_FVOCI', 'REVALUATION_RESERVE', 'CZK', '3100'),
+    ('DEBT_SECURITY_FVOCI', 'REVALUATION_RESERVE', 'EUR', '3101'),
+    ('REPO_BORROWING', 'PRINCIPAL', 'CZK', '2430'),
+    ('REPO_BORROWING', 'PRINCIPAL', 'EUR', '2431'),
+    ('REPO_BORROWING', 'ACCRUED_INTEREST', 'CZK', '2420'),
+    ('REPO_BORROWING', 'ACCRUED_INTEREST', 'EUR', '2421'),
+    ('REPO_BORROWING', 'INTEREST_EXPENSE', 'CZK', '5240'),
+    ('REPO_BORROWING', 'INTEREST_EXPENSE', 'EUR', '5241'),
+    ('REVERSE_REPO_LENDING', 'PRINCIPAL', 'CZK', '1680'),
+    ('REVERSE_REPO_LENDING', 'PRINCIPAL', 'EUR', '1681'),
+    ('REVERSE_REPO_LENDING', 'ACCRUED_INTEREST', 'CZK', '1685'),
+    ('REVERSE_REPO_LENDING', 'ACCRUED_INTEREST', 'EUR', '1686'),
+    ('REVERSE_REPO_LENDING', 'INTEREST_INCOME', 'CZK', '4240'),
+    ('REVERSE_REPO_LENDING', 'INTEREST_INCOME', 'EUR', '4241'),
+    ('DERIVATIVE_ASSET', 'FAIR_VALUE', 'CZK', '1700'),
+    ('DERIVATIVE_ASSET', 'FAIR_VALUE', 'EUR', '1701'),
+    ('DERIVATIVE_LIABILITY', 'FAIR_VALUE', 'CZK', '2400'),
+    ('DERIVATIVE_LIABILITY', 'FAIR_VALUE', 'EUR', '2401'),
+    ('DERIVATIVE_RECEIVE_LEG', 'ACCRUED_INTEREST', 'CZK', '1670'),
+    ('DERIVATIVE_RECEIVE_LEG', 'ACCRUED_INTEREST', 'EUR', '1671'),
+    ('DERIVATIVE_RECEIVE_LEG', 'INTEREST_INCOME', 'CZK', '4230'),
+    ('DERIVATIVE_RECEIVE_LEG', 'INTEREST_INCOME', 'EUR', '4231'),
+    ('DERIVATIVE_PAY_LEG', 'ACCRUED_INTEREST', 'CZK', '2410'),
+    ('DERIVATIVE_PAY_LEG', 'ACCRUED_INTEREST', 'EUR', '2411'),
+    ('DERIVATIVE_PAY_LEG', 'INTEREST_EXPENSE', 'CZK', '5230'),
+    ('DERIVATIVE_PAY_LEG', 'INTEREST_EXPENSE', 'EUR', '5231'),
+    ('TREASURY_TRADING_RESULT', 'REALISED_GAIN', 'CZK', '4300'),
+    ('TREASURY_TRADING_RESULT', 'REALISED_GAIN', 'EUR', '4301'),
+    ('TREASURY_TRADING_RESULT', 'REALISED_LOSS', 'CZK', '5300'),
+    ('TREASURY_TRADING_RESULT', 'REALISED_LOSS', 'EUR', '5301'),
+    ('TREASURY_TRADING_RESULT', 'UNREALISED_GAIN', 'CZK', '4310'),
+    ('TREASURY_TRADING_RESULT', 'UNREALISED_GAIN', 'EUR', '4311'),
+    ('TREASURY_TRADING_RESULT', 'UNREALISED_LOSS', 'CZK', '5310'),
+    ('TREASURY_TRADING_RESULT', 'UNREALISED_LOSS', 'EUR', '5311'),
+    ('FORWARD_COMMITMENT', 'MEMO', 'CZK', '9000'),
+    ('FORWARD_COMMITMENT', 'MEMO', 'EUR', '9001'),
+    ('FORWARD_COMMITMENT', 'MEMO_CONTRA', 'CZK', '9100'),
+    ('FORWARD_COMMITMENT', 'MEMO_CONTRA', 'EUR', '9101'),
+    ('COLLATERAL_RECEIVED', 'MEMO', 'CZK', '9010'),
+    ('COLLATERAL_RECEIVED', 'MEMO', 'EUR', '9011'),
+    ('COLLATERAL_RECEIVED', 'MEMO_CONTRA', 'CZK', '9110'),
+    ('COLLATERAL_RECEIVED', 'MEMO_CONTRA', 'EUR', '9111'),
+    ('COLLATERAL_PLEDGED', 'MEMO', 'CZK', '9020'),
+    ('COLLATERAL_PLEDGED', 'MEMO', 'EUR', '9021'),
+    ('COLLATERAL_PLEDGED', 'MEMO_CONTRA', 'CZK', '9120'),
+    ('COLLATERAL_PLEDGED', 'MEMO_CONTRA', 'EUR', '9121')
+) AS m (accounting_class, role, currency_code, gl_code)
+JOIN gl_accounts g ON g.code = m.gl_code;
+
+-- A row the JOIN dropped means a GL code is missing: fail rather than ship a silent hole (V32 idiom).
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM accounting_class_gl_map) <> 35 + 78 THEN
+        RAISE EXCEPTION 'accounting_class_gl_map holds % of 113 rows after V33: a GL code it names does not exist',
+            (SELECT count(*) FROM accounting_class_gl_map);
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM accounting_class_gl_map m JOIN gl_accounts g ON g.id = m.gl_account_id
+        WHERE g.currency_code <> m.currency_code
+    ) THEN
+        RAISE EXCEPTION 'accounting_class_gl_map has a row whose currency differs from its GL account''s';
+    END IF;
+END $$;

@@ -66,12 +66,22 @@ enum class AmountExpression {
 /** Which flows a rule applies to; null = any. */
 data class FlowSelector(val kind: CashFlowKind? = null, val direction: FlowDirection? = null)
 
-data class LineTemplate(val side: Side, val glPurpose: String, val amount: AmountExpression)
+/**
+ * One template line: the side, the ledger accounting class + role it posts to (ADR-0341 D3: the
+ * ledger, not treasury, maps those to a GL account) and the amount. [accountingClass]
+ * [PostingMatrix.SECURITY_BY_CATEGORY] means "the security class of the book's IFRS 9 category".
+ */
+data class LineTemplate(
+    val side: Side,
+    val accountingClass: String,
+    val role: LedgerRole,
+    val amount: AmountExpression,
+)
 
 /**
  * One row of the posting-rule matrix: `(product, event, IFRS 9 category) → journal template`.
  * [ifrs9Category] null = every category (the product is not measured by category). [selector]
- * narrows the row to one flow kind/direction; [glPurpose] `securities` resolves by the category.
+ * narrows the row to one flow kind/direction; a security line's class resolves by the category.
  */
 data class PostingRule(
     val product: ProductType,
@@ -108,7 +118,58 @@ object PostingMatrix {
 
     private val D = Side.DEBIT
     private val C = Side.CREDIT
-    private fun l(side: Side, purpose: String, amount: AmountExpression) = LineTemplate(side, purpose, amount)
+
+    /** Placeholder class of a security line, resolved by the book's IFRS 9 category at posting time. */
+    const val SECURITY_BY_CATEGORY = "DEBT_SECURITY"
+
+    /**
+     * The matrix's account vocabulary -> (accounting class, role). The ledger's
+     * `accounting_class_gl_map` (V32 + V33) maps each to a GL account per currency.
+     */
+    private val ACCOUNTS: Map<String, Pair<String, LedgerRole>> = mapOf(
+        "nostro" to (AccountingClasses.NOSTRO to LedgerRole.PRINCIPAL),
+        "fx-position" to (AccountingClasses.FX_POSITION to LedgerRole.PRINCIPAL),
+        "cash-transit" to (AccountingClasses.CASH_IN_TRANSIT to LedgerRole.PRINCIPAL),
+        "loan" to (AccountingClasses.TREASURY_LOAN to LedgerRole.PRINCIPAL),
+        "accrued-loan" to (AccountingClasses.TREASURY_LOAN to LedgerRole.ACCRUED_INTEREST),
+        "income-loan" to (AccountingClasses.TREASURY_LOAN to LedgerRole.INTEREST_INCOME),
+        "securities" to (SECURITY_BY_CATEGORY to LedgerRole.PRINCIPAL),
+        "premium-discount" to (SECURITY_BY_CATEGORY to LedgerRole.PREMIUM_DISCOUNT),
+        "accrued-securities" to (SECURITY_BY_CATEGORY to LedgerRole.ACCRUED_INTEREST),
+        "income-securities" to (SECURITY_BY_CATEGORY to LedgerRole.INTEREST_INCOME),
+        "fvoci-reserve" to (AccountingClasses.SECURITY_FVOCI to LedgerRole.REVALUATION_RESERVE),
+        "repo" to (AccountingClasses.REPO_BORROWING to LedgerRole.PRINCIPAL),
+        "accrued-payable-repo" to (AccountingClasses.REPO_BORROWING to LedgerRole.ACCRUED_INTEREST),
+        "expense-repo" to (AccountingClasses.REPO_BORROWING to LedgerRole.INTEREST_EXPENSE),
+        "reverse-repo" to (AccountingClasses.REVERSE_REPO_LENDING to LedgerRole.PRINCIPAL),
+        "accrued-reverse-repo" to (AccountingClasses.REVERSE_REPO_LENDING to LedgerRole.ACCRUED_INTEREST),
+        "income-reverse-repo" to (AccountingClasses.REVERSE_REPO_LENDING to LedgerRole.INTEREST_INCOME),
+        "derivative-asset" to (AccountingClasses.DERIVATIVE_ASSET to LedgerRole.FAIR_VALUE),
+        "derivative-liability" to (AccountingClasses.DERIVATIVE_LIABILITY to LedgerRole.FAIR_VALUE),
+        "accrued-derivative" to (AccountingClasses.DERIVATIVE_RECEIVE_LEG to LedgerRole.ACCRUED_INTEREST),
+        "income-derivative" to (AccountingClasses.DERIVATIVE_RECEIVE_LEG to LedgerRole.INTEREST_INCOME),
+        "accrued-payable-derivative" to (AccountingClasses.DERIVATIVE_PAY_LEG to LedgerRole.ACCRUED_INTEREST),
+        "expense-derivative" to (AccountingClasses.DERIVATIVE_PAY_LEG to LedgerRole.INTEREST_EXPENSE),
+        "realised-gain" to (AccountingClasses.TRADING_RESULT to LedgerRole.REALISED_GAIN),
+        "realised-loss" to (AccountingClasses.TRADING_RESULT to LedgerRole.REALISED_LOSS),
+        "unrealised-gain" to (AccountingClasses.TRADING_RESULT to LedgerRole.UNREALISED_GAIN),
+        "unrealised-loss" to (AccountingClasses.TRADING_RESULT to LedgerRole.UNREALISED_LOSS),
+        "commitment-memo" to (AccountingClasses.FORWARD_COMMITMENT to LedgerRole.MEMO),
+        "commitment-contra" to (AccountingClasses.FORWARD_COMMITMENT to LedgerRole.MEMO_CONTRA),
+        "collateral-received-memo" to (AccountingClasses.COLLATERAL_RECEIVED to LedgerRole.MEMO),
+        "collateral-received-contra" to (AccountingClasses.COLLATERAL_RECEIVED to LedgerRole.MEMO_CONTRA),
+        "collateral-pledged-memo" to (AccountingClasses.COLLATERAL_PLEDGED to LedgerRole.MEMO),
+        "collateral-pledged-contra" to (AccountingClasses.COLLATERAL_PLEDGED to LedgerRole.MEMO_CONTRA),
+    )
+
+    private fun l(side: Side, account: String, amount: AmountExpression): LineTemplate {
+        val (cls, role) = ACCOUNTS[account] ?: error("posting matrix names an unknown account '$account'")
+        return LineTemplate(side, cls, role, amount)
+    }
+
+    /** A legacy product's own account ([ProductType.accountingClass]) in [role]. */
+    private fun Builder.own(side: Side, role: LedgerRole, amount: AmountExpression) =
+        LineTemplate(side, checkNotNull(product.accountingClass), role, amount)
     private val IN = FlowDirection.IN
     private val OUT = FlowDirection.OUT
 
@@ -429,24 +490,24 @@ object PostingMatrix {
                 PostingEvent.SETTLED,
                 FlowSelector(),
                 null,
-                l(D, "placement", AmountExpression.FLOW),
+                own(D, LedgerRole.PRINCIPAL, AmountExpression.FLOW),
                 l(C, "nostro", AmountExpression.FLOW),
             )
             rule(
                 PostingEvent.ACCRUED,
                 FlowSelector(),
                 null,
-                l(D, "accrued-receivable", AmountExpression.DAILY),
-                l(C, "income", AmountExpression.DAILY),
+                own(D, LedgerRole.ACCRUED_INTEREST, AmountExpression.DAILY),
+                own(C, LedgerRole.INTEREST_INCOME, AmountExpression.DAILY),
             )
             rule(
                 PostingEvent.MATURED,
                 FlowSelector(),
                 null,
                 l(D, "nostro", AmountExpression.FLOW),
-                l(C, "placement", AmountExpression.FACE),
-                l(C, "accrued-receivable", AmountExpression.ACCRUED),
-                l(C, "income", AmountExpression.UNACCRUED),
+                own(C, LedgerRole.PRINCIPAL, AmountExpression.FACE),
+                own(C, LedgerRole.ACCRUED_INTEREST, AmountExpression.ACCRUED),
+                own(C, LedgerRole.INTEREST_INCOME, AmountExpression.UNACCRUED),
             )
         },
         product(ProductType.CNB_DEPOSIT_FACILITY) {
@@ -454,24 +515,24 @@ object PostingMatrix {
                 PostingEvent.SETTLED,
                 FlowSelector(),
                 null,
-                l(D, "cnb", AmountExpression.FLOW),
+                own(D, LedgerRole.PRINCIPAL, AmountExpression.FLOW),
                 l(C, "nostro", AmountExpression.FLOW),
             )
             rule(
                 PostingEvent.ACCRUED,
                 FlowSelector(),
                 null,
-                l(D, "accrued-receivable", AmountExpression.DAILY),
-                l(C, "income", AmountExpression.DAILY),
+                own(D, LedgerRole.ACCRUED_INTEREST, AmountExpression.DAILY),
+                own(C, LedgerRole.INTEREST_INCOME, AmountExpression.DAILY),
             )
             rule(
                 PostingEvent.MATURED,
                 FlowSelector(),
                 null,
                 l(D, "nostro", AmountExpression.FLOW),
-                l(C, "cnb", AmountExpression.FACE),
-                l(C, "accrued-receivable", AmountExpression.ACCRUED),
-                l(C, "income", AmountExpression.UNACCRUED),
+                own(C, LedgerRole.PRINCIPAL, AmountExpression.FACE),
+                own(C, LedgerRole.ACCRUED_INTEREST, AmountExpression.ACCRUED),
+                own(C, LedgerRole.INTEREST_INCOME, AmountExpression.UNACCRUED),
             )
         },
         product(ProductType.MM_BORROWING) {
@@ -480,22 +541,22 @@ object PostingMatrix {
                 FlowSelector(),
                 null,
                 l(D, "nostro", AmountExpression.FLOW),
-                l(C, "borrowing", AmountExpression.FLOW),
+                own(C, LedgerRole.PRINCIPAL, AmountExpression.FLOW),
             )
             rule(
                 PostingEvent.ACCRUED,
                 FlowSelector(),
                 null,
-                l(D, "expense", AmountExpression.DAILY),
-                l(C, "accrued-payable", AmountExpression.DAILY),
+                own(D, LedgerRole.INTEREST_EXPENSE, AmountExpression.DAILY),
+                own(C, LedgerRole.ACCRUED_INTEREST, AmountExpression.DAILY),
             )
             rule(
                 PostingEvent.MATURED,
                 FlowSelector(),
                 null,
-                l(D, "borrowing", AmountExpression.FACE),
-                l(D, "accrued-payable", AmountExpression.ACCRUED),
-                l(D, "expense", AmountExpression.UNACCRUED),
+                own(D, LedgerRole.PRINCIPAL, AmountExpression.FACE),
+                own(D, LedgerRole.ACCRUED_INTEREST, AmountExpression.ACCRUED),
+                own(D, LedgerRole.INTEREST_EXPENSE, AmountExpression.UNACCRUED),
                 l(C, "nostro", AmountExpression.FLOW),
             )
         },
@@ -505,22 +566,22 @@ object PostingMatrix {
                 FlowSelector(),
                 null,
                 l(D, "nostro", AmountExpression.FLOW),
-                l(C, "cnb-borrowing", AmountExpression.FLOW),
+                own(C, LedgerRole.PRINCIPAL, AmountExpression.FLOW),
             )
             rule(
                 PostingEvent.ACCRUED,
                 FlowSelector(),
                 null,
-                l(D, "expense", AmountExpression.DAILY),
-                l(C, "accrued-payable", AmountExpression.DAILY),
+                own(D, LedgerRole.INTEREST_EXPENSE, AmountExpression.DAILY),
+                own(C, LedgerRole.ACCRUED_INTEREST, AmountExpression.DAILY),
             )
             rule(
                 PostingEvent.MATURED,
                 FlowSelector(),
                 null,
-                l(D, "cnb-borrowing", AmountExpression.FACE),
-                l(D, "accrued-payable", AmountExpression.ACCRUED),
-                l(D, "expense", AmountExpression.UNACCRUED),
+                own(D, LedgerRole.PRINCIPAL, AmountExpression.FACE),
+                own(D, LedgerRole.ACCRUED_INTEREST, AmountExpression.ACCRUED),
+                own(D, LedgerRole.INTEREST_EXPENSE, AmountExpression.UNACCRUED),
                 l(C, "nostro", AmountExpression.FLOW),
             )
         },
@@ -568,22 +629,21 @@ object PostingMatrix {
         ) {
             null
         } else {
-            PostingLine(code(t.glPurpose, currency, category), t.side, amount, currency)
+            PostingLine(accountingClass(t.accountingClass, category), t.role, t.side, amount, currency)
         }
     }
 
-    fun code(purpose: String, currency: String, category: Ifrs9Category): String = TreasuryChart.code(
-        currency,
-        if (purpose == "securities") {
-            when (category) {
-                Ifrs9Category.AMORTISED_COST -> "securities-ac"
-                Ifrs9Category.FVOCI -> "securities-fvoci"
-                Ifrs9Category.FVTPL -> "securities-fvtpl"
-            }
+    /** The class a template line posts to; a security line takes its book category's class. */
+    fun accountingClass(templateClass: String, category: Ifrs9Category): String =
+        if (templateClass != SECURITY_BY_CATEGORY) {
+            templateClass
         } else {
-            purpose
-        },
-    )
+            when (category) {
+                Ifrs9Category.AMORTISED_COST -> AccountingClasses.SECURITY_AMORTISED_COST
+                Ifrs9Category.FVOCI -> AccountingClasses.SECURITY_FVOCI
+                Ifrs9Category.FVTPL -> AccountingClasses.SECURITY_FVTPL
+            }
+        }
 }
 
 /**

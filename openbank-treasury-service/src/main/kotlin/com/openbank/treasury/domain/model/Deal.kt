@@ -24,13 +24,22 @@ import java.util.UUID
  *   [FxTerms]). No interest, no maturity: it is final once SETTLED. It carries settlement risk
  *   until then, so it consumes the counterparty's CZK limit by its CZK equivalent while
  *   PENDING_APPROVAL, BOOKED or CONFIRMED. `isAsset = false`: it opens no placement-like claim.
+ *
+ * [accountingClass] is the ledger accounting class of a legacy product's own legs (ADR-0341 D3). The
+ * leg-described products post several classes per journal, named line by line by the posting-rule
+ * matrix (ADR-0344 D7, [PostingMatrix]), so they carry none here.
  */
-enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false, val legacy: Boolean = false) {
-    MM_PLACEMENT(isAsset = true, legacy = true),
-    MM_BORROWING(isAsset = false, legacy = true),
-    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true, legacy = true),
-    CNB_LOMBARD(isAsset = false, isCnbFacility = true, legacy = true),
-    FX_SPOT(isAsset = false, legacy = true),
+enum class ProductType(
+    val isAsset: Boolean,
+    val accountingClass: String? = null,
+    val isCnbFacility: Boolean = false,
+    val legacy: Boolean = false,
+) {
+    MM_PLACEMENT(isAsset = true, accountingClass = "INTERBANK_PLACEMENT", legacy = true),
+    MM_BORROWING(isAsset = false, accountingClass = "INTERBANK_BORROWING", legacy = true),
+    CNB_DEPOSIT_FACILITY(isAsset = true, accountingClass = "CNB_DEPOSIT_FACILITY", isCnbFacility = true, legacy = true),
+    CNB_LOMBARD(isAsset = false, accountingClass = "CNB_LOMBARD_BORROWING", isCnbFacility = true, legacy = true),
+    FX_SPOT(isAsset = false, accountingClass = "FX_SPOT_POSITION", legacy = true),
 
     // ADR-0344 D2: instruments described by their legs; they settle, accrue, pay and mature through
     // the posting-rule matrix (ADR-0344 D7, [PostingMatrix]).
