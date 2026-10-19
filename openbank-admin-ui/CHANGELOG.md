@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.4...admin-ui-v3.8.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** show only the five newest EKS versions ([#13385](https://github.com/JiRaska/open-bank-oss/issues/13385)) ([a64d0f3](https://github.com/JiRaska/open-bank-oss/commit/a64d0f3fd882d9771d757525a7e39154b9484b84))
+
 ## [3.8.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.3...admin-ui-v3.8.4) (2026-10-19)
 
 
