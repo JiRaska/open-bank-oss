@@ -3,7 +3,7 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 import { INCIDENT_REGISTER_LIMIT, parseIncidentList, type IctIncident } from '@/lib/security/incidentEvidence'
 
 export const dynamic = 'force-dynamic'
@@ -17,7 +17,18 @@ export async function GET(request: Request) {
   const filters = new URLSearchParams(url.searchParams)
   filters.delete('limit')
   filters.delete('offset')
-  const base = await resolveInClusterBaseUrl('security-scanner-service') ?? process.env.SECURITY_SCANNER_URL
+  let base: string | null
+  if (inCluster()) {
+    const discovery = await resolveInClusterService('security-scanner-service')
+    if (discovery.state === 'found') base = discovery.baseUrl
+    else if (discovery.state === 'not_found') {
+      return NextResponse.json({ available: false, reason: 'not_deployed' }, { status: 200 })
+    } else {
+      return NextResponse.json({ available: false, reason: 'discovery_unavailable' }, { status: 200 })
+    }
+  } else {
+    base = process.env.SECURITY_SCANNER_URL ?? null
+  }
   if (!base) return NextResponse.json({ available: false, reason: 'not_deployed' }, { status: 200 })
   try {
     const incidents: IctIncident[] = []

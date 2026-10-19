@@ -8,6 +8,8 @@ import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, HelpCircle, Ch
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { buildRegistry } from '@/lib/services/registry'
 import { aggregateNamedWorkloadStatuses } from '@/lib/health/workloadHealth'
 
@@ -445,6 +447,7 @@ export default function ApiCatalogPage() {
   // above — rendered as cards so the catalog is COMPLETE, not
   // silently truncated to the hand-maintained subset.
   const [services, setServices] = useState<Service[]>([])
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -512,7 +515,9 @@ export default function ApiCatalogPage() {
     fetch('/api/catalog/services', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!alive || !data?.available || !Array.isArray(data.services)) return
+        if (!alive || !data) return
+        setContentSource(data.contentSource ?? null)
+        if (!data.available || !Array.isArray(data.services)) return
         const map: Record<string, { releaseVersion: string | null; apiVersion: string | null; moneyPath: boolean; gaps: string[] }> = {}
         for (const s of data.services) {
           map[s.name] = { releaseVersion: s.releaseVersion ?? null, apiVersion: s.apiVersion ?? null, moneyPath: !!s.moneyPath, gaps: s.gaps ?? [] }
@@ -596,6 +601,8 @@ export default function ApiCatalogPage() {
             {t('Obnovit', 'Refresh')}
           </button>}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       {/* Tabs */}
       <div role="group" aria-label={t('Typ API dokumentace', 'API documentation type')} style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
