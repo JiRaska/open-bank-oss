@@ -437,20 +437,130 @@ VERIFIES_TITLE = re.compile(r"(?<![A-Za-z0-9])@verifies:(" + VERIFIES_ID + r")")
 MAX_VERIFIES = 8
 
 
+def mask_kotlin_comments(source: str, *, mask_strings: bool = False) -> str:
+    """Blank comments, optionally strings, preserving offsets and newlines."""
+    out = list(source)
+    i, depth, quote = 0, 0, None
+
+    def blank(start, end):
+        out[start:end] = ["\n" if c == "\n" else " " for c in source[start:end]]
+
+    while i < len(source):
+        start = i
+        if depth:
+            if source.startswith("/*", i):
+                depth += 1
+                i += 2
+            elif source.startswith("*/", i):
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            blank(start, i)
+        elif quote:
+            if source.startswith(quote, i):
+                i += len(quote)
+                quote = None
+            elif quote != '"""' and source[i] == "\\":
+                i = min(i + 2, len(source))
+            else:
+                i += 1
+            if mask_strings:
+                blank(start, i)
+        elif source.startswith("//", i):
+            end = source.find("\n", i)
+            i = len(source) if end < 0 else end
+            blank(start, i)
+        elif source.startswith("/*", i):
+            depth = 1
+            i += 2
+            blank(start, i)
+        elif source.startswith('"""', i):
+            quote = '"""'
+            i += 3
+            if mask_strings:
+                blank(start, i)
+        elif source[i] in ("'", '"'):
+            quote = source[i]
+            i += 1
+            if mask_strings:
+                blank(start, i)
+        else:
+            i += 1
+    return "".join(out)
+
+
+
+def kotlin_class_owners(code: str):
+    """Return the direct class owner at an offset in comment/string-masked Kotlin.
+
+    Every brace participates, so a local function or anonymous object cannot borrow its
+    enclosing test class's method identity. Class headers may contain parenthesized lambdas.
+    Unsupported/ambiguous headers have no class owner and therefore supply no tags.
+    """
+    class_openings = {}
+    for declaration in re.finditer(r"(?<![:\w])\bclass\s+([A-Za-z_]\w*)", code):
+        nesting = 0
+        for token in re.finditer(r"[{}()[\]]|\b(?:class|fun|val|var|object)\b", code[declaration.end():]):
+            value = token.group()
+            if value in ("(", "["):
+                nesting += 1
+            elif value in (")", "]"):
+                nesting -= 1
+            elif nesting == 0:
+                if value == "{":
+                    class_openings[declaration.end() + token.start()] = declaration.group(1)
+                break
+    stack, spans = [], []
+    for brace in re.finditer(r"[{}]", code):
+        if brace.group() == "{":
+            parent = stack[-1][1] if stack else ()
+            name = class_openings.get(brace.start())
+            owner = parent + (name,) if name is not None and parent is not None else None
+            stack.append((brace.start(), owner))
+        elif stack:
+            start, owner = stack.pop()
+            spans.append((start, brace.start(), owner))
+
+    def owner_at(position: int):
+        enclosing = [(start, owner) for start, end, owner in spans if start < position < end]
+        return max(enclosing, key=lambda item: item[0])[1] if enclosing else ()
+
+    return owner_at
+
+
 def verifies_ids(service: Path, classname: str, name: str) -> list[str]:
     """Requirement ids a test case declares, from its source tag or its Playwright title."""
     found = set(VERIFIES_TITLE.findall(name))
     source_path = test_definition_path(service, classname)
     if source_path is not None:
-        source = (service / source_path).read_text(errors="replace")
-        simple = classname.split("$", 1)[0].rsplit(".", 1)[-1]
-        # Class-level tags are those between the previous blank-free annotation block and `class`.
-        for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*class[ \t]+" + re.escape(simple) + r"\b", source):
-            found.update(VERIFIES_TAG.findall(match.group(1)))
+        source = mask_kotlin_comments((service / source_path).read_text(errors="replace"))
+        declarations = mask_kotlin_comments(source, mask_strings=True)
+        expected_owner = tuple(classname.rsplit(".", 1)[-1].split("$"))
+        owner_at = kotlin_class_owners(declarations)
+
+        def annotation_ids(start: int, end: int) -> set[str]:
+            ids = set()
+            # Locate tokens in code, then read only THAT annotation's literal argument.
+            # Scanning raw annotation blocks also credits @Tag examples inside @DisplayName.
+            for token in re.finditer(r"@Tag\b", declarations[start:end]):
+                tag = VERIFIES_TAG.match(source, start + token.start())
+                if tag is not None and tag.end() <= end:
+                    ids.add(tag.group(1))
+            return ids
+
+        # A class tag applies to that class and its nested tests, never a sibling/parent.
+        for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*class[ \t]+([A-Za-z_]\w*)\b", declarations):
+            parent = owner_at(match.start())
+            if parent is not None:
+                declared_owner = parent + (match.group(2),)
+                if expected_owner[:len(declared_owner)] == declared_owner:
+                    found.update(annotation_ids(match.start(1), match.end(1)))
         method = re.sub(r"\(\)$", "", re.sub(r"\s*\[[^]]*]\s*$", "", name)).strip()
         if method:
-            for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*fun[ \t]+`?" + re.escape(method) + r"`?\s*\(", source):
-                found.update(VERIFIES_TAG.findall(match.group(1)))
+            for match in re.finditer(r"((?:[ \t]*@[A-Za-z][^\n]*\n)+)[ \t]*(?:\w+[ \t]+)*fun[ \t]+`?" + re.escape(method) + r"`?\s*\(", declarations):
+                if owner_at(match.start()) == expected_owner:
+                    found.update(annotation_ids(match.start(1), match.end(1)))
     return sorted(found)[:MAX_VERIFIES]
 
 

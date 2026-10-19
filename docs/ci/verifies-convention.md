@@ -44,3 +44,31 @@ test('approval inbox rejects a self-approval @verifies:approvals/A1', async ({ p
   green. A component with no envelope is *unknown*, never a verdict.
 
 The gate is advisory until `rules.yaml: threat_model_test_evidence.target_enforce_date` (ADR-0144).
+
+## Evidence provenance and limits
+
+The gate selects the newest scheduled `services-ci.yml` run on `main`, regardless of its
+conclusion. A pending run is `UNRESOLVED`; it never falls back to an older successful run.
+Completed failed runs can still provide per-test results. Missing artifacts, malformed envelopes
+and components without attributable results remain unknown, and do not establish a green claim.
+
+Each accepted envelope passes the producer's validator and matches the selected API run's id,
+attempt, commit, branch, workflow name and URL. The API selection also checks repository, head
+repository, workflow path and scheduled event; those fields are absent from the envelope schema.
+For offline use, supply `--evidence PATH --run-metadata RUN.json`, where `RUN.json` is the
+independently obtained trusted GitHub workflow-run API response. The metadata file is an explicit
+caller trust input, not proof of authenticity on its own. Evidence alone cannot establish provenance.
+
+Results describe that scheduled source commit, which may precede the PR under review. There is no
+contractual maximum age and no arbitrary expiry interval: the gate does not establish that changes
+after the scheduled source passed. It reports the selected source and validates the producer's
+existing five-minute future-clock-skew bound. A current-source enforcement policy remains separate.
+
+A passing `verifies:` test supplements explicit citations; it does not erase a skipped, failed or
+missing explicitly cited test. Simple class citations resolve to a unique declaration and package
+in the component's test source; ambiguous classes remain unverified. A fully qualified citation can
+disambiguate them. Kotlin comments and string examples do not supply declaration annotations. Method tags must
+belong to the executed JUnit class, including its nested class path; class tags apply to that
+class and its nested tests.
+The annotation reader remains a conservative source convention, not a Kotlin compiler or proof
+that a test's assertions substantiate the threat-model mitigation.

@@ -104,6 +104,7 @@ import os
 import pathlib
 import re
 import subprocess
+from functools import lru_cache
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -752,25 +753,38 @@ def money_path(root: pathlib.Path) -> list[str]:
 # `Corpus.resolve` proves a cited test class EXISTS. It cannot tell a green test from one that has
 # been red, skipped or deleted from the CI task for a month. The Test Intelligence run envelopes
 # can: a cited test class must have run, and run green, in the latest evidence for its component.
-TEST_CLASS = re.compile(r"^[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec)$")
+TEST_CLASS = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec)$")
 
 
-def load_evidence(paths: list[pathlib.Path]) -> dict[str, dict]:
-    """component -> {simple test class: set of states, 'verifies': {id: set of states}}.
+def load_evidence(paths: list[pathlib.Path], trusted_run: dict | None = None) -> dict[str, dict]:
+    """Validate producer envelopes against the independently selected scheduled-main run.
 
-    The NEWEST envelope per component wins (`run.observedAt`): evidence is a statement about the
-    latest run, and an older green must never mask a newer red.
+    The newest observation per component from that exact run/attempt wins. Other sources,
+    malformed envelopes and unknown provenance cannot establish a green result.
     """
-    newest: dict[str, tuple[str, dict]] = {}
+    if not valid_evidence_run(trusted_run):
+        return {}  # caller must supply independently selected scheduled-main run metadata
+    collector = evidence_collector()
+    newest: dict[str, tuple[object, dict]] = {}
     files: list[pathlib.Path] = []
     for p in paths:
         files.extend(sorted(p.rglob("*.json")) if p.is_dir() else [p])
     for f in files:
         try:
             env = json.loads(f.read_text(encoding="utf-8"))
-            comp, seen = str(env["component"]), str(env["run"]["observedAt"])
-            env["testCases"]
-        except (OSError, ValueError, KeyError, TypeError):
+            collector.validate_envelope(env)
+            if not isinstance(env["component"], str) or not re.fullmatch(r"openbank-[a-z0-9-]+", env["component"]):
+                continue
+            run = env["run"]
+            expected = {"id": str(trusted_run["id"]), "attempt": trusted_run["run_attempt"],
+                        "commit": trusted_run["head_sha"], "branch": "main",
+                        "workflow": trusted_run["name"], "url": trusted_run["html_url"]}
+            if any(run.get(k) != v for k, v in expected.items()):
+                continue
+            comp, seen = env["component"], collector.parse_timestamp(run["observedAt"], "observedAt")
+            if not isinstance(env.get("testCases"), list):
+                continue
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             continue  # not an envelope, or a malformed one — never a pass, never a crash
         if comp not in newest or seen > newest[comp][0]:
             newest[comp] = (seen, env)
@@ -779,8 +793,8 @@ def load_evidence(paths: list[pathlib.Path]) -> dict[str, dict]:
         classes: dict[str, set[str]] = {}
         ids: dict[str, set[str]] = {}
         for case in env.get("testCases", []):
-            simple = str(case.get("classname", "")).split("$", 1)[0].rsplit(".", 1)[-1]
-            classes.setdefault(simple, set()).add(str(case.get("state")))
+            qualified = str(case.get("classname", "")).split("$", 1)[0]
+            classes.setdefault(qualified, set()).add(str(case.get("state")))
             for vid in case.get("verifies", []) or []:
                 ids.setdefault(str(vid), set()).add(str(case.get("state")))
         out[comp] = {"classes": classes, "verifies": ids}
@@ -812,12 +826,27 @@ def evidence_findings(root: pathlib.Path, services: list[str], corpus: "Corpus",
                 if declared != {"passed"}:
                     findings.append(("UNVERIFIED", svc, rid,
                                      f"`verifies:{scope}/{rid}` ran but not green ({', '.join(sorted(declared))})"))
-                continue
-            for sym in citations(mitig):
-                if not TEST_CLASS.match(sym) or not corpus.resolve(sym):
+            cited = set(citations(mitig))
+            cited.update(re.findall(r"`((?:[a-z_][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec))`", mitig))
+            for sym in sorted(cited):
+                if not TEST_CLASS.match(sym) or ("." not in sym and not corpus.resolve(sym)):
                     continue
                 judged += 1
-                states = ev["classes"].get(sym)
+                # A simple citation must identify a source declaration in THIS component.
+                # Never let an unrelated package's identically named class witness it.
+                simple = sym.rsplit(".", 1)[-1]
+                qualified = set()
+                for source, blob in corpus.blobs.items():
+                    if not source.startswith(comp + "/src/test/") or pathlib.Path(source).stem != simple:
+                        continue
+                    code = evidence_collector().mask_kotlin_comments(blob, mask_strings=True)
+                    if not re.search(r"\bclass\s+" + re.escape(simple) + r"\b", code):
+                        continue
+                    package = re.search(r"(?m)^\s*package\s+([A-Za-z_][\w.]*)", code)
+                    qualified.add((package.group(1) + "." if package else "") + simple)
+                if "." in sym:
+                    qualified &= {sym}
+                states = ev["classes"].get(next(iter(qualified))) if len(qualified) == 1 else None
                 if states is None:
                     findings.append(("UNVERIFIED", svc, rid,
                                      f"cites test `{sym}`, which exists but has no result in the latest "
@@ -828,35 +857,65 @@ def evidence_findings(root: pathlib.Path, services: list[str], corpus: "Corpus",
     return findings, judged
 
 
-def fetch_latest_evidence(dest: pathlib.Path) -> list[pathlib.Path]:
-    """Best-effort download of the newest scheduled main Services CI envelopes via `gh`.
+@lru_cache(maxsize=1)
+def evidence_collector():
+    # Reuse the producer's schema/clock-skew validation rather than inventing a second schema.
+    spec = importlib.util.spec_from_file_location("tm_evidence_collector", REPO / ".github/scripts/collect-test-run-evidence.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-    Returns [] on ANY failure and says so: an unreadable corpus is UNRESOLVED, not a pass and not
-    a failure (a rate limit must not become someone else's red PR).
-    """
+
+def valid_evidence_run(run: dict | None) -> bool:
+    """Metadata from the trusted repository's scheduled Services CI API selection."""
+    if not isinstance(run, dict):
+        return False
+    repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    return (run.get("event") == "schedule" and run.get("head_branch") == "main"
+            and run.get("path") == ".github/workflows/services-ci.yml"
+            and isinstance(run.get("repository"), dict)
+            and run["repository"].get("full_name") == repo
+            and isinstance(run.get("head_repository"), dict)
+            and run["head_repository"].get("full_name") == repo
+            and type(run.get("id")) is int and run["id"] > 0
+            and type(run.get("run_attempt")) is int and run["run_attempt"] > 0
+            and isinstance(run.get("head_sha"), str)
+            and re.fullmatch(r"[0-9a-f]{40}", run["head_sha"]) is not None
+            and isinstance(run.get("name"), str) and bool(run["name"])
+            and run.get("html_url") == f"https://github.com/{repo}/actions/runs/{run['id']}"
+            and run.get("status") == "completed")
+
+
+def fetch_latest_evidence(dest: pathlib.Path) -> tuple[list[pathlib.Path], dict | None]:
+    """Select the latest scheduled run regardless of result; never fall back to old green."""
     repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     try:
-        run = subprocess.run(
-            ["gh", "run", "list", "-R", repo, "--workflow", "services-ci.yml", "--branch", "main",
-             "--event", "schedule", "--status", "success", "--limit", "1", "--json", "databaseId"],
+        result = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/workflows/services-ci.yml/runs?branch=main&event=schedule&per_page=1"],
             capture_output=True, text=True, timeout=60, check=True)
-        run_id = json.loads(run.stdout)[0]["databaseId"]
+        run = json.loads(result.stdout)["workflow_runs"][0]
+        if not valid_evidence_run(run):
+            print("UNRESOLVED: newest scheduled run is pending or its provenance is invalid")
+            return [], None
+        print(f"Evidence source: run {run['id']} attempt {run['run_attempt']}, "
+              f"commit {run['head_sha']}, conclusion {run.get('conclusion')}")
         listing = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/artifacts", "--paginate", "--jq",
-             ".artifacts[] | select(.name | startswith(\"test-intelligence-run-\")) | .name"],
+            ["gh", "api", f"repos/{repo}/actions/runs/{run['id']}/artifacts", "--paginate", "--jq",
+             '.artifacts[] | select(.expired == false and (.name | startswith("test-intelligence-run-"))) | .name'],
             capture_output=True, text=True, timeout=120, check=True)
         from concurrent.futures import ThreadPoolExecutor
 
         def pull(name: str) -> None:
-            subprocess.run(["gh", "run", "download", str(run_id), "-R", repo, "-n", name,
+            if not re.fullmatch(r"test-intelligence-run-[A-Za-z0-9_-]+", name):
+                raise ValueError("invalid artifact name")
+            subprocess.run(["gh", "run", "download", str(run["id"]), "-R", repo, "-n", name,
                             "-D", str(dest / name)], capture_output=True, text=True, timeout=120, check=True)
 
-        # ~80 envelopes: sequential downloads took minutes; a handful in parallel keeps the gate cheap.
         with ThreadPoolExecutor(max_workers=8) as pool:
             list(pool.map(pull, listing.stdout.split()))
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError):
-        return []
-    return [dest]
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError, TypeError, AttributeError):
+        return [], None
+    return [dest], run
 
 
 def audit(root: pathlib.Path):
@@ -1160,13 +1219,24 @@ def self_test() -> int:
             "| T2 | Bypass | `RedGuardTest` asserts it |\n"
             "| T3 | Drift | `GhostGuardTest` asserts it |\n"
             "| T4 | Tamper | `SkippedGuardTest` asserts it |\n", encoding="utf-8")
-        _corpus = _FakeCorpus({f"openbank-x/src/test/kotlin/{n}.kt": f"class {n} {{"
+        _corpus = _FakeCorpus({f"openbank-x/src/test/kotlin/{n}.kt": f"package com.openbank.x\nclass {n} {{"
                                for n in ("GreenGuardTest", "RedGuardTest", "GhostGuardTest", "SkippedGuardTest")})
         _cases = [{"classname": "com.openbank.x.GreenGuardTest", "state": "passed"},
                   {"classname": "com.openbank.x.RedGuardTest", "state": "passed"},
                   {"classname": "com.openbank.x.RedGuardTest", "state": "failed"},
                   {"classname": "com.openbank.x.SkippedGuardTest", "state": "skipped"}]
-        _env = lambda seen, cases: {"component": "openbank-x", "run": {"observedAt": seen}, "testCases": cases}
+        _trusted = {"id": 1, "run_attempt": 1, "head_sha": "a" * 40, "head_branch": "main",
+                    "event": "schedule", "path": ".github/workflows/services-ci.yml", "name": "Services CI",
+                    "repository": {"full_name": "JiRaska/open-bank-oss"},
+                    "head_repository": {"full_name": "JiRaska/open-bank-oss"},
+                    "html_url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "status": "completed"}
+        def _env(seen, cases):
+            return {"schemaVersion": 1, "component": "openbank-x", "run": {
+                "id": "1", "attempt": 1, "commit": "a" * 40, "branch": "main", "workflow": "Services CI",
+                "url": _trusted["html_url"], "observedAt": seen}, "suites": [], "coverage": None,
+                "testInfrastructure": {"declared": [], "observed": []}, "testCases": [
+                    {"fingerprint": f"{i:024x}", "kind": "unit", "name": "guards", "durationMs": 0, **c}
+                    for i, c in enumerate(cases)]}
         (_root / "ev").mkdir()
         (_root / "ev" / "new.json").write_text(json.dumps(_env("2026-10-17T03:00:00Z", _cases)))
         # An OLDER all-green envelope must not mask the newer red/missing results.
@@ -1174,18 +1244,18 @@ def self_test() -> int:
             {"classname": "com.openbank.x.RedGuardTest", "state": "passed"},
             {"classname": "com.openbank.x.GhostGuardTest", "state": "passed"}])))
         (_root / "ev" / "junk.json").write_text("not json")
-        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"]))
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
         _got = sorted(r for _k, _s, r, _d2 in _f)
         case("evidence: red, absent and skipped cited tests are UNVERIFIED; green is not", _got, ["T2", "T3", "T4"])
         case("evidence: every cited test was judged", _n, 4)
         _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, {})
         case("evidence: no envelope for the component is unknown, never a verdict", (_f, _n), ([], 0))
         (_root / "ev" / "ids.json").write_text(json.dumps(_env("2026-10-18T03:00:00Z", [
-            {"classname": "p.GreenGuardTest", "state": "passed", "verifies": ["x/T1"]},
-            {"classname": "p.RedGuardTest", "state": "failed", "verifies": ["x/T2"]}])))
-        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"]))
+            {"classname": "com.openbank.x.GreenGuardTest", "state": "passed", "verifies": ["x/T1"]},
+            {"classname": "com.openbank.x.RedGuardTest", "state": "failed", "verifies": ["x/T2"]}])))
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
         case("evidence: a declared verifies id is judged by its own tests",
-             sorted(r for _k, _s, r, _d2 in _f), ["T2", "T3", "T4"])
+             sorted({r for _k, _s, r, _d2 in _f}), ["T2", "T3", "T4"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")
