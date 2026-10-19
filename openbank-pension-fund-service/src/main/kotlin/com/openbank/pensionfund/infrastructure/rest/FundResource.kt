@@ -16,6 +16,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
@@ -49,16 +50,20 @@ class FundResource {
     lateinit var navs: NavService
 
     @Inject
+    lateinit var replay: PostgresWriteReplay
+
+    @Inject
     lateinit var identity: SecurityIdentity
 
     @POST
     @Operation(summary = "Create a segregated fund")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.fund.manage")
-    suspend fun create(request: CreateFundRequest?): Response {
-        val fund = funds.createFund(requireNotNull(request) { "request body is required" }.toDefinition())
-        return Response.status(Response.Status.CREATED).entity(fund).build()
-    }
+    suspend fun create(request: CreateFundRequest?, @HeaderParam("Idempotency-Key") key: String?): Response =
+        replay.execute(key, "/api/v2/funds", request) {
+            val fund = funds.createFund(requireNotNull(request) { "request body is required" }.toDefinition())
+            Response.status(Response.Status.CREATED).entity(fund).build()
+        }
 
     @GET
     @Operation(summary = "List funds")
@@ -93,7 +98,11 @@ class FundResource {
     @Operation(summary = "Calculate a NAV (maker); a second person publishes it")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.calculate", resource = "#fundId")
-    suspend fun calculateNav(@PathParam("fundId") fundId: UUID, request: NavCalculationDto?): Response {
+    suspend fun calculateNav(
+        @PathParam("fundId") fundId: UUID,
+        request: NavCalculationDto?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): Response = replay.execute(key, "/api/v2/funds/$fundId/navs", request) {
         val nav = navs.calculate(
             fundId,
             requireNotNull(request) {
@@ -101,7 +110,7 @@ class FundResource {
             }.toRequest(),
             identity.actor(),
         )
-        return Response.status(Response.Status.CREATED).entity(NavResponse.from(nav)).build()
+        Response.status(Response.Status.CREATED).entity(NavResponse.from(nav)).build()
     }
 
     @GET

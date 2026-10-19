@@ -68,8 +68,10 @@ class PensionFundObservabilityIT {
         }
     }
 
-    private fun post(path: String, body: String) =
-        given().contentType("application/json").body(body).`when`().post(path)
+    private fun post(path: String, body: String) = given().header(
+        "Idempotency-Key",
+        java.util.UUID.randomUUID().toString(),
+    ).contentType("application/json").body(body).`when`().post(path)
 
     @Test
     @Order(1)
@@ -113,7 +115,10 @@ class PensionFundObservabilityIT {
     @Order(2)
     @TestSecurity(user = "obs-checker", roles = ["ROLE_OPERATOR"])
     fun `publishing settles the order and the snapshot reports AUM, units and NAV age`() {
-        given().`when`().post("/api/v2/navs/$nav/approve").then().statusCode(200)
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).`when`().post("/api/v2/navs/$nav/approve").then().statusCode(200)
 
         assertThat(counter("openbank.pension_fund.nav.events", "fund", isin, "event", "published")).isEqualTo(1.0)
         assertThat(counter("openbank.pension_fund.orders", "fund", isin, "type", "SUBSCRIBE", "status", "SETTLED"))

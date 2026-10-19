@@ -20,11 +20,13 @@ import com.openbank.pensionfund.infrastructure.rest.PositionClassificationResour
 import com.openbank.pensionfund.infrastructure.rest.StrategyChangeResource
 import com.openbank.pensionfund.infrastructure.rest.StrategyResource
 import jakarta.annotation.security.RolesAllowed
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.HttpMethod
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.junit.jupiter.api.Test
+import java.lang.reflect.Modifier
 
 /** Explicit compatibility boundaries must not drift to a different authorization action or role. */
 class PensionFundVersionAuthorizationParityTest {
@@ -42,12 +44,25 @@ class PensionFundVersionAuthorizationParityTest {
         pairs.forEach { (current, legacy) ->
             assertThat(legacy.getAnnotation(Path::class.java).value)
                 .isEqualTo(current.getAnnotation(Path::class.java).value.replace("/api/v2", "/api/v1"))
+            // Kotlin's open suspend functions also emit static $suspendImpl helpers. They are
+            // implementation details, not endpoint declarations, even when annotations are copied.
             val methods = legacy.declaredMethods.filter { method ->
-                method.annotations.any { it.annotationClass.java.isAnnotationPresent(HttpMethod::class.java) }
+                !Modifier.isStatic(method.modifiers) && !method.isSynthetic && !method.isBridge &&
+                    method.annotations.any { it.annotationClass.java.isAnnotationPresent(HttpMethod::class.java) }
             }
             assertThat(methods).isNotEmpty
             methods.forEach { method ->
-                val canonical = current.getDeclaredMethod(method.name, *method.parameterTypes)
+                val canonical = current.declaredMethods.single { candidate ->
+                    !Modifier.isStatic(candidate.modifiers) && !candidate.isSynthetic && !candidate.isBridge &&
+                        candidate.name == method.name &&
+                        (
+                            candidate.parameterTypes.toList() == method.parameterTypes.toList() ||
+                                candidate.parameters.filterNot {
+                                    it.getAnnotation(HeaderParam::class.java)?.value == "Idempotency-Key"
+                                }
+                                    .map { it.type } == method.parameterTypes.toList()
+                            )
+                }
                 val roles = canonical.getAnnotation(RolesAllowed::class.java)
                 val action = canonical.getAnnotation(Authorize::class.java)
                 assertThat(roles).isNotNull

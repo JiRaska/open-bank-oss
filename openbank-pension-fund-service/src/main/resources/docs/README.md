@@ -60,3 +60,18 @@ Approving or rejecting a classification correction updates only a correction sti
 ## API version transition
 
 The authoritative contract is v2.0.0. Fund creation requires an explicit published catalog revision, while amendment retains its existing pin. The unchanged v1 operations remain deprecated compatibility routes; only the two legacy fund-definition writes are excluded by the owner-approved draft exception. See README.en.md / README.cs.md for the 180-day sunset, explicit client transition, preserved fee precision and rollback limits. No operational cutover or deployment is authorized by the draft proposal.
+
+### V2 write retries (draft)
+
+Fund creation, NAV calculation/approve/reject, strategy creation and strategy-change
+submit/approve/reject/apply require `Idempotency-Key`. A matching retry returns the original
+committed status and JSON. Reusing the caller's key for a different path or request returns 409;
+an in-flight request also returns 409 and can be retried with that same key. Missing or invalid
+keys return 400. The unchanged legacy v1 operations retain their existing behavior.
+
+Migration V7 stores response snapshots atomically with local mutations. Snapshots can contain
+audit personal data and have no automatic expiry. Application rollback retains the table and
+receipts: dropping them can reopen completed writes. Do not infer successful native transaction
+verification from this draft; the new HTTP/JDBC suite must prove receipt-insertion failure rolls
+back the business mutation, exclusion across callers, and stable replay after later amendment.
+No migration activation, client cutover or deployment is authorized by these source changes.

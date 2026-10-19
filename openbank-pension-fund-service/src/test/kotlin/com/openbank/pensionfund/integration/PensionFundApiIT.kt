@@ -59,9 +59,10 @@ class PensionFundApiIT {
         [{"fundId":"$fundA","weight":$a,"lowerBand":0,"upperBand":1},{"fundId":"$fundB","weight":$b,"lowerBand":0,"upperBand":1}]
     """.trimIndent()
 
-    private fun post(path: String, body: String? = null) = given().contentType("application/json")
-        .let { if (body != null) it.body(body) else it }
-        .`when`().post(path)
+    private fun post(path: String, body: String? = null) =
+        given().header("Idempotency-Key", java.util.UUID.randomUUID().toString()).contentType("application/json")
+            .let { if (body != null) it.body(body) else it }
+            .`when`().post(path)
 
     @Test
     @Order(1)
@@ -86,7 +87,8 @@ class PensionFundApiIT {
 
         val order = """{"fundId":"$fundA","type":"SUBSCRIBE","amount":1000}"""
         // Without the key the money-path POST is refused, never queued (#8351).
-        post("/api/v2/contracts/$contract/orders", order).then().statusCode(400)
+        given().contentType("application/json").body(order)
+            .post("/api/v2/contracts/$contract/orders").then().statusCode(400)
         val placed = given().contentType("application/json").header("Idempotency-Key", "order-1").body(order)
             .`when`().post("/api/v2/contracts/$contract/orders")
             .then().statusCode(202).body("status", equalTo("PENDING")).extract().path<String>("id")

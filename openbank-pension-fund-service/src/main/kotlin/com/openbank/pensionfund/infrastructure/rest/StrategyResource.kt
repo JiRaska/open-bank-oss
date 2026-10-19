@@ -15,6 +15,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -36,16 +37,20 @@ class StrategyResource {
     lateinit var admin: FundAdministrationService
 
     @Inject
+    lateinit var replay: PostgresWriteReplay
+
+    @Inject
     lateinit var identity: SecurityIdentity
 
     @POST
     @Operation(summary = "Create a strategy (static allocation, optionally a lifecycle glide path)")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.strategy.manage")
-    suspend fun create(request: StrategyRequest?): Response {
-        val strategy = admin.createStrategy(requireNotNull(request) { "request body is required" }.toDefinition())
-        return Response.status(Response.Status.CREATED).entity(strategy).build()
-    }
+    suspend fun create(request: StrategyRequest?, @HeaderParam("Idempotency-Key") key: String?): Response =
+        replay.execute(key, "/api/v2/strategies", request) {
+            val strategy = admin.createStrategy(requireNotNull(request) { "request body is required" }.toDefinition())
+            Response.status(Response.Status.CREATED).entity(strategy).build()
+        }
 
     @GET
     @Operation(summary = "List strategies")
@@ -79,13 +84,17 @@ class StrategyResource {
     @Operation(summary = "Submit an allocation change (maker); needs approval and a notice period")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.strategy.change.submit", resource = "#strategyId")
-    suspend fun submitChange(@PathParam("strategyId") strategyId: UUID, request: StrategyChangeDto?): Response {
+    suspend fun submitChange(
+        @PathParam("strategyId") strategyId: UUID,
+        request: StrategyChangeDto?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): Response = replay.execute(key, "/api/v2/strategies/$strategyId/changes", request) {
         val change = admin.submitChange(
             strategyId,
             requireNotNull(request) { "request body is required" }.toRequest(),
             identity.actor(),
         )
-        return Response.status(Response.Status.CREATED).entity(change).build()
+        Response.status(Response.Status.CREATED).entity(change).build()
     }
 
     @GET

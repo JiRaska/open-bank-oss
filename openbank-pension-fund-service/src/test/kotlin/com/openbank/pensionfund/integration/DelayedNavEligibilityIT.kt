@@ -41,7 +41,7 @@ class DelayedNavEligibilityIT {
     @TestSecurity(user = "nav-maker", roles = ["ROLE_OPERATOR"])
     fun `maker queues orders on two trade dates and calculates delayed prior-day NAV`() {
         val isin = "CZ" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
-        fund = given().contentType("application/json")
+        fund = given().header("Idempotency-Key", java.util.UUID.randomUUID().toString()).contentType("application/json")
             .body(
                 """{"name":"Delayed NAV test","isin":"$isin","lei":"315700ABCDEF12345678",
                     "depositaryReference":"TEST-DEP","custodyAccountReference":"TEST-CUST",
@@ -68,7 +68,10 @@ class DelayedNavEligibilityIT {
     @Order(2)
     @TestSecurity(user = "nav-checker", roles = ["ROLE_OPERATOR"])
     fun `delayed NAV settles only the eligible order`() {
-        given().post("/api/v2/navs/$oldNav/approve").then().statusCode(200)
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).post("/api/v2/navs/$oldNav/approve").then().statusCode(200)
             .body("settledOrders", org.hamcrest.Matchers.equalTo(1))
         assertRegister("SETTLED", "PENDING", 100, 1)
     }
@@ -84,10 +87,16 @@ class DelayedNavEligibilityIT {
     @Order(4)
     @TestSecurity(user = "nav-checker", roles = ["ROLE_OPERATOR"])
     fun `later order settles exactly once at its eligible NAV`() {
-        given().post("/api/v2/navs/$laterNav/approve").then().statusCode(200)
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).post("/api/v2/navs/$laterNav/approve").then().statusCode(200)
             .body("settledOrders", org.hamcrest.Matchers.equalTo(1))
         assertRegister("SETTLED", "SETTLED", 300, 2)
-        given().post("/api/v2/navs/$laterNav/approve").then().statusCode(409)
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).post("/api/v2/navs/$laterNav/approve").then().statusCode(409)
         assertRegister("SETTLED", "SETTLED", 300, 2)
     }
 
@@ -96,9 +105,10 @@ class DelayedNavEligibilityIT {
         .body("""{"fundId":"$fund","type":"SUBSCRIBE","amount":$amount}""")
         .post("/api/v2/contracts/$contract/orders").then().statusCode(202).extract().path("id")
 
-    private fun calculate(day: LocalDate, cash: Int): String = given().contentType("application/json")
-        .body("""{"valuationDate":"$day","cash":$cash}""")
-        .post("/api/v2/funds/$fund/navs").then().statusCode(201).extract().path("id")
+    private fun calculate(day: LocalDate, cash: Int): String =
+        given().header("Idempotency-Key", java.util.UUID.randomUUID().toString()).contentType("application/json")
+            .body("""{"valuationDate":"$day","cash":$cash}""")
+            .post("/api/v2/funds/$fund/navs").then().statusCode(201).extract().path("id")
 
     private fun assertRegister(oldStatus: String, laterStatus: String, units: Int, transactions: Int) {
         assertThat(orderStates()).containsEntry(oldOrder, oldStatus).containsEntry(laterOrder, laterStatus)

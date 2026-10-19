@@ -145,6 +145,29 @@ closed rather than the pod).
 
 ### Versioned compatibility boundary (draft API v2 transition)
 
-Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor, four-eyes and idempotency boundaries directly, rather than relying on resource inheritance. New reflection parity and real HTTP/OIDC/OPA/four-eyes regressions must pass native CI; source correspondence is not runtime proof. The owner approved only the draft exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
+Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor and four-eyes boundaries directly, rather than relying on resource inheritance. Their existing idempotency behavior is preserved; nine v2 writes additionally require durable response replay as described below. New reflection parity and real HTTP/OIDC/OPA/four-eyes regressions must pass native CI; source correspondence is not runtime proof. The owner approved only the draft exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
 
 Known callers are migrated explicitly; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; draft and blocked controls remain. No merge, provisioning, credentials, policy activation or deployment is approved here. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.
+
+### Durable v2 write replay (draft implementation)
+
+Nine v2 POST operations for fund creation, NAV calculation/decisions and strategy creation/change
+now require a validated `Idempotency-Key`. A SHA-256 caller/service-scoped key indexes V7 receipts;
+the canonical fingerprint binds method, concrete resource path and request DTO. A transaction-scoped
+PostgreSQL advisory try-lock excludes concurrent attempts; a busy key returns 409, without claiming
+the write failed permanently. A matching committed receipt replays the original status and JSON,
+even after later changes. A different path or body under the same caller key returns 409.
+
+The operation and receipt must commit in the same context-bound reactive transaction. HTTP/JDBC
+regressions include an injected failure at receipt insertion, after the domain write, to distinguish
+atomic rollback from a separately committed mutation. These new tests require native CI; source
+review and standalone formatting are not execution evidence. Legacy v1 handlers do not gain this
+new requirement. Roles and four-eyes checks execute before replay, so a cached result grants no
+new permission. No new Redis infrastructure or in-memory production fallback is introduced.
+
+Receipts contain response snapshots, including possible audit personal data. Hashing keys is
+pseudonymization, not anonymization. V7 has no automatic expiry: deleting receipts can re-enable
+duplicate writes. Application rollback retains the table and history; schema removal/retention
+requires separate review. A 64-bit advisory hash collision can cause a transient busy response,
+but the full SHA-256 receipt key still distinguishes stored results. No deployment, migration
+activation or live replay is authorized by this draft.

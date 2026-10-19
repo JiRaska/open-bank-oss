@@ -13,11 +13,13 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
@@ -32,6 +34,9 @@ class NavResource {
 
     @Inject
     lateinit var classification: PositionClassificationService
+
+    @Inject
+    lateinit var replay: PostgresWriteReplay
 
     @Inject
     lateinit var identity: SecurityIdentity
@@ -56,22 +61,26 @@ class NavResource {
     @Operation(summary = "Publish a calculated NAV (checker): settles queued orders, or re-prices for a correction")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.approve", resource = "#navId")
-    suspend fun approve(@PathParam("navId") navId: UUID): NavPublicationResponse {
-        val publication = navs.publish(navId, identity.actor())
-        return NavPublicationResponse(
-            nav = NavResponse.from(publication.nav),
-            settledOrders = publication.settledOrders,
-            corrections = publication.corrections.map(CorrectionResponse::from),
-        )
-    }
+    suspend fun approve(@PathParam("navId") navId: UUID, @HeaderParam("Idempotency-Key") key: String?): Response =
+        replay.execute(key, "/api/v2/navs/$navId/approve", null) {
+            val publication = navs.publish(navId, identity.actor())
+            val result = NavPublicationResponse(
+                nav = NavResponse.from(publication.nav),
+                settledOrders = publication.settledOrders,
+                corrections = publication.corrections.map(CorrectionResponse::from),
+            )
+            Response.ok(result).build()
+        }
 
     @POST
     @Path("/{navId}/reject")
     @Operation(summary = "Reject a calculated NAV (checker)")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.nav.approve", resource = "#navId")
-    suspend fun reject(@PathParam("navId") navId: UUID): NavResponse =
-        NavResponse.from(navs.reject(navId, identity.actor()))
+    suspend fun reject(@PathParam("navId") navId: UUID, @HeaderParam("Idempotency-Key") key: String?): Response =
+        replay.execute(key, "/api/v2/navs/$navId/reject", null) {
+            Response.ok(NavResponse.from(navs.reject(navId, identity.actor()))).build()
+        }
 }
 
 data class NavPublicationResponse(

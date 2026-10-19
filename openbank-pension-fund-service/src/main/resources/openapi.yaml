@@ -35,6 +35,7 @@ security:
 paths:
   /api/v2/funds:
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Funds]
       operationId: createFund
       summary: Create a segregated fund
@@ -89,6 +90,7 @@ paths:
   /api/v2/funds/{fundId}/navs:
     parameters: [ { $ref: '#/components/parameters/FundId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Funds]
       operationId: calculateNav
       summary: Calculate a NAV (maker); a second person publishes it
@@ -147,10 +149,12 @@ paths:
   /api/v2/navs/{navId}/approve:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [NAV]
       operationId: approveNav
       summary: Publish a calculated NAV (checker); settles queued orders, or re-prices for a correction
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/NavPublication' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -158,10 +162,12 @@ paths:
   /api/v2/navs/{navId}/reject:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [NAV]
       operationId: rejectNav
       summary: Reject a calculated NAV (checker)
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -217,6 +223,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
   /api/v2/strategies:
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Strategies]
       operationId: createStrategy
       summary: Create a strategy (static allocation, optionally a lifecycle glide path)
@@ -226,6 +233,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/StrategyRequest' }
       responses:
+        '409': { $ref: '#/components/responses/Conflict' }
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
     get:
@@ -265,6 +273,7 @@ paths:
   /api/v2/strategies/{strategyId}/changes:
     parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Strategies]
       operationId: submitStrategyChange
       summary: Submit an allocation change (maker); needs approval and a notice period
@@ -299,10 +308,12 @@ paths:
   /api/v2/strategy-changes/{changeId}/approve:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Strategies]
       operationId: approveStrategyChange
       summary: Approve a change (checker, never the submitter); participants are notified from today
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -310,10 +321,12 @@ paths:
   /api/v2/strategy-changes/{changeId}/reject:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Strategies]
       operationId: rejectStrategyChange
       summary: Reject a change (checker)
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -321,10 +334,12 @@ paths:
   /api/v2/strategy-changes/{changeId}/apply:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     post:
+      parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
       tags: [Strategies]
       operationId: applyStrategyChange
       summary: Apply an approved change on or after its effective date
       responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
         '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -730,6 +745,12 @@ components:
       bearerFormat: JWT
 
   parameters:
+    WriteIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Scoped to the authenticated caller. The key binds the method, resource path and canonical request. A matching retry replays the committed status and JSON; reuse for a different operation or payload is 409. An in-flight request is 409 and may be retried with the same key.
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$' }
     ClassificationIdempotencyKey:
       name: Idempotency-Key
       in: header

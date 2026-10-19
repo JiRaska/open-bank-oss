@@ -40,7 +40,7 @@ class FundPinnedFeePrecisionIT {
     fun `published revision fee retains eight fractional digits after persistence and prices a real NAV`() {
         val isin = "PF" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
         val fund = UUID.fromString(
-            given().contentType("application/json")
+            given().header("Idempotency-Key", java.util.UUID.randomUUID().toString()).contentType("application/json")
                 .body(
                     """{"name":"Precision fixture","isin":"$isin","lei":"315700ABCDEF12345678",
                         "depositaryReference":"TEST-DEP","custodyAccountReference":"TEST-CUST",
@@ -73,7 +73,7 @@ class FundPinnedFeePrecisionIT {
         // A separate HTTP request makes NavService load the fund from the real store again.
         // One day on CZK 365,000,000 costs 1,234.56; the old NUMERIC(9,6) rate costs 1,235.00.
         val nav = UUID.fromString(
-            given().contentType("application/json")
+            given().header("Idempotency-Key", java.util.UUID.randomUUID().toString()).contentType("application/json")
                 .body("""{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":365000000}""")
                 .post("/api/v2/funds/$fund/navs").then().statusCode(201).extract().path<String>("id"),
         )
@@ -98,13 +98,25 @@ class FundPinnedFeePrecisionIT {
     fun `v2 creation requires an explicit revision and amendments retain the stored pin`() {
         val body = definitionBody()
         val withoutRevision = body.filterKeys { it != "productRevisionId" }
-        given().contentType("application/json").body(withoutRevision)
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).contentType("application/json").body(withoutRevision)
             .post("/api/v2/funds").then().statusCode(400)
-        given().contentType("application/json").body(body + ("productRevisionId" to null))
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).contentType("application/json").body(body + ("productRevisionId" to null))
             .post("/api/v2/funds").then().statusCode(400)
-        given().contentType("application/json").body(body + ("productRevisionId" to UUID.randomUUID().toString()))
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).contentType("application/json").body(body + ("productRevisionId" to UUID.randomUUID().toString()))
             .post("/api/v2/funds").then().statusCode(400)
-        val id = given().contentType("application/json").body(body)
+        val id = given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).contentType("application/json").body(body)
             .post("/api/v2/funds").then().statusCode(201).extract().path<String>("id")
         given().contentType("application/json").body(withoutRevision)
             .put("/api/v2/funds/$id").then().statusCode(200)
@@ -151,7 +163,10 @@ class FundPinnedFeePrecisionIT {
             .header("Link", "</api/v2/funds>; rel=\"successor-version\"")
         val legacyBody = definitionBody().filterKeys { it != "productRevisionId" } +
             ("managementFeeRate" to BigDecimal("0.008"))
-        given().contentType("application/json").body(legacyBody)
+        given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).contentType("application/json").body(legacyBody)
             .post("/api/v1/funds").then().statusCode(405)
         given().contentType("application/json").body(legacyBody)
             .put("/api/v1/funds/${UUID.randomUUID()}").then().statusCode(405)
