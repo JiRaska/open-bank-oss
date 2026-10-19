@@ -120,7 +120,9 @@ class SettlementAdapterTest {
                 assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
                     .isInstanceOf(SettlementUnavailableException::class.java)
                     .hasRootCauseMessage("Unexpected HTTP $code from transaction-service")
-                    .satisfies { failure -> assertThat(failure.stackTraceToString()).doesNotContain(poison) }
+                    .isInstanceOfSatisfying(SettlementUnavailableException::class.java) { failure ->
+                        assertThat(failure.stackTraceToString()).doesNotContain(poison)
+                    }
             }
         }
     }
@@ -136,7 +138,7 @@ class SettlementAdapterTest {
             assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
                 .isInstanceOf(SettlementUnavailableException::class.java)
                 .hasRootCauseMessage("Unexpected HTTP $code from transaction-service")
-                .satisfies { failure ->
+                .isInstanceOfSatisfying(SettlementUnavailableException::class.java) { failure ->
                     assertThat(failure.stackTraceToString())
                         .doesNotContain(poison, txId.toString(), tx.sourceAccountId.toString())
                 }
