@@ -4,11 +4,12 @@
 
 'use client'
 import { useEffect, useState, useCallback, type CSSProperties } from 'react'
-import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
+import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, HelpCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { buildRegistry } from '@/lib/services/registry'
+import { aggregateNamedWorkloadStatuses } from '@/lib/health/workloadHealth'
 
 // Card → Kubernetes Deployment/Service name (the BFF's canonical key, ADR-0056).
 // `specId` is the repo module directory (so the code-derived catalog lookup below can
@@ -222,7 +223,7 @@ interface OpenAPIDoc {
 // deployed in this environment (most of the 33-service fleet in the sandbox)
 // from one that IS deployed but failed its readiness probe. Showing the former
 // as a red "Offline" reads as "the app is broken" — see ADR-0056 / graceful-state.
-type Health = 'up' | 'not_deployed' | 'down'
+type Health = 'up' | 'not_deployed' | 'down' | 'unknown'
 
 interface ServiceStatus {
   health: Health
@@ -241,7 +242,8 @@ interface ServiceStatus {
 // static probe in local dev). Probing `/q/health/ready` via the BFF made every
 // deployed service 404 → read as "down", which is exactly the bug being fixed.
 interface HealthSnapshot {
-  byContainer: Record<string, { status: 'UP' | 'DOWN' | 'UNKNOWN' }>
+  services?: { name: string; container?: string; namespace?: string; status: 'UP' | 'DOWN' | 'UNKNOWN' }[]
+  byContainer?: Record<string, { status: 'UP' | 'DOWN' | 'UNKNOWN' }>
   source: string
 }
 
@@ -258,16 +260,19 @@ async function loadHealthSnapshot(): Promise<HealthSnapshot | null> {
   }
 }
 
-// Map a service's k8s name to tri-state health. A service the discovery feed
-// never listed simply isn't deployed in this environment (neutral); a listed
-// service that isn't UP is genuinely down. The snapshot key differs by source
-// (discovery → `account-service`, static probe → `openbank-account-service`),
-// so try both forms.
+// Aggregate all discovered workloads representing the catalog service. The
+// canonical services array takes precedence over legacy aliases, which can be
+// omitted when a bare container name is ambiguous across namespaces.
 function healthFor(snap: HealthSnapshot | null, k8s: string): Health {
-  if (!snap) return 'not_deployed'
-  const entry = snap.byContainer[k8s] ?? snap.byContainer[`openbank-${k8s}`]
+  if (!snap) return 'unknown'
+  if (Array.isArray(snap.services)) {
+    const aliases = new Set([k8s, `openbank-${k8s}`])
+    const status = aggregateNamedWorkloadStatuses(snap.services, aliases)
+    return status === 'UP' ? 'up' : status === 'DOWN' ? 'down' : 'unknown'
+  }
+  const entry = snap.byContainer?.[k8s] ?? snap.byContainer?.[`openbank-${k8s}`]
   if (!entry) return 'not_deployed'
-  return entry.status === 'UP' ? 'up' : 'down'
+  return entry.status === 'UP' ? 'up' : entry.status === 'DOWN' ? 'down' : 'unknown'
 }
 
 const resolveRef = (ref: string, openapi: OpenAPIDoc | null): OpenAPISchema | undefined => {
@@ -710,6 +715,8 @@ export default function ApiCatalogPage() {
                   <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} aria-label={t('Online', 'Online')} />
                 ) : status?.health === 'not_deployed' ? (
                   <MinusCircle size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} aria-label={t('Není nasazeno v tomto prostředí', 'Not deployed in this environment')} />
+                ) : status?.health === 'unknown' ? (
+                  <HelpCircle size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} aria-label={t('Stav není znám', 'Health status unknown')} />
                 ) : (
                   <XCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} aria-label={t('Offline', 'Offline')} />
                 )}
@@ -816,7 +823,9 @@ export default function ApiCatalogPage() {
                           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                             {status.health === 'not_deployed'
                               ? t('Služba není v tomto prostředí nasazená — OpenAPI spec se načte, jakmile poběží.', 'Service is not deployed in this environment — the OpenAPI spec loads once it is running.')
-                              : t('Žádné endpointy (služba offline nebo OpenAPI nedostupné).', 'No endpoints (service offline or OpenAPI unavailable).')}
+                              : status.health === 'unknown'
+                                ? t('Stav služby není znám; endpointy nelze ověřit.', 'Service health is unknown; endpoints could not be verified.')
+                                : t('Žádné endpointy (služba offline nebo OpenAPI nedostupné).', 'No endpoints (service offline or OpenAPI unavailable).')}
                           </div>
                         ) : status.paths.map((path, i) => {
                           const docPaths = status.openapi?.paths || {}

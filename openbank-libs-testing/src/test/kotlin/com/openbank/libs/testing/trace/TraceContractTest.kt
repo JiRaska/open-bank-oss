@@ -61,6 +61,26 @@ class TraceContractTest {
     }
 
     @Test
+    fun `split-trace failure message does not include either trace id`() {
+        val exporter = RecordingSpanExporter()
+        val provider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+            .build()
+        val request = provider.get("test").spanBuilder("POST /payments").setNoParent().startSpan()
+        request.end()
+        val write = provider.get("test").spanBuilder("INSERT payments").setNoParent().startSpan()
+        write.end()
+
+        assertThatThrownBy { exporter.contract().requiresSameTrace("POST /payments", "INSERT payments") }
+            .isInstanceOf(AssertionError::class.java)
+            .hasMessageContaining("expected named spans to share one trace")
+            .hasMessageNotContaining(request.spanContext.traceId)
+            .hasMessageNotContaining(write.spanContext.traceId)
+
+        provider.close()
+    }
+
+    @Test
     fun `evidence marker requires a successful assertion and bounded public id`() {
         assertThatThrownBy { TraceContract.from(emptyList()).verifiedAs("agent-run") }
             .isInstanceOf(IllegalArgumentException::class.java)

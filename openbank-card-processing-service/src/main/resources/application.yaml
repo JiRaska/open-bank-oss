@@ -62,6 +62,10 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+  # ADR-0319: the generated transaction-service client binds its responses with this mapper. A field
+  # the provider adds must never fail a bind AFTER the clearing has committed (Quarkus' default, pinned).
+  jackson:
+    fail-on-unknown-properties: false
   rest-client:
     "card-issuance-api":
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}

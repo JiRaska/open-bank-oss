@@ -439,6 +439,8 @@ export interface TestCaseHistory {
   name: string
   /** Verified path to the test definition; never a claimed production dependency. */
   testDefinitionPath?: string | null
+  /** Requirement ids the test declares it verifies (`verifies:<scope>/<ref>` convention). */
+  verifies?: string[]
   owner: string
   state: 'stable' | 'flaky' | 'failing' | 'skipped'
   lastState: 'passed' | 'failed' | 'skipped'

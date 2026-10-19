@@ -5,7 +5,6 @@
 import type { Account, AccountBalance, CursorPage, Transaction, JournalEntry, ServiceInfo, ServiceHealth, ServiceSnapshot, ServiceConfigResponse, ServiceConfigSnapshot } from '@/types'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { classifyBffFailure, type BffFailure } from '@/lib/services/bff'
-import { buildRegistry, type CatalogFleetModule } from '@/lib/services/registry'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 const TRANSACTION_SERVICE = '/api/svc/transaction-service'
@@ -15,22 +14,6 @@ const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 // Encoding at this boundary prevents a value such as "../../other-endpoint" from changing
 // which same-origin API operation the browser calls.
 const pathSegment = (value: string): string => encodeURIComponent(value)
-
-/**
- * The fleet to list when the live snapshot endpoint is unavailable. DERIVED from the code-generated
- * catalog (the same artifact every other service view reads) - never a list typed into this file.
- * An absent catalog yields an empty list: the caller degrades honestly rather than invent services.
- */
-async function fleetFromCatalog(): Promise<{ name: string; port: number }[]> {
-  try {
-    const res = await fetch('/api/catalog/services', { cache: 'no-store' })
-    if (!res.ok) return []
-    const body = await res.json() as { services?: CatalogFleetModule[] }
-    return buildRegistry(body.services ?? []).map(s => ({ name: s.container.replace(/^openbank-/, ''), port: s.port }))
-  } catch {
-    return []
-  }
-}
 
 export async function fetchAllServiceConfigSnapshots(): Promise<ServiceConfigSnapshot[]> {
   const res = await fetch('/api/services/config', { cache: 'no-store' })
@@ -177,7 +160,7 @@ export const transactionApi = {
   get: (id: string) => apiFetchSimple<Transaction>(`${TRANSACTION_SERVICE}/api/v1/transactions/${pathSegment(id)}`),
 }
 
-import type { ServiceHealthEntry } from '@/app/api/services/health/route'
+import type { ServiceHealthEntry } from '@/lib/services/healthContract'
 
 export type { ServiceHealthEntry }
 
@@ -217,13 +200,6 @@ export async function fetchServiceSnapshot(name: string, port: number): Promise<
   }
 }
 
-export async function fetchAllServiceSnapshots(): Promise<ServiceSnapshot[]> {
-  const evidence = await fetchAllServiceSnapshotsEvidence()
-  return evidence.ok
-    ? evidence.snapshots
-    : (await fleetFromCatalog()).map(s => ({ name: s.name, port: s.port, info: null, health: null, rateLimitMax: null, rateLimitRemaining: null, apiVersion: null, latencyMs: null, reachable: false }))
-}
-
 export type ServiceSnapshotsEvidence =
   | { ok: true; snapshots: ServiceSnapshot[] }
   | { ok: false; failure: BffFailure }
@@ -250,13 +226,19 @@ function isHealthEntry(value: unknown): value is ServiceHealthEntry {
     (entry.latencyMs === null || (typeof entry.latencyMs === 'number' && Number.isFinite(entry.latencyMs))) &&
     (entry.version == null || typeof entry.version === 'string') &&
     (entry.gitCommit == null || typeof entry.gitCommit === 'string') &&
+    (entry.namespace === undefined || (typeof entry.namespace === 'string' && entry.namespace.length > 0)) &&
     isStack(entry.stack)
+}
+
+function healthEntryIdentity(entry: ServiceHealthEntry): string {
+  return entry.namespace ? `${entry.namespace}/${entry.name}` : `${entry.name}:${entry.port}`
 }
 
 function snapshotFromHealthEntry(entry: ServiceHealthEntry): ServiceSnapshot {
   const hasInfoSignal = Boolean(entry.version || entry.gitCommit || entry.stack)
   return {
     name: entry.name,
+    ...(entry.namespace ? { namespace: entry.namespace } : {}),
     port: entry.port,
     info: hasInfoSignal ? {
       service: entry.name,
@@ -290,7 +272,7 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
     }
     const services = (data as { services: unknown[] }).services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
-    if (new Set(services.map(entry => `${entry.name}:${entry.port}`)).size !== services.length) {
+    if (new Set(services.map(healthEntryIdentity)).size !== services.length) {
       return { ok: false, failure: 'error' }
     }
     return { ok: true, snapshots: services.map(snapshotFromHealthEntry) }
