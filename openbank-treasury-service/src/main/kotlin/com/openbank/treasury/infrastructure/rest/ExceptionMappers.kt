@@ -139,6 +139,14 @@ class ExceptionMappers {
         error(UNPROCESSABLE, "ANALYSIS_TOO_LARGE", e.message)
 
     @ServerExceptionMapper
+    fun rateSheetNotFound(e: com.openbank.treasury.infrastructure.marketdata.RateSheetNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun rateSheetStale(e: com.openbank.treasury.infrastructure.marketdata.RateSheetStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "RATE_SHEET_STALE", e.message)
+
+    @ServerExceptionMapper
     fun priorRevaluationUnposted(
         e: com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException,
     ): Response = error(Response.Status.CONFLICT.statusCode, "PRIOR_REVALUATION_UNPOSTED", e.message)

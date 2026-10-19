@@ -1474,6 +1474,96 @@ paths:
                   blocked: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
                   failures: { type: integer, minimum: 0 }
 
+  /api/v1/treasury/market-data/internal-rate-sheets:
+    get:
+      tags: [Treasury]
+      operationId: listRateSheets
+      summary: Internal rate sheets the bank publishes, newest first (contract 8.5)
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, ACTIVE, REJECTED, SUPERSEDED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: The sheets
+          content:
+            application/json:
+              schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/RateSheet' } }
+    post:
+      tags: [Treasury]
+      operationId: proposeRateSheet
+      summary: Propose a rate sheet (back office) — PENDING until a different human approves it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, effectiveFrom, rates]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                effectiveFrom: { type: string, format: date }
+                rates:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [label, value]
+                    properties:
+                      label: { type: string, minLength: 1, maxLength: 64 }
+                      value: { type: number, minimum: -100, maximum: 100, description: Percent, at most 6 decimals }
+      responses:
+        '201':
+          description: The PENDING sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '400':
+          description: A bad name, date or rate
+  /api/v1/treasury/market-data/internal-rate-sheets/{id}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveRateSheet
+      summary: Approve a rate sheet (four-eyes, never its proposer or an AI agent); supersedes the ACTIVE sheet of the same name
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The ACTIVE sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '404':
+          description: No such sheet
+        '409':
+          description: RATE_SHEET_STALE — no longer PENDING
+        '422':
+          description: FOUR_EYES_VIOLATION (an AI or machine principal is 403 ACTOR_NOT_PERMITTED)
+  /api/v1/treasury/market-data/internal-rate-sheets/{id}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectRateSheet
+      summary: Reject a rate sheet with a reason (four-eyes)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200':
+          description: The REJECTED sheet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RateSheet' }
+        '409':
+          description: RATE_SHEET_STALE — no longer PENDING
+
   /api/v1/treasury/analysis/cash-flows:
     post:
       tags: [Treasury]
@@ -2100,6 +2190,26 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    RateSheet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        effectiveFrom: { type: string, format: date }
+        status: { type: string, enum: [PENDING, ACTIVE, REJECTED, SUPERSEDED] }
+        rates:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              value: { type: number }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
     CashFlowSeries:
       type: object
       properties:
