@@ -777,12 +777,20 @@ components:
         error: { type: string }
     CreateFundRequest:
       description: Create a fund against an explicitly selected published catalog revision. No revision is selected implicitly.
-      allOf:
-        - $ref: '#/components/schemas/AmendFundRequest'
-        - type: object
-          required: [productRevisionId]
-          properties:
-            productRevisionId: { type: string, format: uuid, description: Explicitly selected published revision; null is rejected on create. }
+      type: object
+      required: [name, isin, lei, depositaryReference, custodyAccountReference, currency, riskClass, productRevisionId]
+      properties:
+        name: { type: string }
+        isin: { type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' }
+        lei: { type: string, pattern: '^[A-Z0-9]{18}[0-9]{2}$' }
+        depositaryReference: { type: string }
+        custodyAccountReference: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        riskClass: { type: integer, minimum: 1, maximum: 7 }
+        mandatoryConservative: { type: [boolean, 'null'], default: false }
+        managementFeeRate: { type: [number, 'null'], deprecated: true, description: "Deprecated (ADR-0341). Ignored as an input: if supplied it must equal the pinned revision's fee, otherwise the request is rejected with 400. Read the fee from the Fund response." }
+        productRevisionId: { type: string, format: uuid, description: Explicitly selected published revision; null is rejected on create. }
+        launchNavPerUnit: { type: [number, 'null'], default: 1 }
     AmendFundRequest:
       type: object
       required: [name, isin, lei, depositaryReference, custodyAccountReference, currency, riskClass]
