@@ -55,7 +55,7 @@ class FundEntity : PanacheEntityBase {
     @Column(name = "mandatory_conservative", nullable = false)
     var mandatoryConservative: Boolean = false
 
-    @Column(name = "management_fee_rate", nullable = false)
+    @Column(name = "management_fee_rate", nullable = false, precision = 11, scale = 8)
     lateinit var managementFeeRate: BigDecimal
 
     @Column(name = "product_revision_id")
