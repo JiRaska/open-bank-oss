@@ -228,7 +228,7 @@ export default function ProductStudioPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }, [])
 
-  const fetchReviewCapability = useCallback(async (signal?: AbortSignal) => {
+  const fetchReviewCapability = useCallback(async (signal?: AbortSignal): Promise<CatalogReviewCapability> => {
     try {
       const response = await fetch('/api/agent/catalog-reviews', { signal, cache: 'no-store' })
       if (!response.ok || response.status === 401 || response.status === 403) {
@@ -237,11 +237,11 @@ export default function ProductStudioPage() {
       const body: unknown = await response.json()
       return resolveCatalogReviewCapability(response.status, true, body)
     } catch {
-      return 'error' as const
+      return { status: 'error', models: [] }
     }
   }, [])
   const refreshReviewCapability = useCallback(async () => {
-    setReviewCapability('checking')
+    setReviewCapability({ status: 'checking', models: [] })
     setReviewCapability(await fetchReviewCapability())
   }, [fetchReviewCapability])
 
@@ -663,7 +663,7 @@ export default function ProductStudioPage() {
                 ? t('Váš účet nemá oprávnění ověřit kapacitu kontroly. Požádejte správce o kontrolu oprávnění; obsah draftu nebyl odeslán.', 'Your account cannot inspect review capability. Ask an administrator to check access; no draft content was sent.')
                   : t('Dostupnost kontroly se nepodařilo ověřit. Obsah draftu nebyl odeslán; zkuste to znovu.', 'Review availability could not be verified. No draft content was sent; please retry.')}</span><button className="btn btn-secondary" type="button" onClick={() => void refreshReviewCapability()}><RefreshCw size={12} aria-hidden="true" />{t('Zkusit znovu', 'Retry')}</button></div>}
             {reviewCapability.status === 'available' && <div className={styles.schemaHint} role="note">{reviewCapability.mode === 'sandbox-hosted'
-              ? t(`Sandboxová kontrola odešle přes LiteLLM přesnou revizi modelu ${reviewCapability.defaultModel}. Nezahrnujte osobní ani zákaznické údaje. Výsledek je pouze návrh pro lidské posouzení.`, `Sandbox review sends the exact revision through LiteLLM to ${reviewCapability.defaultModel}. Do not include personal or customer data. The result is only a proposal for human review.`)
+              ? t(`Sandboxová kontrola odešle přes LiteLLM přesnou revizi draftu ke kontrole modelem ${reviewCapability.defaultModel}. Nezahrnujte osobní ani zákaznické údaje. Výsledek je pouze návrh pro lidské posouzení.`, `Sandbox review sends the exact revision through LiteLLM to ${reviewCapability.defaultModel}. Do not include personal or customer data. The result is only a proposal for human review.`)
               : t(`Použije se schválený interní model ${reviewCapability.defaultModel}. Výsledek je pouze návrh pro lidské posouzení.`, `Approved internal model ${reviewCapability.defaultModel} will be used. The result is only a proposal for human review.`)}</div>}
             {!selectedRevision && <div className={styles.schemaHint}>{t('Vyberte draft revizi; review nikdy nepracuje s neurčitým nebo živým obsahem.', 'Select a draft revision; review never works from an ambiguous or live document.')}</div>}
             {review && <div aria-live="polite"><div className={styles.findingText} style={{ marginTop: 11, fontWeight: 700 }}>{review.summary}</div>{review.findings.length === 0 && <div className={styles.schemaHint}>{t('Model nenašel strukturované nálezy. To nenahrazuje lidskou obchodní kontrolu.', 'The model found no structured findings. That never replaces human business review.')}</div>}{review.findings.map(finding => <div key={`${finding.category}:${finding.instancePath}`} className={`${styles.finding} ${finding.severity === 'HIGH' ? styles.findingHigh : finding.severity === 'WARNING' ? styles.findingWarning : ''}`}><div className={styles.findingTitle}><span>{finding.category}</span><span>{finding.severity}</span></div><div className={styles.findingText}>{finding.recommendation}</div><div className={styles.evidence}>{finding.instancePath} · {finding.evidence}</div></div>)}<div className={styles.provenance}><span>proposal {review.proposalId.slice(0, 8)}</span><span>model {review.model}</span><span>context {review.contextHash.slice(0, 12)}…</span></div></div>}
