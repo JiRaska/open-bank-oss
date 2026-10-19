@@ -11,6 +11,7 @@ import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException
 import com.openbank.treasury.application.port.out.RevaluationClaim
 import com.openbank.treasury.application.port.out.RevaluationOutOfOrderException
 import com.openbank.treasury.application.port.out.RevaluationRecord
@@ -44,11 +45,27 @@ data class RevaluationRun(
     val journals: Int,
     val gaps: List<RevaluationGap>,
     val failures: List<Throwable>,
+    /** Rows still owed to the ledger after this run (claimed, never posted): any one FAILS the step. */
+    val owed: Int = 0,
+    /** Owed rows from earlier runs this run posted before measuring anything. */
+    val reposted: Int = 0,
 ) {
     /** The REVALUATION day step this run makes (ADR-0344 D7): a gap or a failure is FAILED with its reason. */
     fun step(at: java.time.Instant): DayStepRecord {
         val refused = failures.count { it is AccountingDayClosedException }
         val problems = gaps.size + failures.size
+        if (owed > 0) {
+            return DayStepRecord(
+                asOf,
+                DayStep.REVALUATION,
+                DayStepStatus.FAILED,
+                revalued.size,
+                "$owed revaluation(s) claimed but not posted to the ledger: they are re-posted first on the next run",
+                at,
+                journals,
+                refused,
+            )
+        }
         return when {
             revalued.isEmpty() && problems == 0 ->
                 DayStepRecord(asOf, DayStep.REVALUATION, DayStepStatus.SKIPPED, 0, "no fair-value deal to revalue", at)
@@ -91,6 +108,11 @@ data class RevaluationRun(
  * is never back-filled — the next date's change is measured against the latest recorded cumulative
  * adjustment, so it covers the gap and the cumulative always equals the latest fair value.
  *
+ * A row is CLAIMED before the ledger is asked. If its post is lost (ledger down, crash), the row is
+ * OWED: no new date of that deal is measured against it ([PriorRevaluationUnpostedException], 409)
+ * until it is posted; every whole-book run re-posts owed rows first, by their own stored change and
+ * key, and the REVALUATION day step stays FAILED while any row is owed.
+ *
  * The measured amount is the CLEAN value (accrued interest is posted by the accrual run) less the
  * carrying amount — amortised cost for a security, zero for a derivative, which is carried only at
  * its fair value. A deal the engine did not value, valued as unpriced, or valued in another currency
@@ -109,6 +131,8 @@ class RevaluationService(
 ) {
     suspend fun latestAsOf(): LocalDate? = valuation.latestAsOf()
 
+    suspend fun unposted(): com.openbank.treasury.application.port.out.UnpostedRevaluations = revaluations.unposted()
+
     suspend fun records(asOf: LocalDate, limit: Int): List<RevaluationRecord> {
         require(limit in 1..MAX_LIST) { "limit must be 1..$MAX_LIST" }
         return revaluations.forDate(asOf, limit)
@@ -119,13 +143,22 @@ class RevaluationService(
      * REVALUATION day step; a single-deal run does not, since it says nothing about the rest.
      */
     suspend fun revalue(asOf: LocalDate, dealId: UUID? = null): RevaluationRun {
-        val run = measure(asOf, dealId)
         if (dealId == null) {
+            val (reposted, sweepFailures) = repostOwed()
+            val measured = measure(asOf, null)
+            val run = measured.copy(
+                failures = sweepFailures + measured.failures,
+                journals = measured.journals + reposted,
+                reposted = reposted,
+                owed = revaluations.unposted().count,
+            )
             dayCompletion?.record(run.step(clock.instant()))
-        } else {
-            // A single-deal run asked about one date: refusing it is the answer (409), not a summary.
-            run.failures.firstOrNull { it is RevaluationOutOfOrderException }?.let { throw it }
+            return run
         }
+        val run = measure(asOf, dealId)
+        run.failures.firstOrNull { it is PriorRevaluationUnpostedException }?.let { throw it }
+        // A single-deal run asked about one date: refusing it is the answer (409), not a summary.
+        run.failures.firstOrNull { it is RevaluationOutOfOrderException }?.let { throw it }
         return run
     }
 
@@ -195,22 +228,55 @@ class RevaluationService(
                     return@runCatching
                 }
                 // Owed (new, or a replay whose earlier post was lost): the ledger key makes it idempotent.
-                val spec = checkNotNull(MatrixPostings.revaluation(deal, record.change, deal.currency, asOf, category))
-                val posted = ledger.post(spec, asOf, "treasury ${deal.product} revaluation $asOf")
-                val ref = LedgerJournalRef(
-                    deal.id,
-                    PostingEvent.REVALUATION,
-                    spec.idempotencyKey,
-                    posted.journalId,
-                    clock.instant(),
-                    posted.accounts,
-                )
-                revaluations.attachJournal(deal.id, asOf, ref)
-                done += record.copy(journalId = posted.journalId)
+                val journalId = post(deal, record, category)
+                done += record.copy(journalId = journalId)
                 if (claim is RevaluationClaim.Claimed) journals++
             }.onFailure { failures += it }
         }
         return RevaluationRun(asOf, book.snapshotId, done, journals, gaps, failures)
+    }
+
+    /**
+     * Post every row claimed by an earlier run whose journal never reached the ledger — its OWN stored
+     * change under its OWN key, nothing re-measured — before any new date is measured against it.
+     */
+    private suspend fun repostOwed(): Pair<Int, List<Throwable>> {
+        var posted = 0
+        val failures = mutableListOf<Throwable>()
+        revaluations.owed(MAX_DEALS).forEach { record ->
+            runCatching {
+                val deal =
+                    checkNotNull(deals.findById(record.dealId)) { "owed revaluation of unknown deal ${record.dealId}" }
+                val category = if (deal.product in DERIVATIVES) Ifrs9Category.FVTPL else bookCategory(deal.bookId)
+                post(deal, record, category)
+                posted++
+            }.onFailure { failures += it }
+        }
+        return posted to failures
+    }
+
+    /** Post [record]'s stored change under its stored key and attach the journal; returns its id. */
+    private suspend fun post(deal: Deal, record: RevaluationRecord, category: Ifrs9Category): UUID {
+        val spec = checkNotNull(MatrixPostings.revaluation(deal, record.change, deal.currency, record.asOf, category)) {
+            "revaluation of ${deal.id} on ${record.asOf} owes ${record.change} but the matrix has no rule"
+        }
+        check(spec.idempotencyKey == record.idempotencyKey) {
+            "revaluation of ${deal.id} on ${record.asOf}: key ${spec.idempotencyKey} differs from the claimed ${record.idempotencyKey}"
+        }
+        val posted = ledger.post(spec, record.asOf, "treasury ${deal.product} revaluation ${record.asOf}")
+        revaluations.attachJournal(
+            deal.id,
+            record.asOf,
+            LedgerJournalRef(
+                deal.id,
+                PostingEvent.REVALUATION,
+                spec.idempotencyKey,
+                posted.journalId,
+                clock.instant(),
+                posted.accounts,
+            ),
+        )
+        return posted.journalId
     }
 
     /** Live ACTUAL matrix deals whose product and IFRS 9 category carry a REVALUATION rule. */

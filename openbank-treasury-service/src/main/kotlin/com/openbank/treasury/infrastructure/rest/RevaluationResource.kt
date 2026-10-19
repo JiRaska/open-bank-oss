@@ -57,6 +57,8 @@ class RevaluationResource {
             "snapshotId" to r.snapshotId,
             "revalued" to r.revalued.map { it.view() },
             "journals" to r.journals,
+            "reposted" to r.reposted,
+            "owed" to r.owed,
             "gaps" to r.gaps,
             "failures" to r.failures.map { it.message.orEmpty().take(MAX_MESSAGE) },
         )

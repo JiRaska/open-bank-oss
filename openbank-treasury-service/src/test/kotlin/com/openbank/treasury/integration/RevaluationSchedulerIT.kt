@@ -49,12 +49,14 @@ class RevaluationSchedulerIT {
             conn.prepareStatement(
                 "select status from treasury_day_completion where business_date = ? and step = 'REVALUATION' " +
                     "order by recorded_at desc limit 1",
-            ).use {
-                it.setObject(1, day)
-                it.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+            ).use { ps ->
+                ps.setObject(1, day)
+                firstString(ps.executeQuery())
             }
         }
     }
+
+    private fun firstString(rs: java.sql.ResultSet): String? = rs.use { if (it.next()) it.getString(1) else null }
 
     @Test
     fun `the cron records the REVALUATION step of the accounting day`() {

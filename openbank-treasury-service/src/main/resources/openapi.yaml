@@ -1509,6 +1509,8 @@ paths:
                   snapshotId: { type: string, format: uuid, nullable: true }
                   revalued: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/Revaluation' } }
                   journals: { type: integer, minimum: 0 }
+                  reposted: { type: integer, minimum: 0, description: Rows claimed by an earlier run and owed to the ledger that this run posted first }
+                  owed: { type: integer, minimum: 0, description: Rows still claimed but unposted after the run; any one FAILS the REVALUATION day step }
                   gaps:
                     type: array
                     maxItems: 5000
@@ -1519,7 +1521,7 @@ paths:
                         reason: { type: string, maxLength: 500 }
                   failures: { type: array, maxItems: 5000, items: { type: string, maxLength: 500 } }
         '409':
-          description: REVALUATION_OUT_OF_ORDER — a single-deal run for a date not after the deal's latest revaluation that is not an exact replay (dates are strictly increasing per deal; an earlier date is never back-filled)
+          description: REVALUATION_OUT_OF_ORDER, or PRIOR_REVALUATION_UNPOSTED (the deal's latest revaluation is claimed but not yet posted; the next whole-book run re-posts it first) — a single-deal run for a date not after the deal's latest revaluation that is not an exact replay (dates are strictly increasing per deal; an earlier date is never back-filled)
 
   /api/v1/treasury/fixings/{index}/{date}/manual:
     post:

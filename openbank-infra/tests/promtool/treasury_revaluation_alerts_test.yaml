@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for the ADR-0344 D7/D8 unposted-revaluation alert: a must-FIRE case, a
+# must-NOT-fire control at 0, too short a hold, and a cold pod reading NaN.
+rule_files:
+  - prometheus-rules-reconciliation.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "an owed revaluation held over 1h fires TreasuryRevaluationUnposted"
+    input_series:
+      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+        values: "1+0x90"
+      - series: 'treasury_revaluation_unposted{pod="treasury-b"}'
+        values: "NaN+0x90"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: TreasuryRevaluationUnposted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Treasury revaluation(s) claimed but not posted to the ledger"
+              description: "treasury-service holds revaluations whose fair-value change was measured but whose journal the ledger never accepted; the deal's later dates and the day close wait on them. Check ledger reachability, then run POST /api/v1/treasury/revaluations/run for the day: owed rows are re-posted first by their own key and stored change."
+
+  - interval: 1m
+    name: "owed for less than 1h does NOT fire yet"
+    input_series:
+      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+        values: "1+0x90"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: TreasuryRevaluationUnposted
+        exp_alerts: []
+
+  - interval: 1m
+    name: "nothing owed does NOT fire"
+    input_series:
+      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+        values: "0+0x90"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: TreasuryRevaluationUnposted
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a cold pod reading NaN does NOT fire"
+    input_series:
+      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+        values: "NaN+0x90"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: TreasuryRevaluationUnposted
+        exp_alerts: []

@@ -67,6 +67,26 @@ spec:
               page (or GET /api/v1/treasury/nostro/{iban}/breaks) and resolve it with the
               correspondent or by a ledger booking through the normal deal lifecycle.
 
+    # ADR-0344 D7/D8: a revaluation row was claimed but its journal never reached the ledger
+    # (ledger down, crash). While it is owed, no later date of that deal is measured (409
+    # PRIOR_REVALUATION_UNPOSTED) and the REVALUATION day step is FAILED, which withholds the day from
+    # the close. The next daily run re-posts it first; this fires when it stays owed past an hour.
+    # The gauge is NaN on a cold pod until its first run, so a restart neither fires nor clears it.
+    - name: openbank.treasury.revaluation
+      rules:
+        - alert: TreasuryRevaluationUnposted
+          expr: max(treasury_revaluation_unposted) > 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Treasury revaluation(s) claimed but not posted to the ledger"
+            description: >-
+              treasury-service holds revaluations whose fair-value change was measured but whose
+              journal the ledger never accepted; the deal's later dates and the day close wait on
+              them. Check ledger reachability, then run POST /api/v1/treasury/revaluations/run for
+              the day: owed rows are re-posted first by their own key and stored change.
+
     # #12115 / ADR-0344 D6: a payment release was refused because the funding (nostro) account
     # would go negative as of the value date, net of same-day released treasury payments. The
     # payment stays PROPOSED; nothing left the bank. Fires on any refusal in the last 15 minutes.

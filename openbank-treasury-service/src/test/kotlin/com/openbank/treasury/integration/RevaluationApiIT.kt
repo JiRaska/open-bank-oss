@@ -225,6 +225,46 @@ class RevaluationApiIT {
         assertThat(ledger.journals.size).isEqualTo(journalsBefore)
     }
 
+    @Test
+    @Order(8)
+    @TestSecurity(user = "bert.backoffice", roles = ["ROLE_TREASURY_BACK_OFFICE"])
+    fun `8 - a claim the ledger never took blocks the next date until the run re-posts it`() {
+        val d1 = today.plusDays(4)
+        val d2 = today.plusDays(5)
+        valuation.byDate[d1] = book(d1, fv("95000.00"))
+        valuation.byDate[d2] = book(d2, fv("97000.00"))
+        ledger.down = true
+        try {
+            post("/revaluations/run?asOf=$d1").then().statusCode(200).body("journals", equalTo(0))
+            given().`when`().get("/api/v1/treasury/day-completion/$d1").then().statusCode(200)
+                .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("FAILED"))
+            post("/revaluations/run?asOf=$d2&dealId=$irs").then().statusCode(409)
+                .body("error", equalTo("PRIOR_REVALUATION_UNPOSTED"))
+            assertThat(
+                count("select count(*) from deal_revaluations where deal_id = '$irs' and as_of = '$d2'"),
+            ).isZero()
+        } finally {
+            ledger.down = false
+        }
+        post("/revaluations/run?asOf=$d2").then().statusCode(200).body("reposted", equalTo(1))
+        assertThat(ledger.journals).containsKey("treasury:$irs:revaluation:$d1")
+        assertThat(ledger.journals).containsKey("treasury:$irs:revaluation:$d2")
+        val change = jdbc { c ->
+            c.prepareStatement("select change_amount from deal_revaluations where deal_id = '$irs' and as_of = '$d2'")
+                .executeQuery().use {
+                    it.next()
+                    it.getBigDecimal(1)
+                }
+        }
+        assertThat(change).isEqualByComparingTo("2000.00")
+        assertThat(
+            count("select count(*) from deal_revaluations where idempotency_key is not null and journal_id is null"),
+        )
+            .isZero()
+        given().`when`().get("/api/v1/treasury/day-completion/$d2").then().statusCode(200)
+            .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("DONE"))
+    }
+
     private fun fv(clean: String) = DealFairValue(UUID.fromString(irs), BigDecimal(clean), BigDecimal(clean), null)
 
     private fun book(asOf: LocalDate, vararg deals: DealFairValue) = BookValuation(

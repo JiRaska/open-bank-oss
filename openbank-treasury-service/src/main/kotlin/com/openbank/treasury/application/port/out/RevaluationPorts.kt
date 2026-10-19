@@ -69,6 +69,17 @@ data class RevaluationRecord(
 class RevaluationOutOfOrderException(val dealId: UUID, val asOf: LocalDate, val latest: LocalDate) :
     RuntimeException("deal $dealId is revalued through $latest; $asOf is not after it and is not a replay")
 
+/**
+ * The deal's latest revaluation ([owedAsOf]) is claimed but its journal was never posted (409
+ * `PRIOR_REVALUATION_UNPOSTED`): a new date would measure its change against a posting that never
+ * happened. The owed row is re-posted first — by its own key and stored change — then the date runs.
+ */
+class PriorRevaluationUnpostedException(val dealId: UUID, val asOf: LocalDate, val owedAsOf: LocalDate) :
+    RuntimeException("deal $dealId has an unposted revaluation of $owedAsOf; $asOf waits until it is posted")
+
+/** The owed (claimed, unposted) revaluations: how many, and the oldest claim time. */
+data class UnpostedRevaluations(val count: Int, val oldestClaimedAt: Instant?)
+
 /** What [RevaluationRepository.claim] found. */
 sealed interface RevaluationClaim {
     val record: RevaluationRecord
@@ -86,8 +97,10 @@ interface RevaluationRepository {
     suspend fun forDate(asOf: LocalDate, limit: Int): List<RevaluationRecord>
 
     /**
-     * Under a per-deal transaction lock: an exact replay of (deal, [asOf], snapshot, fair value)
-     * returns [RevaluationClaim.Existing]; a date not after the deal's latest revaluation throws
+     * Under a per-deal transaction lock: an exact replay of (deal, [asOf], snapshot, fair value) — or
+     * ANY retry of a row still owed to the ledger, which re-posts its own stored change — returns
+     * [RevaluationClaim.Existing]; a new date while the latest row is owed throws
+     * [PriorRevaluationUnpostedException]; a date not after the deal's latest revaluation throws
      * [RevaluationOutOfOrderException]; otherwise the change against the latest cumulative
      * adjustment is computed IN the lock and the row is inserted (no journal yet), so two concurrent
      * runs can never both measure against the same prior. [keyOf] names the ledger key a change owes.
@@ -103,6 +116,11 @@ interface RevaluationRepository {
         keyOf: (change: BigDecimal) -> String?,
         at: Instant,
     ): RevaluationClaim
+
+    /** Rows claimed with a change owed to the ledger but no journal yet, oldest first, at most [limit]. */
+    suspend fun owed(limit: Int): List<RevaluationRecord>
+
+    suspend fun unposted(): UnpostedRevaluations
 
     /** Record the ledger journal of a claimed row and its deal journal reference — ONE transaction. */
     suspend fun attachJournal(dealId: UUID, asOf: LocalDate, journal: LedgerJournalRef)

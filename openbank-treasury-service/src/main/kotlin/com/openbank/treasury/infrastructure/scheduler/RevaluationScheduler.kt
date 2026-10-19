@@ -8,6 +8,7 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.usecase.RevaluationService
+import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
@@ -17,6 +18,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * ADR-0344 D7/D8: the daily revaluation of the bank's accounting day, off the risk engine's
@@ -39,8 +41,29 @@ class RevaluationScheduler(
     private val log = Logger.getLogger(RevaluationScheduler::class.java)
     private var liveness: WorkflowLivenessRecorder? = null
 
+    // NaN until the first run has measured them: a cold pod neither fires nor clears the alert.
+    private val unpostedCount = AtomicReference(Double.NaN)
+    private val oldestUnpostedAge = AtomicReference(Double.NaN)
+
     fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
-        if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+        if (!enabled) return
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+        Gauge.builder(UNPOSTED_METRIC) { unpostedCount.get() }
+            .description("Revaluations claimed but not yet posted to the ledger (re-posted first by the next run)")
+            .register(meterRegistry)
+        Gauge.builder("$UNPOSTED_METRIC.oldest.age.seconds") { oldestUnpostedAge.get() }
+            .description("Age of the oldest unposted revaluation claim; 0 when none")
+            .register(meterRegistry)
+    }
+
+    private suspend fun measureUnposted() {
+        runCatching { revaluation.unposted() }.onSuccess { u ->
+            unpostedCount.set(u.count.toDouble())
+            oldestUnpostedAge.set(
+                u.oldestClaimedAt?.let { Duration.between(it, clock.instant()).seconds.coerceAtLeast(0).toDouble() }
+                    ?: 0.0,
+            )
+        }.onFailure { log.error("could not measure unposted revaluations", it) }
     }
 
     @Scheduled(
@@ -62,11 +85,13 @@ class RevaluationScheduler(
                 if (r.failures.isEmpty() && r.gaps.isEmpty()) liveness?.recordSuccess()
             }
             .onFailure { log.error("revaluation run failed", it) }
+        measureUnposted()
     }
 
     private companion object {
         const val WORKFLOW_NAME = "treasury-revaluation-run"
         const val METRIC = "openbank.treasury.revaluations"
+        const val UNPOSTED_METRIC = "treasury.revaluation.unposted"
         val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }

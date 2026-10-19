@@ -9,10 +9,12 @@ import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealFairValue
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException
 import com.openbank.treasury.application.port.out.RevaluationClaim
 import com.openbank.treasury.application.port.out.RevaluationOutOfOrderException
 import com.openbank.treasury.application.port.out.RevaluationRecord
 import com.openbank.treasury.application.port.out.RevaluationRepository
+import com.openbank.treasury.application.port.out.UnpostedRevaluations
 import com.openbank.treasury.application.port.out.ValuationPort
 import com.openbank.treasury.application.port.out.ValuationUnavailableException
 import com.openbank.treasury.application.usecase.RevaluationService
@@ -99,11 +101,11 @@ class RevaluationServiceTest {
             at: java.time.Instant,
         ): RevaluationClaim {
             val latest = rows.values.filter { it.dealId == dealId }.maxByOrNull { it.asOf }
+            val owed = latest != null && latest.idempotencyKey != null && latest.journalId == null
+            if (owed && latest!!.asOf != asOf) throw PriorRevaluationUnpostedException(dealId, asOf, latest.asOf)
             if (latest != null && !latest.asOf.isBefore(asOf)) {
-                if (latest.asOf == asOf &&
-                    latest.snapshotId == snapshotId &&
-                    latest.fairValue.compareTo(fairValue) == 0
-                ) {
+                val sameValue = latest.snapshotId == snapshotId && latest.fairValue.compareTo(fairValue) == 0
+                if (owed || (latest.asOf == asOf && sameValue)) {
                     return RevaluationClaim.Existing(latest)
                 }
                 throw RevaluationOutOfOrderException(dealId, asOf, latest.asOf)
@@ -119,6 +121,12 @@ class RevaluationServiceTest {
                 )
             rows[dealId to asOf] = r
             return RevaluationClaim.Claimed(r)
+        }
+        override suspend fun owed(limit: Int) = rows.values.filter {
+            it.idempotencyKey != null && it.journalId == null
+        }.sortedBy { it.recordedAt }.take(limit)
+        override suspend fun unposted() = owed(Int.MAX_VALUE).let {
+            UnpostedRevaluations(it.size, it.firstOrNull()?.recordedAt)
         }
         override suspend fun attachJournal(dealId: UUID, asOf: LocalDate, journal: LedgerJournalRef) {
             val r = rows.getValue(dealId to asOf)
@@ -273,16 +281,51 @@ class RevaluationServiceTest {
     }
 
     @Test
-    fun `a claimed row whose post was lost is posted on the replay under the same key`() = runBlocking<Unit> {
+    fun `an unposted claim blocks the next date until the sweep posts it, then the next delta is right`() =
+        runBlocking<Unit> {
+            val irs = bookedIrs().also { deals.rows[it.id] = it }
+            val d1 = day
+            val d2 = day.plusDays(1)
+            engine.books[d1] = book(d1, fv(irs, "500.00"))
+            engine.books[d2] = book(d2, fv(irs, "800.00"))
+            ledger.failFor = irs.id
+            val first = service.revalue(d1)
+            assertThat(first.failures).hasSize(1)
+            assertThat(first.owed).isEqualTo(1)
+            assertThat(step().status).isEqualTo(DayStepStatus.FAILED)
+            assertThat(store.rows.values.single().journalId).isNull()
+
+            // Ledger still down: D2 is refused (single deal 409), never measured against D1.
+            assertThatThrownBy { runBlocking { service.revalue(d2, irs.id) } }
+                .isInstanceOf(PriorRevaluationUnpostedException::class.java)
+            assertThat(store.rows).hasSize(1)
+
+            ledger.failFor = null
+            val second = service.revalue(d2)
+            assertThat(second.reposted).isEqualTo(1)
+            assertThat(second.owed).isZero()
+            assertThat(step().status).isEqualTo(DayStepStatus.DONE)
+            assertThat(ledger.posted.map { it.idempotencyKey })
+                .containsExactly("treasury:${irs.id}:revaluation:$d1", "treasury:${irs.id}:revaluation:$d2")
+            assertThat(store.rows.getValue(irs.id to d2).change).isEqualByComparingTo("300.00")
+            // The ledger's cumulative equals D2's fair value.
+            // Both changes are gains (500, then 300): the credited unrealised gain sums to D2's fair value.
+            val net = ledger.posted.sumOf { spec -> spec.lines.filter { it.side == Side.CREDIT }.sumOf { it.amount } }
+            assertThat(net).isEqualByComparingTo("800.00")
+            assertThat(store.journals).hasSize(2)
+        }
+
+    @Test
+    fun `a retry of an owed row posts its stored change whatever the engine now says`() = runBlocking<Unit> {
         val irs = bookedIrs().also { deals.rows[it.id] = it }
         engine.books[day] = book(day, fv(irs, "500.00"))
         ledger.failFor = irs.id
-        assertThat(service.revalue(day).failures).hasSize(1)
-        assertThat(store.rows.values.single().journalId).isNull()
+        service.revalue(day)
         ledger.failFor = null
-        val replay = service.revalue(day)
-        assertThat(replay.revalued.single().journalId).isNotNull()
-        assertThat(ledger.posted.single().idempotencyKey).isEqualTo("treasury:${irs.id}:revaluation:$day")
-        assertThat(store.journals).hasSize(1)
+        engine.books[day] = book(day, fv(irs, "650.00"))
+        val r = service.revalue(day, irs.id)
+        assertThat(r.revalued.single().change).isEqualByComparingTo("500.00")
+        assertThat(ledger.posted.single().lines.filter { it.side == Side.CREDIT }.sumOf { it.amount })
+            .isEqualByComparingTo("500.00")
     }
 }

@@ -5,10 +5,12 @@
 package com.openbank.treasury.infrastructure.revaluation
 
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException
 import com.openbank.treasury.application.port.out.RevaluationClaim
 import com.openbank.treasury.application.port.out.RevaluationOutOfOrderException
 import com.openbank.treasury.application.port.out.RevaluationRecord
 import com.openbank.treasury.application.port.out.RevaluationRepository
+import com.openbank.treasury.application.port.out.UnpostedRevaluations
 import com.openbank.treasury.infrastructure.persistence.repository.DealRepositoryImpl
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
@@ -29,7 +31,11 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** Composite key of [DealRevaluationEntity]: one revaluation per deal and valuation date. */
-data class DealRevaluationKey(var dealId: UUID? = null, var asOf: LocalDate? = null) : Serializable
+data class DealRevaluationKey(var dealId: UUID? = null, var asOf: LocalDate? = null) : Serializable {
+    private companion object {
+        private const val serialVersionUID: Long = 1L
+    }
+}
 
 @Entity
 @Table(name = "deal_revaluations")
@@ -106,10 +112,19 @@ class RevaluationRepositoryImpl(
         }.flatMap {
             rows.find("dealId = ?1 order by asOf desc", dealId).firstResult()
         }.flatMap { latest ->
+            val owed = latest != null && latest.idempotencyKey != null && latest.journalId == null
+            if (owed && latest!!.asOf != asOf) {
+                // Never measure a new date against a change the ledger has not taken.
+                throw PriorRevaluationUnpostedException(dealId, asOf, latest.asOf)
+            }
             if (latest != null && !latest.asOf.isBefore(asOf)) {
-                val replay = latest.asOf == asOf &&
-                    latest.snapshotId == snapshotId &&
-                    latest.fairValue.compareTo(fairValue) == 0
+                // An owed row is re-posted by its own stored change whatever the retry was valued at.
+                val replay = owed ||
+                    (
+                        latest.asOf == asOf &&
+                            latest.snapshotId == snapshotId &&
+                            latest.fairValue.compareTo(fairValue) == 0
+                        )
                 if (!replay) throw RevaluationOutOfOrderException(dealId, asOf, latest.asOf)
                 Uni.createFrom().item<RevaluationClaim>(RevaluationClaim.Existing(latest.toRecord()))
             } else {
@@ -130,6 +145,17 @@ class RevaluationRepositoryImpl(
             }
         }
     }.awaitSuspending()
+
+    override suspend fun owed(limit: Int): List<RevaluationRecord> = Panache.withSession {
+        rows.find("idempotencyKey is not null and journalId is null order by recordedAt").page(0, limit).list()
+    }.awaitSuspending().map { it.toRecord() }
+
+    override suspend fun unposted(): UnpostedRevaluations {
+        val owed = Panache.withSession {
+            rows.find("idempotencyKey is not null and journalId is null order by recordedAt").list()
+        }.awaitSuspending()
+        return UnpostedRevaluations(owed.size, owed.firstOrNull()?.recordedAt)
+    }
 
     override suspend fun attachJournal(dealId: UUID, asOf: LocalDate, journal: LedgerJournalRef) {
         Panache.withTransaction {
