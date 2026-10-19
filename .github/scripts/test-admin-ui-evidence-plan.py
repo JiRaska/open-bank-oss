@@ -70,12 +70,12 @@ class EvidencePolicyScopeTest(unittest.TestCase):
         cls.role = (REPO_ROOT / "openbank-infra/aws/envs/sandbox-platform/admin-ui-evidence.tf").read_text(encoding="utf-8")
         cls.bucket = (REPO_ROOT / "openbank-infra/aws/envs/sandbox-platform/test-evidence-store.tf").read_text(encoding="utf-8")
 
-    def test_role_policy_is_limited_to_the_four_named_datasets_and_exact_prefixes(self):
+    def test_role_policy_is_limited_to_the_five_named_datasets_and_exact_prefixes(self):
         locals_block = hcl_block(self.role, "locals")
         datasets = re.search(r"admin_ui_evidence_datasets\s*=\s*\[(.*?)\]", locals_block, re.DOTALL)
         self.assertIsNotNone(datasets)
         self.assertEqual(re.findall(r'"([a-z-]+)"', datasets.group(1)), [
-            "gate-health", "readiness", "test-intelligence", "security-kpis",
+            "gate-health", "readiness", "test-intelligence", "security-kpis", "content",
         ])
 
         policy = hcl_block(self.role, 'data "aws_iam_policy_document" "admin_ui_evidence"')

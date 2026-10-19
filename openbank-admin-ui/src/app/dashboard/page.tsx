@@ -17,6 +17,8 @@ import { fleetHealthState, summarizeFleetHealth } from '@/lib/dashboard/fleetHea
 import styles from './Dashboard.module.css'
 import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { FLEET_GROUPS, parseDashboardHealth, parseGovernanceFleet } from '@/lib/dashboard/clientContract'
 import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 
@@ -70,6 +72,7 @@ export default function DashboardPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [evidenceFailure, setEvidenceFailure] = useState<'governance' | 'health' | null>(null)
   const [discoveryIncomplete, setDiscoveryIncomplete] = useState(false)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const loadingRef = useRef(false)
 
   const load = useCallback(async () => {
@@ -86,7 +89,9 @@ export default function DashboardPage() {
 
     try {
       if (!govRes?.ok) throw new Error('governance')
-      const fleet = parseGovernanceFleet(await govRes.json())
+      const governancePayload = await govRes.json()
+      setContentSource(governancePayload.contentSource ?? null)
+      const fleet = parseGovernanceFleet(governancePayload)
       if (!res?.ok) throw new Error('health')
       const healthBody = await res.json() as { source?: string; discoveryStatus?: string }
       const inventoryComplete = healthBody.source !== 'kubernetes'
@@ -123,6 +128,9 @@ export default function DashboardPage() {
     } catch (error) {
       setStatuses([])
       setLastRefresh(null)
+      if (error instanceof Error && error.message === 'governance') {
+        setContentSource(previous => previous ? { ...previous, status: 'stale' } : null)
+      }
       setEvidenceFailure(error instanceof Error && error.message === 'governance' ? 'governance' : 'health')
     }
     setLoading(false)
@@ -194,6 +202,8 @@ export default function DashboardPage() {
           </div>
         }
       />
+
+      <ContentSourceNote source={contentSource} />
 
       <ExplorerGuide title={t('Vítejte ve svém operačním kokpitu', 'Welcome to your operations cockpit')}>
         {t(

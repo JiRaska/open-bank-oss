@@ -25,6 +25,8 @@ import type { BpmnProcess, BpmnStep } from '@/lib/docs/bpmn/schema'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { StatusBadge } from '@/components/ui'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 const LANE_BG: Record<string, string> = {
   compliance: '#fef2f2', core: '#eff6ff', psd2: '#fffbeb', payment: '#faf5ff',
@@ -312,7 +314,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
   )
 }
 
-export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
+export function BpmnView({ processes, contentSource }: { processes: BpmnProcess[]; contentSource?: ContentSourceMetadata }) {
   const { t } = useLanguage()
   const [active, setActive] = useState(processes[0]?.slug)
   const process = processes.find((p) => p.slug === active) ?? processes[0]
@@ -320,6 +322,7 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
 
   return (
     <div>
+      <ContentSourceNote source={contentSource} />
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>

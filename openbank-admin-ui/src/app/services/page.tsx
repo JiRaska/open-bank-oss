@@ -11,6 +11,8 @@ import { BookOpen, FileText, ArrowRight, AlertCircle, Package, Search } from 'lu
 import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buildRegistry, findInRegistry, type ServiceEntry } from '@/lib/services/registry'
 
@@ -98,6 +100,7 @@ export default function ServicesDocsOverviewPage() {
   const [candidates, setCandidates] = useState<Candidate[]>(STATIC_CANDIDATES as readonly Candidate[] as Candidate[])
   const [source, setSource] = useState<'kubernetes' | 'partial' | 'static' | 'unavailable'>('unavailable')
   const [catalogAvailable, setCatalogAvailable] = useState(false)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [liveInventoryEmpty, setLiveInventoryEmpty] = useState(false)
   const [statuses, setStatuses] = useState<Record<string, DocsStatus>>({})
   const [loading, setLoading] = useState(true)
@@ -124,7 +127,8 @@ export default function ServicesDocsOverviewPage() {
       try {
         const catalogResponse = await fetch('/api/catalog/services', { cache: 'no-store' })
         if (catalogResponse.ok) {
-          const catalog = await catalogResponse.json() as { available?: boolean; services?: CatalogModule[] }
+          const catalog = await catalogResponse.json() as { available?: boolean; services?: CatalogModule[]; contentSource?: ContentSourceMetadata }
+          if (mounted) setContentSource(catalog.contentSource ?? null)
           if (catalog.available === true && Array.isArray(catalog.services)) {
             const derived = buildRegistry(catalog.services)
             const catalogCandidates = catalog.services
@@ -244,6 +248,8 @@ export default function ServicesDocsOverviewPage() {
         title={t('Dokumentace služeb', 'Service Documentation')}
         subtitle={`${t('Per-service business + technical + compliance dokumentace.', 'Per-service business + technical + compliance documentation.')} ${t('Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).', 'Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).')}`}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       {/* Summary banner */}
       <div style={{

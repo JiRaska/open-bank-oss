@@ -8,6 +8,8 @@ import { Shield, Info, RefreshCw } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
@@ -29,6 +31,7 @@ type ControlSnapshot = {
   status: 'available' | 'unavailable'
   controls: ControlSummary[]
   posture: { source: string; collectedAt: string | null } | null
+  contentSource?: ContentSourceMetadata
 }
 
 // Only exact control references from the authoritative catalogue are linked.
@@ -194,6 +197,8 @@ export default function CompliancePage() {
         icon={<Shield aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
         actions={<PrintDocumentButton />}
       />
+
+      <ContentSourceNote source={snapshot?.contentSource} />
 
       {/* Scope summary: these editorial requirements are not assessed as legal compliance. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>

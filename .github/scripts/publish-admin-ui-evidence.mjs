@@ -5,6 +5,7 @@ import { publishEvidenceSnapshot } from './publish-admin-ui-snapshot.mjs'
 import { validateGateHealthSnapshotData } from '../../openbank-admin-ui/src/lib/evidence/gateHealthSnapshot.ts'
 import { isReadinessSnapshot } from '../../openbank-admin-ui/src/lib/evidence/readinessSnapshot.ts'
 import { validateTestIntelligenceSnapshot, testIntelligenceCollectedAt } from '../../openbank-admin-ui/src/lib/evidence/testIntelligenceSnapshot.ts'
+import { isAdminUiContentSnapshot, adminUiContentCollectedAt } from '../../openbank-admin-ui/src/lib/evidence/contentSnapshot.ts'
 
 import { validateSecurityKpiSnapshot, securityKpiCollectedAt } from '../../openbank-admin-ui/src/lib/security/kpiSnapshot.ts'
 
@@ -13,6 +14,7 @@ export const DATASETS = Object.freeze({
   readiness: { validateSnapshot: isReadinessSnapshot, collectedAt: value => value.collected_at, snapshotSourceSha: value => value.source_sha },
   'test-intelligence': { validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt },
   'security-kpis': { validateSnapshot: validateSecurityKpiSnapshot, collectedAt: securityKpiCollectedAt },
+  content: { validateSnapshot: isAdminUiContentSnapshot, collectedAt: adminUiContentCollectedAt, snapshotSourceSha: value => value.sourceSha },
 })
 
 export function publishDataset({ dataset, ...options }) {

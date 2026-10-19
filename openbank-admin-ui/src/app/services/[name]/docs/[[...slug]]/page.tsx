@@ -17,6 +17,7 @@ import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { DocsDiscoveryIncompleteError, loadDocsIndex, loadDocsDocument } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 interface PageProps {
   params: Promise<{ name: string; slug?: string[] }>
@@ -79,6 +80,8 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
 
   const items = index?.items ?? []
   const source = doc?.source ?? index?.source
+  const contentSource = doc?.contentSource ?? index?.contentSource
+  const publishedBundle = source === 'bundle' && contentSource?.source === 'published'
   const docLangs = doc?.availableLanguages ?? []
 
   return (
@@ -113,17 +116,21 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
           <div
             title={source === 'live'
               ? t('Živé načtení ze služby /q/openbank/docs', 'Live fetch from service /q/openbank/docs')
-              : t('Balíček zapečený do image (libs nemá spustitelnou službu)', 'Image-baked bundle (libs has no runnable service)')}
+              : publishedBundle
+                ? t('Publikovaný snímek zdrojové dokumentace', 'Published reviewed-source documentation snapshot')
+                : t('Balíček zapečený do image (libs nemá spustitelnou službu)', 'Image-baked bundle (libs has no runnable service)')}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '4px',
               fontSize: '10px', padding: '2px 6px', borderRadius: '8px',
-              background: source === 'live' ? 'var(--success-bg, #d1fae5)' : 'var(--surface-2)',
-              color: source === 'live' ? 'var(--success, #047857)' : 'var(--text-tertiary)',
+              background: source === 'live' || publishedBundle ? 'var(--success-bg, #d1fae5)' : 'var(--surface-2)',
+              color: source === 'live' || publishedBundle ? 'var(--success, #047857)' : 'var(--text-tertiary)',
               marginBottom: '12px',
             }}
           >
             {source === 'live' ? <Wifi size={10} /> : <HardDrive size={10} />}
-            {source === 'live'
+            {publishedBundle
+              ? `published · ${contentSource?.sourceSha?.slice(0, 12) ?? 'source SHA unavailable'}`
+              : source === 'live'
               ? `live · v${index?.version ?? '?'}${index?.gitCommit && index.gitCommit !== 'unknown' ? ` · ${index.gitCommit.slice(0, 12)}` : ''}`
               : `${t('snímek z buildu Admin UI', 'Admin UI build snapshot')}${index?.version ? ` · v${index.version}` : ''}${index?.gitCommit && index.gitCommit !== 'unknown' ? ` · ${index.gitCommit.slice(0, 12)}` : ''}`}
           </div>
@@ -247,6 +254,7 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
           </div>
         )}
 
+        {name === 'libs' ? <ContentSourceNote source={contentSource} /> : null}
         {discoveryIncomplete ? (
           <div role="status" style={{
             display: 'flex', alignItems: 'flex-start', gap: '10px',

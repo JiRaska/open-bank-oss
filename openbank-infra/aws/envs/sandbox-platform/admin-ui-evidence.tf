@@ -1,5 +1,5 @@
 locals {
-  admin_ui_evidence_datasets  = ["gate-health", "readiness", "test-intelligence", "security-kpis"]
+  admin_ui_evidence_datasets  = ["gate-health", "readiness", "test-intelligence", "security-kpis", "content"]
   admin_ui_evidence_selectors = [for dataset in local.admin_ui_evidence_datasets : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${dataset}/current.json"]
 }
 

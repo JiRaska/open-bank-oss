@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { parseBcpPolicy } from '@/lib/bcp/continuityModel'
+import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -56,9 +57,13 @@ export async function GET() {
     })
     cachedPolicy = entry
   }
-  const policy = await cachedPolicy.promise
+  const resolved = await resolveAdminUiContent(
+    snapshot => parseBcpPolicy(snapshot.content.bcpPolicyMarkdown),
+    () => cachedPolicy!.promise,
+  )
+  const policy = resolved.value
   return NextResponse.json(
-    policy ? { available: true, policy } : { available: false, policy: null },
+    policy ? { available: true, policy, contentSource: resolved.contentSource } : { available: false, policy: null, contentSource: resolved.contentSource },
     { status: policy ? 200 : 503, headers: { 'Cache-Control': 'no-store, max-age=0' } },
   )
 }

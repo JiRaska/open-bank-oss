@@ -65,7 +65,7 @@ describe('BCP policy runtime source', () => {
     const body = await response.json() as { available: boolean; policy: unknown }
 
     expect(response.status).toBe(503)
-    expect(body).toEqual({ available: false, policy: null })
+    expect(body).toMatchObject({ available: false, policy: null, contentSource: { source: 'unavailable', status: 'unavailable' } })
   })
 
   it('recovers after a missing-file read expires without restarting the route process', async () => {

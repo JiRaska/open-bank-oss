@@ -52,12 +52,22 @@ describe('compliance catalogue derived evidence', () => {
     expect(catalog?.posture).toEqual({ source: 'fixture source', collectedAt: '2026-10-19T06:35:32.599Z' })
   })
 
-  it('uses boolean derived observations without conflating them with authored status', async () => {
+  it('keeps a source-manifest false input separate from operational status', async () => {
     await prepare({ schema: 'openbank.security-posture/v1', source: 'fixture source', network: {}, collectedAt: '2026-10-19T06:35:32.599Z', supplyChain: { enforced: false } })
     const catalog = await loadComplianceCatalog()
 
     expect(catalog?.controls[0]).toMatchObject({
-      status: 'planned', declaredStatus: 'enforced', signalState: 'false', live: true,
+      status: 'unknown', declaredStatus: 'enforced', signalState: 'false', live: false,
+    })
+    expect(catalog?.coverage.TEST).toEqual({ enforced: 0, total: 1 })
+  })
+
+  it('does not promote a positive source-manifest input to operational enforcement', async () => {
+    await prepare({ schema: 'openbank.security-posture/v1', source: 'fixture source', network: {}, collectedAt: '2026-10-19T06:35:32.599Z', supplyChain: { enforced: true } })
+    const catalog = await loadComplianceCatalog()
+
+    expect(catalog?.controls[0]).toMatchObject({
+      status: 'unknown', declaredStatus: 'enforced', signalState: 'true', live: false,
     })
     expect(catalog?.coverage.TEST).toEqual({ enforced: 0, total: 1 })
   })

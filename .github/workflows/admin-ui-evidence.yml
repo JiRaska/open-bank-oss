@@ -15,7 +15,7 @@ on:
       dataset:
         description: "Dataset to refresh (all runs each independent publisher)"
         type: choice
-        options: [all, gate-health, readiness, test-intelligence, security-kpis]
+        options: [all, gate-health, readiness, test-intelligence, security-kpis, content]
         required: true
         default: all
       rollback_snapshot:
@@ -77,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dataset: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Security KPI snapshot' && fromJSON('["security-kpis"]') || github.event_name == 'workflow_run' && fromJSON('["gate-health","readiness","test-intelligence"]') || github.event_name == 'workflow_dispatch' && inputs.dataset != 'all' && fromJSON(format('["{0}"]', inputs.dataset)) || github.event_name == 'workflow_dispatch' && fromJSON('["gate-health","readiness","test-intelligence","security-kpis"]') || fromJSON('["gate-health","readiness","test-intelligence","security-kpis"]') }}
+        dataset: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Security KPI snapshot' && fromJSON('["security-kpis"]') || github.event_name == 'workflow_run' && fromJSON('["gate-health","readiness","test-intelligence","content"]') || github.event_name == 'workflow_dispatch' && inputs.dataset != 'all' && fromJSON(format('["{0}"]', inputs.dataset)) || github.event_name == 'workflow_dispatch' && fromJSON('["gate-health","readiness","test-intelligence","security-kpis","content"]') || fromJSON('["gate-health","readiness","test-intelligence","security-kpis","content"]') }}
     # Each dataset has an independent current pointer. Serialize only writers for
     # the same pointer; never cancel an in-flight immutable snapshot/pointer update.
     concurrency:
@@ -109,10 +109,13 @@ jobs:
             echo '::error::Configure ADMIN_UI_EVIDENCE_BUCKET, ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN and ADMIN_UI_EVIDENCE_REGION after reviewed infrastructure provisioning.'
             exit 1
           }
-      - name: Install locked Test Intelligence collector dependencies
-        if: matrix.dataset == 'test-intelligence'
+      - name: Install locked source collector dependencies
+        if: matrix.dataset == 'test-intelligence' || matrix.dataset == 'content'
         run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
         working-directory: openbank-admin-ui
+      - name: Test the closed evidence dataset registry
+        if: matrix.dataset == 'content'
+        run: node --test .github/scripts/test-publish-admin-ui-evidence.mjs openbank-admin-ui/scripts/collect-admin-ui-content.test.mjs
       - name: Collect selected dataset
         if: env.ROLLBACK_SNAPSHOT == ''
         env:
@@ -139,6 +142,12 @@ jobs:
                 --metadata-out "$RUNNER_TEMP/security-kpis-provenance.json"
               jq -r '"EVIDENCE_SOURCE_SHA=" + .sourceSha' "$RUNNER_TEMP/security-kpis-provenance.json" >> "$GITHUB_ENV"
               echo "EVIDENCE_FILE=$RUNNER_TEMP/security-kpis.json" >> "$GITHUB_ENV"
+              ;;
+            content)
+              node openbank-admin-ui/scripts/collect-admin-ui-content.mjs \
+                --source-sha "$EVIDENCE_SOURCE_SHA" \
+                --out "$RUNNER_TEMP/admin-ui-content.json"
+              echo "EVIDENCE_FILE=$RUNNER_TEMP/admin-ui-content.json" >> "$GITHUB_ENV"
               ;;
             *)
               echo "::error::Unsupported evidence dataset: $DATASET"

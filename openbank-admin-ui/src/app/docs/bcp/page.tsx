@@ -10,6 +10,8 @@ import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import {
   bcpCatalogCoverageIsComplete,
   buildBcpRoster,
@@ -59,6 +61,7 @@ export default function BcpPage() {
   const [infraAssets, setInfraAssets] = useState<{ id: string; label: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [expandedTiers, setExpandedTiers] = useState<Set<number>>(new Set([0, 1, 2]))
   const refreshGeneration = useRef(0)
   const refreshController = useRef<AbortController | null>(null)
@@ -119,6 +122,10 @@ export default function BcpPage() {
       const hasGraph = graph?.available === true
         && Array.isArray(graph.edges) && Array.isArray(graph.infraEdges) && Array.isArray(graph.infraNodes)
       if (generation === refreshGeneration.current) {
+        const source = [catalogRes, graphRes, policyRes]
+          .find((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled' && Boolean(result.value?.contentSource))
+          ?.value.contentSource as ContentSourceMetadata | undefined
+        setContentSource(source ?? null)
         setCatalogAvailable(hasCatalog)
         setPolicyAvailable(bcpPolicy !== null)
         setPolicy(bcpPolicy)
@@ -292,6 +299,8 @@ export default function BcpPage() {
           </button>
         </div>}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       {/* Summary stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>

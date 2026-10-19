@@ -13,6 +13,7 @@ import { cookies } from 'next/headers'
 import { ChevronLeft, ShieldCheck, Radio, FileText } from 'lucide-react'
 import { loadComplianceCatalog, type ControlStatus, type ComplianceControl } from '@/lib/governance/compliance'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,6 +98,8 @@ export default async function ControlTowerPage() {
         </Link>}
       />
 
+      <ContentSourceNote source={catalog.contentSource} />
+
       <p style={{ margin: '-12px 0 20px', color: 'var(--text-tertiary)', fontSize: '11px' }}>
         {catalog.posture?.collectedAt
           ? t(`Odvozené signály pocházejí ze snímku manifestů pořízeného ${catalog.posture.collectedAt}; nejde o živou kontrolu clusteru.`, `Derived signals come from a manifest snapshot collected ${catalog.posture.collectedAt}; this is not a live cluster check.`)
@@ -140,10 +143,10 @@ export default async function ControlTowerPage() {
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '6px' }}>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{c.title}</span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                          {c.live && (
-                        <span title={t('Stav odvozen z buildového snímku manifestů', 'Status derived from a build-time manifest snapshot')}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700, color: 'var(--success-text)' }}>
-                          <Radio size={10} /> SNAPSHOT
+                          {c.signalState && c.signalState !== 'unknown' && (
+                        <span title={t('Vstupní signál ze zdrojového manifestu; nepotvrzuje běžící cluster', 'Source-manifest input; does not verify the running cluster')}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', fontWeight: 700, color: 'var(--info-text)' }}>
+                          <Radio size={10} /> MANIFEST
                         </span>
                       )}
                       <span style={{
@@ -163,7 +166,7 @@ export default async function ControlTowerPage() {
                     )}
                   </div>
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '7px' }}>
-                    {t(`Deklarovaný stav: ${c.declaredStatus}; zobrazený stav: ${c.status}${c.derivedFrom && c.signalState === 'unknown' ? ' (signál chybí)' : ''}`, `Declared status: ${c.declaredStatus}; displayed status: ${c.status}${c.derivedFrom && c.signalState === 'unknown' ? ' (signal missing)' : ''}`)}
+                    {t(`Deklarovaný stav: ${c.declaredStatus}; provozní stav: neověřen`, `Declared status: ${c.declaredStatus}; operational status: unverified`)}
                     {c.derivedFrom ? ` · ${c.derivedFrom}` : ''}
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>

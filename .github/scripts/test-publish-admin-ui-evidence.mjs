@@ -5,7 +5,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { DATASETS, parseArgs, publishDataset } from './publish-admin-ui-evidence.mjs'
+import { collectAdminUiContent } from '../../openbank-admin-ui/scripts/collect-admin-ui-content.mjs'
 
 const sha = 'b'.repeat(40)
 const collectedAt = '2026-10-19T10:00:00.000Z'
@@ -25,7 +27,7 @@ const security = { generatedAt: '2026-10-16T10:00:00.000Z', ...Object.fromEntrie
   ['netpol', 'freshness', 'credentials', 'fuzz', 'threatModels', 'mttr'].map(key => [key, { available: false, reason: 'unavailable' }]),
 ) }
 
-function harness(body) {
+function harness(body, publishEnv = env) {
   const directory = mkdtempSync(join(tmpdir(), 'admin-evidence-dataset-test-'))
   const file = join(directory, 'input.json')
   writeFileSync(file, JSON.stringify(body))
@@ -38,13 +40,33 @@ function harness(body) {
     puts.push({ key: value('--key'), conditional: value('--if-none-match'), body: JSON.parse(readFileSync(value('--body'), 'utf8')) })
     return '{}'
   }
-  return { puts, publish: (dataset, overrides = {}) => publishDataset({ dataset, file, bucket: 'fixture-evidence', env, now, execFileSync, ...overrides }), cleanup: () => rmSync(directory, { recursive: true, force: true }) }
+  return { puts, publish: (dataset, overrides = {}) => publishDataset({ dataset, file, bucket: 'fixture-evidence', env: publishEnv, now, execFileSync, ...overrides }), cleanup: () => rmSync(directory, { recursive: true, force: true }) }
 }
 
 test('closed dataset registry rejects arbitrary path and duplicate CLI dataset', () => {
-  assert.deepEqual(Object.keys(DATASETS).sort(), ['gate-health', 'readiness', 'security-kpis', 'test-intelligence'])
+  assert.deepEqual(Object.keys(DATASETS).sort(), ['content', 'gate-health', 'readiness', 'security-kpis', 'test-intelligence'])
   assert.throws(() => parseArgs(['--dataset', '../other']), /supported/)
   assert.throws(() => parseArgs(['--dataset', 'readiness', '--dataset', 'security-kpis']), /duplicate/)
+})
+
+test('content dataset is bound to its reviewed-source collection time and SHA fields', () => {
+  assert.equal(DATASETS.content.collectedAt({ collectedAt }), collectedAt)
+  assert.equal(DATASETS.content.snapshotSourceSha({ sourceSha: sha }), sha)
+})
+
+test('content publication uses only the admin-ui/content prefix and preserves source provenance', () => {
+  const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  const snapshot = JSON.parse(collectAdminUiContent({ sourceSha }).toString('utf8'))
+  const h = harness(snapshot, { ...env, EVIDENCE_SOURCE_SHA: sourceSha })
+  try {
+    h.publish('content', { now: () => Date.now() + 1_000 })
+    assert.equal(h.puts.length, 2)
+    assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\/123-1-[a-f0-9]{64}\.json$/)
+    assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
+    assert.equal(h.puts[1].body.collectedAt, snapshot.collectedAt)
+    assert.equal(h.puts[1].body.sourceSha, sourceSha)
+    assert.ok(h.puts.every(put => put.conditional === '*'))
+  } finally { h.cleanup() }
 })
 
 for (const [dataset, body, timestamp] of [['readiness', readiness, collectedAt], ['security-kpis', security, security.generatedAt]]) {

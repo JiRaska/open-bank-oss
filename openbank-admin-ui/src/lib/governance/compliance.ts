@@ -17,6 +17,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { parse as parseYaml } from 'yaml'
 import { loadSecurityPosture, type SecurityPosture } from './security'
+import { resolveAdminUiContent, type ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 export type ControlStatus = 'enforced' | 'partial' | 'audit' | 'planned' | 'unknown'
 
@@ -37,9 +38,9 @@ export interface ComplianceControl {
   declaredStatus: ControlStatus
   status: ControlStatus
   derivedFrom?: string
-  /** The derived signal state. `unknown` means no valid signal was available. */
+  /** The build-time manifest signal. It is not proof of deployed runtime enforcement. */
   signalState?: 'true' | 'false' | 'unknown'
-  /** True only when a boolean derived signal was present. */
+  /** Retained for API compatibility; manifest snapshots are never marked live. */
   live?: boolean
 }
 
@@ -49,6 +50,7 @@ export interface ComplianceCatalog {
   /** Per-framework coverage: enforced vs total controls touching that framework. */
   coverage: Record<string, { enforced: number; total: number }>
   posture: { source: string; collectedAt: string | null } | null
+  contentSource?: ContentSourceMetadata
 }
 
 function catalogFile(): string {
@@ -77,35 +79,29 @@ function signalValue(posture: SecurityPosture | null, dotted: string): boolean |
 }
 
 export async function loadComplianceCatalog(): Promise<ComplianceCatalog | null> {
-  let raw: string
-  try {
-    raw = await fs.readFile(catalogFile(), 'utf-8')
-  } catch {
-    return null
-  }
-
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.complianceControlsYaml,
+    async () => {
+      try { return await fs.readFile(catalogFile(), 'utf-8') } catch { return null }
+    },
+  )
+  if (!resolved.value) return null
   let parsed: { frameworks?: Framework[]; controls?: ComplianceControl[] }
-  try {
-    parsed = parseYaml(raw) as typeof parsed
-  } catch {
-    return null
-  }
+  try { parsed = parseYaml(resolved.value) as typeof parsed } catch { return null }
 
   const frameworks = parsed.frameworks ?? []
   const authored = parsed.controls ?? []
 
-  // Join live status from the derived security posture where declared.
-  // Symmetric: a true signal promotes to `enforced`; a false signal demotes
-  // an authored `enforced` back down (the live signal disproved the claim),
-  // but leaves an already-honest partial/audit/planned status untouched.
+  // Keep build-time manifest inputs separate from operational status. The
+  // security graph is derived from source manifests, not a live cluster probe,
+  // so its booleans may be shown as snapshot observations but never promote an
+  // authored claim to an operational `enforced` result.
   const posture = await loadSecurityPosture()
   const controls: ComplianceControl[] = authored.map(c => {
     const declaredStatus = c.declaredStatus ?? c.status
-    if (!c.derivedFrom) return { ...c, declaredStatus }
-    const signal = signalValue(posture, c.derivedFrom)
-    if (signal === undefined) return { ...c, declaredStatus, status: 'unknown', signalState: 'unknown', live: false }
-    if (signal) return { ...c, declaredStatus, status: 'enforced', signalState: 'true', live: true }
-    return { ...c, declaredStatus, status: declaredStatus === 'enforced' ? 'planned' : declaredStatus, signalState: 'false', live: true }
+    const signal = c.derivedFrom && posture ? signalValue(posture, c.derivedFrom) : undefined
+    const signalState = signal === undefined ? 'unknown' : signal ? 'true' : 'false'
+    return { ...c, declaredStatus, status: 'unknown', signalState, live: false }
   })
 
   // Per-framework coverage roll-up.
@@ -124,5 +120,6 @@ export async function loadComplianceCatalog(): Promise<ComplianceCatalog | null>
     controls,
     coverage,
     posture: posture ? { source: posture.source, collectedAt: posture.collectedAt } : null,
+    contentSource: resolved.contentSource,
   }
 }
