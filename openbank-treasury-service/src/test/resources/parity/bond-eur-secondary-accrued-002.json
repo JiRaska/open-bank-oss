@@ -1,0 +1,148 @@
+{
+  "id": "bond-eur-secondary-accrued-002",
+  "product": "BOND",
+  "source": "independent-oracle",
+  "sourceNote": "Secondary purchase mid-coupon: accrued = N * c * ACT/ACT ISDA(last coupon, value date); only flows after the value date are kept. ACT/ACT ISDA (not ICMA) is chosen deliberately, so coupons across 2028 are uneven; ACT/ACT ICMA is outside the oracle's scope.",
+  "deal": {
+    "product": "BOND",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-18",
+    "currency": "EUR",
+    "calendars": [
+      "TARGET2"
+    ],
+    "businessDayConvention": "FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "EUR",
+        "notional": "2000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2025-06-15",
+        "accrualEnd": "2029-06-15",
+        "accrualFrequency": "12M",
+        "paymentFrequency": "12M",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/ACT_ISDA",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.2500"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      }
+    ],
+    "securityIsin": "TEST0000BD02",
+    "nominal": "2000000.00",
+    "cleanPrice": "101.2500",
+    "valueDate": "2026-11-20"
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "accruedInterest": "28136.99",
+    "flows": [
+      {
+        "legIndex": null,
+        "periodIndex": null,
+        "kind": "PRINCIPAL",
+        "direction": "OUT",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-20",
+        "notional": "2000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "2025000.00"
+      },
+      {
+        "legIndex": null,
+        "periodIndex": null,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-20",
+        "notional": "2000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "28136.99"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2026-06-15",
+        "accrualEnd": "2027-06-15",
+        "fixingDate": null,
+        "paymentDate": "2027-06-15",
+        "notional": "2000000.00",
+        "rate": "3.2500",
+        "rateSource": "FIXED",
+        "amount": "65000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2027-06-15",
+        "accrualEnd": "2028-06-15",
+        "fixingDate": null,
+        "paymentDate": "2028-06-15",
+        "notional": "2000000.00",
+        "rate": "3.2500",
+        "rateSource": "FIXED",
+        "amount": "65097.31"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2028-06-15",
+        "accrualEnd": "2029-06-15",
+        "fixingDate": null,
+        "paymentDate": "2029-06-15",
+        "notional": "2000000.00",
+        "rate": "3.2500",
+        "rateSource": "FIXED",
+        "amount": "64902.69"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2029-06-15",
+        "notional": "2000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "2000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

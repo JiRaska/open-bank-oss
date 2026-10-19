@@ -1,0 +1,44 @@
+{
+  "id": "cash-czk-in-001",
+  "product": "CASH",
+  "source": "independent-oracle",
+  "sourceNote": "Incoming CZK cash on a business day; no roll.",
+  "deal": {
+    "product": "CASH",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-02",
+    "currency": "CZK",
+    "amount": "2500000.00",
+    "direction": "IN",
+    "valueDate": "2026-11-02",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "FOLLOWING"
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-02",
+        "notional": "2500000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "2500000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "id": "fx-spot-eurczk-001",
+  "product": "FX_SPOT",
+  "source": "independent-oracle",
+  "sourceNote": "EUR/CZK spot T+2 on the joint TARGET2+CERTIS calendar; CZK amount rounded HALF_UP to 2 dp.",
+  "deal": {
+    "product": "FX_SPOT",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-02",
+    "currencyPair": "EUR/CZK",
+    "side": "BUY",
+    "baseAmount": "1000000.00",
+    "spotRate": "24.3850",
+    "calendars": [
+      "TARGET2",
+      "CERTIS"
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "spotDate": "2026-11-04",
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-04",
+        "notional": "1000000.00",
+        "rate": "24.3850",
+        "rateSource": "FIXED",
+        "amount": "1000000.00"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-04",
+        "notional": "24385000.00",
+        "rate": "24.3850",
+        "rateSource": "FIXED",
+        "amount": "24385000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "id": "cash-czk-out-holiday-002",
+  "product": "CASH",
+  "source": "independent-oracle",
+  "sourceNote": "Value date 2026-11-17 is a CZ holiday (Tuesday); FOLLOWING rolls to 2026-11-18.",
+  "deal": {
+    "product": "CASH",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-16",
+    "currency": "CZK",
+    "amount": "1000000.00",
+    "direction": "OUT",
+    "valueDate": "2026-11-17",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "FOLLOWING"
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-18",
+        "notional": "1000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "1000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

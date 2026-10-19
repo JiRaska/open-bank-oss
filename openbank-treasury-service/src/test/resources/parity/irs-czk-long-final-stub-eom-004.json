@@ -1,0 +1,222 @@
+{
+  "id": "irs-czk-long-final-stub-eom-004",
+  "product": "IRS",
+  "source": "independent-oracle",
+  "sourceNote": "Forward generation from a month-end start with the end-of-month rule and a LONG final stub (the short remainder merges into the last period); 30E/360 fixed semi-annual vs PRIBOR 6M.",
+  "deal": {
+    "product": "IRS",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-08-27",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "20000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-08-31",
+        "accrualEnd": "2028-10-15",
+        "accrualFrequency": "6M",
+        "paymentFrequency": "6M",
+        "stub": "LONG_FINAL",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "30E/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.6000"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": false,
+        "endOfMonth": true
+      },
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "20000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-08-31",
+        "accrualEnd": "2028-10-15",
+        "accrualFrequency": "6M",
+        "paymentFrequency": "6M",
+        "stub": "LONG_FINAL",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FLOATING",
+          "index": "PRIBOR_6M",
+          "spread": "0",
+          "fixingLagBusinessDays": 2,
+          "resetFrequency": "6M",
+          "cap": null,
+          "floor": null,
+          "capFloorAppliesTo": "INDEX",
+          "rateUntilFirstFixing": null
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": false,
+        "endOfMonth": true
+      }
+    ]
+  },
+  "fixings": [
+    {
+      "index": "PRIBOR_6M",
+      "date": "2026-08-27",
+      "rate": "3.6300"
+    }
+  ],
+  "referenceData": {
+    "indices": {
+      "PRIBOR_6M": {
+        "currency": "CZK",
+        "tenor": "6M",
+        "dayCount": "ACT/360",
+        "fixingCalendar": "CERTIS",
+        "fixingLagBusinessDays": 2
+      }
+    }
+  },
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2026-08-31",
+        "accrualEnd": "2027-02-28",
+        "fixingDate": null,
+        "paymentDate": "2027-02-26",
+        "notional": "20000000.00",
+        "rate": "3.6000",
+        "rateSource": "FIXED",
+        "amount": "356000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2027-02-28",
+        "accrualEnd": "2027-08-31",
+        "fixingDate": null,
+        "paymentDate": "2027-08-31",
+        "notional": "20000000.00",
+        "rate": "3.6000",
+        "rateSource": "FIXED",
+        "amount": "364000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2027-08-31",
+        "accrualEnd": "2028-02-29",
+        "fixingDate": null,
+        "paymentDate": "2028-02-29",
+        "notional": "20000000.00",
+        "rate": "3.6000",
+        "rateSource": "FIXED",
+        "amount": "358000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2028-02-29",
+        "accrualEnd": "2028-10-15",
+        "fixingDate": null,
+        "paymentDate": "2028-10-16",
+        "notional": "20000000.00",
+        "rate": "3.6000",
+        "rateSource": "FIXED",
+        "amount": "452000.00"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-08-31",
+        "accrualEnd": "2027-02-28",
+        "fixingDate": "2026-08-27",
+        "paymentDate": "2027-02-26",
+        "notional": "20000000.00",
+        "rate": "3.6300",
+        "rateSource": "OBSERVED",
+        "amount": "365016.67"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-02-28",
+        "accrualEnd": "2027-08-31",
+        "fixingDate": "2027-02-24",
+        "paymentDate": "2027-08-31",
+        "notional": "20000000.00",
+        "rate": null,
+        "rateSource": "MISSING",
+        "amount": null
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-08-31",
+        "accrualEnd": "2028-02-29",
+        "fixingDate": "2027-08-27",
+        "paymentDate": "2028-02-29",
+        "notional": "20000000.00",
+        "rate": null,
+        "rateSource": "MISSING",
+        "amount": null
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 3,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2028-02-29",
+        "accrualEnd": "2028-10-15",
+        "fixingDate": "2028-02-25",
+        "paymentDate": "2028-10-16",
+        "notional": "20000000.00",
+        "rate": null,
+        "rateSource": "MISSING",
+        "amount": null
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

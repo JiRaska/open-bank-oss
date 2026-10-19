@@ -1,0 +1,148 @@
+{
+  "id": "bond-czk-short-first-coupon-001",
+  "product": "BOND",
+  "source": "independent-oracle",
+  "sourceNote": "Annual 30E/360 bond generated BACKWARD from maturity with a short first coupon (2026-11-16 -> 2027-03-15); bought at issue, so no accrued interest; coupon payments adjusted F on CERTIS.",
+  "deal": {
+    "product": "BOND",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-12",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "10000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-16",
+        "accrualEnd": "2030-03-15",
+        "accrualFrequency": "12M",
+        "paymentFrequency": "12M",
+        "stub": "SHORT_INITIAL",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "30E/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "4.0000"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      }
+    ],
+    "securityIsin": "TEST0000BD01",
+    "nominal": "10000000.00",
+    "cleanPrice": "99.8500",
+    "valueDate": "2026-11-16"
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "accruedInterest": "0.00",
+    "flows": [
+      {
+        "legIndex": null,
+        "periodIndex": null,
+        "kind": "PRINCIPAL",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-16",
+        "notional": "10000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "9985000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-11-16",
+        "accrualEnd": "2027-03-15",
+        "fixingDate": null,
+        "paymentDate": "2027-03-15",
+        "notional": "10000000.00",
+        "rate": "4.0000",
+        "rateSource": "FIXED",
+        "amount": "132222.22"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-03-15",
+        "accrualEnd": "2028-03-15",
+        "fixingDate": null,
+        "paymentDate": "2028-03-15",
+        "notional": "10000000.00",
+        "rate": "4.0000",
+        "rateSource": "FIXED",
+        "amount": "400000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2028-03-15",
+        "accrualEnd": "2029-03-15",
+        "fixingDate": null,
+        "paymentDate": "2029-03-15",
+        "notional": "10000000.00",
+        "rate": "4.0000",
+        "rateSource": "FIXED",
+        "amount": "400000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2029-03-15",
+        "accrualEnd": "2030-03-15",
+        "fixingDate": null,
+        "paymentDate": "2030-03-15",
+        "notional": "10000000.00",
+        "rate": "4.0000",
+        "rateSource": "FIXED",
+        "amount": "400000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2030-03-15",
+        "notional": "10000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "10000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

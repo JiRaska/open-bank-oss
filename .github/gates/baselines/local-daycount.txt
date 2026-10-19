@@ -1,0 +1,16 @@
+# Shrink-only baseline for check-no-local-daycount-or-calendar.py (ADR-0344 D1, #11670).
+# One line per <path>|<kind>|<symbol>. Never add a line; delete one when its offender is migrated
+# to openbank-libs-domain / openbank-libs-finance (a line matching nothing fails as STALE).
+openbank-interest-service/src/main/kotlin/com/openbank/interest/domain/model/InterestModels.kt|daycount-type|DayCount  # #11670
+openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/Settlement.kt|year-basis|DAYS_IN_YEAR  # #11670
+openbank-pension-fund-service/src/main/kotlin/com/openbank/pensionfund/domain/model/Precision.kt|year-basis|DAY_COUNT_BASIS  # #11670
+openbank-risk-engine/src/main/kotlin/com/openbank/risk/domain/cashflow/NonMaturityDepositCashFlows.kt|next-bd-fn|nextBusinessDay  # #11670
+openbank-risk-engine/src/main/kotlin/com/openbank/risk/domain/curve/Curve.kt|year-basis|DAYS_PER_YEAR  # #11670
+openbank-risk-engine/src/main/kotlin/com/openbank/risk/domain/model/TreasuryDeals.kt|year-basis|DAYS_IN_YEAR  # #11670
+openbank-simulation/src/main/kotlin/com/openbank/simulation/scenario/InterestAccrualScenario.kt|year-basis|DAYS_PER_YEAR  # #11670
+openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt|daycount-type|DayCount  # #11670
+openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt|next-bd-fn|nextBusinessDay  # #11670
+openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt|weekend-fn|isWeekend  # #11670
+openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt|year-basis|DAYS_IN_YEAR_ACT360  # #11670
+openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Quote.kt|year-basis|DAYS_ACT360  # #11670
+openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Quote.kt|year-basis|DAYS_ACT365  # #11670
