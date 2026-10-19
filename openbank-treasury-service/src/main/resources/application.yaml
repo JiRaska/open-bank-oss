@@ -149,6 +149,13 @@ openbank:
     # treasury_outbox: no error, attempt_count stays 0, the audit trail stays empty.
     dispatch-enabled: true
   treasury:
+    ledger:
+      # ADR-0341 D3 rollout switch. false (default): journal legs carry the explicit glAccountId an
+      # older ledger understands, so deploying treasury BEFORE the ledger that serves accounting
+      # classes cannot fail a posting. true: legs name an accountingClass and the ledger resolves the
+      # account. Flip to true only after the ledger carrying migration V32 is live; then delete the
+      # LegacyGlChart shim. A reversal always names the original posting's account either way.
+      post-by-class: ${OPENBANK_TREASURY_LEDGER_POST_BY_CLASS:false}
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
       # simulated market confirms every BOOKED deal first, so the sandbox lifecycle is unchanged.
