@@ -7,6 +7,7 @@
 -- New funds always carry a revision; management_fee_rate for them is the cached derivation of it.
 -- Purely additive: older binaries neither read nor write the column.
 --
--- Rollback: ALTER TABLE funds DROP COLUMN product_revision_id;
--- Dropping it loses which revision priced each fund; management_fee_rate stays correct as cached.
+-- Rollback: roll back the application while retaining product_revision_id and its persisted provenance.
+-- Do not drop the column: it records which revision priced each fund, alongside the cached rate.
+-- Schema removal requires a separate reviewed preservation plan; application rollback is not data deletion.
 ALTER TABLE funds ADD COLUMN product_revision_id UUID;
