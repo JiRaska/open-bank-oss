@@ -299,17 +299,29 @@ class CorrectionApiIT {
 
     @Test
     @Order(14)
+    @TestSecurity(user = "rory.race", roles = ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"])
     fun `14 - a correction racing a release of a payment on the CHANGED flow - exactly one wins, typed 409`() {
-        // The new receive-leg coupon gets a fresh PROPOSED payment; a correction of that leg races its release.
+        // Its own IRS, so the race is on an OUTGOING coupon nobody released yet: the pay leg's first
+        // coupon is PROPOSED, and a correction of the pay rate changes exactly that flow.
+        val race: String = post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","calendars":["CERTIS"],
+               "tradeDate":"${tomorrow.minusMonths(3).minusDays(2)}","businessDayConvention":"UNADJUSTED",
+               "legs":${legs("4.0", "3.0")}}""",
+        ).then().statusCode(201).extract().path("dealId")
+        post("/deals/$race/submit").then().statusCode(200)
+        jdbc { it.prepareStatement("update deals set state = 'CONFIRMED' where deal_id = '$race'").executeUpdate() }
+        post("/deals/$race/settle").then().statusCode(200)
         onContext { payments.propose(today) }
-        val p = paymentOf(flow(1))
+        val p = paymentOf(flowOf(race, 0))
+        assertThat(status(p)).isEqualTo("PROPOSED")
         val bert = Actor("bert.backoffice", ActorType.HUMAN)
         val raise = onContext {
             corrections.propose(
-                UUID.fromString(deal),
+                UUID.fromString(race),
                 com.openbank.treasury.domain.model.CorrectionTerms(
-                    legs = deals.get(UUID.fromString(deal)).deal.legs.mapIndexed { i, l ->
-                        if (i == 1) l.copy(rate = l.rate.copy(rate = BigDecimal("3.75"))) else l
+                    legs = deals.get(UUID.fromString(race)).deal.legs.mapIndexed { i, l ->
+                        if (i == 0) l.copy(rate = l.rate.copy(rate = BigDecimal("4.25"))) else l
                     },
                 ),
                 false,
@@ -326,7 +338,7 @@ class CorrectionApiIT {
             runCatching {
                 onContext {
                     corrections.approve(
-                        UUID.fromString(deal),
+                        UUID.fromString(race),
                         raise.correctionId,
                         Actor("olga.approver", ActorType.HUMAN),
                         UUID.randomUUID().toString(),
@@ -345,17 +357,16 @@ class CorrectionApiIT {
         println(
             "CORRECTION-RACE approve=${a.isSuccess} release=${r.isSuccess} ${r.exceptionOrNull()} ${a.exceptionOrNull()}",
         )
-        // An incoming payment may not be releasable at all; then only the correction can win.
-        if (r.isFailure && r.exceptionOrNull() !is PaymentStaleException) {
-            assertThat(a.isSuccess).isTrue()
-            return
-        }
-        assertThat(listOf(a, r).count { it.isSuccess }).isEqualTo(1)
+        // No early exit: the payment is outgoing and PROPOSED, so both sides could win alone, and
+        // exactly one must win, the other with its typed refusal.
+        assertThat(listOf(a, r).count { it.isSuccess }).describedAs("exactly one of approve/release wins").isEqualTo(1)
         if (a.isSuccess) {
             assertThat(r.exceptionOrNull()).isInstanceOf(PaymentStaleException::class.java)
             assertThat(status(p)).isEqualTo("CANCELLED")
         } else {
             assertThat(a.exceptionOrNull()).isInstanceOf(CorrectionBlockedByPaymentException::class.java)
+            // Released to the rail (the async release may already have moved it on): never cancelled.
+            assertThat(status(p)).isNotIn("PROPOSED", "CANCELLED")
             assertThat(
                 count(
                     "select count(*) from deal_corrections where correction_id = '${raise.correctionId}' and status = 'PENDING'",
@@ -447,11 +458,13 @@ class CorrectionApiIT {
         assertThat(scheduleVersion()).isEqualTo(current)
     }
 
-    private fun flow(leg: Int): String = jdbc { c ->
+    private fun flow(leg: Int): String = flowOf(deal, leg)
+
+    private fun flowOf(dealId: String, leg: Int): String = jdbc { c ->
         c.prepareStatement(
             "select f.flow_id from deal_cash_flows f join deals d on d.deal_id = f.deal_id " +
                 "and d.schedule_version = f.schedule_version " +
-                "where f.deal_id = '$deal' and f.leg_index = $leg and f.period_index = 0 and f.kind = 'INTEREST'",
+                "where f.deal_id = '$dealId' and f.leg_index = $leg and f.period_index = 0 and f.kind = 'INTEREST'",
         ).executeQuery().use { rs ->
             rs.next()
             rs.getString(1)

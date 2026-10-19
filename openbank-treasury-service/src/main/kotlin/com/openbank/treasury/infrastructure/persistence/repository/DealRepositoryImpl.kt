@@ -178,15 +178,11 @@ class DealRepositoryImpl(
         schedule: ScheduleWrite?,
         extraEvents: List<DealEvent>,
         withdrawPayments: Boolean,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         Panache.withTransaction {
-            val row = if (withdrawPayments) {
-                find("dealId", deal.id).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
-                    .flatMap { locked -> withdraw(deal.id).map { locked } }
-            } else {
-                find("dealId", deal.id).firstResult()
-            }
+            val row = lockedRow(deal.id, withdrawPayments, limitGuard)
             row.flatMap { existing ->
                 val entity = existing ?: DealEntity().apply {
                     dealId = deal.id
@@ -219,6 +215,29 @@ class DealRepositoryImpl(
             }
         }.awaitSuspending()
         return deal
+    }
+
+    /**
+     * The deal row, locked when the change withdraws payments or consumes a limit line. Lock order
+     * everywhere: the deal row, then the limit line (as [commitCorrection] does), so two writes on
+     * one line never deadlock.
+     */
+    private fun lockedRow(
+        dealId: UUID,
+        withdrawPayments: Boolean,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
+    ): Uni<DealEntity?> {
+        if (!withdrawPayments && limitGuard == null) return find("dealId", dealId).firstResult()
+        return find("dealId", dealId).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
+            .flatMap { locked ->
+                if (withdrawPayments) withdraw(dealId).map { locked } else Uni.createFrom().item(locked)
+            }
+            .flatMap { locked ->
+                limitGuard?.let { g ->
+                    Panache.getSession().flatMap { exposureUnderLock(it, dealId, g) }.map { locked }
+                }
+                    ?: Uni.createFrom().item(locked)
+            }
     }
 
     /** One `deal_versions` row per terms version; the schedule columns follow the latest generation. */
@@ -348,7 +367,10 @@ class DealRepositoryImpl(
                             }
                             blockingOnChanged(session, deal.id, c.changedFlowIds)
                         }
-                        .flatMap { exposureUnderLock(session, deal.id, c) }
+                        .flatMap {
+                            c.exposureGuard?.let { g -> exposureUnderLock(session, deal.id, g) }
+                                ?: Uni.createFrom().voidItem()
+                        }
                         .flatMap { proposedOnChanged(session, c.changedFlowIds) }
                         .flatMap { pids -> cancelProposed(session, deal.id, pids) }
                         .flatMap { writeCorrection(session, locked, c, correctionRow) }
@@ -357,45 +379,56 @@ class DealRepositoryImpl(
     }
 
     /**
-     * The counterparty headroom the correction was vetted against, re-measured inside the approval
-     * transaction (the same states and products [exposure] counts, the deal itself excluded) under a
-     * transaction-scoped lock on the (counterparty, currency) line, so two corrections on one line
-     * serialise. A breach meanwhile is a 422, never a committed breach.
+     * The headroom a limit-consuming write (submit, approve, correction approval) was vetted against,
+     * re-measured inside its transaction under a transaction-scoped lock on the (counterparty, limit
+     * currency) line — ONE key for every such write, so two writes on one line serialise and cannot
+     * jointly breach — by the same [lineExposure] query [exposure] answers with. A breach meanwhile
+     * is a 422, never a committed breach.
      */
     private fun exposureUnderLock(
         session: org.hibernate.reactive.mutiny.Mutiny.Session,
         dealId: java.util.UUID,
-        c: CorrectionCommit,
-    ): Uni<Void> {
-        val g = c.exposureGuard ?: return Uni.createFrom().voidItem()
-        val fxPart = if (g.currency == Deal.CZK) {
+        g: com.openbank.treasury.application.port.out.ExposureGuard,
+    ): Uni<Void> = session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
+        .setParameter("line", "treasury-limit:${g.counterpartyId}:${g.currency}").singleResult
+        .flatMap { lineExposure(session, g.counterpartyId, g.currency, dealId) }
+        .map { exposure ->
+            if (exposure > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                    "counterparty ${g.counterpartyId} ${g.currency}: other exposure $exposure exceeds the " +
+                        "${g.maxOthers} headroom the change was vetted against",
+                )
+            }
+        }.replaceWithVoid()
+
+    /**
+     * The limit-consuming exposure of one (counterparty, LIMIT currency) line, [excludeDealId] aside:
+     * the principal of ACTUAL asset deals in that currency in a consuming state, plus — on the CZK
+     * line — the CZK counter-amount of unsettled ACTUAL FX spots ([Deal.limitAmount] of each).
+     */
+    private fun lineExposure(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        counterpartyId: String,
+        currency: String,
+        excludeDealId: UUID?,
+    ): Uni<BigDecimal> {
+        val fxPart = if (currency == Deal.CZK) {
             " + coalesce((select sum(fx_counter_amount) from deals where counterparty_id = :cp " +
                 "and product = 'FX_SPOT' and state in (:fxStates) and kind = 'ACTUAL' and deal_id <> :d), 0)"
         } else {
             ""
         }
-        return session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
-            .setParameter("line", "treasury-limit:${g.counterpartyId}:${g.currency}").singleResult
-            .flatMap {
-                val q = session.createNativeQuery<Any>(
-                    "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
-                        "and currency = :ccy and state in (:states) and product in (:products) " +
-                        "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
-                        fxPart,
-                ).setParameter("cp", g.counterpartyId).setParameter("ccy", g.currency).setParameter("d", dealId)
-                    .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
-                    .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
-                if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
-                q.singleResult
-            }.map { others ->
-                val exposure = java.math.BigDecimal(others.toString())
-                if (exposure > g.maxOthers) {
-                    throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
-                        "counterparty ${g.counterpartyId} ${g.currency}: other exposure $exposure exceeds the " +
-                            "${g.maxOthers} headroom the correction was approved against",
-                    )
-                }
-            }.replaceWithVoid()
+        val q = session.createNativeQuery<Any>(
+            "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
+                "and currency = :ccy and state in (:states) and product in (:products) " +
+                "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
+                fxPart,
+        ).setParameter("cp", counterpartyId).setParameter("ccy", currency)
+            .setParameter("d", excludeDealId ?: NO_DEAL)
+            .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
+            .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
+        if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+        return q.singleResult.map { BigDecimal(it.toString()) }
     }
 
     /** The writes of an approved correction, after the guards passed and the payments were withdrawn. */
@@ -640,31 +673,10 @@ class DealRepositoryImpl(
         }.awaitSuspending(),
     )
 
-    override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal {
-        val rows = Panache.withSession {
-            find(
-                "counterpartyId = ?1 and currency = ?2 and state in ?3 and product in ?4 and kind = ?5",
-                counterpartyId,
-                currency,
-                LIMIT_CONSUMING_STATE_NAMES,
-                LIMIT_CONSUMING_PRODUCT_NAMES,
-                DealKind.ACTUAL.name,
-            ).list()
+    override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal =
+        Panache.withSession {
+            Panache.getSession().flatMap { lineExposure(it, counterpartyId, currency, excludeDealId) }
         }.awaitSuspending()
-        val placed = rows.filter { it.dealId != excludeDealId }.sumOf { it.principal }
-        if (currency != Deal.CZK) return placed
-        // #10896: an unsettled FX spot carries settlement risk on its CZK equivalent until it settles.
-        val fx = Panache.withSession {
-            find(
-                "counterpartyId = ?1 and product = ?2 and state in ?3 and kind = ?4",
-                counterpartyId,
-                ProductType.FX_SPOT.name,
-                Deal.FX_LIMIT_CONSUMING_STATES.map { it.name },
-                DealKind.ACTUAL.name,
-            ).list()
-        }.awaitSuspending()
-        return placed + fx.filter { it.dealId != excludeDealId }.sumOf { it.fxCounterAmount ?: BigDecimal.ZERO }
-    }
 
     /**
      * Deals currently PENDING_APPROVAL that carry a senior limit override (ADR-0315 D4, #10896).
@@ -843,6 +855,9 @@ class DealRepositoryImpl(
 
         /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
         val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
+
+        /** No deal excluded: a UUID no deal carries, so `deal_id <> :d` binds a typed value. */
+        val NO_DEAL: UUID = UUID(0L, 0L)
         val LIMIT_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }
 
         /** The products with posting rules today: the only ones the simulated market moves. */

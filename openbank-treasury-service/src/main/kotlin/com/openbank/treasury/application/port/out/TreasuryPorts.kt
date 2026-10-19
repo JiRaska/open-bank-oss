@@ -73,6 +73,13 @@ interface DealRepository {
          * PROPOSED payments and free their flows. Commits or rolls back with the deal change.
          */
         withdrawPayments: Boolean = false,
+        /**
+         * A limit-consuming write (submit, approve): in the SAME transaction, after locking the deal
+         * row, take the (counterparty, limit currency) line lock and re-measure the others' exposure;
+         * past [ExposureGuard.maxOthers] it refuses (CorrectionLimitBreachedException, 422) instead of
+         * committing a joint breach.
+         */
+        limitGuard: ExposureGuard? = null,
     ): Deal
 
     /** The command previously recorded under [key], if any. */

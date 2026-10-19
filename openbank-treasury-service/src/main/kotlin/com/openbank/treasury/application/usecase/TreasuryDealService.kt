@@ -22,6 +22,7 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.ExposureGuard
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
@@ -204,7 +205,8 @@ class TreasuryDealService(
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = vetTerms(load(dealId))
-        val submitted = deal.submit(actor, limitCheck(deal), clock.instant(), policy().evaluate(deal))
+        val check = limitCheck(deal)
+        val submitted = deal.submit(actor, check, clock.instant(), policy().evaluate(deal))
         // ADR-0344 D4: the cash-flow ledger is generated at submission and stored with it.
         val generated = schedules?.generate(submitted)
         val withSchedule = generated?.let { submitted.withSchedule(it.write.scheduleVersion, it.hash) } ?: submitted
@@ -237,6 +239,9 @@ class TreasuryDealService(
             command = cmd(key, SUBMIT, dealId),
             schedule = generated?.write,
             extraEvents = events,
+            // A submission that fits consumes the line now: serialised with every other write on it.
+            // One that breaches goes to review (PENDING_APPROVAL) and is re-guarded at approval.
+            limitGuard = check.takeIf { submitted.consumesLimit && !it.breached }?.let { ExposureGuard.of(it) },
         )
     }
 
@@ -246,7 +251,8 @@ class TreasuryDealService(
         // Re-checked at approval: exposure may have moved, and the product mandate may have been
         // tightened, since submission (ADR-0315 D4).
         val productCheck = policy().evaluate(deal)
-        val booked = deal.approve(actor, limitCheck(deal), clock.instant(), productCheck)
+        val check = limitCheck(deal)
+        val booked = deal.approve(actor, check, clock.instant(), productCheck)
         val event = DealEvent(
             DealBooked.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -273,7 +279,10 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
+        val guard = check.takeIf {
+            booked.consumesLimit
+        }?.let { ExposureGuard.of(it, booked.limitOverride?.coversExposureUpTo) }
+        return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId), limitGuard = guard)
     }
 
     override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {

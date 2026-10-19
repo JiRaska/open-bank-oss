@@ -159,13 +159,9 @@ class CorrectionService(
         // only reduces exposure. The counterparty headroom is re-measured once more under the lock.
         val (vetted, check) = if (c.fullUnwind) raw to null else vet(raw, c.limitOverride)
         val corrected = plan.schedule?.let { vetted.withSchedule(it.write.scheduleVersion, it.hash) } ?: vetted
-        val guard = check?.let {
-            ExposureGuard(
-                corrected.counterpartyId,
-                corrected.currency,
-                (c.limitOverride?.coversExposureUpTo ?: it.limit) - it.dealAmount,
-            )
-        }
+        // The line is the deal's LIMIT currency (CZK for FX), measured by its limit amount: the same
+        // figures LimitCheck used, the same key and query every booking takes.
+        val guard = check?.let { ExposureGuard.of(it, c.limitOverride?.coversExposureUpTo) }
         val deltas = plan.preview.deltaJournals.map {
             StoredDelta(it.sourceEvent, it.key, it.valueDate, checkNotNull(it.spec.suffix), it.spec.lines)
         }

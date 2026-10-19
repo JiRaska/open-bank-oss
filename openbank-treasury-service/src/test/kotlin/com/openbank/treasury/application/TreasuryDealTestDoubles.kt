@@ -64,7 +64,16 @@ internal class InMemoryDeals : DealRepository {
         schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
         extraEvents: List<DealEvent>,
         withdrawPayments: Boolean,
+        limitGuard: com.openbank.treasury.application.port.out.ExposureGuard?,
     ): Deal {
+        limitGuard?.let { g ->
+            val others = exposure(g.counterpartyId, g.currency, deal.id)
+            if (others > g.maxOthers) {
+                throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                    "${g.counterpartyId} ${g.currency}: $others exceeds ${g.maxOthers}",
+                )
+            }
+        }
         rows[deal.id] = deal
         journal?.let { journals += it }
         event?.let { events += it }
