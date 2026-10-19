@@ -28,9 +28,18 @@ CREATE TABLE deal_corrections (
     preview_json           TEXT          NOT NULL,
     deltas_json            TEXT,
     posted_json            TEXT,
+    -- A counterparty-limit breach the corrected terms cause: requested by the proposer, overridden
+    -- (bounded to the exposure measured) by a senior who is no term author (ADR-0315 D4).
+    limit_override_requested BOOLEAN     NOT NULL DEFAULT FALSE,
+    limit_override_by      VARCHAR(255),
+    limit_override_reason  VARCHAR(500),
+    limit_override_at      TIMESTAMPTZ,
+    limit_override_covers  NUMERIC(20,2),
+    limit_override_limit   NUMERIC(20,2),
     row_version            BIGINT        NOT NULL DEFAULT 0,
     CONSTRAINT deal_corrections_decided CHECK (status = 'PENDING' OR (decided_by IS NOT NULL AND decided_at IS NOT NULL)),
     CONSTRAINT deal_corrections_four_eyes CHECK (decided_by IS NULL OR decided_by <> proposed_by),
+    CONSTRAINT deal_corrections_override_not_proposer CHECK (limit_override_by IS NULL OR limit_override_by <> proposed_by),
     CONSTRAINT deal_corrections_human_decider CHECK (decided_by_type IS NULL OR decided_by_type = 'HUMAN')
 );
 CREATE INDEX idx_deal_corrections_deal ON deal_corrections (deal_id);

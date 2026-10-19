@@ -1786,7 +1786,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No such deal }
         '409': { description: INVALID_STATE (not correctable) or CORRECTION_STALE (one is already pending) }
-        '422': { description: REFERENCE_NOT_EFFECTIVE - the corrected terms name reference data not in force }
+        '422': { description: 'REFERENCE_NOT_EFFECTIVE, PRODUCT_LIMIT_BREACHED, or LIMIT_BREACHED (without requestLimitOverride)' }
 
   /api/v1/treasury/deals/{id}/corrections/{correctionId}:
     get:
@@ -1831,6 +1831,34 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No such correction on the deal }
         '409': { description: PAYMENT_RELEASED, CORRECTION_STALE (the deal moved on), FLOW_CHANGED (its schedule was written meanwhile) or INVALID_STATE }
+        '422': { description: 'FOUR_EYES_VIOLATION, LIMIT_BREACHED (re-measured now and under the lock) or PRODUCT_LIMIT_BREACHED' }
+
+  /api/v1/treasury/deals/{id}/corrections/{correctionId}/override-limit:
+    post:
+      tags: [Treasury]
+      operationId: overrideDealCorrectionLimit
+      summary: >-
+        A senior approver overrides the counterparty-limit breach a correction's terms cause
+        (proposed with requestLimitOverride). Bounded to the exposure measured now; the senior is
+        no term author and may not also approve it; approval re-measures under the lock.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/CorrectionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReasonRequest' }
+      responses:
+        '200':
+          description: The correction carrying the override
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealCorrection' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: No such correction on the deal }
+        '409': { description: INVALID_STATE - not pending, no override requested, or no breach to override }
         '422': { description: FOUR_EYES_VIOLATION }
 
   /api/v1/treasury/deals/{id}/corrections/{correctionId}/reject:
@@ -1971,6 +1999,12 @@ components:
           description: True unwinds the deal completely - every posted journal is offset and the deal ends REVERSED (the way a SETTLED matrix deal is taken back). No changes may be given with it.
         reason: { type: string, minLength: 1, maxLength: 500 }
         effectiveFrom: { type: string, format: date }
+        requestLimitOverride:
+          type: boolean
+          description: >-
+            The corrected terms are vetted exactly as a booking (references, FX flag, product mandate,
+            counterparty limit). A counterparty-limit breach is refused (422 LIMIT_BREACHED) unless this
+            is true; then approval waits for a senior's override. A product-mandate breach is always 422.
     PostedDelta:
       type: object
       properties:
@@ -1998,6 +2032,9 @@ components:
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
         decisionReason: { type: [string, 'null'] }
+        limitOverrideRequested: { type: boolean }
+        limitOverrideBy: { type: [string, 'null'] }
+        limitOverrideCoversExposureUpTo: { type: [number, 'null'] }
         posted:
           type: array
           maxItems: 2000

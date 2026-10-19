@@ -47,6 +47,8 @@ data class CorrectionRequest(
     val fullUnwind: Boolean? = null,
     val reason: String? = null,
     val effectiveFrom: LocalDate? = null,
+    /** The corrected exposure breaches the counterparty limit: ask for a senior override instead of being refused. */
+    val requestLimitOverride: Boolean? = null,
 )
 
 data class CorrectionDto(
@@ -65,6 +67,9 @@ data class CorrectionDto(
     val decidedAt: Instant?,
     val decisionReason: String?,
     val posted: List<PostedDelta>,
+    val limitOverrideRequested: Boolean,
+    val limitOverrideBy: String?,
+    val limitOverrideCoversExposureUpTo: BigDecimal?,
     /** `{ newFlows, changedFlows, deltaJournals }` as computed when proposed. */
     val preview: JsonNode?,
 ) {
@@ -86,6 +91,9 @@ data class CorrectionDto(
                 c.decidedAt,
                 c.decisionReason,
                 c.posted,
+                c.limitOverrideRequested,
+                c.limitOverride?.by?.id,
+                c.limitOverride?.coversExposureUpTo,
                 v.preview?.let(mapper::readTree),
             )
         }
@@ -155,6 +163,7 @@ class CorrectionResource {
             requireNotNull(request.effectiveFrom) { "effectiveFrom is required" },
             actor(),
             requireKey(key),
+            request.requestLimitOverride ?: false,
         )
         return Response.status(Response.Status.CREATED).entity(CorrectionDto.from(v, mapper)).build()
     }
@@ -169,6 +178,29 @@ class CorrectionResource {
         @PathParam("correctionId") correctionId: UUID,
         @HeaderParam(IDEMPOTENCY_KEY) key: String?,
     ): CorrectionDto = CorrectionDto.from(corrections.approve(id, correctionId, actor(), requireKey(key)), mapper)
+
+    @POST
+    @Path("/{correctionId}/override-limit")
+    @RolesAllowed(SENIOR_APPROVER)
+    @Operation(
+        summary = "A senior overrides the counterparty-limit breach the corrected terms cause (never a term author)",
+    )
+    @Authorize(action = "treasury.deal.correction.override-limit", resource = "#id")
+    suspend fun overrideLimit(
+        @PathParam("id") id: UUID,
+        @PathParam("correctionId") correctionId: UUID,
+        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        request: ReasonRequest,
+    ): CorrectionDto = CorrectionDto.from(
+        corrections.overrideLimit(
+            id,
+            correctionId,
+            requireNotNull(request.reason) { "reason is required" },
+            actor(),
+            requireKey(key),
+        ),
+        mapper,
+    )
 
     @POST
     @Path("/{correctionId}/reject")

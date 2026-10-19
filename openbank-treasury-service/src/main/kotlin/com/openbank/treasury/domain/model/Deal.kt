@@ -695,6 +695,10 @@ data class Deal(
         )
     }
 
+    /** Whether this product, live and ACTUAL, consumes a counterparty limit (what a correction re-checks). */
+    val consumesLimitWhenLive: Boolean
+        get() = kind == DealKind.ACTUAL && (product.isAsset || product == ProductType.FX_SPOT)
+
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
         get() = kind == DealKind.ACTUAL &&

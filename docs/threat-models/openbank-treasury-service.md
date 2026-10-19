@@ -107,6 +107,18 @@ creator, submitter, draft editors or the proposer of an earlier correction (`Fou
 422); the policy splits proposing (dealer, back office) from deciding (approver), and a database
 CHECK refuses `decided_by = proposed_by` and a non-human decider. A correction's terms version is
 recorded as authored by its PROPOSER, so the payment releaser rule (never a term author) covers it.
+**STRIDE-E (limit bypass by correction):** the corrected deal is built by the same constructor
+and invariants as any deal and vetted by the SAME function booking uses (`vetCorrection`: reference
+effectiveness, FX rate flag, product mandate — never overridable — and the counterparty limit on the
+corrected exposure) at proposal and again at approval; a counterparty breach is proposable only as
+a request for a senior's override (`/override-limit`, senior role, never a term author, never the
+later approver, DB CHECK against the proposer), and the approval re-measures the counterparty line
+inside its transaction under the deal lock and a transaction lock on the (counterparty, currency)
+line (422 LIMIT_BREACHED). `CorrectionLimitIT` holds each refusal by effect (sabotaging either the
+proposal vetting or the locked guard turns its steps red). **Residual:** a NEW booking does not take
+the line lock, so a booking and a correction racing on one line are as serialised as two bookings
+are today (both re-check at their own approval). FX spot, the only product the FX flag applies to,
+is not correctable (it is reversed and re-booked).
 **STRIDE-T (race with a payment release / a fixing):** approval commits in ONE transaction under the
 deal-row lock that release and fixing take too: the base schedule must still match the fingerprint
 read before the plan (Σ row_version + count — any fixing, override or payment link changes it; else

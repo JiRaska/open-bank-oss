@@ -96,6 +96,13 @@ data class DealCorrection(
     val decisionReason: String? = null,
     val newVersion: Int? = null,
     val posted: List<PostedDelta> = emptyList(),
+    /**
+     * The proposer asked for a counterparty-limit breach to be overridden (the corrected exposure
+     * exceeds the limit). Approval is refused until [limitOverride] — a senior's, who is no term
+     * author — covers it; without the request a breach is refused at proposal.
+     */
+    val limitOverrideRequested: Boolean = false,
+    val limitOverride: LimitOverride? = null,
 ) {
     init {
         require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a correction needs a reason (1..$MAX_REASON)" }
@@ -106,6 +113,9 @@ data class DealCorrection(
 
     fun approve(actor: Actor, deal: Deal, priorAuthors: Set<String>, at: Instant): DealCorrection {
         decide(actor, deal, priorAuthors, "approve")
+        if (limitOverride != null && actor.id == limitOverride.by.id) {
+            throw FourEyesViolationException("four-eyes: the senior who overrode the limit must not also approve")
+        }
         if (deal.version != baseVersion || deal.scheduleVersion != baseScheduleVersion) {
             throw CorrectionStaleException(
                 "deal ${deal.id} is at version ${deal.version}/${deal.scheduleVersion}, the correction was " +
@@ -124,6 +134,28 @@ data class DealCorrection(
         decide(actor, deal, priorAuthors, "reject")
         require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a rejection needs a reason (1..$MAX_REASON)" }
         return copy(status = CorrectionStatus.REJECTED, decidedBy = actor, decidedAt = at, decisionReason = reason)
+    }
+
+    /**
+     * A senior's override of the counterparty-limit breach the corrected terms cause (ADR-0315 D4
+     * applied to a correction): bounded to the exposure measured now, by a human who is not a term
+     * author. The approval re-measures and refuses if exposure has grown past it.
+     */
+    fun overrideLimit(
+        actor: Actor,
+        deal: Deal,
+        priorAuthors: Set<String>,
+        reason: String,
+        check: LimitCheck,
+        at: Instant,
+    ): DealCorrection {
+        decide(actor, deal, priorAuthors, "override the limit of")
+        check(limitOverrideRequested) { "the correction did not ask for a limit override" }
+        check(check.breached) { "the corrected terms breach no counterparty limit: nothing to override" }
+        require(reason.isNotBlank() && reason.length <= MAX_REASON) {
+            "a limit override needs a reason (1..$MAX_REASON)"
+        }
+        return copy(limitOverride = LimitOverride(actor, reason, at, check.exposureAfter, check.limit))
     }
 
     fun posted(deltas: List<PostedDelta>): DealCorrection {
@@ -161,6 +193,7 @@ data class DealCorrection(
             effectiveFrom: LocalDate,
             actor: Actor,
             at: Instant,
+            limitOverrideRequested: Boolean = false,
         ): DealCorrection {
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not propose a deal correction")
@@ -178,6 +211,7 @@ data class DealCorrection(
                 effectiveFrom,
                 actor,
                 at,
+                limitOverrideRequested = limitOverrideRequested,
             )
         }
     }

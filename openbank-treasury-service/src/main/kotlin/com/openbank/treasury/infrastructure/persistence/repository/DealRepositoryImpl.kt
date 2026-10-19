@@ -126,7 +126,7 @@ class CounterpartyRepositoryImpl(private val references: ReferenceRepository, pr
 @ApplicationScoped
 // LongParameterList: the deal aggregate spans these tables and they commit in ONE transaction;
 // splitting the adapter would split the transaction.
-@Suppress("TooManyFunctions", "LongParameterList")
+@Suppress("TooManyFunctions", "LongParameterList", "LargeClass")
 class DealRepositoryImpl(
     private val outbox: TreasuryOutboxRepository,
     private val transitions: DealTransitionPanacheRepository,
@@ -348,11 +348,54 @@ class DealRepositoryImpl(
                             }
                             blockingOnChanged(session, deal.id, c.changedFlowIds)
                         }
+                        .flatMap { exposureUnderLock(session, deal.id, c) }
                         .flatMap { proposedOnChanged(session, c.changedFlowIds) }
                         .flatMap { pids -> cancelProposed(session, deal.id, pids) }
                         .flatMap { writeCorrection(session, locked, c, correctionRow) }
                 }
             }
+    }
+
+    /**
+     * The counterparty headroom the correction was vetted against, re-measured inside the approval
+     * transaction (the same states and products [exposure] counts, the deal itself excluded) under a
+     * transaction-scoped lock on the (counterparty, currency) line, so two corrections on one line
+     * serialise. A breach meanwhile is a 422, never a committed breach.
+     */
+    private fun exposureUnderLock(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        c: CorrectionCommit,
+    ): Uni<Void> {
+        val g = c.exposureGuard ?: return Uni.createFrom().voidItem()
+        val fxPart = if (g.currency == Deal.CZK) {
+            " + coalesce((select sum(fx_counter_amount) from deals where counterparty_id = :cp " +
+                "and product = 'FX_SPOT' and state in (:fxStates) and kind = 'ACTUAL' and deal_id <> :d), 0)"
+        } else {
+            ""
+        }
+        return session.createNativeQuery<Any>("select pg_advisory_xact_lock(hashtext(:line))")
+            .setParameter("line", "treasury-limit:${g.counterpartyId}:${g.currency}").singleResult
+            .flatMap {
+                val q = session.createNativeQuery<Any>(
+                    "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
+                        "and currency = :ccy and state in (:states) and product in (:products) " +
+                        "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
+                        fxPart,
+                ).setParameter("cp", g.counterpartyId).setParameter("ccy", g.currency).setParameter("d", dealId)
+                    .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
+                    .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
+                if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+                q.singleResult
+            }.map { others ->
+                val exposure = java.math.BigDecimal(others.toString())
+                if (exposure > g.maxOthers) {
+                    throw com.openbank.treasury.application.port.out.CorrectionLimitBreachedException(
+                        "counterparty ${g.counterpartyId} ${g.currency}: other exposure $exposure exceeds the " +
+                            "${g.maxOthers} headroom the correction was approved against",
+                    )
+                }
+            }.replaceWithVoid()
     }
 
     /** The writes of an approved correction, after the guards passed and the payments were withdrawn. */

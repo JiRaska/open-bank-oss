@@ -16,6 +16,7 @@ import com.openbank.treasury.application.port.out.CorrectionRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.ExposureGuard
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.MarketDataRepository
@@ -35,6 +36,9 @@ import com.openbank.treasury.domain.model.DealCorrection
 import com.openbank.treasury.domain.model.DeltaJournal
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LedgerFlowItem
+import com.openbank.treasury.domain.model.LimitBreachedException
+import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.LimitOverride
 import com.openbank.treasury.domain.model.PostedDelta
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingLine
@@ -85,6 +89,12 @@ class CorrectionService(
     private val clock: Clock,
     private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
     private val newId: () -> UUID = { UUID.randomUUID() },
+    /**
+     * The booking path's own term vetting (TreasuryDealUseCase.vetCorrection): references, FX flag,
+     * product mandate, counterparty limit under an optional senior override. Required: a correction
+     * that skipped it could raise a notional past every limit the booking enforced.
+     */
+    private val vet: suspend (Deal, LimitOverride?) -> Pair<Deal, LimitCheck?>,
 ) {
     /** What one correction would commit, computed from the deal as it stands. */
     private data class Plan(
@@ -102,13 +112,33 @@ class CorrectionService(
         effectiveFrom: LocalDate,
         actor: Actor,
         key: String,
+        requestLimitOverride: Boolean = false,
     ): CorrectionView {
         replay(key, PROPOSE, dealId)?.let { return it }
         val deal = load(dealId)
         if (corrections.forDeal(dealId).any { it.status == CorrectionStatus.PENDING }) {
             throw CorrectionStaleException("deal $dealId already has a PENDING correction: decide it first")
         }
-        val c = DealCorrection.propose(newId(), deal, terms, fullUnwind, reason, effectiveFrom, actor, clock.instant())
+        val c = DealCorrection.propose(
+            newId(),
+            deal,
+            terms,
+            fullUnwind,
+            reason,
+            effectiveFrom,
+            actor,
+            clock.instant(),
+            requestLimitOverride,
+        )
+        if (!fullUnwind) {
+            try {
+                vet(deal.withCorrectedTerms(terms), null)
+            } catch (e: LimitBreachedException) {
+                // A counterparty-limit breach is proposable only as a request for a senior override;
+                // a product-mandate breach is never (it is not overridable) and propagates as is.
+                if (!requestLimitOverride) throw e
+            }
+        }
         val plan = plan(deal, c)
         val preview = previewJson(plan.preview)
         corrections.propose(c, preview, CommandKey(key, "$PROPOSE:${c.correctionId}", dealId))
@@ -124,8 +154,17 @@ class CorrectionService(
         // commit sees a different fingerprint and refuses (409) instead of committing a stale plan.
         val fingerprint = corrections.fingerprint(deal.id, deal.scheduleVersion)
         val plan = plan(deal, c)
-        val corrected = deal.correct(c.terms, c.fullUnwind, actor, c.reason, clock.instant()).let { d ->
-            plan.schedule?.let { d.withSchedule(it.write.scheduleVersion, it.hash) } ?: d
+        val raw = deal.correct(c.terms, c.fullUnwind, actor, c.reason, clock.instant())
+        // Re-vetted NOW (exposure and the mandate may have moved since the proposal); a full unwind
+        // only reduces exposure. The counterparty headroom is re-measured once more under the lock.
+        val (vetted, check) = if (c.fullUnwind) raw to null else vet(raw, c.limitOverride)
+        val corrected = plan.schedule?.let { vetted.withSchedule(it.write.scheduleVersion, it.hash) } ?: vetted
+        val guard = check?.let {
+            ExposureGuard(
+                corrected.counterpartyId,
+                corrected.currency,
+                (c.limitOverride?.coversExposureUpTo ?: it.limit) - it.dealAmount,
+            )
         }
         val deltas = plan.preview.deltaJournals.map {
             StoredDelta(it.sourceEvent, it.key, it.valueDate, checkNotNull(it.spec.suffix), it.spec.lines)
@@ -140,11 +179,33 @@ class CorrectionService(
                 events(approved, deal, corrected, plan),
                 CommandKey(key, "$APPROVE:$correctionId", dealId),
                 objectMapper.writeValueAsString(deltas),
+                guard,
             ),
         )
         // Best effort now; an APPROVED correction is finished by the CORRECTIONS day step otherwise.
         val outcome = runCatching { post(approved, corrected, deltas) }.getOrNull()
         return CorrectionView(outcome ?: approved, corrections.preview(correctionId))
+    }
+
+    /** A senior's override of the counterparty-limit breach a requested correction causes. */
+    suspend fun overrideLimit(
+        dealId: UUID,
+        correctionId: UUID,
+        reason: String,
+        actor: Actor,
+        key: String,
+    ): CorrectionView {
+        replay(key, OVERRIDE, dealId)?.let { return it }
+        val deal = load(dealId)
+        val c = find(dealId, correctionId)
+        val check = try {
+            vet(deal.withCorrectedTerms(c.terms), null).second
+        } catch (e: LimitBreachedException) {
+            e.check
+        } ?: error("the corrected deal consumes no counterparty limit")
+        val overridden = c.overrideLimit(actor, deal, priorAuthors(dealId), reason, check, clock.instant())
+        corrections.decide(overridden, CommandKey(key, "$OVERRIDE:$correctionId", dealId))
+        return CorrectionView(overridden, corrections.preview(correctionId))
     }
 
     suspend fun reject(dealId: UUID, correctionId: UUID, reason: String, actor: Actor, key: String): CorrectionView {
@@ -419,5 +480,6 @@ class CorrectionService(
         const val PROPOSE = "CORRECTION_PROPOSE"
         const val APPROVE = "CORRECTION_APPROVE"
         const val REJECT = "CORRECTION_REJECT"
+        const val OVERRIDE = "CORRECTION_OVERRIDE_LIMIT"
     }
 }

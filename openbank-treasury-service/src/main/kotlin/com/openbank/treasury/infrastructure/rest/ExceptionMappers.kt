@@ -163,6 +163,10 @@ class ExceptionMappers {
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
+    fun correctionLimit(e: com.openbank.treasury.application.port.out.CorrectionLimitBreachedException): Response =
+        error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
+    @ServerExceptionMapper
     fun correctionStale(e: com.openbank.treasury.domain.model.CorrectionStaleException): Response =
         error(Response.Status.CONFLICT.statusCode, "CORRECTION_STALE", e.message)
 

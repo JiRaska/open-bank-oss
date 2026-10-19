@@ -166,6 +166,7 @@ class TreasuryServiceProducer {
         references: ReferenceRepository,
         objectMapper: ObjectMapper,
         clock: Clock,
+        dealUseCase: jakarta.enterprise.inject.Instance<TreasuryDealUseCase>,
     ): com.openbank.treasury.application.usecase.CorrectionService =
         com.openbank.treasury.application.usecase.CorrectionService(
             deals,
@@ -177,6 +178,7 @@ class TreasuryServiceProducer {
             objectMapper,
             clock,
             BookCategories(references, clock)::of,
+            vet = { deal, override -> dealUseCase.get().vetCorrection(deal, override) },
         )
 
     /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */

@@ -143,6 +143,18 @@ data class AccrualRun(val journals: Int, val failures: List<Throwable>)
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
     /**
+     * ADR-0344 D7: the SAME term vetting a draft, submission and booking run, applied to the deal a
+     * correction would make — reference effectiveness, the FX rate flag, the product mandate (never
+     * overridable) and the counterparty limit on the corrected exposure (a breach passes only under
+     * [override], a senior's recorded override that still covers it). Returns the corrected deal as
+     * vetted and its limit check (null for a product that consumes no limit).
+     */
+    suspend fun vetCorrection(
+        target: com.openbank.treasury.domain.model.Deal,
+        override: com.openbank.treasury.domain.model.LimitOverride?,
+    ): Pair<com.openbank.treasury.domain.model.Deal, com.openbank.treasury.domain.model.LimitCheck?>
+
+    /**
      * Every command takes the client's idempotency key (null only for the in-process simulated
      * market). A replayed key returns the deal as it now stands; a key reused for a different
      * command or deal is refused (400).

@@ -265,7 +265,11 @@ test_correction_split_between_proposers_and_approver if {
 	allowed(approver, "treasury.deal.correction.reject")
 	not allowed(dealer, "treasury.deal.correction.approve")
 	not allowed(back_office, "treasury.deal.correction.approve")
+	allowed(senior, "treasury.deal.correction.override-limit")
+	not allowed(approver, "treasury.deal.correction.override-limit")
+	not allowed(dealer, "treasury.deal.correction.override-limit")
 	every p in [agent, shared_sa, renamed_sa, nobody] {
+		not allowed(p, "treasury.deal.correction.override-limit")
 		not allowed(p, "treasury.deal.correction.propose")
 		not allowed(p, "treasury.deal.correction.approve")
 		not allowed(p, "treasury.deal.correction.reject")

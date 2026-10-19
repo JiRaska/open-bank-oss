@@ -186,6 +186,21 @@ class TreasuryDealService(
         }
     }
 
+    override suspend fun vetCorrection(
+        target: Deal,
+        override: com.openbank.treasury.domain.model.LimitOverride?,
+    ): Pair<Deal, LimitCheck?> {
+        val vetted = vetTerms(target)
+        val productCheck = policy().evaluate(vetted)
+        if (productCheck.breached) throw com.openbank.treasury.domain.model.ProductLimitBreachedException(productCheck)
+        if (!vetted.consumesLimitWhenLive) return vetted to null
+        val check = limitCheck(vetted)
+        if (check.breached && (override == null || check.exposureAfter > override.coversExposureUpTo)) {
+            throw com.openbank.treasury.domain.model.LimitBreachedException(check)
+        }
+        return vetted to check
+    }
+
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = vetTerms(load(dealId))

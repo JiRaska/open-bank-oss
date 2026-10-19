@@ -100,6 +100,24 @@ class DealCorrectionEntity : PanacheEntityBase {
     @Column(name = "posted_json")
     var postedJson: String? = null
 
+    @Column(name = "limit_override_requested", nullable = false)
+    var limitOverrideRequested: Boolean = false
+
+    @Column(name = "limit_override_by")
+    var limitOverrideBy: String? = null
+
+    @Column(name = "limit_override_reason")
+    var limitOverrideReason: String? = null
+
+    @Column(name = "limit_override_at")
+    var limitOverrideAt: Instant? = null
+
+    @Column(name = "limit_override_covers")
+    var limitOverrideCovers: java.math.BigDecimal? = null
+
+    @Column(name = "limit_override_limit")
+    var limitOverrideLimit: java.math.BigDecimal? = null
+
     @Version
     @Column(name = "row_version", nullable = false)
     var rowVersion: Long = 0
@@ -229,6 +247,12 @@ class CorrectionRepositoryImpl(
         decidedAt = c.decidedAt
         decisionReason = c.decisionReason
         newVersion = c.newVersion
+        limitOverrideRequested = c.limitOverrideRequested
+        limitOverrideBy = c.limitOverride?.by?.id
+        limitOverrideReason = c.limitOverride?.reason
+        limitOverrideAt = c.limitOverride?.at
+        limitOverrideCovers = c.limitOverride?.coversExposureUpTo
+        limitOverrideLimit = c.limitOverride?.limitAtOverride
         postedJson = c.posted.takeIf { it.isNotEmpty() }?.let(objectMapper::writeValueAsString)
     }
 
@@ -249,5 +273,15 @@ class CorrectionRepositoryImpl(
         decisionReason = decisionReason,
         newVersion = newVersion,
         posted = postedJson?.let { objectMapper.readValue<List<PostedDelta>>(it) }.orEmpty(),
+        limitOverrideRequested = limitOverrideRequested,
+        limitOverride = limitOverrideBy?.let {
+            com.openbank.treasury.domain.model.LimitOverride(
+                Actor(it, ActorType.HUMAN),
+                checkNotNull(limitOverrideReason),
+                checkNotNull(limitOverrideAt),
+                checkNotNull(limitOverrideCovers),
+                checkNotNull(limitOverrideLimit),
+            )
+        },
     )
 }

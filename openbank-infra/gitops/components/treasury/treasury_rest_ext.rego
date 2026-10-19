@@ -23,6 +23,7 @@
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.correction.propose          — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE (ADR-0344 D7)
 #   treasury.deal.correction.approve/.reject  — ROLE_TREASURY_APPROVER (the domain refuses every term author)
+#   treasury.deal.correction.override-limit   — ROLE_TREASURY_SENIOR_APPROVER only (a limit decision, ADR-0315 D4)
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
@@ -217,6 +218,14 @@ allowed_reasons contains "treasury-correction-decide" if {
 	treasury_staff
 	"ROLE_TREASURY_APPROVER" in input.principal.roles
 	input.action in {"treasury.deal.correction.approve", "treasury.deal.correction.reject"}
+}
+
+# A correction whose terms breach a counterparty limit is a limit decision: the senior only, as for
+# a booking (the domain refuses a term author and the later approval by the same senior).
+allowed_reasons contains "treasury-correction-override-limit" if {
+	treasury_staff
+	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+	input.action == "treasury.deal.correction.override-limit"
 }
 
 # Schedule preview runs the schedule engine: real work per call, so only the roles that build or

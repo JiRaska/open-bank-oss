@@ -27,7 +27,19 @@ data class CorrectionCommit(
     val command: CommandKey,
     /** The delta journals the approval commits to post, stored with the correction row. */
     val deltasJson: String,
+    /** Re-measured under the lock: the others' limit-consuming exposure may not exceed [ExposureGuard.maxOthers]. */
+    val exposureGuard: ExposureGuard? = null,
 )
+
+/**
+ * The counterparty headroom the approval was vetted against: the limit (or the senior override's
+ * bound) less the corrected deal's own amount. A deal booked meanwhile that eats into it refuses
+ * the approval (422 LIMIT_BREACHED) instead of committing a breach.
+ */
+data class ExposureGuard(val counterpartyId: String, val currency: String, val maxOthers: java.math.BigDecimal)
+
+/** The counterparty exposure grew past the vetted headroom between the vetting and the lock. */
+class CorrectionLimitBreachedException(message: String) : RuntimeException(message)
 
 interface CorrectionRepository {
     /** A new PENDING correction (at most one PENDING per deal; a second is a 409). */

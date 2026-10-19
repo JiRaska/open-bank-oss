@@ -64,6 +64,7 @@ import java.util.concurrent.Executors
 @QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @TestProfile(CorrectionApiIT.OwnDatabase::class)
+@Suppress("LongMethod") // each ordered step is one scenario, asserted end to end
 class CorrectionApiIT {
     class OwnDatabase : QuarkusTestProfile
 
@@ -341,7 +342,9 @@ class CorrectionApiIT {
         val a = approve.get()
         val r = release.get()
         pool.shutdown()
-        println("CORRECTION-RACE approve=${a.isSuccess} release=${r.isSuccess} ${r.exceptionOrNull()} ${a.exceptionOrNull()}")
+        println(
+            "CORRECTION-RACE approve=${a.isSuccess} release=${r.isSuccess} ${r.exceptionOrNull()} ${a.exceptionOrNull()}",
+        )
         // An incoming payment may not be releasable at all; then only the correction can win.
         if (r.isFailure && r.exceptionOrNull() !is PaymentStaleException) {
             assertThat(a.isSuccess).isTrue()
@@ -446,7 +449,8 @@ class CorrectionApiIT {
 
     private fun flow(leg: Int): String = jdbc { c ->
         c.prepareStatement(
-            "select f.flow_id from deal_cash_flows f join deals d on d.deal_id = f.deal_id and d.schedule_version = f.schedule_version " +
+            "select f.flow_id from deal_cash_flows f join deals d on d.deal_id = f.deal_id " +
+                "and d.schedule_version = f.schedule_version " +
                 "where f.deal_id = '$deal' and f.leg_index = $leg and f.period_index = 0 and f.kind = 'INTEREST'",
         ).executeQuery().use { rs ->
             rs.next()
