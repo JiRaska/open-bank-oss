@@ -78,3 +78,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ## Observabilita
 
 OpenTelemetry OTLP traces na `:4317` (`service.name=openbank-kyc-service`), Micrometer/Prometheus metriky na `/q/metrics`, JSON console logging. Build metadata (`gitCommit`, `buildTime`, verze) na `/api/v1/info` (identifikace dle DORA čl. 9).
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

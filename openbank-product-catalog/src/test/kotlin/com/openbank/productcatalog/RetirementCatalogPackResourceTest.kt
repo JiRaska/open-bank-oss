@@ -37,7 +37,7 @@ import javax.sql.DataSource
  * through the same trusted-pack seeder as banking/insurance (ADR-0257), and the CZ DPS / DIP
  * specifications carry one offering per fund strategy through the real `/api/v2` surface.
  *
- * Offering values come from `retirement-pack/cz-illustrative-offerings.json` and are placeholders
+ * Offering values come from `catalog-seeds/retirement/cz-illustrative-offerings.json` and are placeholders
  * that need legal and commercial review; the schema forces every instance to say so via
  * `reviewStatus`.
  */
@@ -462,7 +462,7 @@ class RetirementCatalogPackResourceTest {
     // --- fixtures -----------------------------------------------------------------------------
 
     private fun fixtureOfferings(): List<JsonNode> =
-        requireNotNull(javaClass.getResourceAsStream("/retirement-pack/cz-illustrative-offerings.json"))
+        requireNotNull(javaClass.getResourceAsStream("/catalog-seeds/retirement/cz-illustrative-offerings.json"))
             .use(mapper::readTree)["offerings"].toList()
 
     private fun JsonNode.with(change: ObjectNode.() -> Unit): String =

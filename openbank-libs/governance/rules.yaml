@@ -407,7 +407,7 @@ change_requirements:
          check must match against '/v1/...', never 'v1/...' (#10997)"
       - "no new slash-less prefix site; the per-file baseline only shrinks"
     gate: jaxrs-path-prefix-leading-slash
-    enforced: advisory
+    enforced: enforce   # promoted 2026-10-17 (#11008 merged, baseline empty)
     target_enforce_date: "2026-12-31"
     ci_producer: ".github/scripts/check-jaxrs-path-prefix-leading-slash.py"
   db_backup_association:
@@ -588,21 +588,31 @@ change_requirements:
       # Customer 360 silver layer (D8). The entry said to remove it with the first consumer PR, and
       # the gate fails on a stale entry under --enforce, in both directions.
       - topic: "openbank.tpp.registry.event"
-        reason: "tpp-registry-service's own docs say the publish side is dormant (\"no domain events are emitted yet\" — outbox transport exists but unused). Not the #889 pattern (a working publish going nowhere): nothing is actually published today. Re-triage once the publish side is wired."
+        reason: "tpp-registry-service writes TPP_REGISTERED / TPP_BLACKLISTED through its transactional outbox (#4007; proven by TppOutboxWriteIT) and no service consumes the topic yet. CORRECTED 2026-10-17: this entry used to say the publish side was dormant; it has been live since #4007. Not the #889 class by plan only if a consumer is picked — the decision (audit-service/analytics-sink subscribe, or drop the producer) is tracked. TRACKING (2026-10-17, #13168): #13177."
       - topic: "proposal-events"
-        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). The producer is now fully deployed and the exemption is about the CONSUMER side only: openbank-infra/gitops/components/case-coordinator/kafka-case-coordinator-mtls.yaml declares the KafkaUser with Write+Describe on this topic and says in words \"producer-only ... No consumer side\", and kafka-topic.yaml (the Strimzi KafkaTopic, which does exist) says \"Consumer: none yet\". The intended consumer is the oversight/review surface ADR-0244 D7 describes; the ADR-0031 approval queue reads proposals through agent-service's store/REST today. Same shape as the delegation.events and incentive.events entries above. CORRECTED 2026-08-31 (#7740): this reason previously rested on three facts that are all false on main — the topic IS declared under openbank-infra/ (kafka-topic.yaml + the mTLS ACL), openbank-case-coordinator-agent IS in auto-deploy.yml's ALL_SERVICES, and its KafkaUser DOES exist. The conclusion survived its own evidence, which is the failure mode: a stale justification reads as a verified one. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
+        reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). The producer is now fully deployed and the exemption is about the CONSUMER side only: openbank-infra/gitops/components/case-coordinator/kafka-case-coordinator-mtls.yaml declares the KafkaUser with Write+Describe on this topic and says in words \"producer-only ... No consumer side\", and kafka-topic.yaml (the Strimzi KafkaTopic, which does exist) says \"Consumer: none yet\". The intended consumer is the oversight/review surface ADR-0244 D7 describes; the ADR-0031 approval queue reads proposals through agent-service's store/REST today. Same shape as the delegation.events and incentive.events entries above. CORRECTED 2026-08-31 (#7740): this reason previously rested on three facts that are all false on main — the topic IS declared under openbank-infra/ (kafka-topic.yaml + the mTLS ACL), openbank-case-coordinator-agent IS in auto-deploy.yml's ALL_SERVICES, and its KafkaUser DOES exist. The conclusion survived its own evidence, which is the failure mode: a stale justification reads as a verified one. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free. TRACKING (2026-10-17, #13168): #3737."
       - topic: "openbank.loyalty.events"
-        reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793)."
+        reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793). TRACKING (2026-10-17, #13168): #8793."
       - topic: "openbank.wealth.events"
-        reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce."
+        reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce. TRACKING (2026-10-17, #13168): #9774."
       - topic: "openbank.risk.limit.events"
-        reason: "ADR-0313 D9, first slice. risk-engine emits risk.limit.early-warning.v1 / breach.v1 from its transactional outbox after the EOD snapshot; D9 routes them to alerting and to the responsible human, and neither consumer exists yet (the admin console reads the same statuses from GET /snapshots/{id}/limits meanwhile). ADR-0006 sequences producers before consumers (#1916). Not the #889 class: the absence is the plan and the producer is fully wired (KafkaTopic CR and Write ACL in openbank-infra/gitops/components/risk). Re-triage: remove this entry with the first consumer PR (#10896)."
+        reason: "ADR-0313 D9, first slice. risk-engine emits risk.limit.early-warning.v1 / breach.v1 from its transactional outbox after the EOD snapshot; D9 routes them to alerting and to the responsible human, and neither consumer exists yet (the admin console reads the same statuses from GET /snapshots/{id}/limits meanwhile). ADR-0006 sequences producers before consumers (#1916). Not the #889 class: the absence is the plan and the producer is fully wired (KafkaTopic CR and Write ACL in openbank-infra/gitops/components/risk). Re-triage: remove this entry with the first consumer PR (#10896). TRACKING (2026-10-17, #13168): #10896."
       - topic: "openbank.pid.events"
-        reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
+        reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap. TRACKING (2026-10-17, #13168): #13178."
       - topic: "openbank.referral.reward-requested.v1"
-        reason: "#7190's outbox relay is producer-only for this topic: the consumer that would post the reward is ADR-0310 D2, which is Proposed and needs human approval of the money-path owner (billing-service) and the expense account before anything may consume it. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). openbank.referral.qualified.v1, its sibling, left this list when loyalty-service began consuming it (ADR-0310 D3). Re-triage and remove with the first reward-posting consumer."
+        reason: "#7190's outbox relay is producer-only for this topic: the consumer that would post the reward is ADR-0310 D2, which is Proposed and needs human approval of the money-path owner (billing-service) and the expense account before anything may consume it. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). openbank.referral.qualified.v1, its sibling, left this list when loyalty-service began consuming it (ADR-0310 D3). Re-triage and remove with the first reward-posting consumer. TRACKING (2026-10-17, #13168): #13176."
       - topic: "openbank.referral.reward-outcome.v1"
-        reason: "#7190's outbox relay is producer-only for this topic: RewardOutcome is emitted when applyLedgerOutcome records a posting result, and its readers (Campaign Studio's funnel, #7194) are unbuilt. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). Re-triage and remove with the first consumer."
+        reason: "#7190's outbox relay is producer-only for this topic: RewardOutcome is emitted when applyLedgerOutcome records a posting result, and its readers (Campaign Studio's funnel, #7194) are unbuilt. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). Re-triage and remove with the first consumer. TRACKING (2026-10-17, #13168): #7194."
+    # Reverse direction (2026-10-17, #13168): a topic CONSUMED by a service that no service in the
+    # fleet PUBLISHES. A consumer on a topic nobody writes receives nothing and reports healthy —
+    # the #2598 shape (kafka-topic-existence covers a topic that is not declared; this covers a
+    # declared topic with no writer). Connector-managed dead-letter topics (openbank.dlq.*, *.dlq)
+    # are produced by the connector itself and are exempt by name. Every entry needs a reason AND a
+    # tracking issue (#NNN); a stale entry (the topic now has a producer, or is no longer consumed)
+    # is reported, and fails under --enforce only in the first case.
+    consumer_allowlist:
+      - topic: "openbank.oversight-triggers"
+        reason: "agent-service's OversightEventConsumer (ADR-0031 D9 phase 2, channel disabled by default via AGENT_OVERSIGHT_KAFKA_ENABLED) is built; its producers (aml-service, sanctions-service, per the KafkaTopic comment) are not. The 30-minute scheduler sweep covers the gap meanwhile. TRACKING (2026-10-17, #13168): #13179."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -1585,7 +1595,13 @@ coverage:
     compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
-    money_path_floor: 40                # enforced baseline (all 13 money-path services, ratchet-only)
+    # Baseline for every entry in money_path_services (28 on 2026-10-17), ratchet-only. Enforced
+    # per module by koverVerify against the minValue in its build.gradle.kts, and the direction
+    # is enforced by gate `coverage-floor-ratchet` (a lowered minValue needs a
+    # `coverage-floor-lowered: #<issue>` trailer). Two services still sit BELOW it:
+    # standing-order 34 and sdd 38 — tracked in #13144; raise them there, do not read this
+    # number as already true of the whole list.
+    money_path_floor: 40
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
@@ -3265,6 +3281,7 @@ authz:
   # service-account through operator-read-any (#12547). Retire it only after old images are gone.
   operator_read_any_excluded_actions:
     - tax.filing.read
+    - commstemplate.read
     # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
     # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
     - card.details.read

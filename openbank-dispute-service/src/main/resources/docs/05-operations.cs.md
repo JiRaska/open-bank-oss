@@ -71,3 +71,7 @@ Ověř, že bearer token pochází z realmu `openbank` a nese `ROLE_VIEWER` (čt
 ## Release
 
 Per-service SemVer přes release-please (commit message je changelog). Needituj ručně `version.txt`, `CHANGELOG.md` ani `openapi.yaml:info.version`. Použij `/bump openbank-dispute-service` pro synchronizaci verzí a `/ship-check` před mergem (ADR-0029).
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
