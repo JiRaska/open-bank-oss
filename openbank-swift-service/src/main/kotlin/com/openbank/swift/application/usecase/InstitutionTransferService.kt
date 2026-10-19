@@ -57,6 +57,9 @@ class InstitutionTransferRefusedException(message: String) : IllegalArgumentExce
  * dead-letter queue — never a silent ack — after recording a REJECTED event once per readable
  * payment id, so treasury learns of it without waiting for an operator to read the DLQ.
  */
+// One small function per lifecycle edge (release, replay, submit, resolve, resolveDue, send, apply,
+// transition, manual, unknown, refuse): merging them would hide the branches each test pins.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class InstitutionTransferService(
     private val repo: InstitutionTransferRepository,

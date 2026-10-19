@@ -509,7 +509,7 @@ class InstitutionTransferServiceTest {
         val failing = ids[1]
         val flaky = object : SchemeGatewayPort by gateway {
             override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus {
-                if (transfer.paymentId == failing) throw IllegalStateException("defect for one item")
+                check(transfer.paymentId != failing) { "defect for one item" }
                 return SchemeStatus.Known(InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, ""))
             }
         }

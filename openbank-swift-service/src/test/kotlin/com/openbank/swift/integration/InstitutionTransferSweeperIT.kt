@@ -179,6 +179,7 @@ class InstitutionTransferSweeperIT {
         return last
     }
 
+    @Suppress("NestedBlockDepth")
     private fun status(paymentId: UUID): String? = dataSource.connection.use { c ->
         c.prepareStatement("SELECT status FROM swift_institution_transfers WHERE payment_id = ?").use { st ->
             st.setObject(1, paymentId)
