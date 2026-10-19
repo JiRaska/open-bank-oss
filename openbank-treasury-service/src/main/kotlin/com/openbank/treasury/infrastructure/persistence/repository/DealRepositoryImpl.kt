@@ -4,12 +4,15 @@
 
 package com.openbank.treasury.infrastructure.persistence.repository
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
+import com.openbank.treasury.application.port.out.DealReferenceLookup
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.port.out.TreasuryOutboxRepository
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
@@ -24,6 +27,10 @@ import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.LimitOverride
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.reference.CounterpartyPayload
+import com.openbank.treasury.domain.reference.ReferenceKind
+import com.openbank.treasury.domain.reference.ReferenceRef
+import com.openbank.treasury.domain.reference.ReferenceStatus
 import com.openbank.treasury.infrastructure.persistence.entity.CounterpartyEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealCommandEntity
 import com.openbank.treasury.infrastructure.persistence.entity.DealEntity
@@ -50,27 +57,40 @@ class DealJournalPanacheRepository : PanacheRepository<DealJournalEntity>
 @ApplicationScoped
 class DealCommandPanacheRepository : PanacheRepository<DealCommandEntity>
 
+/**
+ * ADR-0344 D3: the counterparty master is the reference store's ACTIVE `counterparty` record
+ * effective on the bank's today — four-eyed and effective-dated. The `counterparties` table is its
+ * projection (deals keep their foreign key to it) and still carries the sandbox `synthetic` flag.
+ */
 @ApplicationScoped
-class CounterpartyRepositoryImpl :
+class CounterpartyRepositoryImpl(private val references: ReferenceRepository, private val clock: Clock) :
     CounterpartyRepository,
     PanacheRepository<CounterpartyEntity> {
 
-    override suspend fun findById(id: String): Counterparty? = Panache.withSession {
-        find("counterpartyId", id).firstResult()
-    }.awaitSuspending()?.toDomain()
+    override suspend fun findById(id: String): Counterparty? {
+        val today = AccountingClock.bank(clock).today()
+        val record = references.versions(ReferenceKind.COUNTERPARTY, id).lastOrNull { it.isEffectiveOn(today) }
+            ?: return null
+        val row = Panache.withSession { find("counterpartyId", id).firstResult() }.awaitSuspending()
+        return (record.payload as CounterpartyPayload).toDomain(row?.synthetic ?: false)
+    }
 
-    override suspend fun list(): List<Counterparty> = Panache.withSession {
-        find("order by kind desc, counterpartyId asc").list()
-    }.awaitSuspending().map { it.toDomain() }
+    override suspend fun list(): List<Counterparty> {
+        val today = AccountingClock.bank(clock).today()
+        val synthetic = Panache.withSession { listAll() }.awaitSuspending().associate {
+            it.counterpartyId to
+                it.synthetic
+        }
+        return references.list(ReferenceKind.COUNTERPARTY, ReferenceStatus.ACTIVE, today)
+            .map { (it.payload as CounterpartyPayload).toDomain(synthetic[it.key] ?: false) }
+            .sortedWith(compareByDescending<Counterparty> { it.kind.name }.thenBy { it.id })
+    }
 
-    private fun CounterpartyEntity.toDomain() = Counterparty(
-        id = counterpartyId,
+    private fun CounterpartyPayload.toDomain(synthetic: Boolean) = Counterparty(
+        id = id,
         name = name,
-        kind = CounterpartyKind.valueOf(kind),
-        limits = buildMap {
-            limitCzk?.let { put(Deal.CZK, it) }
-            limitEur?.let { put(Deal.EUR, it) }
-        },
+        kind = CounterpartyKind.valueOf(kind.name),
+        limits = limits.filterKeys { it in Deal.SUPPORTED_CURRENCIES },
         synthetic = synthetic,
     )
 }
@@ -84,7 +104,17 @@ class DealRepositoryImpl(
     private val commands: DealCommandPanacheRepository,
     private val clock: Clock,
 ) : DealRepository,
+    DealReferenceLookup,
     PanacheRepository<DealEntity> {
+
+    /** ADR-0344 D3: deals whose terms name [ref] (any state; a dependency query, not a filter). */
+    override suspend fun dealsReferencing(ref: ReferenceRef): List<UUID> {
+        val field = when (ref.kind) {
+            ReferenceKind.COUNTERPARTY -> "counterpartyId"
+            else -> return emptyList()
+        }
+        return Panache.withSession { find("$field = ?1", ref.key).list() }.awaitSuspending().map { it.dealId }
+    }
 
     /**
      * Deal row, its NEW timeline entries, the journal reference and the outbox event — one

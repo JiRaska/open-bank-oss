@@ -11,6 +11,7 @@ import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryQuoteUseCase
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.CurveSetPort
+import com.openbank.treasury.application.port.out.DealReferenceLookup
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
@@ -18,8 +19,10 @@ import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
+import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
+import com.openbank.treasury.application.usecase.ReferenceDataService
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.model.BreakAlertPolicy
@@ -83,6 +86,15 @@ class TreasuryServiceProducer {
         quotes,
         productLimits.toPolicy(),
     )
+
+    /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
+    @Produces
+    @ApplicationScoped
+    fun referenceDataService(
+        records: ReferenceRepository,
+        deals: DealReferenceLookup,
+        clock: Clock,
+    ): ReferenceDataService = ReferenceDataService(records, deals, clock)
 
     @Produces
     @ApplicationScoped

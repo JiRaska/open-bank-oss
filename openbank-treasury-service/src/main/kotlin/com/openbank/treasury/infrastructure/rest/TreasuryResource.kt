@@ -261,3 +261,12 @@ const val APPROVER = "ROLE_TREASURY_APPROVER"
 
 /** ADR-0315 D4: overrides a counterparty-limit breach. Never the same person who books the deal. */
 const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"
+
+/** ADR-0344 D3: proposes reference-data changes. Never approves them (that is [APPROVER]). */
+const val REFERENCE_EDITOR = "ROLE_TREASURY_REFERENCE_EDITOR"
+
+/**
+ * ADR-0344 D4/D10: back office — proposes cash-flow overrides and reference-data changes. Never
+ * approves either (that is [APPROVER]), so no single role both writes and activates.
+ */
+const val BACK_OFFICE = "ROLE_TREASURY_BACK_OFFICE"

@@ -13,6 +13,8 @@ import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
+import com.openbank.treasury.domain.reference.ReferenceNotEffectiveException
+import com.openbank.treasury.domain.reference.ReferenceNotFoundException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -31,6 +33,20 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun notFound(e: DealNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun referenceNotFound(e: ReferenceNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    /** ADR-0344 D3: a deal names reference data not ACTIVE on its trade date; each missing ref listed. */
+    @ServerExceptionMapper
+    fun referenceNotEffective(e: ReferenceNotEffectiveException): Response = Response.status(UNPROCESSABLE).entity(
+        mapOf(
+            "error" to "REFERENCE_NOT_EFFECTIVE",
+            "message" to e.message,
+            "missingReferences" to e.missing.map { it.toString() },
+        ),
+    ).build()
 
     @ServerExceptionMapper
     fun statementNotFound(e: StatementNotFoundException): Response =

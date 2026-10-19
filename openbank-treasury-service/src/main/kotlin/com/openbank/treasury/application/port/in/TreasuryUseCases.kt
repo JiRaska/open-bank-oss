@@ -20,6 +20,10 @@ import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.SimulatedQuote
+import com.openbank.treasury.domain.reference.ReferenceKind
+import com.openbank.treasury.domain.reference.ReferencePayload
+import com.openbank.treasury.domain.reference.ReferenceRecord
+import com.openbank.treasury.domain.reference.ReferenceStatus
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -200,4 +204,52 @@ interface NostroBreakUseCase {
     suspend fun breaks(iban: String, includeResolved: Boolean): List<NostroBreakView>
 
     val policy: BreakAlertPolicy
+}
+
+data class ProposeReferenceCommand(
+    val kind: ReferenceKind,
+    val key: String,
+    val validFrom: LocalDate,
+    val validTo: LocalDate?,
+    val payload: ReferencePayload,
+    val reason: String,
+)
+
+data class ReferenceHistory(
+    val kind: ReferenceKind,
+    val key: String,
+    val active: ReferenceRecord?,
+    val versions: List<ReferenceRecord>,
+)
+
+/** `type` is `deal` or a reference kind's wire name; `field` names what points at the record. */
+data class ReferenceDependant(val type: String, val id: String, val field: String)
+
+interface ReferenceDataUseCase {
+    suspend fun list(kind: ReferenceKind, status: ReferenceStatus?, asOf: LocalDate?): List<ReferenceRecord>
+
+    suspend fun history(kind: ReferenceKind, key: String): ReferenceHistory
+
+    suspend fun propose(command: ProposeReferenceCommand, actor: Actor, key: String): ReferenceRecord
+
+    suspend fun approve(
+        kind: ReferenceKind,
+        recordKey: String,
+        version: Int,
+        actor: Actor,
+        key: String,
+    ): ReferenceRecord
+
+    suspend fun reject(
+        kind: ReferenceKind,
+        recordKey: String,
+        version: Int,
+        reason: String,
+        actor: Actor,
+        key: String,
+    ): ReferenceRecord
+
+    suspend fun verify(kind: ReferenceKind, recordKey: String, version: Int, actor: Actor, key: String): ReferenceRecord
+
+    suspend fun dependencies(kind: ReferenceKind, key: String): List<ReferenceDependant>
 }
