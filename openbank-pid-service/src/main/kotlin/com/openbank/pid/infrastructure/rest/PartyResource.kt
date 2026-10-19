@@ -312,10 +312,11 @@ class PartyResource(
     @Path("/by-external-id/lookup")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Look up a party by one exact external identifier (PII-minimised response)")
-    suspend fun lookupByExternalId(request: ExternalIdLookupRequest): Response {
-        val lookupType = requireNotNull(request.type) { "request field 'type' is required" }
+    suspend fun lookupByExternalId(request: ExternalIdLookupRequest?): Response {
+        val lookup = requireNotNull(request) { "request body is required" }
+        val lookupType = requireNotNull(lookup.type) { "request field 'type' is required" }
         val type = ExternalIdType.valueOf(lookupType.name)
-        val value = requireNotNull(request.value) { "request field 'value' is required" }
+        val value = requireNotNull(lookup.value) { "request field 'value' is required" }
         require(value.isNotBlank()) { "request field 'value' must not be blank" }
         require(value.length <= MAX_EXTERNAL_ID_LOOKUP_LENGTH) { "request field 'value' is too long" }
         val party = try {

@@ -259,13 +259,15 @@ class PidApiContractTest {
 
     @Test
     @TestSecurity(user = "contract-test", roles = ["ROLE_OPERATOR"])
-    fun `browser lookup rejects unsupported, blank, and oversized values without reflecting them`() {
+    fun `browser lookup rejects unsupported, blank, oversized, and missing input without reflecting it`() {
         val oversized = "x".repeat(257)
         listOf(
             """{"type":"BIRTH_NUMBER","value":"private-index"}""",
             """{"type":"BANKID_SUB","value":"   "}""",
             """{"type":"BANKID_SUB","value":"$oversized"}""",
             "{}",
+            "null",
+            "",
         ).forEach { request ->
             val response = given()
                 .contentType(ContentType.JSON)
