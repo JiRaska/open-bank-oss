@@ -51,7 +51,7 @@ channels:
     title: Bank-own transfer status
     description: |
       `openbank-infra/gitops/components/payments/kafka-topic.yaml`, retention 7 days. Read by
-      treasury-service (consumer group `openbank-treasury-service`).
+      treasury-service (consumer group `treasury-institution-transfer-status`).
 
       **Partitioning key: `aggregateId`** = the paymentId, so one payment's events stay ordered.
       A transfer's lifecycle is ACCEPTED → SENT → SETTLED, or ACCEPTED → REJECTED (scheme

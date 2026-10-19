@@ -15,8 +15,8 @@ info:
     `treasury.payment.released.v1` is written on the NEW channel `openbank.treasury.payments` in
     the same transaction that moves the payment to RELEASED (rail from the SSI: CZK CERTIS, EUR
     TARGET2, other SWIFT; idempotency key `treasury:<dealId>:<flowId>:payment` or
-    `treasury:netted:<sha256>`). Treasury RECEIVES `swift.institution-transfer.status.v1` on
-    `openbank.swift.institution-transfers` (ACCEPTED keeps RELEASED and records the rail reference,
+    `treasury:netted:<sha256>`). Treasury CONSUMES the rail's status feed `openbank.swift.institution-transfers` (its contract is
+    swift-service's asyncapi) (ACCEPTED keeps RELEASED and records the rail reference,
     SENT -> SENT, SETTLED -> SETTLED, REJECTED -> FAILED), idempotent on (paymentId, status);
     a status it cannot apply is dead-lettered to `openbank.dlq.treasury.institution-transfer-status-in`.
     `PaymentStatusChanged.status` gains FAILED as a reachable value and `rail` now carries the
@@ -119,15 +119,6 @@ channels:
     messages:
       PaymentReleased:
         $ref: '#/components/messages/PaymentReleased'
-  institutionTransferStatus:
-    address: openbank.swift.institution-transfers
-    title: Institution-transfer rail status (consumed)
-    description: |
-      Contract 9.2, published by swift-service; treasury consumes it as group
-      `treasury-institution-transfer-status` (`InstitutionTransferStatusConsumer`).
-    messages:
-      InstitutionTransferStatus:
-        $ref: '#/components/messages/InstitutionTransferStatus'
 
 operations:
   publishTreasuryPayments:
@@ -135,11 +126,6 @@ operations:
     channel:
       $ref: '#/channels/treasuryPayments'
     summary: treasury-service hands a released bank-own payment to the institution-transfer rail.
-  receiveInstitutionTransferStatus:
-    action: receive
-    channel:
-      $ref: '#/channels/institutionTransferStatus'
-    summary: treasury-service applies the rail's status to the released payment.
   publishTreasuryDealEvents:
     action: send
     channel:
@@ -198,11 +184,6 @@ components:
       summary: "A human released an own-account payment; the rail is to transfer it (contract 9.1)."
       payload:
         $ref: '#/components/schemas/PaymentReleased'
-    InstitutionTransferStatus:
-      name: swift.institution-transfer.status.v1
-      summary: "The rail's status of a released payment (contract 9.2)."
-      payload:
-        $ref: '#/components/schemas/InstitutionTransferStatus'
     DealCorrected:
       name: treasury.deal.corrected.v1
       summary: "A four-eyes correction of a booked deal was approved; its delta journals are owed to the ledger (ADR-0344 D7)."
@@ -538,17 +519,3 @@ components:
         releasedAt: { type: string, format: date-time }
         synthetic: { type: boolean }
 
-    InstitutionTransferStatus:
-      type: object
-      description: "What `InstitutionTransferStatusConsumer` reads (contract 9.2)."
-      required: [paymentId, idempotencyKey, status]
-      properties:
-        paymentId: { type: string, format: uuid }
-        idempotencyKey: { type: string, maxLength: 128 }
-        status: { type: string, enum: [ACCEPTED, SENT, SETTLED, REJECTED] }
-        messageType: { type: [string, 'null'], enum: [pacs.009, MT202, null] }
-        schemeReference: { type: [string, 'null'] }
-        reasonCode: { type: [string, 'null'] }
-        reason: { type: [string, 'null'] }
-        at: { type: [string, 'null'], format: date-time }
-        synthetic: { type: boolean }
