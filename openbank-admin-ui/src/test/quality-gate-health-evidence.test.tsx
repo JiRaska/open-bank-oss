@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QualityGateHealthPanel } from '@/components/devops/QualityGateHealthPanel'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
@@ -23,10 +23,33 @@ const renderPanel = () => render(<LanguageProvider initialLanguage="en"><Quality
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 describe('QualityGateHealthPanel evidence states', () => {
+  it.each(['headers', 'body'])('leaves loading after a timeout during %s and permits recovery', async stage => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockImplementationOnce((_url: string, init: RequestInit) => {
+      const pending = new Promise<never>((_resolve, reject) => {
+        init.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+      return stage === 'headers' ? pending : Promise.resolve({ ok: true, json: () => pending })
+    }).mockResolvedValueOnce(response(snapshot()))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPanel()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(screen.queryByText(/Loading quality-gate evidence/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Evidence refresh timed out/)).toBeVisible()
+    expect(screen.queryByText(/could not be verified/)).not.toBeInTheDocument()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Try again' })) })
+    expect(screen.getByText('unit-tests')).toBeVisible()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(screen.queryByText(/Evidence refresh timed out/)).not.toBeInTheDocument()
+  })
+
   it.each([401, 503])('shows unavailable evidence after HTTP %s without inventing a healthy estate', async status => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ error: 'denied' }, status)))
     renderPanel()

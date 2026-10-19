@@ -124,7 +124,7 @@ export function QualityGateHealthPanel() {
       }
       let payload: unknown
       try { payload = await res.json() } catch {
-        if (activeRequest.current === controller) setRefreshProblem('malformed')
+        if (activeRequest.current === controller) setRefreshProblem(timedOut ? 'timeout' : 'malformed')
         return
       }
       if (controller.signal.aborted || activeRequest.current !== controller) return
@@ -146,7 +146,7 @@ export function QualityGateHealthPanel() {
       window.clearTimeout(timeout)
       if (activeRequest.current === controller) {
         activeRequest.current = null
-        if (!controller.signal.aborted) setLoading(false)
+        setLoading(false)
       }
     }
   }, [])
