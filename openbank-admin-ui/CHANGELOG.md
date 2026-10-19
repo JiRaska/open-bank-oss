@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.3...admin-ui-v3.8.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** isolate operational evidence and enforce delivery boundaries ([#13372](https://github.com/JiRaska/open-bank-oss/issues/13372)) ([9da523d](https://github.com/JiRaska/open-bank-oss/commit/9da523d1f38f3e416e5428ad1ebe7070108474a1))
+
 ## [3.8.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.2...admin-ui-v3.8.3) (2026-10-19)
 
 
