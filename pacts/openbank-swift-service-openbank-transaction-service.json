@@ -13,12 +13,19 @@
       "request": {
         "body": {
           "amount": 12500.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "EUR",
           "description": "MT103 INVOICE-2026-0042",
           "idempotencyKey": "swift-settlement-5e2a7b10-1111-4222-8333-444444444444",
+          "initiatedByPartyId": null,
           "instructionType": "ONE_OFF",
           "rail": "SWIFT",
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "eeeeeeee-1111-4222-8333-444444444444",
+          "targetAccountId": null,
           "type": "DEBIT",
           "valueDate": "2026-02-20"
         },
@@ -71,12 +78,19 @@
       "request": {
         "body": {
           "amount": 12500.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "EUR",
           "description": "MT103 INVOICE-2026-0042",
           "idempotencyKey": "swift-settlement-5e2a7b10-1111-4222-8333-444444444444",
+          "initiatedByPartyId": null,
           "instructionType": "ONE_OFF",
           "rail": "SWIFT",
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "eeeeeeee-1111-4222-8333-444444444444",
+          "targetAccountId": null,
           "type": "DEBIT",
           "valueDate": "2026-02-20"
         },
