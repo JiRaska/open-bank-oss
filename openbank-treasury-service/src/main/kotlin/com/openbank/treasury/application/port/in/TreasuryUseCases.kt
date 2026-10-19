@@ -145,6 +145,9 @@ interface TreasuryDealUseCase {
      * command or deal is refused (400).
      */
     suspend fun draft(command: DraftDealCommand, actor: Actor, key: String? = null): Deal
+
+    /** ADR-0344: new terms for a DRAFT (`PUT /deals/{id}`); a human, or the agent that drafted it. */
+    suspend fun editDraft(dealId: UUID, command: DraftDealCommand, actor: Actor, key: String? = null): Deal
     suspend fun submit(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun approve(dealId: UUID, actor: Actor, key: String? = null): Deal
 
@@ -363,6 +366,18 @@ interface CashFlowUseCase {
     ): com.openbank.treasury.domain.cashflow.CashFlowOverride
 
     suspend fun conflicts(dealId: UUID): List<com.openbank.treasury.domain.cashflow.CashFlowConflict>
+
+    /** One deal's overrides, optionally by status (the approver's view of a deal). */
+    suspend fun overrides(
+        dealId: UUID,
+        status: com.openbank.treasury.domain.cashflow.OverrideStatus?,
+    ): List<com.openbank.treasury.domain.cashflow.CashFlowOverride>
+
+    /** The four-eyes queue across deals: overrides in [status], oldest first, at most [limit]. */
+    suspend fun overrideQueue(
+        status: com.openbank.treasury.domain.cashflow.OverrideStatus,
+        limit: Int,
+    ): List<com.openbank.treasury.domain.cashflow.CashFlowOverride>
 
     suspend fun versions(dealId: UUID): List<com.openbank.treasury.application.port.out.DealVersionView>
 

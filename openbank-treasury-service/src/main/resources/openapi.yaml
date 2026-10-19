@@ -184,6 +184,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/Deal'
         '404': { description: No such deal }
+    put:
+      tags: [Treasury]
+      operationId: editDraftDeal
+      summary: New terms for a DRAFT deal; the terms version grows (ADR-0344)
+      description: >-
+        Only a DRAFT is edited (409 otherwise); a human may edit any draft, an AI agent only its own;
+        the product cannot change. The new terms pass every check a new draft passes.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DraftDealRequest' }
+      responses:
+        '200':
+          description: The edited draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deal' }
+        '400': { description: Invalid terms }
+        '403': { description: Not permitted (another agent's draft) }
+        '404': { description: No such deal }
+        '409': { description: The deal is not a DRAFT }
 
   /api/v1/treasury/deals/{id}/submit:
     post:
@@ -643,6 +668,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/deals/{id}/cash-flows/overrides:
+    get:
+      tags: [Treasury]
+      operationId: listDealCashFlowOverrides
+      summary: The deal's cash-flow overrides, optionally by status
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, APPROVED, REJECTED, CONFLICT] } }
+      responses:
+        '200':
+          description: Overrides, oldest first
+          content:
+            application/json:
+              schema: { type: array, maxItems: 10000, items: { $ref: '#/components/schemas/CashFlowOverride' } }
+        '404': { description: No such deal }
+
+  /api/v1/treasury/cash-flow-overrides:
+    get:
+      tags: [Treasury]
+      operationId: listCashFlowOverrideQueue
+      summary: The four-eyes override queue across deals (default PENDING, oldest first)
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, APPROVED, REJECTED, CONFLICT], default: PENDING } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: Overrides
+          content:
+            application/json:
+              schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/CashFlowOverride' } }
+        '400': { description: limit outside 1..500 }
+
+  /api/v1/treasury/day-completion/{date}:
+    get:
+      tags: [Treasury]
+      operationId: getDayCompletion
+      summary: The treasury accounting day's completion record (ADR-0344 D7)
+      description: >-
+        Every step (FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS, MATURITIES) with the last
+        outcome a run recorded for that bank day; a step no run recorded is PENDING with `at` null.
+      parameters:
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The day
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  steps:
+                    type: array
+                    maxItems: 6
+                    items:
+                      type: object
+                      properties:
+                        step: { type: string, enum: [FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS, MATURITIES] }
+                        status: { type: string, enum: [DONE, SKIPPED, FAILED, PENDING] }
+                        count: { type: [integer, 'null'] }
+                        detail: { type: [string, 'null'] }
+                        at: { type: [string, 'null'], format: date-time }
 
   /api/v1/treasury/deals/{id}/cash-flows:
     get:

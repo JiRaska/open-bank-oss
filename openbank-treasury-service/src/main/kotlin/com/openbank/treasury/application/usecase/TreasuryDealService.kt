@@ -138,6 +138,39 @@ class TreasuryDealService(
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }
 
+    override suspend fun editDraft(dealId: UUID, command: DraftDealCommand, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, EDIT, dealId)?.let { return it } }
+        val existing = load(dealId)
+        counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
+        val tradeDate = command.tradeDate ?: existing.tradeDate
+        val valueDate = command.valueDate
+            ?: if (command.product == ProductType.FX_SPOT) DealCalendars.spotDate(tradeDate, command.currency) else null
+        // The new terms are built exactly as a new draft by the deal's creator would be: every
+        // invariant of a draft holds again, including an agent draft's rationale and inputs.
+        val replacement = Deal.draft(
+            id = existing.id,
+            product = command.product,
+            counterpartyId = command.counterpartyId,
+            currency = command.currency,
+            principal = command.principal,
+            rate = command.rate,
+            tradeDate = tradeDate,
+            valueDate = requireNotNull(valueDate) { "valueDate is required" },
+            maturityDate = command.maturityDate,
+            actor = existing.createdBy,
+            at = existing.createdAt,
+            rationale = command.rationale ?: existing.rationale,
+            inputs = command.inputs ?: existing.inputs,
+            fxSide = command.fxSide,
+            kind = command.kind,
+            legs = command.legs,
+            header = command.header,
+        )
+        val edited = existing.editDraft(replacement, actor, clock.instant())
+        schedules?.requireEffective(edited)
+        return deals.save(edited, command = cmd(key, EDIT, dealId))
+    }
+
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = load(dealId)
@@ -603,6 +636,7 @@ class TreasuryDealService(
             ProductType.CNB_DEPOSIT_FACILITY,
         )
         const val DRAFT = "DRAFT"
+        const val EDIT = "EDIT"
         const val SUBMIT = "SUBMIT"
         const val APPROVE = "APPROVE"
         const val OVERRIDE = "OVERRIDE_LIMIT"

@@ -7,6 +7,7 @@ package com.openbank.treasury.infrastructure.rest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.treasury.application.port.`in`.CashFlowUseCase
+import com.openbank.treasury.domain.cashflow.OverrideStatus
 import com.openbank.treasury.domain.model.Actor
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -58,6 +59,13 @@ class CashFlowResource {
     @Authorize(action = "treasury.cashflow.read", resource = "#id")
     suspend fun conflicts(@PathParam("id") id: UUID): List<CashFlowConflictDto> =
         cashFlows.conflicts(id).map(CashFlowConflictDto::from)
+
+    @GET
+    @Path("/overrides")
+    @Operation(summary = "The deal's overrides, optionally by status (PENDING = awaiting a second person)")
+    @Authorize(action = "treasury.cashflow.read", resource = "#id")
+    suspend fun overrides(@PathParam("id") id: UUID, @QueryParam("status") status: String?): List<CashFlowOverrideDto> =
+        cashFlows.overrides(id, status?.let { OverrideStatus.valueOf(it) }).map(CashFlowOverrideDto::from)
 
     @POST
     @Path("/{flowId}/overrides")

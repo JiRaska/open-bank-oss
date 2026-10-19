@@ -386,6 +386,39 @@ class CashFlowLedgerApiIT {
             .body("collect { it.product }.unique()", hasSize<Any>(16))
     }
 
+    @Test
+    @Order(13)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `13 - a draft takes new terms through PUT, and a booked deal does not`() {
+        val start = today.plusDays(10)
+        fun body(rate: String) = """{"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK",
+            "principal":1000000.00,"rate":$rate,"valueDate":"$start","maturityDate":"${start.plusDays(30)}"}"""
+        val draft: String = post("/deals", body("3.00")).then().statusCode(201).extract().path("dealId")
+        given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(body("3.25")).`when`().put("/api/v1/treasury/deals/$draft")
+            .then().statusCode(
+                200,
+            ).body("rate", equalTo(3.25f)).body("version", equalTo(2)).body("state", equalTo("DRAFT"))
+        given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(body("3.25")).`when`().put("/api/v1/treasury/deals/$dealId")
+            .then().statusCode(409)
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `14 - the override queue, a deal's overrides by status and the day-completion record are served`() {
+        given().`when`().get("/api/v1/treasury/deals/$dealId/cash-flows/overrides?status=APPROVED")
+            .then().statusCode(200).body("overrideId", hasItem(overrideId))
+        given().`when`().get("/api/v1/treasury/deals/$dealId/cash-flows/overrides?status=PENDING")
+            .then().statusCode(200).body("$", hasSize<Any>(0))
+        given().`when`().get("/api/v1/treasury/cash-flow-overrides?status=APPROVED&limit=50")
+            .then().statusCode(200).body("overrideId", hasItem(overrideId))
+        given().`when`().get("/api/v1/treasury/cash-flow-overrides?limit=0").then().statusCode(400)
+        given().`when`().get("/api/v1/treasury/day-completion/$today").then().statusCode(200)
+            .body("steps", hasSize<Any>(6)).body("steps[0].step", equalTo("FIXINGS"))
+    }
+
     private fun count(sql: String, id: String): Int = jdbc { c ->
         c.prepareStatement(sql).use { ps ->
             ps.setObject(1, UUID.fromString(id))

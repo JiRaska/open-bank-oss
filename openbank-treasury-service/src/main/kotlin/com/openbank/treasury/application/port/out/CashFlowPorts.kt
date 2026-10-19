@@ -46,6 +46,9 @@ interface CashFlowRepository {
 
     suspend fun overrides(dealId: UUID): List<CashFlowOverride>
 
+    /** Overrides in [status] across every deal, oldest first, at most [limit]. */
+    suspend fun overridesByStatus(status: OverrideStatus, limit: Int): List<CashFlowOverride>
+
     suspend fun findOverride(overrideId: UUID): CashFlowOverride?
 
     suspend fun conflicts(dealId: UUID): List<CashFlowConflict>

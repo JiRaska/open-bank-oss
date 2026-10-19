@@ -136,6 +136,16 @@ class CashFlowService(
         return rejected
     }
 
+    override suspend fun overrides(dealId: UUID, status: OverrideStatus?): List<CashFlowOverride> {
+        load(dealId)
+        return flows.overrides(dealId).filter { status == null || it.status == status }
+    }
+
+    override suspend fun overrideQueue(status: OverrideStatus, limit: Int): List<CashFlowOverride> {
+        require(limit in 1..MAX_QUEUE) { "limit must be 1..$MAX_QUEUE" }
+        return flows.overridesByStatus(status, limit)
+    }
+
     override suspend fun conflicts(dealId: UUID): List<CashFlowConflict> {
         load(dealId)
         return flows.conflicts(dealId)
@@ -243,6 +253,7 @@ class CashFlowService(
 
     private companion object {
         const val MAX_KEY_LENGTH = 128
+        const val MAX_QUEUE = 500
         const val MAX_CALENDAR_DAYS = 366L
         const val PROPOSE = "OVERRIDE_PROPOSE"
         const val APPROVE = "OVERRIDE_APPROVE"

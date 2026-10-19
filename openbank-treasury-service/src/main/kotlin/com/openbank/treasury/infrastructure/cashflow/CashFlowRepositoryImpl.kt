@@ -73,6 +73,11 @@ class CashFlowRepositoryImpl(
         overrideRepo.find("dealId = ?1 order by proposedAt asc", dealId).list()
     }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun overridesByStatus(status: OverrideStatus, limit: Int): List<CashFlowOverride> =
+        Panache.withSession {
+            overrideRepo.find("status = ?1 order by proposedAt asc", status.name).page(0, limit).list()
+        }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun findOverride(overrideId: UUID): CashFlowOverride? = Panache.withSession {
         overrideRepo.find("overrideId", overrideId).firstResult()
     }.awaitSuspending()?.toDomain()

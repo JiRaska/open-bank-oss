@@ -8,6 +8,9 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.out.DayCompletionRepository
+import com.openbank.treasury.domain.model.DayStep
+import com.openbank.treasury.domain.model.DayStepRecord
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
@@ -32,6 +35,8 @@ class InterestAccrualScheduler(
     private val clock: Clock,
     @ConfigProperty(name = "openbank.treasury.accrual.enabled", defaultValue = "true")
     private val enabled: Boolean,
+    /** ADR-0344 D7: each pass records the ACCRUALS step of the bank day it covered; null only in unit tests. */
+    private val dayCompletion: DayCompletionRepository? = null,
 ) {
     private val log: Logger = Logger.getLogger(InterestAccrualScheduler::class.java)
 
@@ -50,8 +55,15 @@ class InterestAccrualScheduler(
     )
     suspend fun run() {
         if (!enabled) return
-        runCatching { deals.accrueInterest(AccountingClock.bank(clock).today()) }
+        val today = AccountingClock.bank(clock).today()
+        runCatching { deals.accrueInterest(today) }
             .onSuccess { r ->
+                runCatching {
+                    dayCompletion?.record(
+                        DayStepRecord.of(today, DayStep.ACCRUALS, r.journals, r.failures.size, clock.instant()),
+                    )
+                }
+                    .onFailure { log.error("could not record the ACCRUALS day-completion step", it) }
                 r.failures.forEach { log.error("interest accrual could not accrue a deal", it) }
                 if (r.failures.isEmpty()) liveness?.recordSuccess()
                 if (r.journals > 0) log.infof("interest accrual posted %d journal(s)", r.journals)

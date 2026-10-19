@@ -76,6 +76,63 @@ class DealV2Test {
         .approve(approver, withinLimit(d), NOW, DealFixtures.withinProduct)
 
     @Test
+    fun `a draft takes new terms - a human may edit it, its version grows and its timeline says so`() {
+        val d = irs()
+        val other = Actor("dora.dealer", ActorType.HUMAN)
+        val edited = d.editDraft(irs().copy(rate = BigDecimal("4.10")), other, NOW)
+        assertThat(edited.id).isEqualTo(d.id)
+        assertThat(edited.createdBy).isEqualTo(d.createdBy)
+        assertThat(edited.version).isEqualTo(d.version + 1)
+        assertThat(edited.rate).isEqualByComparingTo("4.10")
+        assertThat(edited.history.last().note).contains("draft edited")
+        assertThat(edited.history.last().actor).isEqualTo(other)
+    }
+
+    @Test
+    fun `an AI agent edits only its own draft, nobody edits a submitted deal, and the product is fixed`() {
+        val agent = Actor("agent:treasury-dealing-assistant", ActorType.AI_AGENT)
+        val d = irs()
+        assertThatThrownBy { d.editDraft(irs(), agent, NOW) }.isInstanceOf(ActorNotPermittedException::class.java)
+        val service = Actor("service-account-x", ActorType.SERVICE)
+        assertThatThrownBy { d.editDraft(irs(), service, NOW) }.isInstanceOf(ActorNotPermittedException::class.java)
+        val submitted = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
+        assertThatThrownBy { submitted.editDraft(irs(), dealer, NOW) }
+            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("only a DRAFT")
+        assertThatThrownBy { d.editDraft(DealFixtures.placement(), dealer, NOW) }
+            .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("product")
+    }
+
+    @Test
+    fun `the day-completion record lists every step, an unrecorded one PENDING, a failure as FAILED`() {
+        val day = LocalDate.parse("2026-11-02")
+        val accruals = com.openbank.treasury.domain.model.DayStepRecord.of(
+            day,
+            com.openbank.treasury.domain.model.DayStep.ACCRUALS,
+            12,
+            0,
+            NOW,
+        )
+        val failed = com.openbank.treasury.domain.model.DayStepRecord.of(
+            day,
+            com.openbank.treasury.domain.model.DayStep.MATURITIES,
+            1,
+            2,
+            NOW,
+        )
+        val full = com.openbank.treasury.domain.model.DayStepRecord.day(day, listOf(accruals, failed))
+        assertThat(
+            full.map {
+                it.step
+            },
+        ).containsExactly(*com.openbank.treasury.domain.model.DayStep.entries.toTypedArray())
+        assertThat(full.single { it.step.name == "ACCRUALS" }.status.name).isEqualTo("DONE")
+        assertThat(full.single { it.step.name == "MATURITIES" }.status.name).isEqualTo("FAILED")
+        assertThat(full.single { it.step.name == "FIXINGS" }.let { it.status.name to it.at }).isEqualTo(
+            "PENDING" to null,
+        )
+    }
+
+    @Test
     fun `the legacy products derive their legs from the flat fields`() {
         val d = DealFixtures.placement()
         assertThat(d.legs).singleElement().satisfies({

@@ -383,6 +383,39 @@ data class Deal(
      * an approver's queue. [productCheck] is required, never defaulted: a missing check must not
      * read as a passed one.
      */
+    /**
+     * ADR-0344 catalogue (draft edit): a DRAFT takes new terms. [replacement] is the draft the new
+     * terms would make (built by the same path as a new draft, so every invariant holds again); its
+     * identity, creator and timeline are this deal's. A human may edit any draft; an AI agent only
+     * its own. The product cannot change — that is a different deal — and the terms version grows.
+     */
+    fun editDraft(replacement: Deal, actor: Actor, at: Instant): Deal {
+        check(state == DealState.DRAFT) {
+            "only a DRAFT deal can be edited (deal is $state); change a booked deal by a correction"
+        }
+        if (actor.type != ActorType.HUMAN && !(actor.type == ActorType.AI_AGENT && actor.id == createdBy.id)) {
+            throw ActorNotPermittedException("a ${actor.type} principal may edit only its own draft")
+        }
+        require(replacement.product == product) { "the product of a draft cannot change (draft a new deal)" }
+        return replacement.copy(
+            id = id,
+            state = DealState.DRAFT,
+            createdBy = createdBy,
+            createdAt = createdAt,
+            updatedAt = at,
+            version = version + 1,
+            history =
+            history +
+                DealTransition(
+                    DealState.DRAFT,
+                    DealState.DRAFT,
+                    actor,
+                    at,
+                    "draft edited (terms version ${version + 1})",
+                ),
+        )
+    }
+
     fun submit(actor: Actor, check: LimitCheck, at: Instant, productCheck: ProductLimitCheck): Deal {
         requireHuman(actor, "submit")
         requireState(DealState.DRAFT, "submit")

@@ -141,3 +141,10 @@ fun interface CurveSetPort {
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
 }
+
+/** ADR-0344 D7: the per-accounting-day completion record each treasury run writes. */
+interface DayCompletionRepository {
+    suspend fun record(r: com.openbank.treasury.domain.model.DayStepRecord)
+
+    suspend fun day(date: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
+}

@@ -29,6 +29,7 @@ import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -73,6 +74,9 @@ class TreasuryResource {
     private fun requireKey(key: String?): String = requireNotNull(key) { "header '$IDEMPOTENCY_KEY' is required" }
 
     private fun actor(): Actor = Actor.fromPrincipalName(identity.principal.name)
+
+    @Inject
+    lateinit var dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository
 
     @Inject
     lateinit var cashFlows: CashFlowUseCase
@@ -155,6 +159,38 @@ class TreasuryResource {
             "versions" to cashFlows.versions(id).map(DealVersionDto::from),
         )
     }
+
+    @GET
+    @Path("/day-completion/{date}")
+    @Operation(
+        summary = "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)",
+    )
+    @Authorize(action = "treasury.deal.read")
+    suspend fun dayCompletion(@PathParam("date") date: LocalDate): Map<String, Any> = mapOf(
+        "date" to date,
+        "steps" to com.openbank.treasury.domain.model.DayStepRecord.day(date, dayCompletion.day(date)).map {
+            mapOf(
+                "step" to it.step.name,
+                "status" to it.status.name,
+                "count" to it.count,
+                "detail" to it.detail,
+                "at" to it.at,
+            )
+        },
+    )
+
+    @GET
+    @Path("/cash-flow-overrides")
+    @Operation(summary = "The four-eyes override queue across deals (default PENDING, oldest first, at most `limit`)")
+    @Authorize(action = "treasury.cashflow.read")
+    suspend fun overrideQueue(
+        @QueryParam("status") status: String?,
+        @QueryParam("limit") limit: Int?,
+    ): List<CashFlowOverrideDto> = cashFlows.overrideQueue(
+        status?.let { com.openbank.treasury.domain.cashflow.OverrideStatus.valueOf(it) }
+            ?: com.openbank.treasury.domain.cashflow.OverrideStatus.PENDING,
+        limit ?: DEFAULT_QUEUE,
+    ).map(CashFlowOverrideDto::from)
 
     @GET
     @Path("/deals/{id}/journals")
@@ -293,8 +329,24 @@ class TreasuryResource {
             "(ADR-0315 D10) must send rationale and inputs; only a human dealer can submit it.",
     )
     @Authorize(action = "treasury.deal.draft")
-    @Suppress("CyclomaticComplexMethod") // optional v2 fields falling back to the legacy flat ones
     suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
+        val deal = deals.draft(commandOf(request), actor(), requireKey(key))
+        return Response.status(Response.Status.CREATED).entity(DealResponse.from(deal)).build()
+    }
+
+    @PUT
+    @Path("/deals/{id}")
+    @RolesAllowed(DEALER)
+    @Operation(summary = "New terms for a DRAFT deal (a human, or the agent that drafted it); the terms version grows")
+    @Authorize(action = "treasury.deal.draft", resource = "#id")
+    suspend fun editDraft(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: DraftDealRequest,
+    ): DealResponse = DealResponse.from(deals.editDraft(id, commandOf(request), actor(), requireKey(key)))
+
+    @Suppress("CyclomaticComplexMethod") // optional v2 fields falling back to the legacy flat ones
+    private fun commandOf(request: DraftDealRequest): DraftDealCommand {
         val product = requireNotNull(request.product) { "product is required" }
         val fx = if (product == ProductType.FX_SPOT) {
             FxTerms.fromCurrencies(
@@ -314,37 +366,32 @@ class TreasuryResource {
         val legs = request.legs.orEmpty().map { it.toDomain() }
         // ADR-0344 D2: a leg-described product's flat fields come from its first leg when not given.
         val first = legs.firstOrNull().takeIf { !product.legacy }
-        val deal = deals.draft(
-            DraftDealCommand(
-                product = product,
-                counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
-                currency = requireNotNull(fx?.first ?: request.currency ?: first?.currency) { "currency is required" },
-                principal = requireNotNull(
-                    request.principal
-                        ?: first?.let { f -> legs.filter { it.currency == f.currency }.maxOf { it.notional } },
-                ) { "principal is required" },
-                rate = requireNotNull(request.rate ?: first?.let { it.rate.rate ?: java.math.BigDecimal.ZERO }) {
-                    "rate is required"
-                },
-                tradeDate =
-                request.tradeDate
-                    ?: request.tradeDateTime?.atZone(java.time.ZoneId.of("Europe/Prague"))?.toLocalDate(),
-                valueDate = request.valueDate ?: first?.let { legs.minOf { l -> l.accrualStart } },
-                maturityDate = request.maturityDate ?: first?.let { legs.maxOf { l -> l.accrualEnd } },
-                kind = request.kind ?: DealKind.ACTUAL,
-                legs = if (product.legacy) emptyList() else legs,
-                header = headerOf(request),
-                rationale = request.rationale,
-                inputs = request.inputs?.let { node ->
-                    require(node.isObject) { "inputs must be a JSON object" }
-                    node.toString()
-                },
-                fxSide = fx?.second,
-            ),
-            actor(),
-            requireKey(key),
+        return DraftDealCommand(
+            product = product,
+            counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
+            currency = requireNotNull(fx?.first ?: request.currency ?: first?.currency) { "currency is required" },
+            principal = requireNotNull(
+                request.principal
+                    ?: first?.let { f -> legs.filter { it.currency == f.currency }.maxOf { it.notional } },
+            ) { "principal is required" },
+            rate = requireNotNull(request.rate ?: first?.let { it.rate.rate ?: java.math.BigDecimal.ZERO }) {
+                "rate is required"
+            },
+            tradeDate =
+            request.tradeDate
+                ?: request.tradeDateTime?.atZone(java.time.ZoneId.of("Europe/Prague"))?.toLocalDate(),
+            valueDate = request.valueDate ?: first?.let { legs.minOf { l -> l.accrualStart } },
+            maturityDate = request.maturityDate ?: first?.let { legs.maxOf { l -> l.accrualEnd } },
+            kind = request.kind ?: DealKind.ACTUAL,
+            legs = if (product.legacy) emptyList() else legs,
+            header = headerOf(request),
+            rationale = request.rationale,
+            inputs = request.inputs?.let { node ->
+                require(node.isObject) { "inputs must be a JSON object" }
+                node.toString()
+            },
+            fxSide = fx?.second,
         )
-        return Response.status(Response.Status.CREATED).entity(DealResponse.from(deal)).build()
     }
 
     @GET
@@ -491,6 +538,7 @@ const val APPROVER = "ROLE_TREASURY_APPROVER"
 const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"
 
 private const val MAX_FILTER_NAME = 64
+private const val DEFAULT_QUEUE = 100
 
 /** ADR-0344 D3: proposes reference-data changes. Never approves them (that is [APPROVER]). */
 const val REFERENCE_EDITOR = "ROLE_TREASURY_REFERENCE_EDITOR"
