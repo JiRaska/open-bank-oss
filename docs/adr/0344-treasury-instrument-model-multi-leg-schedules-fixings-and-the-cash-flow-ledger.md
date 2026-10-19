@@ -169,18 +169,22 @@ all consume. Concretely:
    rules are data: `(product, event, IFRS 9 category) → journal template`, versioned, with the
    event set `TRADE`, `SETTLEMENT`, `ACCRUAL`, `FIXING`, `PAYMENT`, `AMORTISATION`,
    `REVALUATION`, `MATURITY`, `EARLY_TERMINATION`, `CORRECTION`. A template line names an
-   **accounting class and role**, never a GL account: under ADR-0341 the ledger owns the
-   accounting-class → GL map, so the chart can change without a treasury release and the same
-   matrix serves every legal entity's ledger (ADR-0337). Trade-date versus settlement-date
+   **accounting class and role**, never a GL account: this proposal follows proposed ADR-0341's
+   ledger-owned accounting-class → GL map, so the chart can change without a treasury release
+   and the same matrix can serve each legal entity's ledger as proposed in ADR-0337. These are
+   proposed dependencies, not accepted architecture. Trade-date versus settlement-date
    recognition is declared per product in that matrix, not in code. A back-dated
    correction creates a new deal version, regenerates the cash-flow ledger, diffs the journals
    the previous version posted against the journals the new version implies, and posts the
    **delta journals** into the open accounting day — never an edit of a posted journal and never
-   a posting into a day the ledger has closed. The treasury service is a **day-close
-   participant** under ADR-0342: each accounting day it reports one record — `RAN` with the
-   fixings, accruals, payments, revaluations and corrections it processed, `SKIPPED` with a
-   reason, or `REFUSED` when the ledger refused a posting into a closed day — and the accounting
-   day does not tie out until that record exists or an operator waives it.
+   a posting into a day the ledger has closed. The treasury service is proposed as a **day-close
+   participant**, following the ADR-0342 proposal in open #13197 (not yet on main). Each accounting
+   day it reports `RAN` with the fixings, accruals, payments, revaluations and corrections it
+   processed, `SKIPPED` with a reason, or `REFUSED` when the ledger refused its posting. With
+   participant enforcement enabled, a missing or `REFUSED` participant holds the day in
+   `CUTOFF`; merely having a record is insufficient. It must report `RAN` or reasoned `SKIPPED`,
+   or a verified human operator must explicitly waive it (`WAIVED`). This proposes no activation
+   of that pending enforcement mode.
 
 8. **Valuation and sensitivity live in the risk engine; the treasury service supplies facts.**
    The risk engine adds per-deal and per-portfolio present value from its curve sets (per leg,
@@ -409,8 +413,9 @@ change shows what it would affect before it is approved.
 ## References
 
 - ADR-0313, ADR-0314, ADR-0315 (amended in part), ADR-0317, ADR-0318, ADR-0229, ADR-0332,
-  ADR-0337 (per-entity ledgers and custody holdings), ADR-0341 (accounting class → GL map),
-  ADR-0342 (day-close participants),
+  proposed ADR-0337 (per-entity ledgers and custody holdings), proposed ADR-0341
+  (accounting class → GL map), the ADR-0342 proposal in open #13197 (day-close participants;
+  not yet on main),
   ADR-0046, ADR-0025, ADR-0104, ADR-0031
 - Issues #10618 (programme), #11670 (day-count divergences), #11107 (unverified regulatory
   codes), #12115 (funding check), #13167 (day-end participation)
