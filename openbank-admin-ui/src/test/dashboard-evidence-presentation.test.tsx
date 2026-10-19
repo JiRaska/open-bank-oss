@@ -80,6 +80,58 @@ describe('dashboard evidence presentation', () => {
   })
 
   it.each([
+    ['Kubernetes without a discovery status', { source: 'kubernetes' }],
+    ['static source with a Kubernetes status', { source: 'static', discoveryStatus: 'complete' }],
+    ['unknown source with a complete-looking status', { source: 'future-source', discoveryStatus: 'complete' }],
+  ])('keeps missing roster members unknown for %s', async (_description, metadata) => {
+    const twoServices = {
+      ...governance,
+      items: [
+        ...governance.items,
+        { serviceName: 'ledger-service', dataDomain: 'core' },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? twoServices : {
+        ...metadata, services: [health.services[0]],
+      },
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    expect(await screen.findByText('Service inventory is incomplete')).toBeInTheDocument()
+    expect(screen.getByTitle('Deployment cannot be confirmed: inventory is incomplete')).toBeInTheDocument()
+    expect(screen.queryByTitle('Not deployed in this environment')).not.toBeInTheDocument()
+  })
+
+  it('accepts only the explicit static discovery status as a complete static inventory', async () => {
+    const twoServices = {
+      ...governance,
+      items: [
+        ...governance.items,
+        { serviceName: 'ledger-service', dataDomain: 'core' },
+      ],
+    }
+    const staticHealth = {
+      source: 'static',
+      discoveryStatus: 'static',
+      services: [
+        health.services[0],
+        { name: 'ledger-service', label: 'Ledger', group: 'core', status: 'UP', latencyMs: 8 },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? twoServices : staticHealth,
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    expect(await screen.findByText('Healthy services')).toBeInTheDocument()
+    expect(screen.queryByText('Service inventory is incomplete')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Not deployed in this environment')).not.toBeInTheDocument()
+  })
+
+  it.each([
     ['UNKNOWN', 'Health status unknown', 'serviceChipUnknown'],
     ['DOWN', 'DOWN', 'serviceChipUnhealthy'],
   ] as const)('renders mixed UP/%s workloads as %s with the matching chip state', async (secondStatus, title, stateClass) => {

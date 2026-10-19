@@ -94,9 +94,8 @@ export default function DashboardPage() {
       const fleet = parseGovernanceFleet(governancePayload)
       if (!res?.ok) throw new Error('health')
       const healthBody = await res.json() as { source?: string; discoveryStatus?: string }
-      const inventoryComplete = healthBody.source !== 'kubernetes'
-        || healthBody.discoveryStatus === undefined
-        || healthBody.discoveryStatus === 'complete'
+      const inventoryComplete = (healthBody.source === 'static' && healthBody.discoveryStatus === 'static')
+        || (healthBody.source === 'kubernetes' && healthBody.discoveryStatus === 'complete')
       if (!inventoryComplete) setDiscoveryIncomplete(true)
       // Keep each discovered workload by namespace, then aggregate instances onto
       // the canonical logical-service roster without choosing an arbitrary one.
@@ -107,8 +106,9 @@ export default function DashboardPage() {
         discovered.set(entry.name, instances)
       }
       // Overlay discovery on the canonical fleet: every intended service appears,
-      // with deployed/healthy resolved from the cluster. A roster member absent from
-      // discovery is NOT-DEPLOYED (neutral), never DOWN (which is a real outage).
+      // with deployed/healthy resolved from discovery. Absence means NOT-DEPLOYED
+      // only when the source explicitly reports a complete inventory; otherwise it
+      // remains unknown, never DOWN (which is a real outage).
       const results: SvcStatus[] = fleet.map(f => {
         const instances = discovered.get(f.name) ?? []
         const labels = new Set(instances.map(entry => entry.label))
