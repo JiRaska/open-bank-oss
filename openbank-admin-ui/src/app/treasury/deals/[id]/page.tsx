@@ -21,6 +21,7 @@ import { HumanReference, LoadMoreControl, PageHeader, StatCard, StatusBadge } fr
 import { dealActionUrl, getJson, postJson, treasuryUrl, type DealAction } from '@/components/treasury/api'
 import { counterpartyListSchema, dealSchema, type Counterparty } from '@/components/treasury/contracts'
 import { DealWorkbench } from '@/components/treasury/wb/DealWorkbench'
+import { CorrectionsPanel } from '@/components/treasury/wb/CorrectionsPanel'
 import { ticketDealSchema, type TicketDeal } from '@/components/treasury/wb/types'
 import { dealActions, distinctCounterparties, productLabel, refusalText, STATE_TONE, stateLabel } from '@/components/treasury/model'
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
@@ -367,6 +368,7 @@ function DealDetail({ id }: { id: string }) {
       </div>
 
       <DealWorkbench deal={deal} actor={actor} roles={roles} onChanged={() => void load()} />
+      {deal.state !== 'DRAFT' && <CorrectionsPanel deal={deal} actor={actor} roles={roles} onChanged={() => void load()} />}
     </div>
   )
 }

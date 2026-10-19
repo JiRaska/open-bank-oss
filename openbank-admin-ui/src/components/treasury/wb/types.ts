@@ -327,6 +327,26 @@ export const dayCompletionSchema = z.object({
   })),
 })
 
+/** ADR-0344 D7: a deal correction with its preview (changed flows before/after, delta journals). */
+const previewFlow = z.object({ flowId: z.string().nullish(), legIndex: z.number(), periodIndex: z.number(), kind: z.string(), paymentDate: z.string(), amount: decimal.nullish(), currency: z.string(), rate: decimal.nullish() }).loose()
+export const correctionPreviewSchema = z.object({
+  newFlows: z.array(previewFlow).nullish(),
+  changedFlows: z.array(z.object({ slot: z.string(), before: previewFlow.nullish(), after: previewFlow.nullish() })).nullish(),
+  deltaJournals: z.array(z.object({
+    sourceEvent: z.string(), key: z.string(), valueDate: z.string(), idempotencyKey: z.string().nullish(),
+    lines: z.array(z.object({ accountingClass: z.string(), role: z.string(), side: z.string(), amount: decimal, currency: z.string() })),
+  })).nullish(),
+}).loose()
+export const correctionSchema = z.object({
+  correctionId: z.string(), dealId: z.string(), status: z.string(), baseVersion: z.number(), newVersion: z.number().nullish(),
+  fullUnwind: z.boolean(), reason: z.string(), effectiveFrom: z.string(), proposedBy: z.string(), proposedAt: z.string(),
+  decidedBy: z.string().nullish(), decisionReason: z.string().nullish(),
+  limitOverrideRequested: z.boolean(), limitOverrideBy: z.string().nullish(), limitOverrideCoversExposureUpTo: decimal.nullish(),
+  preview: correctionPreviewSchema.nullish(),
+}).loose()
+export type Correction = z.infer<typeof correctionSchema>
+export const correctionListSchema = z.array(correctionSchema)
+
 /** ADR-0344 D7/D8: one deal's revaluation on one date (GET /revaluations?asOf=). */
 export const revaluationSchema = z.object({
   dealId: z.string(), asOf: z.string(), snapshotId: z.string(), fairValue: decimal, carrying: decimal,

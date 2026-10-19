@@ -54,3 +54,17 @@ export function canDecideRateSheet(
   if (!who.holdsApprove || who.ai || s.status !== 'PENDING' || !s.id) return false
   return who.actor === null || s.proposedBy !== who.actor
 }
+
+/**
+ * A PENDING correction is decided (approve / reject / senior limit override) by a human who is no
+ * term author: not its proposer, not the deal's creator. A courtesy — the service refuses all of it.
+ */
+export function canDecideCorrection(
+  c: { status: string; proposedBy: string },
+  deal: { createdBy?: string | null },
+  who: { actor: string | null; holds: boolean; ai: boolean },
+): boolean {
+  if (!who.holds || who.ai || c.status !== 'PENDING') return false
+  if (who.actor === null) return true
+  return c.proposedBy !== who.actor && deal.createdBy !== who.actor
+}
