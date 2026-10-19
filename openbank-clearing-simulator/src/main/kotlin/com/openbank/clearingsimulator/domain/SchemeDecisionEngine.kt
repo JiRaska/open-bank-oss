@@ -27,6 +27,9 @@ data class SchemeDecision(val status: PaymentStatus, val reason: RejectReason?) 
     companion object {
         val SETTLED = SchemeDecision(PaymentStatus.ACSC, null)
 
+        /** `ACSP`: accepted, settlement to follow (bank-own transfers on deferred settlement). */
+        val ACCEPTED_PENDING = SchemeDecision(PaymentStatus.ACSP, null)
+
         fun rejected(reason: RejectReason) = SchemeDecision(PaymentStatus.RJCT, reason)
     }
 }
@@ -61,6 +64,13 @@ class SchemeDecisionEngine {
         else -> SchemeDecision.SETTLED
     }
 
+    /**
+     * Bank-own (pacs.009) transfers whose minor-unit remainder is 03 are accepted (`ACSP`) and
+     * settled asynchronously later, the deterministic synthetic case for deferred settlement.
+     * Not applied to pacs.008, whose verdict table above is unchanged.
+     */
+    fun defersSettlement(amount: BigDecimal): Boolean = minorUnitRemainder(amount) == TRIGGER_DEFERRED_SETTLEMENT
+
     private fun minorUnitRemainder(amount: BigDecimal): Int =
         amount.movePointRight(MINOR_UNIT_SCALE).toBigInteger().mod(HUNDRED).toInt()
 
@@ -72,5 +82,6 @@ class SchemeDecisionEngine {
         const val TRIGGER_CLOSED_ACCOUNT = 1
         const val TRIGGER_DUPLICATION = 2
         const val TRIGGER_REGULATORY = 4
+        const val TRIGGER_DEFERRED_SETTLEMENT = 3
     }
 }

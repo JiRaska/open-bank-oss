@@ -5,6 +5,7 @@
 package com.openbank.clearingsimulator
 
 import com.openbank.clearingsimulator.application.ClearingSimulatorService
+import com.openbank.clearingsimulator.application.InstitutionTransferRegistry
 import com.openbank.clearingsimulator.domain.ClearingRoute
 import com.openbank.libs.iso20022.Iso20022ValidationResult
 import com.openbank.libs.iso20022.Iso20022Validator
@@ -110,15 +111,54 @@ class ClearingSimulatorInstitutionTransferTest {
 
     @Test
     fun `the registry evicts the oldest entry beyond its capacity`() {
-        val registry = com.openbank.clearingsimulator.application.InstitutionTransferRegistry(capacity = 1)
+        val registry = InstitutionTransferRegistry(capacity = 1)
         val r = com.openbank.clearingsimulator.application.ClearingResult(
             "x",
             settled = true,
             creditNotificationXml = null,
         )
-        registry.recordOnce("a") { r }
-        registry.recordOnce("b") { r }
+        registry.recordOnce("a", Instant.EPOCH) { InstitutionTransferRegistry.Recorded(r) }
+        registry.recordOnce("b", Instant.EPOCH) { InstitutionTransferRegistry.Recorded(r) }
         assertThat(registry.statusOf("a")).isNull()
         assertThat(registry.statusOf("b")).isEqualTo(r)
+    }
+
+    @Test
+    fun `remainder 03 is answered ACSP and settles asynchronously once, after the lag`() {
+        val uetr = "6d4e28ba-2fa1-4d2e-883f-0016d3cca427"
+        val t0 = Instant.parse("2026-10-19T09:00:00Z")
+        val first = service.clearInstitutionTransfer(
+            ClearingRoute.TARGET2,
+            InstitutionTransferFixtures.pacs009(amount = "500.03", uetr = uetr),
+            t0,
+        )
+        assertThat(first.statusReportXml).contains("<TxSts>ACSP</TxSts>")
+        assertThat(first.settled).isFalse()
+        val registry = service.institutionTransfers
+        assertThat(registry.statusOf(uetr, t0.plusSeconds(29))!!.statusReportXml).contains("<TxSts>ACSP</TxSts>")
+        assertThat(registry.settledCount()).isZero()
+        val settled = registry.statusOf(uetr, t0.plusSeconds(30))!!
+        assertThat(settled.statusReportXml).contains("<TxSts>ACSC</TxSts>", "<OrgnlUETR>$uetr</OrgnlUETR>")
+        assertThat(pacs002Validator.validate(settled.statusReportXml)).isEqualTo(Iso20022ValidationResult.Valid)
+        registry.statusOf(uetr, t0.plusSeconds(90))
+        // A resubmission of the same UETR after settlement returns the settled answer, not a second settlement.
+        val again = service.clearInstitutionTransfer(
+            ClearingRoute.TARGET2,
+            InstitutionTransferFixtures.pacs009(amount = "500.03", uetr = uetr),
+            t0.plusSeconds(120),
+        )
+        assertThat(again.statusReportXml).contains("<TxSts>ACSC</TxSts>")
+        assertThat(registry.settledCount()).isEqualTo(1)
+    }
+
+    @Test
+    fun `remainder 03 does not defer a pacs_008 or a route reject`() {
+        assertThat(
+            clear(
+                ClearingRoute.CERTIS,
+                InstitutionTransferFixtures.pacs009(amount = "500.03", currency = "EUR"),
+            ).statusReportXml,
+        )
+            .contains("<Cd>AM03</Cd>")
     }
 }

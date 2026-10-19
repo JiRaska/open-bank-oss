@@ -86,7 +86,7 @@ class ClearingResource {
     fun institutionTransferStatus(@PathParam("uetr") uetr: String): Response {
         // A TYPED not-found: the rail resends only on this exact answer, never on a bare 404
         // (which a proxy, a wrong path or a missing route would also produce).
-        val result = simulator.institutionTransfers.statusOf(uetr)
+        val result = simulator.institutionTransfers.statusOf(uetr, java.time.Instant.now(simulator.clock))
             ?: return Response.status(Response.Status.NOT_FOUND)
                 .type(MediaType.APPLICATION_JSON)
                 .entity(mapOf("code" to UNKNOWN_UETR, "uetr" to uetr))

@@ -30,6 +30,7 @@ import com.openbank.libs.iso20022.ReceivedCreditTransfer
 import com.openbank.libs.iso20022.SettlementMethod
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -64,6 +65,13 @@ class ClearingSimulatorService {
     private val pacs004Builder = Pacs004Builder()
     private val camt054Builder = Camt054Builder()
     private val engine = SchemeDecisionEngine()
+
+    /**
+     * Seconds between the `ACSP` answer and the asynchronous `ACSC` of a deferred bank-own
+     * transfer (amount remainder 03). Non-production knob.
+     */
+    @field:ConfigProperty(name = "openbank.clearing-simulator.fi-settlement-lag-seconds", defaultValue = "30")
+    var fiSettlementLagSeconds: Long = DEFAULT_FI_SETTLEMENT_LAG_SECONDS
 
     /** Bank-own transfers already taken, by UETR (deduplication + status query). */
     val institutionTransfers = InstitutionTransferRegistry()
@@ -120,34 +128,50 @@ class ClearingSimulatorService {
     ): ClearingResult {
         val received = parseWith(pacs009Xml, pacs009Validator) { pacs009Reader.read(it) }
             ?: return ClearingResult(rejectInvalid(now), settled = false, creditNotificationXml = null)
-        val decide = {
-            val decision = if (route.accepts(received.currency, received.clearingSystem)) {
-                engine.decide(received.amount)
-            } else {
-                SchemeDecision.rejected(RejectReason.AM03)
-            }
-            val report = PaymentStatusReport(
+        fun report(status: SchemeDecision, at: Instant): ClearingResult {
+            val r = PaymentStatusReport(
                 messageId = id("SIM-STS-", received.endToEndId),
-                creationDateTime = now.atUtc(),
+                creationDateTime = at.atUtc(),
                 originalEndToEndId = received.endToEndId,
                 originalTransactionId = received.transactionId,
-                status = decision.status,
-                reasonCode = decision.reason?.code,
-                additionalInfo = decision.reason?.description,
+                status = status.status,
+                reasonCode = status.reason?.code,
+                additionalInfo = status.reason?.description,
                 // Names the message it answers, so a rail can verify a status reply is about the
                 // transfer it asked for (MsgId + UETR) before acting on it.
                 originalMessageId = received.messageId,
                 originalMessageNameId = PACS_009_NAME,
                 originalUetr = received.uetr,
             )
-            ClearingResult(
-                validated(pacs002Builder.build(report), pacs002Validator, "pacs.002"),
-                decision.settled,
+            return ClearingResult(
+                validated(pacs002Builder.build(r), pacs002Validator, "pacs.002"),
+                status.settled,
                 null,
             )
         }
+        val decide = {
+            val routeOk = route.accepts(received.currency, received.clearingSystem)
+            if (routeOk && engine.defersSettlement(received.amount)) {
+                // Accepted now (ACSP), settled asynchronously after the configured lag (ACSC).
+                val settleAt = now.plusSeconds(fiSettlementLagSeconds)
+                InstitutionTransferRegistry.Recorded(
+                    initial = report(SchemeDecision.ACCEPTED_PENDING, now),
+                    later = report(SchemeDecision.SETTLED, settleAt),
+                    settleAt = settleAt,
+                )
+            } else {
+                val decision = if (routeOk) {
+                    engine.decide(
+                        received.amount,
+                    )
+                } else {
+                    SchemeDecision.rejected(RejectReason.AM03)
+                }
+                InstitutionTransferRegistry.Recorded(report(decision, now))
+            }
+        }
         // Same UETR twice → the same pacs.002 and one settlement (the scheme's dedup key).
-        return received.uetr?.let { institutionTransfers.recordOnce(it, decide) } ?: decide()
+        return received.uetr?.let { institutionTransfers.recordOnce(it, now, decide) } ?: decide().initial
     }
 
     /**
@@ -228,6 +252,7 @@ class ClearingSimulatorService {
     private companion object {
         const val MAX_35 = 35
         const val PACS_009_NAME = "pacs.009.001.08"
+        const val DEFAULT_FI_SETTLEMENT_LAG_SECONDS = 30L
         const val RETURN_ID_SUFFIX_LEN = 8
     }
 }
