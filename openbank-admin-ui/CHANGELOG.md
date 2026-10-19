@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.0...admin-ui-v3.7.1) (2026-10-18)
+
+
+### Security
+
+* **admin-ui:** remove dynamic data from regulatory error logs ([#13288](https://github.com/JiRaska/open-bank-oss/issues/13288)) ([75d35f2](https://github.com/JiRaska/open-bank-oss/commit/75d35f2207bcec7c5d128fecc55a84a69ea13299))
+
+## [3.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.6.0...admin-ui-v3.7.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui,party:** find clients by name, national ID or birth date instead of UUID; fix state incentives ([#13199](https://github.com/JiRaska/open-bank-oss/issues/13199)) ([3c3f742](https://github.com/JiRaska/open-bank-oss/commit/3c3f742dc0c39af010d9fa2fa8a3a7ad34b74713))
+* **admin-ui:** generate the six catalogue-only regulatory reports ([#13219](https://github.com/JiRaska/open-bank-oss/issues/13219)) ([7d73b53](https://github.com/JiRaska/open-bank-oss/commit/7d73b536e278a558487f4c3af3f05bd7da5302fe))
+
 ## [3.6.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.2...admin-ui-v3.6.0) (2026-10-18)
 
 
