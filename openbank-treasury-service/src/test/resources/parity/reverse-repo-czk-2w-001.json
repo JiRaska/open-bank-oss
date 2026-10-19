@@ -1,0 +1,110 @@
+{
+  "id": "reverse-repo-czk-2w-001",
+  "product": "REVERSE_REPO",
+  "source": "independent-oracle",
+  "sourceNote": "Reverse repo: we receive collateral and pay out the haircut-adjusted cash; interest ACT/360 on the cash amount.",
+  "deal": {
+    "product": "REVERSE_REPO",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-02",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "49045625.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-04",
+        "accrualEnd": "2026-11-18",
+        "accrualFrequency": "TERM",
+        "paymentFrequency": "TERM",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.4500"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ],
+    "collateral": {
+      "securityIsin": "TEST0000GB02",
+      "nominal": "50000000.00",
+      "haircutPercent": "3.0000",
+      "dirtyPricePercent": "101.1250"
+    }
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "collateral": {
+      "securityIsin": "TEST0000GB02",
+      "nominal": "50000000.00",
+      "direction": "IN",
+      "cashAmount": "49045625.00"
+    },
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-04",
+        "notional": "49045625.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "49045625.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-11-04",
+        "accrualEnd": "2026-11-18",
+        "fixingDate": null,
+        "paymentDate": "2026-11-18",
+        "notional": "49045625.00",
+        "rate": "3.4500",
+        "rateSource": "FIXED",
+        "amount": "65802.88"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-18",
+        "notional": "49045625.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "49045625.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

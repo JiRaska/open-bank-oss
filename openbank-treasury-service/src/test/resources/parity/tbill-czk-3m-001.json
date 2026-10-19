@@ -1,0 +1,65 @@
+{
+  "id": "tbill-czk-3m-001",
+  "product": "TREASURY_BILL",
+  "source": "independent-oracle",
+  "sourceNote": "T-bill price from a DISCOUNT yield: price = N * (1 - d * days/360).",
+  "deal": {
+    "product": "TREASURY_BILL",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-02",
+    "securityIsin": "TEST0000TB01",
+    "currency": "CZK",
+    "nominal": "10000000.00",
+    "yield": "3.2000",
+    "valueDate": "2026-11-04",
+    "maturityDate": "2027-02-04",
+    "basis": 360,
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "FOLLOWING",
+    "side": "BUY"
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "days": 92,
+    "pricePer100": "99.182222",
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-04",
+        "notional": "10000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "9918222.22"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-02-04",
+        "notional": "10000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "10000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

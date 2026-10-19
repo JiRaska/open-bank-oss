@@ -1,0 +1,98 @@
+{
+  "id": "mm-borrowing-czk-month-end-mf-002",
+  "product": "MM_BORROWING",
+  "source": "independent-oracle",
+  "sourceNote": "Maturity 2027-07-31 is a Saturday; MODIFIED_FOLLOWING would cross into August, so it goes back to Friday 2027-07-30.",
+  "deal": {
+    "product": "MM_BORROWING",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2027-06-28",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "15000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2027-06-30",
+        "accrualEnd": "2027-07-31",
+        "accrualFrequency": "TERM",
+        "paymentFrequency": "TERM",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.4000"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-06-30",
+        "notional": "15000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "15000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2027-06-30",
+        "accrualEnd": "2027-07-30",
+        "fixingDate": null,
+        "paymentDate": "2027-07-30",
+        "notional": "15000000.00",
+        "rate": "3.4000",
+        "rateSource": "FIXED",
+        "amount": "42500.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-07-30",
+        "notional": "15000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "15000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

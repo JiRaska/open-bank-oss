@@ -1,0 +1,128 @@
+{
+  "id": "loan-eur-actact-leap-003",
+  "product": "LOAN",
+  "source": "independent-oracle",
+  "sourceNote": "Bullet loan accruing across the 2028 leap year at ACT/ACT ISDA; semi-annual.",
+  "deal": {
+    "product": "LOAN",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2027-06-28",
+    "currency": "EUR",
+    "calendars": [
+      "TARGET2"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "EUR",
+        "notional": "4000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2027-06-30",
+        "accrualEnd": "2028-12-30",
+        "accrualFrequency": "6M",
+        "paymentFrequency": "6M",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/ACT_ISDA",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.0000"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-06-30",
+        "notional": "4000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "4000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2027-06-30",
+        "accrualEnd": "2027-12-30",
+        "fixingDate": null,
+        "paymentDate": "2027-12-30",
+        "notional": "4000000.00",
+        "rate": "3.0000",
+        "rateSource": "FIXED",
+        "amount": "60164.38"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2027-12-30",
+        "accrualEnd": "2028-06-30",
+        "fixingDate": null,
+        "paymentDate": "2028-06-30",
+        "notional": "4000000.00",
+        "rate": "3.0000",
+        "rateSource": "FIXED",
+        "amount": "60001.80"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2028-06-30",
+        "accrualEnd": "2028-12-29",
+        "fixingDate": null,
+        "paymentDate": "2028-12-29",
+        "notional": "4000000.00",
+        "rate": "3.0000",
+        "rateSource": "FIXED",
+        "amount": "59672.13"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 2,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2028-12-29",
+        "notional": "4000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "4000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

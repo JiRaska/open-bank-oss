@@ -1,0 +1,171 @@
+{
+  "id": "loan-czk-float-cap-floor-index-005",
+  "product": "LOAN",
+  "source": "independent-oracle",
+  "sourceNote": "Floating PRIBOR 3M + 150bp with floor 3.00 and cap 4.00 applied to the INDEX (spread added after clamping). Period 0 has no observed fixing and uses rateUntilFirstFixing (an all-in rate, no spread, no cap/floor). Last period has no fixing yet -> MISSING, amount null.",
+  "deal": {
+    "product": "LOAN",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-02",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "8000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-05",
+        "accrualEnd": "2027-11-05",
+        "accrualFrequency": "3M",
+        "paymentFrequency": "3M",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FLOATING",
+          "index": "PRIBOR_3M",
+          "spread": "1.5000",
+          "fixingLagBusinessDays": 2,
+          "resetFrequency": "3M",
+          "cap": "4.0000",
+          "floor": "3.0000",
+          "capFloorAppliesTo": "INDEX",
+          "rateUntilFirstFixing": "5.1000"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [
+    {
+      "index": "PRIBOR_3M",
+      "date": "2027-02-03",
+      "rate": "2.8000"
+    },
+    {
+      "index": "PRIBOR_3M",
+      "date": "2027-05-03",
+      "rate": "4.3500"
+    }
+  ],
+  "referenceData": {
+    "indices": {
+      "PRIBOR_3M": {
+        "currency": "CZK",
+        "tenor": "3M",
+        "dayCount": "ACT/360",
+        "fixingCalendar": "CERTIS",
+        "fixingLagBusinessDays": 2
+      }
+    }
+  },
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-05",
+        "notional": "8000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "8000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-11-05",
+        "accrualEnd": "2027-02-05",
+        "fixingDate": "2026-11-03",
+        "paymentDate": "2027-02-05",
+        "notional": "8000000.00",
+        "rate": "5.1000",
+        "rateSource": "RATE_UNTIL_FIRST_FIXING",
+        "amount": "104266.67"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-02-05",
+        "accrualEnd": "2027-05-05",
+        "fixingDate": "2027-02-03",
+        "paymentDate": "2027-05-05",
+        "notional": "8000000.00",
+        "rate": "4.5000",
+        "rateSource": "OBSERVED",
+        "amount": "89000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-05-05",
+        "accrualEnd": "2027-08-05",
+        "fixingDate": "2027-05-03",
+        "paymentDate": "2027-08-05",
+        "notional": "8000000.00",
+        "rate": "5.5000",
+        "rateSource": "OBSERVED",
+        "amount": "112444.44"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-08-05",
+        "accrualEnd": "2027-11-05",
+        "fixingDate": "2027-08-03",
+        "paymentDate": "2027-11-05",
+        "notional": "8000000.00",
+        "rate": null,
+        "rateSource": "MISSING",
+        "amount": null
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 3,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-11-05",
+        "notional": "8000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "8000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

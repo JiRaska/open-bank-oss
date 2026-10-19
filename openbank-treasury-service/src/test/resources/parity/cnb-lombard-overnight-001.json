@@ -1,0 +1,98 @@
+{
+  "id": "cnb-lombard-overnight-001",
+  "product": "CNB_LOMBARD",
+  "source": "independent-oracle",
+  "sourceNote": "Overnight lombard borrowing, 1 day ACT/360.",
+  "deal": {
+    "product": "CNB_LOMBARD",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-10",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "100000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-10",
+        "accrualEnd": "2026-11-11",
+        "accrualFrequency": "TERM",
+        "paymentFrequency": "TERM",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "4.5000"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-10",
+        "notional": "100000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "100000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2026-11-10",
+        "accrualEnd": "2026-11-11",
+        "fixingDate": null,
+        "paymentDate": "2026-11-11",
+        "notional": "100000000.00",
+        "rate": "4.5000",
+        "rateSource": "FIXED",
+        "amount": "12500.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-11",
+        "notional": "100000000.00",
+        "rate": null,
+        "rateSource": null,
+        "amount": "100000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

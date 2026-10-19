@@ -1,0 +1,195 @@
+{
+  "id": "irs-czk-adjusted-accrual-002",
+  "product": "IRS",
+  "source": "independent-oracle",
+  "sourceNote": "Same deal with adjustAccrualPeriod = true: the weekend boundaries move to Monday, so periods lengthen/shorten by one day and the amounts differ from fixture 001.",
+  "deal": {
+    "product": "IRS",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-08-12",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "100000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-08-14",
+        "accrualEnd": "2028-08-14",
+        "accrualFrequency": "12M",
+        "paymentFrequency": "12M",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.7500"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": false
+      },
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "100000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-08-14",
+        "accrualEnd": "2028-08-14",
+        "accrualFrequency": "6M",
+        "paymentFrequency": "6M",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FLOATING",
+          "index": "PRIBOR_6M",
+          "spread": "0",
+          "fixingLagBusinessDays": 2,
+          "resetFrequency": "6M",
+          "cap": null,
+          "floor": null,
+          "capFloorAppliesTo": "INDEX",
+          "rateUntilFirstFixing": null
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": false
+      }
+    ]
+  },
+  "fixings": [
+    {
+      "index": "PRIBOR_6M",
+      "date": "2026-08-12",
+      "rate": "3.6100"
+    },
+    {
+      "index": "PRIBOR_6M",
+      "date": "2027-02-11",
+      "rate": "3.5400"
+    }
+  ],
+  "referenceData": {
+    "indices": {
+      "PRIBOR_6M": {
+        "currency": "CZK",
+        "tenor": "6M",
+        "dayCount": "ACT/360",
+        "fixingCalendar": "CERTIS",
+        "fixingLagBusinessDays": 2
+      }
+    }
+  },
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2026-08-14",
+        "accrualEnd": "2027-08-16",
+        "fixingDate": null,
+        "paymentDate": "2027-08-16",
+        "notional": "100000000.00",
+        "rate": "3.7500",
+        "rateSource": "FIXED",
+        "amount": "3822916.67"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": "2027-08-16",
+        "accrualEnd": "2028-08-14",
+        "fixingDate": null,
+        "paymentDate": "2028-08-14",
+        "notional": "100000000.00",
+        "rate": "3.7500",
+        "rateSource": "FIXED",
+        "amount": "3791666.67"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-08-14",
+        "accrualEnd": "2027-02-15",
+        "fixingDate": "2026-08-12",
+        "paymentDate": "2027-02-15",
+        "notional": "100000000.00",
+        "rate": "3.6100",
+        "rateSource": "OBSERVED",
+        "amount": "1855138.89"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 1,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-02-15",
+        "accrualEnd": "2027-08-16",
+        "fixingDate": "2027-02-11",
+        "paymentDate": "2027-08-16",
+        "notional": "100000000.00",
+        "rate": "3.5400",
+        "rateSource": "OBSERVED",
+        "amount": "1789666.67"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 2,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2027-08-16",
+        "accrualEnd": "2028-02-14",
+        "fixingDate": "2027-08-12",
+        "paymentDate": "2028-02-14",
+        "notional": "100000000.00",
+        "rate": null,
+        "rateSource": "MISSING",
+        "amount": null
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 3,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2028-02-14",
+        "accrualEnd": "2028-08-14",
+        "fixingDate": "2028-02-10",
+        "paymentDate": "2028-08-14",
+        "notional": "100000000.00",
+        "rate": null,
+        "rateSource": "MISSING",
+        "amount": null
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

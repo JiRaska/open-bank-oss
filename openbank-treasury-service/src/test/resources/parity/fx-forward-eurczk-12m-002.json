@@ -1,0 +1,66 @@
+{
+  "id": "fx-forward-eurczk-12m-002",
+  "product": "FX_FORWARD",
+  "source": "independent-oracle",
+  "sourceNote": "12M outright, SELL EUR; same covered-interest-parity convention.",
+  "deal": {
+    "product": "FX_FORWARD",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-02",
+    "currencyPair": "EUR/CZK",
+    "side": "SELL",
+    "baseAmount": "750000.00",
+    "spotRate": "24.3850",
+    "calendars": [
+      "TARGET2",
+      "CERTIS"
+    ],
+    "tenor": "12M",
+    "baseRate": "2.1000",
+    "quoteRate": "3.3000"
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "spotDate": "2026-11-04",
+    "farDate": "2027-11-04",
+    "days": 365,
+    "forwardRate": "24.675499",
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-11-04",
+        "notional": "750000.00",
+        "rate": "24.675499",
+        "rateSource": "FIXED",
+        "amount": "750000.00"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-11-04",
+        "notional": "18506624.25",
+        "rate": "24.675499",
+        "rateSource": "FIXED",
+        "amount": "18506624.25"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}
