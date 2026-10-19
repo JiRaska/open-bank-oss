@@ -74,6 +74,12 @@ class PaymentRailIT {
     lateinit var postings: FakeLedger
 
     @Inject
+    lateinit var deals: com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+
+    @Inject
+    lateinit var dealRepository: com.openbank.treasury.application.port.out.DealRepository
+
+    @Inject
     lateinit var paymentRepository: com.openbank.treasury.application.port.out.PaymentRepository
 
     @Inject
@@ -139,13 +145,14 @@ class PaymentRailIT {
         }
         dealA = book()
         dealB = book()
+        dealC = book()
         valueDate = today.plusDays(1)
         jdbc { c ->
             c.prepareStatement(
-                "update deals set state = 'BOOKED' where deal_id in ('$dealA', '$dealB')",
+                "update deals set state = 'BOOKED' where deal_id in ('$dealA', '$dealB', '$dealC')",
             ).executeUpdate()
             c.prepareStatement(
-                "update deal_cash_flows set payment_date = ? where deal_id in ('$dealA', '$dealB') " +
+                "update deal_cash_flows set payment_date = ? where deal_id in ('$dealA', '$dealB', '$dealC') " +
                     "and period_index = 0 and kind = 'INTEREST'",
             ).use {
                 it.setObject(1, valueDate)
@@ -161,6 +168,7 @@ class PaymentRailIT {
         post("/payments/propose?date=$today").then().statusCode(200)
         payA = paymentOf(outFlow(dealA))
         payB = paymentOf(outFlow(dealB))
+        payC = paymentOf(outFlow(dealC))
     }
 
     @Test
@@ -308,6 +316,89 @@ class PaymentRailIT {
         assertThat(onContext { payments.onRailStatus(event(payB, RailStatus.REJECTED)) }).isNull()
     }
 
+    @Test
+    @Order(12)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `12 - a FAILED payment blocks cancelling its deal - 409, nothing withdrawn`() {
+        post("/deals/$dealB/cancel").then().statusCode(409)
+        assertThat(status(payB)).isEqualTo("FAILED")
+    }
+
+    @Test
+    @Order(13)
+    fun `13 - a FAILED payment blocks reversing its deal and the locked deal change`() {
+        assertThatThrownBy {
+            onContext {
+                deals.reverse(UUID.fromString(dealB), "booked in error", Actor("anna.approver", ActorType.HUMAN), null)
+            }
+        }.isInstanceOf(com.openbank.treasury.domain.payment.DealHasReleasedPaymentException::class.java)
+        val deal = checkNotNull(onContext { dealRepository.findById(UUID.fromString(dealB)) })
+        assertThatThrownBy { onContext { dealRepository.save(deal, withdrawPayments = true) } }
+            .isInstanceOf(com.openbank.treasury.domain.payment.DealHasReleasedPaymentException::class.java)
+        assertThat(status(payB)).isEqualTo("FAILED")
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "erik.editor", roles = ["ROLE_TREASURY_REFERENCE_EDITOR"])
+    fun `14 - a new SSI version is proposed after the payment was addressed`() {
+        post(
+            "/reference/ssi",
+            """{"key":"SIMBK-A:CZK","validFrom":"$today","reason":"counterparty moved its settlement account",
+               "payload":{"counterpartyId":"SIMBK-A","currency":"CZK","rail":"CERTIS","bic":"SIMBCZPP",
+                          "beneficiaryAccount":"CZ5508000000001234567899"}}""",
+        ).then().statusCode(201)
+    }
+
+    @Test
+    @Order(15)
+    @TestSecurity(user = "sam.senior", roles = ["ROLE_TREASURY_SENIOR_APPROVER", "ROLE_TREASURY_APPROVER"])
+    fun `15 - and approved`() {
+        post("/reference/ssi/SIMBK-A:CZK/versions/2/approve").then().statusCode(200)
+    }
+
+    @Test
+    @Order(16)
+    @TestSecurity(user = "rita.releaser", roles = ["ROLE_TREASURY_PAYMENT_RELEASER"])
+    fun `16 - releasing the payment addressed from the old SSI is refused - 409 SSI_CHANGED, nothing written`() {
+        post("/payments/$payC/release").then().statusCode(409).body("error", equalTo("SSI_CHANGED"))
+        assertThat(status(payC)).isEqualTo("PROPOSED")
+        assertThat(outbox(payC, "treasury.payment.released.v1")).isEqualTo(0)
+    }
+
+    @Test
+    @Order(17)
+    @TestSecurity(user = "bert.backoffice", roles = ["ROLE_TREASURY_BACK_OFFICE"])
+    fun `17 - it is cancelled and re-proposed from the new SSI`() {
+        post("/payments/$payC/cancel", """{"reason":"settlement instruction changed"}""").then().statusCode(200)
+        val run = post("/payments/propose?date=$today").then().statusCode(200).extract().asString()
+        assertThat(run).contains("\"failures\":0")
+        payC2 = paymentOf(outFlow(dealC))
+        assertThat(payC2).isNotEqualTo(payC)
+        assertThat(count("select count(*) from treasury_payments where payment_id = '$payC2' and ssi_version = 2"))
+            .isEqualTo(1)
+    }
+
+    @Test
+    @Order(18)
+    @TestSecurity(user = "rita.releaser", roles = ["ROLE_TREASURY_PAYMENT_RELEASER"])
+    fun `18 - the re-proposed payment releases to the new beneficiary, ssiVersion carried`() {
+        post("/payments/$payC2/release").then().statusCode(200).body("status", equalTo("RELEASED"))
+        val payload = objectMapper.readTree(
+            jdbc { c ->
+                c.prepareStatement(
+                    "select payload from treasury_outbox where aggregate_id = '$payC2' " +
+                        "and event_type = 'treasury.payment.released.v1'",
+                ).executeQuery().use { rs ->
+                    rs.next()
+                    rs.getString(1)
+                }
+            },
+        )
+        assertThat(payload["ssiVersion"].asInt()).isEqualTo(2)
+        assertThat(payload["creditor"]["accountNumber"].asText()).isEqualTo("CZ5508000000001234567899")
+    }
+
     private fun pendingOut(): BigDecimal = jdbc { c ->
         c.prepareStatement(
             "select coalesce(sum(amount), 0) from treasury_payments where direction = 'OUT' and status in " +
@@ -399,6 +490,9 @@ class PaymentRailIT {
         lateinit var dealB: String
         lateinit var payA: String
         lateinit var payB: String
+        lateinit var dealC: String
+        lateinit var payC: String
+        lateinit var payC2: String
         lateinit var valueDate: LocalDate
     }
 }

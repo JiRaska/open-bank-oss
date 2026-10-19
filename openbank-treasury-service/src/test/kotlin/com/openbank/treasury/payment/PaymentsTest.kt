@@ -257,4 +257,18 @@ class PaymentsTest {
             ).status,
         ).isEqualTo(PaymentStatus.RETURNED)
     }
+
+    @Test
+    fun `one predicate decides which payments block a deal change, and FAILED is one of them`() {
+        assertThat(PaymentStatus.entries.filter { it.blocksDealChange }).containsExactlyInAnyOrder(
+            PaymentStatus.RELEASED,
+            PaymentStatus.SENT,
+            PaymentStatus.RAIL_NOT_SUPPORTED,
+            PaymentStatus.FAILED,
+        )
+        assertThat(PaymentStatus.BLOCKING_DEAL_CHANGE_NAMES)
+            .isEqualTo(PaymentStatus.entries.filter { it.blocksDealChange }.map { it.name }.sorted())
+        assertThat(PaymentStatus.entries.filter { it.resolvable })
+            .isEqualTo(PaymentStatus.entries.filter { it.blocksDealChange })
+    }
 }

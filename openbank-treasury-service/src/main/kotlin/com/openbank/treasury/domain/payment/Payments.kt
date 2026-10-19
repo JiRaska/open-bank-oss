@@ -45,8 +45,25 @@ enum class PaymentStatus {
     /** Once released, a payment never frees its flows: only a terminal manual resolution follows. */
     val released: Boolean get() = this in setOf(RELEASED, SENT, RAIL_NOT_SUPPORTED)
 
-    /** A status an independent human may resolve to MANUALLY_SETTLED or RETURNED. */
-    val resolvable: Boolean get() = released || this == FAILED
+    /**
+     * THE one predicate every deal-change guard and query uses (cancel, reverse, correction — the
+     * domain pre-check AND the locked SQL in the change's transaction read [BLOCKING_DEAL_CHANGE]):
+     * a payment whose outcome is still OPEN — handed to a rail or out of the system (RELEASED, SENT,
+     * RAIL_NOT_SUPPORTED) or rejected and awaiting a human (FAILED) — blocks any change of its deals,
+     * because money may be in flight or the resolution may still pay it. Not blocking: PROPOSED (the
+     * change withdraws it), CANCELLED, and the terminal outcomes SETTLED / MANUALLY_SETTLED (cash
+     * moved and its flows are SETTLED; a correction treats a settled flow as posted history) and
+     * RETURNED (resolved: nothing moved).
+     */
+    val blocksDealChange: Boolean get() = this in BLOCKING_DEAL_CHANGE
+
+    /** A status an independent human may resolve to MANUALLY_SETTLED or RETURNED: exactly the blocking ones. */
+    val resolvable: Boolean get() = blocksDealChange
+
+    companion object {
+        val BLOCKING_DEAL_CHANGE: Set<PaymentStatus> = setOf(RELEASED, SENT, RAIL_NOT_SUPPORTED, FAILED)
+        val BLOCKING_DEAL_CHANGE_NAMES: List<String> = BLOCKING_DEAL_CHANGE.map { it.name }.sorted()
+    }
 }
 
 /** The counterparty's effective settlement instruction as the payment was addressed from it. */
@@ -119,7 +136,8 @@ data class Payment(
 ) {
     init {
         require(amount.signum() > 0 && amount.scale() <= 2) { "a payment amount is positive with at most 2 decimals" }
-        require(nettedFlowIds.isNotEmpty() && nettedFlowIds.size <= MAX_FLOWS) {
+        // A CANCELLED payment has released its flow links (they are free for a re-proposal).
+        require((status == PaymentStatus.CANCELLED || nettedFlowIds.isNotEmpty()) && nettedFlowIds.size <= MAX_FLOWS) {
             "a payment settles 1..$MAX_FLOWS flows"
         }
         require(direction == FlowDirection.IN || ssi != null) { "an outgoing payment is addressed from an SSI" }
@@ -403,9 +421,20 @@ object FundingCheck {
 
 /** A deal cannot be cancelled, reversed or corrected while one of its payments is out of PROPOSED: 409. */
 class DealHasReleasedPaymentException(dealId: UUID, paymentId: UUID) :
-    IllegalStateException("deal $dealId has payment $paymentId released; resolve it before changing the deal")
+    IllegalStateException(
+        "deal $dealId has payment $paymentId with an open outcome (released, sent or failed); " +
+            "resolve it before changing the deal",
+    )
 
 /** The payment no longer matches its deals and flows (cancelled, corrected, re-scheduled, changed): 409. */
 class PaymentStaleException(message: String) : IllegalStateException(message)
 
 class FundingExceededException(val result: FundingCheck.Result, message: String) : RuntimeException(message)
+
+/**
+ * The counterparty's SSI effective on the value date is no longer the one the payment was addressed
+ * from (version, account, BIC or intermediary differ, or none is effective): 409 SSI_CHANGED. The
+ * payment must be cancelled and re-proposed from the current instruction; it is never released to a
+ * stale beneficiary.
+ */
+class SsiChangedException(message: String) : IllegalStateException(message)

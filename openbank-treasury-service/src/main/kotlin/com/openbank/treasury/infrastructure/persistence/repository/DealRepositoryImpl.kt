@@ -612,8 +612,8 @@ class DealRepositoryImpl(
     }
 
     private companion object {
-        /** Released payments block a deal change; keep in step with PaymentStatus.released. */
-        val RELEASED_STATUSES = listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED")
+        /** Derived from [PaymentStatus.BLOCKING_DEAL_CHANGE] — never a second literal list. */
+        val RELEASED_STATUSES = com.openbank.treasury.domain.payment.PaymentStatus.BLOCKING_DEAL_CHANGE_NAMES
 
         /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
         val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }

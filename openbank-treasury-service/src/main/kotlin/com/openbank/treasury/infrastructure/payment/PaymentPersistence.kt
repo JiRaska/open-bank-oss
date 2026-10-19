@@ -14,6 +14,7 @@ import com.openbank.treasury.domain.cashflow.FlowDirection
 import com.openbank.treasury.domain.payment.Payment
 import com.openbank.treasury.domain.payment.PaymentStaleException
 import com.openbank.treasury.domain.payment.PaymentStatus
+import com.openbank.treasury.domain.payment.SsiChangedException
 import com.openbank.treasury.domain.payment.SsiSnapshot
 import com.openbank.treasury.domain.payment.TransferRail
 import com.openbank.treasury.domain.reference.SettlementRail
@@ -143,6 +144,7 @@ class PaymentRepositoryImpl(
     private val deals: DealLookupPanacheRepository,
     private val outbox: TreasuryOutboxRepository,
     private val clock: Clock,
+    private val objectMapper: com.fasterxml.jackson.databind.ObjectMapper,
 ) : PaymentRepository {
 
     override suspend fun save(payment: Payment, prior: PaymentStatus?, event: DealEvent?, settleFlows: Boolean) {
@@ -271,7 +273,7 @@ class PaymentRepositoryImpl(
                 if (row.status != PaymentStatus.PROPOSED.name) {
                     throw PaymentStaleException("payment ${payment.paymentId} is now ${row.status}, not PROPOSED")
                 }
-                revalidate(payment).map { row }
+                revalidate(payment).flatMap { ssiUnchanged(payment) }.map { row }
             }.flatMap { row ->
                 row.fill(payment)
                 // Contract 9: the status change AND treasury.payment.released.v1 commit with the
@@ -340,6 +342,42 @@ class PaymentRepositoryImpl(
     }.replaceWithVoid()
 
     /**
+     * Inside the release transaction: re-read (FOR SHARE, so an approval of a new version waits for
+     * this commit) the counterparty's SSI effective on the VALUE date and refuse the release when it
+     * is not exactly the snapshot the payment was addressed from — version, account, BIC and
+     * intermediary BIC. A changed instruction means a re-proposal, never a release to a stale one.
+     */
+    private fun ssiUnchanged(payment: Payment): Uni<Void> {
+        val snap = payment.ssi
+        if (payment.direction != FlowDirection.OUT || snap == null) return Uni.createFrom().voidItem()
+        return Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Array<Any?>>(SSI_ON_SQL)
+                .setParameter("k", "${payment.counterpartyId}:${payment.currency}")
+                .setParameter("vd", payment.valueDate)
+                .resultList
+        }.map { rows ->
+            val row = rows.firstOrNull()
+                ?: throw SsiChangedException(
+                    "payment ${payment.paymentId}: no SSI is effective on ${payment.valueDate}",
+                )
+            val version = (row[0] as Number).toInt()
+            val p = objectMapper.readTree(row[1].toString())
+            fun txt(f: String) = p.get(f)?.takeIf { !it.isNull }?.asText()
+            val same = version == snap.ssiVersion &&
+                txt("beneficiaryAccount") == snap.beneficiaryAccount &&
+                txt("bic") == snap.bic &&
+                txt("intermediaryBic") == snap.intermediaryBic &&
+                txt("rail") == snap.rail.name
+            if (!same) {
+                throw SsiChangedException(
+                    "payment ${payment.paymentId} was addressed from SSI version ${snap.ssiVersion}; the instruction " +
+                        "effective on ${payment.valueDate} is version $version — cancel and re-propose it",
+                )
+            }
+        }.replaceWithVoid()
+    }
+
+    /**
      * Σ of outgoing payments in [currency] with a value date on or before [valueDate], in any outflow
      * status, that still pay at least one flow whose outflow journal the ledger does not hold yet.
      */
@@ -366,7 +404,8 @@ class PaymentRepositoryImpl(
     }.awaitSuspending()?.let { withFlows(listOf(it)).single() }
 
     override suspend fun findByKey(idempotencyKey: String): Payment? = Panache.withSession {
-        payments.find("idempotencyKey", idempotencyKey).firstResult()
+        // A CANCELLED payment never reached a rail and freed its flows: the key is free again.
+        payments.find("idempotencyKey = ?1 and status <> 'CANCELLED'", idempotencyKey).firstResult()
     }.awaitSuspending()?.let { withFlows(listOf(it)).single() }
 
     override suspend fun list(status: PaymentStatus?, from: LocalDate, to: LocalDate, limit: Int): List<Payment> {
@@ -449,6 +488,11 @@ class PaymentRepositoryImpl(
                 "and p.currency = :ccy and p.value_date <= :vd and p.status in (:statuses) and not exists (" +
                 "select 1 from deal_journals j where j.deal_id = l.deal_id " +
                 "and j.idempotency_key like ('%:' || cast(l.flow_id as varchar)))"
+
+        const val SSI_ON_SQL =
+            "select version, payload from reference_records where kind = 'ssi' and record_key = :k " +
+                "and status = 'ACTIVE' and valid_from <= :vd and (valid_to is null or valid_to > :vd) " +
+                "order by version desc limit 1 for share"
 
         /** A deal pays only once it is booked; a draft, cancelled or reversed deal never does. */
         val PAYABLE_STATES = setOf("BOOKED", "CONFIRMED", "SETTLED")

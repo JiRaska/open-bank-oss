@@ -135,6 +135,10 @@ class ExceptionMappers {
         error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
 
     @ServerExceptionMapper
+    fun ssiChanged(e: com.openbank.treasury.domain.payment.SsiChangedException): Response =
+        error(Response.Status.CONFLICT.statusCode, "SSI_CHANGED", e.message)
+
+    @ServerExceptionMapper
     fun flowInPayment(e: com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException): Response =
         error(Response.Status.CONFLICT.statusCode, "FLOW_ALREADY_IN_PAYMENT", e.message)
 

@@ -21,7 +21,8 @@ info:
     a status it cannot apply is dead-lettered to `openbank.dlq.treasury.institution-transfer-status-in`.
     `PaymentStatusChanged.status` gains FAILED as a reachable value and `rail` now carries the
     institution-transfer rail once released. RAIL_NOT_SUPPORTED remains only for a payment whose
-    SSI determines no rail.
+    SSI determines no rail. `PaymentReleased.ssiVersion` (additive to contract 9.1) names the SSI
+    version re-verified under lock at release; a changed instruction is refused 409 SSI_CHANGED.
 
     1.8.0 (additive, ADR-0344 D5): `CashFlowGenerated.flows` carries the stored rows (the risk
     engine's stored-flow consumer requires them; before 1.8.0 it acked every such event as
@@ -487,7 +488,7 @@ components:
     PaymentReleased:
       type: object
       description: "Constructor properties of `PaymentReleased` in `PaymentService.kt`."
-      required: [paymentId, idempotencyKey, rail, currency, amount, valueDate, debtor, creditor, remittanceInformation, dealIds, flowIds, releasedBy, releasedAt, synthetic]
+      required: [paymentId, idempotencyKey, rail, currency, amount, valueDate, debtor, creditor, ssiVersion, remittanceInformation, dealIds, flowIds, releasedBy, releasedAt, synthetic]
       properties:
         paymentId: { type: string, format: uuid }
         idempotencyKey: { type: string, maxLength: 128 }
@@ -498,6 +499,7 @@ components:
         debtor: { $ref: '#/components/schemas/TransferParty' }
         creditor: { $ref: '#/components/schemas/TransferParty' }
         intermediaryBic: { type: [string, 'null'] }
+        ssiVersion: { type: integer, minimum: 1, description: "The SSI version the creditor was addressed from, re-verified inside the release transaction (additive to contract 9.1)." }
         remittanceInformation: { type: string, maxLength: 140 }
         dealIds: { type: array, items: { type: string, format: uuid } }
         flowIds: { type: array, items: { type: string, format: uuid } }

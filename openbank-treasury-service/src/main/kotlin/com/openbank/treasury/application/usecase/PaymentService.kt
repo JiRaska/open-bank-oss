@@ -87,6 +87,8 @@ data class PaymentReleased(
     val debtor: TransferParty,
     val creditor: TransferParty,
     val intermediaryBic: String?,
+    /** The SSI version the creditor was addressed from (re-verified inside the release transaction). */
+    val ssiVersion: Int,
     val remittanceInformation: String,
     val dealIds: List<UUID>,
     val flowIds: List<UUID>,
@@ -309,6 +311,7 @@ class PaymentService(
                         name = (cp?.name ?: p.counterpartyId).take(PaymentReleased.MAX_TEXT),
                     ),
                     intermediaryBic = ssi.intermediaryBic,
+                    ssiVersion = ssi.ssiVersion,
                     remittanceInformation = ("TREASURY " + p.dealIds.joinToString(" ")).take(PaymentReleased.MAX_TEXT),
                     dealIds = p.dealIds,
                     flowIds = p.nettedFlowIds,
@@ -389,7 +392,7 @@ class PaymentService(
      * (DealRepository.save withdrawPayments).
      */
     suspend fun guardDealChange(dealId: UUID) {
-        payments.forDeal(dealId).firstOrNull { dealId in it.dealIds && it.status.released }?.let {
+        payments.forDeal(dealId).firstOrNull { dealId in it.dealIds && it.status.blocksDealChange }?.let {
             throw com.openbank.treasury.domain.payment.DealHasReleasedPaymentException(dealId, it.paymentId)
         }
     }
