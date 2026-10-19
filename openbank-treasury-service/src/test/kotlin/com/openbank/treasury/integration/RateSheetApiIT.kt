@@ -7,8 +7,6 @@ package com.openbank.treasury.integration
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.hamcrest.Matchers.equalTo
@@ -26,15 +24,13 @@ import org.junit.jupiter.api.TestMethodOrder
 @QuarkusTestResource(CashFlowLedgerApiIT.NoDispatch::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
-@TestProfile(RateSheetApiIT.OwnDatabase::class)
 class RateSheetApiIT {
-    class OwnDatabase : QuarkusTestProfile
-
     private val base = "/api/v1/treasury/market-data/internal-rate-sheets"
+    private val name get() = sheetName
 
     private fun propose(): String = given().contentType("application/json")
         .body(
-            """{"name":"Term deposits","effectiveFrom":"2026-10-20","rates":[{"label":"1M","value":3.5},{"label":"3M","value":3.6}]}""",
+            """{"name":"$name","effectiveFrom":"2026-10-20","rates":[{"label":"1M","value":3.5},{"label":"3M","value":3.6}]}""",
         )
         .`when`().post(base).then().statusCode(201).body("status", equalTo("PENDING")).extract().path("id")
 
@@ -78,13 +74,15 @@ class RateSheetApiIT {
         given().`when`().post("$base/$second/approve").then().statusCode(200).body("status", equalTo("ACTIVE"))
         given().`when`().get(
             "$base?status=ACTIVE",
-        ).then().statusCode(200).body("size()", equalTo(1)).body("[0].id", equalTo(second))
-        given().`when`().get("$base?status=SUPERSEDED").then().statusCode(200).body("[0].id", equalTo(first))
+        ).then().statusCode(200).body("findAll { it.name == '$name' }.id", equalTo(listOf(second)))
+        given().`when`().get("$base?status=SUPERSEDED").then().statusCode(200)
+            .body("findAll { it.name == '$name' }.id", equalTo(listOf(first)))
         given().`when`().post("$base/0191c0de-0000-7000-8000-000000000000/approve").then().statusCode(404)
     }
 
     private companion object {
         lateinit var first: String
         lateinit var second: String
+        val sheetName = "Term deposits ${java.util.UUID.randomUUID()}"
     }
 }
