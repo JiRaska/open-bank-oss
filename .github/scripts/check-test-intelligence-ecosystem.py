@@ -174,42 +174,69 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
     has_unfiltered_main_push(".github/workflows/services-ci.yml", "Services CI")
 
     deploy = workflow(".github/workflows/admin-ui-deploy.yml")
-    deploy_text = text(root / ".github/workflows/admin-ui-deploy.yml")
     workflow_run = triggers(deploy).get("workflow_run")
     workflow_run = workflow_run if isinstance(workflow_run, dict) else {}
     branches = workflow_run.get("branches", [])
     branches = [branches] if isinstance(branches, str) else branches
     workflows = workflow_run.get("workflows", [])
     workflow_names = set(workflows) if isinstance(workflows, list) else set()
-    if not isinstance(branches, list) or "main" not in branches:
+    if (not isinstance(branches, list)
+            or "main" not in branches
+            or any(not isinstance(branch, str) or branch.startswith("!") for branch in branches)):
         errors.append("Admin UI deploy workflow_run is not restricted to main evidence")
     if not {"CI", "Services CI"}.issubset(workflow_names):
         errors.append("admin deployment is not subscribed to CI and Services CI main-push completions")
-    if "completed" not in (workflow_run.get("types") or []):
+    event_types = workflow_run.get("types", [])
+    if not isinstance(event_types, list) or "completed" not in event_types:
         errors.append("Admin UI deploy does not retry readiness when CI evidence completes")
-    for needle, message in (
-        ("workflow_run.conclusion == 'success'", "admin deployment accepts unsuccessful CI evidence"),
-        ("workflow_run.head_branch == 'main'", "admin deployment accepts non-main CI evidence"),
-        ("github.event.workflow_run.head_sha", "admin deployment cannot key evidence events to their source SHA"),
-    ):
-        if needle not in deploy_text:
-            errors.append(message)
 
-    jobs = deploy.get("jobs", {})
-    jobs = jobs if isinstance(jobs, dict) else {}
+    def normalize_condition(value: object) -> str:
+        condition = str(value or "").strip()
+        if condition.startswith("${{") and condition.endswith("}}"):
+            condition = condition[3:-2]
+        return "".join(condition.split())
+
+    workflow_jobs = deploy.get("jobs", {})
+    workflow_jobs = workflow_jobs if isinstance(workflow_jobs, dict) else {}
+    deploy_source_job = workflow_jobs.get("deploy-source", {})
+    deploy_source_job = deploy_source_job if isinstance(deploy_source_job, dict) else {}
+    expected_source_if = (
+        "github.event_name!='workflow_run'||"
+        "(github.event.workflow_run.conclusion=='success'&&"
+        "github.event.workflow_run.head_branch=='main')"
+    )
+    if normalize_condition(deploy_source_job.get("if")) != expected_source_if:
+        errors.append("deploy-source job does not require successful main workflow_run evidence")
+    expected_group = (
+        "admin-ui-deploy-${{github.event.workflow_run.head_sha||github.sha}}-"
+        "${{github.event_name=='workflow_run'&&"
+        "github.event.workflow_run.conclusion!='success'&&'nonverdict'||'eligible'}}"
+    )
+    concurrency = deploy.get("concurrency", {})
+    if not isinstance(concurrency, dict) or "".join(str(concurrency.get("group", "")).split()) != expected_group:
+        errors.append("Admin UI deploy lacks the source-SHA and nonverdict concurrency boundary")
+
+    jobs = workflow_jobs
     deploy_source = jobs.get("deploy-source", {})
     build_push = jobs.get("build-push", {})
     deploy_source = deploy_source if isinstance(deploy_source, dict) else {}
     build_push = build_push if isinstance(build_push, dict) else {}
 
+    def executable_lines(source: str) -> str:
+        # This is deliberately a line-comment filter, not a shell parser. It prevents
+        # comments from satisfying wiring checks while keeping the gate small and clear.
+        return "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("#")
+        )
+
     def step_run(job: dict, step_id: str) -> str:
         steps = job.get("steps", [])
         if not isinstance(steps, list):
             return ""
-        return "\n".join(
+        return executable_lines("\n".join(
             str(step.get("run", "")) for step in steps
             if isinstance(step, dict) and step.get("id") == step_id
-        )
+        ))
 
     def find_step(job: dict, step_id: str) -> dict:
         steps = job.get("steps", [])
@@ -227,28 +254,62 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
     for job, step_id, label in boundary_steps:
         if admission not in step_run(job, step_id):
             errors.append(f"admin deployment bypasses its admission helper at {label}")
-    if "steps.source.outputs.proceed == 'true'" not in str(find_step(deploy_source, "validation").get("if", "")):
+    if normalize_condition(find_step(deploy_source, "validation").get("if")) != "steps.source.outputs.proceed=='true'":
         errors.append("Admin UI validation is not gated by initial deploy-source admission")
-    if "steps.validation.outputs.proceed == 'true'" not in str(find_step(deploy_source, "post_validation").get("if", "")):
+    if normalize_condition(find_step(deploy_source, "post_validation").get("if")) != "steps.validation.outputs.proceed=='true'":
         errors.append("post-validation admission is not gated by successful evidence readiness")
+    expected_build_job_if = "needs.deploy-source.outputs.proceed=='true'"
+    if normalize_condition(build_push.get("if")) != expected_build_job_if:
+        errors.append("privileged Admin UI build bypasses deploy-source admission")
     build_steps = build_push.get("steps", [])
+    admission_index = -1
     if isinstance(build_steps, list):
-        admission_seen = False
-        for step in build_steps:
+        admission_index = next((index for index, step in enumerate(build_steps)
+                                if isinstance(step, dict) and step.get("id") == "build_admission"), -1)
+    allowed_admission_index = 0
+    if (isinstance(build_steps, list) and build_steps
+            and isinstance(build_steps[0], dict)
+            and isinstance(build_steps[0].get("uses"), str)
+            and build_steps[0]["uses"].startswith("actions/checkout@")
+            and "run" not in build_steps[0]):
+        # This pinned checkout only materializes the already-authorized source SHA;
+        # no repository code executes until the admission step allows later steps.
+        allowed_admission_index = 1
+    if admission_index != allowed_admission_index:
+        errors.append("serialized build-entry admission does not precede all build-push work")
+    elif isinstance(build_steps, list):
+        admission_guard = "steps.build_admission.outputs.proceed=='true'"
+        allowed_extra_clauses = {
+            "always()",
+            "env.APP_RO_TOKEN!=''",
+            "runner.os=='macOS'",
+            "steps.build.outputs.digest!=''",
+            "vars.ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN==''",
+            "steps.rewrite.outputs.changed=='true'",
+            "env.GITOPS_APP_ID!=''",
+            "steps.gitops_pr.outputs.pull-request-number==''",
+            "steps.gitops_pr.outputs.pull-request-number!=''",
+        }
+        for step in build_steps[admission_index + 1:]:
             if not isinstance(step, dict):
-                continue
-            if step.get("id") == "build_admission":
-                admission_seen = True
-                continue
-            if admission_seen and "steps.build_admission.outputs.proceed == 'true'" not in str(step.get("if", "")):
+                errors.append("a privileged build step is malformed")
+                break
+            # Accept only the current direct guard, optionally followed by known simple
+            # conjuncts. The guard cannot be wrapped, negated, or nested under `||`.
+            condition = normalize_condition(step.get("if"))
+            clauses = condition.split("&&")
+            if (not clauses[0] == admission_guard
+                    or "||" in condition
+                    or any(clause not in allowed_extra_clauses for clause in clauses[1:])):
                 errors.append("a privileged build step can run without serialized build-entry admission")
                 break
-    if "needs.deploy-source.outputs.proceed == 'true'" not in str(build_push.get("if", "")):
-        errors.append("privileged Admin UI build bypasses deploy-source admission")
-    if "github.event_name == 'workflow_run'" not in deploy_text:
-        errors.append("automatic Admin UI evidence runs do not have a source-scoped concurrency boundary")
 
-    admission_helper = text(root / ".github/scripts/check-admin-ui-deploy-admission.sh")
+    admission_helper_path = root / ".github/scripts/check-admin-ui-deploy-admission.sh"
+    admission_helper = text(admission_helper_path)
+    # Ignore full-line shell comments while checking that required operations are present
+    # in executable lines. This intentionally is not a shell parser; command behavior is
+    # covered by the helper's own tests and this guard is for wiring regressions.
+    executable_helper = executable_lines(admission_helper)
     for needle, message in (
         ("git ls-remote origin refs/heads/main", "admission helper does not recheck current main"),
         ('git fetch --no-tags --depth=64 origin "$main_sha"', "admission helper cannot prove bounded image-pin-only main advances"),
@@ -258,7 +319,7 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
         (".github/scripts/authorize-admin-ui-deploy-source.sh", "admission helper bypasses source ancestry authorization"),
         ('"$SOURCE_SHA" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists"', "admission helper omits freshness or duplicate-source evidence"),
     ):
-        if needle not in admission_helper:
+        if needle not in executable_helper:
             errors.append(message)
 
     return errors
@@ -1207,10 +1268,14 @@ def self_test() -> int:
             "    types: [completed]\n"
             "  schedule: [{cron: '17 3 * * *'}]\n"
             "concurrency:\n"
-            "  group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}\n"
+            "  group: >-\n"
+            "    admin-ui-deploy-${{ github.event.workflow_run.head_sha || github.sha }}-\n"
+            "    ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' && 'nonverdict' || 'eligible' }}\n"
             "jobs:\n"
             "  deploy-source:\n"
-            "    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'\n"
+            "    if: >-\n"
+            "      github.event_name != 'workflow_run' ||\n"
+            "      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')\n"
             "    steps:\n"
             "      - id: source\n"
             "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n"
@@ -1223,6 +1288,7 @@ def self_test() -> int:
             "  build-push:\n"
             "    if: needs.deploy-source.outputs.proceed == 'true'\n"
             "    steps:\n"
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
             "      - id: build_admission\n"
             "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n"
             "      - id: build\n"
@@ -1243,6 +1309,69 @@ def self_test() -> int:
             print("self-test failed: valid main-push evidence and admission wiring was rejected: "
                   + "; ".join(fixture_errors))
             return 1
+
+        original_deploy = deploy_workflow.read_text()
+        deploy_workflow.write_text(original_deploy.replace(
+            "branches: [main]\n    workflows:", "branches: [main, '!main']\n    workflows:"))
+        if not any("workflow_run is not restricted to main evidence" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: workflow_run main exclusion was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "(github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')",
+            "always() || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')"))
+        if not any("does not require successful main workflow_run evidence" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: permissive deploy-source job condition was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "if: steps.source.outputs.proceed == 'true'",
+            "if: always() || steps.source.outputs.proceed == 'true'"))
+        if not any("validation is not gated by initial" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: permissive validation condition was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "if: steps.build_admission.outputs.proceed == 'true'\n        run: ./build.sh",
+            "if: always() || steps.build_admission.outputs.proceed == 'true'\n        run: ./build.sh"))
+        if not any("build step can run without serialized" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: permissive privileged build-step condition was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "if: steps.build_admission.outputs.proceed == 'true'\n        run: ./build.sh",
+            "if: always() || (steps.rewrite.outputs.changed == 'true' && steps.build_admission.outputs.proceed == 'true')\n        run: ./build.sh"))
+        if not any("build step can run without serialized" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: nested-OR build admission guard was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        deploy_workflow.write_text(original_deploy.replace(
+            "run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event",
+            "run: |\n          # bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n          echo proceed=true", 1))
+        if not any("initial deploy-source admission" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: commented-out workflow admission call was accepted")
+            return 1
+        deploy_workflow.write_text(original_deploy)
+
+        helper_path = scripts_dir / "check-admin-ui-deploy-admission.sh"
+        original_helper = helper_path.read_text()
+        helper_path.write_text("\n".join("# " + line for line in original_helper.splitlines()) + "\n")
+        if not any("admission helper does not recheck current main" in error
+                   for error in admin_ui_deploy_liveness_errors(root)):
+            print("self-test failed: commented-out admission commands were accepted")
+            return 1
+        helper_path.write_text(original_helper)
 
         deploy_workflow.write_text(deploy_workflow.read_text().replace(
             "workflows: [Services CI, CI, Pact drift check]",
