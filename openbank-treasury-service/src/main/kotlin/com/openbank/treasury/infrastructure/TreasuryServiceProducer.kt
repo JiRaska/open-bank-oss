@@ -22,6 +22,7 @@ import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
+import com.openbank.treasury.application.usecase.BookCategories
 import com.openbank.treasury.application.usecase.CashFlowService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
@@ -79,6 +80,7 @@ class TreasuryServiceProducer {
         productLimits: ProductLimitConfig,
         schedules: ScheduleService,
         references: ReferenceRepository,
+        cashFlows: CashFlowRepository,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -94,6 +96,8 @@ class TreasuryServiceProducer {
         productLimits.toPolicy(),
         schedules,
         ProductMandate(references, productLimits.toPolicy(), clock)::policy,
+        cashFlows,
+        BookCategories(references, clock)::of,
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */

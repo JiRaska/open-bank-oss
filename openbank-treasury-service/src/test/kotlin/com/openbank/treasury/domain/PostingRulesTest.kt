@@ -159,9 +159,17 @@ class PostingRulesTest {
 
     @Test
     fun `every posted code has a fixed ledger id in the seeded range`() {
-        assertThat(TreasuryChart.postedCodes).containsExactlyInAnyOrder(
-            "1001", "1002", "1500", "1501", "1510", "2300", "2301", "4200", "4201", "5200", "5201",
-            "1520", "1521", "2310", "2311", "2320", "1990", "1991",
+        // ADR-0344 D7: ledger V31, EUR = CZK + 1 (TreasuryInstrumentAccountsPostingIT posts to each).
+        val v31 = listOf(
+            "1600", "1610", "1620", "1630", "1640", "1650", "1660", "1670", "1680", "1685", "1690", "1700",
+            "2400", "2410", "2420", "2430", "3100", "4210", "4220", "4230", "4240", "4300", "4310",
+            "5230", "5240", "5300", "5310", "9000", "9100", "9010", "9110", "9020", "9120",
+        ).flatMap { listOf(it, (it.toInt() + 1).toString()) }
+        assertThat(TreasuryChart.postedCodes).containsExactlyInAnyOrderElementsOf(
+            listOf(
+                "1001", "1002", "1500", "1501", "1510", "2300", "2301", "4200", "4201", "5200", "5201",
+                "1520", "1521", "2310", "2311", "2320", "1990", "1991",
+            ) + v31,
         )
         assertThat(TreasuryChart.glAccountId("1510").toString()).isEqualTo("a0000000-0000-0000-0000-000000001510")
     }

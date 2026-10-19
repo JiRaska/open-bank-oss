@@ -75,6 +75,29 @@ nothing. I = principal × rate/100 × days/360 (ACT/360), half-up to 2 dp; a zer
 interest line. 1520/1521 and 2310/2311 (accrued interest) are seeded but unused until daily
 accrual lands. Implemented in `PostingRules`, asserted row by row in `PostingRulesTest`.
 
+## Posting-rule matrix (ADR-0344 D7)
+
+The eleven leg-described products (CASH, TREASURY_BILL, BILL_OF_EXCHANGE, BOND, LOAN, FX_FORWARD,
+FX_SWAP, FRA, IRS, REPO, REVERSE_REPO) post through `PostingMatrix` — versioned data, one row per
+`(product, event, IFRS 9 category, flow kind/direction)`, served at `GET /posting-rules` — from the
+deal's stored cash-flow ledger, never from flat fields. Keys `treasury:<dealId>:<event>:<flowId|date>`
+(one journal per settlement date, per accrual day, per paid flow, per maturity). Accounts are the
+ledger `V31` set (securities by IFRS 9 category, premium/discount, accrued interest per family,
+loans, repo/reverse-repo, derivative fair value, FVOCI reserve, realised/unrealised P&L, memo pairs
+for commitments and collateral). Derivatives are recognised on trade date as a commitment memo.
+**STRIDE-T (wrong account / unbalanced):** every row resolves through `TreasuryChart`; a flow with
+no matching row is refused (`NoPostingRuleException`), never posted to a guess; `PostingMatrixLifecycleTest`
+replays every non-legacy parity fixture's whole life (all three IFRS 9 categories for securities) and
+asserts every journal balances, only seeded accounts are touched, every balance-sheet account the deal
+used is back to zero after maturity and the nostro moved by exactly the deal's flows.
+**STRIDE-T (double posting):** a paid flow is recorded under its flow id and never posted again; a
+day's accrual under its date; the ledger deduplicates on the key; `CashFlowLedgerApiIT` drives a past
+IRS through settle → accrue → pay → mature over real HTTP and Postgres and counts six payment keys.
+**Residual:** an unfixed floating flow cannot post until the fixing workflow (ADR-0344 D5) fixes it;
+revaluation journals exist as rules and a pure function but are not yet fed by the risk engine's
+valuation; a settled matrix deal is not reversible (a correction is the route, ADR-0344 D7); the cash
+counter-account of a CASH movement (1690) is cleared by the other side's booking, not by treasury.
+
 ## STRIDE analysis
 
 | Threat | Control | Residual risk |
@@ -94,8 +117,9 @@ accrual lands. Implemented in `PostingRules`, asserted row by row in `PostingRul
 
 1. No journal is posted for a deal that has not been BOOKED by a second human.
 2. A deal's approver is never its creator or submitter, and is always HUMAN (domain + DB CHECK).
-3. Every journal key is `treasury:<dealId>:<settled|matured|reversed>`; each is posted at most
-   once per deal in the ledger, however often it is retried.
+3. Every journal key is `treasury:<dealId>:<settled|matured|reversed>` (legacy, plus
+   `accrued:<date>`) or `treasury:<dealId>:<matrix event>:<flowId|date>` (ADR-0344 D7); each is
+   posted at most once per deal in the ledger, however often it is retried.
 4. Every posted journal balances per currency.
 
 ## Out of scope / follow-ups

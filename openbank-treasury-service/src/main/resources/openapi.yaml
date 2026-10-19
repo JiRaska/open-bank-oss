@@ -770,6 +770,42 @@ paths:
                 items: { $ref: '#/components/schemas/DealVersion' }
         '404': { description: No such deal }
 
+  /api/v1/treasury/deals/{id}/journals:
+    get:
+      tags: [Treasury]
+      operationId: listDealJournals
+      summary: The journals the ledger accepted for the deal (ADR-0344 D7)
+      description: >-
+        Every journal posted for the deal, oldest first, with its event and the idempotency key the
+        ledger deduplicates on (`treasury:<dealId>:<event>[:<flowId|date>]`).
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200':
+          description: Posted journals
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 100000
+                items: { $ref: '#/components/schemas/JournalRef' }
+        '404': { description: No such deal }
+
+  /api/v1/treasury/posting-rules:
+    get:
+      tags: [Treasury]
+      operationId: listPostingRules
+      summary: 'The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)'
+      responses:
+        '200':
+          description: Every posting rule of every product, versioned
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10000
+                items: { $ref: '#/components/schemas/PostingRule' }
+
   /api/v1/treasury/reference/{kind}:
     get:
       tags: [Treasury]
@@ -1456,10 +1492,39 @@ components:
                 currency: { type: string }
                 exposureAfter: { type: number }
                 headroomAfter: { type: number }
+    PostingRule:
+      type: object
+      required: [product, event, recognition, lines, version]
+      properties:
+        product: { $ref: '#/components/schemas/ProductType' }
+        event:
+          type: string
+          x-extensible-enum: [SETTLED, ACCRUED, MATURED, REVERSED, TRADE, SETTLEMENT, ACCRUAL, FIXING, PAYMENT,
+                              AMORTISATION, REVALUATION, MATURITY, EARLY_TERMINATION, CORRECTION]
+        ifrs9Category: { type: [string, 'null'], enum: [AMORTISED_COST, FVOCI, FVTPL, null], description: 'null = every category' }
+        recognition: { type: string, enum: [TRADE_DATE, SETTLEMENT_DATE] }
+        flowKind: { type: [string, 'null'], description: 'the flow kind the row applies to; null = any' }
+        flowDirection: { type: [string, 'null'], enum: [IN, OUT, null] }
+        lines:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              side: { type: string, enum: [DEBIT, CREDIT] }
+              glPurpose: { type: string, description: 'resolved per currency (and, for securities, per IFRS 9 category) to a GL account' }
+              amountExpression: { type: string }
+        version: { type: integer }
     JournalRef:
       type: object
       properties:
-        event: { type: string, enum: [settled, matured, reversed] }
+        event:
+          type: string
+          description: >-
+            The posting event. Open set: the legacy products post settled/accrued/matured/reversed (the
+            server has always returned accrued), the posting-rule matrix adds its own events (ADR-0344 D7).
+          x-extensible-enum: [settled, accrued, matured, reversed, trade, settlement, accrual, fixing, payment, amortisation,
+                              revaluation, maturity, early-termination, correction]
         idempotencyKey: { type: string, examples: ['treasury:0191c0de-0000-7000-8000-000000000001:settled'] }
         journalId: { type: string, format: uuid }
         postedAt: { type: string, format: date-time }

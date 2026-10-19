@@ -343,6 +343,49 @@ class CashFlowLedgerApiIT {
             .body("scheduleHash", nullValue())
     }
 
+    @Test
+    @Order(11)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `11 - a past fixed-fixed IRS is drafted and submitted for the posting-rule matrix`() {
+        val end = today.minusDays(5)
+        val start = end.minusMonths(3)
+        fun leg(side: String, rate: String) = """{"payReceive":"$side","currency":"CZK","notional":10000000.00,
+            "accrualStart":"$start","accrualEnd":"$end","accrualFrequency":"MONTHLY","paymentFrequency":"MONTHLY",
+            "dayCount":"ACT/360","adjustPaymentDate":false,"rate":{"type":"FIXED","rate":$rate}}"""
+        matrixDeal = post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","tradeDate":"${start.minusDays(2)}",
+               "calendars":["CERTIS"],"legs":[${leg("PAY", "4.0")},${leg("RECEIVE", "4.5")}]}""",
+        ).then().statusCode(201).extract().path("dealId")
+        post("/deals/$matrixDeal/submit").then().statusCode(200)
+    }
+
+    @Test
+    @Order(12)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `12 - it settles, accrues, pays and matures through the matrix, every journal recorded with its key`() {
+        post("/deals/$matrixDeal/approve").then().statusCode(200).body("state", equalTo("BOOKED"))
+        post("/deals/$matrixDeal/confirm", """{"reference":"cpty-ref-1"}""").then().statusCode(200)
+        post("/deals/$matrixDeal/settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+        post("/deals/$matrixDeal/mature").then().statusCode(200).body("state", equalTo("MATURED"))
+        val events: List<String> = given().`when`().get("/api/v1/treasury/deals/$matrixDeal/journals")
+            .then().statusCode(200).extract().path("event")
+        assertThat(events).contains("trade", "accrual", "payment", "maturity")
+        // Three monthly periods on two legs: six interest payments, each posted once under its flow id.
+        assertThat(
+            count("select count(*) from deal_journals where deal_id = ? and event = 'PAYMENT'", matrixDeal),
+        ).isEqualTo(6)
+        assertThat(
+            count(
+                "select count(*) from deal_journals where deal_id = ? and idempotency_key like 'treasury:%:payment:%'",
+                matrixDeal,
+            ),
+        ).isEqualTo(6)
+        given().`when`().get("/api/v1/treasury/posting-rules").then().statusCode(200)
+            .body("findAll { it.product == 'IRS' && it.event == 'TRADE' }", hasSize<Any>(1))
+            .body("collect { it.product }.unique()", hasSize<Any>(16))
+    }
+
     private fun count(sql: String, id: String): Int = jdbc { c ->
         c.prepareStatement(sql).use { ps ->
             ps.setObject(1, UUID.fromString(id))
@@ -366,5 +409,6 @@ class CashFlowLedgerApiIT {
         lateinit var dealId: String
         lateinit var interestFlow: String
         lateinit var overrideId: String
+        lateinit var matrixDeal: String
     }
 }

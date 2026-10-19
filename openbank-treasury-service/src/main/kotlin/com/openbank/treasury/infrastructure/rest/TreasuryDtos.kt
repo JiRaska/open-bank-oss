@@ -137,6 +137,33 @@ data class LimitOverrideResponse(
 
 data class JournalRefResponse(val event: String, val idempotencyKey: String, val journalId: UUID, val postedAt: Instant)
 
+/** One posting-rule matrix row; `ifrs9Category` null = every category. */
+data class PostingRuleDto(
+    val product: ProductType,
+    val event: String,
+    val ifrs9Category: String?,
+    val recognition: String,
+    val flowKind: String?,
+    val flowDirection: String?,
+    val lines: List<PostingRuleLineDto>,
+    val version: Int,
+) {
+    companion object {
+        fun from(r: com.openbank.treasury.domain.model.PostingRule) = PostingRuleDto(
+            product = r.product,
+            event = r.event.name,
+            ifrs9Category = r.ifrs9Category?.name,
+            recognition = r.recognition.name,
+            flowKind = r.selector.kind?.name,
+            flowDirection = r.selector.direction?.name,
+            lines = r.lines.map { PostingRuleLineDto(it.side.name, it.glPurpose, it.amount.name) },
+            version = r.version,
+        )
+    }
+}
+
+data class PostingRuleLineDto(val side: String, val glPurpose: String, val amountExpression: String)
+
 data class DealResponse(
     val dealId: UUID,
     val product: ProductType,

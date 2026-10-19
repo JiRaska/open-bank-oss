@@ -179,6 +179,10 @@ interface TreasuryDealUseCase {
 
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
     suspend fun accrueInterest(asOf: LocalDate): AccrualRun
+
+    /** ADR-0344 D7: the posting-rule matrix, every product (versioned data). */
+    fun postingRules(): List<com.openbank.treasury.domain.model.PostingRule> =
+        com.openbank.treasury.domain.model.PostingMatrix.rules
 }
 
 interface NostroReconciliationUseCase {

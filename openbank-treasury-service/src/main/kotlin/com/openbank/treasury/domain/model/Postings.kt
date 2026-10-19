@@ -16,6 +16,19 @@ enum class Side { DEBIT, CREDIT }
 enum class PostingEvent(val key: String) {
     SETTLED("settled"),
 
+    // ADR-0344 D7: the posting-rule matrix events of the leg-described products. Their keys are
+    // `treasury:<dealId>:<event>:<flowId|date>`.
+    TRADE("trade"),
+    SETTLEMENT("settlement"),
+    ACCRUAL("accrual"),
+    FIXING("fixing"),
+    PAYMENT("payment"),
+    AMORTISATION("amortisation"),
+    REVALUATION("revaluation"),
+    MATURITY("maturity"),
+    EARLY_TERMINATION("early-termination"),
+    CORRECTION("correction"),
+
     /** One calendar day of interest recognised on an accrual basis (ADR-0315 D5); keyed per day. */
     ACCRUED("accrued"),
     MATURED("matured"),
@@ -63,6 +76,7 @@ data class JournalSpec(
  * | MM interest income               | 4200 | 4201 | INCOME    |
  * | MM interest expense              | 5200 | 5201 | EXPENSE   |
  * | FX position (ledger V5)          | 1990 | 1991 | ASSET     |
+ * | matrix accounts (ledger V31)     | 16xx–17xx, 24xx, 3100, 42xx–43xx, 52xx–53xx, 90xx/91xx memo pairs; EUR = CZK + 1 |
  *
  * Interest is recognised daily into the accrued-interest accounts (ADR-0315 D5); maturity then
  * clears them rather than booking the whole interest to income in one amount.
@@ -80,6 +94,40 @@ object TreasuryChart {
             "accrued-receivable" to "1520",
             "accrued-payable" to "2310",
             "fx-position" to "1990",
+            // ADR-0344 D7: the posting-rule matrix accounts (ledger V31).
+            "securities-ac" to "1600",
+            "securities-fvoci" to "1610",
+            "securities-fvtpl" to "1620",
+            "premium-discount" to "1630",
+            "accrued-securities" to "1640",
+            "accrued-loan" to "1650",
+            "loan" to "1660",
+            "accrued-derivative" to "1670",
+            "reverse-repo" to "1680",
+            "accrued-reverse-repo" to "1685",
+            "cash-transit" to "1690",
+            "derivative-asset" to "1700",
+            "derivative-liability" to "2400",
+            "accrued-payable-derivative" to "2410",
+            "accrued-payable-repo" to "2420",
+            "repo" to "2430",
+            "fvoci-reserve" to "3100",
+            "income-securities" to "4210",
+            "income-loan" to "4220",
+            "income-derivative" to "4230",
+            "income-reverse-repo" to "4240",
+            "realised-gain" to "4300",
+            "unrealised-gain" to "4310",
+            "expense-derivative" to "5230",
+            "expense-repo" to "5240",
+            "realised-loss" to "5300",
+            "unrealised-loss" to "5310",
+            "commitment-memo" to "9000",
+            "commitment-contra" to "9100",
+            "collateral-received-memo" to "9010",
+            "collateral-received-contra" to "9110",
+            "collateral-pledged-memo" to "9020",
+            "collateral-pledged-contra" to "9120",
         ),
         Deal.EUR to mapOf(
             "nostro" to "1002",
@@ -90,6 +138,39 @@ object TreasuryChart {
             "accrued-receivable" to "1521",
             "accrued-payable" to "2311",
             "fx-position" to "1991",
+            "securities-ac" to "1601",
+            "securities-fvoci" to "1611",
+            "securities-fvtpl" to "1621",
+            "premium-discount" to "1631",
+            "accrued-securities" to "1641",
+            "accrued-loan" to "1651",
+            "loan" to "1661",
+            "accrued-derivative" to "1671",
+            "reverse-repo" to "1681",
+            "accrued-reverse-repo" to "1686",
+            "cash-transit" to "1691",
+            "derivative-asset" to "1701",
+            "derivative-liability" to "2401",
+            "accrued-payable-derivative" to "2411",
+            "accrued-payable-repo" to "2421",
+            "repo" to "2431",
+            "fvoci-reserve" to "3101",
+            "income-securities" to "4211",
+            "income-loan" to "4221",
+            "income-derivative" to "4231",
+            "income-reverse-repo" to "4241",
+            "realised-gain" to "4301",
+            "unrealised-gain" to "4311",
+            "expense-derivative" to "5231",
+            "expense-repo" to "5241",
+            "realised-loss" to "5301",
+            "unrealised-loss" to "5311",
+            "commitment-memo" to "9001",
+            "commitment-contra" to "9101",
+            "collateral-received-memo" to "9011",
+            "collateral-received-contra" to "9111",
+            "collateral-pledged-memo" to "9021",
+            "collateral-pledged-contra" to "9121",
         ),
     )
 

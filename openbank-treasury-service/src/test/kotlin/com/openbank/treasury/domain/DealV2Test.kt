@@ -114,11 +114,10 @@ class DealV2Test {
     }
 
     @Test
-    fun `a leg-described product books but cannot settle until its posting rules exist`() {
+    fun `a leg-described product settles through the posting-rule matrix, never the legacy posting table`() {
         val b = booked(irs()).confirm(approver, NOW)
         assertThat(b.state).isEqualTo(DealState.CONFIRMED)
-        assertThatThrownBy { b.settle(approver, LocalDate.parse("2027-12-31"), NOW) }
-            .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("posting rules")
+        assertThat(b.settle(approver, LocalDate.parse("2027-12-31"), NOW).state).isEqualTo(DealState.SETTLED)
         assertThatThrownBy { PostingRules.settlement(b) }.isInstanceOf(IllegalStateException::class.java)
         assertThat(PostingRules.accrual(b, start.plusDays(1))).isNull()
     }

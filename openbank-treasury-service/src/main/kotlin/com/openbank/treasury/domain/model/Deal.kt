@@ -32,9 +32,8 @@ enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false,
     CNB_LOMBARD(isAsset = false, isCnbFacility = true, legacy = true),
     FX_SPOT(isAsset = false, legacy = true),
 
-    // ADR-0344 D2: instruments described by their legs. Captured, scheduled and four-eyes booked
-    // now; settlement, maturity and posting arrive with the posting-rule matrix (ADR-0344 D7), so
-    // until then [Deal.settle] and [Deal.mature] refuse them.
+    // ADR-0344 D2: instruments described by their legs; they settle, accrue, pay and mature through
+    // the posting-rule matrix (ADR-0344 D7, [PostingMatrix]).
     CASH(isAsset = false),
     TREASURY_BILL(isAsset = true),
     BOND(isAsset = true),
@@ -513,6 +512,7 @@ data class Deal(
     fun mature(actor: Actor, today: LocalDate, at: Instant): Deal {
         requireHumanOrSystem(actor, "mature")
         check(product != ProductType.FX_SPOT) { "an FX spot deal has no maturity; it is final once SETTLED" }
+        check(!product.settlesOnOneDay) { "a $product deal has no maturity; it is final once SETTLED" }
         requireState(DealState.SETTLED, "mature")
         requirePostable("mature")
         check(!maturityDate.isAfter(today)) { "deal cannot mature before its maturity date $maturityDate" }
@@ -538,12 +538,11 @@ data class Deal(
     }
 
     /**
-     * ADR-0344 D7 boundary: only an ACTUAL deal of a product with posting rules moves cash or posts.
-     * PLANNED never does; the leg-described products wait for the posting-rule matrix.
+     * ADR-0344 D7 boundary: only an ACTUAL deal moves cash or posts; PLANNED and HYPOTHETICAL never
+     * do. Every product has posting rules (legacy [PostingRules], the others [PostingMatrix]).
      */
     private fun requirePostable(action: String) {
         check(kind == DealKind.ACTUAL) { "a $kind deal never posts or pays; it cannot $action" }
-        check(product.legacy) { "$product has no posting rules yet (ADR-0344 D7); it cannot $action" }
     }
 
     /** The ledger schedule generated at submission (ADR-0344 D4). */
