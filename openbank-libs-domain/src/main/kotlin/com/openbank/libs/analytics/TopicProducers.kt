@@ -59,6 +59,9 @@ object TopicProducers {
         "openbank.fx.cnb-policy-rate.published" to "fx-service",
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
+        // Contract 9.2: bank-own (financial-institution) transfer status, swift-service's outbox
+        // (swift-institution-transfers-out). The payload carries no sourceService field.
+        "openbank.swift.institution-transfers" to "swift-service",
         "openbank.lending.events" to "lending-service",
         // Issue #5338: audit-service was not subscribed to this topic at all (absent from both
         // this table and application.yaml's topics list), so SCA device enrollment
