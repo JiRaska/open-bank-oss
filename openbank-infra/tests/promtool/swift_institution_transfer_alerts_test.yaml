@@ -23,6 +23,7 @@ tests:
               rail: TARGET2
               cause: UNTYPED_NOT_FOUND
             exp_annotations:
+              subject_period: continuous
               summary: "Bank-own transfer needs manual reconciliation (TARGET2, UNTYPED_NOT_FOUND)"
               description: "swift-service stopped automating a bank-own transfer because the scheme's answer was ambiguous. It will NOT be resent. Find the transfer in swift_institution_transfers with status MANUAL_RECONCILIATION, confirm its UETR with the scheme, and settle or reject it by hand; treasury still sees it as RELEASED or SENT."
       - eval_time: 30m
