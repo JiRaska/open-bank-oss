@@ -113,16 +113,32 @@ paths:
     get:
       tags: [Treasury]
       operationId: listDeals
-      summary: Dealer blotter — deals, newest first, optionally filtered by state
+      summary: Dealer blotter — deals, newest first, filtered (every filter optional and ANDed)
       parameters:
         - name: state
           in: query
           required: false
           schema:
             $ref: '#/components/schemas/DealState'
+        - { name: instrument, in: query, required: false, schema: { type: string }, description: A product type }
+        - { name: bookId, in: query, required: false, schema: { type: string } }
+        - { name: counterpartyId, in: query, required: false, schema: { type: string } }
+        - { name: currency, in: query, required: false, schema: { type: string } }
+        - { name: kind, in: query, required: false, schema: { $ref: '#/components/schemas/DealKind' } }
+        - { name: hideMatured, in: query, required: false, schema: { type: boolean, default: false } }
+        - { name: hideAuthorised, in: query, required: false, schema: { type: boolean, default: false }, description: 'Hide BOOKED and later' }
+        - { name: text, in: query, required: false, schema: { type: string, maxLength: 100 }, description: 'Case-insensitive match on deal id, counterparty, counterparty reference or note' }
+        - { name: tradeDateFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: tradeDateTo, in: query, required: false, schema: { type: string, format: date } }
+        - { name: maturityFrom, in: query, required: false, schema: { type: string, format: date } }
+        - { name: maturityTo, in: query, required: false, schema: { type: string, format: date } }
       responses:
         '200':
-          description: Deals (without journal references; see GET /deals/{id})
+          description: Deals (without journal references; see GET /deals/{id}). The match count is in X-Total-Count.
+          headers:
+            X-Total-Count:
+              description: Number of deals matching the filters
+              schema: { type: integer }
           content:
             application/json:
               schema:
@@ -907,6 +923,270 @@ paths:
               schema: { $ref: '#/components/schemas/ReferenceDependencies' }
         '400': { description: Unknown kind }
 
+  /api/v1/treasury/deals/export:
+    get:
+      tags: [Treasury]
+      operationId: exportDeals
+      summary: Export deals (all matching the blotter filters, or a selection of ids) as CSV or JSON
+      parameters:
+        - { name: format, in: query, required: false, schema: { type: string, enum: [csv, json], default: json } }
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [all, selection], default: all } }
+        - { name: layout, in: query, required: false, schema: { type: string, enum: [STANDARD, REGULATORY], default: STANDARD } }
+        - name: ids
+          in: query
+          required: false
+          description: scope=selection only — comma-separated deal ids
+          schema: { type: string }
+      responses:
+        '200':
+          description: The export
+          content:
+            text/csv: { schema: { type: string } }
+            application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } }
+        '400': { description: Unknown format/layout, or scope=selection without ids }
+
+  /api/v1/treasury/deals/{id}/history:
+    get:
+      tags: [Treasury]
+      operationId: getDealHistory
+      summary: The deal's timeline and its versions with what changed
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dealId: { type: string, format: uuid }
+                  transitions: { type: array, items: { $ref: '#/components/schemas/Transition' } }
+                  versions: { type: array, items: { $ref: '#/components/schemas/DealVersion' } }
+        '404': { description: No such deal }
+
+  /api/v1/treasury/deals/{id}/schedule-preview:
+    post:
+      tags: [Treasury]
+      operationId: previewDealSchedule
+      summary: Generate the deal's cash-flow ledger WITHOUT storing it (the ticket's "generate" button)
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+      responses:
+        '200':
+          description: The ledger the deal would have now; scheduleVersion is the one a submission would write
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CashFlowLedger' }
+        '404': { description: No such deal }
+        '422': { description: REFERENCE_NOT_EFFECTIVE or SCHEDULE_ENGINE_UNAVAILABLE }
+
+  /api/v1/treasury/deals/{id}/send-confirmation:
+    post:
+      tags: [Treasury]
+      operationId: sendDealConfirmation
+      summary: Record that the bank's confirmation was sent to the counterparty (ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER); never the deal's creator
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/DealId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                documentId: { type: [string, 'null'], description: The confirmation artefact's id in the document store }
+                channel: { type: [string, 'null'], maxLength: 64 }
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422': { description: FOUR_EYES_VIOLATION }
+
+  /api/v1/treasury/positions/close-of-day:
+    post:
+      tags: [Treasury]
+      operationId: closePositions
+      summary: Record a close-of-day position snapshot (ROLE_TREASURY_BACK_OFFICE)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionCloseRequest' }
+      responses:
+        '201':
+          description: The recorded close
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionClose' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/positions/close-of-day/special:
+    post:
+      tags: [Treasury]
+      operationId: closePositionsSpecial
+      summary: Record a special (out-of-cycle or scenario) position close (ROLE_TREASURY_BACK_OFFICE)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionCloseRequest' }
+      responses:
+        '201':
+          description: The recorded close
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionClose' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/views/deal-filters:
+    get:
+      tags: [Treasury]
+      operationId: listDealFilters
+      summary: The caller's saved blotter filters
+      responses:
+        '200':
+          description: Saved filters
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SavedDealFilter' } }
+    post:
+      tags: [Treasury]
+      operationId: saveDealFilter
+      summary: Save (or replace by name) one of the caller's blotter filters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SavedDealFilter' }
+      responses:
+        '201':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedDealFilter' }
+        '400': { description: Blank name or a filter that is not an object }
+
+  /api/v1/treasury/views/deal-filters/{name}:
+    delete:
+      tags: [Treasury]
+      operationId: deleteDealFilter
+      summary: Delete one of the caller's saved filters
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '404': { description: No such filter for the caller }
+
+  /api/v1/treasury/calendar:
+    get:
+      tags: [Treasury]
+      operationId: getEventCalendar
+      summary: Treasury events between two dates — refixings, payments, maturities, settlements
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: bookId, in: query, required: false, schema: { type: string } }
+        - name: types
+          in: query
+          required: false
+          description: Comma-separated event types; omitted = all
+          schema: { type: string }
+      responses:
+        '200':
+          description: Events by date
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TreasuryEvent' } }
+        '400': { description: Missing or reversed range, more than 366 days, or an unknown type }
+
+  /api/v1/treasury/reference/{kind}/export:
+    get:
+      tags: [Treasury]
+      operationId: exportReferenceRecords
+      summary: Every version of every record of one kind, in the same JSON shape as GET /reference/{kind}
+      parameters:
+        - $ref: '#/components/parameters/ReferenceKind'
+      responses:
+        '200':
+          description: Records
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReferenceRecord' } }
+
+  /api/v1/treasury/reference/{kind}/import:
+    post:
+      tags: [Treasury]
+      operationId: importReferenceRecords
+      summary: >-
+        Propose many versions at once (ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE).
+        Each item becomes a PENDING proposal exactly as POST /reference/{kind} would make it; nothing
+        activates without four-eyes approval. All-or-nothing: one invalid item rejects the import.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReferenceKind'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/ReferenceProposal' } }
+      responses:
+        '201':
+          description: The PENDING versions
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReferenceRecord' } }
+        '400': { description: An invalid item (its index is in the message) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/treasury/reference/user-activity:
+    get:
+      tags: [Treasury]
+      operationId: getReferenceUserActivity
+      summary: Read-only — who proposed, approved, rejected or verified reference data, newest first
+      parameters:
+        - { name: since, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    at: { type: string, format: date-time }
+                    actor: { type: string }
+                    action: { type: string, enum: [PROPOSE, APPROVE, REJECT, VERIFY] }
+                    kind: { type: string }
+                    key: { type: string }
+                    version: { type: integer }
+
+  /api/v1/treasury/reference/application-version-history:
+    get:
+      tags: [Treasury]
+      operationId: getApplicationVersionHistory
+      summary: Read-only — the schema migrations applied to this service's store, oldest first
+      responses:
+        '200':
+          description: Versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    version: { type: string }
+                    description: { type: string }
+                    installedOn: { type: string, format: date-time }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1005,7 +1285,7 @@ components:
           type: string
           description: >-
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
-            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE
+            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, SCHEDULE_ENGINE_UNAVAILABLE
         message:
           type: [string, 'null']
         breaches:
@@ -1084,6 +1364,26 @@ components:
         linkedDealIds: { type: array, items: { type: string, format: uuid } }
         collateral: { $ref: '#/components/schemas/Collateral' }
         regulatory: { $ref: '#/components/schemas/RegulatoryTerms' }
+        legalEntityId: { type: string, description: 'The booking entity; defaults to the bank' }
+        counterpartyReference: { type: string, maxLength: 64, description: "The counterparty's own deal number" }
+        channel: { type: string, enum: [PLATFORM, VOICE, ELECTRONIC, INTERNAL] }
+        tradeDateTime: { type: string, format: date-time, description: tradeDate is derived from it in the bank zone when given }
+        effectiveDate: { type: string, format: date }
+        validFrom: { type: string, format: date, description: Framework or revolving deals }
+        validTo: { type: string, format: date }
+        jurisdiction: { type: string, pattern: '^[A-Z]{2}$' }
+        fixedConvention: { type: boolean, default: false, description: Conventions frozen at trade; later reference-data changes do not regenerate the schedule }
+        notionalExchange: { type: boolean }
+        singleCurrency: { type: boolean }
+        note: { type: string, maxLength: 2000 }
+        settlementAccounts: { $ref: '#/components/schemas/SettlementAccounts' }
+        documents: { type: array, items: { $ref: '#/components/schemas/DealDocument' } }
+        fees: { type: array, items: { $ref: '#/components/schemas/DealFee' } }
+        linkedDeals: { type: array, items: { $ref: '#/components/schemas/LinkedDeal' } }
+        originalDealId: { type: [string, 'null'], format: uuid }
+        securityTerms: { $ref: '#/components/schemas/SecurityTerms' }
+        fxTerms: { $ref: '#/components/schemas/FxDealTerms' }
+        fraTerms: { $ref: '#/components/schemas/FraTerms' }
     QuoteBoard:
       type: object
       required: [product, currency, tenorDays, synthetic, quotes]
@@ -1243,6 +1543,38 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Collateral'
             - type: 'null'
+        legalEntityId: { type: string, description: 'The booking entity; defaults to the bank' }
+        counterpartyReference: { type: string, maxLength: 64, description: "The counterparty's own deal number" }
+        channel: { type: string, enum: [PLATFORM, VOICE, ELECTRONIC, INTERNAL] }
+        tradeDateTime: { type: string, format: date-time, description: tradeDate is derived from it in the bank zone when given }
+        effectiveDate: { type: string, format: date }
+        validFrom: { type: string, format: date, description: Framework or revolving deals }
+        validTo: { type: string, format: date }
+        jurisdiction: { type: string, pattern: '^[A-Z]{2}$' }
+        fixedConvention: { type: boolean, default: false, description: Conventions frozen at trade; later reference-data changes do not regenerate the schedule }
+        notionalExchange: { type: boolean }
+        singleCurrency: { type: boolean }
+        note: { type: string, maxLength: 2000 }
+        settlementAccounts: { oneOf: [{ $ref: '#/components/schemas/SettlementAccounts' }, { type: 'null' }] }
+        documents: { type: array, items: { $ref: '#/components/schemas/DealDocument' } }
+        fees: { type: array, items: { $ref: '#/components/schemas/DealFee' } }
+        linkedDeals: { type: array, items: { $ref: '#/components/schemas/LinkedDeal' } }
+        originalDealId: { type: [string, 'null'], format: uuid }
+        securityTerms: { $ref: '#/components/schemas/SecurityTerms' }
+        fxTerms: { $ref: '#/components/schemas/FxDealTerms' }
+        fraTerms: { $ref: '#/components/schemas/FraTerms' }
+        counterpartyName: { type: [string, 'null'] }
+        notional: { type: number, description: First leg notional (= principal for the legacy products) }
+        lastChangedAt: { type: string, format: date-time }
+        lastChangedBy: { type: string }
+        creditExposureCheck:
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                counterparty: { $ref: '#/components/schemas/LimitCheck' }
+                product: { type: object, properties: { breached: { type: boolean }, breaches: { type: array, items: { type: object } } } }
+                override: { oneOf: [{ $ref: '#/components/schemas/LimitOverride' }, { type: 'null' }] }
     CounterpartyLimit:
       type: object
       properties:
@@ -1437,7 +1769,7 @@ components:
       required: [type]
       description: '`type: FIXED` needs `rate`; `type: FLOATING` needs `index` (and takes the rest).'
       properties:
-        type: { type: string, enum: [FIXED, FLOATING] }
+        type: { type: string, enum: [FIXED, FLOATING, NONE], description: NONE is an exchange-only leg (FX) }
         rate: { type: [number, 'null'], description: FIXED — annual percentage }
         index: { type: [string, 'null'], description: 'FLOATING — an `index` reference key, e.g. PRIBOR_3M' }
         spread: { type: [number, 'null'], description: FLOATING — added to the index, in percentage points }
@@ -1482,10 +1814,21 @@ components:
         rate: { $ref: '#/components/schemas/LegRate' }
         initialNotionalExchange: { type: boolean, default: false }
         finalNotionalExchange: { type: boolean, default: false }
+        amortisationStart: { type: [string, 'null'], format: date }
+        paymentCalendars: { type: array, items: { type: string }, description: '`calendar` keys; empty = the deal calendars' }
     RegulatoryTerms:
       type: object
       properties:
+        tradeReporting:
+          type: [object, 'null']
+          properties:
+            uti: { type: [string, 'null'], maxLength: 52 }
+            counterpartyLei: { type: [string, 'null'], pattern: '^[A-Z0-9]{20}$' }
+            clearingObligation: { type: [boolean, 'null'] }
+            collateralisation: { type: [string, 'null'], enum: [UNCOLLATERALISED, PARTIALLY, ONE_WAY, FULLY, null] }
+        centralBankCodes: { type: array, items: { type: string } }
         emir:
+          description: Deprecated alias of tradeReporting (kept for the first 1.19.0 drafts).
           type: [object, 'null']
           properties:
             uti: { type: [string, 'null'], maxLength: 52 }
@@ -1502,6 +1845,9 @@ components:
         securityIsin: { type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' }
         nominal: { type: number, exclusiveMinimum: 0 }
         haircutPercent: { type: number, minimum: 0, maximum: 100 }
+        dirtyPrice: { type: [number, 'null'] }
+        substitutionAllowed: { type: boolean, default: false }
+        marginCallThreshold: { type: [number, 'null'] }
     CashFlowLedger:
       type: object
       required: [dealId, dealVersion, scheduleVersion, flows]
@@ -1520,7 +1866,7 @@ components:
       properties:
         flowId: { type: string, format: uuid }
         legIndex: { type: integer, minimum: 0 }
-        periodIndex: { type: integer, minimum: 0 }
+        periodIndex: { type: integer, minimum: -1, description: '-1 is the initial notional exchange' }
         kind: { type: string, enum: [PRINCIPAL, INTEREST, FEE, NOTIONAL_EXCHANGE, PREMIUM] }
         direction: { type: string, enum: [IN, OUT], description: "From the bank's side" }
         currency: { type: string }
@@ -1608,7 +1954,11 @@ components:
           items: { type: string }
     ReferenceKind:
       type: string
-      enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code]
+      enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code,
+             party-group, party-type, country, document-type, account, settlement-place, product-type,
+             loan-type, communication-channel, market-factor, own-capital-item, period-length, scenario,
+             behavioural-scenario, calculation-settings, limit-settings, derivative-conversion-factor,
+             collateral-haircut, portfolio-group, accounting-settings, balance-sheet-side, dealing-filter]
     ReferenceStatus:
       type: string
       enum: [PENDING, ACTIVE, SUPERSEDED, REJECTED]
@@ -1681,6 +2031,8 @@ components:
         - $ref: '#/components/schemas/BookPayload'
         - $ref: '#/components/schemas/BucketSetPayload'
         - $ref: '#/components/schemas/RegulatoryCodePayload'
+        - $ref: '#/components/schemas/ProductTypePayload'
+        - $ref: '#/components/schemas/GenericReferencePayload'
     CalendarPayload:
       type: object
       required: [code, baseCalendar]
@@ -1777,6 +2129,117 @@ components:
       type: object
       required: [list, code, label]
       properties:
-        list: { type: string, enum: [CNB, DISIFE23, EMIR_PRODUCT, LCR, NSFR] }
+        list: { type: string, enum: [CNB, DISIFE23, EMIR_PRODUCT, LCR, NSFR, TRADE_REPORTING, CLASSIFICATION] }
         code: { type: string }
         label: { type: string }
+    SettlementAccounts:
+      type: object
+      properties:
+        cashAccountId: { type: string }
+        securitiesAccountId: { type: [string, 'null'] }
+    DealDocument:
+      type: object
+      required: [documentId, type]
+      properties:
+        documentId: { type: string }
+        type: { type: string, enum: [CONFIRMATION, TERM_SHEET, SIGNED_SCAN, OTHER] }
+    DealFee:
+      type: object
+      required: [type, amount, currency, paymentDate]
+      properties:
+        type: { type: string, maxLength: 32 }
+        amount: { type: number, minimum: 0 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        paymentDate: { type: string, format: date }
+    LinkedDeal:
+      type: object
+      required: [dealId, relation]
+      properties:
+        dealId: { type: string, format: uuid }
+        relation: { type: string, enum: [HEDGE, ROLLOVER, NETTING_SET, AMENDS, ORIGINAL] }
+    SecurityTerms:
+      type: object
+      description: Securities products (bond, bill, repo collateral side)
+      properties:
+        securityIsin: { type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$' }
+        nominal: { type: number, exclusiveMinimum: 0 }
+        cleanPrice: { type: [number, 'null'] }
+        yield: { type: [number, 'null'] }
+        accruedInterest: { type: [number, 'null'] }
+        settlementPlace: { type: [string, 'null'], description: A `settlement-place` reference key }
+        custodyAccountId: { type: [string, 'null'] }
+    FxDealTerms:
+      type: object
+      description: FX forward / swap terms
+      properties:
+        buyCurrency: { type: string }
+        buyAmount: { type: number }
+        sellCurrency: { type: string }
+        sellAmount: { type: number }
+        rate: { type: number }
+        forwardPoints: { type: [number, 'null'] }
+        nearDate: { type: [string, 'null'], format: date }
+        farDate: { type: [string, 'null'], format: date }
+        nearRate: { type: [number, 'null'] }
+        farRate: { type: [number, 'null'] }
+    FraTerms:
+      type: object
+      properties:
+        period: { type: string, pattern: '^[0-9]+x[0-9]+$', examples: ['3x6'] }
+        settlementConvention: { type: string, enum: [ADVANCE_DISCOUNTED, ARREARS] }
+    PositionCloseRequest:
+      type: object
+      required: [date]
+      properties:
+        date: { type: string, format: date }
+        bookId: { type: [string, 'null'] }
+        scenario: { type: [string, 'null'] }
+    PositionClose:
+      type: object
+      properties:
+        snapshotId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        bookId: { type: [string, 'null'] }
+        scenario: { type: [string, 'null'] }
+        special: { type: boolean }
+        closedBy: { type: string }
+        closedAt: { type: string, format: date-time }
+        positions: { type: array, items: { type: object, additionalProperties: true } }
+    SavedDealFilter:
+      type: object
+      required: [name, filter]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        filter: { type: object, additionalProperties: true, description: The GET /deals query parameters }
+        updatedAt: { type: string, format: date-time }
+    TreasuryEvent:
+      type: object
+      required: [date, type, description, dealId]
+      properties:
+        date: { type: string, format: date }
+        type: { type: string, enum: [REFIXING, INTEREST_PAYMENT, PRINCIPAL_PAYMENT, MATURITY, OPTION_EXERCISE, MARGIN_CALL, SETTLEMENT] }
+        description: { type: string }
+        dealId: { type: string, format: uuid }
+        flowId: { type: [string, 'null'], format: uuid }
+        paymentId: { type: [string, 'null'] }
+        responsibleRole: { type: string }
+    ProductTypePayload:
+      type: object
+      description: 'product-type: the mandate per product (migrated from configuration); authoritative over the configured seed'
+      required: [code, permitted]
+      properties:
+        code: { type: string }
+        permitted: { type: boolean }
+        allowedCurrencies: { type: array, items: { type: string } }
+        maxPrincipal: { type: object, additionalProperties: { type: number }, description: Per currency }
+        maxTenorDays: { type: [integer, 'null'] }
+    GenericReferencePayload:
+      type: object
+      description: >-
+        The kinds without a dedicated schema yet: a JSON object whose `code` (or `id`) is the record
+        key, plus `name`; other fields are stored as given.
+      properties:
+        code: { type: string }
+        id: { type: string }
+        name: { type: string }
+      additionalProperties: true
