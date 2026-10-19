@@ -54,6 +54,8 @@ const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
     { href: '/treasury/deals', nameCs: 'Obchody treasury', nameEn: 'Treasury deals', permission: 'treasury:view' },
     { href: '/treasury/approvals', nameCs: 'Ke schválení', nameEn: 'Approval inbox', permission: 'treasury:deal:approve' },
     { href: '/treasury/positions', nameCs: 'Denní pozice', nameEn: 'Daily position', permission: 'treasury:view' },
+    { href: '/treasury/calendar', nameCs: 'Kalendář událostí', nameEn: 'Event calendar', permission: 'treasury:workbench:view' },
+    { href: '/treasury/payments', nameCs: 'Platby', nameEn: 'Payments', permission: 'treasury:workbench:view' },
   ],
   platform: [
     { href: '/system/tests', nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', permission: 'system:view' },
@@ -88,7 +90,8 @@ export function personaForRoles(roles: string[]): Persona {
   }
   if (has(roles, ROLES.PAYMENTS)) return 'payments'
   if (has(roles, ROLES.RISK) || has(roles, ROLES.FINANCE)) return 'balance-sheet'
-  if (has(roles, ROLES.TREASURY_DEALER) || has(roles, ROLES.TREASURY_APPROVER) || has(roles, ROLES.TREASURY_SENIOR_APPROVER)) return 'treasury'
+  if (has(roles, ROLES.TREASURY_DEALER) || has(roles, ROLES.TREASURY_APPROVER) || has(roles, ROLES.TREASURY_SENIOR_APPROVER) ||
+      has(roles, ROLES.TREASURY_BACK_OFFICE) || has(roles, ROLES.TREASURY_REFERENCE_EDITOR) || has(roles, ROLES.TREASURY_PAYMENT_RELEASER)) return 'treasury'
   return 'backoffice'
 }
 

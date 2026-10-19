@@ -8,7 +8,7 @@ describe('hasPermission', () => {
   // treasury-rbac.guard.test.ts ties these to the Kotlin annotations.
   // #10896: NostroResource's upload endpoint is method-level APPROVER only, same shape as the
   // treasury deal writes above — ADMIN sits in the class-level @RolesAllowed but not this method's.
-  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload', 'catalog:pension:legal-approve', 'catalog:pension:product-approve'])
+  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload', 'treasury:backoffice:write', 'treasury:confirmation:send', 'treasury:decision:approve', 'treasury:reference:propose', 'treasury:reference:approve', 'treasury:payment:release', 'catalog:pension:legal-approve', 'catalog:pension:product-approve'])
 
   it('returns true for admin except specialist-only treasury and pension approvals', () => {
     const admin = [ROLES.ADMIN]

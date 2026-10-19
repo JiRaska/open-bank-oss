@@ -4,7 +4,8 @@
 
 import type { ReactNode } from 'react'
 import OperatorLayout from '@/components/layout/OperatorLayout'
+import { TreasuryAreaNav } from '@/components/treasury/TreasuryAreaNav'
 
 export default function TreasuryLayout({ children }: { children: ReactNode }) {
-  return <OperatorLayout><div className="ob-domain-workbench">{children}</div></OperatorLayout>
+  return <OperatorLayout><div className="ob-domain-workbench"><TreasuryAreaNav />{children}</div></OperatorLayout>
 }

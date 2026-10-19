@@ -144,6 +144,16 @@ const treasuryNav: NavItem[] = [
   { nameCs: 'Čerpání limitů',   nameEn: 'Limit utilisation', href: '/treasury/limits',         icon: Gauge,     permission: 'treasury:view' },
   { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view' },
   { nameCs: 'Nostro rekonciliace', nameEn: 'Nostro reconciliation', href: '/treasury/nostro',  icon: FileSearch, permission: 'treasury:nostro:read' },
+  // ADR-0344 workbench. Front office: calendar and cash-flow analysis; back office: payments, fixings,
+  // day completion; market data; reference data; reports.
+  { nameCs: 'Kalendář událostí', nameEn: 'Event calendar',   href: '/treasury/calendar',       icon: ClipboardList, permission: 'treasury:workbench:view' },
+  { nameCs: 'Analýza cash flow', nameEn: 'Cash-flow analysis', href: '/treasury/analysis/cash-flows', icon: BarChart3, permission: 'treasury:workbench:view' },
+  { nameCs: 'Platby',           nameEn: 'Payments',         href: '/treasury/payments',       icon: Banknote,  permission: 'treasury:workbench:view' },
+  { nameCs: 'Fixingy',          nameEn: 'Fixings',          href: '/treasury/fixings',        icon: Activity,  permission: 'treasury:workbench:view' },
+  { nameCs: 'Uzavření dne',     nameEn: 'Day completion',   href: '/treasury/day-completion', icon: ClipboardCheck, permission: 'treasury:workbench:view' },
+  { nameCs: 'Tržní data',       nameEn: 'Market data',      href: '/treasury/market-data',    icon: Gauge,     permission: 'treasury:workbench:view' },
+  { nameCs: 'Referenční data',  nameEn: 'Reference data',   href: '/treasury/reference',      icon: BookOpen,  permission: 'treasury:workbench:view' },
+  { nameCs: 'Reporty a analýzy', nameEn: 'Reports',         href: '/treasury/reports',        icon: FileText,  permission: 'treasury:workbench:view' },
 ]
 
 const customerNav: NavItem[] = [
