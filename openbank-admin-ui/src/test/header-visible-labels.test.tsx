@@ -23,8 +23,9 @@ describe.each(['en', 'cs'] as const)('Header labels in %s', (language) => {
 
   it('includes the visible search label and preserves its shortcut', () => {
     renderHeader()
-    const search = screen.getByRole('button', { name: language === 'en' ? 'Quick search ⌘K' : 'Rychlé hledání ⌘K' })
-    expect(search).toHaveAccessibleName(search.textContent!.replace(/\s+/g, ' ').trim())
+    const search = screen.getByRole('button', { name: language === 'en' ? 'Quick search (⌘K)' : 'Rychlé hledání (⌘K)' })
+    expect(search).toHaveAccessibleName(language === 'en' ? 'Quick search (⌘K)' : 'Rychlé hledání (⌘K)')
+    expect(search.textContent!.replace(/\s+/g, ' ').trim()).toBe(language === 'en' ? 'Quick search (⌘K)' : 'Rychlé hledání (⌘K)')
     expect(search.querySelector('kbd')).toHaveAttribute('aria-hidden', 'true')
     expect(search).toHaveAttribute('aria-keyshortcuts', 'Meta+K Control+K')
   })

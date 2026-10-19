@@ -109,7 +109,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
       <button
         type="button"
         onClick={() => setPaletteOpen(true)}
-        aria-label={t('Rychlé hledání ⌘K', 'Quick search ⌘K')}
+        aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
         aria-keyshortcuts="Meta+K Control+K"
         className={styles.searchTrigger}
       >
@@ -119,7 +119,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
           fontSize: '10px', padding: '1px 5px',
           background: 'var(--surface-3)', border: '1px solid var(--border)',
           borderRadius: '4px', color: 'var(--text-secondary)', fontFamily: 'inherit',
-        }}>⌘K</kbd>
+        }}>(⌘K)</kbd>
       </button>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
