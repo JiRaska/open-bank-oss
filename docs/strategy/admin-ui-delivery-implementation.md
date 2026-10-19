@@ -196,6 +196,36 @@ inputs. Files read by the BFF at runtime belong to separately assembled evidence
 classification must be proven per dataset before moving a collector: filesystem reads
 alone do not prove the file is copied into the final runtime image.
 
+## Route inventory and read-only navigation acceptance
+
+A source inventory on 2026-10-19 found 170 App Router pages: 137 static paths and 33 dynamic templates. Sidebar source contains 106 destinations: 103 in-app pages and three proxied tools. The admin role exposes 105 destinations: 102 in-app pages and the same three tools. The Playwright sidebar smoke derives its destination list from `Sidebar.tsx` and clicks each visible in-app destination, so a new sidebar item joins automatically. The inventory guard and 103-destination clickthrough passed against the production-prebuilt test target in 49.4 seconds.
+
+| Existing route evidence | Count | What it establishes |
+| --- | ---: | --- |
+| Routes with a Playwright direct-load assertion | 96 / 170 | Source contains a `page.goto` for that route template; this does not establish every page's data or controls work. |
+| Distinct destinations with click/press plus cross-route URL assertion | 4 / 170 | `/campaigns/[id]`, `/parties/[id]`, `/pension/contracts/[id]`, and `/system/tests`. |
+| Destinations with redirect assertions | 2 | Includes the role-denied communication editor landing at `/auth/forbidden`. |
+| Routes with only a page-module render reference | 35 / 170 | Component rendering is covered, but a browser navigation is not. |
+| Routes with no route-specific test reference | 39 / 170 | No browser or page-module test reference was found by the source inventory. |
+
+The counts overlap where a route has both a direct load and an interaction assertion. In the exclusive classification, 92 routes are direct-load-only, 4 have an interaction transition, 35 are render-only and 39 have no route-specific test. The earlier scan reported 93 direct-load, 37 render-only and 40 unreferenced routes; this refreshed per-test AST inventory and route-template matching changed classification, not application behavior or proven coverage. These are source-analysis counts, not a claim that all tests pass.
+
+`e2e/route-inventory-classification.spec.ts` requires every static page to have a safe direct-GET path and an explicit disposition; every dynamic template must have a concrete fixture path and evidence record in `dynamic-route-inventory.ts`. `e2e/static-route-direct-load.spec.ts` directly loads all 34 static routes outside the sidebar: 29 operator pages, four public entries (`/auth/error`, `/auth/forbidden`, `/auth/login`, `/privacy`) and the root redirect. It signs in with a local test role set for protected routes, asserts the root redirects to `/dashboard`, checks page content and error states, and fails if loading a route issues a non-GET request. The 103 static sidebar pages remain in the click smoke. Forms are only opened; none is submitted. The static direct-load spec is implemented and awaits its integrated run.
+
+`e2e/dynamic-route-direct-load.spec.ts` directly loads one safe concrete URL for each of the 33 dynamic templates. It stubs browser API reads with 404 and rejects writes, so this proves route resolution and the page's settled failure/unavailable state without changing data or depending on a populated environment. A stubbed 404 is not evidence that the corresponding backend record is absent. The inventory names the existing test fixture source where one exists and marks the smaller set without one as synthetic; it separately records which routes have populated E2E assertions and which have render-only unit fixtures. Three true unknown-record behaviors are already asserted by focused tests: missing Communication persona, missing flaky-test finding, and malformed Pension contract UUID. Report the dynamic smoke as navigation/error-state coverage; it does not establish populated record rendering across all 33 templates.
+
+A read-only production clickthrough on revision `c332985aa` rendered the main content for all 102 admin-visible in-app sidebar destinations after retry. Most captures showed initial data loading, so they establish navigation and shell rendering only. `/iaops` rendered on retry after an earlier browser block.
+
+The three tool links exposed a confirmed deployed bug. Envoy appends the original tool path to its authorization-check URL, so a trailing-slash request reaches Next as `/api/gate/<tool>/tools/<tool>/`. Deployed revision `c332985aa` did not set `skipTrailingSlashRedirect`; Next's default normalization returned a 308 to the slashless internal gate URL, which Envoy exposed to the browser. Root curl and a Pyrra port-forward reproduced the 308. The current change sets `skipTrailingSlashRedirect: true` and keeps the normal public console redirect in `src/proxy.ts`, while `/api/gate/**` bypasses that redirect so Envoy receives the original path. `src/test/proxy-trailing-slash.test.ts` covers gate pass-through, console canonicalization and the Next setting. The fix is not yet verified in production: after rollout, repeat authenticated browser navigation for Grafana, Alertmanager and Pyrra and confirm the public URL never exposes `/api/gate/` and the tool content loads.
+
+Acceptance for broad route coverage is:
+
+1. Keep the inventory classification test green; every newly added static route gets a safe path/disposition and every new dynamic template gets an explicit fixture requirement.
+2. Run the derived Sidebar smoke against a seeded admin role. It must click all 103 in-app sidebar destinations, detect route HTTP errors, uncaught page errors, the not-found page and the shell error boundary, and wait for a route-specific terminal state before claiming a rendered-page pass.
+3. Run the direct-load smoke for all 34 static non-sidebar routes and the dynamic direct-load smoke for all 33 templates. Both reject write requests. Dynamic browser API reads are stubbed 404; report that as terminal error/unavailable-state coverage, not proof a record is absent or that populated data rendered.
+4. Run the focused existing populated detail fixtures referenced by the dynamic inventory, plus the three unknown-record cases, before claiming those individual states. The inventory gate prevents a new template from escaping classification; it does not claim that every dynamic template has populated-state coverage.
+5. Report redirects, unavailable API states and browser-blocked proxied tools separately. A loading shell or route URL alone is not functional readiness.
+
 ## Rollout acceptance and measurement
 
 1. Run the changed behavior tests, complete lint/type checking and the existing broad
