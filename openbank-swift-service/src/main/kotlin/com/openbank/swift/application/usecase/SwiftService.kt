@@ -35,8 +35,6 @@ class SwiftService(
 ) : SwiftUseCase {
 
     companion object {
-        private const val SWIFT_MESSAGE_STATUS_CHANGED = "swift.message.status-changed"
-
         /**
          * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
          * (EVENT-sourced) attribution (#3994/#5256). Matches the fleet's audit convention — the
@@ -67,7 +65,8 @@ class SwiftService(
      */
     private fun statusChangedEvent(message: SwiftMessage) = OutboxMessage(
         aggregateId = message.id,
-        eventType = SWIFT_MESSAGE_STATUS_CHANGED,
+        // Literal, not the constant: the event-contract agreement gate reads it off this call.
+        eventType = "swift.message.status-changed",
         payload = objectMapper.writeValueAsString(
             mapOf(
                 "sourceService" to SOURCE_SERVICE,

@@ -4,6 +4,51 @@
   },
   "interactions": [
     {
+      "description": "POST a bank-own pacs.009 on the TARGET2 route",
+      "providerStates": [
+        {
+          "name": "the clearing simulator is available"
+        }
+      ],
+      "request": {
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.009.001.08\">\n    <FICdtTrf>\n        <GrpHdr>\n            <MsgId>FI-1B4E28BA2FA14D2E</MsgId>\n            <CreDtTm>2026-10-19T09:00:00Z</CreDtTm>\n            <NbOfTxs>1</NbOfTxs>\n            <SttlmInf>\n                <SttlmMtd>CLRG</SttlmMtd>\n                <ClrSys>\n                    <Cd>TGT</Cd>\n                </ClrSys>\n            </SttlmInf>\n        </GrpHdr>\n        <CdtTrfTxInf>\n            <PmtId>\n                <InstrId>1B4E28BA2FA14D2E</InstrId>\n                <EndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</EndToEndId>\n                <TxId>1b4e28ba2fa14d2e883f0016d3cca427</TxId>\n                <UETR>3f0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f</UETR>\n            </PmtId>\n            <IntrBkSttlmAmt Ccy=\"EUR\">1000000.00</IntrBkSttlmAmt>\n            <IntrBkSttlmDt>2026-10-19</IntrBkSttlmDt>\n            <InstgAgt>\n                <FinInstnId>\n                    <BICFI>OPENCZPPXXX</BICFI>\n                </FinInstnId>\n            </InstgAgt>\n            <InstdAgt>\n                <FinInstnId>\n                    <BICFI>BNPAFRPPXXX</BICFI>\n                </FinInstnId>\n            </InstdAgt>\n            <Dbtr>\n                <FinInstnId>\n                    <BICFI>OPENCZPPXXX</BICFI>\n                </FinInstnId>\n            </Dbtr>\n            <DbtrAcct>\n                <Id>\n                    <IBAN>CZ6508000000192000145399</IBAN>\n                </Id>\n            </DbtrAcct>\n            <Cdtr>\n                <FinInstnId>\n                    <BICFI>BNPAFRPPXXX</BICFI>\n                    <Nm>Counterparty Bank</Nm>\n                </FinInstnId>\n            </Cdtr>\n            <CdtrAcct>\n                <Id>\n                    <IBAN>FR1420041010050500013M02606</IBAN>\n                </Id>\n            </CdtrAcct>\n            <RmtInf>\n                <Ustrd>MM deal settlement</Ustrd>\n            </RmtInf>\n        </CdtTrfTxInf>\n    </FICdtTrf>\n</Document>\n",
+        "headers": {
+          "Content-Type": "application/xml"
+        },
+        "method": "POST",
+        "path": "/api/v1/clearing/fi-credit-transfers/target2"
+      },
+      "response": {
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.002.001.10\">\n    <FIToFIPmtStsRpt>\n        <GrpHdr>\n            <MsgId>SIM-STS-1b4e28ba2fa14d2e883f0016d3</MsgId>\n            <CreDtTm>2026-10-19T09:00:00.123456Z</CreDtTm>\n        </GrpHdr>\n        <TxInfAndSts>\n            <OrgnlEndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlEndToEndId>\n            <OrgnlTxId>1b4e28ba2fa14d2e883f0016d3cca427</OrgnlTxId>\n            <TxSts>ACSC</TxSts>\n        </TxInfAndSts>\n    </FIToFIPmtStsRpt>\n</Document>\n",
+        "headers": {
+          "Content-Type": "application/xml"
+        },
+        "matchingRules": {
+          "body": {
+            "$.Document.FIToFIPmtStsRpt.GrpHdr.CreDtTm.#text": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z"
+                }
+              ]
+            },
+            "$.Document.FIToFIPmtStsRpt.GrpHdr.MsgId.#text": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "SIM-STS-.+"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "POST a pacs.008 credit transfer converted from an MT103",
       "providerStates": [
         {
@@ -46,6 +91,25 @@
           }
         },
         "status": 200
+      }
+    },
+    {
+      "description": "POST a pacs.009 on a route the simulator does not clear",
+      "providerStates": [
+        {
+          "name": "the clearing simulator is available"
+        }
+      ],
+      "request": {
+        "body": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pacs.009.001.08\">\n    <FICdtTrf>\n        <GrpHdr>\n            <MsgId>FI-1B4E28BA2FA14D2E</MsgId>\n            <CreDtTm>2026-10-19T09:00:00Z</CreDtTm>\n            <NbOfTxs>1</NbOfTxs>\n            <SttlmInf>\n                <SttlmMtd>CLRG</SttlmMtd>\n                <ClrSys>\n                    <Cd>TGT</Cd>\n                </ClrSys>\n            </SttlmInf>\n        </GrpHdr>\n        <CdtTrfTxInf>\n            <PmtId>\n                <InstrId>1B4E28BA2FA14D2E</InstrId>\n                <EndToEndId>1b4e28ba2fa14d2e883f0016d3cca427</EndToEndId>\n                <TxId>1b4e28ba2fa14d2e883f0016d3cca427</TxId>\n                <UETR>3f0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f</UETR>\n            </PmtId>\n            <IntrBkSttlmAmt Ccy=\"EUR\">1000000.00</IntrBkSttlmAmt>\n            <IntrBkSttlmDt>2026-10-19</IntrBkSttlmDt>\n            <InstgAgt>\n                <FinInstnId>\n                    <BICFI>OPENCZPPXXX</BICFI>\n                </FinInstnId>\n            </InstgAgt>\n            <InstdAgt>\n                <FinInstnId>\n                    <BICFI>BNPAFRPPXXX</BICFI>\n                </FinInstnId>\n            </InstdAgt>\n            <Dbtr>\n                <FinInstnId>\n                    <BICFI>OPENCZPPXXX</BICFI>\n                </FinInstnId>\n            </Dbtr>\n            <DbtrAcct>\n                <Id>\n                    <IBAN>CZ6508000000192000145399</IBAN>\n                </Id>\n            </DbtrAcct>\n            <Cdtr>\n                <FinInstnId>\n                    <BICFI>BNPAFRPPXXX</BICFI>\n                    <Nm>Counterparty Bank</Nm>\n                </FinInstnId>\n            </Cdtr>\n            <CdtrAcct>\n                <Id>\n                    <IBAN>FR1420041010050500013M02606</IBAN>\n                </Id>\n            </CdtrAcct>\n            <RmtInf>\n                <Ustrd>MM deal settlement</Ustrd>\n            </RmtInf>\n        </CdtTrfTxInf>\n    </FICdtTrf>\n</Document>\n",
+        "headers": {
+          "Content-Type": "application/xml"
+        },
+        "method": "POST",
+        "path": "/api/v1/clearing/fi-credit-transfers/sepa"
+      },
+      "response": {
+        "status": 404
       }
     }
   ],

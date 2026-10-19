@@ -10,6 +10,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -28,4 +29,11 @@ interface ClearingSimulatorClient {
     @Consumes("application/xml")
     @Produces("application/xml")
     fun submitCreditTransfer(pacs008Xml: String): Uni<String>
+
+    /** Submit a bank-own `pacs.009` on [route] (`certis` / `target2` / `swift`); returns the `pacs.002`. */
+    @POST
+    @Path("/api/v1/clearing/fi-credit-transfers/{route}")
+    @Consumes("application/xml")
+    @Produces("application/xml")
+    fun submitInstitutionCreditTransfer(@PathParam("route") route: String, pacs009Xml: String): Uni<String>
 }

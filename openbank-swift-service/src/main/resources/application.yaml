@@ -146,6 +146,17 @@ quarkus:
     # so the management interface (default :8085) must be folded back in (else /q/health/* 404s).
     management:
       enabled: false
+  # The two bank-own-transfer channels run on the in-memory connector under test, so no class
+  # needs a broker unless it opts into one (InstitutionTransferDeadLetterIT re-points the incoming
+  # channel at a real broker to prove the DLQ).
+  mp:
+    messaging:
+      incoming:
+        treasury-payments-in:
+          connector: smallrye-in-memory
+      outgoing:
+        swift-institution-transfers-out:
+          connector: smallrye-in-memory
 openbank:
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
@@ -153,6 +164,9 @@ openbank:
     opa-pdp-producer:
       enabled: true
   swift:
+    institution-transfer:
+      # A release whose valueDate is more than this many days in the past is refused (DT01).
+      value-date-past-tolerance-days: 1
     scheme-submission:
       # ADR-0104 D4 SWIFT pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${SWIFT_SCHEME_SUBMISSION_ENABLED:false}
@@ -200,7 +214,35 @@ mp:
         ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    incoming:
+      # Bank-own transfer releases from treasury (contract 9.1). Only treasury holds Write on the
+      # topic (KafkaUser ACL). group.id is NOT set here: a dotted YAML key is inert (#686), and
+      # the connector's default — quarkus.application.name, openbank-swift-service — is the group
+      # the KafkaUser grants Read on.
+      #
+      # A refused or unparseable release is rethrown, so the connector must PARK it: SmallRye's
+      # default failure-strategy is `fail`, which stops the channel. The DLQ topic is explicit
+      # (the implicit name derives from the channel name alone) and NESTED — the dotted leaf
+      # `dead-letter-queue.topic:` is quoted by SmallRye's YAML source and never read (#5752).
+      treasury-payments-in:
+        connector: smallrye-kafka
+        topic: openbank.treasury.payments
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.swift-service.treasury-payments-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
     outgoing:
+      # Bank-own transfer status (contract 9.2), written only through the outbox dispatcher.
+      swift-institution-transfers-out:
+        connector: smallrye-kafka
+        topic: openbank.swift.institution-transfers
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       swift-events-out:
         connector: smallrye-kafka
         client.id: swift-service-${quarkus.uuid}

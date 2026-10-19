@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+# Derived from the code that runs: `SwiftService.statusChangedEvent` (the MT103 envelope, a
+# hand-built map) and `InstitutionTransferStatusChanged` (the bank-own transfer status, a data
+# class), both written to `swift_outbox` and published by `KafkaSwiftOutboxEventPublisher`.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank SWIFT Service — payment message events
+  version: 1.0.0
+  description: |
+    Two event streams, both through swift-service's transactional outbox (a published event
+    always corresponds to a committed state change):
+
+    - `openbank.payments.swift.event` — lifecycle of customer MT103 messages.
+    - `openbank.swift.institution-transfers` — lifecycle of bank-own (financial-institution)
+      credit transfers carried as ISO 20022 pacs.009 (contract 9.2).
+
+    **Consumed, not produced here:** swift-service reads `treasury.payment.released.v1` from
+    `openbank.treasury.payments` (contract 9.1, produced by treasury-service; JSON Schema in
+    `schema/treasury-payment-released.schema.json`). Only treasury holds Write on that topic. A
+    release the rail refuses is dead-lettered to `openbank.dlq.swift-service.treasury-payments-in`
+    and, when its paymentId is readable, answered with one REJECTED status event.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: "Strimzi cluster `openbank-cluster` in `messaging`; mTLS, per-service KafkaUser (`swift-service`)."
+
+channels:
+  swiftMessageEvents:
+    address: openbank.payments.swift.event
+    title: SWIFT MT103 message lifecycle
+    description: |
+      `openbank-infra/gitops/components/payments/kafka-topic.yaml`, retention 7 days. Read by
+      audit-service. **Partitioning key: `aggregateId`** = the SWIFT message id.
+    messages:
+      SwiftMessageStatusChanged:
+        $ref: '#/components/messages/SwiftMessageStatusChanged'
+  institutionTransfers:
+    address: openbank.swift.institution-transfers
+    title: Bank-own transfer status
+    description: |
+      `openbank-infra/gitops/components/payments/kafka-topic.yaml`, retention 7 days. Read by
+      treasury-service (consumer group `openbank-treasury-service`).
+
+      **Partitioning key: `aggregateId`** = the paymentId, so one payment's events stay ordered.
+      A transfer's lifecycle is ACCEPTED → SENT → SETTLED, or ACCEPTED → REJECTED (scheme
+      reject), or REJECTED alone (refused by the rail's validation). SENT and SETTLED of an
+      ACSC verdict are committed together, SENT first. Consumers must be idempotent on
+      (paymentId, status): delivery is at least once.
+    messages:
+      InstitutionTransferStatusChanged:
+        $ref: '#/components/messages/InstitutionTransferStatusChanged'
+
+operations:
+  publishSwiftMessageEvents:
+    action: send
+    channel:
+      $ref: '#/channels/swiftMessageEvents'
+    summary: swift-service publishes MT103 message status changes.
+  publishInstitutionTransferStatus:
+    action: send
+    channel:
+      $ref: '#/channels/institutionTransfers'
+    summary: swift-service publishes bank-own transfer status (contract 9.2).
+
+components:
+  messages:
+    SwiftMessageStatusChanged:
+      name: swift.message.status-changed
+      summary: "An MT103 message changed status (scheme verdict, settlement or operator decision)."
+      payload:
+        $ref: '#/components/schemas/SwiftMessageStatusChanged'
+    InstitutionTransferStatusChanged:
+      name: swift.institution-transfer.status.v1
+      summary: "A bank-own pacs.009 transfer reached ACCEPTED, SENT, SETTLED or REJECTED."
+      payload:
+        $ref: '#/components/schemas/InstitutionTransferStatusChanged'
+
+  schemas:
+    SwiftMessageStatusChanged:
+      type: object
+      required: [sourceService, swiftMessageId, paymentSagaRef, status, messageType, amount, currency, occurredAt]
+      properties:
+        sourceService: { type: string, const: swift-service }
+        swiftMessageId: { type: string, format: uuid }
+        paymentSagaRef: { type: string }
+        status: { type: string, enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED, COMPLETED] }
+        messageType: { type: string, enum: [MT103, MT202, MT900, MT910, MT940, MT950, MT199] }
+        amount: { type: number }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        occurredAt: { type: string, format: date-time }
+    InstitutionTransferStatusChanged:
+      description: Same shape as `schema/institution-transfer-status.schema.json`.
+      type: object
+      required: [paymentId, status, messageType, at, synthetic]
+      properties:
+        paymentId: { type: string, format: uuid }
+        idempotencyKey: { type: [string, 'null'], description: "As released (9.1); null only when a refused release carried none." }
+        status: { type: string, enum: [ACCEPTED, SENT, SETTLED, REJECTED] }
+        messageType: { type: string, enum: [pacs.009, MT202] }
+        schemeReference: { type: [string, 'null'], description: "The transfer's UETR; null on a validation REJECTED." }
+        reasonCode: { type: [string, 'null'], description: "ISO 20022 ExternalStatusReason1Code on REJECTED." }
+        reason: { type: [string, 'null'] }
+        at: { type: string, format: date-time }
+        synthetic: { type: boolean, description: "ADR-0252 taint, propagated from the release." }
+        ssiVersion: { type: [integer, 'null'], description: "Echo of the release's optional ssiVersion (9.1 addendum)." }
