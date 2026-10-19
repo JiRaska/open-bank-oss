@@ -47,7 +47,7 @@ info:
   #         REFERENCE_NOT_EFFECTIVE lists Error.missingReferences. Slice 3 (same unreleased
   #         version): fixings and market data (/fixings, /market-data/*, ADR-0344 D5), the
   #         day-completion record with the ADR-0342 participation it sends, and the
-  #         internal-rate-sheet reference kind.
+  #         internal-rate-sheet reference kind; own-account payments (/payments, ADR-0344 D6).
   version: 1.20.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
@@ -1650,6 +1650,93 @@ paths:
                     maxItems: 500
                     items: { type: object, properties: { index: { type: string }, date: { type: string, format: date }, dealCount: { type: integer } } }
 
+  /api/v1/treasury/payments:
+    get:
+      tags: [Treasury]
+      operationId: listPayments
+      summary: Own-account payments with a value date in from..to (ADR-0344 D6)
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: status, in: query, required: false, schema: { $ref: '#/components/schemas/PaymentStatus' } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        '200': { description: Payments, content: { application/json: { schema: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/Payment' } } } } }
+
+  /api/v1/treasury/payments/{id}:
+    get:
+      tags: [Treasury]
+      operationId: getPayment
+      summary: One payment
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: The payment, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '404': { description: No such payment }
+
+  /api/v1/treasury/payments/propose:
+    post:
+      tags: [Treasury]
+      operationId: proposePayments
+      summary: Propose payments for the FIXED flows inside the cut-off window (netted per agreement, addressed from the SSI)
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: The proposal run, content: { application/json: { schema: { type: object } } } }
+
+  /api/v1/treasury/payments/{id}/release:
+    post:
+      tags: [Treasury]
+      operationId: releasePayment
+      summary: >-
+        Release a PROPOSED payment (ROLE_TREASURY_PAYMENT_RELEASER only; never a netted deal's creator or term
+        author nor an override proposer or approver of a netted flow; never an AI agent). Refused 422
+        FUNDING_EXCEEDED when the funding account would go negative on the value date, net of released
+        payments. A rail with no bank-own debit path ends it RAIL_NOT_SUPPORTED.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Released (SENT or RAIL_NOT_SUPPORTED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '403': { description: Not a human payment releaser }
+        '409': { description: Not PROPOSED }
+        '422': { description: FOUR_EYES_VIOLATION or FUNDING_EXCEEDED }
+
+  /api/v1/treasury/payments/{id}/cancel:
+    post:
+      tags: [Treasury]
+      operationId: cancelPayment
+      summary: Cancel a PROPOSED payment (its flows become proposable again); a released payment is never cancelled
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 500 } } } } }
+      responses:
+        '200': { description: CANCELLED, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '409': { description: Not PROPOSED }
+
+  /api/v1/treasury/payments/{id}/resolve:
+    post:
+      tags: [Treasury]
+      operationId: resolvePayment
+      summary: Resolve a released payment MANUALLY_SETTLED or RETURNED (an approver who is neither its releaser nor a term author); its flows stay linked
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, reason]
+              properties:
+                outcome: { type: string, enum: [MANUALLY_SETTLED, RETURNED] }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '200': { description: Resolved, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '409': { description: Not released }
+        '422': { description: FOUR_EYES_VIOLATION }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1733,6 +1820,28 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    PaymentStatus:
+      type: string
+      enum: [PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED, RETURNED]
+    Payment:
+      type: object
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/PaymentStatus' }
+        direction: { type: string, enum: [IN, OUT] }
+        counterpartyId: { type: string }
+        currency: { type: string }
+        amount: { type: number }
+        valueDate: { type: string, format: date }
+        rail: { type: [string, 'null'], enum: [CERTIS, SEPA, TARGET2, SWIFT, null] }
+        ssi: { type: [object, 'null'] }
+        nettedFlowIds: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+        dealIds: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+        idempotencyKey: { type: string }
+        railReference: { type: [string, 'null'] }
+        releasedBy: { type: [string, 'null'] }
+        statusReason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
     Fixing:
       type: object
       properties:

@@ -66,3 +66,20 @@ spec:
               threshold. A break is never auto-posted: investigate each one on the admin-ui nostro
               page (or GET /api/v1/treasury/nostro/{iban}/breaks) and resolve it with the
               correspondent or by a ledger booking through the normal deal lifecycle.
+
+    # #12115 / ADR-0344 D6: a payment release was refused because the funding (nostro) account
+    # would go negative as of the value date, net of same-day released treasury payments. The
+    # payment stays PROPOSED; nothing left the bank. Fires on any refusal in the last 15 minutes.
+    - name: openbank.treasury.funding
+      rules:
+        - alert: TreasuryFundingExceeded
+          expr: sum by (currency) (increase(openbank_treasury_funding_exceeded_total[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "A treasury payment release was refused: funding account would go negative"
+            description: >-
+              treasury-service refused to release an outgoing payment in {{ $labels.currency }}
+              because the funding nostro account would be negative on the value date. Fund the
+              account (or move the payment) and release it again; GET /api/v1/treasury/payments
+              lists the PROPOSED payments.

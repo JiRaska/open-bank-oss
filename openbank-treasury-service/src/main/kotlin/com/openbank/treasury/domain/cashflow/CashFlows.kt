@@ -88,6 +88,9 @@ data class CashFlow(
     }
 }
 
+/** ADR-0344 D6: a flow already on a (non-cancelled) payment is never overridden: 409 FLOW_ALREADY_IN_PAYMENT. */
+class FlowAlreadyInPaymentException(flowId: UUID) : IllegalStateException("flow $flowId is already on a payment")
+
 enum class OverrideStatus { PENDING, APPROVED, REJECTED, CONFLICT }
 
 /**
@@ -162,6 +165,7 @@ data class CashFlowOverride(
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not propose a cash-flow override")
             }
+            if (flow.paymentId != null) throw FlowAlreadyInPaymentException(flow.flowId)
             check(flow.state == CashFlowState.PROJECTED || flow.state == CashFlowState.FIXED) {
                 "a ${flow.state} flow cannot be overridden; it needs a correction"
             }

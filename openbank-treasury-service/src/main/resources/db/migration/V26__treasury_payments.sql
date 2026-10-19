@@ -10,7 +10,8 @@
 CREATE TABLE treasury_payments (
     payment_id         UUID          PRIMARY KEY,
     status             VARCHAR(24)   NOT NULL CHECK (status IN ('PROPOSED', 'RELEASED', 'SENT', 'SETTLED', 'FAILED',
-                                                               'CANCELLED', 'RAIL_NOT_SUPPORTED')),
+                                                               'CANCELLED', 'RAIL_NOT_SUPPORTED', 'MANUALLY_SETTLED',
+                                                               'RETURNED')),
     direction          VARCHAR(3)    NOT NULL CHECK (direction IN ('IN', 'OUT')),
     counterparty_id    VARCHAR(64)   NOT NULL,
     currency           CHAR(3)       NOT NULL,

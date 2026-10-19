@@ -15,7 +15,10 @@ info:
     engine's stored-flow consumer requires them; before 1.8.0 it acked every such event as
     malformed). New on the same topic: `treasury.cashflow.fixed.v1` — floating flows of one deal
     version moved PROJECTED/MISSING -> FIXED from an observed index value that passed the quality
-    gate, with the value, its source and SHA-256 provenance hash.
+    gate, with the value, its source and SHA-256 provenance hash. `treasury.payment.status-changed.v1`
+    (ADR-0344 D6): an own-account payment moved (PROPOSED, RELEASED, SENT, RAIL_NOT_SUPPORTED,
+    SETTLED, MANUALLY_SETTLED, RETURNED, CANCELLED), keyed by the payment id, written in the
+    transaction of the change.
 
     1.7.0 (additive, ADR-0344 slice 2): `DealBooked` gains `kind` (ACTUAL | PLANNED — absent means
     ACTUAL; a consumer that books exposure must ignore PLANNED), `bookId`, `legs`, `scheduleVersion`
@@ -85,6 +88,8 @@ channels:
         $ref: '#/components/messages/CashFlowOverridden'
       CashFlowFixed:
         $ref: '#/components/messages/CashFlowFixed'
+      PaymentStatusChanged:
+        $ref: '#/components/messages/PaymentStatusChanged'
 
 operations:
   publishTreasuryDealEvents:
@@ -135,6 +140,11 @@ components:
       summary: "A four-eyes override of one cash flow was approved or rejected (ADR-0344 D4). Nothing posted."
       payload:
         $ref: '#/components/schemas/CashFlowOverridden'
+    PaymentStatusChanged:
+      name: treasury.payment.status-changed.v1
+      summary: "An own-account payment changed status (ADR-0344 D6)."
+      payload:
+        $ref: '#/components/schemas/PaymentStatusChanged'
     CashFlowFixed:
       name: treasury.cashflow.fixed.v1
       summary: "Floating flows of one deal version were FIXED from an observed index value that passed the quality gate (ADR-0344 D5)."
@@ -392,3 +402,24 @@ components:
         amount: { type: number }
         rateSource: { type: string, enum: [OBSERVED] }
         state: { type: string, enum: [FIXED] }
+
+    PaymentStatusChanged:
+      type: object
+      description: "Constructor properties of `PaymentStatusChanged` in `PaymentService.kt`."
+      required: [paymentId, status, direction, counterpartyId, currency, amount, valueDate, nettedFlowIds, dealIds, occurredAt, sourceService]
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { type: string, enum: [PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED, RETURNED] }
+        direction: { type: string, enum: [IN, OUT] }
+        counterpartyId: { type: string }
+        currency: { type: string }
+        amount: { type: number }
+        valueDate: { type: string, format: date }
+        rail: { type: [string, 'null'] }
+        railReference: { type: [string, 'null'] }
+        nettedFlowIds: { type: array, items: { type: string, format: uuid } }
+        dealIds: { type: array, items: { type: string, format: uuid } }
+        actor: { type: [string, 'null'] }
+        reason: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }

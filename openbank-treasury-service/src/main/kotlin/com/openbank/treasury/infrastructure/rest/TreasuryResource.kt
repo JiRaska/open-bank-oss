@@ -574,3 +574,9 @@ const val REFERENCE_EDITOR = "ROLE_TREASURY_REFERENCE_EDITOR"
  * approves either (that is [APPROVER]), so no single role both writes and activates.
  */
 const val BACK_OFFICE = "ROLE_TREASURY_BACK_OFFICE"
+
+/**
+ * ADR-0344 D6: releases a proposed own-account payment to the rail. Never the deal's creator or a
+ * term author (the domain), never an AI agent, and no other treasury role releases.
+ */
+const val PAYMENT_RELEASER = "ROLE_TREASURY_PAYMENT_RELEASER"

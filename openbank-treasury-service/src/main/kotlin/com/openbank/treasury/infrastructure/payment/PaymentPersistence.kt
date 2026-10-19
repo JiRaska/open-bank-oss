@@ -218,9 +218,61 @@ class PaymentRepositoryImpl(
         }
 
     /** A cancelled payment frees its flows for a new proposal. */
-    private fun release(payment: Payment): Uni<Void> = links.delete("paymentId", payment.paymentId).flatMap {
-        flows.update("paymentId = null where flowId in ?1", payment.nettedFlowIds)
-    }.replaceWithVoid()
+    /**
+     * A cancelled PROPOSED payment frees exactly its own flows for a new proposal: scoped to this
+     * payment's id, version-bumped, and every one must be freed or the cancel is refused.
+     */
+    private fun release(payment: Payment): Uni<Void> {
+        check(payment.status == PaymentStatus.CANCELLED) { "only a cancelled payment frees its flows" }
+        return flows.update(
+            "paymentId = null, rowVersion = rowVersion + 1 where flowId in ?1 and paymentId = ?2",
+            payment.nettedFlowIds,
+            payment.paymentId.toString(),
+        ).flatMap { n ->
+            if (n != payment.nettedFlowIds.size) {
+                throw CashFlowConflictException("payment ${payment.paymentId} no longer holds all its flows")
+            }
+            links.delete("paymentId", payment.paymentId)
+        }.replaceWithVoid()
+    }
+
+    override suspend fun saveRelease(
+        payment: Payment,
+        event: DealEvent,
+        fundingKey: String,
+        fundingCheck: (pendingOut: BigDecimal) -> Unit,
+    ) {
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Int>("select 1 from (select pg_advisory_xact_lock(hashtext(:k))) l")
+                    .setParameter("k", fundingKey).singleResult
+            }.flatMap {
+                payments.find(
+                    "direction = 'OUT' and currency = ?1 and valueDate = ?2 and status in ?3",
+                    payment.currency,
+                    payment.valueDate,
+                    UNSETTLED_OUT,
+                ).list()
+            }.flatMap { pending ->
+                fundingCheck(pending.sumOf { it.amount })
+                payments.find("paymentId", payment.paymentId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+            }.flatMap { row ->
+                checkNotNull(row) { "payment ${payment.paymentId} disappeared" }
+                check(row.status == PaymentStatus.PROPOSED.name) {
+                    "payment ${payment.paymentId} is now ${row.status}, not PROPOSED"
+                }
+                row.fill(payment)
+                outbox.persistInTransaction(
+                    OutboxMessage(
+                        aggregateId = payment.paymentId,
+                        eventType = event.eventType,
+                        payload = event.payload,
+                        createdAt = clock.instant(),
+                    ),
+                )
+            }
+        }.awaitSuspending()
+    }
 
     override suspend fun find(paymentId: UUID): Payment? = Panache.withSession {
         payments.find("paymentId", paymentId).firstResult()
@@ -248,9 +300,10 @@ class PaymentRepositoryImpl(
 
     override suspend fun pendingOut(currency: String, valueDate: LocalDate): BigDecimal = Panache.withSession {
         payments.find(
-            "direction = 'OUT' and currency = ?1 and valueDate = ?2 and status in ('RELEASED', 'SENT')",
+            "direction = 'OUT' and currency = ?1 and valueDate = ?2 and status in ?3",
             currency,
             valueDate,
+            UNSETTLED_OUT,
         ).list()
     }.awaitSuspending().sumOf { it.amount }
 
@@ -300,6 +353,9 @@ class PaymentRepositoryImpl(
 
     private companion object {
         const val MAX_FLOWS = 10_000
+
+        /** Released and not yet settled: still owed out of the funding account. */
+        val UNSETTLED_OUT = listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED")
 
         /** A deal pays only once it is booked; a draft, cancelled or reversed deal never does. */
         val PAYABLE_STATES = setOf("BOOKED", "CONFIRMED", "SETTLED")

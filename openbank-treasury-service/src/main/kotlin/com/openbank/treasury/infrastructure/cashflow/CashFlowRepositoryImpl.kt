@@ -158,6 +158,11 @@ class CashFlowRepositoryImpl(
             // The override was computed from the flow as read; if a fixing or a payment touched the
             // row since, refuse rather than write a stale state over it (fill never writes the
             // payment link or the fixing provenance, but state/rate/amount must not regress either).
+            if (row.paymentId !=
+                null
+            ) {
+                throw com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException(flow.flowId)
+            }
             if (row.state != flow.state.name || row.fixedAt != flow.fixedAt || row.paymentId != flow.paymentId) {
                 throw CashFlowConflictException(
                     "flow ${flow.flowId} changed since it was read (now ${row.state}); reload and retry",

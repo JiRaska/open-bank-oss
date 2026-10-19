@@ -156,6 +156,12 @@ openbank:
       # only from ACTIVE (four-eyes approved) observations that pass the quality gate; a blocked
       # index-date opens a case and holds the FIXINGS step of the day until resolved.
       enabled: ${OPENBANK_TREASURY_FIXING_ENABLED:true}
+    payments:
+      # ADR-0344 D6: FIXED flows paid within cut-off-window-days of the accounting day are proposed
+      # as payments (netted per netting agreement, addressed from the effective SSI). Release is a
+      # human payment releaser's act; until a rail carries bank-own debits it ends RAIL_NOT_SUPPORTED.
+      enabled: ${OPENBANK_TREASURY_PAYMENTS_ENABLED:true}
+      cut-off-window-days: 2
     close:
       # ADR-0342: treasury is a day-close participant. Every tick re-offers the last lookback-days
       # completed accounting days to the ledger (PUT /api/v1/ledger/accounting-days/{date}/participants/
@@ -163,7 +169,7 @@ openbank:
       # steps every accounting day must finish before the day is reported; a day with one unfinished
       # (or FAILED) is withheld, so the ledger waits and pages. Must match rules.yaml close_participants.
       enabled: ${OPENBANK_TREASURY_CLOSE_ENABLED:true}
-      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS,FIXINGS}
+      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS,FIXINGS,PAYMENTS}
       lookback-days: 3
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The

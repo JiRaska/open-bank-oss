@@ -22,7 +22,25 @@ import java.util.UUID
  * ADR-0344 D6. RAIL_NOT_SUPPORTED: released, but the rail has no path for a bank-own (non-customer)
  * debit, so nothing was handed to it; the payment waits for a manual instruction outside the system.
  */
-enum class PaymentStatus { PROPOSED, RELEASED, SENT, SETTLED, FAILED, CANCELLED, RAIL_NOT_SUPPORTED }
+enum class PaymentStatus {
+    PROPOSED,
+    RELEASED,
+    SENT,
+    SETTLED,
+    FAILED,
+    CANCELLED,
+    RAIL_NOT_SUPPORTED,
+
+    /** A released payment a second, independent human confirmed was settled outside the system. */
+    MANUALLY_SETTLED,
+
+    /** A released payment a second, independent human recorded as returned. Its flows stay linked. */
+    RETURNED,
+    ;
+
+    /** Once released, a payment never frees its flows: only a terminal manual resolution follows. */
+    val released: Boolean get() = this in setOf(RELEASED, SENT, RAIL_NOT_SUPPORTED)
+}
 
 /** The counterparty's effective settlement instruction as the payment was addressed from it. */
 data class SsiSnapshot(val rail: SettlementRail, val beneficiaryAccount: String, val bic: String?, val ssiVersion: Int)
@@ -67,7 +85,7 @@ data class Payment(
      * pays nor anyone who authored or changed its terms. The releaser role itself is checked by RBAC
      * and OPA before this.
      */
-    fun release(actor: Actor, at: Instant): Payment {
+    fun release(actor: Actor, at: Instant, authors: Set<String> = termAuthors): Payment {
         if (actor.type !=
             ActorType.HUMAN
         ) {
@@ -75,7 +93,7 @@ data class Payment(
         }
         check(status == PaymentStatus.PROPOSED) { "cannot release a $status payment (expected PROPOSED)" }
         check(direction == FlowDirection.OUT) { "an incoming payment is matched, never released" }
-        if (actor.id in termAuthors) {
+        if (actor.id in authors) {
             throw FourEyesViolationException(
                 "four-eyes: the creator or a term author of a deal must not release its payment",
             )
@@ -93,6 +111,7 @@ data class Payment(
         return copy(status = PaymentStatus.RAIL_NOT_SUPPORTED, statusReason = reason.take(MAX_REASON))
     }
 
+    /** Only a PROPOSED payment is cancelled (its flows are freed); a released one is resolved instead. */
     fun cancel(actor: Actor, reason: String): Payment {
         if (actor.type !=
             ActorType.HUMAN
@@ -100,10 +119,32 @@ data class Payment(
             throw ActorNotPermittedException("a ${actor.type} principal may not cancel a payment")
         }
         require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a cancellation needs a reason (1..$MAX_REASON)" }
-        check(status == PaymentStatus.PROPOSED || status == PaymentStatus.RAIL_NOT_SUPPORTED) {
-            "cannot cancel a $status payment"
+        check(status == PaymentStatus.PROPOSED) {
+            "cannot cancel a $status payment: a released payment is resolved, never cancelled"
         }
         return copy(status = PaymentStatus.CANCELLED, statusReason = reason)
+    }
+
+    /**
+     * A RELEASED / SENT / RAIL_NOT_SUPPORTED payment ends MANUALLY_SETTLED or RETURNED, recorded by a
+     * second, independent human: never the releaser, never a term author ([authors], computed fresh).
+     * Its flows are never freed.
+     */
+    fun resolve(actor: Actor, outcome: PaymentStatus, reason: String, authors: Set<String>): Payment {
+        if (actor.type !=
+            ActorType.HUMAN
+        ) {
+            throw ActorNotPermittedException("a ${actor.type} principal may not resolve a payment")
+        }
+        require(outcome == PaymentStatus.MANUALLY_SETTLED || outcome == PaymentStatus.RETURNED) {
+            "a released payment resolves to MANUALLY_SETTLED or RETURNED"
+        }
+        require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a resolution needs a reason (1..$MAX_REASON)" }
+        check(status.released) { "cannot resolve a $status payment (expected RELEASED, SENT or RAIL_NOT_SUPPORTED)" }
+        if (actor.id == releasedBy || actor.id in authors) {
+            throw FourEyesViolationException("four-eyes: the releaser or a term author must not resolve a payment")
+        }
+        return copy(status = outcome, statusReason = reason)
     }
 
     /** A nostro statement entry matched this expected (or sent) payment. */

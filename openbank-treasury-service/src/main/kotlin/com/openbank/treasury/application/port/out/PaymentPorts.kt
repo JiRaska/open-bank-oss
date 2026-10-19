@@ -28,7 +28,20 @@ interface PaymentRepository {
 
     suspend fun list(status: PaymentStatus?, from: LocalDate, to: LocalDate, limit: Int): List<Payment>
 
-    /** Σ of RELEASED and SENT outgoing payments in [currency] with value date [valueDate]. */
+    /**
+     * PROPOSED -> RELEASED under the funding check, serialised per funding bucket: inside ONE
+     * transaction it takes a transaction-scoped advisory lock on [fundingKey] (account, currency,
+     * value date), recomputes the released-but-unsettled outgoing total of that bucket, calls
+     * [fundingCheck] with it (which throws to refuse), then stores the release and its [event].
+     */
+    suspend fun saveRelease(
+        payment: Payment,
+        event: DealEvent,
+        fundingKey: String,
+        fundingCheck: (pendingOut: BigDecimal) -> Unit,
+    )
+
+    /** Σ of released-but-unsettled (RELEASED, SENT, RAIL_NOT_SUPPORTED) outgoing payments in [currency] on [valueDate]. */
     suspend fun pendingOut(currency: String, valueDate: LocalDate): BigDecimal
 
     /** Expected receipts (IN, PROPOSED) of exactly [amount] in [currency] on [valueDate]. */

@@ -392,3 +392,41 @@ test_staff_read_fixings_and_market_data if {
 	allowed(approver, "treasury.marketdata.read")
 	not allowed(agent, "treasury.marketdata.read")
 }
+
+# --- ADR-0344 D6 payments: must-DENY first ---
+
+releaser := {"service_account": false, "type": "HUMAN", "id": "rita-1", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
+
+test_only_the_payment_releaser_releases if {
+	every p in [dealer, approver, senior, admin, back_office, editor, nobody] {
+		not allowed(p, "treasury.payment.release")
+	}
+	allowed(releaser, "treasury.payment.release")
+	not allowed(releaser, "treasury.payment.propose")
+	not allowed(releaser, "treasury.payment.cancel")
+}
+
+test_payment_machines_and_agents_get_nothing if {
+	agent_releaser := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
+	every p in [shared_sa, renamed_sa, agent, agent_releaser] {
+		not allowed(p, "treasury.payment.release")
+		not allowed(p, "treasury.payment.propose")
+		not allowed(p, "treasury.payment.cancel")
+	}
+}
+
+test_back_office_proposes_and_cancels_payments if {
+	allowed(back_office, "treasury.payment.propose")
+	allowed(back_office, "treasury.payment.cancel")
+	allowed(approver, "treasury.payment.cancel")
+	not allowed(approver, "treasury.payment.propose")
+	allowed(releaser, "treasury.payment.read")
+}
+
+test_only_approvers_resolve_a_released_payment if {
+	every p in [releaser, back_office, dealer, admin, agent, shared_sa] {
+		not allowed(p, "treasury.payment.resolve")
+	}
+	allowed(approver, "treasury.payment.resolve")
+	allowed(senior, "treasury.payment.resolve")
+}

@@ -74,7 +74,8 @@ allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
 	some role in {
 		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
-		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_ADMIN",
+		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_TREASURY_PAYMENT_RELEASER",
+		"ROLE_ADMIN",
 	}
 	role in input.principal.roles
 	input.action in {
@@ -93,6 +94,8 @@ allowed_reasons contains "treasury-staff-read" if {
 		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
 		"treasury.fixing.read",
 		"treasury.marketdata.read",
+		# ADR-0344 D6: own-account payments.
+		"treasury.payment.read",
 	}
 }
 
@@ -243,4 +246,34 @@ allowed_reasons contains "treasury-approver-market-data" if {
 	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
 	role in input.principal.roles
 	input.action == "treasury.marketdata.approve"
+}
+
+# ADR-0344 D6: back office proposes and cancels own-account payments; ONLY the payment releaser
+# releases one — no dealer, approver, admin, machine or agent. The domain adds that the releaser is
+# neither a deal's creator nor a term author.
+allowed_reasons contains "treasury-back-office-payment" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.payment.propose", "treasury.payment.cancel"}
+}
+
+allowed_reasons contains "treasury-approver-payment-cancel" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.payment.cancel"
+}
+
+# A released payment is resolved (MANUALLY_SETTLED / RETURNED) by an approver; the domain refuses
+# its releaser and every term author.
+allowed_reasons contains "treasury-approver-payment-resolve" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.payment.resolve"
+}
+
+allowed_reasons contains "treasury-payment-release" if {
+	treasury_staff
+	"ROLE_TREASURY_PAYMENT_RELEASER" in input.principal.roles
+	input.action == "treasury.payment.release"
 }

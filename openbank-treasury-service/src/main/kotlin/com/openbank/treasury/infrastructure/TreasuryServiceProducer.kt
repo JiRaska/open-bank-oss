@@ -165,7 +165,52 @@ class TreasuryServiceProducer {
         ledger: LedgerReadPort,
         config: NostroConfig,
         clock: Clock,
-    ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock)
+        payments: com.openbank.treasury.application.usecase.PaymentService,
+    ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock) {
+            ccy,
+            amount,
+            date,
+            ref,
+        ->
+        payments.matchIncoming(ccy, amount, date, ref)
+    }
+
+    /** ADR-0344 D6: the deal-to-payment chain. */
+    @Produces
+    @ApplicationScoped
+    @Suppress("LongParameterList")
+    fun paymentService(
+        payments: com.openbank.treasury.application.port.out.PaymentRepository,
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        references: ReferenceRepository,
+        ledger: LedgerReadPort,
+        rail: com.openbank.treasury.application.port.out.PaymentRailPort,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+        meterRegistry: io.micrometer.core.instrument.MeterRegistry,
+        @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "openbank.treasury.payments.cut-off-window-days",
+            defaultValue = "2",
+        )
+        window: Long,
+    ): com.openbank.treasury.application.usecase.PaymentService =
+        com.openbank.treasury.application.usecase.PaymentService(
+            payments,
+            deals,
+            cashFlows,
+            references,
+            ledger,
+            rail,
+            dayCompletion,
+            objectMapper,
+            clock,
+            window,
+            onFundingExceeded = { ccy ->
+                meterRegistry.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
+            },
+        )
 
     /** ADR-0337 amendment: the custodian's period-end statement of holdings (`openbank.treasury.portfolio`). */
     @Produces

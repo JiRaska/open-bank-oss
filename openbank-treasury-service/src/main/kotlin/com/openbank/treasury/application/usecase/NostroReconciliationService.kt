@@ -15,6 +15,7 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.NostroMatcher
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
+import com.openbank.treasury.domain.model.StatementDirection
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -29,6 +30,18 @@ class NostroReconciliationService(
     private val ledger: LedgerReadPort,
     accounts: Map<String, String>,
     private val clock: Clock,
+    /**
+     * ADR-0344 D6: each credit of a newly stored statement is offered to the expected-receipt
+     * matcher (a match settles the payment and its flows). Null where payments are not wired.
+     */
+    private val incoming: (
+        suspend (
+            currency: String,
+            amount: java.math.BigDecimal,
+            valueDate: java.time.LocalDate,
+            reference: String,
+        ) -> Unit
+    )? = null,
 ) : NostroReconciliationUseCase {
 
     private val accounts: Map<String, String> = accounts.mapKeys { it.key.replace(" ", "").uppercase() }
@@ -61,11 +74,19 @@ class NostroReconciliationService(
                 statement = statement,
             )
         return try {
-            statements.save(candidate)
+            statements.save(candidate).also { stored -> offerCredits(stored) }
         } catch (e: DuplicateStatementException) {
             // A concurrent upload passed the same pre-check and committed first; answer as the
             // pre-check would have now (replay or 409), never the constraint violation as a 500.
             replayOrConflict(statement, sha256, idempotencyKey) ?: throw e
+        }
+    }
+
+    /** A match failure never fails the upload: the statement is the record; an unmatched receipt stays PROPOSED. */
+    private suspend fun offerCredits(stored: StoredStatement) {
+        val match = incoming ?: return
+        stored.statement.entries.filter { it.direction == StatementDirection.CRDT }.forEach { e ->
+            runCatching { match(e.currency, e.amount, e.bookingDate, e.reference ?: "${stored.id}#${e.sequence}") }
         }
     }
 
