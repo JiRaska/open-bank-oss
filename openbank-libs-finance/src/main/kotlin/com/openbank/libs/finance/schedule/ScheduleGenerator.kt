@@ -6,6 +6,7 @@ package com.openbank.libs.finance.schedule
 
 import com.openbank.libs.domain.calendar.YearFraction
 import com.openbank.libs.finance.calendar.DateRoll
+import com.openbank.libs.finance.leg.DateRules
 import com.openbank.libs.finance.leg.LegSpec
 import com.openbank.libs.finance.leg.RateSpec
 import java.time.LocalDate
@@ -54,7 +55,7 @@ object ScheduleGenerator {
                 unadjusted = unadjusted,
                 accrual = accrual,
                 paymentDate = paymentDate(leg, paymentGrid.first { !it.isBefore(unadjusted.end) }),
-                fixingDate = floating?.let { fixingDate(it, accrual) },
+                fixingDate = floating?.let { fixingDate(it, accrual, rules) },
                 yearFraction = leg.dayCount.yearFraction(accrual.start, accrual.end),
             )
         }
@@ -96,9 +97,16 @@ object ScheduleGenerator {
         return rules.calendar.addBusinessDays(rolled, rules.paymentLagBusinessDays)
     }
 
-    private fun fixingDate(rate: RateSpec.Floating, accrual: DateRange): LocalDate {
+    /**
+     * The reset date is the period's start (end, in arrears) as a BUSINESS day of the leg: an
+     * unadjusted accrual still resets on the rolled date (ISDA 2006 §6.1 Reset Date), so a period
+     * starting on a Sunday month end fixes two days before the Friday it rolls back to, not before
+     * the Sunday.
+     */
+    private fun fixingDate(rate: RateSpec.Floating, accrual: DateRange, rules: DateRules): LocalDate {
         val convention = rate.fixing
-        val reference = if (convention.inArrears) accrual.end else accrual.start
+        val boundary = if (convention.inArrears) accrual.end else accrual.start
+        val reference = rules.calendar.roll(boundary, rules.roll)
         return if (convention.lagBusinessDays == 0) {
             convention.calendar.roll(reference, DateRoll.PRECEDING)
         } else {
