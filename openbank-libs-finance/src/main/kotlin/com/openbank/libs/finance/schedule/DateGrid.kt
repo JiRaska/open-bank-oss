@@ -33,6 +33,7 @@ object DateGrid {
         var k = 1
         var d = stepper(k)
         while (d.isBefore(end)) {
+            ScheduleLimits.check(dates.size, start, end, f)
             dates += d
             d = stepper(++k)
         }
@@ -49,6 +50,7 @@ object DateGrid {
         var k = -1
         var d = stepper(k)
         while (d.isAfter(start)) {
+            ScheduleLimits.check(dates.size, start, end, f)
             dates += d
             d = stepper(--k)
         }
