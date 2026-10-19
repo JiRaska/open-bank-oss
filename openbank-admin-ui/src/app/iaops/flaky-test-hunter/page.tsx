@@ -331,7 +331,7 @@ function FlakyTestHunterContent() {
         <StatCard label={t('Otevřené', 'Open')} value={available ? open : '—'} icon={<Bug size={16} />} tone={available && open > 0 ? 'warning' : undefined} />
         <StatCard
           label={t('Poslední pozorovaný stav workflow', 'Last observed workflow status')}
-          value={workflowStatus ?? (lastWorkflowId ? t('Zjišťuji…', 'Checking…') : '—')}
+          value={workflowStatus ?? (workflowStatusError ? t('Neznámý', 'Unknown') : lastWorkflowId ? t('Zjišťuji…', 'Checking…') : '—')}
           icon={<Clock size={16} />}
           hint={lastWorkflowId ?? undefined}
         />
