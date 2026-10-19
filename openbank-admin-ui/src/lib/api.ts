@@ -160,7 +160,7 @@ export const transactionApi = {
   get: (id: string) => apiFetchSimple<Transaction>(`${TRANSACTION_SERVICE}/api/v1/transactions/${pathSegment(id)}`),
 }
 
-import type { ServiceHealthEntry } from '@/app/api/services/health/route'
+import type { ServiceHealthEntry } from '@/lib/services/healthContract'
 
 export type { ServiceHealthEntry }
 

@@ -5,32 +5,9 @@
 import { NextResponse } from 'next/server'
 import { discoverServices, prettyLabel } from '@/lib/discovery'
 import { getRegistry } from '@/lib/services/fleet'
+import type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
-export interface ServiceHealthEntry {
-  name: string
-  /** Kubernetes namespace; omitted for the off-cluster static probe inventory. */
-  namespace?: string
-  port: number
-  label: string
-  group: 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
-  container: string
-  healthPath: string
-  status: 'UP' | 'DOWN' | 'UNKNOWN'
-  reachable: boolean
-  latencyMs: number | null
-  version?: string | null
-  gitCommit?: string | null
-  /** Tech-stack snapshot, fetched separately from /api/v1/info. Null if probe failed. */
-  stack?: ServiceStackEntry | null
-}
-
-export interface ServiceStackEntry {
-  kotlin?:  { version: string }
-  quarkus?: { version: string; lts?: boolean; supportUntil?: string }
-  java?:    { version: string; vendor?: string; arch?: string; cpu?: number; maxHeapMib?: number }
-  gradle?:  { version: string }
-  libs?:    { version: string; buildTime?: string; gitCommit?: string }
-}
+export type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
 // Off-cluster static probe list: DERIVED from the code-generated catalog (see
 // @/lib/services/fleet), never typed here. In-cluster the inventory comes from Kubernetes discovery.
