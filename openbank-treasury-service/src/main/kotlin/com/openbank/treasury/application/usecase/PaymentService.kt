@@ -87,6 +87,7 @@ class PaymentService(
     private val clock: Clock,
     private val cutOffWindowDays: Long,
     private val onFundingExceeded: (String) -> Unit = {},
+    private val onParkedMatch: (UUID) -> Unit = {},
     private val newId: () -> UUID = { UUID.randomUUID() },
 ) {
     init {
@@ -196,16 +197,53 @@ class PaymentService(
     }.toSet()
 
     /**
-     * A nostro statement credit of [amount] in [currency] on [valueDate] matched an expected receipt:
-     * the payment and its flows become SETTLED. Exactly one candidate settles; none or several match
-     * nothing (an ambiguous match is a reconciliation break, never a guess).
+     * A credit on the configured nostro of [currency] (the upload already refused any other account)
+     * of [amount] on [valueDate]. It settles an expected receipt only when it identifies exactly one:
+     * by [reference] (the payment id or its key) or, failing that, as the single IN payment of that
+     * amount and date. An ambiguous or unknown credit settles nothing. The [uploader] must be
+     * independent of the payment — never a term author or its releaser — or the match is parked
+     * (left PROPOSED, reported) for an independent upload. Returns the settled payment or null.
      */
-    suspend fun matchIncoming(currency: String, amount: BigDecimal, valueDate: LocalDate, reference: String): Payment? {
+    suspend fun matchIncoming(
+        currency: String,
+        amount: BigDecimal,
+        valueDate: LocalDate,
+        reference: String,
+        uploader: Actor,
+    ): Payment? {
         val candidates = payments.expectedIn(currency, amount, valueDate)
-        val only = candidates.singleOrNull() ?: return null
+        val byRef = candidates.filter { reference == it.paymentId.toString() || reference == it.idempotencyKey }
+        val only = (byRef.singleOrNull() ?: candidates.singleOrNull()?.takeIf { byRef.isEmpty() }) ?: return null
+        if (uploader.type != com.openbank.treasury.domain.model.ActorType.HUMAN ||
+            uploader.id == only.releasedBy ||
+            uploader.id in authorsOf(only)
+        ) {
+            onParkedMatch(only.paymentId)
+            return null
+        }
         val settled = only.settled(reference)
-        payments.save(settled, only.status, event(settled, null, "matched nostro entry $reference"), settleFlows = true)
+        payments.save(
+            settled,
+            only.status,
+            event(settled, uploader.id, "matched nostro entry $reference"),
+            settleFlows = true,
+        )
         return settled
+    }
+
+    /**
+     * Before a deal is cancelled, reversed or corrected: a released payment blocks the change (409);
+     * PROPOSED payments are withdrawn (their flows freed) in their own scoped transactions.
+     */
+    suspend fun guardDealChange(dealId: UUID) {
+        val mine = payments.forDeal(dealId).filter { dealId in it.dealIds }
+        mine.firstOrNull { it.status.released }?.let {
+            throw com.openbank.treasury.domain.payment.DealHasReleasedPaymentException(dealId, it.paymentId)
+        }
+        mine.filter { it.status == PaymentStatus.PROPOSED }.forEach { p ->
+            val withdrawn = p.withdrawn("deal $dealId changed")
+            payments.save(withdrawn, PaymentStatus.PROPOSED, event(withdrawn, null, withdrawn.statusReason))
+        }
     }
 
     suspend fun list(status: PaymentStatus?, from: LocalDate, to: LocalDate, limit: Int): List<Payment> {

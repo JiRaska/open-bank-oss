@@ -40,6 +40,7 @@ class NostroReconciliationService(
             amount: java.math.BigDecimal,
             valueDate: java.time.LocalDate,
             reference: String,
+            uploader: Actor,
         ) -> Unit
     )? = null,
 ) : NostroReconciliationUseCase {
@@ -74,7 +75,7 @@ class NostroReconciliationService(
                 statement = statement,
             )
         return try {
-            statements.save(candidate).also { stored -> offerCredits(stored) }
+            statements.save(candidate).also { stored -> offerCredits(stored, actor) }
         } catch (e: DuplicateStatementException) {
             // A concurrent upload passed the same pre-check and committed first; answer as the
             // pre-check would have now (replay or 409), never the constraint violation as a 500.
@@ -83,10 +84,12 @@ class NostroReconciliationService(
     }
 
     /** A match failure never fails the upload: the statement is the record; an unmatched receipt stays PROPOSED. */
-    private suspend fun offerCredits(stored: StoredStatement) {
+    private suspend fun offerCredits(stored: StoredStatement, uploader: Actor) {
         val match = incoming ?: return
         stored.statement.entries.filter { it.direction == StatementDirection.CRDT }.forEach { e ->
-            runCatching { match(e.currency, e.amount, e.bookingDate, e.reference ?: "${stored.id}#${e.sequence}") }
+            runCatching {
+                match(e.currency, e.amount, e.bookingDate, e.reference ?: "${stored.id}#${e.sequence}", uploader)
+            }
         }
     }
 

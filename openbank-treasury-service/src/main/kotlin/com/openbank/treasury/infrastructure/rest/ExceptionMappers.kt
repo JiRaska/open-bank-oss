@@ -127,6 +127,14 @@ class ExceptionMappers {
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
+    fun dealHasReleasedPayment(e: com.openbank.treasury.domain.payment.DealHasReleasedPaymentException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
+
+    @ServerExceptionMapper
     fun flowInPayment(e: com.openbank.treasury.domain.cashflow.FlowAlreadyInPaymentException): Response =
         error(Response.Status.CONFLICT.statusCode, "FLOW_ALREADY_IN_PAYMENT", e.message)
 

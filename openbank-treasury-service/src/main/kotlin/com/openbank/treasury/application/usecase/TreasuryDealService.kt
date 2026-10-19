@@ -98,6 +98,11 @@ class TreasuryDealService(
     private val cashFlows: CashFlowRepository? = null,
     /** ADR-0344 D7: the IFRS 9 category of a deal's book (reference `book` record); amortised cost when none. */
     private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
+    /**
+     * ADR-0344 D6: runs before a deal is cancelled or reversed (and, later, corrected): blocks the
+     * change while a payment of the deal is released, withdraws its PROPOSED payments.
+     */
+    private val paymentGuard: (suspend (dealId: UUID) -> Unit)? = null,
 ) : TreasuryDealUseCase {
 
     private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
@@ -271,6 +276,7 @@ class TreasuryDealService(
 
     override suspend fun cancel(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, CANCEL, dealId)?.let { return it } }
+        paymentGuard?.invoke(dealId)
         return deals.save(load(dealId).cancel(actor, clock.instant()), command = cmd(key, CANCEL, dealId))
     }
 
@@ -364,6 +370,7 @@ class TreasuryDealService(
 
     override suspend fun reverse(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
+        paymentGuard?.invoke(dealId)
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
         check(deal.product.legacy || deal.state != DealState.SETTLED) {

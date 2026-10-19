@@ -221,9 +221,9 @@ describe('server refusals land on the field they concern', () => {
 })
 
 describe('reference-data catalogue', () => {
-  it('covers all 31 kinds of the contract, each with a key field and at least one field', () => {
-    expect(KINDS).toHaveLength(31)
-    expect(new Set(KINDS.map(k => k.kind)).size).toBe(31)
+  it('covers all 32 kinds of the contract (31 + internal rate sheets), each with a key field and at least one field', () => {
+    expect(KINDS).toHaveLength(32)
+    expect(new Set(KINDS.map(k => k.kind)).size).toBe(32)
     for (const must of ['calendar', 'index', 'counterparty', 'ssi', 'netting', 'security', 'book', 'bucket-set', 'regulatory-code', 'party-group', 'party-type', 'country',
       'document-type', 'account', 'settlement-place', 'product-type', 'loan-type', 'communication-channel', 'market-factor', 'own-capital-item', 'period-length',
       'scenario', 'behavioural-scenario', 'calculation-settings', 'limit-settings', 'derivative-conversion-factor', 'collateral-haircut', 'portfolio-group',

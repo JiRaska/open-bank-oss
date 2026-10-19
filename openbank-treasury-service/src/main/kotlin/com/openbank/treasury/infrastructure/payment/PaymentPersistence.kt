@@ -12,6 +12,7 @@ import com.openbank.treasury.application.port.out.TreasuryOutboxRepository
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.FlowDirection
 import com.openbank.treasury.domain.payment.Payment
+import com.openbank.treasury.domain.payment.PaymentStaleException
 import com.openbank.treasury.domain.payment.PaymentStatus
 import com.openbank.treasury.domain.payment.SsiSnapshot
 import com.openbank.treasury.domain.reference.SettlementRail
@@ -247,20 +248,17 @@ class PaymentRepositoryImpl(
                 session.createNativeQuery<Int>("select 1 from (select pg_advisory_xact_lock(hashtext(:k))) l")
                     .setParameter("k", fundingKey).singleResult
             }.flatMap {
-                payments.find(
-                    "direction = 'OUT' and currency = ?1 and valueDate = ?2 and status in ?3",
-                    payment.currency,
-                    payment.valueDate,
-                    UNSETTLED_OUT,
-                ).list()
+                Panache.getSession().flatMap { session -> unbookedOut(session, payment.currency, payment.valueDate) }
             }.flatMap { pending ->
-                fundingCheck(pending.sumOf { it.amount })
+                fundingCheck(pending)
                 payments.find("paymentId", payment.paymentId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             }.flatMap { row ->
                 checkNotNull(row) { "payment ${payment.paymentId} disappeared" }
                 check(row.status == PaymentStatus.PROPOSED.name) {
                     "payment ${payment.paymentId} is now ${row.status}, not PROPOSED"
                 }
+                revalidate(payment).map { row }
+            }.flatMap { row ->
                 row.fill(payment)
                 outbox.persistInTransaction(
                     OutboxMessage(
@@ -272,6 +270,73 @@ class PaymentRepositoryImpl(
                 )
             }
         }.awaitSuspending()
+    }
+
+    /**
+     * Re-read under lock every deal and every netted flow the release is about to pay: each deal still
+     * payable, each flow still FIXED on its deal's CURRENT schedule version, linked to THIS payment, on
+     * the payment's value date, and the flows still netting to exactly the payment's amount and
+     * direction. Anything else is a stale payment (409) — a correction or cancellation raced it.
+     */
+    private fun revalidate(payment: Payment): Uni<Void> = deals.find(
+        "dealId in ?1",
+        payment.dealIds,
+    ).withLock(LockModeType.PESSIMISTIC_WRITE).list().flatMap { dealRows ->
+        flows.find(
+            "flowId in ?1",
+            payment.nettedFlowIds,
+        ).withLock(LockModeType.PESSIMISTIC_WRITE).list().map { flowRows ->
+            fun stale(why: String): Nothing = throw PaymentStaleException("payment ${payment.paymentId} is stale: $why")
+            if (dealRows.size != payment.dealIds.size) stale("a deal disappeared")
+            val version = dealRows.associate { it.dealId to it.scheduleVersion }
+            dealRows.firstOrNull { it.state !in PAYABLE_STATES }?.let { stale("deal ${it.dealId} is ${it.state}") }
+            if (flowRows.size != payment.nettedFlowIds.size) stale("a flow disappeared")
+            flowRows.forEach { f ->
+                if (f.state != "FIXED") stale("flow ${f.flowId} is ${f.state}")
+                if (f.paymentId != payment.paymentId.toString()) stale("flow ${f.flowId} is not linked to it")
+                if (version[f.dealId] !=
+                    f.scheduleVersion
+                ) {
+                    stale("flow ${f.flowId} is not on its deal's current schedule")
+                }
+                if (f.paymentDate != payment.valueDate) stale("flow ${f.flowId} is paid on ${f.paymentDate}")
+            }
+            val net = flowRows.sumOf { f ->
+                checkNotNull(f.amount).let {
+                    if (f.direction ==
+                        "IN"
+                    ) {
+                        it
+                    } else {
+                        it.negate()
+                    }
+                }
+            }
+            val expected = if (payment.direction == FlowDirection.IN) payment.amount else payment.amount.negate()
+            if (net.compareTo(expected) != 0) stale("its flows now net to $net, not $expected")
+        }
+    }.replaceWithVoid()
+
+    /**
+     * Σ of outgoing payments in [currency] with a value date on or before [valueDate], in any outflow
+     * status, that still pay at least one flow whose outflow journal the ledger does not hold yet.
+     */
+    private fun unbookedOut(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        currency: String,
+        valueDate: LocalDate,
+    ): Uni<BigDecimal> = session.createNativeQuery<BigDecimal>(UNBOOKED_OUT_SQL)
+        .setParameter("ccy", currency)
+        .setParameter("vd", valueDate)
+        .setParameter("statuses", Payment.OUTFLOW_STATUSES)
+        .singleResult
+        .map { it ?: BigDecimal.ZERO }
+
+    override suspend fun forDeal(dealId: UUID): List<Payment> {
+        val rows = Panache.withSession {
+            payments.find("dealIds like ?1", "%$dealId%").list()
+        }.awaitSuspending()
+        return withFlows(rows)
     }
 
     override suspend fun find(paymentId: UUID): Payment? = Panache.withSession {
@@ -299,13 +364,8 @@ class PaymentRepositoryImpl(
     }
 
     override suspend fun pendingOut(currency: String, valueDate: LocalDate): BigDecimal = Panache.withSession {
-        payments.find(
-            "direction = 'OUT' and currency = ?1 and valueDate = ?2 and status in ?3",
-            currency,
-            valueDate,
-            UNSETTLED_OUT,
-        ).list()
-    }.awaitSuspending().sumOf { it.amount }
+        Panache.getSession().flatMap { unbookedOut(it, currency, valueDate) }
+    }.awaitSuspending()
 
     override suspend fun expectedIn(currency: String, amount: BigDecimal, valueDate: LocalDate): List<Payment> {
         val rows = Panache.withSession {
@@ -354,8 +414,12 @@ class PaymentRepositoryImpl(
     private companion object {
         const val MAX_FLOWS = 10_000
 
-        /** Released and not yet settled: still owed out of the funding account. */
-        val UNSETTLED_OUT = listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED")
+        const val UNBOOKED_OUT_SQL =
+            "select coalesce(sum(p.amount), 0) from treasury_payments p where p.direction = 'OUT' " +
+                "and p.currency = :ccy and p.value_date <= :vd and p.status in (:statuses) and exists (" +
+                "select 1 from treasury_payment_flows l where l.payment_id = p.payment_id and not exists (" +
+                "select 1 from deal_journals j where j.deal_id = l.deal_id " +
+                "and j.idempotency_key like ('%:' || cast(l.flow_id as varchar))))"
 
         /** A deal pays only once it is booked; a draft, cancelled or reversed deal never does. */
         val PAYABLE_STATES = setOf("BOOKED", "CONFIRMED", "SETTLED")

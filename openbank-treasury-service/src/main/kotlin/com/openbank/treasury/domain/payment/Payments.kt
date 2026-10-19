@@ -125,6 +125,12 @@ data class Payment(
         return copy(status = PaymentStatus.CANCELLED, statusReason = reason)
     }
 
+    /** A deal change (cancel, reverse, correction) withdraws its PROPOSED payments; nothing had left. */
+    fun withdrawn(reason: String): Payment {
+        check(status == PaymentStatus.PROPOSED) { "only a PROPOSED payment is withdrawn" }
+        return copy(status = PaymentStatus.CANCELLED, statusReason = reason.take(MAX_REASON))
+    }
+
     /**
      * A RELEASED / SENT / RAIL_NOT_SUPPORTED payment ends MANUALLY_SETTLED or RETURNED, recorded by a
      * second, independent human: never the releaser, never a term author ([authors], computed fresh).
@@ -156,6 +162,15 @@ data class Payment(
     companion object {
         const val MAX_FLOWS = 500
         const val MAX_REASON = 500
+
+        /**
+         * Outgoing payments that have (or may have) left the funding account. Shared by the funding
+         * check and pendingOut; one is still counted until the ledger holds the outflow journal of
+         * every flow it pays.
+         */
+        val OUTFLOW_STATUSES: List<String> =
+            listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED", "MANUALLY_SETTLED", "SETTLED")
+
         private val SETTLEABLE = setOf(PaymentStatus.PROPOSED, PaymentStatus.SENT, PaymentStatus.RELEASED)
 
         fun key(flows: List<CashFlow>): String = if (flows.size == 1) {
@@ -269,5 +284,12 @@ object FundingCheck {
         return Result(available, available - amount)
     }
 }
+
+/** A deal cannot be cancelled, reversed or corrected while one of its payments is out of PROPOSED: 409. */
+class DealHasReleasedPaymentException(dealId: UUID, paymentId: UUID) :
+    IllegalStateException("deal $dealId has payment $paymentId released; resolve it before changing the deal")
+
+/** The payment no longer matches its deals and flows (cancelled, corrected, re-scheduled, changed): 409. */
+class PaymentStaleException(message: String) : IllegalStateException(message)
 
 class FundingExceededException(val result: FundingCheck.Result, message: String) : RuntimeException(message)

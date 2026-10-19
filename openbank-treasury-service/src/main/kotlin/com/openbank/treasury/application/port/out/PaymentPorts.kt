@@ -41,6 +41,9 @@ interface PaymentRepository {
         fundingCheck: (pendingOut: BigDecimal) -> Unit,
     )
 
+    /** Every payment that settles a flow of [dealId]. */
+    suspend fun forDeal(dealId: UUID): List<Payment>
+
     /** Σ of released-but-unsettled (RELEASED, SENT, RAIL_NOT_SUPPORTED) outgoing payments in [currency] on [valueDate]. */
     suspend fun pendingOut(currency: String, valueDate: LocalDate): BigDecimal
 

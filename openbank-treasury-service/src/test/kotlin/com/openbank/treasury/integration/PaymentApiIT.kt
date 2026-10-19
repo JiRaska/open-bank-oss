@@ -122,13 +122,14 @@ class PaymentApiIT {
         }
         dealA = book()
         dealB = book()
+        dealC = book()
         valueDate = today.plusDays(1)
         jdbc { c ->
             c.prepareStatement(
-                "update deals set state = 'BOOKED' where deal_id in ('$dealA', '$dealB')",
+                "update deals set state = 'BOOKED' where deal_id in ('$dealA', '$dealB', '$dealC')",
             ).executeUpdate()
             c.prepareStatement(
-                "update deal_cash_flows set payment_date = ? where deal_id in ('$dealA', '$dealB') " +
+                "update deal_cash_flows set payment_date = ? where deal_id in ('$dealA', '$dealB', '$dealC') " +
                     "and period_index = 0 and kind = 'INTEREST'",
             ).use {
                 it.setObject(1, valueDate)
@@ -211,7 +212,29 @@ class PaymentApiIT {
 
     @Test
     @Order(12)
-    fun `12 - two releases that each fit but together overdraw serialise, and exactly one passes`() {
+    @TestSecurity(user = "rita.releaser", roles = ["ROLE_TREASURY_PAYMENT_RELEASER"])
+    fun `12 - a correction racing the release (deal re-scheduled) makes the payment stale - 409, nothing released`() {
+        jdbc { c ->
+            c.prepareStatement(
+                "update deals set schedule_version = schedule_version + 1 where deal_id = '$dealB'",
+            ).executeUpdate()
+        }
+        ledger.balances[Triple("1001", "CZK", valueDate)] = BigDecimal("1000000000.00")
+        post("/payments/$payB/release").then().statusCode(409).body("error", equalTo("PAYMENT_STALE"))
+        assertThat(
+            count("select count(*) from treasury_payments where payment_id = '$payB' and status = 'PROPOSED'"),
+        ).isEqualTo(1)
+        jdbc { c ->
+            c.prepareStatement(
+                "update deals set schedule_version = schedule_version - 1 where deal_id = '$dealB'",
+            ).executeUpdate()
+        }
+        ledger.reset()
+    }
+
+    @Test
+    @Order(22)
+    fun `22 - two releases that each fit but together overdraw serialise, and exactly one passes`() {
         val amount = jdbc { c ->
             c.prepareStatement("select amount from treasury_payments where payment_id = '$payA'").executeQuery()
                 .use { rs ->
@@ -244,25 +267,25 @@ class PaymentApiIT {
     }
 
     @Test
-    @Order(13)
+    @Order(23)
     @TestSecurity(user = "bert.backoffice", roles = ["ROLE_TREASURY_BACK_OFFICE"])
-    fun `13 - a released payment is never cancelled, so its flows stay linked`() {
+    fun `23 - a released payment is never cancelled, so its flows stay linked`() {
         post("/payments/$released/cancel", """{"reason":"changed my mind"}""").then().statusCode(409)
         assertThat(count("select count(*) from treasury_payment_flows where payment_id = '$released'")).isGreaterThan(0)
     }
 
     @Test
-    @Order(14)
+    @Order(24)
     @TestSecurity(user = "rita.releaser", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `14 - its releaser cannot resolve it`() {
+    fun `24 - its releaser cannot resolve it`() {
         post("/payments/$released/resolve", """{"outcome":"MANUALLY_SETTLED","reason":"paid by hand"}""")
             .then().statusCode(422).body("error", equalTo("FOUR_EYES_VIOLATION"))
     }
 
     @Test
-    @Order(15)
+    @Order(25)
     @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `15 - an independent human resolves it MANUALLY_SETTLED - flows SETTLED, links kept, nothing proposed again`() {
+    fun `25 - an independent human resolves it MANUALLY_SETTLED - flows SETTLED, links kept, nothing proposed again`() {
         post(
             "/payments/$released/resolve",
             """{"outcome":"MANUALLY_SETTLED","reason":"instructed by hand, confirmed"}""",
@@ -282,6 +305,108 @@ class PaymentApiIT {
                     "and event_type = 'treasury.payment.status-changed.v1'",
             ),
         ).isEqualTo(4) // PROPOSED, RELEASED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED
+    }
+
+    @Test
+    @Order(26)
+    @TestSecurity(user = "rita.releaser", roles = ["ROLE_TREASURY_PAYMENT_RELEASER"])
+    fun `26 - an unbooked manually settled payment still counts against funding until the ledger books it`() {
+        val other = if (released == payA) payB else payA
+        val settledFlows = jdbc { c ->
+            c.prepareStatement(
+                "select deal_id, flow_id from treasury_payment_flows where payment_id = '$released'",
+            ).executeQuery()
+                .use { rs -> generateSequence { if (rs.next()) rs.getString(1) to rs.getString(2) else null }.toList() }
+        }
+        val amount = jdbc { c ->
+            c.prepareStatement("select amount from treasury_payments where payment_id = '$other'").executeQuery()
+                .use { rs ->
+                    rs.next()
+                    rs.getBigDecimal(1)
+                }
+        }
+        ledger.reset()
+        ledger.balances[Triple("1001", "CZK", valueDate)] = amount.multiply(BigDecimal("1.5"))
+        post("/payments/$other/release").then().statusCode(422).body("error", equalTo("FUNDING_EXCEEDED"))
+        jdbc { c ->
+            settledFlows.forEach { (d, f) ->
+                c.prepareStatement(
+                    "insert into deal_journals (id, deal_id, event, idempotency_key, journal_id, posted_at) values " +
+                        "(nextval('deal_journals_seq'), '$d', 'PAYMENT', 'treasury:$d:payment:$f', " +
+                        "'${UUID.randomUUID()}', now())",
+                ).executeUpdate()
+            }
+        }
+        post("/payments/$other/release").then().statusCode(200).body("status", equalTo("RAIL_NOT_SUPPORTED"))
+        releasedB = other
+    }
+
+    @Test
+    @Order(27)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `27 - a deal with a released payment cannot be reversed, one with only proposals withdraws them`() {
+        val releasedDeal = jdbc { c ->
+            c.prepareStatement("select deal_ids from treasury_payments where payment_id = '$releasedB'").executeQuery()
+                .use { rs ->
+                    rs.next()
+                    rs.getString(1)
+                }
+        }
+        post("/deals/$releasedDeal/reverse", """{"reason":"booked in error"}""").then().statusCode(409)
+            .body("error", equalTo("PAYMENT_RELEASED"))
+        assertThat(
+            count("select count(*) from treasury_payments where deal_ids like '%$dealC%' and status = 'PROPOSED'"),
+        ).isGreaterThan(0)
+        post("/deals/$dealC/reverse", """{"reason":"booked in error"}""").then().statusCode(200)
+        assertThat(
+            count("select count(*) from treasury_payments where deal_ids like '%$dealC%' and status = 'PROPOSED'"),
+        ).isEqualTo(0)
+        assertThat(
+            count("select count(*) from deal_cash_flows where deal_id = '$dealC' and payment_id is not null"),
+        ).isEqualTo(0)
+    }
+
+    @Test
+    @Order(28)
+    fun `28 - a nostro credit settles only an identified receipt, never ambiguously, never for a dependent uploader`() {
+        val inA = jdbc { c ->
+            c.prepareStatement(
+                "select payment_id, amount from treasury_payments where direction = 'IN' and deal_ids like '%$dealA%'",
+            )
+                .executeQuery().use { rs ->
+                    rs.next()
+                    rs.getString(1) to rs.getBigDecimal(2)
+                }
+        }
+        // A and B expect the same receipt on the same day: without a reference it is ambiguous.
+        assertThat(
+            onContext {
+                payments.matchIncoming(
+                    "CZK",
+                    inA.second,
+                    valueDate,
+                    "UNKNOWN-REF",
+                    Actor("anna.approver", ActorType.HUMAN),
+                )
+            },
+        ).isNull()
+        // The deal's creator uploading the statement is not independent: the match is parked.
+        assertThat(
+            onContext {
+                payments.matchIncoming("CZK", inA.second, valueDate, inA.first, Actor("dana.dealer", ActorType.HUMAN))
+            },
+        ).isNull()
+        assertThat(
+            count("select count(*) from treasury_payments where payment_id = '${inA.first}' and status = 'PROPOSED'"),
+        ).isEqualTo(1)
+        val settled =
+            onContext {
+                payments.matchIncoming("CZK", inA.second, valueDate, inA.first, Actor("anna.approver", ActorType.HUMAN))
+            }
+        assertThat(settled?.paymentId?.toString()).isEqualTo(inA.first)
+        assertThat(
+            count("select count(*) from treasury_payments where payment_id = '${inA.first}' and status = 'SETTLED'"),
+        ).isEqualTo(1)
     }
 
     private fun outFlow(deal: String): String = jdbc { c ->
@@ -327,6 +452,8 @@ class PaymentApiIT {
         lateinit var payA: String
         lateinit var payB: String
         lateinit var released: String
+        lateinit var releasedB: String
+        lateinit var dealC: String
         lateinit var valueDate: LocalDate
     }
 }

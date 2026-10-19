@@ -86,6 +86,7 @@ class TreasuryServiceProducer {
         schedules: ScheduleService,
         references: ReferenceRepository,
         cashFlows: CashFlowRepository,
+        payments: com.openbank.treasury.application.usecase.PaymentService,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -103,6 +104,7 @@ class TreasuryServiceProducer {
         ProductMandate(references, productLimits.toPolicy(), clock)::policy,
         cashFlows,
         BookCategories(references, clock)::of,
+        paymentGuard = { id -> payments.guardDealChange(id) },
     )
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
@@ -171,8 +173,9 @@ class TreasuryServiceProducer {
             amount,
             date,
             ref,
+            who,
         ->
-        payments.matchIncoming(ccy, amount, date, ref)
+        payments.matchIncoming(ccy, amount, date, ref, who)
     }
 
     /** ADR-0344 D6: the deal-to-payment chain. */
@@ -210,6 +213,7 @@ class TreasuryServiceProducer {
             onFundingExceeded = { ccy ->
                 meterRegistry.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
             },
+            onParkedMatch = { meterRegistry.counter("openbank.treasury.payments.match.parked").increment() },
         )
 
     /** ADR-0337 amendment: the custodian's period-end statement of holdings (`openbank.treasury.portfolio`). */

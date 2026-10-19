@@ -80,7 +80,7 @@ class TreasuryResource {
 
     @org.eclipse.microprofile.config.inject.ConfigProperty(
         name = "openbank.treasury.close.due-steps",
-        defaultValue = "ACCRUALS",
+        defaultValue = "ACCRUALS,FIXINGS,PAYMENTS",
     )
     lateinit var closeDueSteps: String
 

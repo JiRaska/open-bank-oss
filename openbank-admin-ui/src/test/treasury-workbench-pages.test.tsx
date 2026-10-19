@@ -396,7 +396,7 @@ describe('reference data', () => {
     router = url => (url.includes('/reference/calendar') ? json([rec('CERTIS', 2, 'ACTIVE', { verified: true }), rec('TARGET2', 1, 'ACTIVE')]) : json([]))
     await renderPage(<TreasuryReferencePage />)
     expect(await screen.findAllByText('CERTIS')).toBeTruthy()
-    expect(within(screen.getByRole('navigation', { name: /kinds|druhy/i })).getAllByRole('button').length).toBe(31 + 2)
+    expect(within(screen.getByRole('navigation', { name: /kinds|druhy/i })).getAllByRole('button').length).toBe(32 + 2)
     expect(screen.getAllByText(/^(Verified|Ověřeno)$/).length).toBeGreaterThan(0)
     expect(screen.getByText(/^(Unverified|Neověřeno)$/)).toBeTruthy()
     expect(screen.getByTestId('record-count').textContent).toMatch(/2/)
