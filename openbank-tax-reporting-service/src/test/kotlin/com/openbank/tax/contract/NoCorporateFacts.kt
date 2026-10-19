@@ -23,3 +23,8 @@ internal object NoCorporateFacts : CorporateFactsPort {
 internal val NoCompanyBooks = com.openbank.tax.infrastructure.returns.pension.CompanyBooksPort {
     error("no pact interaction reads the pension company's books")
 }
+
+/** No pension-service / pension-fund-service pact interaction reads the pension company's portfolio. */
+internal val NoCompanyPortfolio = com.openbank.tax.application.port.out.CompanyPortfolioPort {
+    error("no pact interaction for these providers reads the pension company's portfolio")
+}
