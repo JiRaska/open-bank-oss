@@ -23,8 +23,8 @@ describe.each(['en', 'cs'] as const)('Header labels in %s', (language) => {
 
   it('includes the visible search label and preserves its shortcut', () => {
     renderHeader()
-    const search = screen.getByRole('button', { name: language === 'en' ? 'Quick search (⌘K)' : 'Rychlé hledání (⌘K)' })
-    expect(search).toHaveAccessibleName(expect.stringContaining(search.querySelector('span')!.textContent!))
+    const search = screen.getByRole('button', { name: language === 'en' ? 'Quick search ⌘K' : 'Rychlé hledání ⌘K' })
+    expect(search).toHaveAccessibleName(search.textContent!.replace(/\s+/g, ' ').trim())
     expect(search.querySelector('kbd')).toHaveAttribute('aria-hidden', 'true')
     expect(search).toHaveAttribute('aria-keyshortcuts', 'Meta+K Control+K')
   })
@@ -37,13 +37,15 @@ describe.each(['en', 'cs'] as const)('Header labels in %s', (language) => {
     expect(screen.getByRole('button', { name: language === 'en' ? 'CS: Přepnout na angličtinu' : 'EN: Switch to Czech' })).toBeInTheDocument()
   })
 
-  it('includes the visible user and role without repeating decorative initials', () => {
+  it('includes all painted user text without duplicate initials', () => {
     renderHeader()
     const menu = screen.getByRole('button', { name: /(?:Open user menu|Otevřít uživatelskou nabídku)/ })
     expect(menu).toHaveAccessibleName(expect.stringContaining('Alex Example'))
     const role = menu.querySelectorAll('span')[1]!
     expect(menu).toHaveAccessibleName(expect.stringContaining(role.textContent!))
-    expect(menu.querySelector('[aria-hidden="true"]')).toHaveTextContent('AE')
+    expect(menu.textContent!.replace(/\s+/g, ' ').trim()).toBe(`Alex Example ${role.textContent}`)
+    expect(menu).toHaveAccessibleName(expect.stringContaining(menu.textContent!.replace(/\s+/g, ' ').trim()))
+    expect(menu.querySelector('svg.lucide-user-round')).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('retains Meta+K and Control+K keyboard operation', () => {
