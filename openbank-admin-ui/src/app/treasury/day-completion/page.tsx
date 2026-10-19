@@ -4,20 +4,25 @@
 
 // Treasury day completion (ADR-0344 D6): for a chosen date, the steps the platform runs to close
 // the treasury day — fixings, accruals, payments, revaluation, corrections, maturities — each with
-// its status, how many items it touched, and when. A step that did not run is shown as such.
+// its status, how many items it touched, and when. A step that did not run is shown as such. The
+// revaluation of the day is listed under the steps (fair value from the risk engine's TIED_OUT
+// snapshot, the change it posted, or the gap that held it), and back office may re-run it: owed
+// postings are re-posted first, and a deal the engine did not value is a gap, never a zero.
 
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSession } from 'next-auth/react'
+import { hasPermission } from '@/lib/auth/roles'
 import { ClipboardCheck } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 import { bankToday } from '@/components/balance-sheet/model'
-import { wbGet, wbUrl, type WbRead } from '@/components/treasury/wb/client'
-import { dayCompletionSchema } from '@/components/treasury/wb/types'
+import { wbGet, wbPost, wbUrl, type WbRead } from '@/components/treasury/wb/client'
+import { dayCompletionSchema, revaluationListSchema, revaluationRunSchema, type Revaluation } from '@/components/treasury/wb/types'
 import type { z } from 'zod'
-import { Field, ReadFailure, Section, td, th, useFmt } from '@/components/treasury/wb/ui'
+import { Field, Notice, ReadFailure, Section, td, tdNum, th, useFmt, writeFailureText } from '@/components/treasury/wb/ui'
 
 export default function TreasuryDayCompletionPage() {
   return (
@@ -27,7 +32,7 @@ export default function TreasuryDayCompletionPage() {
   )
 }
 
-const TONE: Record<string, Tone> = { DONE: 'success', SKIPPED: 'neutral', FAILED: 'danger', PENDING: 'warning' }
+const TONE: Record<string, Tone> = { DONE: 'success', SKIPPED: 'neutral', FAILED: 'danger', PENDING: 'warning', REFUSED: 'warning' }
 
 function stepLabel(step: string, t: (cs: string, en: string) => string): string {
   switch (step) {
@@ -46,25 +51,55 @@ function statusLabel(s: string, t: (cs: string, en: string) => string): string {
     case 'SKIPPED': return t('Přeskočeno', 'Skipped')
     case 'FAILED': return t('Selhalo', 'Failed')
     case 'PENDING': return t('Čeká', 'Pending')
+    case 'REFUSED': return t('Odmítnuto (uzavřený den)', 'Refused (day closed)')
     default: return s
   }
 }
 
 function DayCompletion() {
-  const { t, dateTime } = useFmt()
+  const { t, dateTime, money } = useFmt()
+  const { data: session } = useSession()
+  const roles = useMemo(() => session?.user?.roles ?? [], [session?.user?.roles])
+  const canRun = hasPermission(roles, 'treasury:backoffice:write')
   const [date, setDate] = useState(() => bankToday())
   const [result, setResult] = useState<WbRead<z.infer<typeof dayCompletionSchema>> | null>(null)
+  const [revaluations, setRevaluations] = useState<WbRead<Revaluation[]> | null>(null)
+  const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string } | null>(null)
+  const [gaps, setGaps] = useState<{ dealId: string; reason: string }[]>([])
+  const [busy, setBusy] = useState(false)
   const today = useMemo(() => bankToday(), [])
+
+  const load = useCallback(async (d: string, isCancelled: () => boolean = () => false) => {
+    const [res, rev] = await Promise.all([
+      wbGet(wbUrl(`/day-completion/${encodeURIComponent(d)}`), dayCompletionSchema),
+      wbGet(wbUrl('/revaluations', { asOf: d }), revaluationListSchema),
+    ])
+    if (!isCancelled()) { setResult(res); setRevaluations(rev) }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     setResult(null)
-    void (async () => {
-      const res = await wbGet(wbUrl(`/day-completion/${encodeURIComponent(date)}`), dayCompletionSchema)
-      if (!cancelled) setResult(res)
-    })()
+    setRevaluations(null)
+    setGaps([])
+    void load(date, () => cancelled)
     return () => { cancelled = true }
-  }, [date])
+  }, [date, load])
+
+  const runRevaluation = async () => {
+    setBusy(true)
+    setNotice(null)
+    const res = await wbPost(wbUrl('/revaluations/run', { asOf: date }), undefined, revaluationRunSchema)
+    setBusy(false)
+    if (res.ok) {
+      setGaps(res.data.gaps)
+      const problems = res.data.gaps.length + res.data.failures.length + (res.data.owed ?? 0)
+      setNotice(problems === 0
+        ? { tone: 'success', text: t(`Přeceněno ${res.data.revalued.length} obchodů, ${res.data.journals} zaúčtování.`, `Revalued ${res.data.revalued.length} deals, ${res.data.journals} journals.`) }
+        : { tone: 'danger', text: t(`Přecenění neúplné: ${res.data.gaps.length} mezer v datech, ${res.data.failures.length} chyb, ${res.data.owed ?? 0} nezaúčtovaných.`, `Revaluation incomplete: ${res.data.gaps.length} data gaps, ${res.data.failures.length} failures, ${res.data.owed ?? 0} unposted.`) })
+      void load(date)
+    } else setNotice({ tone: 'danger', text: writeFailureText(res, t('Přecenění', 'Revaluation'), t) })
+  }
 
   return (
     <div>
@@ -92,6 +127,37 @@ function DayCompletion() {
             </tbody>
           </table>
         )}
+      </Section>
+      <Section title={t('Přecenění dne', 'Revaluation of the day')} id="day-revaluation">
+        {canRun && <p><button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void runRevaluation()}>{t('Spustit přecenění', 'Run revaluation')}</button></p>}
+        {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
+        {gaps.length > 0 && (
+          <ul data-testid="revaluation-gaps" style={{ fontSize: 13 }}>
+            {gaps.map(g => <li key={g.dealId}>{g.dealId}: {g.reason}</li>)}
+          </ul>
+        )}
+        {revaluations === null && <p style={{ fontSize: 13 }}>{t('Načítám…', 'Loading…')}</p>}
+        {revaluations && !revaluations.ok && <ReadFailure result={revaluations} what={t('Přecenění', 'Revaluation')} />}
+        {revaluations?.ok && (revaluations.data.length === 0
+          ? <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('Pro tento den není zaznamenáno žádné přecenění.', 'No revaluation recorded for this day.')}</p>
+          : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }} data-testid="revaluation-table">
+              <caption className="sr-only" style={{ position: 'absolute', left: -9999 }}>{t('Přecenění', 'Revaluations')}</caption>
+              <thead><tr><th scope="col" style={th}>{t('Obchod', 'Deal')}</th>{[t('Reálná hodnota', 'Fair value'), t('Účetní hodnota', 'Carrying'), t('Kumulativně', 'Cumulative'), t('Změna', 'Change')].map(h => <th key={h} scope="col" style={{ ...th, textAlign: 'right' }}>{h}</th>)}<th scope="col" style={th}>{t('Zaúčtování', 'Journal')}</th></tr></thead>
+              <tbody>
+                {revaluations.data.map(r => (
+                  <tr key={r.dealId} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={td}>{r.dealId}</td>
+                    <td style={tdNum}>{money(r.fairValue)}</td>
+                    <td style={tdNum}>{money(r.carrying)}</td>
+                    <td style={tdNum}>{money(r.cumulative)}</td>
+                    <td style={tdNum}>{money(r.change)}</td>
+                    <td style={td}>{r.journalId ?? (r.change === 0 ? t('beze změny', 'no change') : t('dluží se', 'owed'))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ))}
       </Section>
     </div>
   )

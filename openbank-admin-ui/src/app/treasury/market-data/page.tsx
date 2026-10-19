@@ -15,7 +15,9 @@ import { Gauge } from 'lucide-react'
 import { z } from 'zod'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader, Tabs, type TabItem } from '@/components/ui'
-import { bankToday } from '@/components/balance-sheet/model'
+import { bankToday, principalNameFromToken } from '@/components/balance-sheet/model'
+import { canDecideRateSheet } from '@/components/treasury/wb/payments'
+import { isAiPrincipal } from '@/components/treasury/wb/principal'
 import { addDays } from '@/components/treasury/positions'
 import { hasPermission } from '@/lib/auth/roles'
 import { useSession } from 'next-auth/react'
@@ -38,6 +40,13 @@ function MarketData() {
   const { t, num } = useFmt()
   const { data: session } = useSession()
   const canWrite = hasPermission(session?.user?.roles ?? [], 'treasury:reference:propose')
+  // Rate sheets: back office proposes; a different human approver decides (four-eyes, never an AI).
+  const canProposeSheet = hasPermission(session?.user?.roles ?? [], 'treasury:backoffice:write')
+  const sheetWho = {
+    actor: principalNameFromToken(session?.user?.accessToken),
+    holdsApprove: hasPermission(session?.user?.roles ?? [], 'treasury:decision:approve'),
+    ai: isAiPrincipal(session?.user as { roles?: string[] } | undefined),
+  }
   const [tab, setTab] = useState<TabId>('factors')
   const [date, setDate] = useState(() => bankToday())
   const [quality, setQuality] = useState<WbRead<z.infer<typeof qualitySchema>> | null>(null)
@@ -69,6 +78,18 @@ function MarketData() {
     const res = await wbPost(wbUrl('/market-data/internal-rate-sheets'), { name: sheetForm.name.trim(), effectiveFrom: sheetForm.effectiveFrom, rates }, rateSheetSchema)
     if (res.ok) { setNotice({ tone: 'success', text: t('Sazebník navržen — čeká na schválení jinou osobou.', 'Rate sheet proposed — a different person must approve it.') }); setSheetForm({ name: '', effectiveFrom: bankToday(), rates: '' }); void loadSheets() }
     else setNotice({ tone: 'danger', text: writeFailureText(res, t('Publikace sazebníku', 'Publish rate sheet'), t) })
+  }
+
+  const decideSheet = async (id: string, decision: 'approve' | 'reject') => {
+    let body: { reason: string } | undefined
+    if (decision === 'reject') {
+      const reason = window.prompt(t('Důvod zamítnutí', 'Reason for rejecting'))
+      if (!reason?.trim()) return
+      body = { reason: reason.trim() }
+    }
+    const res = await wbPost(wbUrl(`/market-data/internal-rate-sheets/${encodeURIComponent(id)}/${decision}`), body, rateSheetSchema)
+    if (res.ok) { setNotice({ tone: 'success', text: decision === 'approve' ? t('Sazebník schválen a platí.', 'Rate sheet approved and active.') : t('Sazebník zamítnut.', 'Rate sheet rejected.') }); void loadSheets() }
+    else setNotice({ tone: 'danger', text: writeFailureText(res, t('Rozhodnutí o sazebníku', 'Rate-sheet decision'), t) })
   }
 
   const importFile = async (file: File) => {
@@ -141,10 +162,20 @@ function MarketData() {
           {sheets && !sheets.ok && <ReadFailure result={sheets} what={t('Interní sazebníky', 'Internal rate sheets')} />}
           {sheets?.ok && (sheets.data.length === 0 ? <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('Zatím nebyl publikován žádný sazebník.', 'No rate sheet has been published yet.')}</p> : (
             <ul style={{ fontSize: 13, marginBottom: 12 }}>
-              {sheets.data.map((s, i) => <li key={`${s.name}-${i}`}>{`${s.name} · ${t('platí od', 'effective from')} ${s.effectiveFrom ?? '—'} · ${s.status ?? '—'} · ${(s.rates ?? []).map(r => `${r.label} ${r.value}`).join(', ')}`}</li>)}
+              {sheets.data.map((s, i) => (
+                <li key={s.id ?? `${s.name}-${i}`} data-testid="rate-sheet">
+                  {`${s.name} · ${t('platí od', 'effective from')} ${s.effectiveFrom ?? '—'} · ${s.status ?? '—'} · ${(s.rates ?? []).map(r => `${r.label} ${r.value}`).join(', ')}`}
+                  {s.proposedBy ? ` · ${t('navrhl', 'proposed by')} ${s.proposedBy}` : ''}
+                  {canDecideRateSheet(s, sheetWho) && s.id && (
+                    <>{' '}<button type="button" className="btn btn-primary btn-sm" onClick={() => void decideSheet(s.id!, 'approve')}>{t('Schválit', 'Approve')}</button>{' '}
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void decideSheet(s.id!, 'reject')}>{t('Zamítnout', 'Reject')}</button></>
+                  )}
+                  {s.status === 'PENDING' && sheetWho.holdsApprove && !canDecideRateSheet(s, sheetWho) && <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{' '}{t('Rozhodnout nesmíte: sazebník jste navrhli vy.', 'You may not decide: you proposed this sheet.')}</span>}
+                </li>
+              ))}
             </ul>
           ))}
-          {canWrite && (
+          {canProposeSheet && (
             <div className="card">
               <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{t('Navrhnout sazebník', 'Propose a rate sheet')}</h3>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

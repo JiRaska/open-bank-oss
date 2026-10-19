@@ -171,32 +171,53 @@ describe('event calendar', () => {
 
 // ── cash-flow analysis ─────────────────────────────────────────────────────────────────────────
 describe('cash-flow analysis', () => {
-  it('sends every parameter of the catalogue and drills a date down to deal and leg', async () => {
-    router = () => json({ flows: [
-      { date: '2026-11-02', currency: 'CZK', amount: 100, dealId: 'd-1', legIndex: 0, kind: 'INTEREST' },
-      { date: '2026-11-02', currency: 'CZK', amount: -40, dealId: 'd-2', legIndex: 1, kind: 'PRINCIPAL' },
-      { date: '2026-11-05', currency: 'EUR', amount: 7, dealId: 'd-3', legIndex: 0 },
-    ] })
+  const result = {
+    to: '2027-11-02',
+    series: [
+      { currency: 'CZK', buckets: [{ date: '2026-11-02', inflow: 100, outflow: -40, net: 60, cumulative: 60, value: 60 }] },
+      { currency: 'EUR', buckets: [{ date: '2026-11-05', inflow: 7, outflow: 0, net: 7, cumulative: 7, value: 7 }] },
+    ],
+    reference: null,
+    flows: [
+      { date: '2026-11-02', currency: 'CZK', amount: 100, referenceAmount: null, dealId: 'd-1', legIndex: 0, flowId: 'f-1', kind: 'INTEREST', dealKind: 'ACTUAL', state: 'PROJECTED' },
+      { date: '2026-11-02', currency: 'CZK', amount: -40, referenceAmount: null, dealId: 'd-2', legIndex: 1, flowId: 'f-2', kind: 'PRINCIPAL', dealKind: 'PLANNED', state: 'PROJECTED' },
+      { date: '2026-11-05', currency: 'EUR', amount: 7, referenceAmount: null, dealId: 'd-3', legIndex: 0, flowId: 'f-3', kind: 'INTEREST', dealKind: 'ACTUAL', state: 'FIXED' },
+    ],
+    flowsTruncated: false,
+    fxRates: [],
+    dataGaps: [{ currency: 'EUR', reason: 'no approved FX_EUR_CZK fixing on 2026-10-19' }],
+  }
+
+  it('sends every parameter, shows the service’s buckets and gaps, and drills a bucket down to deal and leg', async () => {
+    router = () => json(result)
     await renderPage(<TreasuryCashFlowAnalysisPage />)
     await change(/Portfolio node|Uzel portfolia/, 'BANKING')
     await change(/Reference currency|Referenční měna/, 'EUR')
     await change(/Result expression|Forma výsledku/, 'NET')
-    await change(/Payment scenario|Scénář plateb/, 'STRESS')
-    await change(/Future-business scenario|Scénář budoucího/, 'growth')
     await change(/Bank account|Bankovní účet/, 'NOSTRO-1')
+    await change(/Horizon|Horizont/, '90')
     await act(async () => { fireEvent.click(screen.getByLabelText(/Convert to reference|Převést do referenční/)) })
-    await act(async () => { fireEvent.click(screen.getByLabelText(/Split monthly|Rozdělit po měsících/)) })
+    await act(async () => { fireEvent.click(screen.getByLabelText(/Include planned|Včetně plánovaných/)) })
     await click(/Run analysis|Spustit analýzu/)
     expect(bodyOf(calls[0])).toMatchObject({
-      bookId: 'BANKING', referenceCurrency: 'EUR', convertToReference: true, expression: 'NET', scenario: 'STRESS', splitMonthly: true,
-      futureBusinessScenarioId: 'growth', bankAccountId: 'NOSTRO-1',
+      bookId: 'BANKING', referenceCurrency: 'EUR', convertToReference: true, expression: 'NET', scenario: 'CONTRACTUAL',
+      splitMonthly: false, includePlanned: true, horizonDays: 90, bankAccountId: 'NOSTRO-1',
     })
     expect(bodyOf(calls[0]).calculationDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(await screen.findByRole('heading', { name: /Currency CZK|Měna CZK/ })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: /Currency EUR|Měna EUR/ })).toBeTruthy()
-    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: /Show flows|Zobrazit toky/ })[0]) })
+    expect(screen.getByTestId('data-gaps').textContent).toMatch(/FX_EUR_CZK/)
+    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: /Show flows \(2\)|Zobrazit toky \(2\)/ })[0]) })
     expect(screen.getAllByRole('link', { name: /^(Deal|Obchod)$/ })[0].getAttribute('href')).toBe('/treasury/deals/d-1')
-    expect(screen.getByText(/leg 2|noha 2/)).toBeTruthy()
+    expect(screen.getByText(/leg 2 · PRINCIPAL · planned|noha 2 · PRINCIPAL · plánovaný/)).toBeTruthy()
+  })
+
+  it('explains a refused behavioural or stress scenario instead of showing a contractual figure', async () => {
+    router = () => json({ error: 'SCENARIO_NOT_AVAILABLE', message: 'no model' }, 422)
+    await renderPage(<TreasuryCashFlowAnalysisPage />)
+    await change(/Payment scenario|Scénář plateb/, 'STRESS')
+    await click(/Run analysis|Spustit analýzu/)
+    expect(bodyOf(calls[0]).scenario).toBe('STRESS')
+    expect((await screen.findByRole('alert')).textContent).toMatch(/not available yet|zatím nejsou k dispozici/)
   })
 
   it('says "not yet available" instead of an empty result when the analysis is not served', async () => {
@@ -286,10 +307,10 @@ describe('market data', () => {
     expect(screen.getByRole('link', { name: /4 deals|4 obchodů/ })).toBeTruthy()
   })
 
-  it('lists internal rate sheets and proposes one (editor role only)', async () => {
-    session.roles = ['ROLE_TREASURY_REFERENCE_EDITOR']
-    session.username = 'rita.editor'
-    router = (url, init) => (url.includes('/internal-rate-sheets') ? (init?.method === 'POST' ? json({ name: 'Retail Q4' }, 201) : json([{ name: 'Retail Q3', effectiveFrom: '2026-07-01', status: 'ACTIVE', rates: [{ label: '3M', value: 3.1 }] }])) : notServed())
+  it('lists internal rate sheets and back office proposes one', async () => {
+    session.roles = ['ROLE_TREASURY_BACK_OFFICE']
+    session.username = 'bert.back'
+    router = (url, init) => (url.includes('/internal-rate-sheets') ? (init?.method === 'POST' ? json({ id: 's-2', name: 'Retail Q4', status: 'PENDING' }, 201) : json([{ id: 's-1', name: 'Retail Q3', effectiveFrom: '2026-07-01', status: 'ACTIVE', rates: [{ label: '3M', value: 3.1 }] }])) : notServed())
     await renderPage(<TreasuryMarketDataPage />)
     await click(/Internal rate sheets|Interní sazebníky/, 'tab')
     expect((await screen.findByText(/Retail Q3/)).textContent).toMatch(/3M 3\.1/)
@@ -297,6 +318,30 @@ describe('market data', () => {
     await change(/Rates \(label;value|Sazby \(popisek/, '3M;3.2')
     await click(/^(Propose|Navrhnout)$/)
     expect(bodyOf(calls.find(c => c.init?.method === 'POST')!)).toMatchObject({ name: 'Retail Q4', rates: [{ label: '3M', value: 3.2 }] })
+  })
+
+  it('a different approver decides a PENDING rate sheet; its proposer and an AI principal are not offered it', async () => {
+    const pending = { id: 's-9', name: 'Retail Q4', effectiveFrom: '2026-10-20', status: 'PENDING', proposedBy: 'bert.back', rates: [{ label: '3M', value: 3.2 }] }
+    router = (url, init) => (url.endsWith('/internal-rate-sheets/s-9/approve') && init?.method === 'POST' ? json({ ...pending, status: 'ACTIVE' })
+      : url.includes('/internal-rate-sheets') ? json([pending]) : notServed())
+    session.roles = ['ROLE_TREASURY_APPROVER']
+    session.username = 'amy.approver'
+    await renderPage(<TreasuryMarketDataPage />)
+    await click(/Internal rate sheets|Interní sazebníky/, 'tab')
+    await screen.findByTestId('rate-sheet')
+    await click(/^(Approve|Schválit)$/)
+    expect(calls.some(c => c.url.endsWith('/internal-rate-sheets/s-9/approve') && c.init?.method === 'POST')).toBe(true)
+    cleanup()
+    for (const [roles, user] of [[['ROLE_TREASURY_APPROVER'], 'bert.back'], [['ROLE_TREASURY_APPROVER', 'ROLE_AI_AGENT'], 'amy.approver'], [['ROLE_TREASURY_DEALER'], 'dana.dealer']] as const) {
+      session.roles = [...roles]
+      session.username = user
+      await renderPage(<TreasuryMarketDataPage />)
+      await click(/Internal rate sheets|Interní sazebníky/, 'tab')
+      await screen.findByTestId('rate-sheet')
+      expect(screen.queryByRole('button', { name: /^(Approve|Schválit)$/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /^(Reject|Zamítnout)$/ })).toBeNull()
+      cleanup()
+    }
   })
 
   it('imports a CSV file as rows and offers export', async () => {
@@ -369,6 +414,42 @@ describe('payments', () => {
     await screen.findByText('Sim Bank A')
     await click(/^(Release|Uvolnit)$/)
     expect((await screen.findByRole('alert')).textContent).toMatch(/different person|jiná osoba/)
+  })
+
+  it('shows the rail reference, and offers manual reconciliation to an independent approver only', async () => {
+    const sent = pay('p-9', { status: 'SENT', railReference: 'RAIL-REF-1', releasedBy: 'rita.releaser' })
+    router = (url, init) => (url.endsWith('/payments/p-9/resolve') && init?.method === 'POST' ? json({ ...sent, status: 'MANUALLY_SETTLED' }) : json([sent]))
+    session.roles = ['ROLE_TREASURY_APPROVER']
+    session.username = 'amy.approver'
+    vi.spyOn(window, 'prompt').mockReturnValue('confirmed by the correspondent')
+    await renderPage(<TreasuryPaymentsPage />)
+    expect((await screen.findByTestId('rail-reference')).textContent).toBe('RAIL-REF-1')
+    await click(/^(Manually settled|Vypořádáno ručně)$/)
+    const resolve = calls.find(c => c.url.endsWith('/payments/p-9/resolve'))!
+    expect(bodyOf(resolve)).toEqual({ outcome: 'MANUALLY_SETTLED', reason: 'confirmed by the correspondent' })
+    cleanup()
+    // Its releaser, a term author, and an AI principal are not offered it.
+    for (const [roles, user] of [[['ROLE_TREASURY_APPROVER'], 'rita.releaser'], [['ROLE_TREASURY_APPROVER'], 'dana.dealer'], [['ROLE_TREASURY_APPROVER', 'ROLE_AI_AGENT'], 'amy.approver']] as const) {
+      session.roles = [...roles]
+      session.username = user
+      await renderPage(<TreasuryPaymentsPage />)
+      await screen.findByTestId('rail-reference')
+      expect(screen.queryByRole('button', { name: /^(Manually settled|Vypořádáno ručně)$/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /^(Returned|Vráceno)$/ })).toBeNull()
+      cleanup()
+    }
+  })
+
+  it('explains SSI_CHANGED on release and reloads', async () => {
+    session.roles = ['ROLE_TREASURY_PAYMENT_RELEASER']
+    session.username = 'rita.releaser'
+    router = (url, init) => (init?.method === 'POST' ? json({ error: 'SSI_CHANGED', message: 'ssi changed' }, 409) : json([pay('p-1')]))
+    await renderPage(<TreasuryPaymentsPage />)
+    await screen.findByText('Sim Bank A')
+    const before = calls.length
+    await click(/^(Release|Uvolnit)$/)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/settlement instruction changed|instrukce protistrany se změnila/)
+    expect(calls.length).toBeGreaterThan(before + 1)
   })
 
   it('filters by status through the query string', async () => {
@@ -550,14 +631,14 @@ describe('reports', () => {
 // ── day completion ─────────────────────────────────────────────────────────────────────────────
 describe('day completion', () => {
   it('shows each step with its status and count, and reloads for another date', async () => {
-    router = () => json({ date: '2026-10-19', steps: [
+    router = url => (url.includes('/revaluations') ? json([]) : json({ date: '2026-10-19', steps: [
       { step: 'FIXINGS', status: 'DONE', count: 4, detail: 'all fixed', at: '2026-10-19T17:00:00Z' },
       { step: 'ACCRUALS', status: 'DONE', count: 12, detail: null, at: '2026-10-19T17:05:00Z' },
       { step: 'PAYMENTS', status: 'FAILED', count: 1, detail: 'rail unavailable', at: null },
       { step: 'REVALUATION', status: 'PENDING', count: null, detail: null, at: null },
       { step: 'CORRECTIONS', status: 'SKIPPED', count: 0, detail: null, at: null },
       { step: 'MATURITIES', status: 'DONE', count: 2, detail: null, at: '2026-10-19T17:10:00Z' },
-    ] })
+    ] }))
     await renderPage(<TreasuryDayCompletionPage />)
     const table = await screen.findByRole('table')
     expect(within(table).getAllByRole('row')).toHaveLength(7)
@@ -565,11 +646,35 @@ describe('day completion', () => {
     expect(within(table).getByText(/^(Failed|Selhalo)$/)).toBeTruthy()
     expect(within(table).getByText(/^(Pending|Čeká)$/)).toBeTruthy()
     await change(/^(Day|Den)$/, '2026-10-16')
-    expect(calls.at(-1)!.url).toBe(`${T}/day-completion/2026-10-16`)
+    expect(calls.some(c => c.url === `${T}/day-completion/2026-10-16`)).toBe(true)
+    expect(calls.some(c => c.url === `${T}/revaluations?asOf=2026-10-16`)).toBe(true)
+  })
+
+  it('lists the day’s revaluations, and lets back office re-run it showing each data gap', async () => {
+    session.roles = ['ROLE_TREASURY_BACK_OFFICE']
+    session.username = 'petr.back'
+    const rev = { dealId: 'd-7', asOf: '2026-10-19', snapshotId: 's-1', fairValue: 125000, carrying: 0, cumulative: 125000, change: 125000, journalId: 'j-1' }
+    router = (url, init) => (url.includes('/revaluations/run') && init?.method === 'POST'
+      ? json({ asOf: '2026-10-19', snapshotId: 's-1', revalued: [rev], journals: 0, reposted: 0, owed: 0, gaps: [{ dealId: 'd-8', reason: 'unpriced by the risk engine: no curve' }], failures: [] })
+      : url.includes('/revaluations') ? json([rev])
+        : json({ date: '2026-10-19', steps: [{ step: 'REVALUATION', status: 'FAILED', count: 1, detail: '1 deal(s) not revalued', at: null }] }))
+    await renderPage(<TreasuryDayCompletionPage />)
+    expect(within(await screen.findByTestId('revaluation-table')).getByText('d-7')).toBeTruthy()
+    await click(/Run revaluation|Spustit přecenění/)
+    expect(calls.some(c => c.url.includes('/revaluations/run?asOf=') && c.init?.method === 'POST')).toBe(true)
+    expect(screen.getByTestId('revaluation-gaps').textContent).toMatch(/d-8: unpriced/)
+  })
+
+  it('offers no revaluation run to a dealer', async () => {
+    session.roles = ['ROLE_TREASURY_DEALER']
+    router = url => (url.includes('/revaluations') ? json([]) : json({ date: '2026-10-19', steps: [] }))
+    await renderPage(<TreasuryDayCompletionPage />)
+    await screen.findByText(/No revaluation recorded|není zaznamenáno žádné přecenění/)
+    expect(screen.queryByRole('button', { name: /Run revaluation|Spustit přecenění/ })).toBeNull()
   })
 
   it('says "not yet available" when day completion is not served', async () => {
-    router = () => notServed()
+    router = url => (url.includes('/revaluations') ? json([]) : notServed())
     await renderPage(<TreasuryDayCompletionPage />)
     await notAvailable()
   })

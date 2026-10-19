@@ -298,18 +298,22 @@ export const factorRowSchema = z.object({
 })
 export const factorListSchema = z.array(factorRowSchema)
 export const rateSheetSchema = z.object({
-  name: z.string(), effectiveFrom: z.string().nullish(), status: z.string().nullish(), publishedBy: z.string().nullish(),
+  id: z.string().nullish(), name: z.string(), effectiveFrom: z.string().nullish(), status: z.string().nullish(), publishedBy: z.string().nullish(),
+  proposedBy: z.string().nullish(), decidedBy: z.string().nullish(), decisionReason: z.string().nullish(),
   rates: z.array(z.object({ label: z.string(), value: decimal })).nullish(),
 }).loose()
 export const rateSheetListSchema = z.array(rateSheetSchema)
 
-export const PAYMENT_STATUSES = ['PROPOSED', 'RELEASED', 'SENT', 'SETTLED', 'FAILED', 'CANCELLED'] as const
+export const PAYMENT_STATUSES = ['PROPOSED', 'RELEASED', 'SENT', 'SETTLED', 'FAILED', 'RAIL_NOT_SUPPORTED', 'MANUALLY_SETTLED', 'RETURNED', 'CANCELLED'] as const
+/** Released payments whose outcome is still open: an independent human resolves them (manual reconciliation). */
+export const RESOLVABLE_PAYMENT_STATUSES = ['RELEASED', 'SENT', 'RAIL_NOT_SUPPORTED', 'FAILED'] as const
 export const paymentSchema = z.object({
   paymentId: z.string(), status: z.string(), direction: z.string(), counterpartyId: z.string(),
   counterpartyName: z.string().nullish(), currency: z.string(), amount: decimal, valueDate: iso, rail: z.string().nullish(),
   ssi: z.union([z.string(), z.record(z.string(), z.unknown())]).nullish(),
   nettedFlowIds: z.array(z.string()).nullish(), dealIds: z.array(z.string()).nullish(),
-  idempotencyKey: z.string().nullish(), railReference: z.string().nullish(), releasedBy: z.string().nullish(),
+  idempotencyKey: z.string().nullish(), railReference: z.string().nullish(), transferRail: z.string().nullish(), releasedBy: z.string().nullish(),
+  statusReason: z.string().nullish(),
   createdBy: z.string().nullish(), dealCreators: z.array(z.string()).nullish(), createdAt: z.string().nullish(),
 })
 export type Payment = z.infer<typeof paymentSchema>
@@ -323,39 +327,38 @@ export const dayCompletionSchema = z.object({
   })),
 })
 
-/** Cash-flow analysis result (8.4): tolerant of a flat list or per-currency groups. */
-export type AnalysisFlow = { date: string; currency: string; amount: number; cumulative: number | null; dealId: string | null; legIndex: number | null; kind: string | null }
-export function normaliseAnalysis(raw: unknown): { currencies: { currency: string; flows: AnalysisFlow[] }[] } | null {
-  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null)
-  const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
-  const flow = (o: unknown, currency?: string): AnalysisFlow | null => {
-    if (!o || typeof o !== 'object') return null
-    const r = o as Record<string, unknown>
-    const date = str(r.date) ?? str(r.paymentDate) ?? str(r.bucket)
-    const amount = num(r.amount) ?? num(r.net)
-    const ccy = str(r.currency) ?? currency
-    if (!date || amount === null || !ccy) return null
-    return { date, currency: ccy, amount, cumulative: num(r.cumulative), dealId: str(r.dealId), legIndex: num(r.legIndex), kind: str(r.kind) }
-  }
-  const group = (flows: AnalysisFlow[]) => {
-    const map = new Map<string, AnalysisFlow[]>()
-    for (const f of flows) map.set(f.currency, [...(map.get(f.currency) ?? []), f])
-    return { currencies: [...map.entries()].map(([currency, list]) => ({ currency, flows: list })) }
-  }
-  if (Array.isArray(raw)) return group(raw.map(o => flow(o)).filter((f): f is AnalysisFlow => f !== null))
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  if (Array.isArray(r.flows)) return group(r.flows.map(o => flow(o)).filter((f): f is AnalysisFlow => f !== null))
-  const byCcy = r.currencies ?? r.byCurrency
-  if (Array.isArray(byCcy)) {
-    return group(byCcy.flatMap(c => {
-      const o = (c ?? {}) as Record<string, unknown>
-      const ccy = str(o.currency) ?? undefined
-      return Array.isArray(o.flows) ? o.flows.map(f => flow(f, ccy)).filter((f): f is AnalysisFlow => f !== null) : []
-    }))
-  }
-  return null
-}
+/** ADR-0344 D7/D8: one deal's revaluation on one date (GET /revaluations?asOf=). */
+export const revaluationSchema = z.object({
+  dealId: z.string(), asOf: z.string(), snapshotId: z.string(), fairValue: decimal, carrying: decimal,
+  cumulative: decimal, change: decimal, journalId: z.string().nullish(),
+})
+export type Revaluation = z.infer<typeof revaluationSchema>
+export const revaluationListSchema = z.array(revaluationSchema)
+export const revaluationRunSchema = z.object({
+  asOf: z.string(), snapshotId: z.string().nullish(), revalued: z.array(revaluationSchema), journals: z.number(),
+  reposted: z.number().nullish(), owed: z.number().nullish(),
+  gaps: z.array(z.object({ dealId: z.string(), reason: z.string() })), failures: z.array(z.string()),
+})
+
+/** Cash-flow analysis result (contract 8.4), exactly as the treasury service answers it. */
+const flowBucketSchema = z.object({
+  date: z.string(), inflow: decimal, outflow: decimal, net: decimal, cumulative: decimal, value: decimal,
+})
+const flowSeriesSchema = z.object({ currency: z.string(), buckets: z.array(flowBucketSchema) })
+export const cashFlowAnalysisSchema = z.object({
+  to: z.string(),
+  series: z.array(flowSeriesSchema),
+  reference: flowSeriesSchema.nullish(),
+  flows: z.array(z.object({
+    date: z.string(), currency: z.string(), amount: decimal, referenceAmount: decimal.nullish(),
+    dealId: z.string(), legIndex: z.number(), flowId: z.string(), kind: z.string(), dealKind: z.string(), state: z.string(),
+  })),
+  flowsTruncated: z.boolean(),
+  fxRates: z.array(z.object({ currency: z.string(), index: z.string(), rate: decimal, date: z.string() })),
+  dataGaps: z.array(z.object({ currency: z.string().nullish(), reason: z.string() })),
+})
+export type CashFlowAnalysis = z.infer<typeof cashFlowAnalysisSchema>
+export type AnalysedFlow = CashFlowAnalysis['flows'][number]
 
 // ── risk-engine reports ─────────────────────────────────────────────────────────────────────────
 export const provenanceSchema = z.string()

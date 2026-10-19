@@ -13,11 +13,11 @@ import {
 } from '@/components/treasury/wb/ticket'
 import { KINDS, KIND_BY_ID, keyOf, toFieldValues, toPayload } from '@/components/treasury/wb/referenceKinds'
 import { dealFilterQuery, filtersFromSaved, NO_DEAL_FILTERS, parseCsv, presetRange } from '@/components/treasury/wb/model'
-import { groupByDate } from '@/components/treasury/wb/analysis'
-import { canReleasePayment, nettingGroups } from '@/components/treasury/wb/payments'
+import { flowsOfBucket } from '@/components/treasury/wb/analysis'
+import { canReleasePayment, canResolvePayment, nettingGroups } from '@/components/treasury/wb/payments'
 import { isAiPrincipal, mayDecide } from '@/components/treasury/wb/principal'
 import { dataGapOf, provenanceOf, responseProvenance } from '@/components/treasury/wb/reports'
-import { normaliseAnalysis, ticketDealSchema, type Payment } from '@/components/treasury/wb/types'
+import { ticketDealSchema, type Payment } from '@/components/treasury/wb/types'
 
 const t = (cs: string, _en: string) => cs
 const tEn = (_cs: string, en: string) => en
@@ -286,20 +286,23 @@ describe('views and presets', () => {
     expect(parseCsv('only a header')).toEqual([])
   })
 
-  it('groups analysis flows per date or month with a running total', () => {
-    const f = (date: string, amount: number) => ({ date, currency: 'CZK', amount, cumulative: null, dealId: 'd', legIndex: 0, kind: null })
-    const daily = groupByDate([f('2026-11-02', 100), f('2026-10-30', -40), f('2026-11-02', 50)], false)
-    expect(daily.map(r => [r.key, r.total, r.cumulative])).toEqual([['2026-10-30', -40, -40], ['2026-11-02', 150, 110]])
-    expect(groupByDate([f('2026-10-30', 1), f('2026-10-31', 2), f('2026-11-01', 4)], true).map(r => [r.key, r.total])).toEqual([['2026-10', 3], ['2026-11', 4]])
+  it('drills an analysis bucket down to its own currency and day, or month when split monthly', () => {
+    const f = (date: string, currency: string) => ({ date, currency, amount: 1, referenceAmount: null, dealId: 'd', legIndex: 0, flowId: `${date}${currency}`, kind: 'INTEREST', dealKind: 'ACTUAL', state: 'FIXED' })
+    const flows = [f('2026-11-02', 'CZK'), f('2026-11-03', 'CZK'), f('2026-11-02', 'EUR'), f('2026-12-01', 'CZK')]
+    expect(flowsOfBucket(flows, 'CZK', '2026-11-02', false).map(x => x.flowId)).toEqual(['2026-11-02CZK'])
+    expect(flowsOfBucket(flows, 'CZK', '2026-11-01', true).map(x => x.flowId)).toEqual(['2026-11-02CZK', '2026-11-03CZK'])
   })
 
-  it('accepts the analysis result as a flat list, flows, or per-currency groups; rejects anything else', () => {
-    const flow = { date: '2026-11-02', amount: '100.5', currency: 'EUR', dealId: 'd', legIndex: 1 }
-    expect(normaliseAnalysis([flow])?.currencies[0].flows[0]).toMatchObject({ amount: 100.5, currency: 'EUR', legIndex: 1 })
-    expect(normaliseAnalysis({ flows: [flow] })?.currencies).toHaveLength(1)
-    expect(normaliseAnalysis({ currencies: [{ currency: 'CZK', flows: [{ date: '2026-11-02', amount: 1 }] }] })?.currencies[0].currency).toBe('CZK')
-    expect(normaliseAnalysis({ nothing: true })).toBeNull()
-    expect(normaliseAnalysis('x')).toBeNull()
+  it('offers manual reconciliation only to an independent human approver while the outcome is open', () => {
+    const p = { status: 'SENT', releasedBy: 'rita', createdBy: 'system', dealCreators: ['dana'] }
+    const who = { actor: 'amy', holdsApprove: true, ai: false }
+    expect(canResolvePayment(p, who)).toBe(true)
+    for (const s of ['FAILED', 'RAIL_NOT_SUPPORTED', 'RELEASED']) expect(canResolvePayment({ ...p, status: s }, who)).toBe(true)
+    for (const s of ['PROPOSED', 'SETTLED', 'MANUALLY_SETTLED', 'RETURNED', 'CANCELLED']) expect(canResolvePayment({ ...p, status: s }, who)).toBe(false)
+    expect(canResolvePayment(p, { ...who, actor: 'rita' })).toBe(false)
+    expect(canResolvePayment(p, { ...who, actor: 'dana' })).toBe(false)
+    expect(canResolvePayment(p, { ...who, ai: true })).toBe(false)
+    expect(canResolvePayment(p, { ...who, holdsApprove: false })).toBe(false)
   })
 })
 
