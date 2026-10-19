@@ -11,8 +11,10 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
  * ADR-0315 D9: the sandbox's interbank counterparties are simulated. A deal against one must never
  * read like a trade with a real bank, so the word is spelled out wherever the counterparty appears.
  */
-export function SyntheticBadge({ synthetic }: { synthetic: boolean | undefined }) {
+export function SyntheticBadge({ synthetic, variant = 'counterparty' }: { synthetic: boolean | undefined; variant?: 'counterparty' | 'data' }) {
   const { t } = useLanguage()
   if (!synthetic) return null
-  return <StatusBadge status="SYNTHETIC" tone="warning" label={t('Simulovaná protistrana', 'Synthetic counterparty')} />
+  // `data`: a report computed from simulated inputs (provenance `synthetic`), not a counterparty.
+  const label = variant === 'data' ? t('Simulovaná data', 'Synthetic data') : t('Simulovaná protistrana', 'Synthetic counterparty')
+  return <StatusBadge status="SYNTHETIC" tone="warning" label={label} />
 }

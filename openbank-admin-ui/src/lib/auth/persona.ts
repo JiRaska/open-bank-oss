@@ -54,6 +54,8 @@ const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
     { href: '/treasury/deals', nameCs: 'Obchody treasury', nameEn: 'Treasury deals', permission: 'treasury:view' },
     { href: '/treasury/approvals', nameCs: 'Ke schválení', nameEn: 'Approval inbox', permission: 'treasury:deal:approve' },
     { href: '/treasury/positions', nameCs: 'Denní pozice', nameEn: 'Daily position', permission: 'treasury:view' },
+    { href: '/treasury/calendar', nameCs: 'Kalendář událostí', nameEn: 'Event calendar', permission: 'treasury:workbench:view' },
+    { href: '/treasury/payments', nameCs: 'Platby', nameEn: 'Payments', permission: 'treasury:workbench:view' },
   ],
   platform: [
     { href: '/system/tests', nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', permission: 'system:view' },

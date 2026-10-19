@@ -273,6 +273,7 @@ export const fixingRowSchema = z.object({
   index: z.string(), fixingDate: iso, status: z.string(), rate: decimal.nullish(), source: z.string().nullish(),
   observedAt: z.string().nullish(), dealCount: z.number().nullish(), flowIds: z.array(z.string()).nullish(),
   blockReason: z.string().nullish(),
+  proposedBy: z.string().nullish(),
   quality: z.object({ stale: z.boolean().nullish(), jumpBp: decimal.nullish(), missing: z.boolean().nullish() }).nullish(),
 })
 export type FixingRow = z.infer<typeof fixingRowSchema>
@@ -309,7 +310,7 @@ export const paymentSchema = z.object({
   ssi: z.union([z.string(), z.record(z.string(), z.unknown())]).nullish(),
   nettedFlowIds: z.array(z.string()).nullish(), dealIds: z.array(z.string()).nullish(),
   idempotencyKey: z.string().nullish(), railReference: z.string().nullish(), releasedBy: z.string().nullish(),
-  createdBy: z.string().nullish(), createdAt: z.string().nullish(),
+  createdBy: z.string().nullish(), dealCreators: z.array(z.string()).nullish(), createdAt: z.string().nullish(),
 })
 export type Payment = z.infer<typeof paymentSchema>
 export const paymentListSchema = z.array(paymentSchema)
