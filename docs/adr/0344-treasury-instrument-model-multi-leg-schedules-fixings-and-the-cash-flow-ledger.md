@@ -144,10 +144,13 @@ all consume. Concretely:
    contracts, and *consumes* treasury's stored flows for `MONEY_MARKET_DEAL`, `BOND` and
    `DERIVATIVE_LEG`, because a fixed flow is a fact, not a projection.
 
-5. **Fixing is a workflow with a market-data quality gate.** A floating flow becomes `FIXED`
-   on its fixing date (payment date minus the leg's fixing lag on the fixing calendar) from an
+5. **Fixing is a workflow with a market-data quality gate.** The contractual reset and index
+   conventions determine the fixing date: an ordinary in-advance coupon fixes at accrual start
+   minus the leg's fixing lag; an explicitly in-arrears coupon fixes at accrual end minus that
+   lag, counted in business days on the fixing calendar. Payment date and the rail's cut-off
+   are separate from this fixing date. A floating flow becomes `FIXED` on its fixing date from an
    observed rate: automatically from the market-data port (ČNB and the FX service today, a
-   a market-data feed adapter later) with the source and value hashed onto the row, or manually with
+   market-data feed adapter later) with the source and value hashed onto the row, or manually with
    four eyes. Before any fixing, the quality gate runs two checks — *suspicious* (stale beyond its tenor, jump beyond a per-index threshold) and
    *missing* (any deal needing an index on that date for which no observation exists). A
    failed check blocks the fixing and opens a case; it does not fix from the last value.
@@ -411,3 +414,4 @@ change shows what it would affect before it is approved.
   ADR-0046, ADR-0025, ADR-0104, ADR-0031
 - Issues #10618 (programme), #11670 (day-count divergences), #11107 (unverified regulatory
   codes), #12115 (funding check), #13167 (day-end participation)
+- [QuantLib `FloatingRateCoupon::fixingDate`](https://github.com/lballabio/QuantLib/blob/master/ql/cashflows/floatingratecoupon.cpp) — accrual-start/end fixing anchors and the index fixing calendar.
