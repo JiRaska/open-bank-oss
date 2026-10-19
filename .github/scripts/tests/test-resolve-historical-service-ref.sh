@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Gate runners may export a synthetic index/worktree for their own Git checks.
+# Isolate this fixture repository from every Git-local override before invoking git.
+while IFS= read -r git_env; do
+  unset "$git_env"
+done < <(git rev-parse --local-env-vars)
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 resolver="$repo_root/.github/scripts/resolve-historical-service-ref.sh"
 # run-gates supplies a private index for the real checkout. A scratch repository must
