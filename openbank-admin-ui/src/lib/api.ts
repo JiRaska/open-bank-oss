@@ -226,13 +226,19 @@ function isHealthEntry(value: unknown): value is ServiceHealthEntry {
     (entry.latencyMs === null || (typeof entry.latencyMs === 'number' && Number.isFinite(entry.latencyMs))) &&
     (entry.version == null || typeof entry.version === 'string') &&
     (entry.gitCommit == null || typeof entry.gitCommit === 'string') &&
+    (entry.namespace === undefined || (typeof entry.namespace === 'string' && entry.namespace.length > 0)) &&
     isStack(entry.stack)
+}
+
+function healthEntryIdentity(entry: ServiceHealthEntry): string {
+  return entry.namespace ? `${entry.namespace}/${entry.name}` : `${entry.name}:${entry.port}`
 }
 
 function snapshotFromHealthEntry(entry: ServiceHealthEntry): ServiceSnapshot {
   const hasInfoSignal = Boolean(entry.version || entry.gitCommit || entry.stack)
   return {
     name: entry.name,
+    ...(entry.namespace ? { namespace: entry.namespace } : {}),
     port: entry.port,
     info: hasInfoSignal ? {
       service: entry.name,
@@ -266,7 +272,7 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
     }
     const services = (data as { services: unknown[] }).services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
-    if (new Set(services.map(entry => `${entry.name}:${entry.port}`)).size !== services.length) {
+    if (new Set(services.map(healthEntryIdentity)).size !== services.length) {
       return { ok: false, failure: 'error' }
     }
     return { ok: true, snapshots: services.map(snapshotFromHealthEntry) }

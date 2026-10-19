@@ -6,6 +6,8 @@
 export type FleetHealthSample = {
   deployed: boolean
   up: boolean
+  /** Omit for legacy boolean samples; UNKNOWN remains neutral, not a failed check. */
+  unknown?: boolean
   latencyMs: number | null
 }
 
@@ -13,6 +15,9 @@ export type FleetHealthSummary = {
   total: number
   deployed: number
   healthy: number
+  observed: number
+  unknown: number
+  unhealthy: number
   notDeployed: number
   averageHealthCheckLatencyMs: number | null
 }
@@ -24,12 +29,17 @@ export type FleetHealthSummary = {
  */
 export function summarizeFleetHealth(samples: FleetHealthSample[]): FleetHealthSummary {
   const deployed = samples.filter(sample => sample.deployed)
+  const observed = deployed.filter(sample => sample.unknown !== true)
+  const unknown = deployed.length - observed.length
   const latencies = deployed.flatMap(sample => sample.latencyMs === null ? [] : [sample.latencyMs])
 
   return {
     total: samples.length,
     deployed: deployed.length,
-    healthy: deployed.filter(sample => sample.up).length,
+    healthy: observed.filter(sample => sample.up).length,
+    observed: observed.length,
+    unknown,
+    unhealthy: observed.filter(sample => !sample.up).length,
     notDeployed: samples.length - deployed.length,
     averageHealthCheckLatencyMs:
       latencies.length === 0 ? null : Math.round(latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length),
@@ -39,6 +49,7 @@ export function summarizeFleetHealth(samples: FleetHealthSample[]): FleetHealthS
 export type FleetHealthState = 'healthy' | 'degraded' | 'unavailable'
 
 export function fleetHealthState(summary: FleetHealthSummary): FleetHealthState {
-  if (summary.deployed === 0) return 'unavailable'
-  return summary.healthy === summary.deployed ? 'healthy' : 'degraded'
+  if (summary.unhealthy > 0) return 'degraded'
+  if (summary.observed === 0 || summary.unknown > 0) return 'unavailable'
+  return 'healthy'
 }
