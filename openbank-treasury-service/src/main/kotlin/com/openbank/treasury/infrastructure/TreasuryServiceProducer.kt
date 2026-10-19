@@ -181,6 +181,16 @@ class TreasuryServiceProducer {
             vet = { deal, override -> dealUseCase.get().vetCorrection(deal, override) },
         )
 
+    /** Contract 8.4: cash-flow analysis over the stored ledger. */
+    @Produces
+    @ApplicationScoped
+    fun cashFlowAnalysisService(
+        cashFlows: CashFlowRepository,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        references: ReferenceRepository,
+    ): com.openbank.treasury.application.usecase.CashFlowAnalysisService =
+        com.openbank.treasury.application.usecase.CashFlowAnalysisService(cashFlows, marketData, references)
+
     /** ADR-0344 D7/D8: revaluation off the risk engine's valuation, posted through the matrix. */
     @Produces
     @ApplicationScoped

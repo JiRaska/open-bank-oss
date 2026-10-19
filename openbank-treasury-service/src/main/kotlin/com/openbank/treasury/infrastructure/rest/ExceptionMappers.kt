@@ -131,6 +131,19 @@ class ExceptionMappers {
         error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
 
     @ServerExceptionMapper
+    fun scenarioNotAvailable(e: com.openbank.treasury.application.usecase.ScenarioNotAvailableException): Response =
+        error(UNPROCESSABLE, "SCENARIO_NOT_AVAILABLE", e.message)
+
+    @ServerExceptionMapper
+    fun analysisTooLarge(e: com.openbank.treasury.application.port.out.AnalysisTooLargeException): Response =
+        error(UNPROCESSABLE, "ANALYSIS_TOO_LARGE", e.message)
+
+    @ServerExceptionMapper
+    fun priorRevaluationUnposted(
+        e: com.openbank.treasury.application.port.out.PriorRevaluationUnpostedException,
+    ): Response = error(Response.Status.CONFLICT.statusCode, "PRIOR_REVALUATION_UNPOSTED", e.message)
+
+    @ServerExceptionMapper
     fun revaluationOutOfOrder(e: com.openbank.treasury.application.port.out.RevaluationOutOfOrderException): Response =
         error(Response.Status.CONFLICT.statusCode, "REVALUATION_OUT_OF_ORDER", e.message)
 

@@ -265,6 +265,29 @@ class RevaluationApiIT {
             .body("steps.find { it.step == 'REVALUATION' }.status", equalTo("DONE"))
     }
 
+    @Test
+    @Order(9)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `9 - the cash-flow analysis reads the stored ledger, and a missing FX fixing is a gap`() {
+        fun analyse(body: String) = given().contentType("application/json").body(body)
+            .`when`().post("/api/v1/treasury/analysis/cash-flows")
+        analyse("""{"calculationDate":"$today","referenceCurrency":"CZK","horizonDays":400}""").then().statusCode(200)
+            .body("series.find { it.currency == 'CZK' }.buckets.size()", org.hamcrest.Matchers.greaterThan(0))
+            .body("flows.dealId", org.hamcrest.Matchers.hasItem(irs))
+        analyse(
+            """{"calculationDate":"$today","referenceCurrency":"EUR","convertToReference":true,"horizonDays":400}""",
+        )
+            .then().statusCode(200)
+            .body("reference", org.hamcrest.Matchers.nullValue())
+            .body("dataGaps.reason", org.hamcrest.Matchers.hasItem(containsString("FX_CZK_EUR")))
+        analyse("""{"calculationDate":"$today","referenceCurrency":"CZK","scenario":"STRESS"}""").then().statusCode(422)
+            .body("error", equalTo("SCENARIO_NOT_AVAILABLE"))
+        analyse("""{"calculationDate":"$today","referenceCurrency":"CZK","horizonDays":99999}""").then().statusCode(400)
+        analyse("""{"referenceCurrency":"CZK"}""").then().statusCode(400)
+        analyse("""{"calculationDate":"$today","referenceCurrency":"CZK","bookId":"NO-SUCH-BOOK","horizonDays":400}""")
+            .then().statusCode(200).body("flows", hasSize<Any>(0))
+    }
+
     private fun fv(clean: String) = DealFairValue(UUID.fromString(irs), BigDecimal(clean), BigDecimal(clean), null)
 
     private fun book(asOf: LocalDate, vararg deals: DealFairValue) = BookValuation(

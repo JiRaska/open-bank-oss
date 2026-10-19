@@ -1474,6 +1474,83 @@ paths:
                   blocked: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
                   failures: { type: integer, minimum: 0 }
 
+  /api/v1/treasury/analysis/cash-flows:
+    post:
+      tags: [Treasury]
+      operationId: analyseCashFlows
+      summary: Contractual cash flows from the stored ledger by currency — gross, net or cumulative, daily or monthly — optionally converted at the approved FX fixing of the calculation date (contract 8.4)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [calculationDate, referenceCurrency]
+              properties:
+                calculationDate: { type: string, format: date }
+                referenceCurrency: { type: string, pattern: '^[A-Z]{3}$' }
+                convertToReference: { type: boolean, default: false }
+                expression: { type: string, enum: [GROSS, NET, CUMULATIVE], default: NET }
+                scenario: { type: string, enum: [CONTRACTUAL, BEHAVIOURAL, STRESS], default: CONTRACTUAL }
+                splitMonthly: { type: boolean, default: false }
+                bookId: { type: string, maxLength: 64, nullable: true, description: The book and every descendant in the ACTIVE book hierarchy }
+                bankAccountId: { type: string, maxLength: 64, nullable: true, description: The deal's settlement cash account }
+                includePlanned: { type: boolean, default: false, description: Include PLANNED deals beside ACTUAL ones }
+                horizonDays: { type: integer, minimum: 1, maximum: 3660, default: 366 }
+      responses:
+        '200':
+          description: Series per currency, the reference-currency series (null when not converting or when any currency lacks a fixing), drill-down flows (at most 2000) and data gaps
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  to: { type: string, format: date }
+                  series:
+                    type: array
+                    maxItems: 200
+                    items: { $ref: '#/components/schemas/CashFlowSeries' }
+                  reference: { allOf: [{ $ref: '#/components/schemas/CashFlowSeries' }], nullable: true }
+                  flows:
+                    type: array
+                    maxItems: 2000
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date }
+                        currency: { type: string }
+                        amount: { type: number, description: Signed, + in and − out }
+                        referenceAmount: { type: number, nullable: true }
+                        dealId: { type: string, format: uuid }
+                        legIndex: { type: integer }
+                        flowId: { type: string, format: uuid }
+                        kind: { type: string }
+                        dealKind: { type: string, enum: [ACTUAL, PLANNED] }
+                        state: { type: string }
+                  flowsTruncated: { type: boolean }
+                  fxRates:
+                    type: array
+                    maxItems: 200
+                    items:
+                      type: object
+                      properties:
+                        currency: { type: string }
+                        index: { type: string, description: 'FX_<CCY>_<REF>: units of the reference currency per one unit of CCY' }
+                        rate: { type: number }
+                        date: { type: string, format: date }
+                  dataGaps:
+                    type: array
+                    maxItems: 400
+                    items:
+                      type: object
+                      properties:
+                        currency: { type: string, nullable: true }
+                        reason: { type: string }
+        '400':
+          description: A bad parameter (date, currency, horizon, enum, identifier length)
+        '422':
+          description: SCENARIO_NOT_AVAILABLE (BEHAVIOURAL or STRESS — no scenario model is published yet), or ANALYSIS_TOO_LARGE (more than 50000 flows in the horizon)
+
   /api/v1/treasury/revaluations:
     get:
       tags: [Treasury]
@@ -2023,6 +2100,22 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    CashFlowSeries:
+      type: object
+      properties:
+        currency: { type: string }
+        buckets:
+          type: array
+          maxItems: 4000
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date, description: The day, or the first of the month when split monthly }
+              inflow: { type: number }
+              outflow: { type: number, description: Signed (≤ 0) }
+              net: { type: number }
+              cumulative: { type: number }
+              value: { type: number, description: 'The figure the expression asks for: GROSS → inflow + |outflow|, NET → net, CUMULATIVE → cumulative' }
     Revaluation:
       type: object
       description: One deal's revaluation on one date (ADR-0344 D7/D8); amounts in the deal currency

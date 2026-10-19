@@ -51,6 +51,10 @@ class CashFlowRepositoryImpl(
     private val clock: Clock,
 ) : CashFlowRepository {
 
+    // Field injection: a tenth constructor parameter trips detekt's LongParameterList.
+    @jakarta.inject.Inject
+    lateinit var objectMapper: com.fasterxml.jackson.databind.ObjectMapper
+
     override suspend fun flows(dealId: UUID, scheduleVersion: Int?): List<CashFlow> = Panache.withSession {
         val version: Uni<Int?> = if (scheduleVersion != null) {
             Uni.createFrom().item(scheduleVersion)
@@ -192,6 +196,39 @@ class CashFlowRepositoryImpl(
         return rows.filter { it.scheduleVersion == byDeal.getValue(it.dealId).scheduleVersion }.map {
             val d = byDeal.getValue(it.dealId)
             CalendarFlow(it.toDomain(), d.bookId, d.maturityDate, d.product)
+        }
+    }
+
+    override suspend fun analysisFlows(
+        from: LocalDate,
+        to: LocalDate,
+        kinds: Set<DealKind>,
+        maxRows: Int,
+    ): List<com.openbank.treasury.application.port.out.AnalysisFlow> {
+        val dealRows = Panache.withSession {
+            deals.find("kind in ?1 and scheduleVersion > 0", kinds.map { it.name }).list()
+        }.awaitSuspending().filter { it.state !in DEAD_STATES }
+        if (dealRows.isEmpty()) return emptyList()
+        val byDeal = dealRows.associateBy { it.dealId }
+        val query = "dealId in ?1 and paymentDate >= ?2 and paymentDate <= ?3 and state <> 'CANCELLED'"
+        val count = Panache.withSession { flowRepo.count(query, byDeal.keys.toList(), from, to) }.awaitSuspending()
+        if (count > maxRows) {
+            throw com.openbank.treasury.application.port.out.AnalysisTooLargeException(
+                "$count flows fall in $from..$to, more than the $maxRows one analysis reads: shorten the horizon",
+            )
+        }
+        val rows = Panache.withSession { flowRepo.find(query, byDeal.keys.toList(), from, to).list() }.awaitSuspending()
+        return rows.filter { it.scheduleVersion == byDeal.getValue(it.dealId).scheduleVersion }.map {
+            val d = byDeal.getValue(it.dealId)
+            val header = d.headerJson?.let { h ->
+                objectMapper.readValue(h, com.openbank.treasury.domain.model.DealHeader::class.java)
+            }
+            com.openbank.treasury.application.port.out.AnalysisFlow(
+                it.toDomain(),
+                DealKind.valueOf(d.kind),
+                d.bookId,
+                header?.settlementAccounts?.cashAccountId,
+            )
         }
     }
 
