@@ -48,10 +48,9 @@ class AccountingDayParticipationTransitionTest {
             // Faithfully model requireParticipantsComplete: null skips, missing or REFUSED holds.
             val required = arg<Set<String>?>(3)
             requiredAtRepository = required
-            if (required != null &&
-                "interest" in required &&
-                (outcome == null || outcome == ParticipationOutcome.REFUSED)
-            ) {
+            val interestRequired = required?.contains("interest") == true
+            val outcomePending = outcome == null || outcome == ParticipationOutcome.REFUSED
+            if (interestRequired && outcomePending) {
                 throw CloseParticipantsPendingException(setOf("interest"))
             }
             persisted++
