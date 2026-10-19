@@ -54,12 +54,12 @@ test('content dataset is bound to its reviewed-source collection time and SHA fi
   assert.equal(DATASETS.content.snapshotSourceSha({ sourceSha: sha }), sha)
 })
 
-test('content publication uses only the admin-ui/content prefix and preserves source provenance', () => {
+test('content publication uses only the admin-ui/content prefix and preserves source provenance', async () => {
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const snapshot = JSON.parse(collectAdminUiContent({ sourceSha }).toString('utf8'))
   const h = harness(snapshot, { ...env, EVIDENCE_SOURCE_SHA: sourceSha })
   try {
-    h.publish('content', { now: () => Date.now() + 1_000 })
+    await h.publish('content', { now: () => Date.now() + 1_000 })
     assert.equal(h.puts.length, 2)
     assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\/123-1-[a-f0-9]{64}\.json$/)
     assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
@@ -92,10 +92,13 @@ test('readiness source mismatch fails before any write', () => {
   } finally { h.cleanup() }
 })
 
-test('malformed data cannot publish into any dataset', () => {
+test('malformed data cannot publish into any dataset', async () => {
   const h = harness({})
   try {
-    for (const dataset of Object.keys(DATASETS)) assert.throws(() => h.publish(dataset), /schema validation/)
+    for (const dataset of Object.keys(DATASETS)) {
+      if (dataset === 'content') await assert.rejects(h.publish(dataset), /schema validation/)
+      else assert.throws(() => h.publish(dataset), /schema validation/)
+    }
     assert.equal(h.puts.length, 0)
   } finally { h.cleanup() }
 })

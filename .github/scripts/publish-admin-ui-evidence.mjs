@@ -5,7 +5,6 @@ import { publishEvidenceSnapshot } from './publish-admin-ui-snapshot.mjs'
 import { validateGateHealthSnapshotData } from '../../openbank-admin-ui/src/lib/evidence/gateHealthSnapshot.ts'
 import { isReadinessSnapshot } from '../../openbank-admin-ui/src/lib/evidence/readinessSnapshot.ts'
 import { validateTestIntelligenceSnapshot, testIntelligenceCollectedAt } from '../../openbank-admin-ui/src/lib/evidence/testIntelligenceSnapshot.ts'
-import { isAdminUiContentSnapshot, adminUiContentCollectedAt } from '../../openbank-admin-ui/src/lib/evidence/contentSnapshot.ts'
 
 import { validateSecurityKpiSnapshot, securityKpiCollectedAt } from '../../openbank-admin-ui/src/lib/security/kpiSnapshot.ts'
 
@@ -14,11 +13,22 @@ export const DATASETS = Object.freeze({
   readiness: { validateSnapshot: isReadinessSnapshot, collectedAt: value => value.collected_at, snapshotSourceSha: value => value.source_sha },
   'test-intelligence': { validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt },
   'security-kpis': { validateSnapshot: validateSecurityKpiSnapshot, collectedAt: securityKpiCollectedAt },
-  content: { validateSnapshot: isAdminUiContentSnapshot, collectedAt: adminUiContentCollectedAt, snapshotSourceSha: value => value.sourceSha },
+  // Content validation imports the UI's YAML/Zod schema. Load it only for content
+  // publication so the dependency-free governance publisher tests remain standalone.
+  content: { collectedAt: value => value.collectedAt, snapshotSourceSha: value => value.sourceSha },
 })
 
 export function publishDataset({ dataset, ...options }) {
   if (!Object.hasOwn(DATASETS, dataset)) throw new Error('unknown evidence dataset')
+  if (dataset === 'content') {
+    return import('../../openbank-admin-ui/src/lib/evidence/contentSnapshot.ts').then(({ isAdminUiContentSnapshot, adminUiContentCollectedAt }) =>
+      publishEvidenceSnapshot({
+        ...options,
+        ...DATASETS.content,
+        validateSnapshot: isAdminUiContentSnapshot,
+        prefix: 'admin-ui/content',
+      }))
+  }
   return publishEvidenceSnapshot({ ...options, ...DATASETS[dataset], prefix: `admin-ui/${dataset}` })
 }
 
@@ -39,7 +49,7 @@ export function parseArgs(argv, env = process.env) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try {
     const options = parseArgs(process.argv.slice(2))
-    const result = publishDataset(options)
+    const result = await publishDataset(options)
     process.stdout.write(`Published ${options.dataset} snapshot ${result.snapshot}\n`)
   } catch (error) {
     process.stderr.write(`Evidence publication failed: ${error instanceof Error ? error.message : 'unknown error'}\n`)

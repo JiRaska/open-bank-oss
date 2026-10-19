@@ -1805,6 +1805,7 @@ gates:
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
+      node --test .github/scripts/test-publish-admin-ui-evidence-import-boundary.mjs
       node --test .github/scripts/test-publish-admin-ui-gate-health.mjs .github/scripts/test-publish-admin-ui-evidence.mjs
       python3 .github/scripts/test-collect-admin-ui-test-evidence.py
       python3 .github/scripts/test-collect-admin-ui-security-kpis.py
