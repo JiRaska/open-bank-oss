@@ -226,10 +226,11 @@ mcp:
     protocol-version: "2024-11-05"
 
 # Model gateway (ADR-0031 D6). Provider-agnostic: adding a model is a `models` entry, adding a
-# new backend kind is one ModelProvider adapter. The sandbox ships only the offline `mock`
-# provider; real backends (a hosted public API, a self-hosted vLLM endpoint) are added here with
-# no code change. Sensitive (PII / money-path) context routes to a `self-hosted` model when one
-# is registered.
+# new backend kind is one ModelProvider adapter. The default registry includes offline `mock` and
+# configured OpenAI-compatible routes through LiteLLM. Sensitive (PII / money-path) context
+# routes to a `self-hosted` model when one is registered. Catalog Review's sandbox-only hosted
+# exception is separately gated by `catalog-review.allow-hosted-models` and does not change this
+# gateway-wide policy.
 model-gateway:
   # Offline `mock-echo` stays the default so the build/tests need no network or API key. Point a
   # demo at a real backend by setting AGENT_DEFAULT_MODEL (or pick it in the admin-UI model picker).
@@ -292,6 +293,13 @@ model-gateway:
     #   provider: openai-compat
     #   endpoint: http://ollama:11434/v1
     #   sensitivity: self-hosted
+
+# Catalog Intelligence is the only workflow allowed to send sandbox product drafts through the
+# existing in-cluster LiteLLM gateway. Disabled by default; production and local deployments keep
+# the normal sensitive-context self-hosted routing requirement.
+catalog-review:
+  allow-hosted-models: ${CATALOG_REVIEW_ALLOW_HOSTED_MODELS:false}
+  gateway-endpoint: ${AGENT_MODEL_ENDPOINT:}
 
 # Agent policy gate (ADR-0031 D2/D9). The PDP is now the live OPA sidecar (ADR-0018):
 # agent.policy.enforcement controls D9 (ADR-0031): `advisory` audits every decision but never

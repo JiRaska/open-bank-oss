@@ -9,10 +9,14 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.application.port.`in`.CreateProposalUseCase
 import com.openbank.agent.application.port.out.CatalogRevisionReadPort
+import com.openbank.agent.domain.model.ModelDescriptor
+import com.openbank.agent.domain.model.Sensitivity
 import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.agent.domain.proposal.AgentProposal
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.MDC
+import java.net.URI
 import java.security.MessageDigest
 
 /**
@@ -21,12 +25,20 @@ import java.security.MessageDigest
  * model zero tools, validates a bounded JSON result, and persists only a PROPOSED HITL record.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions")
 class CatalogReviewService(
     private val revisions: CatalogRevisionReadPort,
     private val chat: AgentChatService,
     private val proposals: CreateProposalUseCase,
     private val objectMapper: ObjectMapper,
+    private val gateway: ModelGateway,
 ) {
+
+    @field:ConfigProperty(name = "catalog-review.allow-hosted-models", defaultValue = "false")
+    var allowHostedModels: Boolean = false
+
+    @field:ConfigProperty(name = "catalog-review.gateway-endpoint", defaultValue = "")
+    var gatewayEndpoint: String = ""
 
     class ModelUnavailableException : IllegalStateException("catalog review model is unavailable")
 
@@ -45,7 +57,46 @@ class CatalogReviewService(
 
     data class Result(val proposal: AgentProposal, val review: Review, val contextHash: String)
 
+    data class ModelOption(val id: String, val provider: String, val sensitivity: String)
+    data class Capability(
+        val available: Boolean,
+        val mode: String?,
+        val defaultModel: String?,
+        val models: List<ModelOption>,
+    )
+
+    /** The capability is derived from the live registry and never exposes arbitrary model routing. */
+    fun capability(): Capability {
+        val registered = gateway.availableModels()
+        val eligible = if (allowHostedModels) {
+            registered.filter(::isApprovedHostedRoute)
+        } else {
+            registered.filter { it.sensitivity == Sensitivity.SELF_HOSTED }
+        }
+        val default = if (allowHostedModels) {
+            gateway.defaultModelId().takeIf { id -> eligible.any { it.id == id } }
+        } else {
+            // This matches ModelGateway's existing sensitive-routing behavior: first registered
+            // SELF_HOSTED model is selected regardless of the ordinary chat default.
+            eligible.firstOrNull()?.id
+        }
+        return Capability(
+            available = default != null,
+            mode = when {
+                default == null -> null
+                allowHostedModels -> "sandbox-hosted"
+                else -> "self-hosted"
+            },
+            defaultModel = default,
+            models = eligible.map { ModelOption(it.id, it.provider, it.sensitivity.name) },
+        )
+    }
+
     suspend fun review(offeringId: String, revisionId: String, modelId: String?): Result {
+        val capability = capability()
+        val selectedModel = modelId?.takeIf(String::isNotBlank) ?: capability.defaultModel
+            ?: throw ModelUnavailableException()
+        require(capability.models.any { it.id == selectedModel }) { "model is not eligible for catalog review" }
         val snapshot = revisions.get(offeringId, revisionId)
         require(snapshot.state == DRAFT_STATE) { "only a DRAFT revision can be reviewed" }
         require(snapshot.document.length <= MAX_SNAPSHOT_CHARS) { "catalog revision exceeds review input limit" }
@@ -67,11 +118,12 @@ class CatalogReviewService(
             history = listOf(
                 com.openbank.agent.domain.model.ChatMessage(com.openbank.agent.domain.model.ChatRole.USER, request),
             ),
-            modelId = modelId,
+            modelId = selectedModel,
             trigger = "catalog_review",
             offeredToolNames = emptySet(),
-            // Product drafts may be a private offer. Never route their terms to a hosted model.
-            sensitive = true,
+            // Hosted routing is an explicit catalog-only sandbox opt-in. Other sensitive calls
+            // continue to use ModelGateway's self-hosted routing policy.
+            sensitive = !allowHostedModels,
             proposalExpected = true,
         )
         if (outcome.unavailable) throw ModelUnavailableException()
@@ -147,6 +199,22 @@ class CatalogReviewService(
         .digest(value.toByteArray())
         .joinToString("") { "%02x".format(it) }
 
+    private fun isApprovedHostedRoute(model: ModelDescriptor): Boolean = model.sensitivity == Sensitivity.HOSTED &&
+        model.provider == "openai-compat" &&
+        model.endpoint == gatewayEndpoint &&
+        isInClusterLiteLlmEndpoint(model.endpoint)
+
+    private fun isInClusterLiteLlmEndpoint(endpoint: String?): Boolean {
+        val uri = endpoint?.let { runCatching { URI(it) }.getOrNull() } ?: return false
+        return uri.scheme == "http" &&
+            uri.host?.endsWith(".svc") == true &&
+            uri.port == LITELLM_PORT &&
+            uri.rawPath == "/v1" &&
+            uri.rawUserInfo == null &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null
+    }
+
     private companion object {
         const val DRAFT_STATE = "DRAFT"
         val REVIEW_IDENTITY = AgentIdentity(agentId = "ui-assistant", plane = "control")
@@ -168,5 +236,6 @@ class CatalogReviewService(
         const val MAX_PATH_CHARS = 512
         const val MAX_EVIDENCE_CHARS = 2_000
         const val MAX_RECOMMENDATION_CHARS = 2_000
+        const val LITELLM_PORT = 4_000
     }
 }
