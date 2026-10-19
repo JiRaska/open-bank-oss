@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
@@ -201,7 +202,14 @@ class WithholdingRemittanceSettlementConsumer(
      * idempotency key makes the retry safe. It is never reported as "FAILED to book".
      */
     private suspend fun bookAndSettle(remittanceId: UUID, request: InitiateTransactionRequest) {
-        when (val outcome = transactions.initiate(request).awaitSuspending()) {
+        // Binding failures can retain provider payloads in their cause. Keep only the controlled
+        // uncertainty status before EventRetry logs the exception; cancellation and other failures pass through.
+        val outcome = transactions.initiate(request)
+            .onFailure(TransactionCompletionUncertainException::class.java).transform { failure ->
+                TransactionCompletionUncertainException((failure as TransactionCompletionUncertainException).status)
+            }
+            .awaitSuspending()
+        when (outcome) {
             is TransactionCallOutcome.HttpSuccess -> {
                 remitUseCase.settle(remittanceId).awaitSuspending()
                 log.infof(
@@ -211,6 +219,7 @@ class WithholdingRemittanceSettlementConsumer(
                     outcome.body?.id,
                 )
             }
+
             TransactionCallOutcome.Conflict -> {
                 remitUseCase.settle(remittanceId).awaitSuspending()
                 log.infof(
@@ -218,6 +227,7 @@ class WithholdingRemittanceSettlementConsumer(
                     remittanceId,
                 )
             }
+
             // transaction-service refused the debit itself (400/422): retrying the same bytes cannot help.
             // This branch used to log and RETURN, which ACKED the event: the tax was never paid and the
             // only trace was an ERROR line nothing pages on. Throwing makes the connector dead-letter (#5698).

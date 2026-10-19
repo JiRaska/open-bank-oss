@@ -107,6 +107,29 @@ class LogSanitizationTest {
             .isEqualTo("\"a\\u000ab\\u2028c\\u001bd\\u0085e\"")
     }
 
+    @Test
+    fun `logfmtValue preserves every UTF16 character within fixed field boundaries`() {
+        for (code in Char.MIN_VALUE.code..Char.MAX_VALUE.code) {
+            val value = code.toChar().toString()
+            val line = "before=left value=${value.logfmtValue()} after=right"
+            assertThat(parseLogfmt(line)).containsExactlyEntriesOf(
+                linkedMapOf("before" to "left", "value" to value, "after" to "right"),
+            )
+            assertThat(line.none { it.isISOControl() || it == '\u2028' || it == '\u2029' }).isTrue()
+        }
+    }
+
+    @Test
+    fun `logfmtValue only leaves complete nonempty allowed tokens bare`() {
+        val token = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:/@+-"
+        assertThat(token.logfmtValue()).isEqualTo(token)
+        for (suffix in listOf(" ", "=admin", "\n", "\r", "\u2028", "\u2029", "é", "\"", "\\")) {
+            val value = token + suffix
+            assertThat(value.logfmtValue()).startsWith("\"").endsWith("\"")
+            assertThat(parseLogfmt("value=${value.logfmtValue()}")["value"]).isEqualTo(value)
+        }
+    }
+
     private val hostile = Arb.choice(
         Arb.element('\n', '\r', '\u0085', '\u2028', '\u2029', '\u001b', '\u0000', '\t', '"', '\\', '=', ' ', '-'),
         Arb.char('\u0000'..'\u2fff'),

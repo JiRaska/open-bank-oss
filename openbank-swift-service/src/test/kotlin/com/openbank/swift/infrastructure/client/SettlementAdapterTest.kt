@@ -4,6 +4,7 @@
 
 package com.openbank.swift.infrastructure.client
 
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
@@ -11,8 +12,11 @@ import com.openbank.swift.domain.model.SwiftPriority
 import com.openbank.swift.domain.model.SwiftStatus
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -20,6 +24,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 class SettlementAdapterTest {
@@ -27,13 +32,14 @@ class SettlementAdapterTest {
     private val client = mockk<TransactionServiceClient>()
     private val adapter = SettlementAdapter(client)
 
+    private fun created(id: UUID, status: Int = 201): Response =
+        Response.status(status).entity(TransactionResponse(id = id, status = "COMPLETED")).build()
+
     @Test
     fun `settle returns settled=true with transactionId on HTTP 201`(): Unit = runBlocking {
         val txId = UUID.randomUUID()
         every { client.initiateTransaction(any()) } returns
-            Uni.createFrom().item(
-                Response.status(201).entity(mapOf("id" to txId.toString())).build(),
-            )
+            Uni.createFrom().item(created(txId))
 
         val outcome = adapter.settle(message())
 
@@ -50,9 +56,9 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `settle returns settled=false on non-2xx response`(): Unit = runBlocking {
+    fun `settle returns settled=false when transaction-service refuses with an HTTP error`(): Unit = runBlocking {
         every { client.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(409).build())
+            Uni.createFrom().failure(WebApplicationException(409))
 
         val outcome = adapter.settle(message())
 
@@ -71,10 +77,140 @@ class SettlementAdapterTest {
     }
 
     @Test
+    fun `coroutine cancellation propagates and is not turned into SettlementUnavailableException`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(CancellationException("cancelled"))
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(CancellationException::class.java)
+            .isNotInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `settle accepts 200 and 202 as a booking`(): Unit = runBlocking {
+        listOf(200, 202).forEach { code ->
+            every { client.initiateTransaction(any()) } returns Uni.createFrom().item(created(UUID.randomUUID(), code))
+            assertThat(adapter.settle(message()).settled).describedAs("HTTP %d", code).isTrue()
+        }
+    }
+
+    @Test
+    fun `a partial HTTP 206 response cannot confirm completed settlement`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(created(UUID.randomUUID(), status = 206))
+
+        val outcome = runBlocking { adapter.settle(message()) }
+
+        assertThat(outcome.settled).isFalse()
+        assertThat(outcome.transactionId).isNull()
+    }
+
+    @Test
+    fun `a 204 has unproven completion and is unavailable`() {
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().item(Response.status(204).build())
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @ParameterizedTest
+    @CsvSource("FAILED", "PENDING", "PROCESSING", "INITIATED", "REVERSED", "UNKNOWN")
+    fun `a readable noncompleted transaction never settles the SWIFT message`(status: String) {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(
+                Response.status(201).entity(TransactionResponse(id = UUID.randomUUID(), status = status)).build(),
+            )
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a 201 without a response body has unproven completion`() {
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().item(Response.status(201).build())
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a 2xx with an unreadable body never proves settlement`() {
+        val response = mockk<Response>(relaxed = true)
+        every { response.status } returns 201
+        every { response.hasEntity() } returns true
+        every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException("garbled")
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().item(response)
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a transaction without a completion status never settles`() {
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().item(Response.status(201).entity(TransactionResponse(id = UUID.randomUUID())).build())
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a later completed response reuses the original settlement idempotency key`(): Unit = runBlocking {
+        val msg = message()
+        every { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-${msg.id}" }) } returnsMany
+            listOf(
+                Uni.createFrom().item(
+                    Response.status(201)
+                        .entity(TransactionResponse(id = UUID.randomUUID(), status = "PENDING"))
+                        .build(),
+                ),
+                Uni.createFrom().item(created(UUID.randomUUID())),
+            )
+
+        assertThatThrownBy { runBlocking { adapter.settle(msg) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+        assertThat(adapter.settle(msg).settled).isTrue()
+        verify(exactly = 2) { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-${msg.id}" }) }
+    }
+
+    @Test
+    fun `a 422 refusal leaves the message SENT`(): Unit = runBlocking {
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(WebApplicationException(422))
+
+        assertThat(adapter.settle(message()).settled).isFalse()
+    }
+
+    @Test
+    fun `a 503 is unavailable and does not decide settlement`() {
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(WebApplicationException(503))
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    @Test
+    fun `an unparseable stored value date sends nothing and does not settle`(): Unit = runBlocking {
+        val outcome = adapter.settle(message(valueDate = "2026-06-22"))
+
+        assertThat(outcome.settled).isFalse()
+        verify(exactly = 0) { client.initiateTransaction(any()) }
+    }
+
+    // transaction-service parses valueDate as ISO-8601; the MT103 value date arrives as YYYYMMDD. The
+    // raw string used to go on the wire unchanged and could not be parsed on the other side.
+    @Test
+    fun `settle sends the MT103 YYYYMMDD value date as an ISO date`(): Unit = runBlocking {
+        every { client.initiateTransaction(match { it.valueDate == LocalDate.parse("2026-06-22") }) } returns
+            Uni.createFrom().item(created(UUID.randomUUID()))
+
+        assertThat(adapter.settle(message()).settled).isTrue()
+    }
+
+    @Test
     fun `settle uses idempotency key prefixed with swift-settlement`(): Unit = runBlocking {
         val msgId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         every { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-$msgId" }) } returns
-            Uni.createFrom().item(Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build())
+            Uni.createFrom().item(created(UUID.randomUUID()))
 
         val outcome = adapter.settle(message(id = msgId))
 
@@ -87,9 +223,7 @@ class SettlementAdapterTest {
             client.initiateTransaction(
                 match { it.amount.toPlainString() == "100.00" && it.currencyCode == "EUR" },
             )
-        } returns Uni.createFrom().item(
-            Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build(),
-        )
+        } returns Uni.createFrom().item(created(UUID.randomUUID()))
 
         val outcome = adapter.settle(message(amountMinorUnits = 10_000L))
 
@@ -106,9 +240,7 @@ class SettlementAdapterTest {
         // #11604: main shifted by a fixed two places and booked 1000 yen as 10.00 JPY.
         every {
             client.initiateTransaction(match { it.amount.toPlainString() == booked && it.currencyCode == currency })
-        } returns Uni.createFrom().item(
-            Response.status(201).entity(mapOf("id" to UUID.randomUUID().toString())).build(),
-        )
+        } returns Uni.createFrom().item(created(UUID.randomUUID()))
 
         assertThat(adapter.settle(message(amountMinorUnits = minorUnits, currency = currency)).settled).isTrue()
     }
@@ -118,6 +250,7 @@ class SettlementAdapterTest {
         accountId: UUID? = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         amountMinorUnits: Long = 1_000_00L,
         currency: String = "EUR",
+        valueDate: String = "20260622",
     ) = SwiftMessage(
         id = id,
         idempotencyKey = "test",
@@ -126,7 +259,7 @@ class SettlementAdapterTest {
         receiverBic = "IJKLMNOP",
         transactionReference = "TRX-001",
         relatedReference = null,
-        valueDate = "20260622",
+        valueDate = valueDate,
         amount = SwiftMessage.moneyOfMinorUnits(amountMinorUnits, currency),
         orderingCustomerAccount = "DE89370400440532013000",
         orderingCustomerAccountId = accountId,

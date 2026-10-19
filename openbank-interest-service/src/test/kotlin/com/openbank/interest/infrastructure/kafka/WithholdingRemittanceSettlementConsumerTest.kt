@@ -109,6 +109,30 @@ class WithholdingRemittanceSettlementConsumerTest {
     }
 
     @Test
+    fun `unreadable booking payload is removed before retry logging without changing retry identity`(): Unit =
+        runBlocking {
+            val poison = "synthetic-private-booking-payload"
+            val response = mockk<Response>(relaxed = true)
+            every { response.status } returns 201
+            every { response.hasEntity() } returns true
+            every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException(poison)
+            val requests = mutableListOf<InitiateTransactionRequest>()
+            every { transactionClient.initiateTransaction(capture(requests)) } returns Uni.createFrom().item(response)
+
+            assertThatThrownBy { runBlocking { consumer.consume(record()) } }
+                .isInstanceOfSatisfying(TransactionCompletionUncertainException::class.java) {
+                    assertThat(it.status).isEqualTo(201)
+                    assertThat(it.cause).isNull()
+                    assertThat(it.stackTraceToString()).doesNotContain(poison)
+                }
+
+            verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { response.readEntity(TransactionResponse::class.java) }
+            assertThat(requests).hasSize(EventRetry.DEFAULT_MAX_ATTEMPTS)
+            assertThat(requests.map { it.idempotencyKey }).containsOnly("interest-withholding-$remittanceId")
+            verify(exactly = 0) { remitUseCase.settle(any()) }
+        }
+
+    @Test
     fun `a numeric totalTaxAmount encoding is accepted too`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns

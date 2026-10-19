@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.client
 import com.openbank.account.application.port.out.WelcomeBonusPort
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.api.TransactionsApi
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
@@ -59,8 +60,13 @@ class TransactionServiceClient(@RestClient private val client: TransactionServic
         // facade turned 409/400/422 into outcomes. initiate() returns HttpSuccess only for a readable COMPLETED
         // transaction; any other 2xx is thrown as TransactionCompletionUncertainException (retry, same key).
         when (val outcome = transactions.initiate(request).awaitSuspending()) {
-            is TransactionCallOutcome.HttpSuccess -> Unit
+            is TransactionCallOutcome.HttpSuccess -> {
+                // The former non-null TransactionAck.id rejected a response without a booking id.
+                if (outcome.body?.id == null) throw TransactionCompletionUncertainException(outcome.status)
+            }
+
             TransactionCallOutcome.Conflict -> throw TransactionHttpException(HTTP_CONFLICT)
+
             is TransactionCallOutcome.Rejected -> throw TransactionHttpException(outcome.status)
         }
     }

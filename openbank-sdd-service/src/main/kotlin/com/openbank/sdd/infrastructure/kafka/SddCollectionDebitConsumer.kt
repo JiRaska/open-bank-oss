@@ -7,6 +7,7 @@ package com.openbank.sdd.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.messaging.EventRetry
@@ -77,7 +78,16 @@ class SddCollectionDebitConsumer(
                 // proves nothing (5xx, dropped connection) is thrown by TransactionClient untouched, so
                 // EventRetry retries it - the idempotency key makes that safe - and it is never reported
                 // as "FAILED to debit".
-                when (val outcome = transactions.initiate(request).awaitSuspending()) {
+                // Remove provider payloads retained by binding errors before EventRetry logs them.
+                // Only completion uncertainty is translated; cancellation and other failures pass through.
+                val outcome = transactions.initiate(request)
+                    .onFailure(TransactionCompletionUncertainException::class.java).transform { failure ->
+                        TransactionCompletionUncertainException(
+                            (failure as TransactionCompletionUncertainException).status,
+                        )
+                    }
+                    .awaitSuspending()
+                when (outcome) {
                     is TransactionCallOutcome.HttpSuccess -> log.infof(
                         "[sdd-collection-debit] mandate=%s umr=%s debited (HTTP %d, transaction %s)",
                         mandateId,
@@ -85,11 +95,13 @@ class SddCollectionDebitConsumer(
                         outcome.status,
                         outcome.body?.id,
                     )
+
                     TransactionCallOutcome.Conflict -> log.infof(
                         "[sdd-collection-debit] mandate=%s umr=%s already booked (409) — idempotent success",
                         mandateId,
                         umr,
                     )
+
                     // The rail refused an AUTHORISED collection (400/422). Throwing rather than logging is the
                     // whole point: R-transaction/return generation is not built (#1000), so the only way this
                     // reaches a human is the DLQ.

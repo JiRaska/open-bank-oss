@@ -46,9 +46,11 @@ class TraceContract private constructor(private val spans: List<SpanData>) {
         require(spanNames.isNotEmpty()) { "at least one span name is required" }
         spanNames.forEach(::requiresSpan)
         val traceIds = spans.filter { it.name in spanNames }.map { it.spanContext.traceId }.toSet()
-        assertThat(traceIds)
+        // Assert on the COUNT, not the set: AssertJ appends the actual collection to a hasSize
+        // failure, which would print every trace id this message promises to redact.
+        assertThat(traceIds.size)
             .describedAs("expected named spans to share one trace; trace ids are deliberately redacted")
-            .hasSize(1)
+            .isEqualTo(1)
         successfulAssertions++
         return this
     }

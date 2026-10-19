@@ -75,6 +75,30 @@ class SddCollectionDebitConsumerTest {
     }
 
     @Test
+    fun `unreadable booking payload is removed before retry logging without changing retry identity`(): Unit =
+        runBlocking {
+            val poison = "synthetic-private-booking-payload"
+            val response = mockk<Response>(relaxed = true)
+            every { response.status } returns 201
+            every { response.hasEntity() } returns true
+            every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException(poison)
+            val requests = mutableListOf<InitiateTransactionRequest>()
+            every { transactionClient.initiateTransaction(capture(requests)) } returns Uni.createFrom().item(response)
+
+            assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }
+                .isInstanceOfSatisfying(TransactionCompletionUncertainException::class.java) {
+                    assertThat(it.status).isEqualTo(201)
+                    assertThat(it.cause).isNull()
+                    assertThat(it.stackTraceToString()).doesNotContain(poison)
+                }
+
+            verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { response.readEntity(TransactionResponse::class.java) }
+            assertThat(requests).hasSize(EventRetry.DEFAULT_MAX_ATTEMPTS)
+            assertThat(requests.map { it.idempotencyKey })
+                .containsOnly("so-sdd-$mandateId-UMR-2026-001-2026-07-13")
+        }
+
+    @Test
     fun `a 409 from transaction-service is treated as an idempotent success, no error logged`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
             Uni.createFrom().failure(WebApplicationException(409))
