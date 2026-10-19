@@ -81,6 +81,8 @@ on:
       - "openbank-libs/docs/**"
       # The deploy workflow itself — changes here should immediately trigger a rebuild
       - ".github/workflows/admin-ui-deploy.yml"
+      - "openbank-infra/scripts/build-push-admin-ui.sh"
+      - "openbank-infra/scripts/test-admin-ui-image.sh"
   workflow_dispatch:
     inputs:
       reason:
@@ -963,6 +965,8 @@ jobs:
 
       - name: Collect CI gate-estate health snapshot (ADR-0255)
         id: stage_gate_health
+        # During migration only: configured installations publish this dataset independently.
+        if: vars.ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN == ''
         # Derives gate-health.json from the GitHub Actions API — same read-only,
         # baked-at-build-time shape as prod-readiness above and DORA (ADR-0061):
         # the token this step holds (actions: read, job-scoped) never reaches the
@@ -1020,9 +1024,22 @@ jobs:
                 unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
               done
 
+      - name: Expose short-lived BuildKit cache credentials
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[name];
+              if (!value) throw new Error(`Missing ${name} for cache v2`);
+              core.setSecret(value);
+              core.exportVariable(name, value);
+            }
+
       - name: Build, collect, push
         id: build
         env:
+          ADMIN_UI_BUILDKIT_CACHE: gha
+          ADMIN_UI_BUILD_METADATA_FILE: ${{ runner.temp }}/admin-ui-build-metadata.json
           # The build script's quality collector reads these only to fetch the
           # Pact Broker's per-Pact provider-verification verdict before the
           # immutable Test Intelligence snapshot is baked. Docker receives no
@@ -1057,7 +1074,38 @@ jobs:
           TAG="${PUSHED##*:}"
           [ -n "${TAG}" ] || { echo "ERROR: could not extract pushed image tag"; exit 1; }
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          DIGEST="$(node -e 'const fs=require("node:fs"); const d=JSON.parse(fs.readFileSync(process.env.ADMIN_UI_BUILD_METADATA_FILE,"utf8"))["containerimage.digest"]; if(!/^sha256:[0-9a-f]{64}$/.test(d)) process.exit(1); process.stdout.write(d)')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Pushed tag: ${TAG}"
+
+      - name: Remove BuildKit cache credentials from later steps
+        if: always()
+        run: |
+          echo 'ACTIONS_RUNTIME_TOKEN=' >> "$GITHUB_ENV"
+          echo 'ACTIONS_RESULTS_URL=' >> "$GITHUB_ENV"
+
+      - name: Install image browser probe
+        working-directory: openbank-admin-ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Test the signed image by digest before GitOps promotion
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          bash openbank-infra/scripts/test-admin-ui-image.sh \
+            "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}@${IMAGE_DIGEST}" "$(git rev-parse --short HEAD)"
+
+      - name: Retain image identity and browser proof
+        if: always() && steps.build.outputs.digest != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-ui-image-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/admin-ui-build-metadata.json
+            openbank-admin-ui/test-results/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Summarize collector request-send trace
         if: always()
@@ -1175,6 +1223,9 @@ jobs:
             Auto-deploy from [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
             Triggered by commit ${{ github.sha }} on `main`.
+
+            Browser-tested image digest: `${{ steps.build.outputs.digest }}`.
+            Image identity and browser proof are retained on the linked workflow run.
 
             ## Linked issues
 

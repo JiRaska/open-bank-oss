@@ -4,7 +4,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckCircle2, XCircle, AlertTriangle, Activity, ShieldCheck, Timer } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -13,10 +13,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 // Self-fetching, unlike the page's other cards: this reads /api/devops/gate-health
 // directly rather than being threaded through DevOpsContent's Promise.all, so
 // adding it never risks the existing DORA/test-results/insights load path. The
-// route serves a build-time snapshot (collect-gate-health.mjs, baked at deploy
-// time from the GitHub Actions API — ADR-0061's boundary: no live token in this
-// pod). A missing snapshot degrades to a small inline notice, never the page's
-// full-takeover DataUnavailable — this is one section, not the whole page.
+// The route may serve a runtime evidence snapshot or its identified bundled
+// fallback. Missing or malformed evidence is shown as unknown, never hidden.
 
 interface GateSummary {
   id: string
@@ -52,11 +50,36 @@ interface Estate {
 interface GateHealthResponse {
   available: boolean
   reason?: string | null
+  source?: string
   collectedAt: string | null
   runsInspected?: number
+  gateDetailRunsInspected?: number
   shardHistory?: ShardRun[]
   gates?: GateSummary[]
   estate?: Estate | null
+  evidence?: {
+    state: 'ready' | 'stale' | 'unavailable' | 'bundled'
+    reason?: string
+    provenance?: {
+      collectedAt: string
+      expiresAt: string
+      sourceSha: string
+      runId: number
+      runAttempt?: number
+    }
+  }
+}
+
+type RefreshProblem = 'denied' | 'unavailable' | 'malformed' | 'timeout'
+
+function validAvailableSnapshot(value: unknown): value is GateHealthResponse {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<GateHealthResponse>
+  return candidate.available === true
+    && typeof candidate.collectedAt === 'string'
+    && Number.isFinite(Date.parse(candidate.collectedAt))
+    && Array.isArray(candidate.gates)
+    && Array.isArray(candidate.shardHistory)
 }
 
 function StatCard({ icon, label, value, tone }: {
@@ -83,33 +106,72 @@ export function QualityGateHealthPanel() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GateHealthResponse | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [refreshProblem, setRefreshProblem] = useState<RefreshProblem | null>(null)
+  const [loading, setLoading] = useState(true)
+  const activeRequest = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
+    if (activeRequest.current) return
+    const controller = new AbortController()
+    activeRequest.current = controller
+    let timedOut = false
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort() }, 10_000)
     try {
-      const res = await fetch('/api/devops/gate-health', { cache: 'no-store' })
-      if (!res.ok) { setFailed(true); return }
-      setData(await res.json())
-      setFailed(false)
+      const res = await fetch('/api/devops/gate-health', { cache: 'no-store', signal: controller.signal })
+      if (!res.ok) {
+        if (activeRequest.current === controller) setRefreshProblem(res.status === 401 || res.status === 403 ? 'denied' : 'unavailable')
+        return
+      }
+      let payload: unknown
+      try { payload = await res.json() } catch {
+        if (activeRequest.current === controller) setRefreshProblem('malformed')
+        return
+      }
+      if (controller.signal.aborted || activeRequest.current !== controller) return
+      if (!validAvailableSnapshot(payload)) {
+        const isUnavailable = payload && typeof payload === 'object'
+          && ('available' in payload && payload.available === false || 'evidence' in payload
+            && typeof payload.evidence === 'object' && payload.evidence !== null
+            && 'state' in payload.evidence && payload.evidence.state === 'unavailable')
+        setRefreshProblem(isUnavailable ? 'unavailable' : 'malformed')
+        return
+      }
+      setData(payload)
+      setRefreshProblem(null)
     } catch {
-      setFailed(true)
+      if (activeRequest.current === controller && (!controller.signal.aborted || timedOut)) {
+        setRefreshProblem(timedOut ? 'timeout' : 'unavailable')
+      }
+    } finally {
+      window.clearTimeout(timeout)
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        if (!controller.signal.aborted) setLoading(false)
+      }
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
   useEffect(() => {
-    const id = setInterval(load, 60_000)
-    return () => clearInterval(id)
+    const initial = window.setTimeout(() => { void load() }, 0)
+    const interval = window.setInterval(() => { void load() }, 60_000)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(interval)
+      activeRequest.current?.abort()
+      activeRequest.current = null
+    }
   }, [load])
 
   const title = t('Zdraví CI kvalitativních bran', 'CI quality-gate health')
-  const subtitle = t(
-    'Snímek estate z gates.yaml (ADR-0254/0253) — vytvořeno při buildu z GitHub Actions API, žádný živý token v tomto podu.',
-    'Snapshot of the gates.yaml estate (ADR-0254/0253) — collected at build time from the GitHub Actions API, no live token in this pod.',
-  )
-
-  if (failed) {
-    return null // a route-level failure (not "no snapshot yet") — quiet, the page's own retry loop covers it
+  const subtitle = t('Evidence o kvalitativních branách a jejich bězích (ADR-0255).', 'Evidence about quality gates and their runs (ADR-0255).')
+  const problemText = (problem: RefreshProblem | null) => {
+    switch (problem) {
+      case 'denied': return t('Přístup k důkazům je odepřen. Zkontrolujte své oprávnění a zkuste to znovu.', 'Access to this evidence was denied. Check your permission and try again.')
+      case 'malformed': return t('Zdroj vrátil neplatné důkazy, které nelze ověřit.', 'The source returned evidence that could not be verified.')
+      case 'timeout': return t('Načítání důkazů překročilo časový limit.', 'Evidence refresh timed out.')
+      case 'unavailable': return t('Zdroj důkazů je dočasně nedostupný.', 'The evidence source is temporarily unavailable.')
+      default: return null
+    }
   }
 
   if (!data || !data.available) {
@@ -120,12 +182,15 @@ export function QualityGateHealthPanel() {
           <ShieldCheck size={14} style={{ color: 'var(--text-tertiary)' }} />
           <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
         </div>
-        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '6px' }}>
-          {t(
-            `Snímek zatím není k dispozici${data?.reason ? ` (${data.reason})` : ''} — objeví se po prvním buildu s collect-gate-health.mjs.`,
-            `Snapshot not available yet${data?.reason ? ` (${data.reason})` : ''} — appears after the first build running collect-gate-health.mjs.`,
-          )}
+        <div aria-live="polite" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '6px' }}>
+          {loading
+            ? t('Načítám důkazy o kvalitativních branách…', 'Loading quality-gate evidence…')
+            : t('Důkazy o kvalitativních branách nejsou dostupné. Stav bran nelze ověřit.', 'Quality-gate evidence is unavailable. Gate status cannot be verified.')}
+          {problemText(refreshProblem) && <span> {problemText(refreshProblem)}</span>}
         </div>
+        {!loading && <button type="button" onClick={() => { setLoading(true); void load() }} style={{ marginTop: '8px' }}>
+          {t('Zkusit znovu', 'Try again')}
+        </button>}
       </div>
     )
   }
@@ -138,6 +203,7 @@ export function QualityGateHealthPanel() {
     .sort((a, b) => (b.lastRed!.createdAt).localeCompare(a.lastRed!.createdAt))
     .slice(0, 8)
   const latestShardRun = (data.shardHistory ?? [])[0]
+  const observedAt = data.evidence?.provenance?.collectedAt ?? data.collectedAt ?? ''
 
   return (
     <div style={{ marginBottom: '24px' }}>
@@ -146,6 +212,26 @@ export function QualityGateHealthPanel() {
         <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)' }}>{title}</span>
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>{subtitle}</div>
+
+      {(refreshProblem || data.evidence?.state === 'stale' || data.evidence?.state === 'unavailable') && (
+        <div role="status" style={{ marginBottom: '12px', padding: '9px 12px', borderRadius: '8px',
+          border: '1px solid #fcd34d', background: 'var(--surface-2)', color: 'var(--text-secondary)', fontSize: '12px' }}>
+          {t('Zobrazuji poslední úspěšně načtený snímek; jeho aktuálnost nelze potvrdit.', 'Showing the last successfully loaded snapshot; its freshness cannot be confirmed.')}
+          {refreshProblem && <span> {problemText(refreshProblem)}</span>}
+          <button type="button" onClick={() => { setLoading(true); void load() }} style={{ marginLeft: '8px' }}>
+            {t('Zkusit znovu', 'Try again')}
+          </button>
+        </div>
+      )}
+
+      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '12px' }}>
+        {t('Poslední úspěšné pozorování', 'Last successful observation')}: <time dateTime={observedAt}>{new Date(observedAt).toLocaleString(dateLocale)}</time>
+        {data.evidence?.provenance?.sourceSha && <span> · {t('zdroj', 'source')} {data.evidence.provenance.sourceSha.slice(0, 8)}</span>}
+        {data.evidence?.state === 'bundled' && <span> · {t('záložní snímek', 'bundled snapshot')}</span>}
+        <button type="button" disabled={loading} onClick={() => { setLoading(true); void load() }} style={{ marginLeft: '8px' }}>
+          {t('Obnovit', 'Refresh')}
+        </button>
+      </div>
 
       {estate && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
