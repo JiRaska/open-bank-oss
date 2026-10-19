@@ -248,6 +248,20 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-19** — **Treasury instrument accounts, `V31` (ADR-0344 D7).** 66 new leaf GL accounts (33 per
+  currency, EUR = CZK code + 1) for the treasury posting-rule matrix: securities by IFRS 9 category and
+  their premium/discount, accrued interest per product family, treasury loans, repo payable and reverse
+  repo receivable, derivative assets and liabilities at fair value, the FVOCI reserve (EQUITY), realised
+  and unrealised P&L, and memo pairs (an asset and a contra liability) for forward commitments and repo
+  collateral — the chart has no off-balance type, so a memo journal balances within its pair. Additive
+  only; fixed ids by the V29 convention; no API, role or policy change. **STRIDE-T:** posting still goes
+  only through `POST /api/v1/journals`, balanced per currency, and a line in the wrong currency is 422;
+  `TreasuryInstrumentAccountsPostingIT` posts to every new account in its currency and proves the wrong
+  currency is refused (and fails, naming the account, when a row is removed from the migration).
+  **Residual:** memo accounts appear in the trial balance as asset/liability pairs that always net to
+  zero; reporting that must exclude them filters codes 9xxx. Rollback: delete the rows while no
+  journal line references them.
+
 - **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
   identity (PR #13127).** Previously the deployment projected account-service's `OIDC_CLIENT_SECRET`,
   so its outbound calls authenticated as another service's client. It now authenticates as its own
