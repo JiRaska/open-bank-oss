@@ -105,7 +105,7 @@ describe('PID quick-create recovery', () => {
     const form = await openAndFillQuickCreate()
 
     await act(async () => { fireEvent.submit(form) })
-    await waitFor(() => expect(screen.getByText(new RegExp(`Record created \\(ID: ${PARTY_ID}\\)`))).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Record created, but BankID sync failed temporarily/)).toBeInTheDocument())
 
     const retry = screen.getByRole('button', { name: 'Retry BankID sync' })
     expect(document.getElementById('pid-bankid-sub')).toBeDisabled()

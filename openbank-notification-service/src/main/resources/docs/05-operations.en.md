@@ -109,3 +109,7 @@ An un-parseable payload is logged and acked (it does not wedge the partition). I
 - Per-service path-scoped CI; release-please owns `version.txt` (currently `0.4.0`) and the changelog from Conventional Commits.
 - CI runs tests against an isolated PostgreSQL per test JVM via Testcontainers (#578); Kafka is in-memory in tests (only an `@Incoming` channel), the `@Scheduled` outbox tick is disabled under test.
 - CD via ArgoCD on image-tag bump (GitOps); for image-tag merge conflicts take `--ours`.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

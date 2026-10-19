@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.Base64
 
@@ -88,9 +89,29 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
         }
     }
 
+    /**
+     * The default disposition: a GitHub issue carrying the finding and its diagnosis for the HITL
+     * queue. Same fail-closed shape as [openProposalPr] — no token, no write — and idempotent per
+     * finding KEY (check type, component, file; see [GitHubTicketWriter.findingKey]): an open
+     * `flaky-test` issue carrying the same hidden key marker is returned instead of a duplicate, so
+     * a re-run cannot flood the tracker while distinct findings of one type stay distinct. Until 2026-10-17 this
+     * method only logged, so every "ticket-only" disposition recorded `proposalUrl = null` and the
+     * human queue never saw it.
+     */
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun openTicket(finding: FlakyTestFinding, diagnosis: String): String? {
-        log.infof("No safe automatic change for finding %s; a human triage ticket is required", finding.id)
-        return null
+        if (config.githubToken().orElse("").isBlank()) {
+            log.warnf("flaky-test-hunter.github-token not seeded — no tracking issue opened for %s", finding.id)
+            return null
+        }
+        return try {
+            withContext(Dispatchers.IO) {
+                GitHubTicketWriter(objectMapper, ::send).openOrReuse(finding, diagnosis)
+            }
+        } catch (ex: Exception) {
+            log.warnf("GitHub tracking issue failed for finding %s: %s", finding.id, ex.message)
+            null
+        }
     }
 
     private fun isEligible(finding: FlakyTestFinding, fix: String): Boolean =
@@ -186,6 +207,152 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
         const val REQUEST_TIMEOUT_SECONDS = 30L
         val OK_RANGE = 200..299
     }
+}
+
+/**
+ * The ticket half of the GitHub writer: list open `flaky-test` issues, reuse one with the same
+ * title, else create one. Separate from [GitHubProposalAdapter] so the adapter stays under the
+ * detekt function budget; it shares the adapter's allow-listed, token-bearing `send`.
+ */
+internal class GitHubTicketWriter(
+    private val objectMapper: ObjectMapper,
+    private val send: (method: String, path: String, body: String?) -> EgressResponse?,
+) {
+    fun openOrReuse(finding: FlakyTestFinding, diagnosis: String): String? {
+        val key = FindingKeys.of(finding)
+        return when (val found = lookup(key)) {
+            is Lookup.Found -> found.url
+            Lookup.Unreadable -> null // cannot prove "no duplicate": create nothing, retry next run
+            Lookup.Absent -> create(title(finding, key), finding, diagnosis, key)
+        }
+    }
+
+    private sealed interface Lookup {
+        data class Found(val url: String) : Lookup
+        data object Absent : Lookup
+        data object Unreadable : Lookup
+    }
+
+    /**
+     * Walks EVERY page of open `flaky-test` issues (a first-page-only read hid an existing issue once
+     * the tracker held more than 100, and the finding was re-opened) and matches on the hidden body
+     * marker, never on the title. An unreadable page, or a tracker deeper than [MAX_PAGES], is
+     * [Lookup.Unreadable]: absence is only claimed after the whole list was read.
+     */
+    private fun lookup(key: String): Lookup {
+        val marker = FindingKeys.marker(key)
+        for (page in 1..MAX_PAGES) {
+            val response = send("GET", "/issues?state=open&labels=$TICKET_LABEL&per_page=$PAGE_SIZE&page=$page", null)
+            if (response == null || response.status !in OK_RANGE) return Lookup.Unreadable
+            val issues = objectMapper.readTree(response.bodyAsString())
+            val hit = issues.firstOrNull { !it.has("pull_request") && it.path("body").asText().contains(marker) }
+            val url = hit?.path("html_url")?.asText().orEmpty()
+            if (url.isNotBlank()) return Lookup.Found(url)
+            if (issues.size() < PAGE_SIZE) return Lookup.Absent
+        }
+        return Lookup.Unreadable
+    }
+
+    private fun create(title: String, finding: FlakyTestFinding, diagnosis: String, key: String): String? {
+        val request = objectMapper.writeValueAsString(
+            mapOf("title" to title, "body" to body(finding, diagnosis, key), "labels" to listOf(TICKET_LABEL)),
+        )
+        val response = send("POST", "/issues", request) ?: return null
+        if (response.status !in OK_RANGE) return null
+        return objectMapper.readTree(response.bodyAsString()).path("html_url").asText().takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Structured fields only: the title never carries the finding's free text, and `component` must
+     * look like a module path or it is replaced, so a model-influenced string cannot become the
+     * headline of a public issue. The short key suffix keeps distinct findings of one type in one
+     * module distinguishable at a glance; dedupe itself reads the body marker, not the title.
+     */
+    private fun title(finding: FlakyTestFinding, key: String): String =
+        "$TICKET_TITLE_PREFIX${finding.checkType} in ${safeComponent(finding.component)} [${key.take(KEY_SHORT)}]"
+            .take(TITLE_MAX_CHARS)
+
+    private fun safeComponent(component: String): String =
+        if (COMPONENT_ALLOWLIST.matches(component)) component else "(unrecognised component)"
+
+    /**
+     * The finding text and the diagnosis are untrusted (LLM output; text scanned from test files) and
+     * this issue lands on a PUBLIC tracker. Built line by line with NO indentation-sensitive template:
+     * a `trimIndent` raw string takes its common indent from the interpolated text, so a multi-line
+     * payload could leave the fences indented (rendered as code, not as a fence). Each untrusted block
+     * is contained by a fence longer than any backtick run it holds (backticks are also removed),
+     * with `@` mentions and link schemes neutralised as defence in depth.
+     */
+    private fun body(finding: FlakyTestFinding, diagnosis: String, key: String): String = buildString {
+        appendLine(FindingKeys.marker(key))
+        appendLine("Finding `${finding.id}` (`${finding.checkType}`, ${finding.severity})")
+        appendLine("detected at ${finding.detectedAt}")
+        appendLine("on `${safeComponent(finding.component)}`.")
+        appendLine()
+        appendLine("**Finding**")
+        appendLine()
+        appendFenced(finding.title)
+        appendLine()
+        appendLine("**Diagnosis** (model output, quoted verbatim as untrusted text)")
+        appendLine()
+        appendFenced(diagnosis.take(DIAGNOSIS_MAX_CHARS))
+        appendLine()
+        appendLine("**Measurement**: ${finding.rawMetricValue.toPlainString()} against threshold")
+        appendLine("${finding.threshold.toPlainString()}.")
+        appendLine()
+        appendLine("No bounded mechanical repair exists for this check type, so the agent opened a tracking")
+        appendLine("issue instead of a pull request. A human must read the test's intent before anything")
+        appendLine("changes; the agent never edits a test file (ADR-0168, ADR-0031 D9).")
+    }
+
+    private fun StringBuilder.appendFenced(untrusted: String) {
+        val clean = neutralise(untrusted)
+        val fence = "`".repeat(maxOf(FENCE_MIN, longestBacktickRun(clean) + 1))
+        appendLine("${fence}text")
+        appendLine(clean)
+        appendLine(fence)
+    }
+
+    private fun longestBacktickRun(text: String): Int = Regex("`+").findAll(text).maxOfOrNull { it.value.length } ?: 0
+
+    private fun neutralise(text: String): String = text
+        .replace("`", "'")
+        .replace("@", "(at)")
+        .replace(Regex("(?i)\\b(?:https?|ftp|file)://"), "hxxp://")
+        .replace(Regex("(?i)\\bwww\\."), "www(dot)")
+        .replace("<", "&lt;")
+
+    private companion object {
+        const val TICKET_LABEL = "flaky-test"
+        const val TICKET_TITLE_PREFIX = "flaky-test-hunter: "
+        const val TITLE_MAX_CHARS = 200
+        const val KEY_SHORT = 8
+        const val PAGE_SIZE = 100
+        const val MAX_PAGES = 20
+        const val DIAGNOSIS_MAX_CHARS = 4000
+        const val FENCE_MIN = 3
+        val COMPONENT_ALLOWLIST = Regex("[A-Za-z0-9._/-]{1,200}")
+        val OK_RANGE = 200..299
+    }
+}
+
+/**
+ * Stable across runs, unlike `finding.id` (random per scan): check type, RAW component (so every
+ * `(unrecognised component)` finding keeps its own key) and file path. Evidence findings carry a
+ * per-snapshot `test-intelligence:<snapshot>` path, which is dropped so the same component and
+ * check type dedupe across snapshots.
+ */
+internal object FindingKeys {
+    private const val KEY_LENGTH = 32
+
+    fun of(finding: FlakyTestFinding): String {
+        val path = if (finding.filePath.startsWith("test-intelligence:")) "" else finding.filePath
+        val material = "${finding.checkType}\u0000${finding.component}\u0000$path"
+        return MessageDigest.getInstance("SHA-256").digest(material.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }.take(KEY_LENGTH)
+    }
+
+    fun marker(key: String) = "<!-- flaky-test-hunter:key=$key -->"
 }
 
 /**

@@ -1,5 +1,51 @@
 # Changelog
 
+## [3.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.0...admin-ui-v3.7.1) (2026-10-18)
+
+
+### Security
+
+* **admin-ui:** remove dynamic data from regulatory error logs ([#13288](https://github.com/JiRaska/open-bank-oss/issues/13288)) ([75d35f2](https://github.com/JiRaska/open-bank-oss/commit/75d35f2207bcec7c5d128fecc55a84a69ea13299))
+
+## [3.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.6.0...admin-ui-v3.7.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui,party:** find clients by name, national ID or birth date instead of UUID; fix state incentives ([#13199](https://github.com/JiRaska/open-bank-oss/issues/13199)) ([3c3f742](https://github.com/JiRaska/open-bank-oss/commit/3c3f742dc0c39af010d9fa2fa8a3a7ad34b74713))
+* **admin-ui:** generate the six catalogue-only regulatory reports ([#13219](https://github.com/JiRaska/open-bank-oss/issues/13219)) ([7d73b53](https://github.com/JiRaska/open-bank-oss/commit/7d73b536e278a558487f4c3af3f05bd7da5302fe))
+
+## [3.6.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.2...admin-ui-v3.6.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui:** publish Test Intelligence evidence per running commit ([#13208](https://github.com/JiRaska/open-bank-oss/issues/13208)) ([de6d9ac](https://github.com/JiRaska/open-bank-oss/commit/de6d9ac2c8c02ee8d0b9efb42d4092878e2dece8))
+
+
+### Bug Fixes
+
+* **admin-ui:** join Test Intelligence to the running commit behind one cached snapshot ([#13203](https://github.com/JiRaska/open-bank-oss/issues/13203)) ([5b2ac4e](https://github.com/JiRaska/open-bank-oss/commit/5b2ac4ef59e698368cb3c6fcfe0884fe58ab9f29))
+
+## [3.5.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.1...admin-ui-v3.5.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** drop the inputless weekly sweep and open real tracking issues ([#13155](https://github.com/JiRaska/open-bank-oss/issues/13155)) ([5fd2d53](https://github.com/JiRaska/open-bank-oss/commit/5fd2d5368e48e2f225b0bde1518b52d2b354a209))
+
+## [3.5.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.5.0...admin-ui-v3.5.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** make DWH reports work against the live ClickHouse ([#13218](https://github.com/JiRaska/open-bank-oss/issues/13218)) ([01ad53e](https://github.com/JiRaska/open-bank-oss/commit/01ad53eac2c28997c671160f384b7988c4320e78))
+
+
+### Security
+
+* **notification:** reserve commstemplate.publish for ROLE_COMMS_APPROVER ([#13133](https://github.com/JiRaska/open-bank-oss/issues/13133)) ([de2b093](https://github.com/JiRaska/open-bank-oss/commit/de2b0936fd079f9affd5f24b4eaf7532c54d6f55))
+
 ## [3.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.4.2...admin-ui-v3.5.0) (2026-10-17)
 
 

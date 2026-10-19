@@ -56,11 +56,11 @@ private fun isLogUnsafe(c: Char): Boolean = c.isISOControl() || c == LINE_SEPARA
  * payload is still one `message` string, so its fields need this escaping regardless.
  */
 fun String?.logfmtValue(): String {
-    if (this == null) return "-"
-    if (this != "-" && Pattern.matches("[A-Za-z0-9._:/@+\\-]+", this)) return this
-    return buildString(length + 2) {
+    val value: String = this ?: return "-"
+    if (value != "-" && Pattern.matches("[A-Za-z0-9._:/@+\\-]+", value)) return value
+    return buildString(value.length + 2) {
         append('"')
-        for (c in this@logfmtValue) {
+        for (c in value) {
             when {
                 c == '"' || c == '\\' -> append('\\').append(c)
                 isLogUnsafe(c) -> append("\\u%04x".format(c.code))

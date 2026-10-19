@@ -173,3 +173,7 @@ jinak                                          → PENDING_KYC
 3. **Doménové eventy jako první** — každá změna stavu emituje doménový event; outbox garantuje doručení.
 4. **Minimalizace PII** — rodné číslo zde není nikdy uloženo ani vyhledatelné; vyhledávání podle jména je jediný fuzzy lookup.
 5. **Fail-static závislosti** — bez flagd / bez OPA služba stále obsluhuje provoz (defaulty volajícího / advisory režim).
+
+## Klient transaction-service (ADR-0319)
+
+Čtení seznamu transakcí pro GDPR export přenositelnosti (`TransactionServiceRestClient`) nově rozšiřuje rozhraní `TransactionsApi` vygenerované z `openapi.yaml` transaction-service (modul `openbank-client-transaction`, ADR-0319) místo ručně psaných DTO. Stránka je cursor page, řádky jsou pod klíčem `data`. Consumer pact pro `GET /api/v1/transactions` přehrává transaction-service na každém PR.

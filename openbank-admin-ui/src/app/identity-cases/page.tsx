@@ -374,7 +374,7 @@ export default function IdentityCasesPage() {
       .filter(c => triggerFilter === 'ALL' || c.trigger === triggerFilter)
       .filter(c => {
         if (!normalizedQuery) return true
-        return [c.applicant.givenName, c.applicant.familyName, c.id, ...c.candidatePartyIds]
+        return [c.applicant.givenName, c.applicant.familyName, c.applicant.birthdate ?? '', c.id, ...c.candidatePartyIds]
           .some(value => value.toLocaleLowerCase(language === 'cs' ? 'cs-CZ' : 'en-US').includes(normalizedQuery))
       })
       .sort((a, b) => {
@@ -437,7 +437,7 @@ export default function IdentityCasesPage() {
                 {t('Hledat osobu nebo případ', 'Find a person or case')}
                 <span style={{ position: 'relative' }}>
                   <Search size={14} aria-hidden="true" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-tertiary)' }} />
-                  <input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('Jméno, ID případu nebo party', 'Name, case ID, or party ID')} autoComplete="off" spellCheck={false} style={{ width: '100%', paddingLeft: 30 }} />
+                  <input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('Jméno, příjmení nebo datum narození', 'Name, surname or date of birth')} autoComplete="off" spellCheck={false} style={{ width: '100%', paddingLeft: 30 }} />
                 </span>
               </label>
               <label style={{ display: 'grid', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>

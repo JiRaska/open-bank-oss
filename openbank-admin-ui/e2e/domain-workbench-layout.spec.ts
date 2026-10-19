@@ -24,6 +24,11 @@ test.describe('domain workbench form layout', () => {
       test(`${route} keeps controls inset and the page inside ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 })
         await page.goto(route)
+        if (route === '/treasury/nostro') {
+          // The technical statement-id field lives in an "Advanced" <details>; closed, its input has
+          // no box to measure and its Load button is not in the accessibility tree.
+          await page.getByText(/Pokročilé: otevřít podle technického ID výpisu|Advanced: open by technical statement ID/).click()
+        }
 
         const field = page.locator('.ob-domain-workbench .card').filter({ has: page.locator('input.input, select.input, textarea.input') }).first()
         await expect(field).toBeVisible({ timeout: 15_000 })

@@ -38,3 +38,7 @@ That relationship is a Pact contract (`pacts/openbank-customer-edge-openbank-wea
 - `WealthPactFolderProviderVerificationTest` replays it on every PR against a real Postgres.
 - `WealthNegativeAuthProviderVerificationTest` proves that a caller with no identity gets 401.
 - `WealthPactBrokerProviderVerificationTest` publishes the verification on main-push, so `can-i-deploy` can answer about customer-edge.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
