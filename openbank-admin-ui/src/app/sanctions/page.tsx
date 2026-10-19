@@ -653,6 +653,7 @@ export default function SanctionsPage() {
               idle: t('sanctions-service spí (scale-to-zero), probouzí se…', 'sanctions-service idle (scaled to zero), waking…'),
               down: t('sanctions-service neodpovídá', 'sanctions-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
+              unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
             }}
           />}
         />
@@ -793,12 +794,9 @@ export default function SanctionsPage() {
                                     {t('Čeká na druhého schvalovatele (čtyři oči, ADR-0155)', 'Awaiting a second approver (four-eyes, ADR-0155)')}
                                   </div>
                                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                                    {t('Předejte toto ID jinému operátorovi. Rozhodnutí schválí níže v poli „Schválit žádost“ — vlastní žádost schválit nelze.',
-                                       'Hand this id to another operator. They decide it in the "Decide an approval" box below — nobody can approve their own request.')}
+                                    {t('Druhý operátor žádost najde ve frontě čekajících žádostí níže a rozhodne ji tam — vlastní žádost schválit nelze.',
+                                       'A second operator finds this request in the pending queue below and decides it there — nobody can approve their own request.')}
                                   </div>
-                                  <code style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', wordBreak: 'break-all' }}>
-                                    {pendingApproval.id}
-                                  </code>
                                   <div style={{ display: 'flex', gap: '8px' }}>
                                     <button onClick={() => submitReview(c.id, pendingApproval.id)} disabled={reviewBusy}
                                       style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: 'var(--accent-strong)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
@@ -892,23 +890,30 @@ export default function SanctionsPage() {
                             <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
                               {a.action}{a.makerId ? ` — ${t('žádá', 'asked by')} ${a.makerId}` : ''}
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
-                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString(dateLocale)}` : ''}
-                            </div>
+                            {a.createdAt && (
+                              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                                {new Date(a.createdAt).toLocaleString(dateLocale)}
+                              </div>
+                            )}
                           </div>
-                          <button type="button" onClick={() => setDecideId(a.id)}
-                            style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent',
+                          <button type="button" onClick={() => setDecideId(a.id)} aria-pressed={decideId === a.id}
+                            style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: decideId === a.id ? 'var(--surface-2)' : 'transparent',
                               color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
-                            {t('Vybrat', 'Select')}
+                            {decideId === a.id ? t('Vybráno', 'Selected') : t('Vybrat', 'Select')}
                           </button>
                         </div>
                       ))}
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input id="sanctions-approval-id" aria-label={t('ID žádosti', 'Approval id')} value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
-                      style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
-                        fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
+                    <span id="sanctions-approval-id" role="status" style={{ flex: 1, alignSelf: 'center', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {(() => {
+                        const picked = pendingQueue.find(item => item.id === decideId)
+                        return picked
+                          ? `${t('Vybraná žádost', 'Selected request')}: ${picked.action}`
+                          : t('Vyberte žádost ve frontě výše.', 'Pick a request from the queue above.')
+                      })()}
+                    </span>
                     <button type="button" onClick={event => openApprovalDecision(true, event.currentTarget)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
                       style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: 'var(--success)', color: 'var(--text-inverse)', fontSize: '12px', fontWeight: 600,
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>

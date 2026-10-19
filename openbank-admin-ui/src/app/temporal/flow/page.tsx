@@ -23,12 +23,12 @@ import { PageHeader } from '@/components/ui/PageHeader'
 // ---------------------------------------------------------------------------
 
 interface TemporalMetrics {
-  workflows: { scheduled1h: number; completed1h: number; failed1h: number; timedOut1h: number }
+  workflows: { scheduled1h: number | null; completed1h: number | null; failed1h: number | null; timedOut1h: number | null }
   latency: { activityScheduleToStartMs: number | null; workflowTaskScheduleToStartMs: number | null; serverRequestP99Ms: number | null }
   namespaces: string[]
-  workflowTypes: { namespace: string; workflowType: string; completed1h: number }[]
+  workflowTypes: { namespace: string; workflowType: string; completed1h: number }[] | null
 }
-interface StatusData { available: boolean; temporalDeployed: boolean; metrics: TemporalMetrics | null }
+interface StatusData { available: boolean; temporalDeployed: boolean | null; metrics: TemporalMetrics | null; degraded?: boolean }
 
 const WIDTH = 1180
 const PAD = 30
@@ -46,16 +46,23 @@ export default function TemporalFlowPage() {
     setIsChecking(true)
     try {
       const res = await fetch('/api/temporal/status', { cache: 'no-store' })
-      if (res.ok) setStatus(await res.json())
-      else setStatus({ available: false, temporalDeployed: false, metrics: null })
+      if (res.ok) {
+        const data = await res.json() as Partial<StatusData>
+        setStatus({
+          available: data.available === true,
+          temporalDeployed: data.temporalDeployed === true ? true : data.temporalDeployed === false ? false : null,
+          metrics: data.metrics ?? null,
+          degraded: data.degraded === true,
+        })
+      } else setStatus({ available: false, temporalDeployed: null, metrics: null })
     } catch {
-      setStatus({ available: false, temporalDeployed: false, metrics: null })
+      setStatus({ available: false, temporalDeployed: null, metrics: null })
     } finally { setIsChecking(false) }
   }
   useEffect(() => { load() }, [])
 
   const m = status?.metrics ?? null
-  const deployed = !!status?.temporalDeployed
+  const deployed = status?.temporalDeployed === true
   const failing = (m?.workflows.failed1h ?? 0) > 0 || (m?.workflows.timedOut1h ?? 0) > 0
   const num = (v: number | null | undefined) => (v == null ? '—' : String(v))
 
@@ -108,9 +115,13 @@ export default function TemporalFlowPage() {
         ))}
       </div>
       <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '4px 2px 18px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        {deployed
+        {deployed && !status?.degraded
           ? <>{t('Živé agregátní metriky z Prometheu · namespace', 'Live aggregate metrics from Prometheus · namespaces')}: {status?.metrics?.namespaces?.join(', ') || '—'}</>
-          : <><AlertTriangle size={12} style={{ color: 'var(--warning)' }} /> {t('Temporal není nasazený zde — ságy zobrazeny staticky, živé metriky nedostupné.', 'Temporal is not deployed here — sagas shown statically, live metrics unavailable.')}</>}
+          : <><AlertTriangle size={12} style={{ color: 'var(--warning)' }} /> {deployed && status?.degraded
+            ? t('Temporal je dostupný, ale některé metriky chybí; neověřené hodnoty jsou zobrazeny jako nedostupné.', 'Temporal is detected, but some metrics are unavailable; unverified values are shown as unavailable.')
+            : status?.available && status.temporalDeployed === false
+            ? t('Temporal nebyl v Prometheu nalezen — ságy jsou referenční definice, živé metriky nejsou dostupné.', 'Temporal was not detected by Prometheus — sagas are reference definitions, live metrics are unavailable.')
+            : t('Stav Temporal není dostupný — ságy jsou referenční definice, živé metriky nelze potvrdit.', 'Temporal status is unavailable — sagas are reference definitions; live metrics cannot be confirmed.')}</>}
       </div>
 
       {deployed && (
@@ -119,7 +130,8 @@ export default function TemporalFlowPage() {
           <table className="table"><thead><tr><th>Namespace</th><th>{t('Workflow typ', 'Workflow type')}</th><th>{t('Dokončeno za 1 h', 'Completed in 1h')}</th></tr></thead>
             <tbody>{(m?.workflowTypes ?? []).map(row => <tr key={`${row.namespace}:${row.workflowType}`}><td className="mono">{row.namespace}</td><td className="mono">{row.workflowType}</td><td>{row.completed1h}</td></tr>)}</tbody>
           </table>
-          {(m?.workflowTypes ?? []).length === 0 && <div style={{ padding: 16, color: 'var(--text-secondary)', fontSize: 12 }}>{t('Temporal je scrapeován, ale za poslední hodinu nebyl dokončen žádný workflow.', 'Temporal is scraped, but no workflow completed in the last hour.')}</div>}
+          {m?.workflowTypes === null && <div style={{ padding: 16, color: 'var(--text-secondary)', fontSize: 12 }}>{t('Typy workflow nelze ověřit; dotaz na tuto metriku selhal.', 'Workflow types could not be verified because their metrics query failed.')}</div>}
+          {Array.isArray(m?.workflowTypes) && m.workflowTypes.length === 0 && <div style={{ padding: 16, color: 'var(--text-secondary)', fontSize: 12 }}>{t('Temporal je scrapeován, ale za poslední hodinu nebyl dokončen žádný workflow.', 'Temporal is scraped, but no workflow completed in the last hour.')}</div>}
         </div>
       )}
 

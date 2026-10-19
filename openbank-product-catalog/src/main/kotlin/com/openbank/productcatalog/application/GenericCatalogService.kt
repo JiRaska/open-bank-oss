@@ -234,6 +234,12 @@ class GenericCatalogService(
         repository.findPublished(offeringId, effectiveAt)
             ?: throw CatalogNotFoundException("no published offering $offeringId is effective at $effectiveAt")
 
+    suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision =
+        repository.findPublishedForLegacyProduct(productId, effectiveAt)
+            ?: throw CatalogNotFoundException(
+                "no published revision of legacy product $productId is effective at $effectiveAt",
+            )
+
     private suspend fun validateOrThrow(
         ref: SchemaRef,
         attributes: com.openbank.productcatalog.domain.catalog.CatalogValue.ObjectValue,

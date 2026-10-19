@@ -117,6 +117,9 @@ export interface RunningCommitObservation {
    */
   evidenceCommit?: string
   equivalence?: EvidenceEquivalence
+  /** Newest test/coverage observation and its request-time age, when available. */
+  latestEvidenceAt?: string | null
+  latestEvidenceAgeSeconds?: number | null
 }
 
 export type EvidenceEquivalence = 'identical' | 'tree-equivalent'
@@ -439,8 +442,10 @@ export interface TestCaseHistory {
   name: string
   /** Verified path to the test definition; never a claimed production dependency. */
   testDefinitionPath?: string | null
+  /** Requirement ids the test declares it verifies (`verifies:<scope>/<ref>` convention). */
+  verifies?: string[]
   owner: string
-  state: 'stable' | 'flaky' | 'failing' | 'skipped'
+  state: 'stable' | 'flaky' | 'failing' | 'skipped' | 'stale'
   lastState: 'passed' | 'failed' | 'skipped'
   observations: number
   failureRate: number | null
@@ -490,14 +495,27 @@ export interface TestAgentFinding {
 
 /** Provenance of an evidence payload served by admin-ui: where it came from and how old it is. */
 export interface TestEvidenceMeta {
-  /** Composition of the payload: bundled snapshot only, or overlaid with running-commit evidence. */
-  source: 'bundled' | 'running-commit'
+  /** Whole-response composition; mixed means published/bundled aggregate plus per-running-commit rows. */
+  source: 'bundled' | 'published-snapshot' | 'running-commit' | 'mixed' | 'unavailable'
   /** When the bundled snapshot was collected (null if unknown — never invented). */
   asOf: string | null
   ageSeconds: number | null
   stale: boolean
   /** When admin-ui last assembled this payload (its server-side cache refresh). */
   servedFrom: string
+  dataset: {
+    status: 'ready' | 'stale' | 'unavailable' | 'disabled'
+    sourceSha: string | null
+    runId: number | null
+    runAttempt: number | null
+    snapshot: string | null
+    sha256: string | null
+    collectedAt: string | null
+    expiresAt: string | null
+    pointerExpired: boolean | null
+    snapshotAgeSeconds: number | null
+    error?: string
+  }
   runningCommits: {
     /** Null off-cluster: running commits cannot be read without the Kubernetes API. */
     known: number | null
@@ -505,5 +523,7 @@ export interface TestEvidenceMeta {
     fromStore: number
     /** Of `fromStore`: tested on a different but build-identical commit. */
     fromEquivalentBuild: number
+    fromBundledFallback: number
+    mismatchedEvidence: number
   }
 }

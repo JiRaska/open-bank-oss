@@ -26,12 +26,12 @@ import java.util.UUID
  *   until then, so it consumes the counterparty's CZK limit by its CZK equivalent while
  *   PENDING_APPROVAL, BOOKED or CONFIRMED. `isAsset = false`: it opens no placement-like claim.
  */
-enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
-    MM_PLACEMENT(isAsset = true),
-    MM_BORROWING(isAsset = false),
-    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true),
-    CNB_LOMBARD(isAsset = false, isCnbFacility = true),
-    FX_SPOT(isAsset = false),
+enum class ProductType(val isAsset: Boolean, val accountingClass: String, val isCnbFacility: Boolean = false) {
+    MM_PLACEMENT(isAsset = true, accountingClass = "INTERBANK_PLACEMENT"),
+    MM_BORROWING(isAsset = false, accountingClass = "INTERBANK_BORROWING"),
+    CNB_DEPOSIT_FACILITY(isAsset = true, accountingClass = "CNB_DEPOSIT_FACILITY", isCnbFacility = true),
+    CNB_LOMBARD(isAsset = false, accountingClass = "CNB_LOMBARD_BORROWING", isCnbFacility = true),
+    FX_SPOT(isAsset = false, accountingClass = "FX_SPOT_POSITION"),
 }
 
 /** The bank's side of an FX spot deal, on the FOREIGN currency: BUY = the bank buys it and pays CZK. */

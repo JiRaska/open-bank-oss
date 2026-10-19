@@ -98,6 +98,8 @@ openbank:
     # an empty value and let the operator opt in explicitly.
     packs: ${OPENBANK_CATALOG_PACKS:banking,insurance,retirement}
     bank-v1-compatibility-enabled: ${OPENBANK_CATALOG_BANK_V1_COMPATIBILITY_ENABLED:true}
+    # ADR-0341: seed treasury-instrument and DPS/DIP offerings as DRAFTS (a human checker publishes them).
+    reference-offerings-enabled: ${OPENBANK_CATALOG_REFERENCE_OFFERINGS_ENABLED:true}
     security:
       scope-claim: ${CATALOG_SCOPE_CLAIM:scope}
       read-scope: ${CATALOG_READ_SCOPE:catalog:read}
@@ -151,6 +153,7 @@ openbank:
     catalog:
       packs: ${OPENBANK_CATALOG_PACKS:}
       bank-v1-compatibility-enabled: ${OPENBANK_BANK_V1_COMPATIBILITY_ENABLED:false}
+      reference-offerings-enabled: ${OPENBANK_CATALOG_REFERENCE_OFFERINGS_ENABLED:false}
       require-https-issuer: true
   authz:
     enforce: "false"

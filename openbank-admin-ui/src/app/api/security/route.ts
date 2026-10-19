@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { auth } from '@/auth'
-import { resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 
 // ── Security posture: READ-ONLY consumer of CI-produced results ──────────────
 //
@@ -43,10 +43,14 @@ type Unavailable = {
 //      'security-scanner-service' in the 'security-scanner' namespace.
 //   2. Explicit env override SECURITY_SCANNER_URL (local dev / off-cluster).
 // We NEVER expose scanner URLs to the browser; this entire module is server-side.
-async function scannerBase(): Promise<string | null> {
-  const discovered = await resolveInClusterBaseUrl('security-scanner-service')
-  if (discovered) return discovered
-  return process.env.SECURITY_SCANNER_URL ?? null
+async function scannerBase(): Promise<{ base: string | null; unknown: boolean }> {
+  if (inCluster()) {
+    const resolved = await resolveInClusterService('security-scanner-service')
+    if (resolved.state === 'found') return { base: resolved.baseUrl, unknown: false }
+    if (resolved.state === 'not_found') return { base: null, unknown: false }
+    return { base: null, unknown: true }
+  }
+  return { base: process.env.SECURITY_SCANNER_URL ?? null, unknown: false }
 }
 
 function reportFile(): string {
@@ -66,8 +70,13 @@ async function fromBundle(): Promise<NextResponse | null> {
 }
 
 async function fromScanner(): Promise<NextResponse | null> {
-  const base = await scannerBase()
-  if (!base) return null
+  const resolved = await scannerBase()
+  const { base } = resolved
+  if (!base) {
+    if (!resolved.unknown) return null
+    const payload: Unavailable = { available: false, reason: 'error', detail: 'Service discovery is incomplete; scanner location is unknown' }
+    return NextResponse.json(payload, { status: 200 })
+  }
   // security-scanner is OIDC-gated (quarkus.oidc + @RolesAllowed on its resources), so the
   // read needs the operator's Keycloak bearer relayed server-side — exactly like the generic
   // /api/svc proxy does. Without it the scanner answered 401 and this route surfaced
@@ -110,15 +119,32 @@ async function fromScanner(): Promise<NextResponse | null> {
   } catch (e) {
     // fetch threw → scanner not reachable (not deployed / DNS / refused / timeout).
     const detail = e instanceof Error ? e.message : String(e)
-    const payload: Unavailable = { available: false, reason: 'not_deployed', detail }
+    const payload: Unavailable = { available: false, reason: 'unreachable', detail }
     return NextResponse.json(payload, { status: 200 })
   }
 }
 
 export async function GET() {
-  return (await fromBundle())
-    ?? (await fromScanner())
-    ?? NextResponse.json(
+  const [bundle, scanner] = await Promise.all([fromBundle(), fromScanner()])
+  if (bundle && scanner) {
+    const [bundleBody, scannerBody] = await Promise.all([
+      bundle.clone().json().catch(() => null),
+      scanner.clone().json().catch(() => null),
+    ])
+    // A scanner outage must not hide the last usable report. When both sources
+    // provide reports, compare their source timestamps; request time is not data
+    // freshness. If only one report has a parseable timestamp, prefer that one.
+    if (scannerBody?.available === true && bundleBody?.available === true) {
+      const bundleTime = Date.parse(bundleBody.report?.generatedAt ?? '')
+      const scannerTime = Date.parse(scannerBody.report?.generatedAt ?? '')
+      if (Number.isFinite(scannerTime) && (!Number.isFinite(bundleTime) || scannerTime > bundleTime)) return scanner
+      if (Number.isFinite(bundleTime)) return bundle
+      return scanner
+    }
+    if (bundleBody?.available === true) return bundle
+    return scanner
+  }
+  return bundle ?? scanner ?? NextResponse.json(
       { available: false, reason: 'not_deployed', detail: 'no CI security report bundled and no scanner configured' } satisfies Unavailable,
       { status: 200 },
     )
