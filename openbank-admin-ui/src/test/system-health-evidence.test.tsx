@@ -19,7 +19,7 @@ const entry = { name: 'ledger-service', port: 8101, status: 'UP', reachable: tru
 const response = (services = [entry]) => new Response(JSON.stringify({ services }), { status: 200 })
 const failure = () => new Response('{}', { status: 503 })
 const refresh = () => fireEvent.click(screen.getByRole('button', { name: 'Refresh system health' }))
-const mount = () => render(<LanguageProvider><SystemHealthPage /></LanguageProvider>)
+const mount = (initialLanguage: 'cs' | 'en' = 'en') => render(<LanguageProvider initialLanguage={initialLanguage}><SystemHealthPage /></LanguageProvider>)
 
 beforeEach(() => {
   localStorage.setItem('openbank-language', 'en')
@@ -50,6 +50,28 @@ describe('System Health evidence', () => {
     expect(await screen.findByText('DOWN')).toBeInTheDocument()
     expect(screen.getByText('Unreachable')).toBeInTheDocument()
     expect(screen.queryByText('Service health could not be verified')).not.toBeInTheDocument()
+  })
+
+  it('renders same-named workloads from different namespaces as separate cards', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
+      { ...entry, namespace: 'tenant-a' },
+      { ...entry, namespace: 'tenant-b' },
+    ])))
+    mount()
+
+    expect(await screen.findAllByText('ledger-service')).toHaveLength(2)
+    expect(screen.getByLabelText('Namespace tenant-a')).toBeVisible()
+    expect(screen.getByLabelText('Namespace tenant-b')).toBeVisible()
+    expect(screen.getByText('Healthy').parentElement).toHaveTextContent('2/2')
+  })
+
+  it('localizes the namespace label in Czech', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
+      { ...entry, namespace: 'tenant-a' },
+    ])))
+    mount('cs')
+
+    expect(await screen.findByLabelText('Jmenný prostor tenant-a')).toBeVisible()
   })
 
   it('labels the last successful sample as stale and recovers on retry', async () => {

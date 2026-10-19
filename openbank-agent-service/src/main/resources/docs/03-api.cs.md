@@ -92,3 +92,11 @@ Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kd
 ## Verzování
 
 Hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `openbank-libs`. Verze MCP protokolu (`2024-11-05`) se vyjednává zvlášť při `initialize` a je nezávislá na verzi HTTP API.
+
+## Navazující kontrakt rezervací zůstatku
+
+`get_balance_holds` volá `GET /api/v1/balances/{accountId}/holds` a předává pole `holds` beze změny,
+včetně citlivých důvodů a referencí. Poskytovatel filtruje uvolněné/expirované řádky, ale neuvolňuje
+prostředky. Spotřebitelský Pact pokrývá aktivní rezervaci, prázdný výsledek a předání 401 bez identity;
+kanonický kontraktní test objevuje Pact drift CI. Fixture neprokazují živý token, předání hlavičky
+customer-edge ani produkční rozhodnutí OPA. Poskytovatel zachovává RBAC/OPA i volitelnou kontrolu vlastníka.

@@ -67,3 +67,31 @@ test('a real outage remains visible with a readable narrow summary', async ({ pa
   expect(card!.width).toBeGreaterThanOrEqual(160)
   await page.screenshot({ path: testInfo.outputPath('verified-outage-mobile.png'), fullPage: true })
 })
+
+test('same-named workloads retain distinct namespace and health on narrow cards', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/services/health', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ services: [
+      { ...sample.services[0], namespace: 'tenant-a' },
+      { ...sample.services[0], namespace: 'tenant-b', status: 'DOWN', reachable: false },
+    ] }),
+  }))
+  await page.goto('/system/health')
+  const main = page.locator('main')
+  await expect(main.getByText('ledger-service', { exact: true })).toHaveCount(2)
+  await expect(main.getByText('UP', { exact: true })).toBeVisible()
+  await expect(main.getByText('DOWN', { exact: true })).toBeVisible()
+  await expect(main.getByText('Service health could not be verified')).toHaveCount(0)
+  for (const namespace of ['tenant-a', 'tenant-b']) {
+    const label = main.getByLabel(`Namespace ${namespace}`, { exact: true })
+    await expect(label).toBeVisible()
+    await label.scrollIntoViewIfNeeded()
+    const bounds = await label.boundingBox()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
+  }
+  await expect(main.getByText('Healthy', { exact: true }).locator('..')).toContainText('1/2')
+  await expect(main.getByText('Unreachable', { exact: true }).locator('..')).toContainText('1/2')
+  await page.screenshot({ path: testInfo.outputPath('namespace-health-mobile.png'), fullPage: true })
+})
