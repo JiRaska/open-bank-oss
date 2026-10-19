@@ -30,9 +30,22 @@ enum class InstitutionTransferStatus {
 
     /** Internal, never announced: no readable answer; resolved by a status query by UETR. */
     SUBMISSION_UNKNOWN,
+
+    /**
+     * Internal, terminal for automation: the scheme's answer about this transfer was ambiguous (a
+     * bare 404, a status for another message, or still unknown after the one permitted resend).
+     * Nothing is resent; a human reconciles against the scheme. Counted and alerted.
+     */
+    MANUAL_RECONCILIATION,
     SENT,
     SETTLED,
     REJECTED,
+    ;
+
+    companion object {
+        /** The statuses contract 9.2 publishes; the others are internal and never leave the rail. */
+        val ANNOUNCED: Set<InstitutionTransferStatus> = setOf(ACCEPTED, SENT, SETTLED, REJECTED)
+    }
 }
 
 /** The debtor (this bank) or creditor institution: BIC plus the settlement account at it. */
@@ -79,6 +92,8 @@ data class InstitutionTransfer(
     val messageId: String? = null,
     /** pacs.009 `GrpHdr/CreDtTm`, fixed with [messageId]. */
     val messageCreatedAt: Instant? = null,
+    /** True once the single permitted resend after a typed "unknown to the scheme" was taken. */
+    val resendTaken: Boolean = false,
 ) {
     val currency: String get() = amount.currency.code
 

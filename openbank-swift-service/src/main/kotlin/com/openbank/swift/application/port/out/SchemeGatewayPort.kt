@@ -28,12 +28,32 @@ interface SchemeGatewayPort {
         throw UnsupportedOperationException("this gateway does not carry bank-own transfers")
 
     /**
-     * Ask the scheme what it holds for [transfer]'s UETR — read-only. `null` = no record, so the
-     * transfer never arrived; otherwise its verdict. [SchemeGatewayUnavailableException] when the
-     * scheme cannot answer.
+     * Ask the scheme what it holds for [transfer]'s UETR — read-only. The answer is trusted only
+     * when it is unambiguous: [SchemeStatus.Known] carries a status report that names this
+     * transfer's own MsgId and UETR; [SchemeStatus.NotKnown] only for the scheme's TYPED
+     * "unknown UETR" answer; everything else (a bare 404, a report about another message) is
+     * [SchemeStatus.Ambiguous]. [SchemeGatewayUnavailableException] when no answer was obtained.
      */
-    suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): InstitutionTransferSubmission? =
+    suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus =
         throw UnsupportedOperationException("this gateway does not carry bank-own transfers")
+}
+
+/** What a status query established about a submitted `pacs.009`. */
+sealed interface SchemeStatus {
+    data class Known(val submission: InstitutionTransferSubmission) : SchemeStatus
+
+    /** The scheme's typed answer that it never received this UETR — the only licence to resend. */
+    data object NotKnown : SchemeStatus
+
+    data class Ambiguous(val why: String) : SchemeStatus
+
+    companion object {
+        /** [Ambiguous.why] for a 404 without the scheme's typed body. */
+        const val UNTYPED_NOT_FOUND: String = "untyped 404"
+
+        /** [Ambiguous.why] for a status report about another MsgId / UETR. */
+        const val MISMATCHED: String = "status report for another message"
+    }
 }
 
 /** The scheme's verdict on a `pacs.009`, from the `pacs.002` `TxSts`. */

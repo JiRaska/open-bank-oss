@@ -18,6 +18,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.hibernate.reactive.mutiny.Mutiny
 import java.util.UUID
 
 /**
@@ -52,35 +53,66 @@ class InstitutionTransferRepositoryImpl(private val outboxRepoImpl: SwiftOutboxR
         }.flatMap { entity -> persistAll(outbox).replaceWith(entity) }
     }.awaitSuspending().toDomain()
 
-    override suspend fun hasRejection(paymentId: UUID): Boolean = Panache.withSession {
-        Panache.getSession().flatMap { it.find(InstitutionTransferRejectionEntity::class.java, paymentId) }
-    }.awaitSuspending() != null
+    private companion object {
+        const val OUTCOME_TRANSFER = "TRANSFER"
+        const val OUTCOME_REJECTION = "REJECTION"
+    }
 
     /**
-     * One transaction: a transfer already stored under the payment id or idempotency key means the
-     * payment is KNOWN, and a stale replay must never announce it REJECTED — nothing is written.
+     * The claim decides, inside the transaction that writes the outcome, which of the two paths
+     * owns a payment: `INSERT ... ON CONFLICT DO NOTHING` on `swift_institution_transfer_claims`
+     * (payment id PK, idempotency key UNIQUE). Concurrent claimants serialise on the unique index;
+     * the loser inserts zero rows and writes NOTHING — no row, no event.
      */
+    @Suppress("MagicNumber") // positional SQL parameters
+    private fun claim(session: Mutiny.Session, paymentId: UUID, key: String?, outcome: String): Uni<Boolean> =
+        session.createNativeQuery<Any>(
+            "INSERT INTO swift_institution_transfer_claims (payment_id, idempotency_key, outcome, created_at) " +
+                "VALUES (?1, ?2, ?3, now()) ON CONFLICT DO NOTHING",
+        ).setParameter(1, paymentId).setParameter(2, key).setParameter(3, outcome)
+            .executeUpdate()
+            .map { it == 1 }
+
+    override suspend fun insertClaimed(transfer: InstitutionTransfer, outbox: List<SwiftOutboxMessage>): Boolean =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                claim(session, transfer.paymentId, transfer.idempotencyKey, OUTCOME_TRANSFER).flatMap { won ->
+                    if (!won) {
+                        Uni.createFrom().item(false)
+                    } else {
+                        session.merge(InstitutionTransferEntity().apply { applyFrom(transfer) })
+                            .flatMap { persistAll(outbox) }
+                            .replaceWith(true)
+                    }
+                }
+            }
+        }.awaitSuspending()
+
     override suspend fun recordRejectionOnce(
         rejection: InstitutionTransferRejection,
         outbox: SwiftOutboxMessage,
     ): Boolean = Panache.withTransaction {
         Panache.getSession().flatMap { session ->
-            find("paymentId = ?1 or idempotencyKey = ?2", rejection.paymentId, rejection.idempotencyKey ?: "")
-                .firstResult()
-                .flatMap { known ->
-                    session.find(
-                        InstitutionTransferRejectionEntity::class.java,
-                        rejection.paymentId,
-                    ).flatMap { existing ->
-                        if (known != null || existing != null) {
-                            Uni.createFrom().item(false)
-                        } else {
-                            session.merge(rejection.toEntity())
-                                .flatMap { outboxRepoImpl.persistWithinCurrentTransaction(outbox) }
-                                .replaceWith(true)
-                        }
-                    }
+            claim(session, rejection.paymentId, rejection.idempotencyKey, OUTCOME_REJECTION).flatMap { won ->
+                if (!won) {
+                    Uni.createFrom().item(false)
+                } else {
+                    session.merge(rejection.toEntity())
+                        .flatMap { outboxRepoImpl.persistWithinCurrentTransaction(outbox) }
+                        .replaceWith(true)
                 }
+            }
+        }
+    }.awaitSuspending()
+
+    /** Optimistic: only the caller holding the current version, and only once, may take it. */
+    override suspend fun takeResendMarker(transfer: InstitutionTransfer): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Any>(
+                "UPDATE swift_institution_transfers SET resend_taken = TRUE, version = version + 1 " +
+                    "WHERE id = ?1 AND version = ?2 AND resend_taken = FALSE " +
+                    "AND status IN ('SUBMITTING', 'SUBMISSION_UNKNOWN')",
+            ).setParameter(1, transfer.id).setParameter(2, transfer.version).executeUpdate().map { it == 1 }
         }
     }.awaitSuspending()
 

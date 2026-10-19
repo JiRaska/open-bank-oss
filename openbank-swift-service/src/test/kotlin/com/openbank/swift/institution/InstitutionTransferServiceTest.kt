@@ -5,17 +5,21 @@
 package com.openbank.swift.institution
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.swift.application.port.out.InstitutionTransferMetrics
 import com.openbank.swift.application.port.out.InstitutionTransferRejection
 import com.openbank.swift.application.port.out.InstitutionTransferRepository
 import com.openbank.swift.application.port.out.InstitutionTransferSubmission
 import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.NonConformingMessageException
+import com.openbank.swift.application.port.out.ReconciliationCause
 import com.openbank.swift.application.port.out.SchemeGatewayPort
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.swift.application.port.out.SchemeStatus
 import com.openbank.swift.application.port.out.SwiftOutboxMessage
 import com.openbank.swift.application.usecase.InstitutionTransferRefusedException
 import com.openbank.swift.application.usecase.InstitutionTransferService
 import com.openbank.swift.domain.institution.InstitutionTransfer
+import com.openbank.swift.domain.institution.InstitutionTransferRail
 import com.openbank.swift.domain.institution.InstitutionTransferStatus
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.institution.InstitutionTransferFixtures.parsed
@@ -31,10 +35,19 @@ import java.util.UUID
 class InstitutionTransferServiceTest {
 
     /** In-memory repository with the real "one rejection per payment id" rule. */
+    /** In-memory repository with the real claim rule: one owner per payment id / key, either outcome. */
     private class FakeRepo : InstitutionTransferRepository {
         val rows = linkedMapOf<UUID, InstitutionTransfer>()
         val outbox = mutableListOf<SwiftOutboxMessage>()
         val rejections = linkedMapOf<UUID, InstitutionTransferRejection>()
+        val claims = linkedMapOf<UUID, Pair<String?, String>>()
+        var stealNextResend = false
+
+        private fun claim(paymentId: UUID, key: String?, outcome: String): Boolean {
+            if (claims.containsKey(paymentId) || (key != null && claims.values.any { it.first == key })) return false
+            claims[paymentId] = key to outcome
+            return true
+        }
 
         override suspend fun findByIdempotencyKey(key: String) = rows.values.firstOrNull { it.idempotencyKey == key }
         override suspend fun findByPaymentId(paymentId: UUID) = rows.values.firstOrNull { it.paymentId == paymentId }
@@ -42,23 +55,34 @@ class InstitutionTransferServiceTest {
             transfer: InstitutionTransfer,
             outbox: List<SwiftOutboxMessage>,
         ): InstitutionTransfer {
-            rows[transfer.id] = transfer
+            val saved = transfer.copy(version = (rows[transfer.id]?.version ?: -1) + 1)
+            rows[transfer.id] = saved
             this.outbox += outbox
-            return transfer
+            return saved
         }
-        override suspend fun hasRejection(paymentId: UUID) = rejections.containsKey(paymentId)
-
+        override suspend fun insertClaimed(transfer: InstitutionTransfer, outbox: List<SwiftOutboxMessage>): Boolean {
+            if (!claim(transfer.paymentId, transfer.idempotencyKey, "TRANSFER")) return false
+            saveWithOutbox(transfer, outbox)
+            return true
+        }
         override suspend fun recordRejectionOnce(
             rejection: InstitutionTransferRejection,
             outbox: SwiftOutboxMessage,
         ): Boolean {
-            val known = rows.values.any {
-                it.paymentId == rejection.paymentId ||
-                    it.idempotencyKey == rejection.idempotencyKey
-            }
-            if (known || rejections.containsKey(rejection.paymentId)) return false
+            if (!claim(rejection.paymentId, rejection.idempotencyKey, "REJECTION")) return false
             rejections[rejection.paymentId] = rejection
             this.outbox += outbox
+            return true
+        }
+        override suspend fun takeResendMarker(transfer: InstitutionTransfer): Boolean {
+            val current = rows[transfer.id] ?: return false
+            if (stealNextResend) {
+                rows[transfer.id] = current.copy(resendTaken = true, version = current.version + 1)
+                stealNextResend = false
+            }
+            val now = rows.getValue(transfer.id)
+            if (now.version != transfer.version || now.resendTaken) return false
+            rows[transfer.id] = now.copy(resendTaken = true, version = now.version + 1)
             return true
         }
     }
@@ -66,13 +90,14 @@ class InstitutionTransferServiceTest {
     /**
      * A scheme with the clearing simulator's real property: it remembers what it took, by UETR.
      * [timeoutAfterAccept] makes it take the transfer and then lose the answer — the case an
-     * automatic retry would turn into a second payment.
+     * automatic retry would turn into a second payment. [queryAnswer] overrides the status reply.
      */
     private class Gateway(var next: () -> InstitutionTransferSubmission) : SchemeGatewayPort {
         var calls = 0
         var queries = 0
         var timeoutAfterAccept = false
         var queryUnavailable = false
+        var queryAnswer: SchemeStatus? = null
         val taken = linkedMapOf<String, InstitutionTransferSubmission>()
         val identities = mutableListOf<Pair<String?, java.time.Instant?>>()
         override suspend fun submit(message: SwiftMessage) = error("not used")
@@ -83,26 +108,29 @@ class InstitutionTransferServiceTest {
             if (timeoutAfterAccept) throw SchemeGatewayUnavailableException(RuntimeException("read timeout"))
             return answer
         }
-        override suspend fun queryInstitutionTransferStatus(
-            transfer: InstitutionTransfer,
-        ): InstitutionTransferSubmission? {
+        override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus {
             queries++
             if (queryUnavailable) throw SchemeGatewayUnavailableException(RuntimeException("down"))
-            return taken[transfer.uetr]
+            queryAnswer?.let { return it }
+            return taken[transfer.uetr]?.let { SchemeStatus.Known(it) } ?: SchemeStatus.NotKnown
+        }
+    }
+
+    private class Metrics : InstitutionTransferMetrics {
+        val stops = mutableListOf<ReconciliationCause>()
+        override fun manualReconciliation(rail: InstitutionTransferRail, cause: ReconciliationCause) {
+            stops += cause
         }
     }
 
     private val mapper = ObjectMapper()
     private val repo = FakeRepo()
+    private val metrics = Metrics()
     private val gateway =
         Gateway { InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, "<pacs009/>") }
-    private val service = InstitutionTransferService(
-        repo,
-        gateway,
-        mapper,
-        Clock.fixed(InstitutionTransferFixtures.NOW, ZoneOffset.UTC),
-        1,
-    )
+    private fun service(clock: Clock = Clock.fixed(InstitutionTransferFixtures.NOW, ZoneOffset.UTC)) =
+        InstitutionTransferService(repo, gateway, metrics, mapper, clock, 1)
+    private val service = service()
 
     private fun statuses() = repo.outbox.map { mapper.readTree(it.payload).path("status").asText() }
 
@@ -222,6 +250,7 @@ class InstitutionTransferServiceTest {
             val later = InstitutionTransferService(
                 repo,
                 gateway,
+                metrics,
                 mapper,
                 Clock.fixed(InstitutionTransferFixtures.NOW.plus(java.time.Duration.ofDays(10)), ZoneOffset.UTC),
                 1,
@@ -238,7 +267,7 @@ class InstitutionTransferServiceTest {
         assertThatThrownBy { runBlocking { service.onReleased(parsed(release(paymentId = id, amount = "0.00"))) } }
             .isInstanceOf(InstitutionTransferRefusedException::class.java)
         assertThatThrownBy { runBlocking { service.onReleased(parsed(release(paymentId = id))) } }
-            .isInstanceOf(InstitutionTransferRefusedException::class.java).hasMessageContaining("already rejected")
+            .isInstanceOf(InstitutionTransferRefusedException::class.java).hasMessageContaining("already claimed")
         assertThat(repo.rows).isEmpty()
         assertThat(gateway.calls).isZero()
         assertThat(statuses()).containsExactly("REJECTED")
@@ -295,5 +324,97 @@ class InstitutionTransferServiceTest {
         assertThatThrownBy { runBlocking { service.onReleased(parsed(release(extra = mapOf("paymentId" to "x")))) } }
             .isInstanceOf(InstitutionTransferRefusedException::class.java)
         assertThat(repo.outbox).isEmpty()
+    }
+
+    private suspend fun leaveUnknown(m: Map<String, Any?>) {
+        gateway.timeoutAfterAccept = true
+        assertThatThrownBy {
+            runBlocking { service.onReleased(parsed(m)) }
+        }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+        gateway.timeoutAfterAccept = false
+        assertThat(repo.rows.values.single().status).isEqualTo(InstitutionTransferStatus.SUBMISSION_UNKNOWN)
+    }
+
+    @Test
+    fun `an untyped 404 from the status query stops in MANUAL_RECONCILIATION and is never resent`(): Unit =
+        runBlocking {
+            val m = release()
+            leaveUnknown(m)
+            gateway.queryAnswer = SchemeStatus.Ambiguous(SchemeStatus.UNTYPED_NOT_FOUND)
+            assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+            assertThat(gateway.calls).isEqualTo(1)
+            assertThat(metrics.stops).containsExactly(ReconciliationCause.UNTYPED_NOT_FOUND)
+            assertThat(statuses()).containsExactly("ACCEPTED")
+            // Terminal for automation: a further replay does nothing.
+            assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+            assertThat(gateway.queries).isEqualTo(1)
+        }
+
+    @Test
+    fun `a status report about another message stops in MANUAL_RECONCILIATION`(): Unit = runBlocking {
+        val m = release()
+        leaveUnknown(m)
+        gateway.queryAnswer = SchemeStatus.Ambiguous(SchemeStatus.MISMATCHED)
+        assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+        assertThat(metrics.stops).containsExactly(ReconciliationCause.MISMATCHED_STATUS)
+        assertThat(gateway.calls).isEqualTo(1)
+    }
+
+    @Test
+    fun `a typed not-known licenses exactly one resend, and still unknown after it stops for a human`(): Unit =
+        runBlocking {
+            val m = release()
+            gateway.next = { throw SchemeGatewayUnavailableException(RuntimeException("connect refused")) }
+            assertThatThrownBy {
+                runBlocking { service.onReleased(parsed(m)) }
+            }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            // The resend also fails to get an answer…
+            assertThatThrownBy {
+                runBlocking { service.onReleased(parsed(m)) }
+            }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            assertThat(gateway.calls).isEqualTo(2)
+            assertThat(repo.rows.values.single().resendTaken).isTrue()
+            // …and the scheme still does not know it: no third send.
+            assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+            assertThat(gateway.calls).isEqualTo(2)
+            assertThat(metrics.stops).containsExactly(ReconciliationCause.UNKNOWN_AFTER_RESEND)
+        }
+
+    @Test
+    fun `a resend marker taken by another worker stops in MANUAL_RECONCILIATION without sending`(): Unit = runBlocking {
+        val m = release()
+        gateway.next = { throw SchemeGatewayUnavailableException(RuntimeException("connect refused")) }
+        assertThatThrownBy {
+            runBlocking { service.onReleased(parsed(m)) }
+        }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+        repo.stealNextResend = true
+        assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+        assertThat(gateway.calls).isEqualTo(1)
+        assertThat(metrics.stops).containsExactly(ReconciliationCause.RESEND_CONTENDED)
+    }
+
+    @Test
+    fun `a rejection that won the claim keeps a later valid release from becoming a transfer`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        val m = release(paymentId = id)
+        // The rejection path claims first (e.g. an invalid replay processed concurrently).
+        assertThat(
+            repo.recordRejectionOnce(
+                InstitutionTransferRejection(
+                    id,
+                    m["idempotencyKey"] as String,
+                    "FF01",
+                    "x",
+                    false,
+                    InstitutionTransferFixtures.NOW,
+                ),
+                SwiftOutboxMessage(aggregateId = id, eventType = "t", payload = "{}"),
+            ),
+        ).isTrue()
+        assertThatThrownBy { runBlocking { service.onReleased(parsed(m)) } }
+            .isInstanceOf(InstitutionTransferRefusedException::class.java).hasMessageContaining("already claimed")
+        assertThat(repo.rows).isEmpty()
+        assertThat(repo.claims).hasSize(1)
+        assertThat(gateway.calls).isZero()
     }
 }

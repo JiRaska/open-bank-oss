@@ -269,6 +269,9 @@ class ClearingSimulatorPactConsumerTest {
         .method("GET")
         .willRespondWith()
         .status(404)
+        .headers(mapOf("Content-Type" to "application/json"))
+        // The TYPED not-found the rail requires before it may resend; a bare 404 is ambiguity.
+        .body("""{"code":"UNKNOWN_UETR","uetr":"9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f"}""", "application/json")
         .toPact()
 
     @Test
@@ -279,5 +282,6 @@ class ClearingSimulatorPactConsumerTest {
             .get("/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f")
             .then()
             .statusCode(404)
+            .body("code", org.hamcrest.Matchers.equalTo("UNKNOWN_UETR"))
     }
 }

@@ -11,6 +11,8 @@ import com.openbank.libs.iso20022.Pacs009Builder
 import com.openbank.swift.application.port.out.InstitutionTransferSubmission
 import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.SchemeGatewayPort
+import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.swift.application.port.out.SchemeStatus
 import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.infrastructure.client.Pacs009InstructionMapper
@@ -83,12 +85,29 @@ class InstitutionTransferRailIT {
         override suspend fun submitInstitutionTransfer(transfer: InstitutionTransfer): InstitutionTransferSubmission {
             val xml = Pacs009Builder().build(Pacs009InstructionMapper.instruction(transfer))
             check(validator.validate(xml) == Iso20022ValidationResult.Valid) { "pacs.009 failed its XSD" }
+            taken[transfer.uetr]?.let { return it }
             val rejected = transfer.amount.amount.toPlainString().endsWith(".01")
-            return if (rejected) {
+            val answer = if (rejected) {
                 InstitutionTransferSubmission(InstitutionTransferVerdict.REJECTED, "AC04", xml)
             } else {
                 InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, xml)
             }
+            taken[transfer.uetr] = answer
+            submissions.incrementAndGet()
+            // Amount remainder 07: the scheme TAKES it and the answer is lost (read timeout).
+            if (transfer.amount.amount.toPlainString().endsWith(".07") && loseNextAnswer.getAndSet(false)) {
+                throw SchemeGatewayUnavailableException(RuntimeException("read timeout after accept"))
+            }
+            return answer
+        }
+
+        override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus =
+            taken[transfer.uetr]?.let { SchemeStatus.Known(it) } ?: SchemeStatus.NotKnown
+
+        companion object {
+            val taken = java.util.concurrent.ConcurrentHashMap<String, InstitutionTransferSubmission>()
+            val submissions = java.util.concurrent.atomic.AtomicInteger()
+            val loseNextAnswer = java.util.concurrent.atomic.AtomicBoolean(true)
         }
     }
 
@@ -197,6 +216,20 @@ class InstitutionTransferRailIT {
     @Test
     fun `unparseable JSON is nacked for the DLQ`() {
         assertThat(deliver("{not json")).isFalse()
+    }
+
+    @Test
+    fun `a timeout after the scheme took it settles exactly once, resolved by status query`() {
+        val m = release(amount = "4000.07")
+        val paymentId = UUID.fromString(m["paymentId"] as String)
+        val before = DeterministicScheme.submissions.get()
+        // The consumer's bounded in-process retry re-enters the service, which finds the transfer
+        // SUBMISSION_UNKNOWN and asks the scheme by UETR instead of sending again.
+        assertThat(deliver(InstitutionTransferFixtures.json(m))).describedAs("resolved within the delivery").isTrue()
+        assertThat(transferRow(paymentId)!!.status).isEqualTo("SETTLED")
+        assertThat(deliver(InstitutionTransferFixtures.json(m))).describedAs("a later replay is a no-op").isTrue()
+        assertThat(DeterministicScheme.submissions.get() - before).describedAs("one submission, never two").isEqualTo(1)
+        assertThat(outbox(paymentId).map { it.status }).containsExactly("ACCEPTED", "SENT", "SETTLED")
     }
 
     private data class Row(

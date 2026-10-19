@@ -29,8 +29,7 @@ class InstitutionTransferSchemaContractTest {
 
     @Test
     fun `every status event the rail can emit conforms to the 9_2 schema`() {
-        val announced = InstitutionTransferStatus.entries -
-            setOf(InstitutionTransferStatus.SUBMITTING, InstitutionTransferStatus.SUBMISSION_UNKNOWN)
+        val announced = InstitutionTransferStatus.ANNOUNCED
         for (status in announced) {
             for (ssi in listOf(null, 3L)) {
                 val event = InstitutionTransferStatusChanged(

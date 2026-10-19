@@ -117,6 +117,9 @@ class InstitutionTransferEntity {
     @field:Column(name = "message_created_at")
     var messageCreatedAt: Instant? = null
 
+    @field:Column(name = "resend_taken")
+    var resendTaken: Boolean = false
+
     @field:Version
     @field:Column(name = "version")
     var version: Long = 0

@@ -13,6 +13,7 @@ import com.openbank.libs.iso20022.PaymentStatusReport
 import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.NonConformingMessageException
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.swift.application.port.out.SchemeStatus
 import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.infrastructure.client.ClearingSimulatorClient
 import com.openbank.swift.infrastructure.client.SchemeGatewayAdapter
@@ -91,21 +92,81 @@ class InstitutionTransferGatewayTest {
         assertThat(query.getAnnotation(org.eclipse.microprofile.faulttolerance.Retry::class.java)).isNotNull()
     }
 
+    private fun submitted() = transfer().let { it.copy(messageId = InstitutionTransfer.messageIdFor(it)) }
+
+    private fun statusFor(t: InstitutionTransfer, uetr: String = t.uetr, msgId: String? = t.messageId) =
+        Pacs002Builder().build(
+            PaymentStatusReport(
+                "SIM-STS-1",
+                OffsetDateTime.now(ZoneOffset.UTC),
+                "E2E",
+                null,
+                PaymentStatus.ACSC,
+                originalMessageId = msgId,
+                originalMessageNameId = "pacs.009.001.08",
+                originalUetr = uetr,
+            ),
+        )
+
+    private fun notFound(body: String?): Uni<String> {
+        val response = jakarta.ws.rs.core.Response.status(404).apply { body?.let { entity(it) } }.build()
+        return Uni.createFrom().failure(jakarta.ws.rs.WebApplicationException(response))
+    }
+
     @Test
-    fun `a status query maps the scheme's pacs_002 and a 404 means no record`(): Unit = runBlocking {
-        val t = transfer()
-        every { client.institutionTransferStatus(t.uetr) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
-        assertThat(adapter.queryInstitutionTransferStatus(t)!!.verdict).isEqualTo(InstitutionTransferVerdict.SETTLED)
+    fun `a status naming this MsgId and UETR is Known`(): Unit = runBlocking {
+        val t = submitted()
+        every { client.institutionTransferStatus(t.uetr) } returns Uni.createFrom().item(statusFor(t))
+        val known = adapter.queryInstitutionTransferStatus(t) as SchemeStatus.Known
+        assertThat(known.submission.verdict).isEqualTo(InstitutionTransferVerdict.SETTLED)
+    }
+
+    @Test
+    fun `a status naming another UETR or MsgId, or none, is Ambiguous`(): Unit = runBlocking {
+        val t = submitted()
+        for (xml in listOf(
+            statusFor(t, uetr = "00000000-0000-4000-8000-000000000000"),
+            statusFor(t, msgId = "FI-SOMETHINGELSE"),
+            statusFor(t, msgId = null),
+        )) {
+            every { client.institutionTransferStatus(t.uetr) } returns Uni.createFrom().item(xml)
+            assertThat(
+                adapter.queryInstitutionTransferStatus(t),
+            ).isEqualTo(SchemeStatus.Ambiguous(SchemeStatus.MISMATCHED))
+        }
+    }
+
+    @Test
+    fun `only the typed UNKNOWN_UETR 404 for this UETR is NotKnown, any other 404 is Ambiguous`(): Unit = runBlocking {
+        val t = submitted()
         every { client.institutionTransferStatus(t.uetr) } returns
-            Uni.createFrom().failure(jakarta.ws.rs.WebApplicationException(404))
-        assertThat(adapter.queryInstitutionTransferStatus(t)).isNull()
-        every { client.institutionTransferStatus(t.uetr) } returns
-            Uni.createFrom().failure(jakarta.ws.rs.WebApplicationException(503))
-        assertThatThrownBy { runBlocking { adapter.queryInstitutionTransferStatus(t) } }
-            .isInstanceOf(SchemeGatewayUnavailableException::class.java)
-        every { client.institutionTransferStatus(t.uetr) } returns Uni.createFrom().item("<garbage")
-        assertThatThrownBy { runBlocking { adapter.queryInstitutionTransferStatus(t) } }
-            .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            notFound("""{"code":"UNKNOWN_UETR","uetr":"${t.uetr}"}""")
+        assertThat(adapter.queryInstitutionTransferStatus(t)).isEqualTo(SchemeStatus.NotKnown)
+        for (body in listOf(
+            null,
+            "",
+            "<html>Not Found</html>",
+            """{"code":"UNKNOWN_UETR","uetr":"another"}""",
+            """{"code":"OTHER"}""",
+        )) {
+            every { client.institutionTransferStatus(t.uetr) } returns notFound(body)
+            assertThat(adapter.queryInstitutionTransferStatus(t)).describedAs("body %s", body)
+                .isEqualTo(SchemeStatus.Ambiguous(SchemeStatus.UNTYPED_NOT_FOUND))
+        }
+    }
+
+    @Test
+    fun `no answer at all is SchemeGatewayUnavailable, not a verdict`() {
+        val t = submitted()
+        for (failure in listOf<Uni<String>>(
+            Uni.createFrom().failure(jakarta.ws.rs.WebApplicationException(503)),
+            Uni.createFrom().failure(RuntimeException("timeout")),
+            Uni.createFrom().item("<garbage"),
+        )) {
+            every { client.institutionTransferStatus(t.uetr) } returns failure
+            assertThatThrownBy { runBlocking { adapter.queryInstitutionTransferStatus(t) } }
+                .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+        }
     }
 
     @Test

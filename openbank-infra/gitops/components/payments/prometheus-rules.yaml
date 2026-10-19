@@ -123,6 +123,20 @@ spec:
           annotations:
             summary: "swift outbox backlog stuck"
             description: "swift-service outbox has >50 unrelayed rows for >15m — SWIFT confirmations are not being dispatched."
+        # Bank-own transfer rail (contract 9.3): automation STOPPED on a transfer because the
+        # scheme's answer about it was ambiguous (untyped 404, a status for another message, still
+        # unknown after the single permitted resend, or a contended resend marker). Nothing is
+        # resent; the money may or may not have moved, so a human must reconcile it against the
+        # scheme. Every (rail, cause) series is registered at 0 at boot, so increase() sees the
+        # first stop; a cold pod reads 0, not absent.
+        - alert: SwiftInstitutionTransferManualReconciliation
+          expr: sum by (rail, cause) (increase(openbank_swift_institution_transfer_manual_reconciliation_total[15m])) > 0
+          labels:
+            severity: critical
+            service: swift
+          annotations:
+            summary: "Bank-own transfer needs manual reconciliation ({{ $labels.rail }}, {{ $labels.cause }})"
+            description: "swift-service stopped automating a bank-own transfer because the scheme's answer was ambiguous. It will NOT be resent. Find the transfer in swift_institution_transfers with status MANUAL_RECONCILIATION, confirm its UETR with the scheme, and settle or reject it by hand; treasury still sees it as RELEASED or SENT."
         # SwiftMtMessageProcessingStalled was REMOVED in #5733, for the same reason as
         # ClearingSettlementWindowMissed above. It watched `openbank_swift_messages_processed_total`,
         # which nothing emits, and swift-service does not ingest messages on a cadence: every entry

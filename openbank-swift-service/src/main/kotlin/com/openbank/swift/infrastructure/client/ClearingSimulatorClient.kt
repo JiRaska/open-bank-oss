@@ -41,6 +41,6 @@ interface ClearingSimulatorClient {
     /** The `pacs.002` the scheme holds for a UETR; 404 when it has none (read-only). */
     @GET
     @Path("/api/v1/clearing/fi-credit-transfers/status/{uetr}")
-    @Produces("application/xml")
+    @Produces("application/xml", "application/json")
     fun institutionTransferStatus(@PathParam("uetr") uetr: String): Uni<String>
 }

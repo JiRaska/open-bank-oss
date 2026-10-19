@@ -15,6 +15,13 @@
         "path": "/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f"
       },
       "response": {
+        "body": {
+          "code": "UNKNOWN_UETR",
+          "uetr": "9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
         "status": 404
       }
     },

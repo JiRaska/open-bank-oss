@@ -18,6 +18,7 @@ import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.NonConformingMessageException
 import com.openbank.swift.application.port.out.SchemeGatewayPort
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.swift.application.port.out.SchemeStatus
 import com.openbank.swift.application.port.out.SchemeSubmissionOutcome
 import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.domain.model.SwiftMessage
@@ -112,17 +113,22 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
     }
 
     /**
-     * Read-only status query by UETR — the only way an unanswered submission is resolved. `null`
-     * when the scheme has no record of the UETR (HTTP 404): the transfer never arrived, and only
-     * then may it be resent (with the same identity). Safe to retry: it moves nothing.
+     * Read-only status query by UETR — the only way an unanswered submission is resolved, and
+     * deliberately suspicious of its answer (see [SchemeStatus]): a 404 counts as "never received"
+     * ONLY with the scheme's typed body naming this UETR, and a pacs.002 counts only when its
+     * `OrgnlUETR` and `OrgnlMsgId` are this transfer's. Safe to retry: it moves nothing.
      */
-    @Suppress("TooGenericExceptionCaught")
-    override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): InstitutionTransferSubmission? {
+    @Suppress("TooGenericExceptionCaught", "ReturnCount")
+    override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus {
         val body = try {
             self.queryInstitutionWithResilience(transfer.uetr)
         } catch (ex: WebApplicationException) {
-            if (ex.response?.status == HTTP_NOT_FOUND) return null
-            throw SchemeGatewayUnavailableException(ex)
+            if (ex.response?.status != HTTP_NOT_FOUND) throw SchemeGatewayUnavailableException(ex)
+            return if (isTypedUnknown(ex, transfer.uetr)) {
+                SchemeStatus.NotKnown
+            } else {
+                SchemeStatus.Ambiguous(SchemeStatus.UNTYPED_NOT_FOUND)
+            }
         } catch (ex: Exception) {
             throw SchemeGatewayUnavailableException(ex)
         }
@@ -131,7 +137,21 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
         } catch (ex: Exception) {
             throw SchemeGatewayUnavailableException(ex)
         }
-        return InstitutionTransferSubmission(verdictOf(status.status), status.reasonCode, transfer.rawPacs009.orEmpty())
+        if (status.originalUetr != transfer.uetr || status.originalMessageId != transfer.messageId) {
+            log.errorf("Status for UETR %s names another message; not acting on it", transfer.uetr)
+            return SchemeStatus.Ambiguous(SchemeStatus.MISMATCHED)
+        }
+        return SchemeStatus.Known(
+            InstitutionTransferSubmission(verdictOf(status.status), status.reasonCode, transfer.rawPacs009.orEmpty()),
+        )
+    }
+
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun isTypedUnknown(ex: WebApplicationException, uetr: String): Boolean = try {
+        val node = mapper.readTree(ex.response.readEntity(String::class.java))
+        node.path("code").asText() == UNKNOWN_UETR && node.path("uetr").asText() == uetr
+    } catch (e: Exception) {
+        false
     }
 
     private fun verdictOf(status: PaymentStatus) = when (status) {
@@ -201,5 +221,7 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
     private companion object {
         const val MAX_35 = 35
         const val HTTP_NOT_FOUND = 404
+        const val UNKNOWN_UETR = "UNKNOWN_UETR"
+        val mapper = com.fasterxml.jackson.databind.ObjectMapper()
     }
 }

@@ -1,6 +1,7 @@
 -- Bank-own (financial-institution) credit transfers released by treasury (contract 9.3).
 -- Natural-key idempotency: payment_id and idempotency_key are each UNIQUE, so a replayed release
 -- can only ever resolve to the row that already exists, never to a second message.
+-- swift_institution_transfer_claims arbitrates which outcome owns a payment;
 -- swift_institution_transfer_rejections records a release refused by validation, once per payment
 -- id, so its REJECTED status event is emitted exactly once however often the record is replayed.
 -- Rollback: before this migration is applied anywhere, drop both tables; once applied, a
@@ -27,9 +28,10 @@ CREATE TABLE swift_institution_transfers (
     released_at                 TIMESTAMPTZ NOT NULL,
     synthetic                   BOOLEAN NOT NULL,
     ssi_version                 BIGINT CHECK (ssi_version IS NULL OR ssi_version > 0),
-    status                      VARCHAR(20) NOT NULL,
+    status                      VARCHAR(32) NOT NULL,
     message_id                  VARCHAR(35),
     message_created_at          TIMESTAMPTZ,
+    resend_taken                BOOLEAN NOT NULL DEFAULT FALSE,
     uetr                        CHAR(36) NOT NULL,
     reason_code                 VARCHAR(4),
     reason                      VARCHAR(255),
@@ -47,5 +49,15 @@ CREATE TABLE swift_institution_transfer_rejections (
     reason_code      VARCHAR(4) NOT NULL,
     reason           VARCHAR(255) NOT NULL,
     synthetic        BOOLEAN NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL
+);
+
+-- One claim per payment, shared by BOTH outcomes: the transfer insert and the rejection record each
+-- INSERT here in the same transaction as their row and outbox event. A unique violation (payment id
+-- or idempotency key) means the other path already won, and the loser writes nothing.
+CREATE TABLE swift_institution_transfer_claims (
+    payment_id       UUID PRIMARY KEY,
+    idempotency_key  VARCHAR(255) UNIQUE,
+    outcome          VARCHAR(10) NOT NULL CHECK (outcome IN ('TRANSFER', 'REJECTION')),
     created_at       TIMESTAMPTZ NOT NULL
 );

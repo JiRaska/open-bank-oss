@@ -6,13 +6,16 @@ package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.swift.application.port.out.InstitutionTransferMetrics
 import com.openbank.swift.application.port.out.InstitutionTransferRejection
 import com.openbank.swift.application.port.out.InstitutionTransferRepository
 import com.openbank.swift.application.port.out.InstitutionTransferSubmission
 import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.NonConformingMessageException
+import com.openbank.swift.application.port.out.ReconciliationCause
 import com.openbank.swift.application.port.out.SchemeGatewayPort
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.swift.application.port.out.SchemeStatus
 import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.domain.institution.InstitutionTransferStatus
 import com.openbank.swift.domain.institution.InstitutionTransferStatusChanged
@@ -58,6 +61,7 @@ class InstitutionTransferRefusedException(message: String) : IllegalArgumentExce
 class InstitutionTransferService(
     private val repo: InstitutionTransferRepository,
     private val gateway: SchemeGatewayPort,
+    private val metrics: InstitutionTransferMetrics,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     @ConfigProperty(name = "openbank.swift.institution-transfer.value-date-past-tolerance-days", defaultValue = "1")
@@ -69,28 +73,25 @@ class InstitutionTransferService(
         // Idempotency FIRST: a replay of a payment this rail already holds is answered from the
         // stored transfer and never re-judged — today's date would refuse a release whose value
         // date has since passed, announcing REJECTED for a payment that may already be SETTLED.
-        knownTransfer(payment)?.let { return replay(it, payment) }
+        val paymentId = payment.paymentId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val known = payment.idempotencyKey?.let { repo.findByIdempotencyKey(it) }
+            ?: paymentId?.let { repo.findByPaymentId(it) }
+        if (known != null) return replay(known, payment)
 
         val today = LocalDate.ofInstant(Instant.now(clock), ZoneOffset.UTC)
         val release = when (val v = ReleasedPaymentValidator.validate(payment, today, pastToleranceDays)) {
             is ReleaseValidation.Valid -> v.release
             is ReleaseValidation.Invalid -> refuse(payment, v.rejection.reasonCode, v.rejection.reason)
         }
-        if (repo.hasRejection(release.paymentId)) {
-            // Already announced REJECTED; a later valid release under the same id must not turn it
-            // into a payment. Dead-letter only — treasury re-proposes under a new payment id.
-            log.warnf("Release for payment %s follows a recorded rejection; dead-lettering", release.paymentId)
-            throw InstitutionTransferRefusedException("paymentId was already rejected")
-        }
         val fresh = newTransferAt(release, Instant.now(clock))
-        val accepted = repo.saveWithOutbox(fresh, listOf(objectMapper.statusEvent(fresh, fresh.createdAt)))
-        return submit(accepted)
-    }
-
-    private suspend fun knownTransfer(payment: ReleasedPayment): InstitutionTransfer? {
-        val byKey = payment.idempotencyKey?.let { repo.findByIdempotencyKey(it) }
-        val paymentId = payment.paymentId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-        return byKey ?: paymentId?.let { repo.findByPaymentId(it) }
+        // The claim is taken in the SAME transaction as the row and its ACCEPTED event. Losing it
+        // means a rejection (or a concurrent identical release) already owns this payment: then
+        // nothing was written, and the record is dead-lettered without any status event.
+        if (!repo.insertClaimed(fresh, listOf(objectMapper.statusEvent(fresh, fresh.createdAt)))) {
+            log.warnf("Payment %s is already claimed by another outcome; dead-lettering", release.paymentId)
+            throw InstitutionTransferRefusedException("paymentId or idempotencyKey already claimed")
+        }
+        return submit(repo.findByPaymentId(fresh.paymentId) ?: fresh)
     }
 
     private suspend fun replay(existing: InstitutionTransfer, payment: ReleasedPayment): InstitutionTransfer {
@@ -112,10 +113,9 @@ class InstitutionTransferService(
 
     /**
      * First submission. The message identity (MsgId, CreDtTm; the UETR is fixed at creation) is
-     * committed as SUBMITTING BEFORE the scheme is called, so any later resend is byte-identical
-     * and the scheme's UETR deduplication can recognise it. One call, no automatic retry: no
-     * readable answer moves the transfer to SUBMISSION_UNKNOWN and the failure propagates for
-     * redelivery, which then resolves it by status query ([resolve]) — never by a blind resend.
+     * committed as SUBMITTING BEFORE the scheme is called, so any later resend is byte-identical.
+     * One call, no automatic retry: no readable answer moves the transfer to SUBMISSION_UNKNOWN
+     * and the failure propagates for redelivery, which resolves it by status query ([resolve]).
      */
     private suspend fun submit(accepted: InstitutionTransfer): InstitutionTransfer {
         val now = maxOf(Instant.now(clock), accepted.updatedAt.plusMillis(1))
@@ -131,15 +131,39 @@ class InstitutionTransferService(
         return send(prepared)
     }
 
-    /** SUBMITTING / SUBMISSION_UNKNOWN: ask the scheme by UETR; resend (same identity) only if it has no record. */
+    /**
+     * SUBMITTING / SUBMISSION_UNKNOWN. Only an unambiguous answer is acted on: a status naming
+     * this MsgId + UETR is applied; the scheme's TYPED "unknown UETR" licenses ONE resend, taken
+     * under an optimistic version so only one worker can send it. Anything else — an untyped 404,
+     * a report about another message, still unknown after the resend, a lost marker race — stops
+     * in MANUAL_RECONCILIATION: counted, alerted, never resent.
+     */
     private suspend fun resolve(transfer: InstitutionTransfer): InstitutionTransfer {
-        val known = try {
+        val status = try {
             gateway.queryInstitutionTransferStatus(transfer)
         } catch (e: SchemeGatewayUnavailableException) {
             markUnknown(transfer)
             throw e
         }
-        return if (known == null) send(transfer) else apply(transfer, known)
+        return when (status) {
+            is SchemeStatus.Known -> apply(transfer, status.submission)
+            is SchemeStatus.Ambiguous -> manual(transfer, causeOf(status))
+            SchemeStatus.NotKnown -> when {
+                transfer.resendTaken -> manual(transfer, ReconciliationCause.UNKNOWN_AFTER_RESEND)
+                !repo.takeResendMarker(transfer) -> manual(transfer, ReconciliationCause.RESEND_CONTENDED)
+                else -> send(repo.findByPaymentId(transfer.paymentId) ?: transfer.copy(resendTaken = true))
+            }
+        }
+    }
+
+    private suspend fun manual(t: InstitutionTransfer, cause: ReconciliationCause): InstitutionTransfer {
+        log.errorf("Bank-own transfer %s needs manual reconciliation (%s); nothing resent", t.paymentId, cause)
+        metrics.manualReconciliation(t.rail, cause)
+        val now = maxOf(Instant.now(clock), t.updatedAt.plusMillis(1))
+        return repo.saveWithOutbox(
+            t.copy(status = InstitutionTransferStatus.MANUAL_RECONCILIATION, updatedAt = now),
+            emptyList(),
+        )
     }
 
     private suspend fun send(prepared: InstitutionTransfer): InstitutionTransfer {
@@ -162,9 +186,13 @@ class InstitutionTransferService(
     }
 
     private suspend fun markUnknown(t: InstitutionTransfer) {
-        if (t.status == InstitutionTransferStatus.SUBMISSION_UNKNOWN) return
-        val now = maxOf(Instant.now(clock), t.updatedAt.plusMillis(1))
-        repo.saveWithOutbox(t.copy(status = InstitutionTransferStatus.SUBMISSION_UNKNOWN, updatedAt = now), emptyList())
+        val current = repo.findByPaymentId(t.paymentId) ?: t
+        if (current.status == InstitutionTransferStatus.SUBMISSION_UNKNOWN) return
+        val now = maxOf(Instant.now(clock), current.updatedAt.plusMillis(1))
+        repo.saveWithOutbox(
+            current.copy(status = InstitutionTransferStatus.SUBMISSION_UNKNOWN, updatedAt = now),
+            emptyList(),
+        )
     }
 
     private suspend fun apply(
@@ -296,6 +324,7 @@ private fun newTransferAt(r: ValidatedRelease, now: Instant): InstitutionTransfe
 }
 
 private fun ObjectMapper.statusEvent(t: InstitutionTransfer, at: Instant): OutboxMessage {
+    check(t.status in InstitutionTransferStatus.ANNOUNCED) { "internal status ${t.status} is never announced" }
     val payload = InstitutionTransferStatusChanged(
         paymentId = t.paymentId.toString(),
         idempotencyKey = t.idempotencyKey,
@@ -323,3 +352,11 @@ private fun ObjectMapper.statusOutbox(
     createdAt = at,
     synthetic = synthetic,
 )
+
+private fun causeOf(a: SchemeStatus.Ambiguous) = if (a.why ==
+    SchemeStatus.UNTYPED_NOT_FOUND
+) {
+    ReconciliationCause.UNTYPED_NOT_FOUND
+} else {
+    ReconciliationCause.MISMATCHED_STATUS
+}
