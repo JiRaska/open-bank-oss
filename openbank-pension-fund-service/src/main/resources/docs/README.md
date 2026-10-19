@@ -18,7 +18,7 @@ The generated `00-build` page in this same documentation index reports the relea
 
 ## Period reporting
 
-`GET /api/v1/reporting/funds/{fundId}/period-figures` accepts required
+`GET /api/v2/reporting/funds/{fundId}/period-figures` accepts required
 `periodStart` and `periodEnd` dates. It exposes aggregate fund figures for
 tax-reporting-service: balance sheet, year-to-date profit and loss, unit
 roll-forward, portfolio and flows. The endpoint requires an allowed reporting
@@ -41,7 +41,7 @@ reportable; an unavailable breakdown is not a measured zero.
 
 Recorded NAV positions carry an instrument class. Historical positions and feed
 entries without a class remain `UNCLASSIFIED`. Propose a correction with
-`POST /api/v1/position-classification-corrections` (`positionId`, `toClass`, `reason`),
+`POST /api/v2/position-classification-corrections` (`positionId`, `toClass`, `reason`),
 then have a different checker approve or reject it via `/{correctionId}/approve`
 or `/{correctionId}/reject`. Proposing requires `pension-fund.nav.calculate`; deciding
 requires `pension-fund.nav.approve`. The proposer cannot decide their own correction.
@@ -55,3 +55,8 @@ The proposal, approval, and rejection POSTs require a nonblank `Idempotency-Key`
 ### Classification decision concurrency
 
 Approving or rejecting a classification correction updates only a correction still in `PROPOSED` state. The transaction must change exactly one row; a competing decision cannot silently overwrite the first decision. The mutation-query API retains the existing conditional update and transaction semantics.
+
+
+## API version transition
+
+The authoritative contract is v2.0.0. Fund creation requires an explicit published catalog revision, while amendment retains its existing pin. The unchanged v1 operations remain deprecated compatibility routes; only the two legacy fund-definition writes are excluded by the owner-approved draft exception. See README.en.md / README.cs.md for the 180-day sunset, explicit client transition, preserved fee precision and rollback limits. No operational cutover or deployment is authorized by the draft proposal.

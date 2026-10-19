@@ -131,7 +131,7 @@ fund stores `product_revision_id` (V5) and the fee derived from the revision's
 
 | Threat | Control |
 |---|---|
-| **Tampering** - an operator sets an arbitrary fee on a fund (the previous `managementFeeRate` request field priced every NAV) | The field is gone from create and amend; the fee is the revision's, maker-checker approved in the catalog. Amend rejects any `productRevisionId` that differs from the pinned one (a re-pin is not an amendment). Funds created before pinning keep their stored rate, read-only through the API. |
+| **Tampering** - an operator sets an arbitrary fee on a fund (the previous `managementFeeRate` request field priced every NAV) | The field remains deprecated: creation accepts it only if it equals the resolved revision fee, and amendment only if it equals the stored fee. It never selects the fee; that comes from the catalog revision. Amend rejects any `productRevisionId` that differs from the pinned one (a re-pin is not an amendment). Funds created before pinning keep their stored rate, read-only through the API. |
 | **Spoofing** - another service reads or authors catalog terms with this credential | Own Keycloak client `openbank-pension-fund`: no realm role, only the `catalog:read` scope. product-catalog's OPA bundle admits `catalog.read` for `service-account-openbank-pension-fund` alone (`machine_named` + `CATALOG_SCOPE_READ`); `catalog.author`/`publish`/approvals stay denied (rego tests). |
 | **Elevation** - unpublished or foreign terms priced as a fund fee | `FundRevisionTerms.parse` fails closed unless the revision id matches, `state=PUBLISHED`, schema `org.openbank.retirement.pension-savings` version >= 2, and a fee string is present. |
 | **Denial of service** - catalog down | Fund CREATION fails closed (no fund without a pinned revision); NAV, register, orders and reporting read the stored rate and never call the catalog. |
@@ -141,3 +141,10 @@ Rollback: revert the commit; `product_revision_id` stays (nullable, additive) an
 remains correct as cached. Rollout order: seed Vault `keycloak/pension-fund-service`, create the
 Keycloak client, then deploy (the env ref is `optional: true`, so an unseeded secret fails creation
 closed rather than the pod).
+
+
+### Versioned compatibility boundary (draft API v2 transition)
+
+Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor, four-eyes and idempotency boundaries directly, rather than relying on resource inheritance. New reflection parity and real HTTP/OIDC/OPA/four-eyes regressions must pass native CI; source correspondence is not runtime proof. The owner approved only the draft exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
+
+Known callers are migrated explicitly; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; draft and blocked controls remain. No merge, provisioning, credentials, policy activation or deployment is approved here. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.

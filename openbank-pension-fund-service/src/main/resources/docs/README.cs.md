@@ -17,14 +17,14 @@ Dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-a
 
 | Metoda a cesta | Co dělá |
 |---|---|
-| `POST/GET /api/v1/funds`, `GET/PUT/DELETE /api/v1/funds/{id}` | Správa fondů; zrušení fondu se odmítne, dokud existují podílové jednotky |
-| `POST/GET /api/v1/funds/{id}/navs` | Výpočet NAV (maker) nebo jejich seznam |
-| `POST /api/v1/navs/{id}/approve` · `/reject` | Zveřejnění (checker): vypořádá čekající pokyny, u opravy znovu ocení transakce |
-| `POST/GET /api/v1/strategies`, `GET /api/v1/strategies/{id}` | Strategie: cílová alokace, pásma, glide path |
-| `GET /api/v1/strategies/{id}/allocation?yearsToRetirement=` | Alokace podle glide path pro účastníka |
-| `POST /api/v1/strategies/{id}/changes`, `POST /api/v1/strategy-changes/{id}/approve` · `/reject` · `/apply` | Řízená změna: druhý schvalovatel a výpovědní lhůta před účinností |
-| `POST /api/v1/contracts/{id}/orders` | Nákup, prodej nebo přestup. Vyžaduje `Idempotency-Key` |
-| `GET /api/v1/contracts/{id}/holdings` · `/orders` · `/transactions` | Držba oceněná poslední zveřejněnou NAV a její historie |
+| `POST/GET /api/v2/funds`, `GET/PUT/DELETE /api/v2/funds/{id}` | Správa fondů; zrušení fondu se odmítne, dokud existují podílové jednotky |
+| `POST/GET /api/v2/funds/{id}/navs` | Výpočet NAV (maker) nebo jejich seznam |
+| `POST /api/v2/navs/{id}/approve` · `/reject` | Zveřejnění (checker): vypořádá čekající pokyny, u opravy znovu ocení transakce |
+| `POST/GET /api/v2/strategies`, `GET /api/v2/strategies/{id}` | Strategie: cílová alokace, pásma, glide path |
+| `GET /api/v2/strategies/{id}/allocation?yearsToRetirement=` | Alokace podle glide path pro účastníka |
+| `POST /api/v2/strategies/{id}/changes`, `POST /api/v2/strategy-changes/{id}/approve` · `/reject` · `/apply` | Řízená změna: druhý schvalovatel a výpovědní lhůta před účinností |
+| `POST /api/v2/contracts/{id}/orders` | Nákup, prodej nebo přestup. Vyžaduje `Idempotency-Key` |
+| `GET /api/v2/contracts/{id}/holdings` · `/orders` · `/transactions` | Držba oceněná poslední zveřejněnou NAV a její historie |
 
 ## Čísla
 
@@ -57,7 +57,7 @@ test nedokazují připravenost certifikátu v clusteru.
 
 ## Výkazy za období
 
-`GET /api/v1/reporting/funds/{fundId}/period-figures` vyžaduje datum
+`GET /api/v2/reporting/funds/{fundId}/period-figures` vyžaduje datum
 `periodStart` a `periodEnd`. Vrací agregované údaje fondu pro tax-reporting-service:
 rozvahu, výsledek hospodaření od začátku roku, pohyb jednotek, portfolio a toky.
 Přístup vyžaduje povolenou roli a autorizační politiku `pension-fund.reporting.inspect`.
@@ -78,7 +78,7 @@ neznamená naměřenou nulu.
 
 Zaznamenané pozice NAV nesou třídu instrumentu. Historické pozice a vstupy bez
 klasifikace zůstávají `UNCLASSIFIED`. Návrh opravy vytvoří
-`POST /api/v1/position-classification-corrections` (`positionId`, `toClass`, `reason`).
+`POST /api/v2/position-classification-corrections` (`positionId`, `toClass`, `reason`).
 Jiný schvalovatel jej rozhodne přes `/{correctionId}/approve` nebo
 `/{correctionId}/reject`. Návrh vyžaduje `pension-fund.nav.calculate`, rozhodnutí
 `pension-fund.nav.approve`; autor návrhu vlastní opravu rozhodnout nesmí. Tyto
@@ -112,6 +112,17 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 ## Správní poplatek z připnuté revize katalogu (ADR-0341)
 
-Fond se nyní zakládá proti publikované revizi produktového katalogu. Požadavek na založení nese `productRevisionId`; služba tuto revizi jednou při založení načte z product-catalog a z jejího poplatkového schématu odvodí roční správní poplatek. Fond ukládá id revize do `product_revision_id` (migrace V5, nullable) a odvozenou sazbu cachuje v `management_fee_rate`; poplatek se poté už neupravuje. Založení bez id revize vrací 400. Pole `managementFeeRate` je jako vstup zastaralé: pokud je zadáno, musí se rovnat poplatku připnuté revize, jinak je požadavek odmítnut s 400. Fondy založené před připnutím mají revizi null, ponechávají si uloženou sazbu jen pro čtení přes API a zůstávají tak, dokud není vytvořena grandfathering revize schválená maker-checker postupem a fondy nejsou znovu připnuty. Verze kontraktu API je 1.3.0.
+Fond se nyní zakládá proti publikované revizi produktového katalogu. Požadavek na založení nese `productRevisionId`; služba tuto revizi jednou při založení načte z product-catalog a z jejího poplatkového schématu odvodí roční správní poplatek. Fond ukládá id revize do `product_revision_id` (migrace V5, nullable) a odvozenou sazbu cachuje v `management_fee_rate`; poplatek se poté už neupravuje. Založení bez id revize vrací 400. Pole `managementFeeRate` je jako vstup zastaralé: pokud je zadáno, musí se rovnat poplatku připnuté revize, jinak je požadavek odmítnut s 400. Fondy založené před připnutím mají revizi null, ponechávají si uloženou sazbu jen pro čtení přes API a zůstávají tak, dokud není vytvořena grandfathering revize schválená maker-checker postupem a fondy nejsou znovu připnuty. Verze kontraktu API je 2.0.0; založení a změna mají oddělená schémata.
 
 Vyhledání v katalogu používá vlastní strojovou identitu služby, klienta Keycloak `openbank-pension-fund` s oborem `catalog:read`, v produkci přes TLS konfiguraci `catalog-authority` (klientský certifikát, soukromá CA, TLS 1.3). Timeouty připojení a čtení jsou 2 s a 5 s. Pokud založení fondu selže s chybou katalogu, zkontrolujte společně URL product-catalog, klientské tajemství a TLS mount. OIDC klient je v testovacím profilu vypnutý. Zpětné vrácení schématu provedete zrušením sloupce `product_revision_id`; cachovaná sazba zůstává správná.
+
+
+### Přechod na API v2 (návrh doručení)
+
+V2 vyžaduje při založení explicitní `productRevisionId`; změna jej může vynechat nebo zopakovat existující pin. Žádný požadavek nevybere revizi skrytě. V6 rozšiřuje uloženou sazbu na osm desetinných míst, neopravuje však zpětně dříve zaokrouhlené hodnoty.
+
+Všech 27 nezměněných operací v1 zůstává jako explicitní deprecated aliasy se stejnými rolemi, autorizačními akcemi, identitou, idempotencí a čtyřočkovou kontrolou. Odpovědi mají verzi v1 a hlavičky Deprecation, Sunset a odkaz na v2. Výchozí sunset je 30. června 2027; před schváleným nasazením musí skutečná konfigurace zachovat alespoň 180denní okno.
+
+Vlastník schválil pouze návrh úzké výjimky pro původní `POST /api/v1/funds` a `PUT /api/v1/funds/{id}`: staré zápisy s ručním poplatkem nejsou registrované a vracejí 405. Nejde o povolení jejich provozního ukončení. Úplný seznam externích zapisujících klientů zatím nemáme. Známí klienti pension-service, tax-reporting a Admin UI přecházejí výslovně na v2; Pact soubory musí regenerovat nativní CI.
+
+První aktivace vyžaduje samostatné schválení image, přechodu zapisujících klientů a stávajících změn TLS, certifikátů a sítí. Před přepnutím klientů musí v2 umět všechny aktivní backendy. Rollback nejprve vrátí klienty nebo zachová poskytovatele v2; ponechá sloupec revize i rozšířenou přesnost, nemaže piny a neobnovuje editaci jejich sazeb. Draft zůstává blokovaný a auto-merge vypnuté. Návrh nepovoluje merge, provisioning, deployment ani finanční operace.

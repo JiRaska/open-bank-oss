@@ -27,7 +27,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
 
 @Tag(name = "Strategies", description = "Fund strategies, glide paths and governed changes (ADR-0334)")
-@Path("/api/v1/strategies")
+@Path("/api/v2/strategies")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class StrategyResource {

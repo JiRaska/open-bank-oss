@@ -67,12 +67,12 @@ class PensionFundApiIT {
     @Order(1)
     @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
     fun `maker creates funds, a lifecycle strategy, a change, an order and a NAV`() {
-        fundA = post("/api/v1/funds", fundBody("CZ0008474053")).then().statusCode(201)
+        fundA = post("/api/v2/funds", fundBody("CZ0008474053")).then().statusCode(201)
             .body("status", equalTo("ACTIVE")).extract().path("id")
-        fundB = post("/api/v1/funds", fundBody("CZ0008474061")).then().statusCode(201).extract().path("id")
+        fundB = post("/api/v2/funds", fundBody("CZ0008474061")).then().statusCode(201).extract().path("id")
 
         strategy = post(
-            "/api/v1/strategies",
+            "/api/v2/strategies",
             """{"name":"Lifecycle","allocations":${allocation("0.6", "0.4")},
                 "glidePath":[{"minYearsToRetirement":15,"allocations":${allocation("0.9", "0.1")}},
                              {"minYearsToRetirement":0,"allocations":${allocation("0.2", "0.8")}}]}""",
@@ -80,25 +80,31 @@ class PensionFundApiIT {
 
         val effective = LocalDate.now(ZoneOffset.UTC).plusDays(31)
         change = post(
-            "/api/v1/strategies/$strategy/changes",
+            "/api/v2/strategies/$strategy/changes",
             """{"allocations":${allocation("0.5", "0.5")},"reason":"de-risk","effectiveDate":"$effective"}""",
         ).then().statusCode(201).body("status", equalTo("PENDING_APPROVAL")).extract().path("id")
 
         val order = """{"fundId":"$fundA","type":"SUBSCRIBE","amount":1000}"""
         // Without the key the money-path POST is refused, never queued (#8351).
-        post("/api/v1/contracts/$contract/orders", order).then().statusCode(400)
+        post("/api/v2/contracts/$contract/orders", order).then().statusCode(400)
         val placed = given().contentType("application/json").header("Idempotency-Key", "order-1").body(order)
-            .`when`().post("/api/v1/contracts/$contract/orders")
+            .`when`().post("/api/v2/contracts/$contract/orders")
             .then().statusCode(202).body("status", equalTo("PENDING")).extract().path<String>("id")
         // A retry with the same key returns the same order: one order, not two.
+        given().contentType("application/json").header("Idempotency-Key", "order-1").body(order)
+            .`when`().post("/api/v2/contracts/$contract/orders")
+            .then().statusCode(202).body("id", equalTo(placed))
+        // The deprecated route reaches the same application boundary and idempotency registry.
         given().contentType("application/json").header("Idempotency-Key", "order-1").body(order)
             .`when`().post("/api/v1/contracts/$contract/orders")
             .then().statusCode(202).body("id", equalTo(placed))
 
-        nav = post("/api/v1/funds/$fundA/navs", """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0}""")
+        nav = post("/api/v2/funds/$fundA/navs", """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0}""")
             .then().statusCode(201).body("status", equalTo("CALCULATED")).extract().path("id")
 
         // The maker cannot be the checker, for a NAV or a strategy change.
+        post("/api/v2/navs/$nav/approve").then().statusCode(403)
+        post("/api/v2/strategy-changes/$change/approve").then().statusCode(403)
         post("/api/v1/navs/$nav/approve").then().statusCode(403)
         post("/api/v1/strategy-changes/$change/approve").then().statusCode(403)
     }
@@ -115,21 +121,21 @@ class PensionFundApiIT {
             .body("status", equalTo("APPROVED"))
             .body("participantNotificationDate", equalTo(LocalDate.now(ZoneOffset.UTC).toString()))
         // Not before the effective date.
-        post("/api/v1/strategy-changes/$change/apply").then().statusCode(409)
+        post("/api/v2/strategy-changes/$change/apply").then().statusCode(409)
     }
 
     @Test
     @Order(4)
     @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
     fun `cross currency switch is a bad request and leaves the register unchanged`() {
-        val euroFund = post("/api/v1/funds", fundBody("CZ0008474079", "EUR"))
+        val euroFund = post("/api/v2/funds", fundBody("CZ0008474079", "EUR"))
             .then().statusCode(201).extract().path<String>("id")
         given().contentType("application/json").header("Idempotency-Key", "cross-currency-switch")
             .body("""{"fundId":"$fundA","type":"SWITCH_OUT","units":100,"targetFundId":"$euroFund"}""")
-            .`when`().post("/api/v1/contracts/$contract/orders").then().statusCode(400)
-        given().`when`().get("/api/v1/contracts/$contract/orders").then().statusCode(200)
+            .`when`().post("/api/v2/contracts/$contract/orders").then().statusCode(400)
+        given().`when`().get("/api/v2/contracts/$contract/orders").then().statusCode(200)
             .body("size()", equalTo(1))
-        given().`when`().get("/api/v1/contracts/$contract/holdings").then().statusCode(200)
+        given().`when`().get("/api/v2/contracts/$contract/holdings").then().statusCode(200)
             .body("holdings[0].units", equalTo(1000.0f))
             .body("pendingOrders.size()", equalTo(0))
     }
@@ -138,18 +144,18 @@ class PensionFundApiIT {
     @Order(3)
     @TestSecurity(user = "pension-service", roles = ["ROLE_API"])
     fun `holdings are valued at the published NAV and persisted`() {
-        given().`when`().get("/api/v1/contracts/$contract/holdings").then().statusCode(200)
+        given().`when`().get("/api/v2/contracts/$contract/holdings").then().statusCode(200)
             .body("holdings[0].fundId", equalTo(fundA))
             .body("holdings[0].units", equalTo(1000.0f))
             .body("holdings[0].value", equalTo(1000.0f))
 
         given().`when`().get(
-            "/api/v1/strategies/$strategy/allocation?yearsToRetirement=20",
+            "/api/v2/strategies/$strategy/allocation?yearsToRetirement=20",
         ).then().log().ifValidationFails().statusCode(200)
             .body("[0].weight", equalTo(0.9f))
         // Absent query parameter is a 400, never a 500 (#3104).
-        given().`when`().get("/api/v1/strategies/$strategy/allocation").then().statusCode(400)
-        given().`when`().get("/api/v1/funds/${UUID.randomUUID()}").then().statusCode(404)
+        given().`when`().get("/api/v2/strategies/$strategy/allocation").then().statusCode(400)
+        given().`when`().get("/api/v2/funds/${UUID.randomUUID()}").then().statusCode(404)
 
         val config = ConfigProvider.getConfig()
         DriverManager.getConnection(
@@ -171,12 +177,12 @@ class PensionFundApiIT {
     @Order(5)
     @TestSecurity(user = "compliance-reviewer", roles = ["ROLE_COMPLIANCE"])
     fun `compliance staff can inspect contract data but cannot place an order`() {
-        given().`when`().get("/api/v1/contracts/$contract/orders").then().statusCode(200)
-        given().`when`().get("/api/v1/contracts/$contract/holdings").then().statusCode(200)
-        given().`when`().get("/api/v1/contracts/$contract/transactions").then().statusCode(200)
+        given().`when`().get("/api/v2/contracts/$contract/orders").then().statusCode(200)
+        given().`when`().get("/api/v2/contracts/$contract/holdings").then().statusCode(200)
+        given().`when`().get("/api/v2/contracts/$contract/transactions").then().statusCode(200)
         given().contentType("application/json").header("Idempotency-Key", "compliance-denied")
             .body("""{"fundId":"$fundA","type":"SUBSCRIBE","amount":1}""")
-            .`when`().post("/api/v1/contracts/$contract/orders").then().statusCode(403)
+            .`when`().post("/api/v2/contracts/$contract/orders").then().statusCode(403)
     }
 
     @Test
@@ -185,7 +191,7 @@ class PensionFundApiIT {
     fun `the reporting read model serves period aggregates that reconcile, over real HTTP and SQL`() {
         val today = LocalDate.now(ZoneOffset.UTC)
         val start = today.withDayOfMonth(1)
-        val path = "/api/v1/reporting/funds/$fundA/period-figures"
+        val path = "/api/v2/reporting/funds/$fundA/period-figures"
         val body = given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
             .`when`().get(path).then().log().ifValidationFails().statusCode(200)
             .body("units.opening", equalTo(0.0f))
@@ -213,7 +219,7 @@ class PensionFundApiIT {
         given().queryParam("periodStart", "2001-01-01").queryParam("periodEnd", "2001-01-31")
             .`when`().get(path).then().statusCode(409)
         given().queryParam("periodStart", "$start").queryParam("periodEnd", "$today")
-            .`when`().get("/api/v1/reporting/funds/${UUID.randomUUID()}/period-figures").then().statusCode(404)
+            .`when`().get("/api/v2/reporting/funds/${UUID.randomUUID()}/period-figures").then().statusCode(404)
     }
 
     @Test
@@ -222,7 +228,7 @@ class PensionFundApiIT {
     fun `a customer cannot reach the reporting read model`() {
         val today = LocalDate.now(ZoneOffset.UTC)
         given().queryParam("periodStart", "${today.withDayOfMonth(1)}").queryParam("periodEnd", "$today")
-            .`when`().get("/api/v1/reporting/funds/$fundA/period-figures").then().statusCode(403)
+            .`when`().get("/api/v2/reporting/funds/$fundA/period-figures").then().statusCode(403)
     }
 
     @Test
@@ -230,40 +236,40 @@ class PensionFundApiIT {
     @TestSecurity(user = "maker", roles = ["ROLE_OPERATOR"])
     fun `a position recorded without a class is UNCLASSIFIED and the maker can only propose a class`() {
         loanNav = post(
-            "/api/v1/funds/$fundB/navs",
+            "/api/v2/funds/$fundB/navs",
             """{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":0,
                 "positions":[{"instrumentId":"LOAN-1","quantity":1,"price":100},
                              {"instrumentId":"CZ-BOND-1","quantity":2,"price":50,"instrumentClass":"DEBT_SECURITY"}]}""",
         ).then().statusCode(201).extract().path("id")
-        loanPosition = given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
+        loanPosition = given().`when`().get("/api/v2/navs/$loanNav/positions").then().statusCode(200)
             .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("UNCLASSIFIED"))
             .body("find { it.instrumentId == 'CZ-BOND-1' }.instrumentClass", equalTo("DEBT_SECURITY"))
             .extract().path("find { it.instrumentId == 'LOAN-1' }.positionId")
 
         // Missing fields are a 400, never a 500.
-        post("/api/v1/position-classification-corrections", """{"positionId":"$loanPosition"}""").then().statusCode(400)
+        post("/api/v2/position-classification-corrections", """{"positionId":"$loanPosition"}""").then().statusCode(400)
         correction = given().header("Idempotency-Key", "proposal").contentType("application/json").body(
 
             """{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""",
         ).`when`().post(
-            "/api/v1/position-classification-corrections",
+            "/api/v2/position-classification-corrections",
         ).then().statusCode(200).body("status", equalTo("PROPOSED")).body("fromClass", equalTo("UNCLASSIFIED"))
             .extract().path("id")
         given().header("Idempotency-Key", "proposal").contentType("application/json")
             .body("""{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""")
-            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(200)
+            .`when`().post("/api/v2/position-classification-corrections").then().statusCode(200)
             .body("id", equalTo(correction)).body("status", equalTo("PROPOSED"))
         given().header("Idempotency-Key", "proposal").contentType("application/json")
             .body("""{"positionId":"$loanPosition","toClass":"OTHER","reason":"changed instruction"}""")
-            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(409)
+            .`when`().post("/api/v2/position-classification-corrections").then().statusCode(409)
         given().header("Idempotency-Key", " ").contentType("application/json")
             .body("""{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""")
-            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(400)
+            .`when`().post("/api/v2/position-classification-corrections").then().statusCode(400)
         // The proposer is not the checker.
         given().header(
             "Idempotency-Key",
             "approval",
-        ).`when`().post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(403)
+        ).`when`().post("/api/v2/position-classification-corrections/$correction/approve").then().statusCode(403)
     }
 
     @Test
@@ -273,13 +279,13 @@ class PensionFundApiIT {
         given().header(
             "Idempotency-Key",
             "approval",
-        ).`when`().post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
+        ).`when`().post("/api/v2/position-classification-corrections/$correction/approve").then().statusCode(200)
             .body("status", equalTo("APPROVED")).body("decidedBy", equalTo("checker")).extract().asString()
         given().header(
             "Idempotency-Key",
             "approval",
-        ).`when`().post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(200)
-        given().`when`().get("/api/v1/navs/$loanNav/positions").then().statusCode(200)
+        ).`when`().post("/api/v2/position-classification-corrections/$correction/approve").then().statusCode(200)
+        given().`when`().get("/api/v2/navs/$loanNav/positions").then().statusCode(200)
             .body("find { it.instrumentId == 'LOAN-1' }.instrumentClass", equalTo("LOAN"))
 
         val config = ConfigProvider.getConfig()
@@ -315,11 +321,11 @@ class PensionFundApiIT {
     fun `proposal replay remains proposed after the checker has approved the correction`() {
         given().header("Idempotency-Key", "proposal").contentType("application/json")
             .body("""{"positionId":"$loanPosition","toClass":"LOAN","reason":"depositary statement"}""")
-            .`when`().post("/api/v1/position-classification-corrections").then().statusCode(200)
+            .`when`().post("/api/v2/position-classification-corrections").then().statusCode(200)
             .body("id", equalTo(correction)).body("status", equalTo("PROPOSED"))
         // Another caller's successful decision never grants the maker a replay of that decision.
         given().header("Idempotency-Key", "approval").`when`()
-            .post("/api/v1/position-classification-corrections/$correction/approve").then().statusCode(409)
+            .post("/api/v2/position-classification-corrections/$correction/approve").then().statusCode(409)
     }
 
     private fun jdbc(): Connection {
@@ -382,7 +388,7 @@ class PensionFundApiIT {
 
     private fun decisionRequest(id: UUID, operation: String): Callable<Int> = Callable {
         given().header("Idempotency-Key", "race-$operation").`when`()
-            .post("/api/v1/position-classification-corrections/$id/$operation").statusCode
+            .post("/api/v2/position-classification-corrections/$id/$operation").statusCode
     }
 
     private fun awaitCompetingDecisions() {
@@ -439,7 +445,7 @@ class PensionFundApiIT {
         }
         try {
             given().header("Idempotency-Key", "rollback-proof").`when`()
-                .post("/api/v1/position-classification-corrections/$id/reject").then().statusCode(500)
+                .post("/api/v2/position-classification-corrections/$id/reject").then().statusCode(500)
             assertThat(receiptCount(id)).isZero()
         } finally {
             jdbc().use { connection ->
@@ -450,10 +456,10 @@ class PensionFundApiIT {
             }
         }
         val original = given().header("Idempotency-Key", "rollback-proof").`when`()
-            .post("/api/v1/position-classification-corrections/$id/reject").then().statusCode(200)
+            .post("/api/v2/position-classification-corrections/$id/reject").then().statusCode(200)
             .body("status", equalTo("REJECTED")).extract().asString()
         val replay = given().header("Idempotency-Key", "rollback-proof").`when`()
-            .post("/api/v1/position-classification-corrections/$id/reject").then().statusCode(200).extract().asString()
+            .post("/api/v2/position-classification-corrections/$id/reject").then().statusCode(200).extract().asString()
         assertThat(replay).isEqualTo(original)
         assertThat(receiptCount(id)).isEqualTo(1)
     }

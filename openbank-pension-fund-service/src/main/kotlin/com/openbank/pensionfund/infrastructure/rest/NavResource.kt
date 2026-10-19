@@ -23,7 +23,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
 
 @Tag(name = "NAV", description = "Four-eyes NAV publication and correction (ADR-0334)")
-@Path("/api/v1/navs")
+@Path("/api/v2/navs")
 @Produces(MediaType.APPLICATION_JSON)
 class NavResource {
 

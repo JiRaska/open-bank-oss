@@ -32,7 +32,7 @@ import java.util.UUID
  * shared service-account does not reach it.
  */
 @Tag(name = "Reporting", description = "Period-end fund aggregates for regulatory returns (#12425)")
-@Path("/api/v1/reporting/funds")
+@Path("/api/v2/reporting/funds")
 @Produces(MediaType.APPLICATION_JSON)
 class FundReportingResource {
 

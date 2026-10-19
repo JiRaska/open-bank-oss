@@ -69,7 +69,7 @@ class OutgoingReservationIT {
             val executor = Executors.newFixedThreadPool(2)
             try {
                 val publish = executor.submit<Response> {
-                    given().post("/api/v1/navs/$navId/approve")
+                    given().post("/api/v2/navs/$navId/approve")
                 }
                 awaitHoldingWaiters(db, 1)
                 val reserve = executor.submit<Response> { redeem(contract, fund, "during-nav", 60) }
@@ -238,7 +238,7 @@ class OutgoingReservationIT {
         given().contentType("application/json")
             .header("Idempotency-Key", key)
             .body("""{"fundId":"$fund","type":"REDEEM","units":$units}""")
-            .post("/api/v1/contracts/$contract/orders")
+            .post("/api/v2/contracts/$contract/orders")
 
     private fun createFund(): UUID {
         val isin = "RS" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
@@ -249,7 +249,7 @@ class OutgoingReservationIT {
                     "currency":"CZK","riskClass":3,"mandatoryConservative":false,
                     "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}
                 """.trimIndent(),
-            ).post("/api/v1/funds").then().statusCode(201).extract().path<String>("id")
+            ).post("/api/v2/funds").then().statusCode(201).extract().path<String>("id")
         return UUID.fromString(id)
     }
 

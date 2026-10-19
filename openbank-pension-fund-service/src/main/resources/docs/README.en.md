@@ -17,14 +17,14 @@ This documentation is published by the service at the management endpoint `/q/op
 
 | Method & path | What it does |
 |---|---|
-| `POST/GET /api/v1/funds`, `GET/PUT/DELETE /api/v1/funds/{id}` | Fund administration; closing is refused while units are outstanding |
-| `POST/GET /api/v1/funds/{id}/navs` | Calculate a NAV (maker) or list them |
-| `POST /api/v1/navs/{id}/approve` · `/reject` | Publish (checker): this settles queued orders, or re-prices transactions for a correction |
-| `POST/GET /api/v1/strategies`, `GET /api/v1/strategies/{id}` | Strategies: target allocation, bands, glide path |
-| `GET /api/v1/strategies/{id}/allocation?yearsToRetirement=` | The glide-path allocation for a participant |
-| `POST /api/v1/strategies/{id}/changes`, `POST /api/v1/strategy-changes/{id}/approve` · `/reject` · `/apply` | Governed change: a second approver and a notice period before it applies |
-| `POST /api/v1/contracts/{id}/orders` | Subscription, redemption or switch. Requires `Idempotency-Key` |
-| `GET /api/v1/contracts/{id}/holdings` · `/orders` · `/transactions` | Holdings valued at the latest published NAV, and their history |
+| `POST/GET /api/v2/funds`, `GET/PUT/DELETE /api/v2/funds/{id}` | Fund administration; closing is refused while units are outstanding |
+| `POST/GET /api/v2/funds/{id}/navs` | Calculate a NAV (maker) or list them |
+| `POST /api/v2/navs/{id}/approve` · `/reject` | Publish (checker): this settles queued orders, or re-prices transactions for a correction |
+| `POST/GET /api/v2/strategies`, `GET /api/v2/strategies/{id}` | Strategies: target allocation, bands, glide path |
+| `GET /api/v2/strategies/{id}/allocation?yearsToRetirement=` | The glide-path allocation for a participant |
+| `POST /api/v2/strategies/{id}/changes`, `POST /api/v2/strategy-changes/{id}/approve` · `/reject` · `/apply` | Governed change: a second approver and a notice period before it applies |
+| `POST /api/v2/contracts/{id}/orders` | Subscription, redemption or switch. Requires `Idempotency-Key` |
+| `GET /api/v2/contracts/{id}/holdings` · `/orders` · `/transactions` | Holdings valued at the latest published NAV, and their history |
 
 ## Numbers
 
@@ -57,7 +57,7 @@ declarations and this test do not prove that a cluster Certificate is ready.
 
 ## Period reporting
 
-`GET /api/v1/reporting/funds/{fundId}/period-figures` accepts required
+`GET /api/v2/reporting/funds/{fundId}/period-figures` accepts required
 `periodStart` and `periodEnd` dates. It exposes aggregate fund figures for
 tax-reporting-service: balance sheet, year-to-date profit and loss, unit
 roll-forward, portfolio and flows. The endpoint requires an allowed reporting
@@ -80,7 +80,7 @@ reportable; an unavailable breakdown is not a measured zero.
 
 Recorded NAV positions carry an instrument class. Historical positions and feed
 entries without a class remain `UNCLASSIFIED`. Propose a correction with
-`POST /api/v1/position-classification-corrections` (`positionId`, `toClass`, `reason`),
+`POST /api/v2/position-classification-corrections` (`positionId`, `toClass`, `reason`),
 then have a different checker approve or reject it via `/{correctionId}/approve`
 or `/{correctionId}/reject`. Proposing requires `pension-fund.nav.calculate`; deciding
 requires `pension-fund.nav.approve`. The proposer cannot decide their own correction.
@@ -114,6 +114,21 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 ## Management fee from a pinned catalog revision (ADR-0341)
 
-A fund is now created against a published product catalog revision. The create request carries `productRevisionId`, and the service reads that revision from product-catalog once, at creation, and derives the annual management fee from its fee schedule. The fund stores the revision id in `product_revision_id` (migration V5, nullable) and caches the derived rate in `management_fee_rate`; the fee is never edited afterwards. The create request answers 400 without a revision id. `managementFeeRate` is deprecated as an input: if supplied it must equal the pinned revision's fee, otherwise the request is rejected with 400. Funds created before pinning have a null revision, keep their stored rate read-only through the API, and stay that way until a maker-checker grandfathering revision is created and they are re-pinned. The API contract version is 1.3.0.
+A fund is now created against a published product catalog revision. The create request carries `productRevisionId`, and the service reads that revision from product-catalog once, at creation, and derives the annual management fee from its fee schedule. The fund stores the revision id in `product_revision_id` (migration V5, nullable) and caches the derived rate in `management_fee_rate`; the fee is never edited afterwards. The create request answers 400 without a revision id. `managementFeeRate` is deprecated as an input: if supplied it must equal the pinned revision's fee, otherwise the request is rejected with 400. Funds created before pinning have a null revision, keep their stored rate read-only through the API, and stay that way until a maker-checker grandfathering revision is created and they are re-pinned. The API contract version is 2.0.0; creation and amendment use separate schemas.
 
 The catalog lookup uses the service's own machine identity, the Keycloak client `openbank-pension-fund` with the `catalog:read` scope, over the `catalog-authority` TLS configuration (client certificate, private CA, TLS 1.3) in production. Connect and read timeouts are 2 s and 5 s. If fund creation fails with a catalog error, check the product-catalog URL, the client secret and the TLS mount together. The OIDC client is disabled in the test profile. To roll back the schema change, drop the `product_revision_id` column; the cached rate stays correct.
+
+
+### API v2 transition and rollback (draft delivery plan)
+
+API v2 requires `productRevisionId` in `CreateFundRequest`; `AmendFundRequest` can omit it to retain the existing pin, or repeat that same id. Neither request silently chooses a current revision, changes the pin or edits the cached fee. Missing/null revision, an unresolved published revision or a conflicting fee is refused. V6 widens the stored fee to eight fractional digits so six-digit percentage terms survive persistence; it does not reconstruct historical rounded fees.
+
+The seven v1 resource roots retain all 27 unchanged operations as explicit deprecated application boundaries, with the same roles, authorization actions, actor attribution, idempotency keys and four-eyes checks. They return `X-API-Version: v1`, `Deprecation`, `Sunset` and a v2 successor link. The configured default sunset is 30 June 2027; an owner-approved rollout must verify that the actual configured date is at least 180 days ahead.
+
+The owner approved only a **draft transition proposal** excepting `POST /api/v1/funds` and `PUT /api/v1/funds/{id}` from that compatibility window: those two old manual-fee writes are not registered and return 405, instead of silently selecting a revision or accepting editable pinned fees. This proposal is not permission to deploy the retirement. External writers have not been exhaustively inventoried.
+
+Known readers/writers move explicitly: pension-service's fund client and mTLS fixture, tax-reporting's fund-period client, their consumer Pact tests, and the Admin UI's pension-fund URL builder use v2. Consumer Pact JSON must be regenerated by the native Pact workflow and imported unchanged; old tracked v1 pacts are not proof of v2 compatibility.
+
+Before activation, separately approve the exact provider/client images, legacy-writer cutover and existing TLS/certificate/network policy changes. First verify the provider's v2 capability across every active backend; old v1-only pods cannot safely receive v2 traffic. Retained aliases allow existing unchanged-operation callers to continue while their images are updated. Do not activate new callers against an old provider. Existing draft, blocked and automatic-merge-off controls remain until those decisions and native tests are complete.
+
+For rollback, restore callers before reverting to a v1-only provider, or retain a v2-capable provider. Keep the additive revision column and widened numeric precision; do not drop pins, narrow stored fees or restore fee editing on pinned funds. A safe binary/data rollback must be accepted before rollout. Source merge, provisioning, credentials, policy activation and financial execution are not authorized by this draft plan.

@@ -15,9 +15,9 @@ import { signInAsOperator } from './helpers/auth'
 const ID = '11111111-2222-4333-8444-555555555551'
 const CONTRACT = `**/api/svc/pension-service/api/v2/pension/contracts/${ID}`
 const OPERATOR_BASE = `**/api/svc/pension-service/api/v2/pension/operator/contracts/${ID}`
-const HOLDINGS = `**/api/svc/pension-fund-service/api/v1/contracts/${ID}/holdings**`
-const TRANSACTIONS = `**/api/svc/pension-fund-service/api/v1/contracts/${ID}/transactions**`
-const FUNDS = '**/api/svc/pension-fund-service/api/v1/funds**'
+const HOLDINGS = `**/api/svc/pension-fund-service/api/v2/contracts/${ID}/holdings**`
+const TRANSACTIONS = `**/api/svc/pension-fund-service/api/v2/contracts/${ID}/transactions**`
+const FUNDS = '**/api/svc/pension-fund-service/api/v2/funds**'
 
 const CONTRACT_BODY = {
   contractId: ID,

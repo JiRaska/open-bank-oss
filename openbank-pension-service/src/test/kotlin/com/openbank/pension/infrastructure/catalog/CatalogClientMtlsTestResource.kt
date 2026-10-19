@@ -209,7 +209,7 @@ private class CatalogTlsFixture(private val scenario: CatalogTlsScenario) {
         catalog.start()
         catalogServerStarted = true
         catalog.stubFor(get(urlEqualTo("/api/v2/offerings")).willReturn(okJson("[]")))
-        catalog.stubFor(get(urlEqualTo("/api/v1/strategies")).willReturn(okJson("[]")))
+        catalog.stubFor(get(urlEqualTo("/api/v2/strategies")).willReturn(okJson("[]")))
         catalog.stubFor(
             post(urlEqualTo("/api/v1/accounts/ownership-verifications"))
                 .withRequestBody(

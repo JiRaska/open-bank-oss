@@ -13,6 +13,7 @@ import com.openbank.pensionfund.domain.model.AllocationTarget
 import com.openbank.pensionfund.domain.model.GlidePathStep
 import com.openbank.pensionfund.domain.model.InstrumentClass
 import com.openbank.pensionfund.domain.model.OrderType
+import org.eclipse.microprofile.openapi.annotations.media.Schema
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -22,19 +23,82 @@ import java.util.UUID
  * is then a 400 naming the field (libs-runtime maps IllegalArgumentException), never a 500.
  */
 
-data class FundRequest(
+@Schema(
+    requiredProperties = [
+        "name", "isin", "lei", "depositaryReference", "custodyAccountReference", "currency", "riskClass",
+        "productRevisionId",
+    ],
+)
+data class CreateFundRequest(
+    @field:Schema(nullable = false)
     val name: String? = null,
+    @field:Schema(nullable = false)
     val isin: String? = null,
+    @field:Schema(nullable = false)
     val lei: String? = null,
+    @field:Schema(nullable = false)
     val depositaryReference: String? = null,
+    @field:Schema(nullable = false)
     val custodyAccountReference: String? = null,
+    @field:Schema(nullable = false)
     val currency: String? = null,
+    @field:Schema(nullable = false)
     val riskClass: Int? = null,
+    @field:Schema(nullable = true)
     val mandatoryConservative: Boolean? = null,
     /** ADR-0341: the published catalog revision whose fee schedule prices this fund. Required on create. */
+    @field:Schema(nullable = false)
     val productRevisionId: UUID? = null,
+    @field:Schema(nullable = true)
     val launchNavPerUnit: BigDecimal? = null,
     /** Deprecated: the fee comes from [productRevisionId]'s revision; a supplied value must equal it. */
+    @field:Schema(nullable = true, deprecated = true)
+    val managementFeeRate: BigDecimal? = null,
+) {
+    fun toDefinition() = FundDefinition(
+        name = req(name, "name"),
+        isin = req(isin, "isin"),
+        lei = req(lei, "lei"),
+        depositaryReference = req(depositaryReference, "depositaryReference"),
+        custodyAccountReference = req(custodyAccountReference, "custodyAccountReference"),
+        currency = req(currency, "currency"),
+        riskClass = req(riskClass, "riskClass"),
+        mandatoryConservative = mandatoryConservative ?: false,
+        productRevisionId = req(productRevisionId, "productRevisionId"),
+        launchNavPerUnit = launchNavPerUnit ?: BigDecimal.ONE,
+        managementFeeRate = managementFeeRate,
+    )
+}
+
+@Schema(
+    requiredProperties = [
+        "name", "isin", "lei", "depositaryReference", "custodyAccountReference", "currency", "riskClass",
+    ],
+)
+data class AmendFundRequest(
+    @field:Schema(nullable = false)
+    val name: String? = null,
+    @field:Schema(nullable = false)
+    val isin: String? = null,
+    @field:Schema(nullable = false)
+    val lei: String? = null,
+    @field:Schema(nullable = false)
+    val depositaryReference: String? = null,
+    @field:Schema(nullable = false)
+    val custodyAccountReference: String? = null,
+    @field:Schema(nullable = false)
+    val currency: String? = null,
+    @field:Schema(nullable = false)
+    val riskClass: Int? = null,
+    @field:Schema(nullable = true)
+    val mandatoryConservative: Boolean? = null,
+    /** An omitted revision retains the current pin; a supplied revision must equal it. */
+    @field:Schema(nullable = true)
+    val productRevisionId: UUID? = null,
+    @field:Schema(nullable = true)
+    val launchNavPerUnit: BigDecimal? = null,
+    /** Deprecated: the fee comes from [productRevisionId]'s revision; a supplied value must equal it. */
+    @field:Schema(nullable = true, deprecated = true)
     val managementFeeRate: BigDecimal? = null,
 ) {
     fun toDefinition() = FundDefinition(

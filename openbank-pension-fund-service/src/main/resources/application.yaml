@@ -115,7 +115,19 @@ openbank:
     enabled: true
     max-concurrent-requests: 100
   api:
-    version: "1"
+    version: "2"
+    # ADR-0048: unchanged v1 operations coexist with v2. The two legacy fund-definition writes
+    # are excluded by the owner-approved draft transition proposal; no revision is chosen for them.
+    deprecated-paths:
+      - /api/v1/funds
+      - /api/v1/navs
+      - /api/v1/strategies
+      - /api/v1/strategy-changes
+      - /api/v1/contracts
+      - /api/v1/reporting/funds
+      - /api/v1/position-classification-corrections
+    # Before an approved rollout, verify the actual sunset remains at least 180 days away.
+    sunset-date: "${PENSION_FUND_V1_SUNSET_DATE:Wed, 30 Jun 2027 00:00:00 GMT}"
   build:
     time: "${BUILD_TIME:unknown}"
   git:

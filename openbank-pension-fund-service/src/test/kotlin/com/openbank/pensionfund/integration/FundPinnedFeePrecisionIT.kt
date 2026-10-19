@@ -47,7 +47,7 @@ class FundPinnedFeePrecisionIT {
                         "currency":"CZK","riskClass":3,"mandatoryConservative":false,
                         "productRevisionId":"${PrecisionCatalogTerms.REVISION}","launchNavPerUnit":1}
                     """.trimIndent(),
-                ).post("/api/v1/funds").then().statusCode(201).extract().path<String>("id"),
+                ).post("/api/v2/funds").then().statusCode(201).extract().path<String>("id"),
         )
 
         connection().use { db ->
@@ -75,7 +75,7 @@ class FundPinnedFeePrecisionIT {
         val nav = UUID.fromString(
             given().contentType("application/json")
                 .body("""{"valuationDate":"${LocalDate.now(ZoneOffset.UTC)}","cash":365000000}""")
-                .post("/api/v1/funds/$fund/navs").then().statusCode(201).extract().path<String>("id"),
+                .post("/api/v2/funds/$fund/navs").then().statusCode(201).extract().path<String>("id"),
         )
         connection().use { db ->
             db.prepareStatement(
@@ -93,6 +93,80 @@ class FundPinnedFeePrecisionIT {
             }
         }
     }
+
+    @Test
+    fun `v2 creation requires an explicit revision and amendments retain the stored pin`() {
+        val body = definitionBody()
+        val withoutRevision = body.filterKeys { it != "productRevisionId" }
+        given().contentType("application/json").body(withoutRevision)
+            .post("/api/v2/funds").then().statusCode(400)
+        given().contentType("application/json").body(body + ("productRevisionId" to null))
+            .post("/api/v2/funds").then().statusCode(400)
+        given().contentType("application/json").body(body + ("productRevisionId" to UUID.randomUUID().toString()))
+            .post("/api/v2/funds").then().statusCode(400)
+        val id = given().contentType("application/json").body(body)
+            .post("/api/v2/funds").then().statusCode(201).extract().path<String>("id")
+        given().contentType("application/json").body(withoutRevision)
+            .put("/api/v2/funds/$id").then().statusCode(200)
+        given().contentType("application/json").body(withoutRevision + ("productRevisionId" to null))
+            .put("/api/v2/funds/$id").then().statusCode(200)
+        given().contentType("application/json").body(body)
+            .put("/api/v2/funds/$id").then().statusCode(200)
+        given().contentType("application/json").body(body + ("productRevisionId" to UUID.randomUUID().toString()))
+            .put("/api/v2/funds/$id").then().statusCode(400)
+        given().contentType("application/json").body(withoutRevision + ("managementFeeRate" to BigDecimal("0.5")))
+            .put("/api/v2/funds/$id").then().statusCode(400)
+        val stored = given().get("/api/v2/funds/$id").then().statusCode(200).extract().jsonPath()
+        assertThat(stored.getString("productRevisionId")).isEqualTo(PrecisionCatalogTerms.REVISION.toString())
+        assertThat(stored.getString("managementFeeRate")).isEqualTo("0.00123456")
+    }
+
+    @Test
+    fun `running v2 routes and create amendment schemas agree with the configured major`() {
+        assertThat(ConfigProvider.getConfig().getValue("openbank.api.version", String::class.java)).isEqualTo("2")
+        given().get("/api/v2/funds").then().statusCode(200).header("X-API-Version", "v2")
+        val served = given().accept("application/json").get("/q/openapi")
+            .then().statusCode(200).extract().jsonPath()
+        assertThat(served.getMap<String, Any>("paths").keys).contains(
+            "/api/v2/funds",
+            "/api/v2/navs/{navId}",
+            "/api/v2/strategies",
+            "/api/v2/strategy-changes/{changeId}",
+            "/api/v2/contracts/{contractId}/holdings",
+            "/api/v2/reporting/funds/{fundId}/period-figures",
+            "/api/v2/position-classification-corrections",
+        )
+        assertThat(served.getList<String>("components.schemas.CreateFundRequest.required"))
+            .contains("productRevisionId")
+        assertThat(served.getList<String>("components.schemas.AmendFundRequest.required"))
+            .doesNotContain("productRevisionId")
+    }
+
+    @Test
+    fun `legacy reads advertise sunset but legacy fund definition writes are not registered`() {
+        given().get("/api/v1/funds").then().statusCode(200)
+            .header("X-API-Version", "v1")
+            .header("Deprecation", "true")
+            .header("Sunset", "Wed, 30 Jun 2027 00:00:00 GMT")
+            .header("Link", "</api/v2/funds>; rel=\"successor-version\"")
+        val legacyBody = definitionBody().filterKeys { it != "productRevisionId" } +
+            ("managementFeeRate" to BigDecimal("0.008"))
+        given().contentType("application/json").body(legacyBody)
+            .post("/api/v1/funds").then().statusCode(405)
+        given().contentType("application/json").body(legacyBody)
+            .put("/api/v1/funds/${UUID.randomUUID()}").then().statusCode(405)
+    }
+
+    private fun definitionBody(): Map<String, Any> = mapOf(
+        "name" to "Versioned revision fixture",
+        "isin" to ("PF" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"),
+        "lei" to "315700ABCDEF12345678",
+        "depositaryReference" to "TEST-DEP",
+        "custodyAccountReference" to "TEST-CUST",
+        "currency" to "CZK",
+        "riskClass" to 3,
+        "productRevisionId" to PrecisionCatalogTerms.REVISION.toString(),
+    )
 
     private fun connection(): Connection {
         val config = ConfigProvider.getConfig()

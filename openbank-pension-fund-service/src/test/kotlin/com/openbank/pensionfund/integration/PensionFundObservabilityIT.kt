@@ -76,7 +76,7 @@ class PensionFundObservabilityIT {
     @TestSecurity(user = "obs-maker", roles = ["ROLE_OPERATOR"])
     fun `placing an order and calculating a NAV move the counters once each`() {
         fund = post(
-            "/api/v1/funds",
+            "/api/v2/funds",
             """{"name":"Obs","isin":"$isin","lei":"315700ABCDEF12345678","depositaryReference":"DEP-1",
                "custodyAccountReference":"CUST-OBS","currency":"CZK","riskClass":3,"mandatoryConservative":false,
                "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}""",
@@ -84,8 +84,8 @@ class PensionFundObservabilityIT {
 
         given().contentType("application/json").header("Idempotency-Key", "obs-1")
             .body("""{"fundId":"$fund","type":"SUBSCRIBE","amount":250}""")
-            .`when`().post("/api/v1/contracts/$contract/orders").then().statusCode(202)
-        nav = post("/api/v1/funds/$fund/navs", """{"valuationDate":"$today","cash":0}""")
+            .`when`().post("/api/v2/contracts/$contract/orders").then().statusCode(202)
+        nav = post("/api/v2/funds/$fund/navs", """{"valuationDate":"$today","cash":0}""")
             .then().statusCode(201).extract().path("id")
 
         assertThat(counter("openbank.pension_fund.orders", "fund", isin, "type", "SUBSCRIBE", "status", "PENDING"))
@@ -113,7 +113,7 @@ class PensionFundObservabilityIT {
     @Order(2)
     @TestSecurity(user = "obs-checker", roles = ["ROLE_OPERATOR"])
     fun `publishing settles the order and the snapshot reports AUM, units and NAV age`() {
-        given().`when`().post("/api/v1/navs/$nav/approve").then().statusCode(200)
+        given().`when`().post("/api/v2/navs/$nav/approve").then().statusCode(200)
 
         assertThat(counter("openbank.pension_fund.nav.events", "fund", isin, "event", "published")).isEqualTo(1.0)
         assertThat(counter("openbank.pension_fund.orders", "fund", isin, "type", "SUBSCRIBE", "status", "SETTLED"))

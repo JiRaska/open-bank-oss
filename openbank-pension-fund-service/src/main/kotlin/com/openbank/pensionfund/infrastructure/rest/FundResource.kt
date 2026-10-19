@@ -37,7 +37,7 @@ import java.util.UUID
  * top-level helper slipped in between would silently steal it (#3371).
  */
 @Tag(name = "Funds", description = "Segregated pension funds and NAV (ADR-0334)")
-@Path("/api/v1/funds")
+@Path("/api/v2/funds")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class FundResource {
@@ -55,7 +55,7 @@ class FundResource {
     @Operation(summary = "Create a segregated fund")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.fund.manage")
-    suspend fun create(request: FundRequest?): Response {
+    suspend fun create(request: CreateFundRequest?): Response {
         val fund = funds.createFund(requireNotNull(request) { "request body is required" }.toDefinition())
         return Response.status(Response.Status.CREATED).entity(fund).build()
     }
@@ -75,10 +75,10 @@ class FundResource {
 
     @PUT
     @Path("/{fundId}")
-    @Operation(summary = "Amend a fund's descriptive and fee terms; ISIN and currency are immutable")
+    @Operation(summary = "Amend a fund's descriptive terms; identity, currency and revision pin are immutable")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "pension-fund.fund.manage", resource = "#fundId")
-    suspend fun amend(@PathParam("fundId") fundId: UUID, request: FundRequest?): Fund =
+    suspend fun amend(@PathParam("fundId") fundId: UUID, request: AmendFundRequest?): Fund =
         funds.amendFund(fundId, requireNotNull(request) { "request body is required" }.toDefinition())
 
     @DELETE

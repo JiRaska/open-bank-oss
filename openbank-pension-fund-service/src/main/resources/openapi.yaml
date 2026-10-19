@@ -7,11 +7,10 @@ info:
   #        correction route — additive; income/expenses stay as deprecated fields.
   # 1.2.1: clarify same-currency fund switch validation (this branch's 1.1.1, re-taken on 1.2.0);
   #        no schema change.
-  # 1.3.0: ADR-0341 - a fund is created against a published catalog revision (`productRevisionId`,
-  #        optional in the schema, enforced by the server) and its management fee is read from it.
-  #        `managementFeeRate` stays in the request schema, deprecated; a differing value is rejected.
-  #        A behavioural tightening announced under ADR-0145, not a schema break.
-  version: 1.3.0
+  # 2.0.0: ADR-0341 requires an explicit published productRevisionId on fund creation.
+  #        This is a breaking contract: all business routes move to /api/v2; consumers migrate
+  #        explicitly. Amendments retain their existing pin and cannot change the fee.
+  version: 2.0.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -34,7 +33,7 @@ security:
   - bearerAuth: []
 
 paths:
-  /api/v1/funds:
+  /api/v2/funds:
     post:
       tags: [Funds]
       operationId: createFund
@@ -43,7 +42,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/FundRequest' }
+            schema: { $ref: '#/components/schemas/CreateFundRequest' }
       responses:
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -56,7 +55,7 @@ paths:
         '200':
           description: Funds
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Fund' } } } }
-  /api/v1/funds/{fundId}:
+  /api/v2/funds/{fundId}:
     parameters: [ { $ref: '#/components/parameters/FundId' } ]
     get:
       tags: [Funds]
@@ -68,12 +67,12 @@ paths:
     put:
       tags: [Funds]
       operationId: amendFund
-      summary: Amend a fund's descriptive and fee terms; ISIN and currency are immutable
+      summary: Amend a fund's descriptive terms; identity, currency and revision pin are immutable
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/FundRequest' }
+            schema: { $ref: '#/components/schemas/AmendFundRequest' }
       responses:
         '200': { description: Amended, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
@@ -87,7 +86,7 @@ paths:
         '200': { description: Closed, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/funds/{fundId}/navs:
+  /api/v2/funds/{fundId}/navs:
     parameters: [ { $ref: '#/components/parameters/FundId' } ]
     post:
       tags: [Funds]
@@ -115,7 +114,7 @@ paths:
         '200':
           description: NAVs
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Nav' } } } }
-  /api/v1/reporting/funds/{fundId}/period-figures:
+  /api/v2/reporting/funds/{fundId}/period-figures:
     parameters: [ { $ref: '#/components/parameters/FundId' } ]
     get:
       tags: [Reporting]
@@ -136,7 +135,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: No published NAV backs the period — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-  /api/v1/navs/{navId}:
+  /api/v2/navs/{navId}:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
       tags: [NAV]
@@ -145,7 +144,7 @@ paths:
       responses:
         '200': { description: The NAV, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/navs/{navId}/approve:
+  /api/v2/navs/{navId}/approve:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     post:
       tags: [NAV]
@@ -156,7 +155,7 @@ paths:
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/navs/{navId}/reject:
+  /api/v2/navs/{navId}/reject:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     post:
       tags: [NAV]
@@ -167,7 +166,7 @@ paths:
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/navs/{navId}/positions:
+  /api/v2/navs/{navId}/positions:
     parameters: [ { $ref: '#/components/parameters/NavId' } ]
     get:
       tags: [NAV]
@@ -176,7 +175,7 @@ paths:
       responses:
         '200': { description: The positions, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/NavPosition' } } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/position-classification-corrections:
+  /api/v2/position-classification-corrections:
     post:
       tags: [NAV]
       operationId: proposeClassificationCorrection
@@ -190,7 +189,7 @@ paths:
         '200': { description: Proposed, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/position-classification-corrections/{correctionId}/approve:
+  /api/v2/position-classification-corrections/{correctionId}/approve:
     parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
     post:
       tags: [NAV]
@@ -203,7 +202,7 @@ paths:
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/position-classification-corrections/{correctionId}/reject:
+  /api/v2/position-classification-corrections/{correctionId}/reject:
     parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
     post:
       tags: [NAV]
@@ -216,7 +215,7 @@ paths:
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/strategies:
+  /api/v2/strategies:
     post:
       tags: [Strategies]
       operationId: createStrategy
@@ -237,7 +236,7 @@ paths:
         '200':
           description: Strategies
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Strategy' } } } }
-  /api/v1/strategies/{strategyId}:
+  /api/v2/strategies/{strategyId}:
     parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
     get:
       tags: [Strategies]
@@ -246,7 +245,7 @@ paths:
       responses:
         '200': { description: The strategy, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/strategies/{strategyId}/allocation:
+  /api/v2/strategies/{strategyId}/allocation:
     parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
     get:
       tags: [Strategies]
@@ -263,7 +262,7 @@ paths:
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/strategies/{strategyId}/changes:
+  /api/v2/strategies/{strategyId}/changes:
     parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
     post:
       tags: [Strategies]
@@ -288,7 +287,7 @@ paths:
           description: Changes
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/StrategyChange' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/strategy-changes/{changeId}:
+  /api/v2/strategy-changes/{changeId}:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     get:
       tags: [Strategies]
@@ -297,7 +296,7 @@ paths:
       responses:
         '200': { description: The change, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-  /api/v1/strategy-changes/{changeId}/approve:
+  /api/v2/strategy-changes/{changeId}/approve:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     post:
       tags: [Strategies]
@@ -308,7 +307,7 @@ paths:
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/strategy-changes/{changeId}/reject:
+  /api/v2/strategy-changes/{changeId}/reject:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     post:
       tags: [Strategies]
@@ -319,7 +318,7 @@ paths:
         '403': { $ref: '#/components/responses/FourEyes' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/strategy-changes/{changeId}/apply:
+  /api/v2/strategy-changes/{changeId}/apply:
     parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
     post:
       tags: [Strategies]
@@ -329,7 +328,7 @@ paths:
         '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
-  /api/v1/contracts/{contractId}/orders:
+  /api/v2/contracts/{contractId}/orders:
     parameters: [ { $ref: '#/components/parameters/ContractId' } ]
     post:
       tags: [Unit register]
@@ -359,7 +358,7 @@ paths:
         '200':
           description: Orders
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } } } }
-  /api/v1/contracts/{contractId}/holdings:
+  /api/v2/contracts/{contractId}/holdings:
     parameters: [ { $ref: '#/components/parameters/ContractId' } ]
     get:
       tags: [Unit register]
@@ -367,11 +366,356 @@ paths:
       summary: Unit holdings of a contract valued at each fund's latest published NAV
       responses:
         '200': { description: Valuation, content: { application/json: { schema: { $ref: '#/components/schemas/ContractValuation' } } } }
-  /api/v1/contracts/{contractId}/transactions:
+  /api/v2/contracts/{contractId}/transactions:
     parameters: [ { $ref: '#/components/parameters/ContractId' } ]
     get:
       tags: [Unit register]
       operationId: listTransactions
+      summary: Priced unit transactions of a contract, newest first
+      responses:
+        '200':
+          description: Transactions
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UnitTransaction' } } } }
+
+  # ADR-0048 compatibility surface; legacy fund create/amend are explicitly excluded.
+  /api/v1/funds:
+    get:
+      deprecated: true
+      tags: [Funds]
+      operationId: legacyListFunds
+      summary: List funds
+      responses:
+        '200':
+          description: Funds
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Fund' } } } }
+  /api/v1/funds/{fundId}:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    get:
+      deprecated: true
+      tags: [Funds]
+      operationId: legacyGetFund
+      summary: Read one fund
+      responses:
+        '200': { description: The fund, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      deprecated: true
+      tags: [Funds]
+      operationId: legacyCloseFund
+      summary: Close a fund; refused while units are outstanding or a strategy uses it
+      responses:
+        '200': { description: Closed, content: { application/json: { schema: { $ref: '#/components/schemas/Fund' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/funds/{fundId}/navs:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    post:
+      deprecated: true
+      tags: [Funds]
+      operationId: legacyCalculateNav
+      summary: Calculate a NAV (maker); a second person publishes it
+      description: |
+        A position without `price` is priced through the market-price port; an unpriced position
+        is refused (400) rather than valued at an invented number. Calculating for a date that
+        already has a published NAV creates a CORRECTION of it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NavCalculationRequest' }
+      responses:
+        '201': { description: Calculated, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      deprecated: true
+      tags: [Funds]
+      operationId: legacyListNavs
+      summary: NAV history of a fund, newest first
+      responses:
+        '200':
+          description: NAVs
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Nav' } } } }
+  /api/v1/reporting/funds/{fundId}/period-figures:
+    parameters: [ { $ref: '#/components/parameters/FundId' } ]
+    get:
+      deprecated: true
+      tags: [Reporting]
+      operationId: legacyGetFundPeriodFigures
+      summary: Period-end fund aggregates for regulatory returns (#12425)
+      description: |
+        Balance sheet at the closing NAV, year-to-date P&L, unit roll-forward, portfolio at the
+        closing NAV, flows and participant COUNTS for one period. Aggregate only — no contract id
+        or participant attribute is returned. Derived from PUBLISHED NAVs and the transactions
+        priced at them, bucketed by valuation date, so a closed period answers the same way every
+        time; `fingerprint` changes only when the inputs do (e.g. a NAV correction).
+        Served to staff and to tax-reporting-service's own client only.
+      parameters:
+        - { name: periodStart, in: query, required: true, schema: { type: string, format: date } }
+        - { name: periodEnd, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: The period figures, content: { application/json: { schema: { $ref: '#/components/schemas/FundPeriodFigures' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: No published NAV backs the period — not reportable (never zeroes), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/v1/navs/{navId}:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    get:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyGetNav
+      summary: Read one NAV
+      responses:
+        '200': { description: The NAV, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/navs/{navId}/approve:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    post:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyApproveNav
+      summary: Publish a calculated NAV (checker); settles queued orders, or re-prices for a correction
+      responses:
+        '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/NavPublication' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/navs/{navId}/reject:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    post:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyRejectNav
+      summary: Reject a calculated NAV (checker)
+      responses:
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/Nav' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/navs/{navId}/positions:
+    parameters: [ { $ref: '#/components/parameters/NavId' } ]
+    get:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyListNavPositions
+      summary: The positions a NAV was struck on, each with its effective instrument class
+      responses:
+        '200': { description: The positions, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/NavPosition' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/position-classification-corrections:
+    post:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyProposeClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
+      summary: Propose a position's instrument class (maker)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrectionRequest' } } }
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Proposed, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/position-classification-corrections/{correctionId}/approve:
+    parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
+    post:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyApproveClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
+      summary: Approve a proposed instrument class (checker, never the proposer)
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/position-classification-corrections/{correctionId}/reject:
+    parameters: [ { $ref: '#/components/parameters/CorrectionId' } ]
+    post:
+      deprecated: true
+      tags: [NAV]
+      operationId: legacyRejectClassificationCorrection
+      parameters: [ { $ref: '#/components/parameters/ClassificationIdempotencyKey' } ]
+      summary: Reject a proposed instrument class (checker, never the proposer)
+      responses:
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ClassificationCorrection' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/strategies:
+    post:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyCreateStrategy
+      summary: Create a strategy (static allocation, optionally a lifecycle glide path)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StrategyRequest' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyListStrategies
+      summary: List strategies
+      responses:
+        '200':
+          description: Strategies
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Strategy' } } } }
+  /api/v1/strategies/{strategyId}:
+    parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
+    get:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyGetStrategy
+      summary: Read one strategy
+      responses:
+        '200': { description: The strategy, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategies/{strategyId}/allocation:
+    parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
+    get:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyGetStrategyAllocation
+      summary: Target allocation for a participant with the given years to retirement
+      parameters:
+        - name: yearsToRetirement
+          in: query
+          required: true
+          schema: { type: integer, format: int32 }
+      responses:
+        '200':
+          description: Allocation
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AllocationTarget' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategies/{strategyId}/changes:
+    parameters: [ { $ref: '#/components/parameters/StrategyId' } ]
+    post:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacySubmitStrategyChange
+      summary: Submit an allocation change (maker); needs approval and a notice period
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StrategyChangeRequest' }
+      responses:
+        '201': { description: Submitted, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyListStrategyChanges
+      summary: Changes submitted against a strategy, newest first
+      responses:
+        '200':
+          description: Changes
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategy-changes/{changeId}:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    get:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyGetStrategyChange
+      summary: Read one strategy change
+      responses:
+        '200': { description: The change, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/strategy-changes/{changeId}/approve:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    post:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyApproveStrategyChange
+      summary: Approve a change (checker, never the submitter); participants are notified from today
+      responses:
+        '200': { description: Approved, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/strategy-changes/{changeId}/reject:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    post:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyRejectStrategyChange
+      summary: Reject a change (checker)
+      responses:
+        '200': { description: Rejected, content: { application/json: { schema: { $ref: '#/components/schemas/StrategyChange' } } } }
+        '403': { $ref: '#/components/responses/FourEyes' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/strategy-changes/{changeId}/apply:
+    parameters: [ { $ref: '#/components/parameters/ChangeId' } ]
+    post:
+      deprecated: true
+      tags: [Strategies]
+      operationId: legacyApplyStrategyChange
+      summary: Apply an approved change on or after its effective date
+      responses:
+        '200': { description: Applied, content: { application/json: { schema: { $ref: '#/components/schemas/Strategy' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/contracts/{contractId}/orders:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    post:
+      deprecated: true
+      tags: [Unit register]
+      operationId: legacyPlaceOrder
+      summary: Place a subscription, redemption or switch; it queues until the next published NAV
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: A retry with the same key returns the original order; the same key with a different order is 409.
+          schema: { type: string, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '202': { description: Accepted, unpriced, content: { application/json: { schema: { $ref: '#/components/schemas/UnitOrder' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      deprecated: true
+      tags: [Unit register]
+      operationId: legacyListOrders
+      summary: Orders of a contract, newest first
+      responses:
+        '200':
+          description: Orders
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UnitOrder' } } } }
+  /api/v1/contracts/{contractId}/holdings:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    get:
+      deprecated: true
+      tags: [Unit register]
+      operationId: legacyGetHoldings
+      summary: Unit holdings of a contract valued at each fund's latest published NAV
+      responses:
+        '200': { description: Valuation, content: { application/json: { schema: { $ref: '#/components/schemas/ContractValuation' } } } }
+  /api/v1/contracts/{contractId}/transactions:
+    parameters: [ { $ref: '#/components/parameters/ContractId' } ]
+    get:
+      deprecated: true
+      tags: [Unit register]
+      operationId: legacyListTransactions
       summary: Priced unit transactions of a contract, newest first
       responses:
         '200':
@@ -410,7 +754,15 @@ components:
       type: object
       properties:
         error: { type: string }
-    FundRequest:
+    CreateFundRequest:
+      description: Create a fund against an explicitly selected published catalog revision. No revision is selected implicitly.
+      allOf:
+        - $ref: '#/components/schemas/AmendFundRequest'
+        - type: object
+          required: [productRevisionId]
+          properties:
+            productRevisionId: { type: string, format: uuid, description: Explicitly selected published revision; null is rejected on create. }
+    AmendFundRequest:
       type: object
       required: [name, isin, lei, depositaryReference, custodyAccountReference, currency, riskClass]
       properties:
@@ -421,10 +773,10 @@ components:
         custodyAccountReference: { type: string }
         currency: { type: string, pattern: '^[A-Z]{3}$' }
         riskClass: { type: integer, minimum: 1, maximum: 7 }
-        mandatoryConservative: { type: boolean, default: false }
-        managementFeeRate: { type: number, deprecated: true, description: "Deprecated (ADR-0341). Ignored as an input: if supplied it must equal the pinned revision's fee, otherwise the request is rejected with 400. Read the fee from the Fund response." }
-        productRevisionId: { type: string, format: uuid, description: "The published catalog revision whose feeSchedule prices this fund (ADR-0341). Required on create (the service answers 400 without it) but optional in this shared create/amend schema: on amend it must be absent or equal to the pinned revision. Not marked `required` because the create-time requirement is enforced by the service, and a schema-level required property would be a breaking change under ADR-0048 for an internal contract that has no /api/v2." }
-        launchNavPerUnit: { type: number, default: 1 }
+        mandatoryConservative: { type: [boolean, 'null'], default: false }
+        managementFeeRate: { type: [number, 'null'], deprecated: true, description: "Deprecated (ADR-0341). Ignored as an input: if supplied it must equal the pinned revision's fee, otherwise the request is rejected with 400. Read the fee from the Fund response." }
+        productRevisionId: { type: [string, 'null'], format: uuid, description: "On amendment, omission retains the existing revision pin; a supplied value must equal it. The CreateFundRequest contract requires this property explicitly." }
+        launchNavPerUnit: { type: [number, 'null'], default: 1 }
     Fund:
       type: object
       properties:

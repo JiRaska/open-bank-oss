@@ -26,8 +26,8 @@ import java.util.UUID
  * service-account-openbank-tax-reporting and staff, never the shared openbank-services account.
  */
 
-/** pension-fund-service's `GET /api/v1/reporting/funds/{fundId}/period-figures` (its openapi.yaml). */
-@Path("/api/v1/reporting/funds")
+/** pension-fund-service's `GET /api/v2/reporting/funds/{fundId}/period-figures` (its openapi.yaml). */
+@Path("/api/v2/reporting/funds")
 @Produces(MediaType.APPLICATION_JSON)
 @OidcClientFilter
 @RegisterRestClient(configKey = "pension-fund-service")
