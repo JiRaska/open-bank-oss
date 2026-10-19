@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.2...admin-ui-v3.8.3) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve unknown costs and skip inactive blob warm-up ([#13200](https://github.com/JiRaska/open-bank-oss/issues/13200)) ([a8c619b](https://github.com/JiRaska/open-bank-oss/commit/a8c619b14dbac8dbea9311ae57dd35e81e409f72))
+
 ## [3.8.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.1...admin-ui-v3.8.2) (2026-10-19)
 
 
