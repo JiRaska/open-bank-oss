@@ -22,7 +22,15 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
-  services: {}
+  services:
+    openbank-transaction-service:
+      issue: "#13231"
+      reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
+      release_condition: "The maintenance owner approves the exact target image and deployment window, the writer and retry barrier is active, and duplicate-key reconciliation, bounded lock wait and rollback plans are accepted."
+    openbank-card-processing-service:
+      issue: "#13231"
+      reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
+      release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
