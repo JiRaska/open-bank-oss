@@ -18,6 +18,8 @@ import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -96,6 +98,48 @@ class SettlementAdapterTest {
             assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
                 .describedAs("HTTP %d", code)
                 .isInstanceOf(SettlementUnavailableException::class.java)
+        }
+    }
+
+    @Test
+    fun `refusal diagnostics never expose the provider body or its read error`() {
+        val poison = "synthetic-private-provider-payload"
+        listOf(400, 422).forEach { code ->
+            listOf(false, true).forEach { readFails ->
+                val response = mockk<Response>(relaxed = true)
+                every { response.status } returns code
+                every { response.hasEntity() } returns true
+                if (readFails) {
+                    every { response.readEntity(InputStream::class.java) } throws IllegalStateException(poison)
+                } else {
+                    every { response.readEntity(InputStream::class.java) } returns
+                        ByteArrayInputStream(poison.toByteArray())
+                }
+                every { client.initiateTransaction(any()) } returns Uni.createFrom().item(response)
+
+                assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
+                    .isInstanceOf(SettlementUnavailableException::class.java)
+                    .hasRootCauseMessage("Unexpected HTTP $code from transaction-service")
+                    .satisfies { failure -> assertThat(failure.stackTraceToString()).doesNotContain(poison) }
+            }
+        }
+    }
+
+    @Test
+    fun `unexpected successful statuses never expose the transaction body`() {
+        val poison = "synthetic-private-transaction-payload"
+        val txId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        val tx = completed(txId).copy(type = poison)
+        listOf(200, 202, 206).forEach { code ->
+            every { client.initiateTransaction(any()) } returns Uni.createFrom().item(created(tx, code))
+
+            assertThatThrownBy { adapter.settle(payment()).await().indefinitely() }
+                .isInstanceOf(SettlementUnavailableException::class.java)
+                .hasRootCauseMessage("Unexpected HTTP $code from transaction-service")
+                .satisfies { failure ->
+                    assertThat(failure.stackTraceToString())
+                        .doesNotContain(poison, txId.toString(), tx.sourceAccountId.toString())
+                }
         }
     }
 

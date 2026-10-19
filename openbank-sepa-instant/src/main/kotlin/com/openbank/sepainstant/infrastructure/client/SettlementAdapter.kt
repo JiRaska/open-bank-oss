@@ -85,9 +85,14 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         // TransactionCompletionUncertainException), so the status is not re-interpreted here.
         val booked = outcome as? TransactionCallOutcome.HttpSuccess
         if (booked == null || booked.status != Response.Status.CREATED.statusCode) {
-            throw SettlementUnavailableException(
-                "Unexpected answer from transaction-service for payment ${payment.paymentId}: $outcome",
-            )
+            // Outcome bodies may contain customer data or provider diagnostics. Keep the exception
+            // safe for the caller's warning log by describing only the controlled kind and status.
+            val answer = when (outcome) {
+                is TransactionCallOutcome.HttpSuccess -> "HTTP ${outcome.status}"
+                TransactionCallOutcome.Conflict -> "HTTP 409"
+                is TransactionCallOutcome.Rejected -> "HTTP ${outcome.status}"
+            }
+            throw SettlementUnavailableException("Unexpected $answer from transaction-service")
         }
         // This adapter verifies the booking against the request, so it needs the body: unreadable = unproven
         // (the idempotent retry replays the same booking), which is what it always did.

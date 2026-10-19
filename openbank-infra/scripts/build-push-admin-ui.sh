@@ -17,7 +17,7 @@
 # --no-bump to only build & push (e.g. a throwaway test image).
 #
 # Usage:
-#   openbank-infra/scripts/build-push-admin-ui.sh [--no-bump] [--no-sbom] [--platform <p>]
+#   openbank-infra/scripts/build-push-admin-ui.sh [--collect-only] [--no-bump] [--no-sbom] [--platform <p>]
 #
 #   --no-sbom  skip ./gradlew sbomAll and reuse whatever build/reports/bom.json
 #              files already exist (fast UI-only iteration).
@@ -42,10 +42,12 @@ PLATFORM="linux/arm64"
 BUMP_MANIFEST=1
 GEN_SBOM=1
 ECR_LOGIN=1
+COLLECT_ONLY=0
 MANIFEST="openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --collect-only) COLLECT_ONLY=1; shift ;;
     --no-bump)    BUMP_MANIFEST=0; shift ;;
     --no-sbom)    GEN_SBOM=0; shift ;;
     --no-login)   ECR_LOGIN=0; shift ;;
@@ -371,6 +373,11 @@ else
   echo "    WARN: app-status.json missing/garbled; baked available:false stub." >&2
 fi
 
+if [ "${COLLECT_ONLY}" = "1" ]; then
+  echo '==> collected image inputs; no image built or published'
+  exit 0
+fi
+
 if [ "${ECR_LOGIN}" = "1" ]; then
   echo "==> ECR login (${AWS_REGION})"
   aws ecr get-login-password --region "${AWS_REGION}" \
@@ -412,6 +419,19 @@ buildx_args=(
   --push \
   .
 )
+
+# Shared cache is an optimization only. Source validation and image smoke tests still run.
+# The caller exposes the short-lived Actions runtime credentials; no cache credentials
+# are passed as build arguments or copied into the image.
+if [ "${ADMIN_UI_BUILDKIT_CACHE:-}" = "gha" ]; then
+  : "${ACTIONS_RUNTIME_TOKEN:?Actions runtime token required for gha cache}"
+  : "${ACTIONS_RESULTS_URL:?Actions cache v2 URL required}"
+  buildx_args=(--cache-from "type=gha,version=2,scope=admin-ui-${PLATFORM//\//-}" \
+    --cache-to "type=gha,version=2,scope=admin-ui-${PLATFORM//\//-},mode=max,ignore-error=true" "${buildx_args[@]}")
+fi
+if [ -n "${ADMIN_UI_BUILD_METADATA_FILE:-}" ]; then
+  buildx_args=(--metadata-file "${ADMIN_UI_BUILD_METADATA_FILE}" "${buildx_args[@]}")
+fi
 
 # The GitHub job has a 30-minute ceiling, but an unbounded BuildKit invocation can consume the
 # entire deploy slot and leave no time for a useful failure or cleanup signal. GNU timeout is
