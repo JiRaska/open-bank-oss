@@ -161,10 +161,6 @@
         <error line="71" column="27" source="standard:statement-wrapping" />
         <error line="71" column="58" source="standard:statement-wrapping" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
     <file name="src/test/kotlin/com/openbank/securityscanner/application/SecurityScannerServiceTest.kt">
         <error line="41" column="92" source="standard:trailing-comma-on-call-site" />
         <error line="48" column="42" source="standard:trailing-comma-on-call-site" />
