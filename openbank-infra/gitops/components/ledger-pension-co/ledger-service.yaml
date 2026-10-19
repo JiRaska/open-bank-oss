@@ -106,10 +106,10 @@ spec:
             # producer has nowhere to connect even if the dispatcher were switched on).
             - name: MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_TOPIC
               value: openbank.ledger-pension-co.journal.posted.disabled
-            # …and no Kafka client at all until first send. The connector otherwise builds the
-            # producer eagerly at boot, and with no bootstrap env it falls back to localhost:9092
-            # and logs a "Bootstrap broker localhost … disconnected" WARN every few hundred ms
-            # (~760/h). The dispatcher is off, so nothing ever sends and no client is created.
+            # Defer the underlying Kafka producer initialization until first use. The connector
+            # still creates its wrapper and serialization resources at boot; lazy-client does
+            # not disable the channel or prevent a later send from creating the producer.
+            # Keep dispatch disabled and the isolated topic above as separate safeguards.
             - name: MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_LAZY_CLIENT
               value: "true"
             # Quarkus disables a @Scheduled method whose config-expression cron resolves to "off".
