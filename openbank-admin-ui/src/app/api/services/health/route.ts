@@ -3,34 +3,11 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { discoverServices, prettyLabel } from '@/lib/discovery'
+import { discoverServicesSnapshot, prettyLabel } from '@/lib/discovery'
 import { getRegistry } from '@/lib/services/fleet'
+import type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
-export interface ServiceHealthEntry {
-  name: string
-  /** Kubernetes namespace; omitted for the off-cluster static probe inventory. */
-  namespace?: string
-  port: number
-  label: string
-  group: 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
-  container: string
-  healthPath: string
-  status: 'UP' | 'DOWN' | 'UNKNOWN'
-  reachable: boolean
-  latencyMs: number | null
-  version?: string | null
-  gitCommit?: string | null
-  /** Tech-stack snapshot, fetched separately from /api/v1/info. Null if probe failed. */
-  stack?: ServiceStackEntry | null
-}
-
-export interface ServiceStackEntry {
-  kotlin?:  { version: string }
-  quarkus?: { version: string; lts?: boolean; supportUntil?: string }
-  java?:    { version: string; vendor?: string; arch?: string; cpu?: number; maxHeapMib?: number }
-  gradle?:  { version: string }
-  libs?:    { version: string; buildTime?: string; gitCommit?: string }
-}
+export type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
 // Off-cluster static probe list: DERIVED from the code-generated catalog (see
 // @/lib/services/fleet), never typed here. In-cluster the inventory comes from Kubernetes discovery.
@@ -200,22 +177,27 @@ async function probeService(
 // one's readiness — the kubelet's own /q/health/ready verdict on the management
 // port, which a sibling pod cannot reach directly. Version/stack chips are still
 // enriched best-effort from /api/v1/info on the Service DNS. Off-cluster (local
-// dev) discoverServices() returns null and we fall back to static probing.
-async function fromDiscovery(): Promise<ServiceHealthEntry[] | null> {
-  const discovered = await discoverServices()
-  if (!discovered) {
+// dev) discovery marks the source static and we fall back to static probing. An
+// incomplete in-cluster inventory remains explicitly partial/unavailable.
+async function fromDiscovery(): Promise<{ services: ServiceHealthEntry[] | null; status: 'complete' | 'partial' | 'unavailable' | 'static' }> {
+  const snapshot = await discoverServicesSnapshot()
+  if (snapshot.status === 'static') {
     trimInfoState(new Set())
-    return null
+    return { services: null, status: 'static' }
+  }
+  if (snapshot.status === 'unavailable') {
+    trimInfoState(new Set())
+    return { services: [], status: 'unavailable' }
   }
 
-  const keyed = discovered.map((d) => {
+  const keyed = snapshot.services.map((d) => {
     const base = `http://${d.name}.${d.namespace}.svc:${d.port}`
     return { d, base, key: infoKey(base, d.image) }
   })
   const currentKeys = new Set(keyed.map(({ key }) => key))
   trimInfoState(currentKeys)
 
-  return Promise.all(
+  const services = await Promise.all(
     keyed.map(({ d, base, key }): ServiceHealthEntry => {
       const reachable = d.readyReplicas > 0
       // Kubernetes readiness is authoritative and returned immediately. Info is
@@ -242,12 +224,13 @@ async function fromDiscovery(): Promise<ServiceHealthEntry[] | null> {
       }
     }),
   )
+  return { services, status: snapshot.status }
 }
 
 export async function GET() {
-  const discovered = await fromDiscovery()
-  const services = discovered ?? (await Promise.all(staticServices().map(probeService)))
-  const source = discovered ? 'kubernetes' : 'static'
+  const discovery = await fromDiscovery()
+  const services = discovery.services ?? (await Promise.all(staticServices().map(probeService)))
+  const source = discovery.status === 'static' ? 'static' : 'kubernetes'
 
   const byContainer: Record<string, ServiceHealthEntry> = {}
   const byWorkload: Record<string, ServiceHealthEntry> = {}
@@ -267,7 +250,7 @@ export async function GET() {
   }
 
   return NextResponse.json(
-    { services, byContainer, byWorkload, source },
+    { services, byContainer, byWorkload, source, discoveryStatus: discovery.status },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

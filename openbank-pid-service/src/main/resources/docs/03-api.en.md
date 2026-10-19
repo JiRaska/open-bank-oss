@@ -16,6 +16,7 @@
 | `POST` | `/api/v1/parties` | employee, admin | Create a party (unified identity) | `201` + `PartyResponse`, `Location` header |
 | `GET` | `/api/v1/parties/{id}` | employee, admin, customer | Get party by internal UUID | `200` + `PartyResponse` |
 | `GET` | `/api/v1/parties/by-external-id?type=&value=` | employee, admin | Resolve party by external id (`type`=`ExternalIdType`) | `200` + `PartyResponse` |
+| `POST` | `/api/v1/parties/by-external-id/lookup` | operator, admin | Browser-safe exact lookup; identifier is sent in the JSON body and response is limited to the matched party ID, status, creation time, and requested identifier | `200` + `ExternalIdLookupResponse` |
 | `GET` | `/api/v1/parties?givenName=&familyName=&email=&role=&status=&limit=20&afterId=` | employee, admin | Search / keyset-paginate parties | `200` + `PartyResponse[]` |
 | `POST` | `/api/v1/parties/{id}/sync/bankid` | employee, admin | Overwrite core + contact attrs from bankID | `200` + `PartyResponse` |
 | `POST` | `/api/v1/parties/{id}/sync/rob` | employee, admin | Sync address + AIFO from ROB | `200` + `PartyResponse` |
@@ -27,6 +28,16 @@
 | `DELETE` | `/api/v1/parties/{id}/relationships/{relationshipId}` | employee, admin | Terminate a relationship | `200` + `RelationshipResponse` |
 
 ## Key request/response shapes
+
+### Browser-safe exact external-ID lookup
+
+`POST /api/v1/parties/by-external-id/lookup` accepts exactly one identifier in a JSON body. Supported `type` values are `BANKID_SUB`, `ROB_AIFO`, `ICO`, `PASSPORT_NUMBER`, and `ID_CARD_NUMBER`; `value` must be nonblank and at most 256 characters. The endpoint requires the operator or admin role. A match returns only the stable party ID, party status, creation time, and the exact requested identifier. It does not return other external IDs, profile fields, or an unmatched identifier; a missing match returns `404`.
+
+```json
+{ "type": "BANKID_SUB", "value": "bankid|example" }
+```
+
+The existing `GET /api/v1/parties/by-external-id` implementation currently reads `type` and `value` query parameters. Its checked-in OpenAPI definition is being kept unchanged in this additive API release; exact reconciliation is tracked separately.
 
 ### `CreatePartyRequest` (POST /parties)
 

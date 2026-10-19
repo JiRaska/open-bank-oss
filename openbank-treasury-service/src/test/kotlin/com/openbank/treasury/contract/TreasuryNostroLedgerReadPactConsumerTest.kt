@@ -78,7 +78,7 @@ class TreasuryNostroLedgerReadPactConsumerTest {
                     j.minArrayLike("lines", 1) { l ->
                         l.uuid("id")
                         // stringValue: this interaction's whole point is that GL 1001 (CZK nostro,
-                        // TreasuryChart.glAccountId("1001")) carries the seeded line.
+                        // the chart id of 1001) carries the seeded line.
                         l.stringValue("glAccountId", NOSTRO_CZK_GL_ID)
                         l.stringValue("side", "CREDIT")
                         l.decimalType("amount", 250000.00)
@@ -168,6 +168,233 @@ class TreasuryNostroLedgerReadPactConsumerTest {
         .willRespondWith()
         .status(401)
         .toPact()
+
+    /**
+     * ADR-0341 D3 -- the WRITE call: treasury posts a journal whose legs name an accounting class and
+     * role, never a GL account. The request body is pinned field by field (values literal, ids as
+     * type matchers) and the test below serialises the PRODUCTION [PostJournalRequest] DTO against it,
+     * so a drifted field name fails the consumer test while a drifted ledger fails the provider replay.
+     * The provider state is the already-existing chart seed; the ledger resolves the classes through
+     * V32's `accounting_class_gl_map`, so replay is also the proof the map covers what treasury sends.
+     */
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun postJournalByAccountingClassPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the standard chart of accounts is seeded")
+        .uponReceiving("POST a treasury settlement journal naming accounting classes instead of GL accounts")
+        .path("/api/v1/journals")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "Accept" to "application/json"))
+        .body(journalBody("INTERBANK_PLACEMENT", "PRINCIPAL"))
+        .willRespondWith()
+        .status(201)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.uuid("id")
+                o.stringValue("status", "POSTED")
+            }.build(),
+        )
+        .toPact()
+
+    /** A class the ledger has no mapping for is the ledger's own 422, never a guessed account. */
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun postJournalWithUnmappedClassPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the standard chart of accounts is seeded")
+        .uponReceiving("POST a treasury journal whose accounting class the ledger does not map")
+        .path("/api/v1/journals")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "Accept" to "application/json"))
+        .body(journalBody("NOT_A_MAPPED_CLASS", "PRINCIPAL", key = "treasury:unmapped:settled"))
+        .willRespondWith()
+        .status(422)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.stringType("error", "no GL account is mapped for accountingClass=NOT_A_MAPPED_CLASS")
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun rejectsJournalPostWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST a treasury journal with a missing or expired token")
+        .path("/api/v1/journals")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "Accept" to "application/json"))
+        .body(journalBody("INTERBANK_PLACEMENT", "PRINCIPAL", key = "treasury:no-token:settled"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    /**
+     * ADR-0341 D3 -- the READ of the ledger's accountingClass -> GL map, which is where treasury now
+     * learns which GL is a currency's nostro (it names no GL code itself). The row is pinned by value:
+     * the nostro CZK row, its fixed chart id and its code.
+     */
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun accountingClassMapPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the standard chart of accounts is seeded")
+        .uponReceiving("GET the accountingClass to GL account map")
+        .path("/api/v1/accounting-classes")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            au.com.dius.pact.consumer.dsl.PactDslJsonArray.arrayMinLike(1)
+                .stringValue("accountingClass", "NOSTRO_ACCOUNT")
+                .stringValue("role", "PRINCIPAL")
+                .stringValue("currencyCode", "CZK")
+                .stringValue("glAccountId", NOSTRO_CZK_GL_ID)
+                .stringValue("glCode", "1001")
+                .closeObject()!!,
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-treasury-service", provider = "openbank-ledger-service")
+    fun rejectsAccountingClassMapWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the accountingClass map with a missing or expired token")
+        .path("/api/v1/accounting-classes")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    private fun journalBody(accountingClass: String, role: String, key: String = JOURNAL_KEY) = newJsonBody { o ->
+        o.stringValue("idempotencyKey", key)
+        o.uuid("transactionId")
+        o.stringValue("entryDate", JOURNAL_DATE)
+        o.stringValue("valueDate", JOURNAL_DATE)
+        o.stringType("description", "MM placement settlement")
+        o.uuid("createdBy")
+        o.array("lines") { lines ->
+            lines.`object` { l -> journalLeg(l, accountingClass, role, "DEBIT") }
+            lines.`object` { l -> journalLeg(l, "NOSTRO_ACCOUNT", "PRINCIPAL", "CREDIT") }
+        }
+    }.build()
+
+    private fun journalLeg(
+        l: au.com.dius.pact.consumer.dsl.LambdaDslObject,
+        accountingClass: String,
+        role: String,
+        side: String,
+    ) {
+        l.stringValue("accountingClass", accountingClass)
+        l.stringValue("accountingRole", role)
+        l.stringValue("side", side)
+        l.decimalType("amount", 250000.00)
+        l.stringValue("currencyCode", "CZK")
+        l.nullValue("fxRate")
+        l.decimalType("baseAmount", 250000.00)
+        l.stringValue("baseCurrencyCode", "CZK")
+    }
+
+    private fun postBody(accountingClass: String, key: String = JOURNAL_KEY): String {
+        fun leg(cls: String, role: String, side: String) =
+            com.openbank.treasury.infrastructure.client.JournalLineRequest(
+                glAccountId = null,
+                accountingClass = cls,
+                accountingRole = role,
+                side = side,
+                amount = java.math.BigDecimal("250000.00"),
+                currencyCode = "CZK",
+                fxRate = null,
+                baseAmount = java.math.BigDecimal("250000.00"),
+                baseCurrencyCode = "CZK",
+            )
+        return com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+            com.openbank.treasury.infrastructure.client.PostJournalRequest(
+                idempotencyKey = key,
+                transactionId = java.util.UUID.fromString("0191c0de-0000-7000-8000-000000000001"),
+                entryDate = JOURNAL_DATE,
+                valueDate = JOURNAL_DATE,
+                description = "MM placement settlement",
+                lines = listOf(
+                    leg(accountingClass, "PRINCIPAL", "DEBIT"),
+                    leg("NOSTRO_ACCOUNT", "PRINCIPAL", "CREDIT"),
+                ),
+                createdBy = java.util.UUID.fromString("0191c0de-0000-7000-8000-0000000000aa"),
+            ),
+        )
+    }
+
+    private fun clientDerivedPostPath(): String = clientDerivedJournalsPath()
+
+    @Test
+    @PactTestFor(pactMethod = "accountingClassMapPact")
+    fun `the accounting class map names the nostro GL of a currency`(mockServer: MockServer) {
+        val rows = given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get("/api/v1/accounting-classes")
+            .then()
+            .statusCode(200)
+            .extract().jsonPath()
+        assertThat(rows.getString("[0].glCode")).isEqualTo("1001")
+        assertThat(rows.getString("[0].glAccountId")).isEqualTo(NOSTRO_CZK_GL_ID)
+        // the production client reads exactly this route
+        assertThat(
+            com.openbank.treasury.infrastructure.nostro.LedgerAccountingClassRestClient::class.java
+                .getAnnotation(jakarta.ws.rs.Path::class.java).value,
+        ).isEqualTo("/api/v1/accounting-classes")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsAccountingClassMapWithMissingToken")
+    fun `the accounting class map is refused with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .accept("application/json")
+            .get("/api/v1/accounting-classes")
+            .then()
+            .statusCode(401)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "postJournalByAccountingClassPact")
+    fun `a journal naming accounting classes is created with the production request DTO`(mockServer: MockServer) {
+        assertThat(clientDerivedPostPath()).isEqualTo("/api/v1/journals")
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .accept("application/json")
+            .body(postBody("INTERBANK_PLACEMENT"))
+            .post(clientDerivedPostPath())
+            .then()
+            .statusCode(201)
+            .extract().jsonPath()
+        assertThat(body.getString("status")).isEqualTo("POSTED")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "postJournalWithUnmappedClassPact")
+    fun `an unmapped accounting class is the ledger's 422`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .accept("application/json")
+            .body(postBody("NOT_A_MAPPED_CLASS", key = "treasury:unmapped:settled"))
+            .post(clientDerivedPostPath())
+            .then()
+            .statusCode(422)
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsJournalPostWithMissingToken")
+    fun `a journal post is refused with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .accept("application/json")
+            .body(postBody("INTERBANK_PLACEMENT", key = "treasury:no-token:settled"))
+            .post(clientDerivedPostPath())
+            .then()
+            .statusCode(401)
+    }
 
     @Test
     @PactTestFor(pactMethod = "nostroJournalLinesPact")
@@ -261,8 +488,10 @@ class TreasuryNostroLedgerReadPactConsumerTest {
     private companion object {
         const val STATEMENT_DATE = "2026-03-15"
         const val PAGE_SIZE = 200
+        const val JOURNAL_DATE = "2026-03-16"
+        const val JOURNAL_KEY = "treasury:0191c0de-0000-7000-8000-000000000001:settled"
 
-        // TreasuryChart.glAccountId("1001") — CZK nostro, seeded by ledger's
+        // the chart id of GL 1001 — CZK nostro, seeded by ledger's
         // V29__treasury_money_market_accounts.sql.
         const val NOSTRO_CZK_GL_ID = "a0000000-0000-0000-0000-000000001001"
     }

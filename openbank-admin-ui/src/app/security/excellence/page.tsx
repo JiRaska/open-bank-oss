@@ -19,7 +19,7 @@
  * skutečně odpověděly.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   Shield, ScanLine, AlertTriangle, ShieldAlert, AlertOctagon, ClipboardCheck,
@@ -33,6 +33,7 @@ import { svcUrl } from '@/lib/services/bff'
 import { parseIctIncidentEnvelope, summarizeIctIncidents } from '@/lib/security/ictIncidentContract'
 import { parseSecurityEnvelope, summarizeReachable } from '@/lib/security/summary'
 import { parseSecurityKpis, type SecurityKpis } from '@/lib/security/kpiContract'
+import { classifySecurityKpiFreshness } from '@/lib/security/kpiFreshness'
 
 // ── Doménové stavy ───────────────────────────────────────────────────────────
 
@@ -244,12 +245,29 @@ async function fetchSbom(): Promise<Patch> {
 
 type KpisSnapshot = SecurityKpis
 
-async function fetchKpis(): Promise<KpisSnapshot | null> {
+type KpisSnapshotResult = {
+  snapshot: KpisSnapshot | null
+  freshness: 'fresh' | 'stale' | 'unavailable'
+  staleCause?: 'data-age' | 'publisher'
+}
+
+async function fetchKpis(): Promise<KpisSnapshotResult> {
   const { ok, body } = await safeJson('/api/security/kpis')
-  if (!ok) return null
-  const env = body as { available?: unknown; kpis?: unknown }
-  if (env.available !== true) return null
-  try { return parseSecurityKpis(env.kpis) } catch { return null }
+  if (!ok) return { snapshot: null, freshness: 'unavailable' }
+  const env = body as { available?: unknown; kpis?: unknown; status?: unknown }
+  if (env.available !== true) return { snapshot: null, freshness: 'unavailable' }
+  try {
+    const snapshot = parseSecurityKpis(env.kpis)
+    const ageFreshness = classifySecurityKpiFreshness(snapshot.generatedAt)
+    const freshness = env.status === 'stale' || ageFreshness === 'stale' ? 'stale' : 'fresh'
+    return {
+      snapshot,
+      freshness,
+      ...(freshness === 'stale' ? { staleCause: ageFreshness === 'stale' ? 'data-age' : 'publisher' } : {}),
+    }
+  } catch {
+    return { snapshot: null, freshness: 'unavailable' }
+  }
 }
 
 async function fetchSegmentation(snap: KpisSnapshot | null): Promise<Patch> {
@@ -393,37 +411,89 @@ export default function SecurityExcellencePage() {
   const { t, language } = useLanguage()
   const [patches, setPatches] = useState<Record<string, Patch>>({})
   const [loading, setLoading] = useState(true)
-  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null)
+  const [liveCheckedAt, setLiveCheckedAt] = useState<Date | null>(null)
+  const [kpisGeneratedAt, setKpisGeneratedAt] = useState<string | null>(null)
+  const [kpisFreshness, setKpisFreshness] = useState<'fresh' | 'stale' | 'unavailable'>('unavailable')
+  const [kpisStaleCause, setKpisStaleCause] = useState<'data-age' | 'publisher' | null>(null)
+  const requestGeneration = useRef(0)
+  const loadInFlight = useRef<number | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
+    if (loadInFlight.current !== null) return
+    const request = ++requestGeneration.current
+    loadInFlight.current = request
+    const isCurrent = () => request === requestGeneration.current
     setLoading(true)
-    setPatches({})
+    if (!background) setPatches({})
     // All KPI-derived cards must describe one coherent CI snapshot. Sharing this promise also
     // collapses six identical BFF requests into one without serialising the wider fan-out.
-    const kpisSnapshot = fetchKpis()
+    const kpisSnapshot = fetchKpis().then(evidence => {
+      if (isCurrent()) {
+        setKpisGeneratedAt(evidence.snapshot?.generatedAt ?? null)
+        setKpisFreshness(evidence.freshness)
+        setKpisStaleCause(evidence.staleCause ?? null)
+      }
+      return evidence
+    })
+    const withFreshKpis = async (select: (snapshot: KpisSnapshot) => Promise<Patch>): Promise<Patch> => {
+      const evidence = await kpisSnapshot
+      if (!evidence.snapshot) return unavailable('not_deployed')
+      if (evidence.freshness === 'stale') return unavailable('stale_snapshot')
+      return select(evidence.snapshot)
+    }
     const fetchers: Record<string, () => Promise<Patch>> = {
       posture: fetchPosture, incidents: fetchIncidents, fraud: fetchFraud, aml: fetchAml,
       sanctions: fetchSanctions, approvals: fetchApprovals, audit: fetchAudit, identity: fetchIdentity,
       sbom: fetchSbom,
-      segmentation: async () => fetchSegmentation(await kpisSnapshot),
-      freshness: async () => fetchFreshness(await kpisSnapshot),
-      credentials: async () => fetchCredentials(await kpisSnapshot),
-      fuzz: async () => fetchFuzz(await kpisSnapshot),
-      threatmodels: async () => fetchThreatModels(await kpisSnapshot),
-      mttr: async () => fetchMttr(await kpisSnapshot),
+      segmentation: () => withFreshKpis(fetchSegmentation),
+      freshness: () => withFreshKpis(fetchFreshness),
+      credentials: () => withFreshKpis(fetchCredentials),
+      fuzz: () => withFreshKpis(fetchFuzz),
+      threatmodels: () => withFreshKpis(fetchThreatModels),
+      mttr: () => withFreshKpis(fetchMttr),
     }
-    // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
-    await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {
-      const patch = await fn()
-      setPatches(prev => ({ ...prev, [id]: patch }))
-    }))
-    setRefreshedAt(new Date())
-    setLoading(false)
+    try {
+      // Fan-out paralelně; každá doména se doplní jakmile odpoví (progressive render).
+      await Promise.all(Object.entries(fetchers).map(async ([id, fn]) => {
+        const patch = await fn()
+        if (isCurrent()) setPatches(prev => ({ ...prev, [id]: patch }))
+      }))
+      if (isCurrent()) setLiveCheckedAt(new Date())
+    } finally {
+      if (loadInFlight.current === request) loadInFlight.current = null
+      if (isCurrent()) setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => { void load() }, 0)
-    return () => window.clearTimeout(initialLoad)
+    const refreshMs = 5 * 60 * 1000
+    let disposed = false
+    let timer: number | undefined
+    const clearRefresh = () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = undefined
+    }
+    const scheduleRefresh = () => {
+      clearRefresh()
+      if (disposed || document.visibilityState !== 'visible') return
+      timer = window.setTimeout(() => { void load(true).finally(scheduleRefresh) }, refreshMs)
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        clearRefresh()
+        return
+      }
+      void load(true).finally(scheduleRefresh)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    if (document.visibilityState === 'visible') void load().finally(scheduleRefresh)
+    return () => {
+      disposed = true
+      clearRefresh()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      requestGeneration.current += 1
+      loadInFlight.current = null
+    }
   }, [load])
 
   const domains: Domain[] = DOMAIN_DEFS.map(d => ({ ...d, status: patches[d.id]?.status ?? 'loading', ...patches[d.id] }))
@@ -449,6 +519,7 @@ export default function SecurityExcellencePage() {
       case 'unauthorized': return t('Role bez oprávnění', 'Role lacks permission')
       case 'unreachable':  return t('Služba neodpovídá', 'Service unreachable')
       case 'invalid_evidence': return t('Neplatná evidence — skóre zadrženo', 'Invalid evidence — score withheld')
+      case 'stale_snapshot': return t('Bezpečnostní KPI snímek je zastaralý', 'Security KPI snapshot is stale')
       default:             return t('Nedostupné', 'Unavailable')
     }
   }
@@ -496,11 +567,20 @@ export default function SecurityExcellencePage() {
                 `Weighted average of ${answered} of ${total} responding domains. Domains marked “Unavailable” do not drag the score down — degradation is visible on the cards, not hidden in the number.`,
               )}
             </p>
-            {refreshedAt && (
+            {liveCheckedAt && (
               <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
-                {t('Aktualizováno', 'Refreshed')}: {refreshedAt.toLocaleTimeString(dateLocale)}
+                {t('Kontrola živých zdrojů dokončena', 'Live-source check completed')}: {liveCheckedAt.toLocaleTimeString(dateLocale)}
               </p>
             )}
+            <p role={kpisFreshness === 'stale' ? 'alert' : 'status'} aria-live="polite"
+              style={{ margin: '6px 0 0', fontSize: 12, color: kpisFreshness === 'stale' ? 'var(--warning-text)' : 'var(--text-tertiary)' }}>
+              {kpisFreshness === 'unavailable'
+                ? t('Bezpečnostní KPI snímek není dostupný', 'Security KPI snapshot unavailable')
+                : `${t('Bezpečnostní KPI snímek vytvořen', 'Security KPI snapshot generated')}: ${new Date(kpisGeneratedAt!).toLocaleString(dateLocale)}`}
+              {kpisFreshness === 'stale' && ` · ${kpisStaleCause === 'publisher'
+                ? t('zastaralý (stav publikace)', 'stale (publisher heartbeat)')
+                : t('zastaralý (limit stáří dat 8 dní)', 'stale (8-day data-age limit)')}`}
+            </p>
           </div>
         </section>
 

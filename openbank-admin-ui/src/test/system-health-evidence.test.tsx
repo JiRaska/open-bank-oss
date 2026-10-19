@@ -16,7 +16,11 @@ vi.mock('@/components/insights/ContextualInsights', () => ({ ContextualInsights:
 vi.mock('@/components/governance/CatalogDriftBanner', () => ({ CatalogDriftBanner: () => <div>Catalog comparison</div> }))
 
 const entry = { name: 'ledger-service', port: 8101, status: 'UP', reachable: true, latencyMs: 12 }
-const response = (services = [entry]) => new Response(JSON.stringify({ services }), { status: 200 })
+const response = (
+  services = [entry],
+  source: 'static' | 'kubernetes' = 'static',
+  discoveryStatus: 'static' | 'complete' = source === 'static' ? 'static' : 'complete',
+) => new Response(JSON.stringify({ source, discoveryStatus, services }), { status: 200 })
 const failure = () => new Response('{}', { status: 503 })
 const refresh = () => fireEvent.click(screen.getByRole('button', { name: 'Refresh system health' }))
 const mount = (initialLanguage: 'cs' | 'en' = 'en') => render(<LanguageProvider initialLanguage={initialLanguage}><SystemHealthPage /></LanguageProvider>)
@@ -56,7 +60,7 @@ describe('System Health evidence', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
       { ...entry, namespace: 'tenant-a' },
       { ...entry, namespace: 'tenant-b' },
-    ])))
+    ], 'kubernetes')))
     mount()
 
     expect(await screen.findAllByText('ledger-service')).toHaveLength(2)
@@ -68,7 +72,7 @@ describe('System Health evidence', () => {
   it('localizes the namespace label in Czech', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([
       { ...entry, namespace: 'tenant-a' },
-    ])))
+    ], 'kubernetes')))
     mount('cs')
 
     expect(await screen.findByLabelText('Jmenný prostor tenant-a')).toBeVisible()

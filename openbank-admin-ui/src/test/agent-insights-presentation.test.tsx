@@ -33,6 +33,22 @@ describe('shared agent findings presentation', () => {
     expectSemanticTone(screen.getByText('FUTURE_STATE'), 'var(--text-secondary)', 'var(--surface-3)')
   })
 
+  it('keeps decision controls hidden for rows rejected by the caller policy', () => {
+    render(
+      <LanguageProvider initialLanguage="en">
+        <AgentInsightsPanel
+          title="Findings" emptyMessage="None"
+          findings={[{ id: 'future', title: 'Future finding', status: 'FUTURE_STATE' }]}
+          onApprove={vi.fn()} onReject={vi.fn()}
+          canDecideFinding={finding => finding.status === 'PROPOSED'}
+        />
+      </LanguageProvider>,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument()
+  })
+
   it('uses semantic AA text on finding tones and human-decision controls', () => {
     render(
       <LanguageProvider initialLanguage="en">

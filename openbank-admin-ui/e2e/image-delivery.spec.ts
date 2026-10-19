@@ -9,10 +9,29 @@ test('the deployable image enforces auth and serves its stamped source and UI', 
   expect([302, 303, 307, 308, 401]).toContain(guest.status())
   if (guest.status() !== 401) expect(guest.headers().location).toContain('/auth/login')
 
+  const toolGatePaths = ['grafana', 'alertmanager', 'pyrra'].map(tool => ({
+    tool,
+    gatePath: `/api/gate/${tool}/tools/${tool}/`,
+    callbackPath: `/tools/${tool}/`,
+  }))
+  for (const { tool, gatePath, callbackPath } of toolGatePaths) {
+    const denied = await context.request.get(gatePath, { maxRedirects: 0 })
+    expect(denied.status(), `${tool} gate denies an anonymous image request`).toBe(302)
+    const location = new URL(denied.headers().location ?? '', baseURL!)
+    expect(location.pathname, `${tool} anonymous gate redirects to login`).toBe('/auth/login')
+    expect(location.searchParams.get('callbackUrl'), `${tool} gate preserves the trailing-slash callback`).toBe(callbackPath)
+  }
+
   await signInAsOperator(context, baseURL!)
   const build = await context.request.get('/api/build-info')
   expect(build.ok()).toBe(true)
   expect((await build.json()).gitSha).toBe(expectedSha)
+
+  for (const { tool, gatePath } of toolGatePaths) {
+    const allowed = await context.request.get(gatePath, { maxRedirects: 0 })
+    expect(allowed.status(), `${tool} gate allows the signed image request`).toBe(200)
+    expect(allowed.headers().location, `${tool} allowed gate response has no redirect`).toBeUndefined()
+  }
 
   // No page.route mocks: prove standalone assets, middleware and the real BFF
   // are present in this image. Backend availability is a separate deployed probe.

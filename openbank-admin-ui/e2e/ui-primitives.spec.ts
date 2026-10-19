@@ -30,15 +30,21 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 const READINESS = {
-  generated_for: 'e2e',
-  dimensions: [
-    { code: 'C1', name: 'Code' },
-    { code: 'C2', name: 'Backup' },
-  ],
-  services: [
-    { service: 'svc-go', money_path: true, scores: { C1: 3, C2: 3 }, evidence: {}, gate: 'GO' },
-    { service: 'svc-nogo', money_path: false, scores: { C1: 0, C2: 1 }, evidence: {}, gate: 'NO-GO' },
-  ],
+  status: 'image-baked',
+  source: 'image-baked',
+  provenance: null,
+  report: {
+    schema_version: 1,
+    generated_for: 'e2e',
+    collected_at: '2026-10-19T10:00:00Z',
+    source_sha: 'a'.repeat(40),
+    scope: { kind: 'service-module-matrix-v1', service_count: 2, money_path_count: 1, roster_sha256: 'b'.repeat(64) },
+    dimensions: ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9'].map(code => ({ code, name: code })),
+    services: [
+      { service: 'svc-go', money_path: true, scores: { C1: 3, C2: 2, C3: 2, C4: 2, C5: 3, C6: 2, C7: 3, C8: 2, C9: 2 }, evidence: {}, gate: 'GO' },
+      { service: 'svc-nogo', money_path: false, scores: { C1: 0, C2: 1, C3: 2, C4: 2, C5: 2, C6: 2, C7: 2, C8: 2, C9: 2 }, evidence: {}, gate: 'NO-GO' },
+    ],
+  },
 }
 
 const CONSENTS = [
@@ -73,7 +79,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/services/health', route =>
       route.fulfill({
         status: 200,
-        body: JSON.stringify({ services: [
+        body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [
           { name: 'account-service', label: 'Accounts', group: 'core', status: 'UP', latencyMs: 12 },
           { name: 'ledger-service', label: 'Ledger', group: 'core', status: 'DOWN', latencyMs: 28 },
         ] }),

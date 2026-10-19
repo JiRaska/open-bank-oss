@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.8.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.5...admin-ui-v3.8.6) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** refresh operational evidence and restore source-backed views ([#13391](https://github.com/JiRaska/open-bank-oss/issues/13391)) ([e5cfe1a](https://github.com/JiRaska/open-bank-oss/commit/e5cfe1a3bb4898a5dbd4ffc3da3e8790baf88fd9))
+
+## [3.8.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.4...admin-ui-v3.8.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** show only the five newest EKS versions ([#13385](https://github.com/JiRaska/open-bank-oss/issues/13385)) ([a64d0f3](https://github.com/JiRaska/open-bank-oss/commit/a64d0f3fd882d9771d757525a7e39154b9484b84))
+
+## [3.8.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.3...admin-ui-v3.8.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** isolate operational evidence and enforce delivery boundaries ([#13372](https://github.com/JiRaska/open-bank-oss/issues/13372)) ([9da523d](https://github.com/JiRaska/open-bank-oss/commit/9da523d1f38f3e416e5428ad1ebe7070108474a1))
+
 ## [3.8.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.2...admin-ui-v3.8.3) (2026-10-19)
 
 

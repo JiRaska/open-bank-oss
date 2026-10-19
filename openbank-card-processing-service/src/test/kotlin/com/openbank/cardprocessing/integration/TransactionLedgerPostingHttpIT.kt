@@ -12,6 +12,7 @@ import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostin
 import com.openbank.cardprocessing.infrastructure.client.TransactionServiceClient
 import com.openbank.cardprocessing.it.PostgresTestResource
 import com.openbank.cardprocessing.it.StubTransactionServiceResource
+import com.openbank.cardprocessing.support.capturePostingLogs
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -102,6 +103,21 @@ class TransactionLedgerPostingHttpIT {
 
         assertThat(result.outcome).isEqualTo(PostingOutcome.FAILED)
         assertThat(result.detail).describedAs("the stub's status, not an auth/connect error").contains("422")
+    }
+
+    @Test
+    fun `real HTTP problem bodies never escape into posting details or logs`() {
+        val logs = capturePostingLogs {
+            val result = runBlocking {
+                adapter().postClearedSpend(authorization("stub-422"), 12_345, "synthetic-private-key")
+            }
+            assertThat(result.outcome).isEqualTo(PostingOutcome.FAILED)
+            assertThat(result.detail).isEqualTo("HTTP 422")
+        }
+        assertThat(logs).isNotEmpty()
+        assertThat(logs.map { it.text }.joinToString())
+            .doesNotContain("synthetic-private-provider-body", "synthetic-private-key")
+        assertThat(logs.mapNotNull { it.thrown }).isEmpty()
     }
 
     @Test
