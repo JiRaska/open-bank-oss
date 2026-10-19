@@ -1256,11 +1256,19 @@ jobs:
                "create-pull-request 'add-paths' pathspec matched nothing (check MANIFEST=${MANIFEST})."
           exit 1
 
+      - name: Install deploy-hold parser
+        if: steps.gitops_pr.outputs.pull-request-number != ''
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
+          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+
       - name: Close superseded deploy PRs
         if: steps.gitops_pr.outputs.pull-request-number != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
             'chore/admin-ui-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
