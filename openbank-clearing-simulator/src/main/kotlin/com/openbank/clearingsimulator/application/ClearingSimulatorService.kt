@@ -5,6 +5,7 @@
 package com.openbank.clearingsimulator.application
 
 import com.openbank.clearingsimulator.application.dto.ReturnRequest
+import com.openbank.clearingsimulator.domain.ClearingRoute
 import com.openbank.clearingsimulator.domain.RejectReason
 import com.openbank.clearingsimulator.domain.SchemeDecision
 import com.openbank.clearingsimulator.domain.SchemeDecisionEngine
@@ -19,6 +20,9 @@ import com.openbank.libs.iso20022.Pacs004Builder
 import com.openbank.libs.iso20022.Pacs008Builder
 import com.openbank.libs.iso20022.Pacs008ParseException
 import com.openbank.libs.iso20022.Pacs008Reader
+import com.openbank.libs.iso20022.Pacs009Builder
+import com.openbank.libs.iso20022.Pacs009ParseException
+import com.openbank.libs.iso20022.Pacs009Reader
 import com.openbank.libs.iso20022.PaymentReturn
 import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.PaymentStatusReport
@@ -53,7 +57,9 @@ class ClearingSimulatorService {
     private val pacs008Validator = Iso20022Validator.forSchema(Pacs008Builder.SCHEMA_RESOURCE)
     private val pacs002Validator = Iso20022Validator.forSchema(Pacs002Builder.SCHEMA_RESOURCE)
     private val camt054Validator = Iso20022Validator.forSchema(Camt054Builder.SCHEMA_RESOURCE)
+    private val pacs009Validator = Iso20022Validator.forSchema(Pacs009Builder.SCHEMA_RESOURCE)
     private val reader = Pacs008Reader()
+    private val pacs009Reader = Pacs009Reader()
     private val pacs002Builder = Pacs002Builder()
     private val pacs004Builder = Pacs004Builder()
     private val camt054Builder = Camt054Builder()
@@ -87,20 +93,50 @@ class ClearingSimulatorService {
      * simulator always answers with a status report, exactly as a CSM does.
      */
     fun clear(pacs008Xml: String, now: Instant = Instant.now(clock)): ClearingResult {
-        val received = parse(pacs008Xml)
+        val received = parseWith(pacs008Xml, pacs008Validator) { reader.read(it) }
             ?: return ClearingResult(rejectInvalid(now), settled = false, creditNotificationXml = null)
 
         val decision = engine.decide(received)
-        val statusReport = buildStatusReport(received, decision, now)
+        val statusReport = buildStatusReport(received.endToEndId, received.transactionId, decision, now)
         val notification = if (decision.settled) buildNotification(received, now) else null
         return ClearingResult(statusReport, decision.settled, notification)
     }
 
-    private fun parse(pacs008Xml: String): ReceivedCreditTransfer? {
-        if (pacs008Validator.validate(pacs008Xml) !is Iso20022ValidationResult.Valid) return null
+    /**
+     * Processes one inbound `pacs.009` (bank-own FI credit transfer, CORE) on [route] and returns
+     * its `pacs.002`. Same contract as [clear]: always a status report, never an exception —
+     * `RJCT`/`FF01` for a message failing the XSD or unparseable, `RJCT`/`AM03` for a currency or
+     * clearing system the route does not clear, otherwise the deterministic amount-keyed verdict.
+     * `ACSC` means settled on the route; there is no camt.054 for an FI transfer (the parties are
+     * the institutions themselves, whose nostro statements are a separate flow).
+     */
+    fun clearInstitutionTransfer(
+        route: ClearingRoute,
+        pacs009Xml: String,
+        now: Instant = Instant.now(clock),
+    ): ClearingResult {
+        val received = parseWith(pacs009Xml, pacs009Validator) { pacs009Reader.read(it) }
+            ?: return ClearingResult(rejectInvalid(now), settled = false, creditNotificationXml = null)
+        val decision = if (route.accepts(received.currency, received.clearingSystem)) {
+            engine.decide(received.amount)
+        } else {
+            SchemeDecision.rejected(RejectReason.AM03)
+        }
+        val statusReport = buildStatusReport(received.endToEndId, received.transactionId, decision, now)
+        return ClearingResult(statusReport, decision.settled, creditNotificationXml = null)
+    }
+
+    /**
+     * XSD-validates then reads an inbound message; `null` when either fails. The readers throw
+     * only their typed parse exceptions, which is the one failure this swallows into a reject.
+     */
+    private fun <T> parseWith(xml: String, validator: Iso20022Validator, read: (String) -> T): T? {
+        if (validator.validate(xml) !is Iso20022ValidationResult.Valid) return null
         return try {
-            reader.read(pacs008Xml)
+            read(xml)
         } catch (_: Pacs008ParseException) {
+            null
+        } catch (_: Pacs009ParseException) {
             null
         }
     }
@@ -118,12 +154,17 @@ class ClearingSimulatorService {
         return validated(pacs002Builder.build(report), pacs002Validator, "pacs.002")
     }
 
-    private fun buildStatusReport(received: ReceivedCreditTransfer, decision: SchemeDecision, now: Instant): String {
+    private fun buildStatusReport(
+        endToEndId: String,
+        transactionId: String?,
+        decision: SchemeDecision,
+        now: Instant,
+    ): String {
         val report = PaymentStatusReport(
-            messageId = id("SIM-STS-", received.endToEndId),
+            messageId = id("SIM-STS-", endToEndId),
             creationDateTime = now.atUtc(),
-            originalEndToEndId = received.endToEndId,
-            originalTransactionId = received.transactionId,
+            originalEndToEndId = endToEndId,
+            originalTransactionId = transactionId,
             status = decision.status,
             reasonCode = decision.reason?.code,
             additionalInfo = decision.reason?.description,

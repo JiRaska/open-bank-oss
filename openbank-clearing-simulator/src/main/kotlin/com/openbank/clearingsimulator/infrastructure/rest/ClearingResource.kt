@@ -6,12 +6,15 @@ package com.openbank.clearingsimulator.infrastructure.rest
 
 import com.openbank.clearingsimulator.application.ClearingSimulatorService
 import com.openbank.clearingsimulator.application.dto.ReturnRequest
+import com.openbank.clearingsimulator.domain.ClearingRoute
 import com.openbank.clearingsimulator.infrastructure.client.SepaPaymentClient
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -50,6 +53,23 @@ class ClearingResource {
     @Operation(summary = "Submit a pacs.008; receive a pacs.002 status report")
     fun submitCreditTransfer(pacs008Xml: String): Response =
         Response.ok(simulator.clear(pacs008Xml).statusReportXml).build()
+
+    /**
+     * Submit a `pacs.009` (bank-own FI credit transfer, CORE) on one of the three routes —
+     * `certis` (CZK RTGS), `target2` (EUR RTGS) or `swift` (correspondent, any currency) — and
+     * receive the `pacs.002`. Same verdict rules as `/credit-transfers`, plus `RJCT`/`AM03` when
+     * the currency or clearing system does not belong to the route. An unknown route is 404.
+     */
+    @POST
+    @Path("/fi-credit-transfers/{route}")
+    @Consumes(MediaType.APPLICATION_XML)
+    @Produces(MediaType.APPLICATION_XML)
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Operation(summary = "Submit a pacs.009 on a clearing route; receive a pacs.002 status report")
+    fun submitInstitutionCreditTransfer(@PathParam("route") route: String, pacs009Xml: String): Response {
+        val clearingRoute = ClearingRoute.fromPath(route) ?: throw NotFoundException("unknown clearing route")
+        return Response.ok(simulator.clearInstitutionTransfer(clearingRoute, pacs009Xml).statusReportXml).build()
+    }
 
     /**
      * Simulate a `pacs.004` payment return (R-transaction). Generates a pacs.004 XML from the

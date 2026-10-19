@@ -16,7 +16,8 @@ enum class RejectReason(val code: String, val description: String) {
     AC04("AC04", "closed account"),
     AM05("AM05", "duplication"),
     RR04("RR04", "regulatory reason"),
-    FF01("FF01", "invalid pacs.008 (fails XSD validation)"),
+    AM03("AM03", "currency not processable on this clearing route"),
+    FF01("FF01", "invalid message (fails XSD validation)"),
 }
 
 /** The simulator's verdict on a credit transfer: a settlement ack or a reject with a reason. */
@@ -50,7 +51,10 @@ data class SchemeDecision(val status: PaymentStatus, val reason: RejectReason?) 
  * this engine entirely.
  */
 class SchemeDecisionEngine {
-    fun decide(transfer: ReceivedCreditTransfer): SchemeDecision = when (minorUnitRemainder(transfer.amount)) {
+    fun decide(transfer: ReceivedCreditTransfer): SchemeDecision = decide(transfer.amount)
+
+    /** The same deterministic verdict keyed off an amount alone — shared by pacs.008 and pacs.009. */
+    fun decide(amount: BigDecimal): SchemeDecision = when (minorUnitRemainder(amount)) {
         TRIGGER_CLOSED_ACCOUNT -> SchemeDecision.rejected(RejectReason.AC04)
         TRIGGER_DUPLICATION -> SchemeDecision.rejected(RejectReason.AM05)
         TRIGGER_REGULATORY -> SchemeDecision.rejected(RejectReason.RR04)

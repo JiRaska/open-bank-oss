@@ -89,4 +89,63 @@ class ClearingSimulatorApiIT {
             statusCode(401)
         }
     }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `submitting a pacs_009 on each route returns an ACSC pacs_002`() {
+        for ((route, xml) in listOf(
+            "target2" to InstitutionTransferFixtures.target2(),
+            "certis" to InstitutionTransferFixtures.certis(),
+            "swift" to InstitutionTransferFixtures.swift(),
+        )) {
+            val body = (
+                Given {
+                    contentType("application/xml")
+                    body(xml)
+                } When {
+                    post("/api/v1/clearing/fi-credit-transfers/$route")
+                } Then {
+                    statusCode(200)
+                }
+                ).extract().body().asString()
+            assertThat(body).describedAs("route %s", route).contains("<TxSts>ACSC</TxSts>")
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `a pacs_009 in the wrong currency for the route is rejected and an unknown route is 404`() {
+        val body = (
+            Given {
+                contentType("application/xml")
+                body(InstitutionTransferFixtures.certis())
+            } When {
+                post("/api/v1/clearing/fi-credit-transfers/target2")
+            } Then {
+                statusCode(200)
+            }
+            ).extract().body().asString()
+        assertThat(body).contains("<TxSts>RJCT</TxSts>", "<Cd>AM03</Cd>")
+
+        Given {
+            contentType("application/xml")
+            body(InstitutionTransferFixtures.target2())
+        } When {
+            post("/api/v1/clearing/fi-credit-transfers/sepa")
+        } Then {
+            statusCode(404)
+        }
+    }
+
+    @Test
+    fun `the pacs_009 route requires authentication`() {
+        Given {
+            contentType("application/xml")
+            body(InstitutionTransferFixtures.target2())
+        } When {
+            post("/api/v1/clearing/fi-credit-transfers/target2")
+        } Then {
+            statusCode(401)
+        }
+    }
 }
