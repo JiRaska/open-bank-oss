@@ -259,7 +259,8 @@ class DayCloseParticipantsIT {
     fun `manual HTTP tie-out cannot bypass a missing participant in enforce mode`() {
         val date = LocalDate.of(2019, 6, 10)
         seedManualDay(date)
-        given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        given().contentType("application/json")
+            .post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
         assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
         assertThat(onEventLoop { participation.completeness(date) }.missing).containsExactly("interest")
     }
@@ -270,7 +271,8 @@ class DayCloseParticipantsIT {
         val date = LocalDate.of(2019, 6, 11)
         seedManualDay(date)
         interestReports(date, ParticipationOutcome.REFUSED, 0, "posting refused")
-        given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        given().contentType("application/json")
+            .post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
         assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
     }
 
@@ -292,7 +294,8 @@ class DayCloseParticipantsIT {
         assertThat(waiver.outcome).isEqualTo(ParticipationOutcome.WAIVED)
         assertThat(waiver.reason).isEqualTo("accepted outage, INC-4")
         assertThat(waiver.reportedBy).isEqualTo("manual-close-operator-sub")
-        given().post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
+        given().contentType("application/json")
+            .post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
         assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.TIED_OUT)
     }
 
