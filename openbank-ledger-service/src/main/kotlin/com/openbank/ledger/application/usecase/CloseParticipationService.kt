@@ -190,6 +190,9 @@ class CloseParticipationService(
         by: String,
         guard: AppendGuard,
     ): CloseParticipationRecord {
+        require(reason == null || reason.codePointCount(0, reason.length) <= MAX_REASON_CODE_POINTS) {
+            "reason must contain at most $MAX_REASON_CODE_POINTS Unicode characters"
+        }
         val record = CloseParticipationRecord(
             businessDate = businessDate,
             participant = participant,
@@ -219,6 +222,7 @@ class CloseParticipationService(
 
     companion object {
         const val REPORTS_METRIC = "openbank.ledger.close.participation.reports"
+        private const val MAX_REASON_CODE_POINTS = 1000
 
         /**
          * A participant's non-RAN report must not supersede an operator WAIVED row: the reporter
