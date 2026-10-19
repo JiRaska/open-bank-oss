@@ -16,7 +16,7 @@ import { useSession } from 'next-auth/react'
 import { hasPermission } from '@/lib/auth/roles'
 import { ClipboardCheck } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { HumanReference, PageHeader, StatusBadge } from '@/components/ui'
 import type { Tone } from '@/components/ui/tone'
 import { bankToday } from '@/components/balance-sheet/model'
 import { wbGet, wbPost, wbUrl, type WbRead } from '@/components/treasury/wb/client'
@@ -133,7 +133,7 @@ function DayCompletion() {
         {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
         {gaps.length > 0 && (
           <ul data-testid="revaluation-gaps" style={{ fontSize: 13 }}>
-            {gaps.map(g => <li key={g.dealId}>{g.dealId}: {g.reason}</li>)}
+            {gaps.map(g => <li key={g.dealId}><HumanReference label={t('Obchod', 'Deal')} reference={g.dealId} href={`/treasury/deals/${encodeURIComponent(g.dealId)}`} copyLabel={t('Kopírovat ID obchodu', 'Copy deal ID')} />: {g.reason}</li>)}
           </ul>
         )}
         {revaluations === null && <p style={{ fontSize: 13 }}>{t('Načítám…', 'Loading…')}</p>}
@@ -147,12 +147,12 @@ function DayCompletion() {
               <tbody>
                 {revaluations.data.map(r => (
                   <tr key={r.dealId} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={td}>{r.dealId}</td>
+                    <td style={td}><HumanReference label={t('Obchod', 'Deal')} reference={r.dealId} href={`/treasury/deals/${encodeURIComponent(r.dealId)}`} copyLabel={t('Kopírovat ID obchodu', 'Copy deal ID')} /></td>
                     <td style={tdNum}>{money(r.fairValue)}</td>
                     <td style={tdNum}>{money(r.carrying)}</td>
                     <td style={tdNum}>{money(r.cumulative)}</td>
                     <td style={tdNum}>{money(r.change)}</td>
-                    <td style={td}>{r.journalId ?? (r.change === 0 ? t('beze změny', 'no change') : t('dluží se', 'owed'))}</td>
+                    <td style={td}>{r.journalId ? <HumanReference label={t('Zápis', 'Journal')} reference={r.journalId} copyLabel={t('Kopírovat ID zápisu', 'Copy journal ID')} /> : (r.change === 0 ? t('beze změny', 'no change') : t('dluží se', 'owed'))}</td>
                   </tr>
                 ))}
               </tbody>

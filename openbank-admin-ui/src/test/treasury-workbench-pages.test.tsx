@@ -659,10 +659,11 @@ describe('day completion', () => {
       : url.includes('/revaluations') ? json([rev])
         : json({ date: '2026-10-19', steps: [{ step: 'REVALUATION', status: 'FAILED', count: 1, detail: '1 deal(s) not revalued', at: null }] }))
     await renderPage(<TreasuryDayCompletionPage />)
-    expect(within(await screen.findByTestId('revaluation-table')).getByText('d-7')).toBeTruthy()
+    expect(within(await screen.findByTestId('revaluation-table')).getByRole('link', { name: /^(Deal|Obchod)$/ }).getAttribute('href')).toBe('/treasury/deals/d-7')
     await click(/Run revaluation|Spustit přecenění/)
     expect(calls.some(c => c.url.includes('/revaluations/run?asOf=') && c.init?.method === 'POST')).toBe(true)
-    expect(screen.getByTestId('revaluation-gaps').textContent).toMatch(/d-8: unpriced/)
+    expect(screen.getByTestId('revaluation-gaps').textContent).toMatch(/unpriced by the risk engine/)
+    expect(within(screen.getByTestId('revaluation-gaps')).getByRole('link').getAttribute('href')).toBe('/treasury/deals/d-8')
   })
 
   it('offers no revaluation run to a dealer', async () => {
