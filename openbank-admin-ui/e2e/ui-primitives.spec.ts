@@ -79,7 +79,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await page.route('**/api/services/health', route =>
       route.fulfill({
         status: 200,
-        body: JSON.stringify({ services: [
+        body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [
           { name: 'account-service', label: 'Accounts', group: 'core', status: 'UP', latencyMs: 12 },
           { name: 'ledger-service', label: 'Ledger', group: 'core', status: 'DOWN', latencyMs: 28 },
         ] }),

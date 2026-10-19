@@ -18,7 +18,7 @@ test('dashboard does not present zero fleet metrics before the first verified re
   await page.route('**/api/services/health', async route => {
     markRequested()
     await heldHealth
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ services: [
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [
       { name: 'account-service', label: 'Accounts', group: 'core', status: 'UP', latencyMs: 12 },
     ] }) })
   })
@@ -54,7 +54,7 @@ test('dashboard keeps the retry state truthful after a failed refresh', async ({
       markRetryRequested()
       await heldRetry
     }
-    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ services: [
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [
       { name: 'account-service', label: 'Accounts', group: 'core', status: 'UP', latencyMs: 12 },
     ] }) })
   })
