@@ -117,7 +117,7 @@ def union_holds(*sources):
     for service, values in sorted(merged.items()):
         items = []
         for key, origins in sorted(values.items()):
-            value = dict(zip(FIELDS, key))
+            value = dict(zip(FIELDS, key, strict=True))
             if origins:
                 value["origins"] = [{"pr": pr, "head": head} for pr, head in sorted(origins)]
             items.append(value)

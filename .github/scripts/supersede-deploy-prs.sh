@@ -806,7 +806,7 @@ HOOK
   # synthetic and deliberately exceeds Linux MAX_ARG_STRLEN after base64 expansion; it must survive
   # the GitHub Contents API round-trip byte-for-byte, and the hold actions keep their order.
   local rules_file blob_file expected_file body_file events_file fake_bin payload_len
-  local new_keep_branch expected_events base64_bin request_tmp
+  local new_keep_branch base64_bin request_tmp
   rules_file="$tmp/rules.yaml"
   blob_file="$tmp/rules-response.json"
   expected_file="$tmp/expected-rules.yaml"
