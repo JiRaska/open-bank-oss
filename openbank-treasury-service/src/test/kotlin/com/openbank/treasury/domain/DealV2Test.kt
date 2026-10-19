@@ -103,6 +103,33 @@ class DealV2Test {
     }
 
     @Test
+    fun `whoever edited a draft is a term author - they cannot approve it, a third person can`() {
+        val editor = Actor("bea.dealer", ActorType.HUMAN)
+        val edited = irs().editDraft(irs().copy(rate = BigDecimal("4.10")), editor, NOW)
+        assertThat(edited.termEditors).containsExactly(editor.id)
+        val submitted = edited.submit(dealer, withinLimit(edited), NOW, DealFixtures.withinProduct)
+        assertThatThrownBy {
+            submitted.approve(Actor(editor.id, ActorType.HUMAN), withinLimit(edited), NOW, DealFixtures.withinProduct)
+        }
+            .isInstanceOf(FourEyesViolationException::class.java).hasMessageContaining("draft editor")
+        assertThat(
+            submitted.approve(approver, withinLimit(edited), NOW, DealFixtures.withinProduct).state,
+        ).isEqualTo(DealState.BOOKED)
+    }
+
+    @Test
+    fun `a human editing an agent's draft drops the agent's rationale and inputs`() {
+        val agent = Actor("agent:treasury-dealing-assistant", ActorType.AI_AGENT)
+        val byAgent = irs().copy(createdBy = agent, rationale = "cheapest funding", inputs = "{\"quote\":1}")
+        val edited = byAgent.editDraft(byAgent.copy(rate = BigDecimal("4.20")), dealer, NOW)
+        assertThat(edited.rationale).isNull()
+        assertThat(edited.inputs).isNull()
+        assertThat(edited.history.last().note).contains("superseded")
+        val ownEdit = byAgent.editDraft(byAgent.copy(rate = BigDecimal("4.20")), agent, NOW)
+        assertThat(ownEdit.rationale).isEqualTo("cheapest funding")
+    }
+
+    @Test
     fun `the day-completion record lists every step, an unrecorded one PENDING, a failure as FAILED`() {
         val day = LocalDate.parse("2026-11-02")
         val accruals = com.openbank.treasury.domain.model.DayStepRecord.of(

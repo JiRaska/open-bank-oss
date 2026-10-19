@@ -553,6 +553,22 @@ class TreasuryDealServiceTest {
             assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).contains("mid unavailable")
         }
 
+    @Test
+    fun `an edit cannot launder an off-market rate - edit and submit flag it exactly as a create would`(): Unit =
+        runBlocking {
+            tolerance = FxRateTolerance(true, BigDecimal("1.0"))
+            fxMid = FxMidRatePort { ccy, _ -> if (ccy == "EUR") BigDecimal("25.00") else null }
+            val fair = service.draft(fx(rate = "25.000000"), DealFixtures.dealer)
+            assertThat(fair.fx!!.rateFlag).isNull()
+            val edited = service.editDraft(fair.id, fx(rate = "27.500000"), DealFixtures.dealer)
+            val created = service.draft(fx(rate = "27.500000"), DealFixtures.dealer)
+            assertThat(edited.fx!!.rateFlag).isNotNull().isEqualTo(created.fx!!.rateFlag)
+            // Submit re-runs the same check: a flag can never be missing on the deal the approver sees.
+            val submitted = service.submit(edited.id, DealFixtures.dealer)
+            assertThat(submitted.fx!!.rateFlag).isEqualTo(created.fx!!.rateFlag)
+            assertThat(submitted.history.count { it.note?.startsWith("rate flagged:") == true }).isEqualTo(1)
+        }
+
     // --- ADR-0315 D2: CONFIRMED ------------------------------------------------------------------
 
     @Test

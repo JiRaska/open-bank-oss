@@ -128,13 +128,7 @@ class TreasuryDealService(
             legs = command.legs,
             header = command.header,
         )
-        schedules?.requireEffective(drafted)
-        // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
-        val deal = if (fxTolerance.enabled) {
-            drafted.checkRate(fxMid.mid(drafted.currency, tradeDate), fxTolerance.tolerancePercent, now)
-        } else {
-            drafted
-        }
+        val deal = vetTerms(drafted)
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }
 
@@ -166,15 +160,29 @@ class TreasuryDealService(
             legs = command.legs,
             header = command.header,
         )
-        val edited = existing.editDraft(replacement, actor, clock.instant())
-        schedules?.requireEffective(edited)
+        val edited = vetTerms(existing.editDraft(replacement, actor, clock.instant()))
         return deals.save(edited, command = cmd(key, EDIT, dealId))
+    }
+
+    /**
+     * The term checks every path that creates, changes or advances a deal's terms runs — draft,
+     * edit, submit, approve — so none can skip one: every named reference effective on the trade
+     * date and (#10896) the FX rate re-flagged against fx-service's mid (a flag, never a block).
+     * Leg/flat consistency and the work bounds are [Deal]'s own invariants and hold on every copy;
+     * product and counterparty limits are evaluated at submit and re-checked at approval.
+     */
+    private suspend fun vetTerms(deal: Deal): Deal {
+        schedules?.requireEffective(deal)
+        return if (fxTolerance.enabled) {
+            deal.checkRate(fxMid.mid(deal.currency, deal.tradeDate), fxTolerance.tolerancePercent, clock.instant())
+        } else {
+            deal
+        }
     }
 
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
-        val deal = load(dealId)
-        schedules?.requireEffective(deal)
+        val deal = vetTerms(load(dealId))
         val submitted = deal.submit(actor, limitCheck(deal), clock.instant(), policy().evaluate(deal))
         // ADR-0344 D4: the cash-flow ledger is generated at submission and stored with it.
         val generated = schedules?.generate(submitted)
@@ -212,7 +220,7 @@ class TreasuryDealService(
 
     override suspend fun approve(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
-        val deal = load(dealId)
+        val deal = vetTerms(load(dealId))
         // Re-checked at approval: exposure may have moved, and the product mandate may have been
         // tightened, since submission (ADR-0315 D4).
         val productCheck = policy().evaluate(deal)

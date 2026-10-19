@@ -345,7 +345,8 @@ data class Deal(
             }
         }
         val checked = copy(fx = terms.copy(midRate = mid, rateFlag = flag), updatedAt = at)
-        return if (flag == null) {
+        // Re-run on every path that changes or advances terms; only a NEW flag is a timeline entry.
+        return if (flag == null || flag == terms.rateFlag) {
             checked
         } else {
             checked.copy(
@@ -389,6 +390,15 @@ data class Deal(
      * identity, creator and timeline are this deal's. A human may edit any draft; an AI agent only
      * its own. The product cannot change — that is a different deal — and the terms version grows.
      */
+    /** Everyone who changed a DRAFT's terms after its creator: a term author, so never its approver. */
+    val termEditors: Set<String>
+        get() = history.filter {
+            it.from == DealState.DRAFT &&
+                it.to == DealState.DRAFT &&
+                it.note?.startsWith("draft edited") == true
+        }
+            .map { it.actor.id }.toSet()
+
     fun editDraft(replacement: Deal, actor: Actor, at: Instant): Deal {
         check(state == DealState.DRAFT) {
             "only a DRAFT deal can be edited (deal is $state); change a booked deal by a correction"
@@ -397,7 +407,15 @@ data class Deal(
             throw ActorNotPermittedException("a ${actor.type} principal may edit only its own draft")
         }
         require(replacement.product == product) { "the product of a draft cannot change (draft a new deal)" }
+        // A human changing an agent's draft makes the agent's rationale and inputs describe terms
+        // that no longer exist: they are dropped, so an approver never reads them as the basis.
+        val supersedesAgent = actor.type == ActorType.HUMAN && createdBy.type == ActorType.AI_AGENT
+        val note =
+            "draft edited (terms version ${version + 1})" +
+                if (supersedesAgent) "; agent rationale and inputs superseded" else ""
         return replacement.copy(
+            rationale = if (supersedesAgent) null else replacement.rationale,
+            inputs = if (supersedesAgent) null else replacement.inputs,
             id = id,
             state = DealState.DRAFT,
             createdBy = createdBy,
@@ -411,7 +429,7 @@ data class Deal(
                     DealState.DRAFT,
                     actor,
                     at,
-                    "draft edited (terms version ${version + 1})",
+                    note,
                 ),
         )
     }
@@ -461,6 +479,7 @@ data class Deal(
         val role = when (actor.id) {
             createdBy.id -> "creator"
             submittedBy?.id -> "submitter"
+            in termEditors -> "draft editor"
             else -> null
         }
         role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not override its limit") }
@@ -510,6 +529,7 @@ data class Deal(
             val role = when (actor.id) {
                 createdBy.id -> "creator"
                 submittedBy?.id -> "submitter"
+                in termEditors -> "draft editor"
                 else -> null
             }
             role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not confirm it") }
@@ -597,6 +617,7 @@ data class Deal(
         val role = when (actor.id) {
             createdBy.id -> "creator"
             submittedBy?.id -> "submitter"
+            in termEditors -> "draft editor"
             else -> null
         }
         role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not send its confirmation") }
@@ -645,6 +666,7 @@ data class Deal(
         val role = when (actor.id) {
             createdBy.id -> "creator"
             submittedBy?.id -> "submitter"
+            in termEditors -> "draft editor"
             else -> return
         }
         throw FourEyesViolationException("four-eyes: the approver must not be the deal's $role")
