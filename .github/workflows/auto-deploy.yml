@@ -1452,6 +1452,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
             'chore/gitops-auto-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
