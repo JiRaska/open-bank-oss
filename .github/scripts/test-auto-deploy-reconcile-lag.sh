@@ -231,20 +231,63 @@ expect_target_failure "a selector without the buildable allowlist" \
   '' 'openbank-stale-svc'
 expect_target_failure "a malformed service name" \
   'openbank-stale-svc' '../openbank-stale-svc'
+expect_target_failure "a whitespace-only targeted service list" \
+  'openbank-stale-svc' $' \t\n\t '
 
 # Keep the workflow input wired only through the reconcile path and anchored to current main.
 WORKFLOW="${SCRIPT_DIR}/../workflows/auto-deploy.yml"
+VALIDATOR="${SCRIPT_DIR}/validate-auto-deploy-reconcile-inputs.sh"
+validate_dispatch() {
+  INPUT_RECONCILE_SERVICES="${1:-}" \
+    INPUT_RECONCILE="${2:-}" \
+    INPUT_CODEPLOY="${3:-false}" \
+    INPUT_CODEPLOY_PACT_VERSIONS="${4:-}" \
+    INPUT_BOOTSTRAP_IMAGE_ONLY="${5:-false}" \
+    bash "$VALIDATOR" >/dev/null 2>&1
+}
+if validate_dispatch '' '' true '{"openbank-stale-svc":"0123456789012345678901234567890123456789"}' true; then
+  echo 'ok: unrelated dispatch inputs bypass targeted-reconcile-only guards'
+else
+  echo 'FAIL: non-targeted dispatch unexpectedly failed targeted-reconcile validation'; exit 1
+fi
+if validate_dispatch 'openbank-stale-svc' false; then
+  echo 'FAIL: targeted reconcile without reconcile=true was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile requires reconcile=true'
+fi
+if validate_dispatch 'openbank-stale-svc' true true; then
+  echo 'FAIL: targeted reconcile with co-deploy was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects co-deploy'
+fi
+if validate_dispatch 'openbank-stale-svc' true false '{"openbank-stale-svc":"0123456789012345678901234567890123456789"}'; then
+  echo 'FAIL: targeted reconcile with Pact replay was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects Pact replay'
+fi
+if validate_dispatch 'openbank-stale-svc' true false '' true; then
+  echo 'FAIL: targeted reconcile with bootstrap_image_only was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects bootstrap_image_only'
+fi
+if validate_dispatch 'openbank-stale-svc' true; then
+  echo 'ok: valid targeted reconcile dispatch inputs are accepted'
+else
+  echo 'FAIL: valid targeted reconcile dispatch inputs were rejected'; exit 1
+fi
 grep -Fq 'reconcile_services:' "$WORKFLOW" \
   || { echo 'FAIL: workflow_dispatch has no reconcile_services input'; exit 1; }
 grep -Fq 'INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}' "$WORKFLOW" \
   || { echo 'FAIL: workflow does not pass reconcile_services to the selector'; exit 1; }
-grep -Fq 'reconcile_services requires reconcile=true' "$WORKFLOW" \
+grep -Fq 'bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh' "$WORKFLOW" \
+  || { echo 'FAIL: workflow does not validate targeted reconcile inputs'; exit 1; }
+grep -Fq 'reconcile_services requires reconcile=true' "$VALIDATOR" \
   || { echo 'FAIL: workflow accepts reconcile_services outside reconciliation'; exit 1; }
 grep -Fq 'targeted reconcile requires this run'"'"'s source SHA to be current main' "$WORKFLOW" \
   || { echo 'FAIL: targeted reconciliation is not pinned to current main'; exit 1; }
-grep -Fq 'targeted reconcile cannot use co-deploy or Pact replay inputs' "$WORKFLOW" \
+grep -Fq 'targeted reconcile cannot use co-deploy or Pact replay inputs' "$VALIDATOR" \
   || { echo 'FAIL: targeted reconciliation does not reject co-deploy/Pact replay'; exit 1; }
-grep -Fq 'targeted reconcile cannot be combined with bootstrap_image_only' "$WORKFLOW" \
+grep -Fq 'targeted reconcile cannot be combined with bootstrap_image_only' "$VALIDATOR" \
   || { echo 'FAIL: targeted reconciliation does not reject image-only bootstrap'; exit 1; }
 
 # A held placeholder would rank first. It must be removed BEFORE the one-service

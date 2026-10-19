@@ -129,6 +129,10 @@ ALLOWLIST="$(tr -s ' \t' '\n' <<< "${RECONCILE_SERVICES:-}" | sed '/^$/d' | sort
 TARGET_LIST="$(tr ' \t' '\n' <<< "${RECONCILE_TARGETS:-}" | sed '/^$/d')"
 TARGET_COUNT="$(printf '%s\n' "$TARGET_LIST" | grep -c . || true)"
 SEEN_TARGET_PINS=""
+if [ -n "${RECONCILE_TARGETS:-}" ] && [ "$TARGET_COUNT" -eq 0 ]; then
+  echo "::error::targeted reconcile requires at least one service name" >&2
+  exit 2
+fi
 if [ "$TARGET_COUNT" -gt 0 ]; then
   if [ "$TARGET_COUNT" -gt 3 ]; then
     echo "::error::targeted reconcile accepts at most three services" >&2

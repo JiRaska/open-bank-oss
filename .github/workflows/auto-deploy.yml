@@ -183,6 +183,8 @@ jobs:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
           INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}
+          INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
+          INPUT_BOOTSTRAP_IMAGE_ONLY: ${{ github.event.inputs.bootstrap_image_only }}
           INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
@@ -327,22 +329,7 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ] \
-              && [ "${{ github.event.inputs.reconcile }}" != "true" ]; then
-              echo "::error::reconcile_services requires reconcile=true"
-              exit 1
-            fi
-            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
-              if [ "${INPUT_CODEPLOY:-false}" = "true" ] \
-                || [ -n "${INPUT_CODEPLOY_PACT_VERSIONS:-}" ]; then
-                echo "::error::targeted reconcile cannot use co-deploy or Pact replay inputs"
-                exit 1
-              fi
-              if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
-                echo "::error::targeted reconcile cannot be combined with bootstrap_image_only"
-                exit 1
-              fi
-            fi
+            bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh
             if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
               if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
                 echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
