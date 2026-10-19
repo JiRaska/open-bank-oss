@@ -12,8 +12,7 @@ import org.junit.jupiter.api.Test
 /**
  * The warm-up reads one row of every mapped entity. `ObjectStoreBlobEntity` is mapped in every service
  * that has this module, but its table exists only where the Postgres blob adapter was opted into, so
- * reading it elsewhere made Postgres log `relation "object_store_blobs" does not exist (42P01)` on every
- * boot (sandbox swift-service DB, 2026-10-17).
+ * reading it elsewhere would query a table outside the configured storage backend.
  */
 class HibernateReactiveWarmupTest {
     private class OrdinaryEntity

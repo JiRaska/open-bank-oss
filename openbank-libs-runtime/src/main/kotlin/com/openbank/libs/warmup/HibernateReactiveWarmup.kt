@@ -27,9 +27,8 @@ import java.time.Instant
  * Entities that belong to an OPTIONAL adapter are skipped when that adapter's bean is not in the
  * container ([shouldWarm]). `ObjectStoreBlobEntity` is `@Entity`-scanned into EVERY service that has
  * `openbank-libs-runtime`, but its table (`object_store_blobs`) exists only in a service that opted into
- * `openbank.objectstore.backend=postgres`; reading it anywhere else made each pod issue a query that
- * Postgres answered `relation "object_store_blobs" does not exist (42P01)` on every boot -- swallowed
- * here, but written to the database log (found on the sandbox swift-service DB, 2026-10-17).
+ * `openbank.objectstore.backend=postgres`. Skipping the entity when that adapter is absent avoids
+ * querying a table that is not part of the configured storage backend.
  *
  * Only referenced after [ENTRY_CLASS] resolved on the classpath — services without Hibernate
  * Reactive must never link this class. `VertxContextSupport.subscribeAndAwait` supplies the

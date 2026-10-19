@@ -118,13 +118,13 @@ interface CostReport {
 interface AgentCostEntry {
   agentId: string
   model: string
-  tokensLast24h: number
+  tokensLast24h: number | null
   tokensLast7d: number | null
-  costLast24hUsd: number
-  costLast7dUsd: number
+  costLast24hUsd: number | null
+  costLast7dUsd: number | null
   budgetMonthlyUsd: number | null
   budgetUsedPct: number | null
-  burnRate: 'low' | 'normal' | 'high' | 'exceeded'
+  burnRate: 'low' | 'normal' | 'high' | 'exceeded' | null
   anomalyZ: number | null
 }
 
@@ -948,8 +948,8 @@ function FinOpsContent() {
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 16px' }}>
               {t(
-                'Tokeny a náklady na AI agenty (copilot, Holmes RCA, FinOps agent). Datový zdroj: Langfuse→Prometheus bridge (ADR-0112 P1). Fallback na prázdný stav, dokud bridge není nasazen.',
-                'Token usage and cost for AI agents (copilot, Holmes RCA, FinOps agent). Data source: Langfuse→Prometheus bridge (ADR-0112 P1). Falls back to empty state until bridge is deployed.',
+                'Tokeny a náklady na AI agenty (copilot, Holmes RCA, FinOps agent). Datový zdroj: Langfuse→Prometheus bridge (ADR-0112 P1). Pokud metriky nejsou dostupné, zobrazí se prázdný stav.',
+                'Token usage and cost for AI agents (copilot, Holmes RCA, FinOps agent). Data source: Langfuse→Prometheus bridge (ADR-0112 P1). Shows an empty state when metrics are unavailable.',
               )}
             </p>
 
@@ -959,8 +959,8 @@ function FinOpsContent() {
                 <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {t(
-                    'Langfuse→Prometheus bridge není nasazen — AI náklady nejsou k dispozici. Data se zobrazí po nasazení bridge (ADR-0112 P1).',
-                    'Langfuse→Prometheus bridge is not deployed — AI cost metrics unavailable. Data will appear after deploying the bridge (ADR-0112 P1).',
+                    'Metriky nákladů na AI nejsou k dispozici. Ověřte dostupnost datového zdroje a jednotlivých měření (ADR-0112 P1).',
+                    'AI cost metrics are unavailable. Check data source and individual measurement availability (ADR-0112 P1).',
                   )}
                 </span>
               </div>
@@ -1018,7 +1018,9 @@ function FinOpsContent() {
                       ))}
                     </div>
                     {aiCosts.agents.map(agent => {
-                      const burnCfg = {
+                      const burnCfg = agent.burnRate == null
+                        ? { color: 'var(--text-tertiary)', bg: 'var(--surface-3)', label: t('Žádná data', 'No data') }
+                        : {
                         low:      { color: 'var(--success-text)', bg: 'var(--success-bg)', label: t('Nízký', 'Low') },
                         normal:   { color: 'var(--info-text)', bg: 'var(--info-bg)', label: t('Normální', 'Normal') },
                         high:     { color: 'var(--warning-text)', bg: 'var(--warning-bg)', label: t('Vysoký', 'High') },
@@ -1052,10 +1054,10 @@ function FinOpsContent() {
                             )}
                           </div>
                           <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
-                            ${agent.costLast24hUsd.toFixed(2)}
+                            {agent.costLast24hUsd == null ? t('Žádná data', 'No data') : `$${agent.costLast24hUsd.toFixed(2)}`}
                           </span>
                           <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', textAlign: 'right' }}>
-                            ${agent.costLast7dUsd.toFixed(2)}
+                            {agent.costLast7dUsd == null ? t('Žádná data', 'No data') : `$${agent.costLast7dUsd.toFixed(2)}`}
                           </span>
                         </div>
                       )
