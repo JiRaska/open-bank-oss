@@ -86,6 +86,11 @@ dependencies {
         testImplementation("com.google.guava:guava:33.6.0-jre")
     }
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.2")
+    // Trace context propagation across the Temporal boundary (OpenTelemetryContextPropagator).
+    // compileOnly: services that trace already have it via quarkus-opentelemetry; others never
+    // load the class. Same version as openbank-libs-runtime's pin (verified coordinate).
+    compileOnly("io.opentelemetry:opentelemetry-api:1.62.0")
+    testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     compileOnly("io.temporal:temporal-serviceclient:1.25.1") { isTransitive = false }
     compileOnly("com.uber.m3:tally-core:0.13.0") { isTransitive = false }
 

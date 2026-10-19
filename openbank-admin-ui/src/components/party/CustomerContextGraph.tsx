@@ -11,7 +11,7 @@ import { ArrowMarker, NodeShadow } from '@/components/topology/TopologyDefs'
 import { pathId } from '@/components/topology/geometry'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { Customer360Evidence } from '@/lib/customer360/evidence'
+import type { Customer360Evidence } from '@/lib/customer360/contracts'
 import {
   buildCustomerGraph,
   emptyLiveCustomerFacts,

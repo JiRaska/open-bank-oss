@@ -61,7 +61,9 @@ Both are `suspend fun`; in `%test` the scheduler is disabled and the tests drive
 | `openbank.card.processing.presentments` | `fully_cleared` |
 | `openbank.card.processing.clearing.conflicts` | — (clearings, reversals and expiries that lost a concurrent-write race and were re-evaluated; an expiry that loses twice is left for the next sweep) |
 | `openbank.card.processing.hold.releases` | `kind` (`REVERSAL` / `EXPIRY`) |
-| `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
+| `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED` / `UNKNOWN`) |
+| `openbank.card.processing.ledger.posting.unposted` (gauge) | clearings still owed a ledger posting |
+| `openbank.card.processing.ledger.posting.exhausted` (gauge) | clearings that used up their attempts; alert `CardLedgerPostingExhausted` |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
 
 Shadow fraud scoring sends fraud-service its real `POST /api/v1/fraud/score` contract: `accountId`, `amount` in major units by the currency's minor-unit digits, `currency` and `rail = "CARD"`. It reads `verdict` and an integer `score`. It never blocks an authorisation. A failure (any 4xx/5xx, timeout or unreadable body) is counted as `outcome=FAILED` and logged at WARN, at most once a minute with the number of suppressed failures. Before 2026-10-04 the client sent `currencyCode`, no `rail` and minor-unit amounts, and read `decision`, so every shadow score failed silently. The pacts `pacts/openbank-card-processing-service-openbank-fraud-service.json` and `…-openbank-transaction-service.json` now pin both calls, including a recorded 401.
@@ -91,7 +93,60 @@ Defined in `openbank-infra/gitops/components/observability/prometheus-rules-card
 
 ### Ledger posting FAILED
 
-The clearing is recorded; the books are not. Look for the log line `ledger posting FAILED for authorization …` and the `outcome=FAILED` counter. Check transaction-service reachability and the client-credentials token. The posting carries the idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>` (see 03 — API), so a replay through transaction-service cannot double-post. An acquirer retry of the same clearing does **not** re-attempt the posting: the clearing key is already applied and replays without touching the ledger, so a `FAILED` posting must be re-driven deliberately.
+**Staged rollout prerequisite.** The instructions below describe the approved re-driver version, not proof that it is deployed. Verify provider V22 first and obtain explicit owner approval for backlog re-drive before releasing the card image hold. Deploying that image activates the re-driver when `ledger-posting-enabled` retains its default `true`; there is no separate default-off re-driver switch. While an older image remains held, do not assume automatic retry, the exhausted gauge or its workflow heartbeat exists. Their absence does not prove recovery.
+
+The clearing is recorded; the books may not be. Look for the log line `ledger posting FAILED|UNKNOWN for authorization …` and the `outcome=FAILED|UNKNOWN` counter. `UNKNOWN` means the answer was unreadable (a body that did not bind, a cut connection): whether the ledger booked the debit is not known. The posting carries the idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>` (see 03 — API), so posting it again cannot double-post.
+
+Each clearing row carries its posting state (`card_clearings.posting_status` `PENDING` / `POSTED` / `FAILED` / `UNKNOWN`, `posting_attempts`, `posting_last_error`, `posting_next_attempt_at`), written in the clearing's own transaction. The scheduled re-driver (`openbank.card-processing.posting-redrive-cron`, default every minute, heartbeat `card-processing-ledger-posting-redrive`) posts every unposted row again with exponential backoff (`posting-backoff-seconds` 60, capped at `posting-backoff-max-seconds` 3600) up to `posting-max-attempts` (12). An acquirer retry of the same clearing still does **not** touch the ledger; only the re-driver does.
+
+After the last attempt the row stays `FAILED`/`UNKNOWN` (never dropped) and `openbank.card.processing.ledger.posting.exhausted` goes above zero: alert `CardLedgerPostingExhausted`. A row is only ever retried while it is not `POSTED`, and an outcome is only recorded by the attempt that still holds the row's claim token, so a slow superseded attempt can neither overwrite a newer result nor count. (The claim fences recording, not a slow HTTP request after lease expiry. Provider V22 serializes the same key across booking dates; it must be verified before enabling this re-drive.)
+
+`posting_last_error` stores only controlled diagnostics: `POSTING_FAILED`, `COMPLETION_UNPROVEN`, `AUTHORISATION_NOT_FOUND` or `REDRIVE_FAILED`; a successful posting clears it. It does not retain upstream response bodies or exception messages. Posting diagnostics in logs retain opaque clearing/authorisation IDs for correlation; those identifiers remain linkable and are not anonymised. The existing disabled-adapter warning still includes amount, currency and authorisation ID. The shared TransactionClient response-close logger is outside this application-logger proof and can still log a throwable on close failure.
+
+**Remedy for exhausted rows.** Never reset blindly - first prove transaction-service has no booking.
+
+1. In the card-processing database, list the rows and their ledger keys:
+
+```sql
+SELECT id, authorization_id, idempotency_key, posting_status, posting_attempts, posting_last_error,
+       'card-clearing:' || authorization_id || ':h:' ||
+       translate(rtrim(encode(sha256(convert_to(idempotency_key, 'UTF8')), 'base64'), '='), '+/', '-_') AS ledger_key
+FROM card_clearings
+WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
+```
+
+2. In the transaction-service database, look each `ledger_key` up:
+
+```sql
+SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
+-- V22 registry: a retained/orphan claim also prevents automatic retry.
+SELECT idempotency_key, transaction_id, booking_date
+FROM transaction_idempotency_keys WHERE idempotency_key IN ('<ledger_key>', ...);
+```
+
+   - `COMPLETED`: the debit IS booked; mark the card row done: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL, posting_last_attempt_at = now() WHERE id = '<clearing id>';`
+   - no transaction row and no registry claim: after confirming no write/retry is still in flight, an owner may approve re-drive: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
+   - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service holds the key in that state and will keep answering with it; this is a transaction-service incident, not a reset - do not reset.
+
+**One-off reconciliation of clearings from before V5.** V5 marked every existing row `POSTED` (their state was never recorded). Those rows are recognisable by `posting_last_attempt_at IS NULL`. Run step 1 below in the card-processing database, step 2 in the transaction-service database; step 2 returns only keys absent from both transaction history and the global idempotency registry (transaction-service V22 is required). After confirming no writer or retry is still in flight, these rows may be approved for re-drive (set `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()` on that row, `posting_claim_token = NULL`).
+
+```sql
+-- 1. card-processing DB
+SELECT 'card-clearing:' || authorization_id || ':h:' ||
+       translate(rtrim(encode(sha256(convert_to(idempotency_key, 'UTF8')), 'base64'), '='), '+/', '-_') AS ledger_key
+FROM card_clearings WHERE posting_status = 'POSTED' AND posting_last_attempt_at IS NULL;
+-- 2. transaction-service DB: paste the keys from step 1
+SELECT k.ledger_key
+FROM (VALUES ('<ledger_key>'), ...) AS k(ledger_key)
+WHERE NOT EXISTS (
+    SELECT 1 FROM transactions t WHERE t.idempotency_key = k.ledger_key
+)
+AND NOT EXISTS (
+    SELECT 1 FROM transaction_idempotency_keys r WHERE r.idempotency_key = k.ledger_key
+);
+```
+
+Keys already held by a `FAILED`, `REVERSED`, `PENDING` or `PROCESSING` transaction are excluded from this retry list and require the incident triage above; do not reset them or invent a new key. A registry claim without its transaction is also an incident requiring reconciliation, never proof that no booking occurred.
 
 ### Every authorisation is declined
 
@@ -136,3 +191,7 @@ The key's reservation is stuck `PENDING`: a request failed after the network was
 ## Deploy / release
 
 Versioning via `version.txt` and release-please; do not hand-edit. Docker image is a fast-jar.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

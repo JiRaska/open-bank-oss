@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.22.0...balance-service-v1.23.0) (2026-10-19)
+
+
+### Features
+
+* **balance:** expose active holds via GET /{accountId}/holds, the read get_balance_holds has called all along ([#13071](https://github.com/JiRaska/open-bank-oss/issues/13071)) ([df80cbb](https://github.com/JiRaska/open-bank-oss/commit/df80cbb61daebd591f0977f481d3e866eed48f0b))
+
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.21.0...balance-service-v1.22.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
 ## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.20.1...balance-service-v1.21.0) (2026-10-16)
 
 

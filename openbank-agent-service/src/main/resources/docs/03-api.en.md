@@ -94,3 +94,12 @@ ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merg
 ## Versioning
 
 `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The MCP protocol version (`2024-11-05`) is negotiated separately on `initialize` and is independent of the HTTP API version.
+
+## Balance holds downstream contract
+
+`get_balance_holds` calls `GET /api/v1/balances/{accountId}/holds` and passes the `holds` array
+through unchanged, including sensitive reason/reference metadata. The balance provider filters
+released/expired rows without releasing funds. The consumer Pact covers an active hold, an empty
+result and propagation of a missing-identity 401; its canonical contract test is discovered by
+Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
+production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.

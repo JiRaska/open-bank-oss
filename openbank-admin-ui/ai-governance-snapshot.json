@@ -189,7 +189,7 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "7790b6353c493d35",
+      "sha256": "ab7c341db4674803",
       "count": 21,
       "ids": [
         "compliance-officer",

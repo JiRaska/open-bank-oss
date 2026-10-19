@@ -9,6 +9,7 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { Smartphone, RefreshCw, PauseCircle, PlayCircle, Trash2 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { CardPicker } from '@/components/cards/CardPicker'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { HumanReference } from '@/components/ui/HumanReference'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -29,7 +30,7 @@ import { tokenStatusRequest } from '@/lib/cards/lifecycleRequests'
  * mirror row can say ACTIVE about a token the network suspended an hour ago. A screen that dropped
  * `source` would present a stale state as current and an operator would have no way to tell.
  *
- * ## Why a card id has to be typed in
+ * ## Why a card has to be picked first
  *
  * There is no "all tokens" route, deliberately: the token vault belongs to the network and this
  * bank holds only a mirror, so a fleet-wide list would be a list of what we happen to have recorded
@@ -40,7 +41,6 @@ export default function CardTokensPage() {
   const { data: session } = useSession()
   const canManage = hasPermission(session?.user?.roles ?? [], 'cards:issue')
 
-  const [cardIdInput, setCardIdInput] = useState('')
   const [cardId, setCardId] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -93,30 +93,9 @@ export default function CardTokensPage() {
           }
         />
 
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={e => {
-            e.preventDefault()
-            setActionError(null)
-            setCardId(cardIdInput.trim() || null)
-          }}
-        >
-          <label className="flex flex-col gap-1 text-xs text-slate-600">
-            {t('ID karty', 'Card id')}
-            <input
-              value={cardIdInput}
-              onChange={e => setCardIdInput(e.target.value)}
-              className="w-96 rounded border border-slate-300 px-2 py-1 text-sm"
-              placeholder="00000000-0000-0000-0000-000000000000"
-            />
-          </label>
-          <button
-            type="submit"
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700"
-          >
-            {t('Načíst', 'Load')}
-          </button>
-          {cardId && (
+        <CardPicker selectedId={cardId} onSelect={c => { setActionError(null); setCardId(c.id) }} />
+        {cardId && (
+          <div>
             <button
               type="button"
               onClick={reload}
@@ -125,8 +104,8 @@ export default function CardTokensPage() {
               <RefreshCw className="h-3.5 w-3.5" />
               {t('Obnovit', 'Refresh')}
             </button>
-          )}
-        </form>
+          </div>
+        )}
 
         {actionError && (
           <div className="rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{actionError}</div>
@@ -135,8 +114,8 @@ export default function CardTokensPage() {
         {!cardId && (
           <p className="text-sm text-slate-600">
             {t(
-              'Zadejte ID karty. Trezor tokenů patří síti — banka drží jen svůj záznam, takže seznam „všech tokenů“ by byl seznamem toho, co jsme si zapsali, ne toho, co existuje.',
-              'Enter a card id. The token vault belongs to the network and this bank holds only its own record, so a list of "all tokens" would be a list of what we recorded, not of what exists.',
+              'Vyberte kartu. Trezor tokenů patří síti — banka drží jen svůj záznam, takže seznam „všech tokenů“ by byl seznamem toho, co jsme si zapsali, ne toho, co existuje.',
+              'Pick a card. The token vault belongs to the network and this bank holds only its own record, so a list of "all tokens" would be a list of what we recorded, not of what exists.',
             )}
           </p>
         )}

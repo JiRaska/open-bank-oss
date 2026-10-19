@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.27.1...audit-service-v0.28.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
 ## [0.27.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.27.0...audit-service-v0.27.1) (2026-10-14)
 
 

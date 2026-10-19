@@ -3,9 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ShieldAlert, CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, Server, Database, Lock, Zap, CreditCard, Eye, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
@@ -169,6 +170,7 @@ interface ServiceHealth {
 
 const CATALOG_PRESENT = TIERS.flatMap(tier => tier.services.map(s => s.name))
   .filter(n => n.endsWith('-service') || n.endsWith('-payment') || n.endsWith('-instant'))
+const EVIDENCE_FETCH_TIMEOUT_MS = 8_000
 
 export default function BcpPage() {
   const { t, language } = useLanguage()
@@ -181,13 +183,20 @@ export default function BcpPage() {
   // NOT assigned to any continuity tier. Surfaced so a newly-added service can't
   // silently fall outside the BCP model — the hand-curated TIERS no longer hides drift.
   const [unclassified, setUnclassified] = useState<string[]>([])
+  const refreshGeneration = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
 
   const fetchHealth = async () => {
+    const generation = ++refreshGeneration.current
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
+    const timeout = setTimeout(() => controller.abort(), EVIDENCE_FETCH_TIMEOUT_MS)
     setLoading(true)
     try {
       const [svcRes, infraRes] = await Promise.allSettled([
-        fetch('/api/services/health'),
-        fetch('/api/infra/status'),
+        fetch('/api/services/health', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
+        fetch('/api/infra/status', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
       ])
       const toStatus = (s: string): HealthStatus =>
         s === 'UP' ? 'healthy' : s === 'DOWN' ? 'unhealthy' : 'unknown'
@@ -197,13 +206,19 @@ export default function BcpPage() {
       // `services[]` array (the shape the Dashboard consumes); fall back to the
       // legacy `byContainer` map so a future endpoint that drops one shape can't
       // silently blank every tier to UNKNOWN.
-      if (svcRes.status === 'fulfilled' && svcRes.value.ok) {
-        const data = await svcRes.value.json() as {
+      if (svcRes.status === 'fulfilled' && svcRes.value) {
+        const data = svcRes.value as {
           services?: { name: string; status: string }[]
           byContainer?: Record<string, { status: string }>
         }
-        if (Array.isArray(data.services) && data.services.length > 0) {
-          for (const s of data.services) mapped[s.name] = toStatus(s.status)
+        if (Array.isArray(data.services)) {
+          const statusesByName = new Map<string, ('UP' | 'DOWN' | 'UNKNOWN')[]>()
+          for (const service of data.services) {
+            const observations = statusesByName.get(service.name) ?? []
+            observations.push(service.status === 'UP' || service.status === 'DOWN' ? service.status : 'UNKNOWN')
+            statusesByName.set(service.name, observations)
+          }
+          for (const [name, statuses] of statusesByName) mapped[name] = toStatus(aggregateHealthStatuses(statuses))
         } else if (data.byContainer) {
           for (const [container, entry] of Object.entries(data.byContainer)) {
             mapped[container] = toStatus(entry.status)
@@ -214,7 +229,7 @@ export default function BcpPage() {
       // its workload (`security-scanner-service`). Alias through the catalog registry so a renamed
       // workload does not read UNKNOWN in one of the two modes.
       try {
-        const cat = await fetch('/api/catalog/services', { cache: 'no-store' })
+        const cat = await fetch('/api/catalog/services', { cache: 'no-store', signal: controller.signal })
         if (cat.ok) {
           const body = await cat.json() as { services?: CatalogFleetModule[] }
           for (const r of buildRegistry(body.services ?? [])) {
@@ -226,33 +241,46 @@ export default function BcpPage() {
       } catch { /* no catalog snapshot - names resolve as reported */ }
       // Infra: /api/infra/status is already keyed by the stable infra id
       // (postgres, kafka, keycloak, …) — the same ids the Tier 0/5 entries use.
-      if (infraRes.status === 'fulfilled' && infraRes.value.ok) {
-        const data = await infraRes.value.json() as Record<string, { status: string }>
+      if (infraRes.status === 'fulfilled' && infraRes.value) {
+        const data = infraRes.value as Record<string, { status: string }>
         for (const [id, entry] of Object.entries(data)) {
           mapped[id] = toStatus(entry.status)
         }
       }
       // The admin UI is serving this very page, so it is healthy by construction.
       mapped['admin-ui'] = 'healthy'
-      setHealth(mapped)
+      if (generation === refreshGeneration.current) setHealth(mapped)
     } catch {
+      // A failed refresh must not relabel the previous observation as current.
+      if (generation === refreshGeneration.current) setHealth({})
     } finally {
-      setLoading(false)
-      setLastRefresh(new Date())
+      clearTimeout(timeout)
+      if (generation === refreshGeneration.current) {
+        refreshController.current = null
+        setLoading(false)
+        setLastRefresh(new Date())
+      }
     }
   }
 
   useEffect(() => {
     fetchHealth()
     const interval = setInterval(fetchHealth, 30000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      refreshGeneration.current += 1
+      refreshController.current?.abort()
+      refreshController.current = null
+    }
   }, [])
 
   // Pull the code-derived catalog once and diff it against the tier membership.
   useEffect(() => {
     let alive = true
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), EVIDENCE_FETCH_TIMEOUT_MS)
     const classified = new Set(TIERS.flatMap(tier => tier.services.map(s => s.name)))
-    fetch('/api/catalog/services', { cache: 'no-store' })
+    fetch('/api/catalog/services', { cache: 'no-store', signal: controller.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!alive || !data?.available || !Array.isArray(data.services)) return
@@ -264,7 +292,12 @@ export default function BcpPage() {
         )
       })
       .catch(() => { /* catalog snapshot absent — skip the cross-check */ })
-    return () => { alive = false }
+      .finally(() => clearTimeout(timeout))
+    return () => {
+      alive = false
+      controller.abort()
+      clearTimeout(timeout)
+    }
   }, [])
 
   const toggleTier = (id: number) => {
@@ -281,16 +314,20 @@ export default function BcpPage() {
     const healthy = statuses.filter(s => s === 'healthy').length
     const hasUnhealthy = statuses.some(s => s === 'unhealthy')
     const hasStarting = statuses.some(s => s === 'starting')
-    const allUnknown = statuses.every(s => s === 'unknown')
+    const hasUnknown = statuses.some(s => s === 'unknown')
 
-    if (allUnknown) return { status: 'unknown', healthy, total }
     if (hasUnhealthy) return { status: 'unhealthy', healthy, total }
     if (hasStarting) return { status: 'starting', healthy, total }
+    if (hasUnknown) return { status: 'unknown', healthy, total }
     return { status: 'healthy', healthy, total }
   }
 
   const complianceTierStatus = getTierStatus(TIERS[2])
-  const paymentsBlocked = complianceTierStatus.status !== 'healthy' && complianceTierStatus.status !== 'unknown'
+  const paymentsUnknown = complianceTierStatus.status === 'unknown'
+  const paymentsBlocked = complianceTierStatus.status === 'unhealthy' || complianceTierStatus.status === 'starting'
+  const tierStatuses = TIERS.map(tier => getTierStatus(tier).status)
+  const overallStatus = tierStatuses.includes('unhealthy') || tierStatuses.includes('starting')
+    ? 'DEGRADED' : tierStatuses.includes('unknown') ? 'UNKNOWN' : 'NOMINAL'
 
   const overallHealthy = TIERS.reduce((acc, t) => acc + getTierStatus(t).healthy, 0)
   const overallTotal = TIERS.reduce((acc, t) => acc + t.services.length, 0)
@@ -361,21 +398,21 @@ export default function BcpPage() {
         {[
           {
             label: t('Celkový stav', 'Overall status'),
-            value: loading ? '…' : overallHealthy === overallTotal ? 'NOMINAL' : 'DEGRADED',
+            value: loading ? '…' : overallStatus,
             sub: loading ? '' : t(`${overallHealthy}/${overallTotal} služeb healthy`, `${overallHealthy}/${overallTotal} services healthy`),
-            color: overallHealthy === overallTotal ? 'var(--success-text)' : 'var(--danger-text)',
+            color: overallStatus === 'NOMINAL' ? 'var(--success-text)' : overallStatus === 'UNKNOWN' ? 'var(--text-secondary)' : 'var(--danger-text)',
           },
           {
             label: t('Compliance gate', 'Compliance gate'),
-            value: loading ? '…' : complianceTierStatus.status === 'healthy' ? 'CLEAR' : 'BLOCKED',
+            value: loading ? '…' : paymentsUnknown ? 'UNKNOWN' : complianceTierStatus.status === 'healthy' ? 'CLEAR' : 'BLOCKED',
             sub: '5AMLD Art. 18 / DORA Art. 12',
-            color: complianceTierStatus.status === 'healthy' ? 'var(--success-text)' : 'var(--danger-text)',
+            color: paymentsUnknown ? 'var(--text-secondary)' : complianceTierStatus.status === 'healthy' ? 'var(--success-text)' : 'var(--danger-text)',
           },
           {
             label: t('Platební zpracování', 'Payment processing'),
-            value: loading ? '…' : paymentsBlocked ? t('BLOKOVÁNO', 'BLOCKED') : t('POVOLENO', 'ALLOWED'),
+            value: loading ? '…' : paymentsUnknown ? t('NEOVĚŘENO', 'UNVERIFIED') : paymentsBlocked ? t('BLOKOVÁNO', 'BLOCKED') : t('POVOLENO', 'ALLOWED'),
             sub: t('Tier 4 platební služby', 'Tier 4 payment services'),
-            color: paymentsBlocked ? 'var(--danger-text)' : 'var(--success-text)',
+            color: paymentsUnknown ? 'var(--text-secondary)' : paymentsBlocked ? 'var(--danger-text)' : 'var(--success-text)',
           },
           {
             label: t('Cílový RTO (full stack)', 'Target RTO (full stack)'),

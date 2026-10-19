@@ -243,7 +243,7 @@ def self_test() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
-    parser.add_argument("--today", help="explicit ISO date (YYYY-MM-DD); CI passes $(date -u +%F)")
+    parser.add_argument("--today", help="explicit ISO date (YYYY-MM-DD); CI passes $(date -u +%%F)")
     parser.add_argument("--max-age-days", type=int, default=MAX_AGE_DAYS_DEFAULT)
     parser.add_argument("--enforce", action="store_true")
     parser.add_argument("--self-test", action="store_true")
