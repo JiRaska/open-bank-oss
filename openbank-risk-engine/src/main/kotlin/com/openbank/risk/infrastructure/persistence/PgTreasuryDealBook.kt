@@ -4,10 +4,15 @@
 
 package com.openbank.risk.infrastructure.persistence
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.model.TreasuryInstrumentMapper
+import com.openbank.risk.domain.valuation.DealKind
+import com.openbank.risk.infrastructure.finance.LegDto
+import com.openbank.risk.infrastructure.finance.LegSpecJson
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.Row
@@ -21,7 +26,7 @@ import java.time.LocalDate
  * the row lacked), so the book is monotonic and a redelivery or a late, older event is a no-op.
  */
 @ApplicationScoped
-class PgTreasuryDealBook(private val pool: Pool) : TreasuryDealBook {
+class PgTreasuryDealBook(private val pool: Pool, private val objectMapper: ObjectMapper) : TreasuryDealBook {
 
     override suspend fun dealsOnBook(asOf: LocalDate): List<TreasuryDeal> =
         pool.preparedQuery(SELECT).execute(Tuple.of(asOf)).awaitSuspending()
@@ -30,6 +35,9 @@ class PgTreasuryDealBook(private val pool: Pool) : TreasuryDealBook {
             // it), but a row could still exist from before that guard or an out-of-band insert — the
             // mapper must never be asked to build an instrument for a product it does not know.
             .filter { it.onBookAt(asOf) && it.product in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS }
+
+    override suspend fun valuationCandidates(asOf: LocalDate): List<TreasuryDeal> =
+        pool.preparedQuery(SELECT_CANDIDATES).execute(Tuple.of(asOf)).awaitSuspending().mapNotNull { it.toDeal() }
 
     override suspend fun apply(event: TreasuryDealEvent): Boolean = pool.preparedQuery(UPSERT).execute(
         Tuple.tuple(
@@ -43,6 +51,10 @@ class PgTreasuryDealBook(private val pool: Pool) : TreasuryDealBook {
                 event.valueDate,
                 event.maturityDate,
                 event.state,
+                event.kind.name,
+                event.bookId,
+                event.legsJson?.let { io.vertx.core.json.JsonArray(it) },
+                event.scheduleHash,
             ),
         ),
     ).awaitSuspending().rowCount() > 0
@@ -60,29 +72,53 @@ class PgTreasuryDealBook(private val pool: Pool) : TreasuryDealBook {
             valueDate = value,
             maturityDate = maturity,
             state = getString("state"),
+            kind = DealKind.parse(getString("kind")),
+            bookId = getString("book_id"),
+            legs = getString("legs")?.let { json ->
+                LegSpecJson.toLegs(objectMapper.readValue(json, object : TypeReference<List<LegDto>>() {}))
+            },
+            scheduleHash = getString("schedule_hash"),
         )
     }
 
     private companion object {
         // Only rows that can be on the book at asOf: settled ones, and matured ones not yet past it.
+        const val COLUMNS =
+            "deal_id, product, counterparty_id, currency, principal, rate, value_date, maturity_date, state, " +
+                "kind, book_id, legs::text AS legs, schedule_hash"
+
+        // ADR-0344 D2: only ACTUAL deals enter the snapshot's instruments.
         const val SELECT =
-            "SELECT deal_id, product, counterparty_id, currency, principal, rate, value_date, maturity_date, " +
-                "state FROM treasury_deal WHERE state IN ('SETTLED', 'MATURED') AND value_date <= $1"
+            "SELECT $COLUMNS FROM treasury_deal WHERE state IN ('SETTLED', 'MATURED') AND value_date <= $1 " +
+                "AND kind = 'ACTUAL'"
+
+        const val SELECT_CANDIDATES =
+            "SELECT $COLUMNS FROM treasury_deal WHERE state <> 'REVERSED' AND value_date <= $1 " +
+                "AND maturity_date > $1 " +
+                "ORDER BY deal_id"
 
         const val RANK = "CASE %s WHEN 'BOOKED' THEN 1 WHEN 'SETTLED' THEN 2 ELSE 3 END"
 
         val UPSERT =
             "INSERT INTO treasury_deal (deal_id, product, counterparty_id, currency, principal, rate, value_date, " +
-                "maturity_date, state) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) " +
+                "maturity_date, state, kind, book_id, legs, schedule_hash) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13) " +
                 "ON CONFLICT (deal_id) DO UPDATE SET " +
                 "state = CASE WHEN ${RANK.format("EXCLUDED.state")} > ${RANK.format("treasury_deal.state")} " +
                 "THEN EXCLUDED.state ELSE treasury_deal.state END, " +
                 "rate = COALESCE(treasury_deal.rate, EXCLUDED.rate), " +
                 "value_date = COALESCE(treasury_deal.value_date, EXCLUDED.value_date), " +
                 "maturity_date = COALESCE(treasury_deal.maturity_date, EXCLUDED.maturity_date), " +
+                // ADR-0344 D2, monotonic like the rate: the first event carrying a field fills it,
+                // a later or older one never overwrites it (amendments arrive as new flow versions).
+                "book_id = COALESCE(treasury_deal.book_id, EXCLUDED.book_id), " +
+                "legs = COALESCE(treasury_deal.legs, EXCLUDED.legs), " +
+                "schedule_hash = COALESCE(treasury_deal.schedule_hash, EXCLUDED.schedule_hash), " +
                 "updated_at = now() " +
                 "WHERE ${RANK.format("EXCLUDED.state")} > ${RANK.format("treasury_deal.state")} " +
                 "OR (treasury_deal.rate IS NULL AND EXCLUDED.rate IS NOT NULL) " +
-                "OR (treasury_deal.value_date IS NULL AND EXCLUDED.value_date IS NOT NULL)"
+                "OR (treasury_deal.value_date IS NULL AND EXCLUDED.value_date IS NOT NULL) " +
+                "OR (treasury_deal.legs IS NULL AND EXCLUDED.legs IS NOT NULL) " +
+                "OR (treasury_deal.book_id IS NULL AND EXCLUDED.book_id IS NOT NULL)"
     }
 }

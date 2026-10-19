@@ -4,10 +4,17 @@
 
 package com.openbank.risk.domain.model
 
+import com.openbank.libs.domain.calendar.DayCount
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.finance.calendar.Calendars
+import com.openbank.libs.finance.leg.LegSpec
+import com.openbank.libs.finance.leg.PayReceive
+import com.openbank.libs.finance.product.DealTerms
+import com.openbank.libs.finance.product.LegTemplates
+import com.openbank.risk.domain.valuation.DealKind
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -25,6 +32,12 @@ data class TreasuryDeal(
     val valueDate: LocalDate,
     val maturityDate: LocalDate,
     val state: String,
+    /** ADR-0344 D2; a deal published before the field existed is ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
+    val bookId: String? = null,
+    /** The legs treasury published (LegSpec), or null for a legacy event — see [TreasuryLegs]. */
+    val legs: List<LegSpec>? = null,
+    val scheduleHash: String? = null,
 ) {
     val isAsset: Boolean get() = product != MM_BORROWING && product != CNB_LOMBARD
 
@@ -40,6 +53,15 @@ data class TreasuryDeal(
             MATURED -> maturityDate.isAfter(asOf)
             else -> false
         }
+
+    /**
+     * In scope of a valuation at [asOf]: on the book ([onBookAt]), or BOOKED with its value date
+     * reached and its maturity still ahead — a derivative may never pass through SETTLED. The
+     * events carry no trade date, so a deal booked after [asOf] with an earlier value date cannot
+     * be told apart; the valuation input hash makes such a late arrival visible as a changed input.
+     */
+    fun inValuationScope(asOf: LocalDate): Boolean = maturityDate.isAfter(asOf) &&
+        (onBookAt(asOf) || (state == BOOKED && !valueDate.isAfter(asOf)))
 
     companion object {
         const val MM_PLACEMENT = "MM_PLACEMENT"
@@ -112,11 +134,36 @@ object TreasuryInstrumentMapper {
         valueDate: LocalDate,
         maturity: LocalDate,
     ): BigDecimal {
-        val days = ChronoUnit.DAYS.between(valueDate, maturity)
-        return principal.multiply(ratePercent).multiply(BigDecimal.valueOf(days))
-            .divide(BigDecimal.valueOf(DAYS_IN_YEAR * PERCENT), 2, RoundingMode.HALF_UP)
+        val tau = DayCount.ACT_360.yearFraction(valueDate, maturity)
+        return principal.multiply(ratePercent).multiply(BigDecimal.valueOf(tau.numerator))
+            .divide(BigDecimal.valueOf(tau.denominator * PERCENT), 2, RoundingMode.HALF_UP)
     }
 
-    private const val DAYS_IN_YEAR = 360L
     private const val PERCENT = 100L
+}
+
+/**
+ * The legs of a deal (ADR-0344 D2): the published ones, or — for the four legacy money-market
+ * products, whose events carry no legs — derived with libs-finance's money-market template from
+ * the flat fields, exactly as treasury derives them (ACT/360, MODIFIED_FOLLOWING on the currency
+ * calendar, principal exchanged at value date and repaid with interest at maturity).
+ */
+object TreasuryLegs {
+    /** The event rate is an annual percentage (4.25 = 4.25 %). */
+    private val PERCENT = BigDecimal.ONE.movePointRight(2)
+
+    fun legsOf(deal: TreasuryDeal): List<LegSpec>? {
+        deal.legs?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (deal.product !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS) return null
+        val rate = deal.rate ?: return null
+        val terms = DealTerms(
+            CurrencyCode.of(deal.currency),
+            deal.principal,
+            deal.valueDate,
+            deal.maturityDate,
+            Calendars.forCurrencies(deal.currency),
+        )
+        val side = if (deal.isAsset) PayReceive.RECEIVE else PayReceive.PAY
+        return listOf(LegTemplates.moneyMarket(side, terms, rate.divide(PERCENT), DayCount.ACT_360))
+    }
 }

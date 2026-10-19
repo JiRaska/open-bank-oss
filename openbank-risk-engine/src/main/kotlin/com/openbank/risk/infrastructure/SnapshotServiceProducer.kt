@@ -14,12 +14,14 @@ import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.`in`.ValuationUseCase
 import com.openbank.risk.application.port.out.CnbPolicyRateFactRepository
 import com.openbank.risk.application.port.out.CurveSetRepository
 import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.port.out.TreasuryCashFlowStore
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.usecase.CapitalService
 import com.openbank.risk.application.usecase.CashFlowService
@@ -33,13 +35,17 @@ import com.openbank.risk.application.usecase.MinReservesService
 import com.openbank.risk.application.usecase.ReferenceCurveSetSeeder
 import com.openbank.risk.application.usecase.ReportingFixings
 import com.openbank.risk.application.usecase.SnapshotService
+import com.openbank.risk.application.usecase.TreasuryValuationService
+import com.openbank.risk.application.usecase.VarSettings
 import com.openbank.risk.domain.cashflow.BehaviouralModel
+import com.openbank.risk.domain.curve.CurveBootstrap
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.PostShockFloor
 import com.openbank.risk.domain.irrbb.ShockSizes
 import com.openbank.risk.domain.limits.LimitMetric
 import com.openbank.risk.domain.model.ModelVersions
 import com.openbank.risk.domain.model.Provenance
+import com.openbank.risk.domain.valuation.ValuationModel
 import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
@@ -134,6 +140,8 @@ class SnapshotServiceProducer {
             minReservesSetVersion = reserves.parameterSetVersion(),
             behaviouralModelId = model.id,
             behaviouralModelVersion = model.version,
+            curveModelVersion = CurveBootstrap.VERSION,
+            valuationModelVersion = ValuationModel.VERSION,
         )
     }
 
@@ -210,8 +218,38 @@ class SnapshotServiceProducer {
         snapshots: SnapshotUseCase,
         curveSets: CurveSetUseCase,
         config: LiquidityConfig,
-    ): LiquidityForecastUseCase =
-        LiquidityForecastService(snapshots, curveSets, BehaviouralModel.NMD_PHASE0, config.toParameters())
+        valuation: ValuationUseCase,
+    ): LiquidityForecastUseCase = LiquidityForecastService(
+        snapshots,
+        curveSets,
+        BehaviouralModel.NMD_PHASE0,
+        config.toParameters(),
+        valuation::plannedFlows,
+    )
+
+    /**
+     * Valuation, sensitivity, FX position and VaR of the own book (ADR-0344 D8). The VaR window and
+     * the minimum scenario count are configuration (`openbank.risk.var.*`), never code defaults: too
+     * little history answers a data gap, not a number.
+     */
+    @Produces
+    @ApplicationScoped
+    fun valuationUseCase(
+        snapshots: SnapshotUseCase,
+        curveSets: CurveSetRepository,
+        treasury: TreasuryDealBook,
+        storedFlows: TreasuryCashFlowStore,
+        fixings: FxFixingRepository,
+        @ConfigProperty(name = "openbank.risk.var.minimum-scenarios") minimumScenarios: Int,
+        @ConfigProperty(name = "openbank.risk.var.window-days") windowDays: Int,
+    ): ValuationUseCase = TreasuryValuationService(
+        snapshots,
+        curveSets,
+        treasury,
+        storedFlows,
+        ReportingFixings(fixings),
+        VarSettings(minimumScenarios, windowDays),
+    )
 
     /**
      * The mapping's presence check runs at boot, but the range / unknown-key checks live in the
@@ -290,7 +328,8 @@ class SnapshotServiceProducer {
         irrbb: IrrbbUseCase,
         curveSets: CurveSetRepository,
         config: LimitsConfig,
-    ): LimitUseCase = LimitService(snapshots, liquidity, capital, irrbb, curveSets, config.toLimitSet())
+        valuation: ValuationUseCase,
+    ): LimitUseCase = LimitService(snapshots, liquidity, capital, irrbb, curveSets, config.toLimitSet(), valuation)
 
     /** Same reason as [validateCapitalParameters]: every DECLARED limit set is parsed at boot. */
     @Suppress("UnusedParameter") // the event only schedules the call

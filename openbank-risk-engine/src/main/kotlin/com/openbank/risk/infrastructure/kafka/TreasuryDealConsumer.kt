@@ -4,14 +4,23 @@
 
 package com.openbank.risk.infrastructure.kafka
 
+import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.risk.application.port.out.TreasuryCashFlowStore
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.model.TreasuryInstrumentMapper
+import com.openbank.risk.domain.valuation.DealKind
+import com.openbank.risk.domain.valuation.StoredFlowSet
+import com.openbank.risk.infrastructure.finance.CashFlowDto
+import com.openbank.risk.infrastructure.finance.CashFlowJson
+import com.openbank.risk.infrastructure.finance.LegDefaults
+import com.openbank.risk.infrastructure.finance.LegDto
+import com.openbank.risk.infrastructure.finance.LegSpecJson
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
@@ -58,6 +67,9 @@ class TreasuryDealConsumer {
     lateinit var objectMapper: ObjectMapper
 
     @Inject
+    lateinit var cashFlows: TreasuryCashFlowStore
+
+    @Inject
     lateinit var registry: MeterRegistry
 
     private val log = Logger.getLogger(TreasuryDealConsumer::class.java)
@@ -70,12 +82,18 @@ class TreasuryDealConsumer {
             count(OUTCOME_IGNORED)
             return
         }
+        if (type == CASHFLOW_GENERATED) {
+            consumeCashFlows(payload)
+            return
+        }
         val event = parse(type, payload)
         if (event == null) {
             count(OUTCOME_MALFORMED)
             return
         }
-        if (event.product !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS) {
+        // A product outside the snapshot's instrument set is still VALUED when it publishes legs
+        // (ADR-0344 D8); without legs there is nothing this engine can do with it.
+        if (event.product !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS && event.legsJson == null) {
             log.infof(
                 "[treasury-deal-in] product '%s' is not modelled by this engine, not stored: %.200s",
                 event.product,
@@ -91,6 +109,66 @@ class TreasuryDealConsumer {
             throw e
         }
         count(if (changed) OUTCOME_STORED else OUTCOME_UNCHANGED)
+    }
+
+    /**
+     * `treasury.cashflow.generated.v1` (ADR-0344 D4): the stored ledger of one deal version. Kept at
+     * the latest version per deal; malformed → acked and counted, a write failure → retried, rethrown.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun consumeCashFlows(payload: String) {
+        val set = parseCashFlows(payload)
+        if (set == null) {
+            count(OUTCOME_MALFORMED)
+            return
+        }
+        val changed = try {
+            EventRetry.withRetry(log, "treasury cash-flow upsert", set.dealId) { cashFlows.apply(set) }
+        } catch (e: Exception) {
+            count(OUTCOME_WRITE_ERROR)
+            throw e
+        }
+        count(if (changed) OUTCOME_STORED else OUTCOME_UNCHANGED)
+    }
+
+    @Suppress("TooGenericExceptionCaught", "ReturnCount")
+    internal fun parseCashFlows(payload: String): StoredFlowSet? = try {
+        val node = objectMapper.readTree(payload)
+        val flows = node.get("flows")?.takeIf { it.isArray } ?: return malformedFlows("flows", payload)
+        StoredFlowSet(
+            dealId = UUID.fromString(node.text("dealId") ?: return malformedFlows("dealId", payload)),
+            dealVersion = node.get("dealVersion")?.takeIf { it.canConvertToInt() }?.intValue()
+                ?: return malformedFlows("dealVersion", payload),
+            scheduleHash = node.text("scheduleHash") ?: return malformedFlows("scheduleHash", payload),
+            flows = objectMapper.convertValue(flows, object : TypeReference<List<CashFlowDto>>() {})
+                .mapIndexed(CashFlowJson::toDomain),
+        )
+    } catch (e: Exception) {
+        log.errorf(e, "[treasury-deal-in] malformed cash-flow event, acked: %.200s", payload)
+        null
+    }
+
+    private fun malformedFlows(field: String, payload: String): StoredFlowSet? {
+        log.warnf("[treasury-deal-in] cash-flow event without a valid %s, acked: %.200s", field, payload)
+        return null
+    }
+
+    /**
+     * The legs as canonical JSON after validating them with libs-finance's types (a leg the engine
+     * cannot build is a malformed event, not a deal stored without its legs), or null when absent.
+     */
+    private fun legsJson(node: JsonNode, header: LegDefaults): String? {
+        val legs = node.get("legs")?.takeIf { it.isArray && it.size() > 0 } ?: return null
+        val dtos = objectMapper.convertValue(legs, object : TypeReference<List<LegDto>>() {})
+        LegSpecJson.toLegs(dtos, header) // validates; throws IllegalArgumentException
+        val resolved = dtos.map {
+            it.copy(
+                paymentCalendars = it.paymentCalendars ?: header.calendars,
+                businessDayConvention =
+                it.businessDayConvention ?: header.businessDayConvention,
+            )
+        }
+        return objectMapper.writeValueAsString(resolved)
     }
 
     /** The event as the book needs it, or null (malformed: logged, counted and acked). */
@@ -110,6 +188,16 @@ class TreasuryDealConsumer {
                 rate = node.get("rate")?.takeIf { it.isNumber }?.decimalValue(),
                 valueDate = node.text("valueDate")?.let(LocalDate::parse),
                 maturityDate = node.text("maturityDate")?.let(LocalDate::parse),
+                kind = DealKind.parse(node.text("kind")),
+                bookId = node.text("bookId"),
+                legsJson = legsJson(
+                    node,
+                    LegDefaults(
+                        calendars = node.get("calendars")?.takeIf { it.isArray }?.map { it.asText() },
+                        businessDayConvention = node.text("businessDayConvention"),
+                    ),
+                ),
+                scheduleHash = node.text("scheduleHash"),
             )
         } catch (e: Exception) {
             log.errorf(e, "[treasury-deal-in] malformed deal event, acked: %.200s", payload)
@@ -136,6 +224,12 @@ class TreasuryDealConsumer {
         const val OUTCOME_WRITE_ERROR = "write_error"
         const val OUTCOME_UNSUPPORTED_PRODUCT = "unsupported_product"
         const val OUTCOME_IGNORED = "ignored"
+
+        /**
+         * ADR-0344 D4: treasury's stored ledger of one deal version. Same topic as the deal events
+         * (one producer, one ordering per deal), told apart by `ce-type` like every other type.
+         */
+        const val CASHFLOW_GENERATED = "treasury.cashflow.generated.v1"
 
         /** Known treasury types that move nothing in the book (see the class KDoc). */
         val IGNORED_TYPES: Set<String> = setOf(

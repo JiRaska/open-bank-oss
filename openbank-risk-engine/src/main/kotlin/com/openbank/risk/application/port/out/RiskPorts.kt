@@ -6,8 +6,8 @@ package com.openbank.risk.application.port.out
 
 import com.openbank.risk.application.port.`in`.LimitAnalysis
 import com.openbank.risk.domain.curve.CurveIndex
+import com.openbank.risk.domain.curve.CurveQuote
 import com.openbank.risk.domain.curve.CurveSet
-import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LedgerInputs
 import com.openbank.risk.domain.model.LoanContract
@@ -15,6 +15,8 @@ import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutMismatch
 import com.openbank.risk.domain.model.TreasuryDeal
+import com.openbank.risk.domain.valuation.DealKind
+import com.openbank.risk.domain.valuation.StoredFlowSet
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -104,10 +106,28 @@ data class FxFixingRate(
  * out-of-date event changes nothing.
  */
 interface TreasuryDealBook {
+    /** ACTUAL deals on the balance sheet at [asOf] in a product the snapshot models as an instrument. */
     suspend fun dealsOnBook(asOf: LocalDate): List<TreasuryDeal>
+
+    /**
+     * Every deal of any kind and product that could be in a valuation's scope at [asOf] (not
+     * reversed, not matured before it); the caller applies [TreasuryDeal.inValuationScope] and the
+     * kind rule (ADR-0344 D2). Empty for a book that does not keep legs.
+     */
+    suspend fun valuationCandidates(asOf: LocalDate): List<TreasuryDeal> = emptyList()
 
     /** Returns true when the event changed the stored deal. */
     suspend fun apply(event: TreasuryDealEvent): Boolean
+}
+
+/**
+ * Treasury's stored cash-flow ledger (ADR-0344 D4), kept at the LATEST deal version per deal from
+ * `treasury.cashflow.generated` events. [apply] is monotonic: an older or equal version is a no-op.
+ */
+interface TreasuryCashFlowStore {
+    suspend fun apply(set: StoredFlowSet): Boolean
+
+    suspend fun latest(dealIds: Collection<UUID>): Map<UUID, StoredFlowSet>
 }
 
 /** One `treasury.deal.*` event as the book needs it; [rate] is present only on `booked`. */
@@ -121,6 +141,12 @@ data class TreasuryDealEvent(
     val rate: BigDecimal?,
     val valueDate: LocalDate?,
     val maturityDate: LocalDate?,
+    /** ADR-0344 D2 additive fields; absent on every event published before them. */
+    val kind: DealKind = DealKind.ACTUAL,
+    val bookId: String? = null,
+    /** The legs as canonical LegSpec JSON (already validated by the consumer), or null. */
+    val legsJson: String? = null,
+    val scheduleHash: String? = null,
 )
 
 /**
@@ -175,13 +201,19 @@ interface CurveSetRepository {
     suspend fun listRecent(limit: Int, asOf: LocalDate? = null): List<CurveSetSummary>
 
     /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
-    suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
+    suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<CurveQuote>>)
 
     /**
      * Like [save], but a set whose id is already stored is left untouched and `false` is returned —
      * the idempotent write for sets with a deterministic id (the sandbox reference set).
      */
-    suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>): Boolean
+    suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<CurveQuote>>): Boolean
+
+    /**
+     * The latest-recorded curve set of each as-of date in [from]..[to], oldest first — the history a
+     * historical-simulation VaR reads (ADR-0344 D8). Empty for a store that keeps no history.
+     */
+    suspend fun latestPerDayBetween(from: LocalDate, to: LocalDate): List<CurveSet> = emptyList()
 
     suspend fun findById(id: UUID): CurveSet?
 

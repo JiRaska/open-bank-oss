@@ -176,8 +176,88 @@ class TreasuryDealConsumerIT {
         assertThat(outcome("malformed")).isEqualTo(malformedBefore)
     }
 
+    @Inject
+    lateinit var cashFlows: com.openbank.risk.application.port.out.TreasuryCashFlowStore
+
+    private val irs = UUID.randomUUID()
+
+    /**
+     * ADR-0344 D2: a NEW-format event (kind, bookId, legs) for a product the snapshot does not
+     * model is stored for valuation with its legs; the OLD format (no new fields) still parses as an
+     * ACTUAL deal without legs — the legacy money-market product derives its legs at read time.
+     */
+    @Test
+    fun `a new-format IRS event is stored with its legs, an old-format event still parses`() {
+        val source = connector.source<Any>("treasury-deal-in")
+        val legs = """[{"payReceive":"PAY","currency":"CZK","notional":5000000,"accrualStart":"2030-01-10",
+            "accrualEnd":"2032-01-10","accrualFrequency":"1Y","dayCount":"ACT/360","rate":{"type":"FIXED","rate":0.035},
+            "finalNotionalExchange":false,"someFutureField":{"x":1}}]"""
+        source.send(
+            record(
+                "treasury.deal.booked.v1",
+                """{"dealId":"$irs","product":"IRS","counterpartyId":"CP1","currency":"CZK","principal":5000000,
+                    "valueDate":"2030-01-10","maturityDate":"2032-01-10","kind":"PLANNED","bookId":"ALM-1",
+                    "calendars":["CZK"],"scheduleHash":"sha256:abc","legs":$legs,"createdBy":"d","approvedBy":"a"}""",
+            ),
+        )
+        source.send(record("treasury.deal.settled.v1", payload(""","ledgerJournalId":"${UUID.randomUUID()}"""")))
+        await { runBlocking { book.valuationCandidates(LocalDate.parse("2030-06-01")) }.any { it.dealId == irs } }
+        awaitState("SETTLED")
+        val stored = runBlocking { book.valuationCandidates(LocalDate.parse("2030-06-01")) }.single { it.dealId == irs }
+        assertThat(stored.kind.name).isEqualTo("PLANNED")
+        assertThat(stored.bookId).isEqualTo("ALM-1")
+        assertThat(stored.legs).hasSize(1)
+        assertThat(stored.legs!!.single().notional.amount).isEqualByComparingTo("5000000")
+        assertThat(stored.scheduleHash).isEqualTo("sha256:abc")
+        // A PLANNED deal never enters the snapshot's instruments.
+        assertThat(
+            runBlocking {
+                book.dealsOnBook(LocalDate.parse("2030-06-01"))
+            }.map { it.dealId },
+        ).doesNotContain(irs)
+        val legacy = current()!!
+        assertThat(legacy.kind.name).isEqualTo("ACTUAL")
+        assertThat(legacy.legs).isNull()
+
+        // Legs that libs-finance cannot build make the event malformed, never a deal stored without them.
+        val malformedBefore = outcome("malformed")
+        source.send(
+            record(
+                "treasury.deal.booked.v1",
+                """{"dealId":"${UUID.randomUUID()}","product":"IRS","counterpartyId":"CP1","currency":"CZK",
+                    "principal":1,"valueDate":"2030-01-10","maturityDate":"2032-01-10","legs":[{"payReceive":"SIDEWAYS"}]}""",
+            ),
+        )
+        await { outcome("malformed") >= malformedBefore + 1.0 }
+    }
+
+    /** ADR-0344 D4: the stored ledger is kept at the latest version; an older version is a no-op. */
+    @Test
+    fun `cash-flow events keep the latest deal version only`() {
+        val source = connector.source<Any>("treasury-deal-in")
+        fun flows(version: Int, amount: String) = """{"dealId":"$irs","dealVersion":$version,"scheduleHash":"h$version",
+            "generatedAt":"2030-01-10T08:00:00Z","flows":[{"flowId":"${UUID.randomUUID()}","legIndex":0,"periodIndex":0,
+            "kind":"INTEREST","direction":"OUT","currency":"CZK","accrualStart":"2030-01-10","accrualEnd":"2031-01-10",
+            "paymentDate":"2031-01-10","notional":5000000,"rate":0.035,"rateSource":"FIXED","amount":$amount,
+            "state":"FIXED","manual":false,"journalRefs":[]}]}"""
+        source.send(record("treasury.cashflow.generated.v1", flows(2, "177430.56")))
+        await { runBlocking { cashFlows.latest(listOf(irs)) }[irs]?.dealVersion == 2 }
+        val unchangedBefore = outcome("unchanged")
+        source.send(record("treasury.cashflow.generated.v1", flows(1, "1.00")))
+        await { outcome("unchanged") >= unchangedBefore + 1.0 }
+        val latest = runBlocking { cashFlows.latest(listOf(irs)) }.getValue(irs)
+        assertThat(latest.dealVersion).isEqualTo(2)
+        assertThat(latest.flows.single().signedAmount).isEqualByComparingTo("-177430.56")
+        val malformedBefore = outcome("malformed")
+        source.send(record("treasury.cashflow.generated.v1", """{"dealId":"$irs","flows":[]}"""))
+        await { outcome("malformed") >= malformedBefore + 1.0 }
+    }
+
     @org.junit.jupiter.api.AfterEach
-    fun cleanup() = TestDb.execute("DELETE FROM treasury_deal WHERE deal_id = '$deal'")
+    fun cleanup() {
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$deal', '$irs')")
+        TestDb.execute("DELETE FROM treasury_deal_cash_flows WHERE deal_id = '$irs'")
+    }
 
     private fun awaitState(expected: String) = await { current()?.state == expected }
 
