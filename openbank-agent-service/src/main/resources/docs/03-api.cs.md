@@ -98,3 +98,11 @@ Hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `open
 `sanctions_list_checks`, `sanctions_get_check` a `sanctions_list_pending` předávají tělo odpovědi sanctions-service přes `RestDownstreamReadAdapter`. Seznamové nástroje vracejí pole; čekající kontroly mají stav `POTENTIAL_HIT`. Neznámé id zůstává chybou404 navazující služby a nezmění se na vymyšlený výsledek bez nálezu.
 
 Čtyři consumer Pact interakce pokrývají seznam, známou kontrolu, čekající kontroly a chybějící id. Používají skutečný adaptér a ručně implementovaného klienta připojeného k Pact mocku. Provider replay čte připravený záznam přes skutečné HTTP a PostgreSQL. Testy neprokazují mapování anotací skutečného REST klienta, platnost JWT, vynucení politik, vlastnictví ani úplnost vrácené populace.
+
+## Navazující kontrakt rezervací zůstatku
+
+`get_balance_holds` volá `GET /api/v1/balances/{accountId}/holds` a předává pole `holds` beze změny,
+včetně citlivých důvodů a referencí. Poskytovatel filtruje uvolněné/expirované řádky, ale neuvolňuje
+prostředky. Spotřebitelský Pact pokrývá aktivní rezervaci, prázdný výsledek a předání 401 bez identity;
+kanonický kontraktní test objevuje Pact drift CI. Fixture neprokazují živý token, předání hlavičky
+customer-edge ani produkční rozhodnutí OPA. Poskytovatel zachovává RBAC/OPA i volitelnou kontrolu vlastníka.

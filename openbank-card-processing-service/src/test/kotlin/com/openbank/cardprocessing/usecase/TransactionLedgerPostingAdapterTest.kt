@@ -9,13 +9,15 @@ import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.infrastructure.client.CardClearingLedgerKey
-import com.openbank.cardprocessing.infrastructure.client.InitiateTransactionRequest
 import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostingAdapter
-import com.openbank.cardprocessing.infrastructure.client.TransactionResponse
 import com.openbank.cardprocessing.infrastructure.client.TransactionServiceClient
-import io.mockk.coEvery
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -60,10 +62,36 @@ class TransactionLedgerPostingAdapterTest {
         updatedAt = now,
     )
 
+    private fun <T : Any> ok(type: Class<T>, body: T): Response = mockk<Response>(relaxed = true).also {
+        every { it.status } returns 200
+        every { it.hasEntity() } returns true
+        every { it.readEntity(type) } returns body
+    }
+
+    @Test
+    fun `non-completed transaction states are UNKNOWN and preserve the clearing idempotency key`(): Unit = runBlocking {
+        listOf("FAILED", "PENDING", "PROCESSING", null, "UNRECOGNIZED").forEach { state ->
+            val sent = slot<InitiateTransactionRequest>()
+            every { client.initiateTransaction(capture(sent)) } returns Uni.createFrom().item(
+                ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = state)),
+            )
+            val authorization = authorization("CZK")
+            val result = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
+                .postClearedSpend(authorization, 12_345, "uncertain-clearing")
+            assertThat(result.outcome).describedAs("provider state=%s", state).isEqualTo(PostingOutcome.UNKNOWN)
+            assertThat(result.transactionId).isNull()
+            assertThat(sent.captured.idempotencyKey)
+                .isEqualTo(CardClearingLedgerKey.of(authorization.id, "uncertain-clearing"))
+        }
+    }
+
     @Test
     fun `a two-decimal currency is posted with two decimals`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
-        coEvery { client.initiate(capture(sent)) } returns TransactionResponse(UUID.randomUUID(), "COMPLETED")
+        every { client.initiateTransaction(capture(sent)) } returns
+            Uni.createFrom().item(
+                ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")),
+            )
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         val authorization = authorization("CZK")
@@ -129,7 +157,10 @@ class TransactionLedgerPostingAdapterTest {
     @Test
     fun `a zero-decimal currency is posted whole, not divided by a hundred`(): Unit = runBlocking {
         val sent = slot<InitiateTransactionRequest>()
-        coEvery { client.initiate(capture(sent)) } returns TransactionResponse(UUID.randomUUID(), "COMPLETED")
+        every { client.initiateTransaction(capture(sent)) } returns
+            Uni.createFrom().item(
+                ok(TransactionResponse::class.java, TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")),
+            )
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         adapter.postClearedSpend(authorization("JPY"), 12_345, "clr-2")
@@ -157,7 +188,8 @@ class TransactionLedgerPostingAdapterTest {
 
     @Test
     fun `a failing transaction-service is FAILED, and the exception does not escape`(): Unit = runBlocking {
-        coEvery { client.initiate(any()) } throws IllegalStateException("connection refused")
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(IllegalStateException("connection refused"))
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
         val result = adapter.postClearedSpend(authorization("CZK"), 1_000, "clr-4")

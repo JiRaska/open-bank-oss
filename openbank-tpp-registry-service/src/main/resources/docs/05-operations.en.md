@@ -84,3 +84,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ## Release
 
 Released component (has `version.txt`, currently `0.3.0`). Versioning/changelog are owned by release-please from Conventional Commits — do not hand-edit `version.txt` or `CHANGELOG.md`. The `openapi.yaml:info.version` is a separate API-contract axis (ADR-0048).
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

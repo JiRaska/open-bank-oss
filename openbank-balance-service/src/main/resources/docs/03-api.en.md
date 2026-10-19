@@ -135,16 +135,30 @@ written. Zero and negative deltas remain valid (they are posted ledger facts).
 
 | Event | Trigger | Key fields |
 |---|---|---|
-| `balance.opened.v1` | initialise for new account | accountId, currency, openedAt |
-| `balance.updated.v1` | every change (booked/reserved/pending) | accountId, currency, deltas, version |
-| `balance.hold.created.v1` | POST /holds | holdId, accountId, amount, reason, expiresAt |
-| `balance.hold.captured.v1` | POST /capture | holdId, actualAmount |
-| `balance.hold.released.v1` | DELETE /holds | holdId, reason (manual/expired) |
-| `balance.low.v1` | `available < threshold` (per-account config) | accountId, currency, available, threshold |
-| `balance.overdraft.changed.v1` | PATCH /overdraft | accountId, currency, oldLimit, newLimit |
+| `BALANCE_UPDATED` | credit/debit, ledger projection or value-date roll | eventId, accountId, currency, bookedAmount, availableAmount, reservedAmount, occurredAt |
+| `HOLD_PLACED` | hold creation | eventId, accountId, currency, amount, availableAmount, occurredAt |
+| `HOLD_RELEASED` | hold release or ledger cover consumption | eventId, accountId, currency, amount, availableAmount, occurredAt |
+
+`balance.low.v1` is planned in ADR-0333 and is not emitted. Account-level opt-in, a downward
+threshold crossing, cooldown and ownership checks must exist before it becomes a customer intent.
 
 ## Backward compatibility
 
 - API `/api/v1/...`. v2 runs in parallel for 6 months.
 - Event version in topic name + per-event `v1` suffix in the type.
 - OpenAPI diff in CI prevents breaking changes without a bump.
+
+## Read active holds
+
+`GET /api/v1/balances/{accountId}/holds` returns `{ "holds": [...] }`, or an empty array.
+Each row exposes its id, accountId, amount, currency, reason, referenceId and lifecycle timestamps.
+Only unreleased holds with no expiry or an expiry strictly after the service clock are returned.
+This read does not release funds, update the balance or emit an event; excluding an expired row
+is not evidence that the reservation has been released.
+
+The endpoint uses the sibling reads' `ROLE_API`, `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`
+role gate and `balance.read` OPA decision. When trusted customer-edge supplies
+`X-Customer-Party-Id`, the account owner must match; missing accounts and mismatches return 404.
+Omitting that header retains the existing service-reader path, not a customer ownership proof.
+No identity returns 401 and an unrelated role returns 403. Hold reasons and reference ids are
+sensitive financial metadata; the assistant's `get_balance_holds` tool passes this response through.

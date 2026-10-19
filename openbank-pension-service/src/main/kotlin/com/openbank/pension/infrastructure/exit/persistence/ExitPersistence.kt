@@ -19,6 +19,7 @@ import com.openbank.pension.application.exit.PaymentInstruction
 import com.openbank.pension.application.exit.PaymentInstructionRepository
 import com.openbank.pension.application.exit.PayoutRequestRepository
 import com.openbank.pension.application.exit.TerminationNoticeRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.domain.exit.DeathClaim
 import com.openbank.pension.domain.exit.DeathClaimStatus
 import com.openbank.pension.domain.exit.PayoutRequest
@@ -150,7 +151,23 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
     updatedAt: Instant,
     expectedVersion: Int,
     create: () -> E,
-): Int = Panache.withTransaction {
+): Int = upsertTracked(id, contractId, status, idempotencyKey, body, updatedAt, expectedVersion, create).version
+
+/** What a write replaced: the new row version and the status the row had before (null when created). */
+internal data class UpsertResult(val version: Int, val previousStatus: String?)
+
+/** [upsert], also answering the status it replaced, so a caller can count the transition. */
+@Suppress("LongParameterList") // the upsert's own parameters, unchanged
+internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsertTracked(
+    id: UUID,
+    contractId: UUID,
+    status: String,
+    idempotencyKey: String?,
+    body: Any,
+    updatedAt: Instant,
+    expectedVersion: Int,
+    create: () -> E,
+): UpsertResult = Panache.withTransaction {
     // Every exit write takes the CONTRACT row lock first (#12376): a death claim registered
     // concurrently with a beneficiary change is serialised against it, so the change either sees
     // the claim (and is refused) or completes strictly before the claim is registered.
@@ -160,6 +177,7 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
                 "exit aggregate $id changed concurrently (version ${existing.rowVersion}, expected $expectedVersion)",
             )
         }
+        val previous = existing?.status
         val entity = existing ?: create().also { it.aggregateId = id }
         entity.contractId = contractId
         entity.status = status
@@ -167,7 +185,7 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
         entity.body = ExitJson.mapper.writeValueAsString(body)
         entity.updatedAt = updatedAt
         val stored = if (existing == null) persist(entity) else Uni.createFrom().item(entity)
-        stored.flatMap { Panache.getSession() }.flatMap { it.flush() }.map { entity.rowVersion }
+        stored.flatMap { Panache.getSession() }.flatMap { it.flush() }.map { UpsertResult(entity.rowVersion, previous) }
     }
 }.onFailure(::isLostRace).transform { e ->
     // Two writers that both passed the in-memory check race at FLUSH; Hibernate's @Version then
@@ -177,6 +195,14 @@ internal suspend fun <E : ExitDocumentEntity> PanacheRepository<E>.upsert(
     ExitConcurrentUpdateException("exit aggregate $id changed concurrently at flush: ${e.javaClass.simpleName}")
         .also { it.initCause(e) }
 }.awaitSuspending()
+
+/** Counts a refused optimistic write (surfaced to the caller, or retried by it) before rethrowing. */
+internal suspend fun <T> conflictsCounted(metrics: PensionMetrics, aggregate: String, write: suspend () -> T): T = try {
+    write()
+} catch (e: ExitConcurrentUpdateException) {
+    metrics.optimisticLockConflict(aggregate, "detected")
+    throw e
+}
 
 /** `SELECT … FOR UPDATE` on the contract row, inside the caller's transaction. */
 internal fun lockContractRow(contractId: UUID): Uni<Any?> = Panache.getSession().flatMap { session ->
@@ -225,21 +251,26 @@ internal suspend inline fun <E : ExitDocumentEntity, reified T> PanacheRepositor
 }
 
 @ApplicationScoped
-class TerminationNoticeRepositoryImpl :
+class TerminationNoticeRepositoryImpl(private val metrics: PensionMetrics) :
     TerminationNoticeRepository,
     PanacheRepository<TerminationNoticeEntity> {
     override suspend fun save(notice: TerminationNotice): TerminationNotice {
-        val version = upsert(
-            notice.id,
-            notice.contractId,
-            notice.status.name,
-            notice.idempotencyKey,
-            notice,
-            notice.updatedAt,
-            notice.version,
-            ::TerminationNoticeEntity,
-        )
-        return notice.copy(version = version)
+        val written = conflictsCounted(metrics, "termination_notice") {
+            upsertTracked(
+                notice.id,
+                notice.contractId,
+                notice.status.name,
+                notice.idempotencyKey,
+                notice,
+                notice.updatedAt,
+                notice.version,
+                ::TerminationNoticeEntity,
+            )
+        }
+        if (written.previousStatus != notice.status.name) {
+            metrics.transition("termination_notice", written.previousStatus, notice.status.name)
+        }
+        return notice.copy(version = written.version)
     }
 
     override suspend fun findById(id: UUID): TerminationNotice? =
@@ -254,21 +285,27 @@ class TerminationNoticeRepositoryImpl :
 }
 
 @ApplicationScoped
-class PayoutRequestRepositoryImpl :
+class PayoutRequestRepositoryImpl(private val metrics: PensionMetrics) :
     PayoutRequestRepository,
     PanacheRepository<PayoutRequestEntity> {
     override suspend fun save(request: PayoutRequest): PayoutRequest {
-        val version = upsert(
-            request.id,
-            request.contractId,
-            request.status.name,
-            request.idempotencyKey,
-            request,
-            request.updatedAt,
-            request.version,
-            ::PayoutRequestEntity,
-        )
-        return request.copy(version = version)
+        val written = conflictsCounted(metrics, "payout_request") {
+            upsertTracked(
+                request.id,
+                request.contractId,
+                request.status.name,
+                request.idempotencyKey,
+                request,
+                request.updatedAt,
+                request.version,
+                ::PayoutRequestEntity,
+            )
+        }
+        if (written.previousStatus != request.status.name) {
+            metrics.transition("payout_request", written.previousStatus, request.status.name)
+            recordPayout(request)
+        }
+        return request.copy(version = written.version)
     }
 
     override suspend fun findById(id: UUID): PayoutRequest? =
@@ -280,26 +317,42 @@ class PayoutRequestRepositoryImpl :
     override suspend fun list(status: PayoutStatus?, contractId: UUID?, limit: Int): List<PayoutRequest> =
         page<PayoutRequestEntity, PayoutRequest>(status?.name, contractId, limit)
 
+    /** Payouts by form; the confirmed gross is the money the participant committed to take out. */
+    private fun recordPayout(request: PayoutRequest) {
+        val confirmed = request.status == PayoutStatus.CONFIRMED
+        metrics.payout(
+            request.form,
+            request.status.name,
+            if (confirmed) request.quote.grossAmount else null,
+            if (confirmed) request.quote.currency else null,
+        )
+    }
+
     override suspend fun findInPayment(): List<PayoutRequest> =
         load("status in ?1", listOf(PayoutStatus.CONFIRMED.name, PayoutStatus.IN_PAYMENT.name))
 }
 
 @ApplicationScoped
-class DeathClaimRepositoryImpl :
+class DeathClaimRepositoryImpl(private val metrics: PensionMetrics) :
     DeathClaimRepository,
     PanacheRepository<DeathClaimEntity> {
     override suspend fun save(claim: DeathClaim): DeathClaim {
-        val version = upsert(
-            claim.id,
-            claim.contractId,
-            claim.status.name,
-            claim.idempotencyKey,
-            claim,
-            claim.updatedAt,
-            claim.version,
-            ::DeathClaimEntity,
-        )
-        return claim.copy(version = version)
+        val written = conflictsCounted(metrics, "death_claim") {
+            upsertTracked(
+                claim.id,
+                claim.contractId,
+                claim.status.name,
+                claim.idempotencyKey,
+                claim,
+                claim.updatedAt,
+                claim.version,
+                ::DeathClaimEntity,
+            )
+        }
+        if (written.previousStatus != claim.status.name) {
+            metrics.transition("death_claim", written.previousStatus, claim.status.name)
+        }
+        return claim.copy(version = written.version)
     }
 
     override suspend fun findById(id: UUID): DeathClaim? =

@@ -98,3 +98,12 @@ ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merg
 `sanctions_list_checks`, `sanctions_get_check` and `sanctions_list_pending` return sanctions-service response bodies through `RestDownstreamReadAdapter`. The list tools return arrays; pending rows carry `POTENTIAL_HIT`. An unknown check id remains a downstream404 error and does not become a fabricated clear verdict.
 
 The four consumer Pact interactions cover list, a known check, pending and missing-id behavior using the real adapter with a handwritten client connected to a Pact mock. Sanctions provider replay reads a seeded row through real HTTP and PostgreSQL. These tests do not establish actual REST-client annotation mapping, JWT validity, policy enforcement, ownership or completeness of the returned population.
+
+## Balance holds downstream contract
+
+`get_balance_holds` calls `GET /api/v1/balances/{accountId}/holds` and passes the `holds` array
+through unchanged, including sensitive reason/reference metadata. The balance provider filters
+released/expired rows without releasing funds. The consumer Pact covers an active hold, an empty
+result and propagation of a missing-identity 401; its canonical contract test is discovered by
+Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
+production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.

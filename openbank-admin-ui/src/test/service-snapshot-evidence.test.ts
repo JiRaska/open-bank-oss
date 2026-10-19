@@ -41,6 +41,25 @@ describe('service snapshot evidence', () => {
     await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
   })
 
+  it('preserves same-named workloads from separate namespaces, but rejects duplicate workload identity', async () => {
+    const account = { name: 'ledger-service', namespace: 'tenant-a', port: 8101, status: 'UP', reachable: true, latencyMs: null }
+    const pension = { ...account, namespace: 'tenant-b' }
+    const duplicateWorkload = { ...account, port: 8102 }
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(json({ services: [account, pension] }))
+      .mockResolvedValueOnce(json({ services: [account, duplicateWorkload] }))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(fetchAllServiceSnapshotsEvidence()).resolves.toMatchObject({
+      ok: true,
+      snapshots: [
+        { name: 'ledger-service', namespace: 'tenant-a', port: 8101 },
+        { name: 'ledger-service', namespace: 'tenant-b', port: 8101 },
+      ],
+    })
+    await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
+  })
+
   it('classifies collector and OSV failures without claiming verified empty evidence', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'upstream_unreachable' }, 502)))
     await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'unreachable' })

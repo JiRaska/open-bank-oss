@@ -127,3 +127,7 @@ naplníš přes `POST /api/v1/security/scan`. Rozpracované ICT incidenty se NEV
 ## Poznámky k lokálnímu vývoji
 
 Scanner prověřuje služby pomocí URL — v dev módu by seznam služeb měl být přepsán v `application.yaml` tak, aby odkazoval na lokálně běžící služby. Alternativně spusť s `QUARKUS_PROFILE=test`, kde je seznam služeb prázdný a skeny produkují prázdné reporty.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

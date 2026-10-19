@@ -29,16 +29,16 @@ class ScheduledWorkflowIdTest {
     @Test
     fun `two fires on the same UTC day produce the same id`() {
         assertEquals(
-            id(RunTrigger.SCHEDULED, "2026-08-02T03:00:00Z"),
-            id(RunTrigger.SCHEDULED, "2026-08-02T21:40:11Z"),
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-02T03:00:00Z"),
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-02T21:40:11Z"),
         )
     }
 
     @Test
     fun `consecutive days produce different ids`() {
         assertNotEquals(
-            id(RunTrigger.SCHEDULED, "2026-08-02T03:00:00Z"),
-            id(RunTrigger.SCHEDULED, "2026-08-03T03:00:00Z"),
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-02T03:00:00Z"),
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-03T03:00:00Z"),
         )
     }
 
@@ -48,19 +48,19 @@ class ScheduledWorkflowIdTest {
         // on the 2nd. A local-zone truncation would split the first pair and merge the second, so
         // the schedule would double-run on some days and skip others depending on where the pod runs.
         assertEquals(
-            "flaky-test-hunter-check-scheduled-2026-08-02",
-            id(RunTrigger.SCHEDULED, "2026-08-02T23:59:59Z"),
+            "flaky-test-hunter-check-ci_test_suite_failure_webhook-2026-08-02",
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-02T23:59:59Z"),
         )
         assertEquals(
-            "flaky-test-hunter-check-scheduled-2026-08-03",
-            id(RunTrigger.SCHEDULED, "2026-08-03T00:00:00Z"),
+            "flaky-test-hunter-check-ci_test_suite_failure_webhook-2026-08-03",
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-03T00:00:00Z"),
         )
     }
 
     @Test
-    fun `an operator run is never blocked by the day's scheduled run`() {
+    fun `an operator run is never blocked by the day's webhook run`() {
         assertNotEquals(
-            id(RunTrigger.SCHEDULED, "2026-08-02T03:00:00Z"),
+            id(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK, "2026-08-02T03:00:00Z"),
             id(RunTrigger.OPERATOR_MANUAL, "2026-08-02T03:00:00Z"),
         )
     }
