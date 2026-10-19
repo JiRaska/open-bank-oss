@@ -299,7 +299,6 @@ model-gateway:
 # the normal sensitive-context self-hosted routing requirement.
 catalog-review:
   allow-hosted-models: ${CATALOG_REVIEW_ALLOW_HOSTED_MODELS:false}
-  gateway-endpoint: ${AGENT_MODEL_ENDPOINT:}
 
 # Agent policy gate (ADR-0031 D2/D9). The PDP is now the live OPA sidecar (ADR-0018):
 # agent.policy.enforcement controls D9 (ADR-0031): `advisory` audits every decision but never

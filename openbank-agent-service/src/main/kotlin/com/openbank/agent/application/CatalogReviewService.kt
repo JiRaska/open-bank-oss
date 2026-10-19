@@ -37,9 +37,6 @@ class CatalogReviewService(
     @field:ConfigProperty(name = "catalog-review.allow-hosted-models", defaultValue = "false")
     var allowHostedModels: Boolean = false
 
-    @field:ConfigProperty(name = "catalog-review.gateway-endpoint", defaultValue = "")
-    var gatewayEndpoint: String = ""
-
     class ModelUnavailableException : IllegalStateException("catalog review model is unavailable")
 
     data class Finding(
@@ -68,13 +65,19 @@ class CatalogReviewService(
     /** The capability is derived from the live registry and never exposes arbitrary model routing. */
     fun capability(): Capability {
         val registered = gateway.availableModels()
+        val configuredDefault = registered.firstOrNull { it.id == gateway.defaultModelId() }
+        val approvedEndpoint = configuredDefault?.takeIf {
+            it.sensitivity == Sensitivity.HOSTED &&
+                it.provider == "openai-compat" &&
+                isInClusterLiteLlmEndpoint(it.endpoint)
+        }?.endpoint
         val eligible = if (allowHostedModels) {
-            registered.filter(::isApprovedHostedRoute)
+            registered.filter { model -> approvedEndpoint != null && isApprovedHostedRoute(model, approvedEndpoint) }
         } else {
             registered.filter { it.sensitivity == Sensitivity.SELF_HOSTED }
         }
         val default = if (allowHostedModels) {
-            gateway.defaultModelId().takeIf { id -> eligible.any { it.id == id } }
+            configuredDefault?.id?.takeIf { id -> eligible.any { it.id == id } }
         } else {
             // This matches ModelGateway's existing sensitive-routing behavior: first registered
             // SELF_HOSTED model is selected regardless of the ordinary chat default.
@@ -199,10 +202,11 @@ class CatalogReviewService(
         .digest(value.toByteArray())
         .joinToString("") { "%02x".format(it) }
 
-    private fun isApprovedHostedRoute(model: ModelDescriptor): Boolean = model.sensitivity == Sensitivity.HOSTED &&
-        model.provider == "openai-compat" &&
-        model.endpoint == gatewayEndpoint &&
-        isInClusterLiteLlmEndpoint(model.endpoint)
+    private fun isApprovedHostedRoute(model: ModelDescriptor, approvedEndpoint: String): Boolean =
+        model.sensitivity == Sensitivity.HOSTED &&
+            model.provider == "openai-compat" &&
+            model.endpoint == approvedEndpoint &&
+            isInClusterLiteLlmEndpoint(model.endpoint)
 
     private fun isInClusterLiteLlmEndpoint(endpoint: String?): Boolean {
         val uri = endpoint?.let { runCatching { URI(it) }.getOrNull() } ?: return false

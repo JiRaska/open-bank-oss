@@ -203,6 +203,7 @@ class CatalogReviewServiceTest {
             mockk(),
             mapper,
             gateway(
+                ModelDescriptor("other-internal", "openai-compat", "http://other.svc:4000/v1", Sensitivity.HOSTED),
                 ModelDescriptor("approved", "openai-compat", gatewayEndpoint, Sensitivity.HOSTED),
                 ModelDescriptor("direct", "openai-compat", "https://provider.example/v1", Sensitivity.HOSTED),
                 ModelDescriptor("mock", "mock", null, Sensitivity.HOSTED),
@@ -211,7 +212,6 @@ class CatalogReviewServiceTest {
             ),
         ).also {
             it.allowHostedModels = true
-            it.gatewayEndpoint = gatewayEndpoint
         }
 
         val capability = service.capability()
@@ -234,13 +234,12 @@ class CatalogReviewServiceTest {
             ),
         ).also {
             it.allowHostedModels = true
-            it.gatewayEndpoint = gatewayEndpoint
         }
 
         val capability = service.capability()
         assertThat(capability.available).isFalse()
         assertThat(capability.defaultModel).isNull()
-        assertThat(capability.models.map { it.id }).containsExactly("approved")
+        assertThat(capability.models).isEmpty()
     }
 
     @Test
@@ -265,7 +264,7 @@ class CatalogReviewServiceTest {
     }
 
     @Test
-    fun `explicit approved sandbox model is sent without changing global sensitive routing`() = runBlocking {
+    fun `explicit approved sandbox model is sent without changing global sensitive routing`(): Unit = runBlocking {
         val reader = mockk<CatalogRevisionReadPort> {
             every { get(snapshot.offeringId, snapshot.revisionId) } returns
                 snapshot
@@ -296,7 +295,6 @@ class CatalogReviewServiceTest {
             gateway(ModelDescriptor("approved", "openai-compat", gatewayEndpoint, Sensitivity.HOSTED)),
         ).also {
             it.allowHostedModels = true
-            it.gatewayEndpoint = gatewayEndpoint
         }
 
         val result = service.review(snapshot.offeringId, snapshot.revisionId, "approved")
@@ -318,7 +316,6 @@ class CatalogReviewServiceTest {
                 gateway(ModelDescriptor("approved", "openai-compat", gatewayEndpoint, Sensitivity.HOSTED)),
             ).also {
                 it.allowHostedModels = true
-                it.gatewayEndpoint = gatewayEndpoint
             }
 
             assertThatThrownBy {

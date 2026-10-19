@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.15.0"
+  version: "1.16.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -23,10 +23,11 @@ info:
     behind a provider-agnostic model gateway. The model call never happens in the browser — the
     UI posts to `/agent/chat`, the loop runs each tool through the OPA policy gate, and every
     model completion emits an AI-attributed audit event. `/agent/models` lists the registered
-    models. The demo ships a single offline mock provider; adding a real model is a config entry,
-    not a code change. `POST /agent/catalog-reviews` turns one exact DRAFT revision into a
-    human-reviewed proposal: it has no catalog mutation path and refuses to send private draft
-    content to a hosted model.
+    models. The registry includes an offline mock and configured LiteLLM routes; adding a model is
+    a config entry, not a code change. `POST /agent/catalog-reviews` turns one exact DRAFT revision
+    into a human-reviewed proposal without a catalog mutation path. Hosted routing is allowed only
+    for this workflow when its catalog-only sandbox opt-in is enabled; other sensitive workflows
+    keep their existing self-hosted routing policy.
 
     This is an internal service — not exposed via API Gateway to external TPPs.
   license:
