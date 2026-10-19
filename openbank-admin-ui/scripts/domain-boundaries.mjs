@@ -88,4 +88,3 @@ export const domainBoundariesPlugin = {
     'no-payments-private-cross-domain': noPaymentsPrivateCrossDomain,
   },
 }
-
