@@ -26,6 +26,7 @@ import { dealActions, distinctCounterparties, productLabel, refusalText } from '
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
 import { principalNameFromToken } from '@/components/balance-sheet/model'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { OverrideQueue } from '@/components/treasury/wb/OverrideQueue'
 
 const PAGE_SIZE = 25
 
@@ -33,6 +34,7 @@ export default function TreasuryApprovalsPage() {
   return (
     <AuthGuard permission="treasury:deal:approve">
       <ApprovalInbox />
+      <OverrideQueue />
     </AuthGuard>
   )
 }
