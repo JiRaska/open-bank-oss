@@ -259,7 +259,10 @@ any merge the shadow train would have made disagrees with what strict mode event
 **Phase 1 — flip.** Requires: (a) shadow has shown the status landing on every armed green PR,
 (b) `ruleset-context-parity` is green with `merge-train` present in the required set,
 (c) the owner runs the commands below, (d) the workflow `env` is set to
-`MERGE_TRAIN_SHADOW=false` in a follow-up PR. `auto-update-armed-prs.yml` then exits before PR
+`MERGE_TRAIN_SHADOW=false` in a follow-up PR. Phase 1 is gated at runtime on the ruleset: with the flag
+off, `settle` still merges nothing (it behaves as shadow and logs why) until the live ruleset requires
+`merge-train` pinned to the App (`GITOPS_APP_ID`) and strict is off, so the order of (c) and (d) does
+not matter. `auto-update-armed-prs.yml` then exits before PR
 enumeration on its own (it already does when strict is off) and can be retired in a later ADR.
 
 ```sh
@@ -286,8 +289,9 @@ gh api repos/JiRaska/open-bank-oss/rules/branches/main \
   --jq '.[] | select(.type=="required_status_checks") | .parameters | {strict: .strict_required_status_checks_policy, ctx: [.required_status_checks[] | {context, integration_id}]}'
 ```
 
-**Rollback.** Re-enable strict and remove the context, in that order (removing the context
-first, with strict still off, is the one state with no protection at all); then set
+**Rollback.** The ruleset revert alone stops all merging by the train (the runtime guard sees the pin
+or strict change on the next tick); the env flag need not change. Re-enable strict and remove the context, in that order (removing the context
+first, with strict still off, is the one state with no protection at all); optionally set
 `MERGE_TRAIN_SHADOW=true` or disable the workflow. Same PUT with
 `strict_required_status_checks_policy: true` and the `merge-train` entry filtered out. Every PR
 that merged through the train is an ordinary squash merge with its own CI history; nothing to
