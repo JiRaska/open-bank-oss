@@ -230,3 +230,19 @@ silently re-suspend a credential the customer was just given back.
   classifications. This changes response interpretation, not the caller identity, permissions,
   endpoint, feature flag or image. Real broker settlement and a production rollout are not
   established by the client regression tests.
+
+
+### Posting diagnostics data minimisation (#13228)
+
+The durable posting error stores only controlled diagnostic codes, with null on success.
+Upstream response bodies, exception messages and cause chains are excluded from the
+posting record and the three changed application posting/re-drive loggers. Logs keep outcome, exception type
+and opaque clearing/authorisation IDs for correlation; these IDs remain linkable, not
+anonymised. The pre-existing disabled-adapter warning still reports amount, currency
+and authorisation ID. Marker fixtures cover both captured logging parameters/throwables
+and the real HTTP-clearing/database persistence path. This does not establish that every
+other service log or upstream producer is free of personal data.
+
+The shared TransactionClient response-close failure path uses its own System.Logger
+and is outside these captured loggers; it can still log a throwable on close failure.
+The marker fixtures do not establish a cause-free entire client call chain.

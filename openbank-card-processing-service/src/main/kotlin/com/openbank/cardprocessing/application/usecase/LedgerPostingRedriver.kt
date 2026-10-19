@@ -71,7 +71,7 @@ class LedgerPostingRedriver(
             val authorization = repository.findById(clearing.authorizationId)
             if (authorization == null) {
                 log.errorf("clearing %s has no authorisation %s", clearing.id, clearing.authorizationId)
-                poster.recordFailure(clearing, token, "authorisation ${clearing.authorizationId} not found")
+                poster.recordFailure(clearing, token, PostingDiagnostic.AUTHORISATION_NOT_FOUND)
                 PostingOutcome.FAILED
             } else {
                 poster.post(authorization, clearing, token).outcome
@@ -79,8 +79,8 @@ class LedgerPostingRedriver(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            log.errorf(e, "re-driving clearing %s failed", clearing.id)
-            poster.recordFailure(clearing, token, "re-drive failed: ${e.javaClass.simpleName}: ${e.message}")
+            log.errorf("re-driving clearing %s failed (failureType=%s)", clearing.id, e.javaClass.simpleName)
+            poster.recordFailure(clearing, token, PostingDiagnostic.REDRIVE_FAILED)
             PostingOutcome.FAILED
         }
     }

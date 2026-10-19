@@ -13,11 +13,13 @@ import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.ProcessingException
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -94,10 +96,12 @@ class TransactionLedgerPostingAdapter(
                 // The write facade has proven a readable COMPLETED transaction, not merely HTTP 2xx.
                 is TransactionCallOutcome.HttpSuccess ->
                     PostingResult(PostingOutcome.POSTED, outcome.body?.id, outcome.body?.status ?: BOOKED_DETAIL)
+
                 TransactionCallOutcome.Conflict -> {
                     log.errorf("ledger posting for authorization %s answered 409", authorization.id)
                     PostingResult(PostingOutcome.FAILED, null, CONFLICT_DETAIL)
                 }
+
                 is TransactionCallOutcome.Rejected -> {
                     log.errorf(
                         "ledger posting for authorization %s rejected (HTTP %d)",
@@ -107,10 +111,12 @@ class TransactionLedgerPostingAdapter(
                     PostingResult(
                         PostingOutcome.FAILED,
                         null,
-                        "HTTP ${outcome.status}" + (outcome.problem?.let { ": $it" } ?: ""),
+                        "HTTP ${outcome.status}",
                     )
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // Unproven completion is not a settlement verdict: the debit may or may not be booked. It must NOT be
             // rethrown (this runs after the clearing committed and nobody retries the caller) and must
@@ -118,17 +124,21 @@ class TransactionLedgerPostingAdapter(
             // again under the same key.
             if (isUncertainResponse(e)) {
                 log.warnf(
-                    e,
                     "ledger posting for authorization %s has unproven transaction completion",
                     authorization.id,
                 )
                 return PostingResult(PostingOutcome.UNKNOWN, null, UNCERTAIN_DETAIL)
             }
-            // Deliberately broad: this runs AFTER the clearing has committed, so no exception from
-            // here may propagate and undo a fact the acquirer has already asserted. The FAILED
-            // outcome is what makes the gap visible instead of swallowed.
-            log.errorf(e, "ledger posting failed for authorization %s", authorization.id)
-            PostingResult(PostingOutcome.FAILED, null, e.message)
+            // Ordinary failures become a visible outcome after the clearing has committed.
+            // Cancellation deliberately propagates above; it cannot undo that committed row,
+            // whose unchanged idempotency key remains available to the durable re-driver.
+            log.errorf(
+                "ledger posting failed for authorization %s (failureType=%s)",
+                authorization.id,
+                e.javaClass.simpleName,
+            )
+            val detail = if (e is TransactionHttpException) "HTTP ${e.status}" else "POSTING_FAILED"
+            PostingResult(PostingOutcome.FAILED, null, detail)
         }
     }
 

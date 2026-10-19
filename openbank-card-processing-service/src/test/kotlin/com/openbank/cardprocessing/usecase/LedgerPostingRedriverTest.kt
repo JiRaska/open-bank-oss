@@ -18,13 +18,16 @@ import com.openbank.cardprocessing.application.usecase.RedriveResult
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
+import com.openbank.cardprocessing.support.capturePostingLogs
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -110,7 +113,7 @@ class LedgerPostingRedriverTest {
         poster.post(authorization, c, token)
 
         coVerify(exactly = 1) {
-            postings.recordAttempt(c.id, token, PostingStatus.POSTED, txId, "COMPLETED", now, null)
+            postings.recordAttempt(c.id, token, PostingStatus.POSTED, txId, null, now, null)
         }
     }
 
@@ -123,7 +126,9 @@ class LedgerPostingRedriverTest {
 
         poster.post(authorization, c, token)
 
-        coVerify { postings.recordAttempt(c.id, token, PostingStatus.UNKNOWN, null, "unreadable", now, capture(next)) }
+        coVerify {
+            postings.recordAttempt(c.id, token, PostingStatus.UNKNOWN, null, "COMPLETION_UNPROVEN", now, capture(next))
+        }
         // third attempt: 60s * 2^2
         assertThat(Duration.between(now, next.captured)).isEqualTo(Duration.ofSeconds(240))
         assertThat(poster.backoff(1)).isEqualTo(Duration.ofSeconds(60))
@@ -205,9 +210,7 @@ class LedgerPostingRedriverTest {
                     token,
                     PostingStatus.FAILED,
                     null,
-                    match {
-                        it!!.contains("not found")
-                    },
+                    "AUTHORISATION_NOT_FOUND",
                     any(),
                     any(),
                 )
@@ -236,9 +239,7 @@ class LedgerPostingRedriverTest {
                 token,
                 PostingStatus.FAILED,
                 null,
-                match {
-                    it!!.contains("db blip")
-                },
+                "REDRIVE_FAILED",
                 any(),
                 any(),
             )
@@ -260,5 +261,112 @@ class LedgerPostingRedriverTest {
         val result = redriver.redriveDue()
 
         assertThat(result).isEqualTo(RedriveResult(attempted = 0, skippedDisabled = 1))
+    }
+
+    @Test
+    fun `raw posting details and keys never become stored errors or log data`() {
+        val raw = "synthetic-private-upstream-marker"
+        val key = "synthetic-private-clearing-key"
+        val logs = capturePostingLogs {
+            runBlocking {
+                val c = clearing().copy(idempotencyKey = key)
+                coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
+                    PostingResult(PostingOutcome.FAILED, null, raw)
+                poster.post(authorization, c, token)
+                coVerify(exactly = 1) {
+                    postings.recordAttempt(
+                        c.id,
+                        token,
+                        PostingStatus.FAILED,
+                        null,
+                        "POSTING_FAILED",
+                        now,
+                        now.plusSeconds(60),
+                    )
+                }
+                coVerify(exactly = 1) { metrics.ledgerPosting(PostingOutcome.FAILED) }
+            }
+        }
+        assertThat(logs).isNotEmpty()
+        assertThat(logs.map { it.text }.joinToString()).doesNotContain(raw, key)
+        assertThat(logs.mapNotNull { it.thrown }).isEmpty()
+    }
+
+    @Test
+    fun `redrive exception messages and causes are neither logged nor stored`() {
+        val raw = "synthetic-private-exception-marker"
+        val cause = "synthetic-private-cause-marker"
+        val c = clearing()
+        val logs = capturePostingLogs {
+            runBlocking {
+                coEvery { postings.findDue(any(), any(), any()) } returns listOf(c)
+                coEvery { postings.claim(any(), any(), any(), any()) } returns token
+                coEvery { authorizations.findById(any()) } throws
+                    IllegalStateException(raw, IllegalArgumentException(cause))
+                assertThat(redriver.redriveDue().attempted).isEqualTo(1)
+                coVerify(exactly = 1) {
+                    postings.recordAttempt(
+                        c.id,
+                        token,
+                        PostingStatus.FAILED,
+                        null,
+                        "REDRIVE_FAILED",
+                        now,
+                        now.plusSeconds(60),
+                    )
+                }
+            }
+        }
+        assertThat(logs).isNotEmpty()
+        assertThat(logs.map { it.text }.joinToString()).doesNotContain(raw, cause)
+        assertThat(logs.mapNotNull { it.thrown }).isEmpty()
+    }
+
+    @Test
+    fun `record and defer failures log neither raw messages nor cause chains`() {
+        val marker = "synthetic-private-record-message"
+        val cause = "synthetic-private-record-cause"
+        val failure = IllegalStateException(marker, IllegalArgumentException(cause))
+        coEvery { postings.recordAttempt(any(), any(), any(), any(), any(), any(), any()) } throws failure
+        coEvery { postings.deferWithoutAttempt(any(), any(), any()) } throws failure
+        val logs = capturePostingLogs {
+            runBlocking {
+                coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
+                    PostingResult(PostingOutcome.POSTED, null, null)
+                assertThat(poster.post(authorization, clearing(), token).outcome).isEqualTo(PostingOutcome.POSTED)
+                coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
+                    PostingResult(PostingOutcome.SKIPPED_DISABLED, null, null)
+                assertThat(poster.post(authorization, clearing(), token).outcome)
+                    .isEqualTo(PostingOutcome.SKIPPED_DISABLED)
+            }
+        }
+        assertThat(logs).hasSize(2)
+        assertThat(logs.map { it.text }.joinToString()).doesNotContain(marker, cause)
+        assertThat(logs.mapNotNull { it.thrown }).isEmpty()
+    }
+
+    @Test
+    fun `cancellation aborts a redrive without recording a failed attempt`() {
+        val c = clearing()
+        val cancellation = CancellationException("cancelled")
+        coEvery { postings.findDue(any(), any(), any()) } returns listOf(c)
+        coEvery { postings.claim(any(), any(), any(), any()) } returns token
+        coEvery { authorizations.findById(any()) } throws cancellation
+        assertThat(assertThrows<CancellationException> { runBlocking { redriver.redriveDue() } })
+            .isSameAs(cancellation)
+        coVerify(exactly = 0) { postings.recordAttempt(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `cancellation during outcome persistence propagates`() {
+        val cancellation = CancellationException("cancelled")
+        coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
+            PostingResult(PostingOutcome.POSTED, null, null)
+        coEvery { postings.recordAttempt(any(), any(), any(), any(), any(), any(), any()) } throws cancellation
+        assertThat(
+            assertThrows<CancellationException> {
+                runBlocking { poster.post(authorization, clearing(), token) }
+            },
+        ).isSameAs(cancellation)
     }
 }

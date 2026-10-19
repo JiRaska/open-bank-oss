@@ -9,6 +9,7 @@ import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.infrastructure.client.CardClearingLedgerKey
+import com.openbank.cardprocessing.support.capturePostingLogs
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -88,19 +89,40 @@ class LedgerPostingRedriveIT {
             val n = attempts.computeIfAbsent(idempotencyKey) { AtomicInteger() }.incrementAndGet()
             val ledgerKey = CardClearingLedgerKey.of(authorization.id, idempotencyKey)
             return when {
+                idempotencyKey.startsWith("it-rd-private-error") && n > 1 ->
+                    throw IllegalStateException(
+                        "synthetic-private-exception",
+                        IllegalArgumentException("synthetic-private-cause"),
+                    )
+
+                idempotencyKey.startsWith("it-rd-private-failed") ->
+                    PostingResult(PostingOutcome.FAILED, null, "synthetic-private-provider-body")
+
+                idempotencyKey.startsWith("it-rd-private-unknown") ||
+                    idempotencyKey.startsWith("it-rd-private-error") ->
+                    PostingResult(PostingOutcome.UNKNOWN, null, "synthetic-private-provider-body")
+
+                idempotencyKey.startsWith("it-rd-private-posted") -> {
+                    books.merge(ledgerKey, 1) { a, _ -> a }
+                    PostingResult(PostingOutcome.POSTED, authorization.id, "synthetic-private-provider-body")
+                }
+
                 // A SLOW inline attempt that outlives the re-driver's claim and answers late with a
                 // failure: the stale result must not overwrite the newer attempt's POSTED.
                 idempotencyKey.startsWith("it-rd-stale") && n == 1 -> {
                     delay(STALE_ATTEMPT_MILLIS)
                     PostingResult(PostingOutcome.FAILED, null, "late failure from a superseded attempt")
                 }
+
                 idempotencyKey.startsWith("it-rd-fail") -> PostingResult(PostingOutcome.FAILED, null, "ledger refused")
+
                 // The debit IS booked on the first attempt, but the answer is lost: exactly the case
                 // where only the idempotency key stands between a retry and a double debit.
                 idempotencyKey.startsWith("it-rd-unknown") && n == 1 -> {
                     books.merge(ledgerKey, 1) { a, _ -> a }
                     PostingResult(PostingOutcome.UNKNOWN, null, "answer unreadable")
                 }
+
                 else -> {
                     books.merge(ledgerKey, 1) { a, _ -> a }
                     PostingResult(PostingOutcome.POSTED, authorization.id, "COMPLETED")
@@ -257,6 +279,44 @@ class LedgerPostingRedriveIT {
         assertThat(status(key)).isEqualTo("POSTED")
         assertThat(attempts(key)).isEqualTo(1)
     }
+
+    @Test
+    fun `HTTP clearings persist only controlled diagnostics while redrive preserves accounting`() {
+        val logs = capturePostingLogs {
+            assertPrivatePosting("failed", "FAILED", "POSTING_FAILED")
+            assertPrivatePosting("unknown", "UNKNOWN", "COMPLETION_UNPROVEN")
+            assertPrivatePosting("posted", "POSTED", null)
+            val key = "it-rd-private-error-synthetic-private-key"
+            val id = authorize(key)
+            clear(id, key)
+            assertThat(status(key)).isEqualTo("UNKNOWN")
+            assertThat(await { error(key) == "REDRIVE_FAILED" }).isTrue()
+            assertThat(status(key)).isEqualTo("FAILED")
+            assertThat(attempts(key)).isGreaterThanOrEqualTo(2)
+            assertThat(books(id, key)).isZero()
+        }
+        assertThat(logs).isNotEmpty()
+        assertThat(logs.map { it.text }.joinToString()).doesNotContain(
+            "synthetic-private-provider-body",
+            "synthetic-private-exception",
+            "synthetic-private-cause",
+            "synthetic-private-key",
+        )
+        assertThat(logs.mapNotNull { it.thrown }).isEmpty()
+    }
+
+    private fun assertPrivatePosting(suffix: String, expectedStatus: String, expectedError: String?) {
+        val key = "it-rd-private-$suffix-synthetic-private-key"
+        val id = authorize(key)
+        clear(id, key)
+        assertThat(status(key)).isEqualTo(expectedStatus)
+        assertThat(error(key)).isEqualTo(expectedError)
+        assertThat(attempts(key)).isEqualTo(1)
+        assertThat(books(id, key)).isEqualTo(if (expectedStatus == "POSTED") 1 else 0)
+    }
+
+    private fun error(key: String): String? =
+        query("SELECT posting_last_error FROM card_clearings WHERE idempotency_key = '$key'") { it.getString(1) }
 
     private companion object {
         const val STALE_ATTEMPT_MILLIS = 10_000L

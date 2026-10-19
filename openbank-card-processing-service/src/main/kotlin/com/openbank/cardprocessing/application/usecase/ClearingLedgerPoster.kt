@@ -13,6 +13,7 @@ import com.openbank.cardprocessing.application.port.out.PostingStatus
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -60,11 +61,9 @@ class ClearingLedgerPoster(
         metrics.ledgerPosting(result.outcome)
         if (result.outcome == PostingOutcome.FAILED || result.outcome == PostingOutcome.UNKNOWN) {
             log.errorf(
-                "ledger posting %s for authorization %s (%s) - the clearing is recorded, the books may not be: %s",
+                "ledger posting %s for clearing %s - the clearing is recorded, the books may not be",
                 result.outcome,
-                authorization.id,
-                clearing.idempotencyKey.forLog(),
-                result.detail?.forLog(),
+                clearing.id,
             )
         }
         if (result.outcome == PostingOutcome.SKIPPED_DISABLED) {
@@ -78,31 +77,47 @@ class ClearingLedgerPoster(
     }
 
     /** A re-driver attempt that failed before the ledger was reached: it still counts, so it reaches the cap. */
-    suspend fun recordFailure(clearing: RecordedClearing, claimToken: UUID, detail: String?) {
-        record(clearing, claimToken, PostingResult(PostingOutcome.FAILED, null, detail))
+    suspend fun recordFailure(clearing: RecordedClearing, claimToken: UUID, diagnostic: PostingDiagnostic) {
+        record(clearing, claimToken, PostingResult(PostingOutcome.FAILED, null, null), diagnostic)
     }
 
     @Suppress("TooGenericExceptionCaught")
     private suspend fun defer(clearing: RecordedClearing, claimToken: UUID) {
         try {
             postings.deferWithoutAttempt(clearing.id, claimToken, Instant.now(clock).plusSeconds(backoffMaxSeconds))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            log.errorf(e, "could not defer clearing %s while posting is disabled", clearing.id)
+            log.errorf(
+                "could not defer clearing %s while posting is disabled (failureType=%s)",
+                clearing.id,
+                e.javaClass.simpleName,
+            )
         }
     }
 
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun record(clearing: RecordedClearing, claimToken: UUID, result: PostingResult) {
+    private suspend fun record(
+        clearing: RecordedClearing,
+        claimToken: UUID,
+        result: PostingResult,
+        diagnostic: PostingDiagnostic? = null,
+    ) {
         val now = Instant.now(clock)
         val status = when (result.outcome) {
             PostingOutcome.POSTED -> PostingStatus.POSTED
             PostingOutcome.UNKNOWN -> PostingStatus.UNKNOWN
             else -> PostingStatus.FAILED
         }
+        val error = when (status) {
+            PostingStatus.POSTED -> null
+            PostingStatus.UNKNOWN -> PostingDiagnostic.COMPLETION_UNPROVEN.name
+            else -> (diagnostic ?: PostingDiagnostic.POSTING_FAILED).name
+        }
         val next = if (status == PostingStatus.POSTED) null else now.plus(backoff(clearing.postingAttempts + 1))
         try {
             val applied =
-                postings.recordAttempt(clearing.id, claimToken, status, result.transactionId, result.detail, now, next)
+                postings.recordAttempt(clearing.id, claimToken, status, result.transactionId, error, now, next)
             if (!applied) {
                 // The attempt no longer counts: a newer claim superseded it, or the debit is already booked.
                 log.warnf(
@@ -111,9 +126,16 @@ class ClearingLedgerPoster(
                     clearing.id,
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // observed-by: the unposted gauge and the re-driver - the row keeps its previous state.
-            log.errorf(e, "could not record the %s posting state of clearing %s", status, clearing.id)
+            log.errorf(
+                "could not record the %s posting state of clearing %s (failureType=%s)",
+                status,
+                clearing.id,
+                e.javaClass.simpleName,
+            )
         }
     }
 
@@ -128,3 +150,6 @@ class ClearingLedgerPoster(
         const val MAX_DOUBLINGS = 20
     }
 }
+
+/** Controlled diagnostics only: upstream bodies, raw keys and exception text must not become stored errors. */
+enum class PostingDiagnostic { POSTING_FAILED, COMPLETION_UNPROVEN, AUTHORISATION_NOT_FOUND, REDRIVE_FAILED }
