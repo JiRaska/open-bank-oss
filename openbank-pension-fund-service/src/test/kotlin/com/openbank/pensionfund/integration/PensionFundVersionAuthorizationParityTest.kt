@@ -47,13 +47,17 @@ class PensionFundVersionAuthorizationParityTest {
             // Kotlin's open suspend functions also emit static $suspendImpl helpers. They are
             // implementation details, not endpoint declarations, even when annotations are copied.
             val methods = legacy.declaredMethods.filter { method ->
-                !Modifier.isStatic(method.modifiers) && !method.isSynthetic && !method.isBridge &&
+                !Modifier.isStatic(method.modifiers) &&
+                    !method.isSynthetic &&
+                    !method.isBridge &&
                     method.annotations.any { it.annotationClass.java.isAnnotationPresent(HttpMethod::class.java) }
             }
             assertThat(methods).isNotEmpty
             methods.forEach { method ->
                 val canonical = current.declaredMethods.single { candidate ->
-                    !Modifier.isStatic(candidate.modifiers) && !candidate.isSynthetic && !candidate.isBridge &&
+                    !Modifier.isStatic(candidate.modifiers) &&
+                        !candidate.isSynthetic &&
+                        !candidate.isBridge &&
                         candidate.name == method.name &&
                         (
                             candidate.parameterTypes.toList() == method.parameterTypes.toList() ||
