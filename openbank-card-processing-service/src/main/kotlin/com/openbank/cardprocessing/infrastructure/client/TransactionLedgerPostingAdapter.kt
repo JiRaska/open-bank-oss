@@ -117,6 +117,9 @@ class TransactionLedgerPostingAdapter(
             }
         } catch (e: CancellationException) {
             throw e
+        } catch (e: TransactionHttpException) {
+            log.errorf("ledger posting failed for authorization %s (HTTP %d)", authorization.id, e.status)
+            PostingResult(PostingOutcome.FAILED, null, "HTTP ${e.status}")
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // Unproven completion is not a settlement verdict: the debit may or may not be booked. It must NOT be
             // rethrown (this runs after the clearing committed and nobody retries the caller) and must
@@ -137,8 +140,7 @@ class TransactionLedgerPostingAdapter(
                 authorization.id,
                 e.javaClass.simpleName,
             )
-            val detail = if (e is TransactionHttpException) "HTTP ${e.status}" else "POSTING_FAILED"
-            PostingResult(PostingOutcome.FAILED, null, detail)
+            PostingResult(PostingOutcome.FAILED, null, "POSTING_FAILED")
         }
     }
 
