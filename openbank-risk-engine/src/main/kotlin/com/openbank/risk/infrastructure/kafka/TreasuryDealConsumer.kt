@@ -233,9 +233,10 @@ class TreasuryDealConsumer {
     }
 
     /** Absent `kind` = ACTUAL (every event before treasury AsyncAPI 1.7.0); unparseable JSON is judged by [parse]. */
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     internal fun isHypothetical(payload: String): Boolean = try {
-        objectMapper.readTree(payload)?.get("kind")?.takeIf { it.isTextual }?.asText()?.let { it == "HYPOTHETICAL" } ?: false
+        objectMapper.readTree(payload)?.get("kind")?.takeIf { it.isTextual }?.asText()?.let { it == "HYPOTHETICAL" }
+            ?: false
     } catch (e: Exception) {
         false // unparseable JSON is judged — and counted malformed — by [parse]
     }

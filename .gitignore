@@ -363,6 +363,8 @@ openbank-admin-ui/patch-*.js
 # artifact left in the repo root.
 sbom-downloads/
 reports/
+# The admin-ui treasury reports ROUTE is source, not a generated report (ADR-0344).
+!openbank-admin-ui/src/app/treasury/reports/
 !perf/reports/
 *-sbom.cdx.json
 [0-9]* test-reports-*

@@ -127,7 +127,7 @@ class TreasuryDealConsumerIT {
     }
 
     @Test
-    fun `a HYPOTHETICAL deal is never exposure - counted not_actual and never stored, while ACTUAL and absent kind are`() {
+    fun `a HYPOTHETICAL deal is counted not_actual and never stored, while ACTUAL and absent kind are`() {
         val source = connector.source<Any>("treasury-deal-in")
         val hypothetical = UUID.randomUUID()
         val hypotheticalPayload = """
@@ -140,9 +140,12 @@ class TreasuryDealConsumerIT {
         source.send(record("treasury.deal.booked.v1", hypotheticalPayload))
         await { outcome("not_actual") >= before + 1.0 }
         assertThat(runBlocking { book.dealsOnBook(valueDate) }.map { it.dealId }).doesNotContain(hypothetical)
-        assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId }).doesNotContain(hypothetical)
+        assertThat(
+            runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId },
+        ).doesNotContain(hypothetical)
         // An explicit ACTUAL is processed exactly like an event without the field.
-        source.send(record("treasury.deal.settled.v1", payload(""","ledgerJournalId":"${UUID.randomUUID()}","kind":"ACTUAL"""")))
+        val actualSettled = payload(""","ledgerJournalId":"${UUID.randomUUID()}","kind":"ACTUAL"""")
+        source.send(record("treasury.deal.settled.v1", actualSettled))
         awaitState("SETTLED")
     }
 
