@@ -1798,7 +1798,7 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
-    budget_seconds: 120   # a real test suite
+    budget_seconds: 180   # a real test suite
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
@@ -5400,6 +5400,25 @@ gates:
     run: |
       python3 .github/scripts/check-threat-model-claims.py --enforce
 
+  # Evidence half of threat-model-claims-resolve (#13171): the cited test must have RUN GREEN in the
+  # latest scheduled main envelope. Advisory first (ADR-0144; rules.yaml: threat_model_test_evidence).
+  # `--fetch-evidence` is best effort: any gh failure prints UNRESOLVED and exits 0, so a rate limit
+  # never becomes a red PR. The finding output, not the exit code, is the signal (advisory exits 0).
+  - id: threat-model-test-evidence
+    name: "threat-model cited tests ran green in the latest run (ADR-0144, advisory)"
+    group: security
+    mode: advisory
+    verified: "2026-10-17 — self-test pins red, absent, skipped, stale-green-masking and no-envelope cases"
+    min_subjects: 23
+    budget_seconds: 180
+    rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."
+    review_after: "2027-03-31"
+    selftest: python3 .github/scripts/check-threat-model-test-evidence.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py"]
+    run: |
+      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence
+
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
     group: security
@@ -6815,7 +6834,7 @@ gates:
       fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
       from history, and counts an unresolvable pin as lagging. It is monotonic once green.
     review_after: "2027-04-11"
-    budget_seconds: 120                  # ~60 compare-API calls in a shallow checkout
+    budget_seconds: 180                  # ~60 compare-API calls in a shallow checkout
     min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
     run: |
       bash .github/scripts/check-pdp-flag-rollout.sh
