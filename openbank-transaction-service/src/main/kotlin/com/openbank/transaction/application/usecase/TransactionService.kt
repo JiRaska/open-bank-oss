@@ -33,10 +33,8 @@ import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.api.trace.Tracer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
-import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
-import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Clock
@@ -219,9 +217,7 @@ class TransactionService(
                     payload = eventPublisher.initiatedPayload(transaction),
                 ),
             )
-        } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
-        } catch (e: PgException) {
+        } catch (e: RuntimeException) {
             return recoverConcurrentReplay(e, command.idempotencyKey)
         }
 
@@ -350,18 +346,13 @@ class TransactionService(
 
     /**
      * The loser of a concurrent duplicate-submission race: both contenders passed the replay
-     * check before either committed, and this transaction died on uq_transactions_idempotency.
+     * check before either committed, and this transaction died on the global registry primary key.
      * Recover to the same contract as the sequential path — return the winner's transaction and
      * start no second payment workflow. Anything that is not the idempotency-key conflict
      * propagates untouched.
      */
     private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): Transaction {
-        // transactions is range-partitioned by booking_date: the violation surfaces under the
-        // per-partition auto-generated name (transactions_<year>_idempotency_key_booking_date_key),
-        // not the parent's uq_transactions_idempotency — match the column, not one spelling.
-        val isIdempotencyKeyConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
-            .any { it.message?.contains("idempotency", ignoreCase = true) == true }
-        if (!isIdempotencyKeyConflict) throw e
+        if (!TransactionIdempotencyConflict.isConflict(e)) throw e
         return transactionRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
     }
 

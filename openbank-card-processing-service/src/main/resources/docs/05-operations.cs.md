@@ -115,13 +115,16 @@ WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
 
 ```sql
 SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
+-- V22 registry: a retained/orphan claim also prevents automatic retry.
+SELECT idempotency_key, transaction_id, booking_date
+FROM transaction_idempotency_keys WHERE idempotency_key IN ('<ledger_key>', ...);
 ```
 
    - `COMPLETED`: debet JE zaúčtovaný; označte řádek: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL, posting_last_attempt_at = now() WHERE id = '<clearing id>';`
-   - žádný řádek: bezpečné znovu odeslat: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
+   - žádná transakce ani rezervace v registru: po ověření, že neběží zápis ani opakovaný požadavek, může vlastník schválit opakování: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
    - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service drží klíč v tomto stavu a bude jím dál odpovídat; je to incident transaction-service, ne reset - neresetovat.
 
-**Jednorázová rekonciliace clearingů před V5.** V5 označila všechny existující řádky `POSTED` (jejich stav se nikdy nezaznamenával). Poznáte je podle `posting_last_attempt_at IS NULL`. Krok 1 spusťte v databázi card-processing, krok 2 v databázi transaction-service; každý klíč vrácený krokem 2 je historický clearing, který se nikdy nedostal do účetnictví a lze ho znovu odeslat (na řádku nastavte `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()`, `posting_claim_token = NULL`).
+**Jednorázová rekonciliace clearingů před V5.** V5 označila všechny existující řádky `POSTED` (jejich stav se nikdy nezaznamenával). Poznáte je podle `posting_last_attempt_at IS NULL`. Krok 1 spusťte v databázi card-processing, krok 2 v databázi transaction-service; krok 2 vrací pouze klíče, které chybí v historii transakcí i v globálním registru idempotence (vyžaduje transaction-service V22). Po ověření, že neběží žádný zápis ani opakovaný požadavek, lze schválit jejich opakované odeslání (na řádku nastavte `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()`, `posting_claim_token = NULL`).
 
 ```sql
 -- 1. DB card-processing
@@ -131,9 +134,15 @@ FROM card_clearings WHERE posting_status = 'POSTED' AND posting_last_attempt_at 
 -- 2. DB transaction-service: vložte klíče z kroku 1
 SELECT k.ledger_key
 FROM (VALUES ('<ledger_key>'), ...) AS k(ledger_key)
-LEFT JOIN transactions t ON t.idempotency_key = k.ledger_key
-WHERE t.id IS NULL OR t.status <> 'COMPLETED';
+WHERE NOT EXISTS (
+    SELECT 1 FROM transactions t WHERE t.idempotency_key = k.ledger_key
+)
+AND NOT EXISTS (
+    SELECT 1 FROM transaction_idempotency_keys r WHERE r.idempotency_key = k.ledger_key
+);
 ```
+
+Klíče existujících transakcí ve stavu `FAILED`, `REVERSED`, `PENDING` nebo `PROCESSING` se do seznamu k opakování nedostanou a vyžadují výše uvedenou analýzu incidentu; neresetovat je ani nevytvářet nový klíč. Rezervace v registru bez odpovídající transakce také vyžaduje rekonciliaci, není důkazem, že zaúčtování neproběhlo.
 
 ### Každá autorizace je zamítnuta
 

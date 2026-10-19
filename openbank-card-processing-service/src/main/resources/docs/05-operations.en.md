@@ -115,13 +115,16 @@ WHERE posting_status <> 'POSTED' AND posting_attempts >= 12;
 
 ```sql
 SELECT idempotency_key, id, status FROM transactions WHERE idempotency_key IN ('<ledger_key>', ...);
+-- V22 registry: a retained/orphan claim also prevents automatic retry.
+SELECT idempotency_key, transaction_id, booking_date
+FROM transaction_idempotency_keys WHERE idempotency_key IN ('<ledger_key>', ...);
 ```
 
    - `COMPLETED`: the debit IS booked; mark the card row done: `UPDATE card_clearings SET posting_status = 'POSTED', posting_transaction_id = '<id>', posting_claim_token = NULL, posting_last_attempt_at = now() WHERE id = '<clearing id>';`
-   - no row: safe to re-drive: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
+   - no transaction row and no registry claim: after confirming no write/retry is still in flight, an owner may approve re-drive: `UPDATE card_clearings SET posting_attempts = 0, posting_next_attempt_at = now(), posting_claim_token = NULL WHERE id IN ('<clearing id>', ...) AND posting_status <> 'POSTED';`
    - `FAILED` / `REVERSED` / `PENDING` / `PROCESSING`: transaction-service holds the key in that state and will keep answering with it; this is a transaction-service incident, not a reset - do not reset.
 
-**One-off reconciliation of clearings from before V5.** V5 marked every existing row `POSTED` (their state was never recorded). Those rows are recognisable by `posting_last_attempt_at IS NULL`. Run step 1 below in the card-processing database, step 2 in the transaction-service database; any key returned by step 2 is a historical clearing that never reached the books and can be re-driven (set `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()` on that row, `posting_claim_token = NULL`).
+**One-off reconciliation of clearings from before V5.** V5 marked every existing row `POSTED` (their state was never recorded). Those rows are recognisable by `posting_last_attempt_at IS NULL`. Run step 1 below in the card-processing database, step 2 in the transaction-service database; step 2 returns only keys absent from both transaction history and the global idempotency registry (transaction-service V22 is required). After confirming no writer or retry is still in flight, these rows may be approved for re-drive (set `posting_status = 'UNKNOWN'`, `posting_attempts = 0`, `posting_next_attempt_at = now()` on that row, `posting_claim_token = NULL`).
 
 ```sql
 -- 1. card-processing DB
@@ -131,9 +134,15 @@ FROM card_clearings WHERE posting_status = 'POSTED' AND posting_last_attempt_at 
 -- 2. transaction-service DB: paste the keys from step 1
 SELECT k.ledger_key
 FROM (VALUES ('<ledger_key>'), ...) AS k(ledger_key)
-LEFT JOIN transactions t ON t.idempotency_key = k.ledger_key
-WHERE t.id IS NULL OR t.status <> 'COMPLETED';
+WHERE NOT EXISTS (
+    SELECT 1 FROM transactions t WHERE t.idempotency_key = k.ledger_key
+)
+AND NOT EXISTS (
+    SELECT 1 FROM transaction_idempotency_keys r WHERE r.idempotency_key = k.ledger_key
+);
 ```
+
+Keys already held by a `FAILED`, `REVERSED`, `PENDING` or `PROCESSING` transaction are excluded from this retry list and require the incident triage above; do not reset them or invent a new key. A registry claim without its transaction is also an incident requiring reconciliation, never proof that no booking occurred.
 
 ### Every authorisation is declined
 

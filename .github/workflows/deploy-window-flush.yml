@@ -86,12 +86,20 @@ jobs:
           gh pr diff "$ARM" --repo "$GITHUB_REPOSITORY" \
             | python3 .github/scripts/deploy-window.py verify --root .
 
+      - name: Install deploy-hold parser
+        if: steps.pick.outputs.arm != ''
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
+          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+
       - name: Close superseded deploy PRs (refuses a rollback)
         if: steps.pick.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
           ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
+          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           set -euo pipefail
           case "$ARM_HEAD" in
