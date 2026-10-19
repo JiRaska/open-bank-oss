@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
-import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
+import { resolveCatalogReviewCapability, type CatalogReviewCapability } from '@/lib/catalog-review-capability'
 import { catalogFieldValue, catalogSchemaFields, type CatalogSchemaField, withCatalogFieldValue } from '@/lib/catalog-schema-form'
 import { catalogRevisionEditorDocument, diffCatalogDocuments } from '@/lib/catalog-structural-diff'
 import {
@@ -121,7 +121,7 @@ export default function ProductStudioPage() {
   const [review, setReview] = useState<CatalogReview | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const [validationState, setValidationState] = useState<'idle' | 'valid' | 'invalid'>('idle')
-  const [reviewCapability, setReviewCapability] = useState<'checking' | 'available' | 'unavailable'>('checking')
+  const [reviewCapability, setReviewCapability] = useState<CatalogReviewCapability>({ status: 'checking', models: [] })
 
   const selectedSpec = specifications.find(item => item.id === specificationId)
   const selectedOffering = offerings.find(item => item.id === offeringId)
@@ -228,6 +228,23 @@ export default function ProductStudioPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }, [])
 
+  const fetchReviewCapability = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch('/api/agent/catalog-reviews', { signal, cache: 'no-store' })
+      if (!response.ok || response.status === 401 || response.status === 403) {
+        return resolveCatalogReviewCapability(response.status, response.ok, null)
+      }
+      const body: unknown = await response.json()
+      return resolveCatalogReviewCapability(response.status, true, body)
+    } catch {
+      return 'error' as const
+    }
+  }, [])
+  const refreshReviewCapability = useCallback(async () => {
+    setReviewCapability('checking')
+    setReviewCapability(await fetchReviewCapability())
+  }, [fetchReviewCapability])
+
   useEffect(() => {
     const task = window.setTimeout(() => { void load() }, 0)
     return () => window.clearTimeout(task)
@@ -238,12 +255,11 @@ export default function ProductStudioPage() {
   }, [offeringId, loadRevisions])
   useEffect(() => {
     const controller = new AbortController()
-    void fetch('/api/agent/chat', { signal: controller.signal, cache: 'no-store' })
-      .then(async response => response.ok ? response.json() as Promise<{ models?: AgentModelDescriptor[] }> : null)
-      .then(result => setReviewCapability(canReviewPrivateCatalogDraft(result?.models ?? []) ? 'available' : 'unavailable'))
-      .catch(() => setReviewCapability('unavailable'))
+    void fetchReviewCapability(controller.signal).then(capability => {
+      if (!controller.signal.aborted) setReviewCapability(capability)
+    })
     return () => controller.abort()
-  }, [])
+  }, [fetchReviewCapability])
   useEffect(() => {
     const nextDraft = selectedRevision
       ? JSON.stringify(catalogRevisionEditorDocument(selectedRevision), null, 2)
@@ -424,21 +440,21 @@ export default function ProductStudioPage() {
   }
 
   const reviewDraft = async () => {
-    if (!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewCapability !== 'available') return
+    if (!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewCapability.status !== 'available') return
     setReviewing(true); setReview(null); setMessage('')
     try {
       const response = await fetch('/api/agent/catalog-reviews', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id }),
+        body: JSON.stringify({ offeringId: selectedRevision.offeringId, revisionId: selectedRevision.id, model: reviewCapability.defaultModel }),
       })
       const body = await response.json() as CatalogReview & { error?: string }
       if (!response.ok) throw new Error(body.error ?? response.statusText)
       setReview(body)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      setReviewCapability(detail === 'model unavailable' ? 'unavailable' : reviewCapability)
+      if (detail === 'model unavailable') setReviewCapability({ status: 'unavailable', models: [] })
       setMessage(detail === 'model unavailable'
-        ? t('Privátní AI kontrola není v tomto prostředí dostupná. Návrh zůstává uvnitř platformy; použijte kontrolu schématu a dopadu změny.', 'Private AI review is unavailable in this environment. The draft stays inside the platform; use schema validation and change impact instead.')
+        ? t('Schválený model pro kontrolu není dostupný. Draft nebyl zpracován; použijte kontrolu schématu a dopadu změny.', 'No approved review model is available. The draft was not processed; use schema validation and change impact instead.')
         : detail)
     } finally {
       setReviewing(false)
@@ -638,8 +654,17 @@ export default function ProductStudioPage() {
 
           <div className={styles.aiPanel}>
             <div className={styles.aiHead}><div><div className={styles.aiTitle}><Bot size={15} aria-hidden="true" />{t('Catalog intelligence review', 'Catalog intelligence review')}</div><div className={styles.aiCopy}>{t('Připne přesný draft, vytvoří pouze návrh pro lidské posouzení a nikdy nemění ani nepublikuje nabídku.', 'Pins the exact draft, creates only a human-review proposal and never changes or publishes an offer.')}</div></div><span className={styles.aiGuard}><ShieldCheck size={11} aria-hidden="true" />HITL</span></div>
-            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" type="button" aria-busy={reviewing} aria-label={reviewing ? t('Kontroluji draft', 'Reviewing draft') : t('Spustit AI kontrolu draftu', 'Run AI review for draft')} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} aria-hidden="true" />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('Privátní AI kontrola nedostupná', 'Private AI review unavailable')}</button></div></Can>
-            {reviewCapability === 'unavailable' && <div className={styles.aiUnavailable}><ShieldCheck size={13} aria-hidden="true" /><span>{t('Toto prostředí nemá schválený interní model pro neveřejné drafty. Nic se neposílá do hostovaného modelu — k dispozici zůstává deterministická kontrola schématu a dopadu.', 'This environment has no approved internal model for unpublished drafts. Nothing is sent to a hosted model — deterministic schema and change-impact checks remain available.')}</span></div>}
+            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" type="button" aria-busy={reviewing} aria-label={reviewing ? t('Kontroluji draft', 'Reviewing draft') : t('Spustit AI kontrolu draftu', 'Run AI review for draft')} disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability.status !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} aria-hidden="true" />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability.status === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability.status === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('AI kontrola nedostupná', 'AI review unavailable')}</button></div></Can>
+            {reviewCapability.status !== 'checking' && reviewCapability.status !== 'available' && <div className={styles.aiUnavailable} role="status"><ShieldCheck size={13} aria-hidden="true" /><span>{reviewCapability.status === 'unavailable'
+              ? t('V tomto prostředí není dostupný schválený model pro kontrolu. Draft nebyl odeslán.', 'No approved review model is available in this environment. The draft was not sent.')
+              : reviewCapability.status === 'unauthenticated'
+                ? t('Nelze ověřit přihlášení k AI službě. Obnovte relaci a zkuste kontrolu dostupnosti znovu; obsah draftu nebyl odeslán.', 'Could not authenticate with the AI service. Refresh your session and retry the availability check; no draft content was sent.')
+                : reviewCapability.status === 'forbidden'
+                ? t('Váš účet nemá oprávnění ověřit kapacitu kontroly. Požádejte správce o kontrolu oprávnění; obsah draftu nebyl odeslán.', 'Your account cannot inspect review capability. Ask an administrator to check access; no draft content was sent.')
+                  : t('Dostupnost kontroly se nepodařilo ověřit. Obsah draftu nebyl odeslán; zkuste to znovu.', 'Review availability could not be verified. No draft content was sent; please retry.')}</span><button className="btn btn-secondary" type="button" onClick={() => void refreshReviewCapability()}><RefreshCw size={12} aria-hidden="true" />{t('Zkusit znovu', 'Retry')}</button></div>}
+            {reviewCapability.status === 'available' && <div className={styles.schemaHint} role="note">{reviewCapability.mode === 'sandbox-hosted'
+              ? t(`Sandboxová kontrola odešle přes LiteLLM přesnou revizi modelu ${reviewCapability.defaultModel}. Nezahrnujte osobní ani zákaznické údaje. Výsledek je pouze návrh pro lidské posouzení.`, `Sandbox review sends the exact revision through LiteLLM to ${reviewCapability.defaultModel}. Do not include personal or customer data. The result is only a proposal for human review.`)
+              : t(`Použije se schválený interní model ${reviewCapability.defaultModel}. Výsledek je pouze návrh pro lidské posouzení.`, `Approved internal model ${reviewCapability.defaultModel} will be used. The result is only a proposal for human review.`)}</div>}
             {!selectedRevision && <div className={styles.schemaHint}>{t('Vyberte draft revizi; review nikdy nepracuje s neurčitým nebo živým obsahem.', 'Select a draft revision; review never works from an ambiguous or live document.')}</div>}
             {review && <div aria-live="polite"><div className={styles.findingText} style={{ marginTop: 11, fontWeight: 700 }}>{review.summary}</div>{review.findings.length === 0 && <div className={styles.schemaHint}>{t('Model nenašel strukturované nálezy. To nenahrazuje lidskou obchodní kontrolu.', 'The model found no structured findings. That never replaces human business review.')}</div>}{review.findings.map(finding => <div key={`${finding.category}:${finding.instancePath}`} className={`${styles.finding} ${finding.severity === 'HIGH' ? styles.findingHigh : finding.severity === 'WARNING' ? styles.findingWarning : ''}`}><div className={styles.findingTitle}><span>{finding.category}</span><span>{finding.severity}</span></div><div className={styles.findingText}>{finding.recommendation}</div><div className={styles.evidence}>{finding.instancePath} · {finding.evidence}</div></div>)}<div className={styles.provenance}><span>proposal {review.proposalId.slice(0, 8)}</span><span>model {review.model}</span><span>context {review.contextHash.slice(0, 12)}…</span></div></div>}
           </div>

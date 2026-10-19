@@ -6,7 +6,7 @@
 
 // Flaky Test Hunter findings (ADR-0168, issue #5499) — active findings from the four checks
 // (RunBlocking-unit drop, Pact local-verification blind spot, Pact provider collision, test-count
-// drift), plus an operator "Run check now" trigger for the weekly sweep. Trigger admission is
+// drift), plus an operator trigger for an asynchronous workflow. Trigger admission is
 // asynchronous: the bounded IAOps BFF returns a durable workflow id, never a completed report.
 // Findings continue to flow through their dedicated read-only BFF.
 
@@ -28,6 +28,11 @@ const CHECK_TYPE_LABEL: Record<FlakyTestFinding['checkType'], { cs: string; en: 
   PACT_PROVIDER_CLASS_COLLISION:     { cs: 'Pact — kolize providerů',     en: 'Pact provider collision' },
   TEST_COUNT_DRIFT:                  { cs: 'Odchylka počtu testů',       en: 'Test count drift' },
 }
+
+const TERMINAL_WORKFLOW_STATES = new Set([
+  'COMPLETED', 'FAILED', 'CANCELED', 'TERMINATED', 'CONTINUED_AS_NEW', 'TIMED_OUT',
+])
+const WORKFLOW_STATES = new Set([...TERMINAL_WORKFLOW_STATES, 'RUNNING', 'UNSPECIFIED', 'UNRECOGNIZED'])
 
 const TRIGGER_RECOVERY_DAY_KEY = 'openbank.flaky-test-hunter.trigger.requested-on'
 
@@ -66,6 +71,11 @@ function FlakyTestHunterContent() {
   const [triggering, setTriggering] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'accepted' | 'nonfinal' | 'error'; text: string } | null>(null)
   const [lastWorkflowId, setLastWorkflowId] = useState<string | null>(null)
+  const [workflowStatus, setWorkflowStatus] = useState<string | null>(null)
+  const [workflowStatusObservedAt, setWorkflowStatusObservedAt] = useState<string | null>(null)
+  const [workflowStatusError, setWorkflowStatusError] = useState(false)
+  const [workflowStatusPollingPaused, setWorkflowStatusPollingPaused] = useState(false)
+  const [workflowStatusRefresh, setWorkflowStatusRefresh] = useState(0)
   const [recoveryDay, setRecoveryDay] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -75,8 +85,13 @@ function FlakyTestHunterContent() {
       const res = await fetch('/api/flaky-test-hunter/findings', { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
       if (!res.ok) { setUnavailable({ kind: 'error' }); return }
       const body = await res.json() as { findings?: FlakyTestFinding[]; available?: boolean }
-      setFindings(body.findings ?? [])
-      setAvailable(body.available !== false)
+      if (body.available === true && Array.isArray(body.findings)) {
+        setFindings(body.findings)
+        setAvailable(true)
+      } else {
+        setFindings([])
+        setAvailable(false)
+      }
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally {
@@ -86,9 +101,62 @@ function FlakyTestHunterContent() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    if (!lastWorkflowId) return
+    setWorkflowStatusPollingPaused(false)
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let requestDeadline: ReturnType<typeof setTimeout> | null = null
+    let controller: AbortController | null = null
+    let attempts = 0
+
+    const checkStatus = async () => {
+      attempts += 1
+      controller = new AbortController()
+      requestDeadline = setTimeout(() => controller?.abort(), 6_000)
+      try {
+        const res = await fetch(`/api/iaops/flaky-test-hunter/workflows/${encodeURIComponent(lastWorkflowId)}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        if (!res.ok) throw new Error('Workflow status unavailable')
+        const result = await res.json() as { workflowId?: unknown; status?: unknown }
+        if (stopped) return
+        if (result.workflowId !== lastWorkflowId || typeof result.status !== 'string' || !WORKFLOW_STATES.has(result.status)) {
+          setWorkflowStatusError(true)
+          return
+        }
+        setWorkflowStatus(result.status)
+        setWorkflowStatusObservedAt(new Date().toISOString())
+        setWorkflowStatusError(false)
+        if (result.status === 'RUNNING' && attempts < 12) {
+          timer = setTimeout(checkStatus, 5_000)
+        } else if (result.status === 'RUNNING') {
+          setWorkflowStatusPollingPaused(true)
+        }
+      } catch {
+        if (!stopped) setWorkflowStatusError(true)
+      } finally {
+        if (requestDeadline) clearTimeout(requestDeadline)
+      }
+    }
+
+    void checkStatus()
+    return () => {
+      stopped = true
+      controller?.abort()
+      if (timer) clearTimeout(timer)
+      if (requestDeadline) clearTimeout(requestDeadline)
+    }
+  }, [lastWorkflowId, workflowStatusRefresh])
+
   const runCheck = useCallback(async () => {
     setTriggering(true)
     setNotice(null)
+    setWorkflowStatus(null)
+    setWorkflowStatusObservedAt(null)
+    setWorkflowStatusError(false)
+    setWorkflowStatusPollingPaused(false)
     const requestedOn = recoveryDay ?? triggerRecoveryDay()
     setRecoveryDay(requestedOn)
     persistTriggerRecoveryDay(requestedOn)
@@ -168,6 +236,9 @@ function FlakyTestHunterContent() {
         return
       }
       setLastWorkflowId(payload.workflowId)
+      setWorkflowStatus(null)
+      setWorkflowStatusError(false)
+      setWorkflowStatusRefresh(value => value + 1)
       persistTriggerRecoveryDay(null)
       setRecoveryDay(null)
       setNotice({
@@ -205,8 +276,8 @@ function FlakyTestHunterContent() {
         icon={<Bug size={20} aria-hidden="true" />}
         title={t('Flaky Test Hunter', 'Flaky Test Hunter')}
         subtitle={t(
-          'Tichá selhání testů napříč monorepem — ADR-0168, týdenní sweep neděle 06:30 UTC',
-          'Silent test-failure patterns across the monorepo — ADR-0168, weekly sweep Sunday 06:30 UTC',
+          'Signály o nestabilních testech napříč monorepem — ADR-0168. Stav běhu workflow se ověřuje z Temporal; návrhy stále vyžadují lidské schválení.',
+          'Test instability signals across the monorepo — ADR-0168. Workflow execution status is read from Temporal; proposals still require human approval.',
         )}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Flaky testy', 'Flaky tests')}</span></div>}
         actions={
@@ -238,7 +309,7 @@ function FlakyTestHunterContent() {
           display: 'flex', alignItems: 'center', gap: '10px' }}>
           <AlertTriangle size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {t('flaky-test-hunter není v tomto prostředí dostupný — zobrazuji poslední známý stav (žádný).', 'flaky-test-hunter is not reachable in this environment — showing the last known state (none).')}
+            {t('Zdroj nálezů není dostupný. Nulový počet nálezů nelze potvrdit; zkuste obnovit data nebo zkontrolujte aktuální CI evidenci.', 'The findings source is unavailable. A zero-findings result cannot be confirmed; refresh the data or review current CI evidence.')}
           </span>
         </div>
       )}
@@ -255,26 +326,48 @@ function FlakyTestHunterContent() {
       )}
 
       <div className="grid-4" style={{ marginBottom: '24px' }}>
-        <StatCard label={t('Aktivní nálezy', 'Active findings')} value={findings.length} icon={<FlaskConical size={16} />} />
-        <StatCard label={t('Kritické', 'Critical')} value={critical} icon={<AlertTriangle size={16} />} tone={critical > 0 ? 'danger' : undefined} />
-        <StatCard label={t('Otevřené', 'Open')} value={open} icon={<Bug size={16} />} tone={open > 0 ? 'warning' : undefined} />
+        <StatCard label={t('Aktivní nálezy', 'Active findings')} value={available ? findings.length : '—'} icon={<FlaskConical size={16} />} />
+        <StatCard label={t('Kritické', 'Critical')} value={available ? critical : '—'} icon={<AlertTriangle size={16} />} tone={available && critical > 0 ? 'danger' : undefined} />
+        <StatCard label={t('Otevřené', 'Open')} value={available ? open : '—'} icon={<Bug size={16} />} tone={available && open > 0 ? 'warning' : undefined} />
         <StatCard
-          label={t('Poslední přijaté workflow', 'Latest admitted workflow')}
-          value={lastWorkflowId ? t('Přijato', 'Accepted') : '—'}
+          label={t('Poslední pozorovaný stav workflow', 'Last observed workflow status')}
+          value={workflowStatus ?? (lastWorkflowId ? t('Zjišťuji…', 'Checking…') : '—')}
           icon={<Clock size={16} />}
           hint={lastWorkflowId ?? undefined}
         />
       </div>
 
+      {lastWorkflowId && (
+        <div role="status" aria-live="polite" style={{ marginBottom: 18, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {workflowStatusObservedAt && <span>{t('Naposledy ověřeno', 'Last observed')}: {workflowStatusObservedAt}. </span>}
+          {workflowStatusError ? (
+            <>{t('Aktuální stav workflow nelze načíst.', 'The current workflow status could not be checked.')} {workflowStatus && t(`Poslední známý stav: ${workflowStatus}.`, `Last observed status: ${workflowStatus}.`)} <button type="button" className="btn btn-secondary btn-sm" onClick={() => setWorkflowStatusRefresh(value => value + 1)}>{t('Obnovit stav', 'Refresh status')}</button></>
+          ) : workflowStatus === 'RUNNING' && workflowStatusPollingPaused ? (
+            <>{t('Poslední ověřený stav je stále RUNNING. Automatické ověřování se po jedné minutě pozastavilo.', 'The last observed status is still RUNNING. Automatic checks paused after one minute.')} <button type="button" className="btn btn-secondary btn-sm" onClick={() => setWorkflowStatusRefresh(value => value + 1)}>{t('Obnovit stav', 'Refresh status')}</button></>
+          ) : workflowStatus === 'RUNNING' ? (
+            t('Poslední stav Temporal je RUNNING; další ověření proběhne automaticky.', 'The last observed Temporal status is RUNNING; another check will run automatically.')
+          ) : workflowStatus && TERMINAL_WORKFLOW_STATES.has(workflowStatus) ? (
+            t('Poslední pozorovaný stav popisuje dokončení Temporal workflow, nikoli schválení nebo provedení návrhu.', 'The last observed status describes Temporal workflow completion, not approval or application of a proposal.')
+          ) : (
+            t('Přijetí workflow samo o sobě nepotvrzuje jeho dokončení.', 'Workflow admission alone does not confirm completion.')
+          )}
+        </div>
+      )}
+
       <div className="card">
-        {loading ? (
+        {!available ? (
+          <div role="status" aria-live="polite" style={{ padding: '28px', color: 'var(--text-secondary)', fontSize: '13px' }}>
+            <p style={{ marginTop: 0 }}>{t('Stav nálezů ani dokončení workflow není dostupný.', 'Findings and workflow completion status are unavailable.')}</p>
+            <Link href="/system/tests" className="btn btn-secondary">{t('Otevřít CI evidenci testů', 'Open CI test evidence')}</Link>
+          </div>
+        ) : loading ? (
           <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
             <RefreshCw size={20} aria-hidden="true" className="animate-spin" style={{ marginBottom: '8px', margin: '0 auto', display: 'block' }} />
             <div>{t('Načítám…', 'Loading…')}</div>
           </div>
         ) : findings.length === 0 ? (
           <DataUnavailable kind="no_data" feature={t('Nálezy', 'Findings')} lang={language}
-            detail={t('Žádné aktivní nálezy — poslední sweep nic nenašel.', 'No active findings — the last sweep found nothing.')} />
+            detail={t('Endpoint nyní nevrací žádné aktivní nálezy. To nepotvrzuje dokončení ručně spuštěného workflow.', 'The endpoint currently returns no active findings. This does not confirm that a manually triggered workflow completed.')} />
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">
