@@ -13,7 +13,7 @@ import { RefreshCw, ShieldAlert, CircleAlert, Clock3 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, ShortId, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { parseFraudReviewQueue, type FraudReviewEvidence } from '@/lib/fraud/fraudReviewContract'
 
 function scoreTone(score: number): Tone {
@@ -117,7 +117,7 @@ export default function FraudPage() {
                   </td>
                   <td style={{ padding: '10px 14px' }}><span className="pill">{r.rail}</span></td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
-                    {r.accountId ? `${r.accountId.slice(0, 8)}…` : '—'}
+                    <ShortId value={r.accountId} copyLabel={t('Kopírovat ID účtu', 'Copy account ID')} />
                   </td>
                   <td style={{ padding: '10px 14px' }}>
                     <StatusBadge status={String(r.score)} label={String(r.score)} tone={tone} />

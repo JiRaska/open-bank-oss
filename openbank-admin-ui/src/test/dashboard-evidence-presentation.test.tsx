@@ -54,4 +54,26 @@ describe('dashboard evidence presentation', () => {
     expect(screen.getAllByText('1/1')).toHaveLength(2)
     expect(screen.queryByText('Current platform state cannot be verified')).not.toBeInTheDocument()
   })
+
+  it.each([
+    ['UNKNOWN', 'Health status unknown', 'serviceChipUnknown'],
+    ['DOWN', 'DOWN', 'serviceChipUnhealthy'],
+  ] as const)('renders mixed UP/%s workloads as %s with the matching chip state', async (secondStatus, title, stateClass) => {
+    const mixedHealth = { services: [
+      { ...health.services[0], namespace: 'tenant-a', port: 8080, status: 'UP' },
+      { ...health.services[0], namespace: 'tenant-b', port: 8081, status: secondStatus },
+    ] }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? governance : mixedHealth,
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    const chip = await screen.findByTitle(title)
+    expect(chip.className).toContain(stateClass)
+    if (secondStatus === 'UNKNOWN') {
+      expect(chip.className).not.toContain('serviceChipUnhealthy')
+      expect(screen.getByText('Unknown status')).toBeInTheDocument()
+    }
+  })
 })

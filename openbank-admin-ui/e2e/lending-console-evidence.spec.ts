@@ -75,7 +75,11 @@ test('renders whole-book KPIs from the aggregate endpoints and drills down by st
   // The stage is an SVG <g> whose bounding-box centre sits between the nodes, so a
   // Playwright actionability click can land on empty canvas — dispatch the click
   // straight at the element instead.
-  await page.getByTestId('stage-DECISION_PENDING').dispatchEvent('click')
+  const pipeline = page.getByRole('img', { name: /Loan application pipeline by stage|Pipeline úvěrových žádostí po stavech/ })
+  const pendingStage = pipeline.locator('[data-testid="stage-DECISION_PENDING"]:visible')
+  await expect(pendingStage).toHaveCount(1)
+  await expect(pendingStage).toHaveAttribute('data-count', '7')
+  await pendingStage.dispatchEvent('click')
   // EntityChip truncates the uuid for display — locate rows by the party link target instead.
   const partyA = (id: string) => page.locator(`tbody a[href="/parties/00000000-0000-4000-8000-0000000000${id}"]`)
   await expect(partyA('a1')).toBeVisible()

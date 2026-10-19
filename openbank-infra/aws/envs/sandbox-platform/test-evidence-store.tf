@@ -128,16 +128,37 @@ data "aws_iam_policy_document" "test_evidence_bucket" {
     }
   }
 
-  # Write-once: an unconditional PUT (which would overwrite) is refused for everyone,
-  # including the writer role. Only `If-None-Match: *` creates are allowed.
+  # All evidence bodies remain write-once. Only the Gate Health selector may change;
+  # its separate rule below requires compare-and-swap (or conditional initial create).
   statement {
-    sid       = "DenyOverwrite"
-    effect    = "Deny"
-    actions   = ["s3:PutObject"]
-    resources = ["${aws_s3_bucket.test_evidence.arn}/*"]
+    sid           = "DenyOverwrite"
+    effect        = "Deny"
+    actions       = ["s3:PutObject"]
+    not_resources = ["${aws_s3_bucket.test_evidence.arn}/admin-ui/gate-health/current.json"]
     principals {
       type        = "*"
       identifiers = ["*"]
+    }
+    condition {
+      test     = "Null"
+      variable = "s3:if-none-match"
+      values   = ["true"]
+    }
+  }
+
+  statement {
+    sid       = "DenyUnconditionalGateHealthPointer"
+    effect    = "Deny"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.test_evidence.arn}/admin-ui/gate-health/current.json"]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "Null"
+      variable = "s3:if-match"
+      values   = ["true"]
     }
     condition {
       test     = "Null"
