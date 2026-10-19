@@ -17,7 +17,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { QualityGateHealthPanel } from '@/components/devops/QualityGateHealthPanel'
-import type { DevOpsFinding } from '@/app/api/devops/insights/route'
+import type { DevOpsFinding } from '@/lib/devops/contracts'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RemediationReviewDialog } from '@/components/devops/RemediationReviewDialog'
 import { DORA_METRIC_LABEL } from '@/lib/devops/doraMetricLabels'
@@ -153,6 +153,29 @@ function SourceChip({ available, label }: { available: boolean; label: string })
 // Map a devops-agent finding → the shared AgentFinding view-model. Severity is
 // lower-cased (the backend emits WARNING/CRITICAL); the DORA-impact and
 // remediation-kind become tags so the rendering matches every other agent surface.
+function isDevOpsFinding(value: unknown): value is DevOpsFinding {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const finding = value as Record<string, unknown>
+  const oneOf = (candidate: unknown, values: readonly string[]) => typeof candidate === 'string' && values.includes(candidate)
+  const nullableString = (candidate: unknown) => candidate === null || typeof candidate === 'string'
+  return typeof finding.id === 'string' && finding.id.length > 0
+    && oneOf(finding.detector, ['D1_CI_PIPELINE_HEALTH', 'D2_DORA_REGRESSION', 'D3_RUNNER_CAPACITY', 'D4_DEPLOY_HEALTH', 'D5_SSDLC_HYGIENE', 'D6_INCIDENT_RECURRENCE'])
+    && oneOf(finding.severity, ['WARNING', 'CRITICAL'])
+    && typeof finding.detectedAt === 'string'
+    && typeof finding.title === 'string'
+    && typeof finding.rawMetricValue === 'number' && Number.isFinite(finding.rawMetricValue)
+    && typeof finding.threshold === 'number' && Number.isFinite(finding.threshold)
+    && typeof finding.affectedResource === 'string'
+    && (finding.doraMetricImpacted === null || oneOf(finding.doraMetricImpacted, ['DEPLOYMENT_FREQUENCY', 'LEAD_TIME_FOR_CHANGES', 'CHANGE_FAILURE_RATE', 'TIME_TO_RESTORE']))
+    && nullableString(finding.rootCause)
+    && oneOf(finding.remediationKind, ['PULL_REQUEST', 'RUNBOOK_UPDATE', 'TICKET', 'NONE'])
+    && nullableString(finding.proposalPrUrl)
+    && nullableString(finding.proposedRemediation)
+    && oneOf(finding.status, ['OPEN', 'DIAGNOSED', 'PROPOSED', 'APPROVED', 'REJECTED', 'RESOLVED'])
+    && nullableString(finding.diagnosedAt)
+    && nullableString(finding.proposedAt)
+}
+
 function toAgentFinding(f: DevOpsFinding, t: (cs: string, en: string) => string): AgentFinding {
   const tags: AgentFinding['tags'] = []
   if (f.doraMetricImpacted) {
@@ -185,36 +208,62 @@ function DevOpsContent() {
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [dora, setDora] = useState<DoraData | null>(null)
   const [findings, setFindings] = useState<DevOpsFinding[]>([])
+  const [findingsAvailability, setFindingsAvailability] = useState<'loading' | 'available' | 'unavailable'>('loading')
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [deciding, setDeciding] = useState<string | null>(null)
   const [decisionError, setDecisionError] = useState<string | null>(null)
+  const loadGeneration = useRef(0)
   const [reviewIntent, setReviewIntent] = useState<{ finding: DevOpsFinding; approve: boolean } | null>(null)
   const reviewTriggerRef = useRef<HTMLElement | null>(null)
   const reviewWorkspaceRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current
     setLoading(true)
     setUnavailable(null)
+    setFindings([])
+    setFindingsAvailability('loading')
+    const insightsRequest = fetch('/api/devops/insights', { cache: 'no-store' })
+      .then(async response => {
+        if (!response.ok) return null
+        try {
+          return await response.json() as { available?: unknown; findings?: unknown }
+        } catch {
+          return null
+        }
+      })
+      .catch(() => null)
+      .then(insights => {
+        if (generation !== loadGeneration.current) return
+        // Findings are optional and must not block DORA. Only a fully valid result
+        // proves either a non-empty list or a verified empty state.
+        if (insights?.available === true && Array.isArray(insights.findings)
+          && insights.findings.every(isDevOpsFinding)) {
+          setFindings(insights.findings)
+          setFindingsAvailability('available')
+        } else {
+          setFindings([])
+          setFindingsAvailability('unavailable')
+        }
+      })
+
     try {
-      const [doraRes, insightsRes] = await Promise.all([
-        fetch('/api/devops/dora', { cache: 'no-store' }),
-        fetch('/api/devops/insights', { cache: 'no-store' }),
-      ])
-
+      const doraRes = await fetch('/api/devops/dora', { cache: 'no-store' })
+      if (generation !== loadGeneration.current) return
       if (!doraRes.ok) { setUnavailable({ kind: 'error' }); return }
-
-      setDora(await doraRes.json())
-      if (insightsRes.ok) {
-        const ins = await insightsRes.json() as { findings?: DevOpsFinding[] }
-        setFindings(ins.findings ?? [])
-      }
+      const nextDora = await doraRes.json() as DoraData
+      if (generation !== loadGeneration.current) return
+      setDora(nextDora)
     } catch {
-      setUnavailable({ kind: 'unreachable' })
+      if (generation === loadGeneration.current) setUnavailable({ kind: 'unreachable' })
     } finally {
-      setLoading(false)
-      setLastRefresh(new Date())
+      if (generation === loadGeneration.current) {
+        setLoading(false)
+        setLastRefresh(new Date())
+      }
+      void insightsRequest
     }
   }, [])
 
@@ -274,7 +323,10 @@ function DevOpsContent() {
     })
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => { loadGeneration.current += 1 }
+  }, [load])
   useEffect(() => {
     const id = setInterval(load, 60_000)
     return () => clearInterval(id)
@@ -355,12 +407,13 @@ function DevOpsContent() {
           <div className="grid-4" style={{ marginBottom: '28px' }}>
             <DoraCard
               icon={<Rocket size={18} />}
-              titleEn="Deployment Frequency"
-              titleCs="Frekvence nasazení"
+              titleEn="Merged Changes (proxy)"
+              titleCs="Sloučené změny (proxy)"
               value={df?.description ?? null}
-              sub={df?.count30d != null ? t(`${df.count30d} nasazení za 30 dní`, `${df.count30d} deployments in last 30 days`) : null}
+              sub={df?.count30d != null ? t(`${df.count30d} změn za 30 dní`, `${df.count30d} changes in last 30 days`) : null}
               level={df?.level ?? null}
-              noDataMsg={t('Odvozeno z git historie', 'Derived from git history')}
+              note={df?.note}
+              noDataMsg={t('Odvozeno z git historie; nejde o potvrzená nasazení.', 'Derived from git history; these are not verified deployments.')}
             />
             <DoraCard
               icon={<Clock size={18} />}
@@ -406,7 +459,11 @@ function DevOpsContent() {
               'Active findings from the devops-agent (CI health, DORA regressions, runner capacity, deploys, SSDLC, incident recurrence — ADR-0119). The agent proposes; a human approves (HITL, ADR-0031 D4).',
             )}
             findings={findings.map(f => toAgentFinding(f, t))}
-            emptyMessage={t('Žádné aktivní DevOps nálezy — pipeline v pořádku', 'No active DevOps findings — pipeline healthy')}
+            emptyMessage={findingsAvailability === 'available'
+              ? t('Žádné aktivní DevOps nálezy.', 'No active DevOps findings.')
+              : findingsAvailability === 'loading'
+                ? t('Ověřuji dostupnost DevOps nálezů…', 'Checking DevOps findings…')
+                : t('DevOps nálezy nejsou dostupné. Aktuální stav nelze potvrdit.', 'DevOps findings are unavailable. Current health cannot be confirmed.')}
             onApprove={canDecide ? id => decide(id, 'approve') : undefined}
             onReject={canDecide ? id => decide(id, 'reject') : undefined}
             decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
@@ -466,7 +523,7 @@ function DevOpsContent() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
                 <GitBranch size={16} style={{ color: 'var(--accent-text)' }} />
                 <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {t('Poslední nasazení', 'Recent Deployments')}
+                  {t('Nedávné sloučené změny', 'Recent Merged Changes')}
                 </span>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('Squash-merge do main (posledních 30 dní)', 'Squash-merges to main (last 30 days)')}
