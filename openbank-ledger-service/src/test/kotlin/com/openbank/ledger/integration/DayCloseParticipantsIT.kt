@@ -379,7 +379,7 @@ class DayCloseParticipantsIT {
 
     private fun assertReasonHistory(date: LocalDate, expectedCount: Int, expectedReason: String?) {
         val config = ConfigProvider.getConfig()
-        DriverManager.getConnection(
+        val reasons = DriverManager.getConnection(
             config.getValue("quarkus.datasource.jdbc.url", String::class.java),
             config.getValue("quarkus.datasource.username", String::class.java),
             config.getValue("quarkus.datasource.password", String::class.java),
@@ -390,12 +390,12 @@ class DayCloseParticipantsIT {
             ).use { statement ->
                 statement.setObject(1, date)
                 statement.executeQuery().use { rows ->
-                    val reasons = readReasons(rows)
-                    assertThat(reasons).hasSize(expectedCount)
-                    if (expectedReason != null) assertThat(reasons).containsExactly(expectedReason)
+                    readReasons(rows)
                 }
             }
         }
+        assertThat(reasons).hasSize(expectedCount)
+        if (expectedReason != null) assertThat(reasons).containsExactly(expectedReason)
     }
 
     private fun readReasons(rows: ResultSet): List<String> = buildList {
