@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, fstatSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,12 +28,20 @@ function parseArgs(argv) {
   return { sourceSha, out: resolve(out) }
 }
 
-function readUtf8(repoRoot, relative) {
+export function readBoundedSourceFile(repoRoot, relative) {
   const filename = resolve(repoRoot, relative)
   if (!filename.startsWith(`${resolve(repoRoot)}/`)) throw new Error(`source path escaped repository: ${relative}`)
-  const stat = statSync(filename)
-  if (!stat.isFile() || stat.size > MAX_SOURCE_FILE_BYTES) throw new Error(`source file is not a bounded regular file: ${relative}`)
-  return readFileSync(filename, 'utf8')
+  // Validate and read the same open file, even if its path changes concurrently.
+  const descriptor = openSync(filename, constants.O_RDONLY | constants.O_NOFOLLOW)
+  try {
+    const stat = fstatSync(descriptor)
+    if (!stat.isFile() || stat.size > MAX_SOURCE_FILE_BYTES) throw new Error(`source file is not a bounded regular file: ${relative}`)
+    const content = readFileSync(descriptor, 'utf8')
+    if (Buffer.byteLength(content, 'utf8') > MAX_SOURCE_FILE_BYTES) throw new Error(`source file exceeds size limit: ${relative}`)
+    return content
+  } finally {
+    closeSync(descriptor)
+  }
 }
 
 function filesIn(repoRoot, directory, extension, pathFor) {
@@ -44,7 +52,7 @@ function filesIn(repoRoot, directory, extension, pathFor) {
     .map(entry => entry.name)
     .sort()
   if (files.length === 0) throw new Error(`source inventory is empty: ${directory}`)
-  return files.map(name => ({ path: pathFor(name), content: readUtf8(repoRoot, `${directory}/${name}`) }))
+  return files.map(name => ({ path: pathFor(name), content: readBoundedSourceFile(repoRoot, `${directory}/${name}`) }))
 }
 
 function generateJson(repoRoot, temporaryDirectory, name, script) {
@@ -78,8 +86,8 @@ export function collectAdminUiContent({ repoRoot = REPO, sourceSha, now = Date.n
         serviceGraph: generateJson(root, temporaryDirectory, 'service-graph', 'generate-service-graph.mjs'),
         governance: generateJson(root, temporaryDirectory, 'governance', 'generate-governance.mjs'),
         securityGraph: generateJson(root, temporaryDirectory, 'security-graph', 'generate-security-graph.mjs'),
-        bcpPolicyMarkdown: readUtf8(root, 'docs/bcp/bcp-policy.md'),
-        complianceControlsYaml: readUtf8(root, 'openbank-libs/governance/compliance-controls.yaml'),
+        bcpPolicyMarkdown: readBoundedSourceFile(root, 'docs/bcp/bcp-policy.md'),
+        complianceControlsYaml: readBoundedSourceFile(root, 'openbank-libs/governance/compliance-controls.yaml'),
         bpmnManifests: bpmn,
         libsDocs,
       },

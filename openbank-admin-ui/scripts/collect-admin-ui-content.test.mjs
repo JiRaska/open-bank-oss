@@ -1,17 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import {
   ADMIN_UI_CONTENT_MAX_BYTES,
   isAdminUiContentSnapshot,
 } from '../src/lib/evidence/contentSnapshot.ts'
-import { collectAdminUiContent } from './collect-admin-ui-content.mjs'
+import { collectAdminUiContent, readBoundedSourceFile } from './collect-admin-ui-content.mjs'
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const SOURCE_SHA = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+
+test('bounded source reads reject symlinks, oversized files and escaped paths', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'admin-ui-source-read-'))
+  try {
+    writeFileSync(join(directory, 'valid.md'), 'reviewed source')
+    writeFileSync(join(directory, 'large.md'), 'x'.repeat(256 * 1024 + 1))
+    symlinkSync(join(directory, 'valid.md'), join(directory, 'link.md'))
+
+    assert.equal(readBoundedSourceFile(directory, 'valid.md'), 'reviewed source')
+    assert.throws(() => readBoundedSourceFile(directory, 'link.md'))
+    assert.throws(() => readBoundedSourceFile(directory, 'large.md'), /bounded regular file/)
+    assert.throws(() => readBoundedSourceFile(directory, '../outside.md'), /escaped repository/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 test('collector publishes every current source file in a bounded, validated reviewed-source snapshot', () => {
   const bytes = collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA })
   const snapshot = JSON.parse(bytes.toString('utf8'))
