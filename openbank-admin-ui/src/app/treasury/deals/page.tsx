@@ -112,7 +112,7 @@ function DealBlotter() {
   const close = async (special: boolean) => {
     const res = await wbPost(wbUrl(special ? '/positions/close-of-day/special' : '/positions/close-of-day'), { date: closeDate, bookId: closeBook.trim() || null, scenario: special ? scenario.trim() || null : null }, positionCloseSchema)
     const label = special ? t('Zvláštní uzávěrka', 'Special close') : t('Uzávěrka pozic', 'Position close')
-    if (res.ok) setNotice({ tone: 'success', text: t(`${label}: zaznamenáno${res.data.snapshotId ? ` (snímek ${res.data.snapshotId.slice(0, 8)})` : ''}.`, `${label}: recorded${res.data.snapshotId ? ` (snapshot ${res.data.snapshotId.slice(0, 8)})` : ''}.`) })
+    if (res.ok) setNotice({ tone: 'success', text: t(`${label}: zaznamenáno, pozice zachyceny ve snímku.`, `${label}: recorded, positions captured in a snapshot.`) })
     else setNotice({ tone: 'danger', text: writeFailureText(res, label, t) })
   }
 

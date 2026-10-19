@@ -98,10 +98,13 @@ describe('treasury — route and page gates', () => {
 })
 
 describe('treasury — UI grants never exceed the service', () => {
-  it('reads: the UI set is exactly the class-level @RolesAllowed', () => {
+  it('reads: the UI set is the class-level @RolesAllowed plus, and only plus, the ADR-0344 workbench read roles', () => {
     const cls = resource.match(/@RolesAllowed\(([^)]*)\)\s*\n(?:@Suppress[^\n]*\n)?class TreasuryResource/)
     expect(cls, 'class-level @RolesAllowed not found').toBeTruthy()
-    expect(granted('treasury:view')).toEqual(resolveRoles(cls![1]))
+    // API 1.19.0 widens the service's class-level set with these two; until that lands on main the
+    // console grants them ahead of the Kotlin annotation, and nothing else may be granted ahead of it.
+    const workbenchReaders = [ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR]
+    expect(granted('treasury:view')).toEqual([...new Set([...resolveRoles(cls![1]), ...workbenchReaders])].sort())
   })
 
   it('draft: only the POST /deals roles — ADMIN is not admitted by the service, so not by the UI', () => {

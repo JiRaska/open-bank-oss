@@ -25,6 +25,7 @@ import {
 } from './types'
 import { downloadText, Field, Notice, ReadFailure, recordLabel, Section, td, th, useFmt, writeFailureText } from './ui'
 
+type ErrorMap = Record<string, string>
 const STATUS_TONE: Record<string, Tone> = { PENDING: 'warning', ACTIVE: 'success', SUPERSEDED: 'neutral', REJECTED: 'danger' }
 const READONLY = ['user-activity', 'application-version-history'] as const
 type View = string // a kind id or a READONLY id
@@ -297,7 +298,7 @@ function RecordEditor({ spec, base, onClose, onProposed }: { spec: KindSpec; bas
 
   const submit = async () => {
     let payload: Record<string, unknown>
-    let errs: Record<string, string> = {}
+    let errs: ErrorMap = {}
     if (advanced) {
       try { payload = JSON.parse(json) as Record<string, unknown> } catch { setFormError(t('JSON není platný.', 'The JSON is not valid.')); return }
     } else {

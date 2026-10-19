@@ -19,7 +19,7 @@ import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
 import { bankToday } from '@/components/balance-sheet/model'
 import { ALL_PRODUCTS, productName, profileOf, type AnyProduct } from './catalogue'
 import { CashFlowLedgerView } from './CashFlowLedger'
-import { wbGet, wbPost, wbUrl, riskUrl, type WbWrite } from './client'
+import { wbGet, wbPost, wbSend, wbUrl, riskUrl, type WbWrite } from './client'
 import {
   AccountsTab, CentralBankTab, CollateralTab, DepositPanel, DocumentsTab, FeesTab, FraPanel, FxPanel, HeaderPanel, LegacyTermsPanel,
   LegPanel, LinkedDealsTab, LiquidityTab, SecuritiesPanel, type SetForm,
@@ -122,7 +122,7 @@ export function DealTicket({ mode, deal, canCreate, canBackOffice, actor, onSave
     setNotice(null)
     const body = buildRequest(form)
     const res: WbWrite<TicketDeal> = saved && mode === 'edit'
-      ? await (await import('./client')).wbSend('PUT', treasuryUrl(`/deals/${encodeURIComponent(saved.dealId)}`), body, ticketDealSchema)
+      ? await wbSend('PUT', treasuryUrl(`/deals/${encodeURIComponent(saved.dealId)}`), body, ticketDealSchema)
       : await wbPost(treasuryUrl('/deals'), body, ticketDealSchema)
     setBusy(false)
     if (res.ok) {

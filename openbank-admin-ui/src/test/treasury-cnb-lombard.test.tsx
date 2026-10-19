@@ -155,7 +155,8 @@ describe('deal list and detail — CNB_LOMBARD labelling', () => {
   it('the blotter labels a CNB_LOMBARD row "ČNB lombardní úvěr"', async () => {
     router = url => (url.includes('/counterparties') ? json(COUNTERPARTIES) : json([lombardDeal()]))
     await renderPage(<TreasuryDealsPage />)
-    expect(await screen.findByText(/ČNB lombardní úvěr|ČNB lombard borrowing/)).toBeTruthy()
+    // The instrument filter also lists the product name, so the row is addressed by its link.
+    expect(await screen.findByRole('link', { name: /ČNB lombardní úvěr|ČNB lombard borrowing/ })).toBeTruthy()
   })
 
   it('the detail page shows the collateral-not-modelled note for a CNB_LOMBARD deal, but not otherwise', async () => {
