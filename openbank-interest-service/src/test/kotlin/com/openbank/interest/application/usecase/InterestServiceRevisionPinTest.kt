@@ -37,7 +37,9 @@ import java.util.UUID
 class InterestServiceRevisionPinTest {
     private val clock = Clock.fixed(Instant.parse("2027-02-10T00:00:00Z"), ZoneOffset.UTC)
     private val configRepo = mockk<InterestRateConfigRepository>()
-    private val accrualRepo = mockk<InterestAccrualRepository>()
+    private val accrualRepo = mockk<InterestAccrualRepository>().also { repository ->
+        every { repository.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
+    }
     private val pins = mockk<RateRevisionPinRepository>()
     private val service = InterestService(
         configRepo,

@@ -17,7 +17,9 @@ import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
+import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -193,6 +195,77 @@ internal class RevisionPinSupersedeIT {
         val next = accrueOn(legacy, LocalDate.of(2027, 5, 15))
 
         assertThat(next.configId).isEqualTo(first.configId)
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `failed first HTTP accrual rolls back its revision pin before a new revision can succeed`() {
+        publish("0.020000000000000000", LocalDate.of(2027, 6, 1), "c-rollback-a")
+        val account = UUID.randomUUID()
+        val suffix = UUID.randomUUID().toString().replace("-", "")
+        val function = "test_accrual_failure_$suffix"
+        val trigger = "test_accrual_failure_$suffix"
+        val request = mapOf(
+            "accountId" to account.toString(),
+            "productId" to specification.toString(),
+            "balance" to BigDecimal("1000.00"),
+            "currency" to "EUR",
+            "accrualDate" to "2027-06-15",
+        )
+        dataSource.connection.use { db ->
+            try {
+                db.createStatement().use { statement ->
+                    // Only generated UUID/hex values enter DDL; other accounts are unaffected.
+                    statement.execute(
+                        "CREATE FUNCTION $function() RETURNS trigger LANGUAGE plpgsql AS " +
+                            "$$ BEGIN IF NEW.account_id = '$account'::uuid THEN " +
+                            "RAISE EXCEPTION 'synthetic accrual insertion failure'; END IF; RETURN NEW; END; $$",
+                    )
+                    statement.execute(
+                        "CREATE TRIGGER $trigger BEFORE INSERT ON interest_accruals " +
+                            "FOR EACH ROW EXECUTE FUNCTION $function()",
+                    )
+                }
+                given().contentType("application/json").body(request)
+                    .post("/api/v1/interest/accrue").then().statusCode(500)
+                assertThat(accountRows("interest_accruals", account)).isZero()
+                assertThat(accountRows("account_rate_revision_pins", account)).isZero()
+            } finally {
+                db.createStatement().use { statement ->
+                    statement.execute("DROP TRIGGER IF EXISTS $trigger ON interest_accruals")
+                    statement.execute("DROP FUNCTION IF EXISTS $function()")
+                }
+            }
+        }
+
+        val successfulRevision = publish("0.030000000000000000", LocalDate.of(2027, 6, 10), "c-rollback-b")
+        val response = given().contentType("application/json").body(request)
+            .post("/api/v1/interest/accrue").then().statusCode(201).extract().response()
+        assertThat(BigDecimal(response.jsonPath().getString("accruedAmount"))).isEqualByComparingTo("0.082192")
+        assertThat(accountRows("interest_accruals", account)).isEqualTo(1)
+        assertThat(accountRows("account_rate_revision_pins", account)).isEqualTo(1)
+        dataSource.connection.use { db ->
+            db.prepareStatement("SELECT revision_id FROM account_rate_revision_pins WHERE account_id = ?").use {
+                it.setObject(1, account)
+                it.executeQuery().use { rows ->
+                    check(rows.next())
+                    assertThat(rows.getObject(1, UUID::class.java)).isEqualTo(successfulRevision)
+                }
+            }
+        }
+    }
+
+    private fun accountRows(table: String, account: UUID): Long {
+        require(table in setOf("interest_accruals", "account_rate_revision_pins"))
+        return dataSource.connection.use { db ->
+            db.prepareStatement("SELECT count(*) FROM $table WHERE account_id = ?").use {
+                it.setObject(1, account)
+                it.executeQuery().use { rows ->
+                    check(rows.next())
+                    rows.getLong(1)
+                }
+            }
+        }
     }
 
     @Test

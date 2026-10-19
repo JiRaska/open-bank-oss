@@ -118,19 +118,29 @@ class InterestService(
     private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
-        // Idempotent replay (ADR-0291, #8351): (account, date, product, currency) IS one day's
-        // accrual — the V12 UNIQUE constraint backs it — so a retried accrue replays the ORIGINAL
-        // row with no second write. The check runs BEFORE the rate resolution on purpose: a replay
-        // arriving after the config was deactivated must still return the original accrual, not
-        // fail closed with RateConfigNotFoundException. The constraint is the race backstop.
-        accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
-            .flatMap { existing ->
-                if (existing != null) {
-                    Uni.createFrom().item(existing)
-                } else {
-                    accrueNew(request)
+        // The catalog pin and the day's accrual share one transaction. Read the existing natural
+        // key before rate resolution so a retry still works after its config is deactivated.
+        accrualRepo.withAccrual {
+            accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
+                .flatMap { existing ->
+                    if (existing != null) Uni.createFrom().item(existing) else accrueNew(request)
+                }
+        }.onFailure().recoverWithUni { failure ->
+            // Recover only after the outer transaction has rolled back. Querying the winner
+            // inside a transaction aborted by the V12 unique constraint cannot succeed.
+            if (!failure.isAccrualConflict()) {
+                Uni.createFrom().failure(failure)
+            } else {
+                accrualRepo.findByNaturalKey(
+                    request.accountId,
+                    request.accrualDate,
+                    request.productId,
+                    request.currency,
+                ).flatMap { winner ->
+                    if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(failure)
                 }
             }
+        }
 
     private fun accrueNew(request: AccrualRequest): Uni<InterestAccrual> = resolveRate(request).flatMap { config ->
         if (config == null) {
@@ -152,23 +162,7 @@ class InterestService(
                 currency = request.currency,
                 createdAt = OffsetDateTime.now(clock),
             )
-            accrualRepo.save(accrual).onFailure().recoverWithUni { e ->
-                // Lost the race against a concurrent first attempt with the same natural
-                // key: the V12 constraint rejected our insert, so the winner's row IS the
-                // correct replay answer. Anything else propagates unchanged.
-                if (!e.isAccrualConflict()) {
-                    Uni.createFrom().failure(e)
-                } else {
-                    accrualRepo.findByNaturalKey(
-                        request.accountId,
-                        request.accrualDate,
-                        request.productId,
-                        request.currency,
-                    ).flatMap { winner ->
-                        if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(e)
-                    }
-                }
-            }
+            accrualRepo.save(accrual)
         }
     }
 

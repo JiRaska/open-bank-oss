@@ -65,6 +65,14 @@ interface InterestRateConfigRepository {
 
 /** Outbound persistence port for daily interest accruals (reactive, Mutiny). */
 interface InterestAccrualRepository {
+    /**
+     * Runs the natural-key lookup, rate resolution, revision pin and accrual insert in one
+     * transaction. Nested repository calls must share its session: a failed accrual must not leave
+     * a committed pin, and a successful accrual and its newly created pin commit together.
+     * Conflict recovery must run after this Uni fails and the transaction has rolled back.
+     */
+    fun withAccrual(block: () -> Uni<InterestAccrual>): Uni<InterestAccrual>
+
     fun save(accrual: InterestAccrual): Uni<InterestAccrual>
     fun findAll(): Uni<List<InterestAccrual>>
     fun findByAccountId(accountId: UUID, from: LocalDate?, to: LocalDate?): Uni<List<InterestAccrual>>

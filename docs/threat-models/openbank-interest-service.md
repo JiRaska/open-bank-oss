@@ -344,3 +344,17 @@ money-path service, not adjacent.
   reads published terms, cannot author or publish); a revoked scope fails the sync closed and the cursor
   does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
   then idles on 403 (catalog sync stays off by default until the follow-up PR).
+
+### First catalog pin and accrual atomicity
+
+The first catalog revision pin must not survive an unsuccessful accrual write. The accrual
+repository's transaction boundary encompasses natural-key replay lookup, rate/pin resolution
+and accrual persistence. Nested pin writes share that transaction; a failed unique-key insert
+rolls back before the service reads the winner. Existing account-specific override precedence,
+lifetime pin selection, V19/V20 backfill and image holds remain unchanged.
+
+A new HTTP/JDBC regression injects an accrual INSERT failure for one synthetic account and
+requires both pin and accrual to remain absent; after a newer revision arrives, the identical
+request must pin that successful revision. This test has not run for this draft source and
+requires native CI. Source correspondence is not proof of transaction behavior or activation
+readiness. No catalog-sync activation, migration delivery or deployment is authorized here.

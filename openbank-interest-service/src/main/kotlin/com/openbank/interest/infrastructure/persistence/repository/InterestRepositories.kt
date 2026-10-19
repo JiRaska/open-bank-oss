@@ -148,6 +148,8 @@ class InterestAccrualRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: InterestMapper,
 ) : InterestAccrualRepository {
+    override fun withAccrual(block: () -> Uni<InterestAccrual>): Uni<InterestAccrual> = sf.withTransaction { block() }
+
     @WithTransaction override fun save(accrual: InterestAccrual): Uni<InterestAccrual> {
         val e = mapper.toEntity(accrual)
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }

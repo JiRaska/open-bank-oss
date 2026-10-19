@@ -44,7 +44,9 @@ class InterestAuditEventTimeTest {
 
     private val clock = Clock.fixed(Instant.parse("2026-02-01T11:30:00Z"), ZoneOffset.UTC)
     private val configRepo = mockk<InterestRateConfigRepository>()
-    private val accrualRepo = mockk<InterestAccrualRepository>()
+    private val accrualRepo = mockk<InterestAccrualRepository>().also { repository ->
+        every { repository.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
+    }
     private val capitalizationRepo = mockk<InterestCapitalizationRepository>()
     private val taxProfilePort = mockk<TaxProfilePort>()
     private val ledgerPostingPort = mockk<LedgerPostingPort>()
