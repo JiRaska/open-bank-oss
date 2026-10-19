@@ -167,20 +167,10 @@ authz:
 
 billing:
   ledger:
-    # System-actor id recorded as the journal's createdBy (ADR-0143 step 4) and the two leaf GL
-    # accounts every fee journal debits/credits. Placeholder defaults (the "a0000000-…" family the
-    # ledger seeds, see LendingLedgerConfig for the identical convention); operators override to
-    # the real chart of accounts per environment.
+    # System-actor id recorded as the journal's createdBy (ADR-0143 step 4). Fee journal legs name an
+    # accounting class and the ledger resolves the GL account (ADR-0341 D3), so there is no GL
+    # account configuration here any more.
     system-actor-id: ${BILLING_LEDGER_SYSTEM_ACTOR_ID:00000000-0000-0000-0000-0000000000bb}
-    gl:
-      # Deposit-control (2100, same seeded account as settlement/transaction/interest use), not
-      # a separate fee-receivable asset account — subAccountId is only valid on deposit-control
-      # legs (ADR-0039 Phase B); "1400" was never a seeded GL account, so every real fee posting
-      # 422'd against ledger-service. Fixed alongside the pact coverage for this edge (issue #468).
-      fee-receivable: ${BILLING_GL_FEE_RECEIVABLE_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}
-      # 4003, not the older 4001 — V1__init_ledger.sql seeded 4001 with gen_random_uuid(), so no
-      # fixed UUID could ever reference it (issue #468). V15 adds a stable-UUID replacement.
-      fee-income: ${BILLING_GL_FEE_INCOME_ACCOUNT_ID:a0000000-0000-0000-0000-000000004003}
 
 openbank:
   # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
@@ -204,6 +194,13 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
   billing:
+    ledger:
+      # ADR-0341 D3 rollout switch. false (default): fee legs carry the explicit GL accounts the ledger has
+      # always accepted (2100 / 4003), so deploying billing BEFORE the ledger that serves accounting
+      # classes (migration V32) cannot make the ledger refuse every fee. true: legs name an
+      # accountingClass and the ledger resolves the account. Flip only after that ledger is live, then
+      # delete the two literal ids in BillingJournalFactory.
+      post-by-class: ${OPENBANK_BILLING_LEDGER_POST_BY_CLASS:false}
     scheduler:
       # Disabled by default — the scheduler cannot charge anyone on default config.
       # Batch source (BillingCycleScheduler KDoc, ADR-0143 / issue #548): account-ids CSV set
