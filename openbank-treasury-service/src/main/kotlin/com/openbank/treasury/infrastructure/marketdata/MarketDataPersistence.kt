@@ -5,6 +5,7 @@
 package com.openbank.treasury.infrastructure.marketdata
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.treasury.application.port.out.CashFlowConflictException
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.FixingFlowRepository
 import com.openbank.treasury.application.port.out.MarketDataRepository
@@ -21,9 +22,7 @@ import com.openbank.treasury.domain.marketdata.ObservationSource
 import com.openbank.treasury.domain.marketdata.ObservationStatus
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
-import com.openbank.treasury.infrastructure.cashflow.CashFlowEntity
 import com.openbank.treasury.infrastructure.cashflow.DealLookupPanacheRepository
-import com.openbank.treasury.infrastructure.cashflow.fill
 import com.openbank.treasury.infrastructure.cashflow.toDomain
 import com.openbank.treasury.infrastructure.persistence.repository.CashFlowPanacheRepository
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -364,27 +363,44 @@ class FixingFlowRepositoryImpl(
         return rows.filter { live[it.dealId] == it.scheduleVersion }.map { it.toDomain() }
     }
 
+    /**
+     * Each flow is moved by its OWN guarded UPDATE — only while it is still an unfixed PROJECTED /
+     * MISSING row with no provenance — and must hit exactly one row, else the whole transaction is
+     * refused (a concurrent fixing or override won). Never the generic entity fill.
+     */
     override suspend fun applyFixing(dealId: UUID, flows: List<CashFlow>, event: DealEvent) {
         Panache.withTransaction {
-            flowRepo.find("flowId in ?1", flows.map { it.flowId }).withLock(LockModeType.PESSIMISTIC_WRITE).list()
-                .flatMap { rows ->
-                    val byId = rows.associateBy { it.flowId }
-                    flows.forEach { f ->
-                        val row: CashFlowEntity = checkNotNull(byId[f.flowId]) { "flow ${f.flowId} disappeared" }
-                        check(row.state == "PROJECTED") {
-                            "flow ${f.flowId} is ${row.state}, not PROJECTED: fixed concurrently"
+            flows.fold(Uni.createFrom().voidItem()) { acc, f ->
+                acc.flatMap {
+                    flowRepo.update(
+                        "state = 'FIXED', rate = ?1, amount = ?2, rateSource = 'OBSERVED', fixingSource = ?3, " +
+                            "fixingSha256 = ?4, fixedAt = ?5, rowVersion = rowVersion + 1 " +
+                            "where flowId = ?6 and state = 'PROJECTED' and rateSource in ('PROJECTED', 'MISSING') " +
+                            "and fixingSha256 is null",
+                        checkNotNull(f.rate),
+                        checkNotNull(f.amount),
+                        checkNotNull(f.fixingSource),
+                        checkNotNull(f.fixingSha256),
+                        checkNotNull(f.fixedAt),
+                        f.flowId,
+                    ).map { n ->
+                        if (n != 1) {
+                            throw CashFlowConflictException(
+                                "flow ${f.flowId} is no longer an unfixed PROJECTED row: fixed concurrently",
+                            )
                         }
-                        row.fill(f)
-                    }
-                    outbox.persistInTransaction(
-                        OutboxMessage(
-                            aggregateId = dealId,
-                            eventType = event.eventType,
-                            payload = event.payload,
-                            createdAt = clock.instant(),
-                        ),
-                    )
+                    }.replaceWithVoid()
                 }
+            }.flatMap {
+                outbox.persistInTransaction(
+                    OutboxMessage(
+                        aggregateId = dealId,
+                        eventType = event.eventType,
+                        payload = event.payload,
+                        createdAt = clock.instant(),
+                    ),
+                )
+            }
         }.awaitSuspending()
     }
 

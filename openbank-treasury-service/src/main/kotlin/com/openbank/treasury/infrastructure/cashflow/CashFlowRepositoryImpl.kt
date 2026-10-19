@@ -6,6 +6,7 @@ package com.openbank.treasury.infrastructure.cashflow
 
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.treasury.application.port.out.CalendarFlow
+import com.openbank.treasury.application.port.out.CashFlowConflictException
 import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.DealEvent
@@ -154,6 +155,14 @@ class CashFlowRepositoryImpl(
     private fun applyFlow(flow: CashFlow): Uni<Void> =
         flowRepo.find("flowId", flow.flowId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().map { row ->
             checkNotNull(row) { "flow ${flow.flowId} disappeared" }
+            // The override was computed from the flow as read; if a fixing or a payment touched the
+            // row since, refuse rather than write a stale state over it (fill never writes the
+            // payment link or the fixing provenance, but state/rate/amount must not regress either).
+            if (row.state != flow.state.name || row.fixedAt != flow.fixedAt || row.paymentId != flow.paymentId) {
+                throw CashFlowConflictException(
+                    "flow ${flow.flowId} changed since it was read (now ${row.state}); reload and retry",
+                )
+            }
             row.fill(flow)
         }.replaceWithVoid()
 

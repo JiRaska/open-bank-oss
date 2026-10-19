@@ -10,6 +10,8 @@ import com.openbank.treasury.domain.marketdata.ObservationSource
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
@@ -40,7 +42,10 @@ import java.util.UUID
 @QuarkusTestResource(CashFlowLedgerApiIT.NoDispatch::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
+@TestProfile(FixingApiIT.OwnDatabase::class)
 class FixingApiIT {
+    /** Its own application (and Postgres): the reference data it activates must not leak into other ITs. */
+    class OwnDatabase : QuarkusTestProfile
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun post(path: String, body: String? = null, type: String = "application/json") = given()

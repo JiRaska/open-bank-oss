@@ -40,6 +40,9 @@ data class DealVersionView(
 /** A flow with the deal facts the event calendar needs. */
 data class CalendarFlow(val flow: CashFlow, val bookId: String?, val maturityDate: LocalDate, val product: String)
 
+/** A guarded flow write found the row changed underneath it (a concurrent fixing, payment or override): 409. */
+class CashFlowConflictException(message: String) : IllegalStateException(message)
+
 interface CashFlowRepository {
     /** The rows of [scheduleVersion], or of the latest version when null. */
     suspend fun flows(dealId: UUID, scheduleVersion: Int?): List<CashFlow>

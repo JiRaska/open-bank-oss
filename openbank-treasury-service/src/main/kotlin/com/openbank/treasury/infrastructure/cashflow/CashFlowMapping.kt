@@ -39,10 +39,9 @@ internal fun CashFlowEntity.fill(f: CashFlow) = apply {
     originalPaymentDate = f.originalPaymentDate
     originalAmount = f.originalAmount
     overrideId = f.overrideId
-    fixingSource = f.fixingSource
-    fixingSha256 = f.fixingSha256
-    fixedAt = f.fixedAt
-    paymentId = f.paymentId
+    // Deliberately NOT written here: paymentId and the fixing provenance (fixingSource,
+    // fixingSha256, fixedAt). Each has its own narrow, guarded UPDATE (FixingFlowRepositoryImpl,
+    // PaymentRepositoryImpl) so a writer holding a stale copy of the row can never erase them.
 }
 
 internal fun CashFlowEntity.toDomain() = CashFlow(

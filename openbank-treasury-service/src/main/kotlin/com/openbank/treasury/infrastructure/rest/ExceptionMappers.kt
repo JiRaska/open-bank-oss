@@ -127,6 +127,18 @@ class ExceptionMappers {
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
+    fun flowConflict(e: com.openbank.treasury.application.port.out.CashFlowConflictException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FLOW_CHANGED", e.message)
+
+    @ServerExceptionMapper
+    fun paymentNotFound(e: com.openbank.treasury.application.port.out.PaymentNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun fundingExceeded(e: com.openbank.treasury.domain.payment.FundingExceededException): Response =
+        error(UNPROCESSABLE, "FUNDING_EXCEEDED", e.message)
+
+    @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
 

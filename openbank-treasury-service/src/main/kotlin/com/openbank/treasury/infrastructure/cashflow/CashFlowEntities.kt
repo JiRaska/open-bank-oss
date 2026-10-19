@@ -96,6 +96,11 @@ class CashFlowEntity : PanacheEntity() {
 
     @Column(name = "fixed_at")
     var fixedAt: java.time.Instant? = null
+
+    /** Optimistic lock (V27): a stale copy of the row fails at flush instead of overwriting it. */
+    @Version
+    @Column(name = "row_version", nullable = false)
+    var rowVersion: Long = 0
 }
 
 @Entity
