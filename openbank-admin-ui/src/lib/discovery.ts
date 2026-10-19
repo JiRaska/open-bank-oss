@@ -16,6 +16,8 @@
 
 import { readFileSync, existsSync } from 'node:fs'
 import https from 'node:https'
+import { getRegistry } from '@/lib/services/fleet'
+import { k8sNameOf } from '@/lib/services/registry'
 
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount'
 const TOKEN_PATH = `${SA_DIR}/token`
@@ -293,29 +295,69 @@ export async function discoverServices(): Promise<DiscoveredService[] | null> {
 // resolution the BFF proxy uses, so server-side fetches reach the real Service
 // DNS (`<name>.<namespace>.svc:<port>`) instead of a compose hostname/localhost
 // that doesn't resolve inside the pod.
-let _baseUrlCache: { at: number; map: Record<string, { namespace: string; port: number }> } | null = null
+export type InClusterServiceResolution =
+  | { state: 'found'; service: DiscoveredService; baseUrl: string; coverage: 'complete' | 'partial' }
+  | { state: 'not_found'; coverage: 'complete' }
+  | { state: 'unknown'; coverage: 'complete' | 'partial' | 'unavailable' }
+  | { state: 'off_cluster'; coverage: 'static' }
+
+let _discoverySnapshotCache: { at: number; snapshot: ServiceDiscoverySnapshot } | null = null
 const BASEURL_TTL_MS = 30_000
 
-/**
- * In-cluster base URL for a Kubernetes Deployment/Service name, e.g.
- * `account-service` → `http://account-service.accounts.svc:8100`. Resolved via
- * the ADR-0051 discovery feed. Returns null off-cluster (no SA token) or when
- * the service isn't currently discovered (undeployed), so callers can degrade to
- * a graceful "not deployed" state instead of hanging on an unresolvable host.
- */
-export async function resolveInClusterBaseUrl(k8sName: string): Promise<string | null> {
-  if (!inCluster()) return null
+async function cachedDiscoverySnapshot(): Promise<ServiceDiscoverySnapshot> {
   const now = Date.now()
-  if (!_baseUrlCache || now - _baseUrlCache.at > BASEURL_TTL_MS) {
-    const discovered = await discoverServices()
-    if (discovered) {
-      const map: Record<string, { namespace: string; port: number }> = {}
-      for (const d of discovered) map[d.name] = { namespace: d.namespace, port: d.port }
-      _baseUrlCache = { at: now, map }
+  if (_discoverySnapshotCache && now - _discoverySnapshotCache.at <= BASEURL_TTL_MS) {
+    return _discoverySnapshotCache.snapshot
+  }
+  const snapshot = await discoverServicesSnapshot()
+  _discoverySnapshotCache = { at: now, snapshot }
+  return snapshot
+}
+
+/** Resolve a workload without turning an incomplete Kubernetes read into a negative.
+ * A known positive from a partial list is usable; absence is authoritative only in a
+ * complete snapshot. Duplicate workload names are ambiguous and therefore unknown.
+ */
+export function resolveServiceInSnapshot(
+  snapshot: ServiceDiscoverySnapshot,
+  k8sName: string,
+  preferredNamespace?: string,
+): InClusterServiceResolution {
+  if (snapshot.status === 'static') return { state: 'off_cluster', coverage: 'static' }
+  if (snapshot.status === 'unavailable') return { state: 'unknown', coverage: 'unavailable' }
+  const sameName = snapshot.services.filter((service) => service.name === k8sName)
+  const matches = preferredNamespace
+    ? sameName.filter((service) => service.namespace === preferredNamespace)
+    : sameName
+  if (matches.length > 1) return { state: 'unknown', coverage: snapshot.status }
+  if (matches.length === 1) {
+    const service = matches[0]
+    return {
+      state: 'found',
+      service,
+      baseUrl: `http://${service.name}.${service.namespace}.svc:${service.port}`,
+      coverage: snapshot.status,
     }
   }
-  const hit = _baseUrlCache?.map[k8sName]
-  return hit ? `http://${k8sName}.${hit.namespace}.svc:${hit.port}` : null
+  return snapshot.status === 'complete'
+    ? { state: 'not_found', coverage: 'complete' }
+    : { state: 'unknown', coverage: 'partial' }
+}
+
+export async function resolveInClusterService(k8sName: string): Promise<InClusterServiceResolution> {
+  if (!inCluster()) return { state: 'off_cluster', coverage: 'static' }
+  // This preference is sourced only from the closed, code-derived service registry.
+  // No request path or caller-supplied namespace can influence upstream selection.
+  const preferredNamespace = getRegistry()
+    .find((service) => k8sNameOf(service) === k8sName)?.k8sNamespace
+  return resolveServiceInSnapshot(await cachedDiscoverySnapshot(), k8sName, preferredNamespace)
+}
+
+/** Compatibility URL helper. Null means no usable positive observation; callers
+ * that need to distinguish absence from incomplete discovery must use the typed resolver. */
+export async function resolveInClusterBaseUrl(k8sName: string): Promise<string | null> {
+  const result = await resolveInClusterService(k8sName)
+  return result.state === 'found' ? result.baseUrl : null
 }
 
 /** "account-service" → "Account Service" for display. */

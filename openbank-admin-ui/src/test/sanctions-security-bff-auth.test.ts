@@ -18,7 +18,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
 // The security route resolves the scanner through k8s discovery; pin it so the test never
 // touches the API server.
-vi.mock('@/lib/discovery', () => ({ resolveInClusterBaseUrl: vi.fn().mockResolvedValue('http://scanner:8120') }))
+vi.mock('@/lib/discovery', () => ({
+  inCluster: vi.fn().mockReturnValue(true),
+  resolveInClusterService: vi.fn().mockResolvedValue({ state: 'found', service: {}, baseUrl: 'http://scanner:8120', coverage: 'complete' }),
+}))
 
 import { auth } from '@/auth'
 
@@ -175,5 +178,18 @@ describe('security BFF relays the operator bearer', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('does not claim the scanner is absent when discovery is incomplete and no bundle exists', async () => {
+    const { resolveInClusterService } = await import('@/lib/discovery')
+    vi.mocked(resolveInClusterService).mockResolvedValue({ state: 'unknown', coverage: 'partial' })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { GET } = await import('@/app/api/security/route')
+    const body = await (await GET()).json()
+
+    expect(body).toMatchObject({ available: false, reason: 'error', detail: expect.stringContaining('discovery is incomplete') })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

@@ -15,7 +15,7 @@ import { cookies } from 'next/headers'
 import { BookOpen, ChevronLeft, FileText, AlertCircle, Wifi, HardDrive, ExternalLink, FileJson, Heart, Activity, Info, Hash, Globe } from 'lucide-react'
 import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
-import { loadDocsIndex, loadDocsDocument } from '@/lib/services/docs'
+import { DocsDiscoveryIncompleteError, loadDocsIndex, loadDocsDocument } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
 
 interface PageProps {
@@ -64,10 +64,18 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
   const lang = langCookie === 'cs' ? 'cs' : 'en'
   const t = (cs: string, en: string) => (lang === 'cs' ? cs : en)
 
-  const [index, doc] = await Promise.all([
-    loadDocsIndex(name, requestedLang),
-    loadDocsDocument(name, slug, requestedLang),
-  ])
+  let index = null
+  let doc = null
+  let discoveryIncomplete = false
+  try {
+    [index, doc] = await Promise.all([
+      loadDocsIndex(name, requestedLang),
+      loadDocsDocument(name, slug, requestedLang),
+    ])
+  } catch (error) {
+    if (!(error instanceof DocsDiscoveryIncompleteError)) throw error
+    discoveryIncomplete = true
+  }
 
   const items = index?.items ?? []
   const source = doc?.source ?? index?.source
@@ -143,7 +151,11 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
               </Link>
             )
           })}
-          {items.length === 0 && (
+          {discoveryIncomplete ? (
+            <div role="status" style={{ fontSize: '12px', color: 'var(--warning)', padding: '8px', lineHeight: 1.5 }}>
+              {t('Stav zjišťování služeb je neúplný; dostupnost dokumentace zatím nelze ověřit. Zkuste to později.', 'Service discovery is incomplete; documentation availability cannot yet be verified. Please try again later.')}
+            </div>
+          ) : items.length === 0 && (
             <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '8px', lineHeight: 1.5 }}>
               {t('Žádné dokumenty. Služba buď nemá ', 'No documents. The service either has no ')}
               <code>src/main/resources/docs/</code>
@@ -235,7 +247,17 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
           </div>
         )}
 
-        {doc === null ? (
+        {discoveryIncomplete ? (
+          <div role="status" style={{
+            display: 'flex', alignItems: 'flex-start', gap: '10px',
+            background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+            color: 'var(--warning)', padding: '14px 16px', borderRadius: 'var(--r-md)',
+            fontSize: '13px',
+          }}>
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
+            {t('Dokumentace nebyla označena jako nenalezená, protože inventář služeb je neúplný.', 'Documentation is not reported as missing because the service inventory is incomplete.')}
+          </div>
+        ) : doc === null ? (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: '10px',
             background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',

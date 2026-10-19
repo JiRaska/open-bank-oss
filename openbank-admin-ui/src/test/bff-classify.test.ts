@@ -19,6 +19,17 @@ describe('classifyBffFailure', () => {
     expect(await classifyBffFailure(res(404, { error: 'Unknown service: foo' }))).toBe('not_deployed')
   })
 
+  it('maps discovery_unavailable 503 to unknown collection state before generic status handling', async () => {
+    expect(await classifyBffFailure(res(503, { error: 'discovery_unavailable' }))).toBe('discovery_unavailable')
+  })
+
+  it('does not classify incomplete discovery as deployed, idle, or unreachable', async () => {
+    const kind = await classifyBffFailure(res(503, { error: 'discovery_unavailable' }))
+    expect(kind).not.toBe('not_deployed')
+    expect(kind).not.toBe('scaled_to_zero')
+    expect(kind).not.toBe('unreachable')
+  })
+
   it('maps 503 "scaled_to_zero" to scaled_to_zero (KEDA idle, ADR-0057)', async () => {
     expect(await classifyBffFailure(res(503, { error: 'scaled_to_zero' }))).toBe('scaled_to_zero')
   })

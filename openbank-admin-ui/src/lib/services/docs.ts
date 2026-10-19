@@ -23,7 +23,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { findService } from './fleet'
 import { serviceBaseUrl, k8sNameOf, type ServiceEntry } from './registry'
-import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 
 const FETCH_TIMEOUT_MS = 2000
 const DEFAULT_LANG = 'en'
@@ -193,16 +193,26 @@ async function docFromBundle(serviceDir: string, slug: string, requestedLang: st
  * Base URL for talking to a running service from the admin-ui server process.
  *   • In-cluster → real Service DNS (`<name>.<namespace>.svc:<port>`) resolved
  *     via the ADR-0051 discovery feed — the same path the BFF proxy and System
- *     Health use. Returns null when the service isn't deployed (→ docs degrade to
- *     a calm "not available" 404 instead of hanging on an unresolvable host).
+ *     Health use. Returns null only when a complete inventory confirms absence;
+ *     incomplete discovery is surfaced as unavailable rather than a false 404.
  *   • Off-cluster (local dev / docker-compose) → legacy localhost/container map.
  * The old code always used the compose hostname / localhost, which does not
  * resolve inside the Kubernetes pod — so docs for *running* services silently
  * 404'd in the sandbox.
  */
+export class DocsDiscoveryIncompleteError extends Error {
+  constructor() {
+    super('Kubernetes service discovery is incomplete')
+    this.name = 'DocsDiscoveryIncompleteError'
+  }
+}
+
 async function liveBaseUrl(svc: ServiceEntry): Promise<string | null> {
   if (inCluster()) {
-    return resolveInClusterBaseUrl(k8sNameOf(svc))
+    const result = await resolveInClusterService(k8sNameOf(svc))
+    if (result.state === 'found') return result.baseUrl
+    if (result.state === 'unknown') throw new DocsDiscoveryIncompleteError()
+    return null
   }
   return serviceBaseUrl(svc)
 }
@@ -214,8 +224,14 @@ async function docsBaseUrl(id: string): Promise<string | null> {
   const svc = findService(id)
   if (svc) return liveBaseUrl(svc)
   if (!inCluster()) return null
-  return (await resolveInClusterBaseUrl(id))
-    ?? (await resolveInClusterBaseUrl(`${id}-service`))
+  let discoveryIncomplete = false
+  for (const name of [id, `${id}-service`]) {
+    const result = await resolveInClusterService(name)
+    if (result.state === 'found') return result.baseUrl
+    if (result.state === 'unknown') discoveryIncomplete = true
+  }
+  if (discoveryIncomplete) throw new DocsDiscoveryIncompleteError()
+  return null
 }
 
 async function indexFromLive(id: string, requestedLang: string): Promise<DocsIndex | null> {
