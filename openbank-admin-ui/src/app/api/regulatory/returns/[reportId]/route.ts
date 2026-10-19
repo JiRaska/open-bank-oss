@@ -55,6 +55,7 @@ export async function GET(request: Request, { params }: RouteContext) {
       console.error('regulatory BFF: report source failed')
       switch (err.kind) {
         case 'not_deployed': return NextResponse.json({ error: `Unknown service: ${err.service}`, service: err.service }, { status: 404 })
+        case 'discovery_unavailable': return NextResponse.json({ error: 'discovery_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
         case 'unauthorized': return NextResponse.json({ error: 'unauthorized', service: err.service }, { status: 403 })
         case 'unreachable': return NextResponse.json({ error: 'upstream_unreachable', service: err.service }, { status: 502 })
         case 'result_limit': return NextResponse.json({ error: 'result_limit', service: err.service }, { status: 500 })

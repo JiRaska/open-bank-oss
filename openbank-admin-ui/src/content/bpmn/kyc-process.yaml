@@ -3,130 +3,108 @@
 # BPMN process diagram (ADR-0019/0029). Authored as data; validated by
 # src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
 
-name: KYC / CDD Process
-desc: Know Your Customer - Customer Due Diligence proces dle EBA AML Guidelines
+name: KYC Case Lifecycle
+desc: PARTY_CREATED opens a KYC case. Checks accumulate before an authorised four-eyes reviewer approves or rejects it.
 regulation: EBA AML Guidelines + 5AMLD Art. 13 + FATF R.10
 services:
   - kyc-service
-  - aml-service
   - party-service
 steps:
   - id: start
     type: start
     x: 60
     y: 100
-    label: Nový zákazník
-  - id: collect
+    label: PARTY_CREATED
+  - id: open-case
     type: task
     x: 180
     y: 100
-    label: Sběr dokumentů
+    label: Open KYC case
     lane: kyc
     apis:
-      - POST /api/v1/kyc/documents
+      - POST /api/v1/kyc/cases
     relatedServices:
       - kyc-service
-  - id: pep
+    consumes:
+      - openbank.party.events
+    emits:
+      - openbank.kyc.events
+  - id: checks
     type: task
-    x: 320
+    x: 410
     y: 100
-    label: PEP Screening
-    lane: compliance
+    label: Record KYC check results
+    lane: kyc
     apis:
-      - POST /api/v1/aml/pep-check
+      - PUT /api/v1/kyc/cases/{caseId}/checks/{checkType}
     relatedServices:
-      - aml-service
-  - id: gw-pep
+      - kyc-service
+  - id: review
     type: gateway
-    x: 440
+    x: 650
     y: 100
-    label: PEP?
-  - id: edd
+    label: Four-eyes decision
+  - id: approve
     type: task
-    x: 440
-    y: 220
-    label: EDD (Enhanced)
-    lane: compliance
+    x: 830
+    y: 50
+    label: Approve case
+    lane: kyc
     apis:
-      - POST /api/v1/kyc/edd
+      - POST /api/v1/kyc/cases/{caseId}/approve
     relatedServices:
       - kyc-service
     emits:
       - openbank.kyc.events
-  - id: cdd
-    type: task
-    x: 560
-    y: 100
-    label: CDD Standard
-    lane: compliance
-    apis:
-      - POST /api/v1/kyc/cdd
-    relatedServices:
-      - kyc-service
-    emits:
-      - openbank.kyc.events
-  - id: risk
-    type: task
-    x: 680
-    y: 100
-    label: Risk Rating
-    lane: compliance
-    apis:
-      - POST /api/v1/aml/risk-rating
-    relatedServices:
-      - aml-service
-  - id: gw2
-    type: gateway
-    x: 800
-    y: 100
-    label: Schváleno?
   - id: reject
-    type: end-err
-    x: 800
-    y: 220
-    label: Odmítnuto
-  - id: active
     type: task
-    x: 920
-    y: 100
-    label: Aktivace Party
-    lane: identity
+    x: 830
+    y: 180
+    label: Reject case
+    lane: kyc
     apis:
-      - PUT /api/v1/party/{id}/activate
+      - POST /api/v1/kyc/cases/{caseId}/reject
+    relatedServices:
+      - kyc-service
+    emits:
+      - openbank.kyc.events
+  - id: party-update
+    type: task
+    x: 1040
+    y: 100
+    label: Party service applies KYC decision
+    lane: identity
     relatedServices:
       - party-service
     consumes:
       - openbank.kyc.events
-      - openbank.aml.events
   - id: end
     type: end
-    x: 1020
+    x: 1140
     y: 100
-    label: Aktivní
+    label: Party KYC status updated
 flows:
   - from: start
-    to: collect
-  - from: collect
-    to: pep
-  - from: pep
-    to: gw-pep
-  - from: gw-pep
-    to: edd
-    label: Ano
-  - from: gw-pep
-    to: cdd
-    label: Ne
-  - from: edd
-    to: risk
-  - from: cdd
-    to: risk
-  - from: risk
-    to: gw2
-  - from: gw2
+    to: open-case
+    kind: async
+    topic: openbank.party.events
+  - from: open-case
+    to: checks
+  - from: checks
+    to: review
+  - from: review
+    to: approve
+    label: Approve
+  - from: review
     to: reject
-    label: Ne
-  - from: gw2
-    to: active
-    label: Ano
-  - from: active
+    label: Reject
+  - from: approve
+    to: party-update
+    kind: async
+    topic: openbank.kyc.events
+  - from: reject
+    to: party-update
+    kind: async
+    topic: openbank.kyc.events
+  - from: party-update
     to: end

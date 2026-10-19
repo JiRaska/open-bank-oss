@@ -12,6 +12,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.PostingEvent
+import com.openbank.treasury.domain.model.ResolvedAccount
 import io.smallrye.mutiny.Uni
 import java.math.BigDecimal
 import java.time.Instant
@@ -31,6 +32,8 @@ data class LedgerJournalRef(
     val idempotencyKey: String,
     val journalId: UUID,
     val postedAt: Instant,
+    /** The accounts the ledger resolved each leg to, so a reversal can offset exactly these. */
+    val accounts: List<ResolvedAccount> = emptyList(),
 )
 
 /**
@@ -96,8 +99,11 @@ interface CounterpartyRepository {
  * writes the ledger's database. Must be idempotent on [JournalSpec.idempotencyKey].
  */
 interface LedgerPostingPort {
-    /** Returns the ledger's journal id — the original one on an idempotent replay. */
-    suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID
+    /**
+     * Returns the ledger's journal — the original one on an idempotent replay, with the accounts its
+     * legs were ORIGINALLY resolved to.
+     */
+    suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal
 }
 
 /**
@@ -137,3 +143,6 @@ fun interface CurveSetPort {
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
 }
+
+/** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */
+data class PostedJournal(val journalId: UUID, val accounts: List<ResolvedAccount> = emptyList())

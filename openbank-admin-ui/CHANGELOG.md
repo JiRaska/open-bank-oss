@@ -1,5 +1,52 @@
 # Changelog
 
+## [3.8.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.4...admin-ui-v3.8.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** show only the five newest EKS versions ([#13385](https://github.com/JiRaska/open-bank-oss/issues/13385)) ([a64d0f3](https://github.com/JiRaska/open-bank-oss/commit/a64d0f3fd882d9771d757525a7e39154b9484b84))
+
+## [3.8.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.3...admin-ui-v3.8.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** isolate operational evidence and enforce delivery boundaries ([#13372](https://github.com/JiRaska/open-bank-oss/issues/13372)) ([9da523d](https://github.com/JiRaska/open-bank-oss/commit/9da523d1f38f3e416e5428ad1ebe7070108474a1))
+
+## [3.8.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.2...admin-ui-v3.8.3) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve unknown costs and skip inactive blob warm-up ([#13200](https://github.com/JiRaska/open-bank-oss/issues/13200)) ([a8c619b](https://github.com/JiRaska/open-bank-oss/commit/a8c619b14dbac8dbea9311ae57dd35e81e409f72))
+
+## [3.8.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.1...admin-ui-v3.8.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve accessible labels with UI dependency updates ([#13329](https://github.com/JiRaska/open-bank-oss/issues/13329)) ([638a27c](https://github.com/JiRaska/open-bank-oss/commit/638a27c6ed541d8f6785af8f8b9571b87d84dcce))
+
+## [3.8.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.0...admin-ui-v3.8.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve health identity across namespaces ([#13356](https://github.com/JiRaska/open-bank-oss/issues/13356)) ([8590616](https://github.com/JiRaska/open-bank-oss/commit/8590616bd329b141332ce43ddd0fa8d83c2f7872))
+
+## [3.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.1...admin-ui-v3.8.0) (2026-10-19)
+
+
+### Features
+
+* **admin-ui:** publish runtime evidence and verify deployable images ([#13337](https://github.com/JiRaska/open-bank-oss/issues/13337)) ([83a53d7](https://github.com/JiRaska/open-bank-oss/commit/83a53d7c21149e093c569f283c98b10b5b9b0725))
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish collector failures from service outages ([#13334](https://github.com/JiRaska/open-bank-oss/issues/13334)) ([45aedc3](https://github.com/JiRaska/open-bank-oss/commit/45aedc3427d89028a81162a44fcad6391e5e5bc2))
+
 ## [3.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.0...admin-ui-v3.7.1) (2026-10-18)
 
 
