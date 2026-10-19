@@ -36,7 +36,7 @@ const observedAt = file => {
 }
 const {
   safeRun, stateFrom, freshnessAwareState, thresholdObservation, retainedThresholdObservation,
-  thresholdBackedState, validBuildAttestation, retainActionableFailure, normalizeThresholdEvidence,
+  thresholdBackedState, validBuildAttestation, retainActionableFailure,
   projectRunEnvelope,
 } = createRunProjection({ collectedAt, staleAfterMs, maxFutureSkewMs, warn: message => warnings.push(message) })
 

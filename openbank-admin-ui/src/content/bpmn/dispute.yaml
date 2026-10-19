@@ -21,10 +21,10 @@ steps:
     type: task
     x: 180
     y: 100
-    label: Ověření transakce
+    label: Open dispute record
     lane: core
     apis:
-      - GET /api/v1/transactions/{id}
+      - POST /api/v1/disputes
     relatedServices:
       - dispute-service
   - id: gw1
@@ -43,10 +43,8 @@ steps:
     y: 100
     label: Provisional Credit
     lane: core
-    apis:
-      - POST /api/v1/ledger/post
     relatedServices:
-      - ledger-service
+      - dispute-service
   - id: cb
     type: task
     x: 580
@@ -54,9 +52,9 @@ steps:
     label: Chargeback Init
     lane: cards
     apis:
-      - POST /api/v1/cards/chargeback
+      - POST /api/v1/disputes/{id}/escalate
     relatedServices:
-      - card-issuance-service
+      - dispute-service
   - id: gw2
     type: gateway
     x: 720
@@ -68,10 +66,8 @@ steps:
     y: 220
     label: Debit Reversal
     lane: core
-    apis:
-      - POST /api/v1/ledger/post
     relatedServices:
-      - ledger-service
+      - dispute-service
   - id: confirm
     type: task
     x: 860
@@ -79,7 +75,7 @@ steps:
     label: Potvrzení kreditu
     lane: core
     apis:
-      - PUT /api/v1/disputes/{id}/close
+      - POST /api/v1/disputes/{id}/resolve
     relatedServices:
       - dispute-service
   - id: notify
@@ -88,8 +84,6 @@ steps:
     y: 100
     label: Notifikace
     lane: platform
-    apis:
-      - POST /api/v1/notifications
     relatedServices:
       - notification-service
     consumes:

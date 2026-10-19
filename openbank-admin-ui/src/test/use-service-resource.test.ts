@@ -44,6 +44,19 @@ describe('useServiceResource', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('does not auto-wake on incomplete discovery because deployment state is unknown', async () => {
+    const fetchMock = vi.fn(async () => jsonRes(503, { error: 'discovery_unavailable' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() =>
+      useServiceResource('/api/svc/x/api/v1/items', { retryDelayMs: 1, maxWakeRetries: 3 }),
+    )
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.unavailable).toEqual({ kind: 'discovery_unavailable', status: 503 })
+    expect(result.current.waking).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('auto-wakes a scaled-to-zero service: retries the 503 then fills in', async () => {
     let call = 0
     const fetchMock = vi.fn(async () => {
@@ -106,6 +119,30 @@ describe('useServiceResource', () => {
     await waitFor(() => expect(result.current.unavailable).toEqual({ kind: 'unauthorized', status }))
     expect(result.current.data).toBeNull()
     expect(result.current.unavailable).toEqual({ kind: 'unauthorized', status })
+  })
+
+  it('classifies invalid JSON as a terminal contract failure without waking a service', async () => {
+    const fetchMock = vi.fn(async () => new Response('{', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useServiceResource('/api/svc/x/api/v1/items', { retryDelayMs: 1 }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.unavailable).toEqual({ kind: 'error', status: 200 })
+    expect(result.current.waking).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a response-body transport failure without calling it malformed JSON', async () => {
+    let call = 0
+    const fetchMock = vi.fn(async () => {
+      call += 1
+      if (call === 1) return { ok: true, status: 200, json: async () => { throw new TypeError('body terminated') } } as Response
+      return jsonRes(200, ['recovered'])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => useServiceResource('/api/svc/x/api/v1/items', { retryDelayMs: 1 }))
+    await waitFor(() => expect(result.current.data).toEqual(['recovered']))
+    expect(result.current.unavailable).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('does nothing when url is null', async () => {

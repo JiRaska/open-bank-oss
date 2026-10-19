@@ -6,22 +6,24 @@
 // Production-readiness collector (Node.js ESM port of prod-readiness-collector.py).
 //
 // Derives C1–C9 maturity scores from the repo — no JDK, no credentials, pure
-// filesystem read. Produces prod-readiness.json in the admin-ui working directory
-// (same path the route.ts reads: process.cwd()/prod-readiness.json).
+// filesystem read. Produces a provenance-stamped image fallback; the API prefers
+// a separately published runtime snapshot when one is available.
 //
 // Score scale per cell: 0 Absent · 1 Declared · 2 Verified · 3 Bank-grade.
 //
-// Wired into `prebuild` so the image always contains a fresh scorecard baked at
-// build time. The admin-ui is a READ-ONLY consumer (ADR-0029 rule #7: derived data
-// is never hand-edited). build-push-admin-ui.sh calls the Python version; this
-// script is the Node path used by `npm run build` and the admin-ui CI step.
+// Wired into `prebuild` so an image-baked reference is available before the first
+// runtime publication. The admin-ui remains a READ-ONLY consumer (ADR-0029 rule #7).
+// build-push-admin-ui.sh calls the Python version; this script is the Node path
+// used by `npm run build` and the admin-ui CI step.
 //
 // Usage:
-//   node scripts/collect-prod-readiness.mjs [--repo <path>] [--out <file>]
+//   node scripts/collect-prod-readiness.mjs [--repo <path>] [--out <file>] [--source-sha <full-sha>]
 // Defaults: repo = two levels up from scripts/ (the monorepo root)
 //           out  = ./prod-readiness.json
 
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -36,6 +38,13 @@ const getArg = (flag, dflt) => {
 const REPO   = path.resolve(getArg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT    = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'prod-readiness.json')))
 const TODAY  = process.env.READINESS_TODAY ?? new Date().toISOString().slice(0, 10)
+const SOURCE_SHA_ARG = getArg('--source-sha', process.env.READINESS_SOURCE_SHA ?? process.env.GITHUB_SHA)
+
+function sourceSha() {
+  const sha = SOURCE_SHA_ARG ?? execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim()
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('READINESS_SOURCE_SHA must be a full 40-character Git SHA')
+  return sha
+}
 
 // ---------------------------------------------------------------------------
 // Money-path services — DERIVED from rules.yaml: money_path_services.
@@ -656,7 +665,16 @@ if (results.length === 0) {
 }
 
 const payload = {
+  schema_version: 1,
   generated_for: TODAY,
+  collected_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  source_sha: sourceSha(),
+  scope: {
+    kind: 'service-module-matrix-v1',
+    service_count: results.length,
+    money_path_count: results.filter(result => result.money_path).length,
+    roster_sha256: createHash('sha256').update(results.map(result => `${result.service}:${result.money_path}`).sort().join('\n')).digest('hex'),
+  },
   dimensions: DIMENSIONS,
   services: results,
 }

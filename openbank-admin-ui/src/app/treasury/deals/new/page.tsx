@@ -25,7 +25,7 @@ import {
   headroomFor, isAssetProduct, isCnbFacility, isValidFxPair, nextBusinessDay, productLabel, refusalText, STATE_TONE, stateLabel,
 } from '@/components/treasury/model'
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
-import { bankToday, isIsoDate } from '@/components/balance-sheet/model'
+import { bankToday, isIsoDate } from '@/lib/format/bankDate'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export default function NewTreasuryDealPage() {

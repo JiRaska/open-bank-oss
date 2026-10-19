@@ -4,6 +4,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  IMAGE_SAMPLE_MAX_AGE_MS,
   QUERIES,
   aggregateImages,
   buildView,
@@ -20,6 +21,7 @@ import { compareVersions, formatVersion, nodesText, versionText } from '@/lib/pl
 type Row = { metric: Record<string, string>; value: [number, string] }
 const prom = (rows: Row[]) => new Response(JSON.stringify({ status: 'success', data: { result: rows } }), { status: 200 })
 const row = (metric: Record<string, string>, v: number): Row => ({ metric, value: [0, String(v)] })
+const imageRow = (image: string, observedAt: number): Row => row({ image }, observedAt)
 
 /** Mock Prometheus keyed on which query string was sent. */
 function mockProm(answers: Partial<Record<keyof typeof QUERIES, Row[]>>): typeof fetch {
@@ -53,20 +55,57 @@ describe('parsers', () => {
     expect(parseImageVersion('loki', 'docker.io/grafana/loki:6.6.6')).toBe('6.6.6')
     expect(parseImageVersion('keycloak', 'quay.io/keycloak/keycloak:44.4.4')).toBe('44.4.4')
     expect(parseImageVersion('grafana', 'docker.io/grafana/grafana:33.3.3')).toBe('33.3.3')
+    expect(parseImageVersion('schema-registry', 'docker.io/apicurio/apicurio-registry-sql:2.6.2.Final')).toBe('2.6.2')
+    expect(parseImageVersion('kafka-ui', 'docker.io/kafbat/kafka-ui:v1.2.3')).toBe('1.2.3')
+    expect(parseImageVersion('prometheus', 'public.ecr.aws/mirror/prometheus/prometheus:v3.5.0')).toBe('3.5.0')
+    expect(parseImageVersion('tempo', 'docker.io/grafana/tempo:2.8.1')).toBe('2.8.1')
+    expect(parseImageVersion('alloy', 'public.ecr.aws/d7v4f3x6/alloy:v1.20.1')).toBe('1.20.1')
+    expect(parseImageVersion('openbao', 'quay.io/openbao/openbao:2.5.4')).toBe('2.5.4')
+  })
+
+  it('parses source-backed runtime image repositories for the remaining infrastructure registry entries', () => {
+    const samples: Record<string, [string, string]> = {
+      pyroscope: ['public.ecr.aws/grafana/pyroscope:1.21.0', '1.21.0'],
+      glitchtip: ['docker.io/glitchtip/glitchtip:6.2.3', '6.2.3'],
+      alertmanager: ['quay.io/prometheus/alertmanager:v0.28.1', '0.28.1'],
+      'otel-collector': ['docker.io/otel/opentelemetry-collector-contrib:0.0.1', '0.0.1'],
+      pyrra: ['ghcr.io/pyrra-dev/pyrra:v0.10.2', '0.10.2'],
+      goalert: ['docker.io/goalert/goalert:v0.34.1', '0.34.1'],
+      ntfy: ['docker.io/binwiederhier/ntfy:v2.24.0', '2.24.0'],
+      temporal: ['docker.io/temporalio/server:1.31.4', '1.31.4'],
+      keda: ['ghcr.io/kedacore/keda:2.21.0', '2.21.0'],
+      argocd: ['quay.io/argoproj/argocd:v3.5.3', '3.5.3'],
+      kyverno: ['ghcr.io/kyverno/kyverno:v7.8.9', '7.8.9'],
+      'cert-manager': ['quay.io/jetstack/cert-manager-controller:v1.21.2', '1.21.2'],
+      karpenter: ['public.ecr.aws/karpenter/controller:1.15.0', '1.15.0'],
+    }
+    for (const [component, [image, version]] of Object.entries(samples)) {
+      expect(parseImageVersion(component, image), component).toBe(version)
+    }
+  })
+
+  it('preserves the full digest identity when a known component image has no parseable version tag', () => {
+    const digest = 'a'.repeat(64)
+    expect(parseImageVersion('kafka-ui', `ghcr.io/kafbat/kafka-ui@sha256:${digest}`)).toBe(`sha256:${digest}`)
+    expect(parseImageVersion('kafka-ui', `ghcr.io/unrelated/app@sha256:${digest}`)).toBeNull()
   })
 
   it('aggregates distinct running versions with pod counts', () => {
     const agg = aggregateImages([
-      { image: 'ghcr.io/cloudnative-pg/postgresql:77.3', count: 5 },
-      { image: 'ghcr.io/cloudnative-pg/postgresql:77.1', count: 1 },
-      { image: 'busybox:1', count: 9 },
+      { image: 'ghcr.io/cloudnative-pg/postgresql:77.3', count: 5, observedAt: '2026-10-19T00:00:00.000Z' },
+      { image: 'ghcr.io/cloudnative-pg/postgresql:77.1', count: 1, observedAt: '2026-10-19T00:01:00.000Z' },
+      { image: 'busybox:1', count: 9, observedAt: '2026-10-19T00:00:00.000Z' },
     ])
-    expect(agg.postgres).toEqual([{ version: '77.3', count: 5 }, { version: '77.1', count: 1 }])
+    expect(agg.postgres).toEqual([
+      { version: '77.3', count: 5, observedAt: '2026-10-19T00:00:00.000Z' },
+      { version: '77.1', count: 1, observedAt: '2026-10-19T00:01:00.000Z' },
+    ])
     expect(agg.kafka).toBeUndefined()
   })
 })
 
 describe('live snapshot from mocked Prometheus', () => {
+  const fixedNow = new Date('2026-10-19T18:00:00.000Z')
   const full = mockProm({
     apiserver: [row({ git_version: 'v1.99.0-eks-aaa' }, 2)],
     kubelet: [row({ git_version: 'v1.98.7-eks-bbb' }, 3)],
@@ -75,19 +114,52 @@ describe('live snapshot from mocked Prometheus', () => {
     nodeTypes: [row({ label_node_kubernetes_io_instance_type: 'x9.big', label_karpenter_sh_capacity_type: 'spot' }, 2)],
     nodesReady: [row({}, 2)],
     nodesTotal: [row({}, 3)],
-    images: [row({ image: 'quay.io/strimzi/kafka:0.77.0-kafka-9.8.7' }, 3)],
+    images: [
+      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000),
+      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000),
+      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000),
+    ],
   })
 
   it('reads versions, nodes (Ready of total) and node types', async () => {
-    const s = await fetchLiveSnapshot(full)
+    const s = await fetchLiveSnapshot(full, () => fixedNow)
     expect(s.available).toBe(true)
     expect(s.kubernetes).toEqual([{ version: '1.99.0', count: 2 }])
     expect(s.kubelets).toEqual([{ version: '1.98.7', count: 3 }])
     expect(s.podsRunningByNamespace).toEqual({ 'cert-manager': 3 })
     expect(s.daemonSetsReady).toEqual({ 'observability/alloy': 7 })
-    expect(s.components.kafka).toEqual([{ version: '9.8.7', count: 3 }])
+    expect(s.components.kafka).toEqual([{ version: '9.8.7', count: 3, observedAt: fixedNow.toISOString() }])
     expect(s.nodes).toEqual({ ready: 2, total: 3, byType: [{ instanceType: 'x9.big', capacityType: 'spot', count: 2 }] })
     expect(nodesText({ nodes: s.nodes, declaredNodeGroup: null } as never)).toContain('2/3 Ready')
+  })
+
+  it('ignores stopped containers and stale image samples before reporting live component versions', async () => {
+    const fixedNow = new Date('2026-10-19T18:00:00.000Z')
+    const query = mockProm({
+      images: [
+        imageRow('docker.io/apicurio/apicurio-registry-sql:2.6.2.Final', fixedNow.getTime() / 1000),
+        imageRow('docker.io/grafana/grafana:11.2.0', fixedNow.getTime() / 1000 - IMAGE_SAMPLE_MAX_AGE_MS / 1000 - 1),
+      ],
+    })
+    const s = await fetchLiveSnapshot(query, () => fixedNow)
+    expect(QUERIES.images).toContain('kube_pod_container_status_running == 1')
+    expect(s.components['schema-registry']).toEqual([{ version: '2.6.2', count: 1, observedAt: fixedNow.toISOString() }])
+    expect(s.components.grafana).toBeUndefined()
+    expect(s.available).toBe(true)
+  })
+
+  it('does not turn a digest identity into a declared-version drift claim', async () => {
+    const fixedNow = new Date('2026-10-19T18:00:00.000Z')
+    const digest = 'a'.repeat(64)
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [imageRow(`ghcr.io/cloudnative-pg/postgresql@sha256:${digest}`, fixedNow.getTime() / 1000)],
+    }), () => fixedNow)
+    expect(s.components.postgres).toEqual([
+      { version: `sha256:${digest}`, count: 1, observedAt: fixedNow.toISOString() },
+    ])
+    const view = buildView(s, 'snapshot')
+    expect(view.items.postgres.live).toBeNull()
+    expect(view.items.postgres.status).toBe('live-unavailable')
   })
 
   it('empty Prometheus answers read as unavailable, not as "nothing runs"', async () => {

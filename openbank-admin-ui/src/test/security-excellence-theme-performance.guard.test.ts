@@ -24,8 +24,16 @@ describe('Security Excellence presentation and snapshot contract', () => {
     expect(source.match(/fetchKpis\(\)/g)).toHaveLength(2) // declaration + one request per refresh
     expect(source.match(/const kpisSnapshot = fetchKpis\(\)/g)).toHaveLength(1)
     expect(source).not.toMatch(/const snap = await fetchKpis\(\)/)
-    for (const domain of ['segmentation', 'freshness', 'credentials', 'fuzz', 'threatmodels', 'mttr']) {
-      expect(source).toContain(`${domain}: async () =>`)
+    const kpiDomains = {
+      segmentation: 'fetchSegmentation',
+      freshness: 'fetchFreshness',
+      credentials: 'fetchCredentials',
+      fuzz: 'fetchFuzz',
+      threatmodels: 'fetchThreatModels',
+      mttr: 'fetchMttr',
+    }
+    for (const [domain, fetcher] of Object.entries(kpiDomains)) {
+      expect(source).toContain(`${domain}: () => withFreshKpis(${fetcher})`)
     }
   })
 })
