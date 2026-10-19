@@ -8,9 +8,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.swift.application.port.out.InstitutionTransferRejection
 import com.openbank.swift.application.port.out.InstitutionTransferRepository
+import com.openbank.swift.application.port.out.InstitutionTransferSubmission
 import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.NonConformingMessageException
 import com.openbank.swift.application.port.out.SchemeGatewayPort
+import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.domain.institution.InstitutionTransferStatus
 import com.openbank.swift.domain.institution.InstitutionTransferStatusChanged
@@ -64,57 +66,133 @@ class InstitutionTransferService(
     private val log = Logger.getLogger(InstitutionTransferService::class.java)
 
     suspend fun onReleased(payment: ReleasedPayment): InstitutionTransfer {
+        // Idempotency FIRST: a replay of a payment this rail already holds is answered from the
+        // stored transfer and never re-judged — today's date would refuse a release whose value
+        // date has since passed, announcing REJECTED for a payment that may already be SETTLED.
+        knownTransfer(payment)?.let { return replay(it, payment) }
+
         val today = LocalDate.ofInstant(Instant.now(clock), ZoneOffset.UTC)
         val release = when (val v = ReleasedPaymentValidator.validate(payment, today, pastToleranceDays)) {
             is ReleaseValidation.Valid -> v.release
             is ReleaseValidation.Invalid -> refuse(payment, v.rejection.reasonCode, v.rejection.reason)
         }
-        val existing = repo.findByIdempotencyKey(release.idempotencyKey)
-            ?: repo.findByPaymentId(release.paymentId)
-        if (existing != null) return replay(existing, release)
-
-        val fresh = newTransfer(release)
-        val accepted = repo.saveWithOutbox(fresh, listOf(event(fresh, fresh.createdAt)))
+        if (repo.hasRejection(release.paymentId)) {
+            // Already announced REJECTED; a later valid release under the same id must not turn it
+            // into a payment. Dead-letter only — treasury re-proposes under a new payment id.
+            log.warnf("Release for payment %s follows a recorded rejection; dead-lettering", release.paymentId)
+            throw InstitutionTransferRefusedException("paymentId was already rejected")
+        }
+        val fresh = newTransferAt(release, Instant.now(clock))
+        val accepted = repo.saveWithOutbox(fresh, listOf(objectMapper.statusEvent(fresh, fresh.createdAt)))
         return submit(accepted)
     }
 
-    private suspend fun replay(existing: InstitutionTransfer, release: ValidatedRelease): InstitutionTransfer {
-        if (existing.paymentId != release.paymentId || existing.idempotencyKey != release.idempotencyKey) {
+    private suspend fun knownTransfer(payment: ReleasedPayment): InstitutionTransfer? {
+        val byKey = payment.idempotencyKey?.let { repo.findByIdempotencyKey(it) }
+        val paymentId = payment.paymentId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        return byKey ?: paymentId?.let { repo.findByPaymentId(it) }
+    }
+
+    private suspend fun replay(existing: InstitutionTransfer, payment: ReleasedPayment): InstitutionTransfer {
+        if (existing.paymentId.toString() != payment.paymentId || existing.idempotencyKey != payment.idempotencyKey) {
             // Same key, different payment (or the reverse): never a second message, never a silent merge.
             log.errorf(
                 "Release for payment %s conflicts with stored transfer %s; dead-lettering",
-                release.paymentId,
+                payment.paymentId,
                 existing.id,
             )
             throw InstitutionTransferRefusedException("idempotencyKey and paymentId do not match the stored transfer")
         }
-        return if (existing.status == InstitutionTransferStatus.ACCEPTED) submit(existing) else existing
+        return when (existing.status) {
+            InstitutionTransferStatus.ACCEPTED -> submit(existing)
+            InstitutionTransferStatus.SUBMITTING, InstitutionTransferStatus.SUBMISSION_UNKNOWN -> resolve(existing)
+            else -> existing
+        }
     }
 
-    private suspend fun submit(transfer: InstitutionTransfer): InstitutionTransfer {
+    /**
+     * First submission. The message identity (MsgId, CreDtTm; the UETR is fixed at creation) is
+     * committed as SUBMITTING BEFORE the scheme is called, so any later resend is byte-identical
+     * and the scheme's UETR deduplication can recognise it. One call, no automatic retry: no
+     * readable answer moves the transfer to SUBMISSION_UNKNOWN and the failure propagates for
+     * redelivery, which then resolves it by status query ([resolve]) — never by a blind resend.
+     */
+    private suspend fun submit(accepted: InstitutionTransfer): InstitutionTransfer {
+        val now = maxOf(Instant.now(clock), accepted.updatedAt.plusMillis(1))
+        val prepared = repo.saveWithOutbox(
+            accepted.copy(
+                status = InstitutionTransferStatus.SUBMITTING,
+                messageId = accepted.messageId ?: InstitutionTransfer.messageIdFor(accepted),
+                messageCreatedAt = accepted.messageCreatedAt ?: now,
+                updatedAt = now,
+            ),
+            emptyList(),
+        )
+        return send(prepared)
+    }
+
+    /** SUBMITTING / SUBMISSION_UNKNOWN: ask the scheme by UETR; resend (same identity) only if it has no record. */
+    private suspend fun resolve(transfer: InstitutionTransfer): InstitutionTransfer {
+        val known = try {
+            gateway.queryInstitutionTransferStatus(transfer)
+        } catch (e: SchemeGatewayUnavailableException) {
+            markUnknown(transfer)
+            throw e
+        }
+        return if (known == null) send(transfer) else apply(transfer, known)
+    }
+
+    private suspend fun send(prepared: InstitutionTransfer): InstitutionTransfer {
         val submission = try {
-            gateway.submitInstitutionTransfer(transfer)
+            gateway.submitInstitutionTransfer(prepared)
         } catch (e: NonConformingMessageException) {
-            log.errorf(e, "Rail built a non-conforming pacs.009 for payment %s; rejecting", transfer.paymentId)
+            log.errorf(e, "Rail built a non-conforming pacs.009 for payment %s; rejecting", prepared.paymentId)
             return transition(
-                transfer,
+                prepared,
                 InstitutionTransferStatus.REJECTED,
                 "FF01",
                 "rail built a non-conforming pacs.009",
                 null,
             )
+        } catch (e: SchemeGatewayUnavailableException) {
+            markUnknown(prepared)
+            throw e
         }
+        return apply(prepared, submission)
+    }
+
+    private suspend fun markUnknown(t: InstitutionTransfer) {
+        if (t.status == InstitutionTransferStatus.SUBMISSION_UNKNOWN) return
+        val now = maxOf(Instant.now(clock), t.updatedAt.plusMillis(1))
+        repo.saveWithOutbox(t.copy(status = InstitutionTransferStatus.SUBMISSION_UNKNOWN, updatedAt = now), emptyList())
+    }
+
+    private suspend fun apply(
+        transfer: InstitutionTransfer,
+        submission: InstitutionTransferSubmission,
+    ): InstitutionTransfer {
+        val raw = submission.rawPacs009.ifBlank { null }
         return when (submission.verdict) {
-            InstitutionTransferVerdict.IN_PROCESS ->
-                transition(transfer, InstitutionTransferStatus.SENT, null, null, submission.rawPacs009)
-            InstitutionTransferVerdict.SETTLED ->
-                transition(transfer, InstitutionTransferStatus.SETTLED, null, null, submission.rawPacs009)
+            InstitutionTransferVerdict.IN_PROCESS -> transition(
+                transfer,
+                InstitutionTransferStatus.SENT,
+                null,
+                null,
+                raw,
+            )
+            InstitutionTransferVerdict.SETTLED -> transition(
+                transfer,
+                InstitutionTransferStatus.SETTLED,
+                null,
+                null,
+                raw,
+            )
             InstitutionTransferVerdict.REJECTED -> transition(
                 transfer,
                 InstitutionTransferStatus.REJECTED,
                 submission.reasonCode ?: "NARR",
                 "scheme reject (pacs.002)",
-                submission.rawPacs009,
+                raw,
             )
         }
     }
@@ -141,10 +219,10 @@ class InstitutionTransferService(
             if (status ==
                 InstitutionTransferStatus.SETTLED
             ) {
-                add(event(updated.copy(status = InstitutionTransferStatus.SENT), now))
+                add(objectMapper.statusEvent(updated.copy(status = InstitutionTransferStatus.SENT), now))
             }
             // Strictly later than the SENT row, so the outbox's oldest-first claim keeps the order.
-            add(event(updated, if (isEmpty()) now else now.plusMillis(1)))
+            add(objectMapper.statusEvent(updated, if (isEmpty()) now else now.plusMillis(1)))
         }
         return repo.saveWithOutbox(updated, events)
     }
@@ -169,7 +247,7 @@ class InstitutionTransferService(
             )
             val written = repo.recordRejectionOnce(
                 InstitutionTransferRejection(paymentId, key, reasonCode, reason, synthetic, now),
-                outbox(paymentId, payload, now, synthetic),
+                objectMapper.statusOutbox(paymentId, payload, now, synthetic),
             )
             log.warnf(
                 "Refused release for payment %s (%s: %s); REJECTED %s",
@@ -183,62 +261,65 @@ class InstitutionTransferService(
         }
         throw InstitutionTransferRefusedException("$reasonCode: $reason")
     }
-
-    private fun newTransfer(r: ValidatedRelease): InstitutionTransfer {
-        val now = Instant.now(clock)
-        val transfer = InstitutionTransfer(
-            id = r.paymentId,
-            paymentId = r.paymentId,
-            idempotencyKey = r.idempotencyKey,
-            rail = r.rail,
-            amount = r.amount,
-            valueDate = r.valueDate,
-            debtor = r.debtor,
-            debtorGlAccountingClass = r.debtorGlAccountingClass,
-            creditor = r.creditor,
-            creditorName = r.creditorName,
-            intermediaryBic = r.intermediaryBic,
-            remittanceInformation = r.remittanceInformation,
-            dealIds = r.dealIds,
-            flowIds = r.flowIds,
-            releasedBy = r.releasedBy,
-            releasedAt = r.releasedAt,
-            synthetic = r.synthetic,
-            status = InstitutionTransferStatus.ACCEPTED,
-            uetr = InstitutionTransfer.uetrFor(r.paymentId),
-            reasonCode = null,
-            reason = null,
-            rawPacs009 = null,
-            rawMt202 = null,
-            createdAt = now,
-            updatedAt = now,
-            ssiVersion = r.ssiVersion,
-        )
-        return transfer.copy(rawMt202 = Mt202Mapper.render(transfer))
-    }
-
-    private fun event(t: InstitutionTransfer, at: Instant): OutboxMessage {
-        val payload = InstitutionTransferStatusChanged(
-            paymentId = t.paymentId.toString(),
-            idempotencyKey = t.idempotencyKey,
-            status = t.status.name,
-            messageType = InstitutionTransfer.MESSAGE_TYPE,
-            schemeReference = t.uetr,
-            reasonCode = t.reasonCode,
-            reason = t.reason,
-            at = at.toString(),
-            synthetic = t.synthetic,
-            ssiVersion = t.ssiVersion,
-        )
-        return outbox(t.paymentId, payload, at, t.synthetic)
-    }
-
-    private fun outbox(paymentId: UUID, payload: InstitutionTransferStatusChanged, at: Instant, synthetic: Boolean) =
-        OutboxMessage(
-            aggregateId = paymentId,
-            eventType = InstitutionTransferStatusChanged.EVENT_TYPE,
-            payload = objectMapper.writeValueAsString(payload),
-            createdAt = at,
-            synthetic = synthetic,
-        )
 }
+
+private fun newTransferAt(r: ValidatedRelease, now: Instant): InstitutionTransfer {
+    val transfer = InstitutionTransfer(
+        id = r.paymentId,
+        paymentId = r.paymentId,
+        idempotencyKey = r.idempotencyKey,
+        rail = r.rail,
+        amount = r.amount,
+        valueDate = r.valueDate,
+        debtor = r.debtor,
+        debtorGlAccountingClass = r.debtorGlAccountingClass,
+        creditor = r.creditor,
+        creditorName = r.creditorName,
+        intermediaryBic = r.intermediaryBic,
+        remittanceInformation = r.remittanceInformation,
+        dealIds = r.dealIds,
+        flowIds = r.flowIds,
+        releasedBy = r.releasedBy,
+        releasedAt = r.releasedAt,
+        synthetic = r.synthetic,
+        status = InstitutionTransferStatus.ACCEPTED,
+        uetr = InstitutionTransfer.uetrFor(r.paymentId),
+        reasonCode = null,
+        reason = null,
+        rawPacs009 = null,
+        rawMt202 = null,
+        createdAt = now,
+        updatedAt = now,
+        ssiVersion = r.ssiVersion,
+    )
+    return transfer.copy(rawMt202 = Mt202Mapper.render(transfer))
+}
+
+private fun ObjectMapper.statusEvent(t: InstitutionTransfer, at: Instant): OutboxMessage {
+    val payload = InstitutionTransferStatusChanged(
+        paymentId = t.paymentId.toString(),
+        idempotencyKey = t.idempotencyKey,
+        status = t.status.name,
+        messageType = InstitutionTransfer.MESSAGE_TYPE,
+        schemeReference = t.uetr,
+        reasonCode = t.reasonCode,
+        reason = t.reason,
+        at = at.toString(),
+        synthetic = t.synthetic,
+        ssiVersion = t.ssiVersion,
+    )
+    return statusOutbox(t.paymentId, payload, at, t.synthetic)
+}
+
+private fun ObjectMapper.statusOutbox(
+    paymentId: UUID,
+    payload: InstitutionTransferStatusChanged,
+    at: Instant,
+    synthetic: Boolean,
+) = OutboxMessage(
+    aggregateId = paymentId,
+    eventType = InstitutionTransferStatusChanged.EVENT_TYPE,
+    payload = writeValueAsString(payload),
+    createdAt = at,
+    synthetic = synthetic,
+)

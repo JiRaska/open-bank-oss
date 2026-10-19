@@ -46,23 +46,49 @@ class InstitutionTransferServiceTest {
             this.outbox += outbox
             return transfer
         }
+        override suspend fun hasRejection(paymentId: UUID) = rejections.containsKey(paymentId)
+
         override suspend fun recordRejectionOnce(
             rejection: InstitutionTransferRejection,
             outbox: SwiftOutboxMessage,
         ): Boolean {
-            if (rejections.containsKey(rejection.paymentId)) return false
+            val known = rows.values.any {
+                it.paymentId == rejection.paymentId ||
+                    it.idempotencyKey == rejection.idempotencyKey
+            }
+            if (known || rejections.containsKey(rejection.paymentId)) return false
             rejections[rejection.paymentId] = rejection
             this.outbox += outbox
             return true
         }
     }
 
+    /**
+     * A scheme with the clearing simulator's real property: it remembers what it took, by UETR.
+     * [timeoutAfterAccept] makes it take the transfer and then lose the answer — the case an
+     * automatic retry would turn into a second payment.
+     */
     private class Gateway(var next: () -> InstitutionTransferSubmission) : SchemeGatewayPort {
         var calls = 0
+        var queries = 0
+        var timeoutAfterAccept = false
+        var queryUnavailable = false
+        val taken = linkedMapOf<String, InstitutionTransferSubmission>()
+        val identities = mutableListOf<Pair<String?, java.time.Instant?>>()
         override suspend fun submit(message: SwiftMessage) = error("not used")
         override suspend fun submitInstitutionTransfer(transfer: InstitutionTransfer): InstitutionTransferSubmission {
             calls++
-            return next()
+            identities += transfer.messageId to transfer.messageCreatedAt
+            val answer = taken.getOrPut(transfer.uetr) { next() }
+            if (timeoutAfterAccept) throw SchemeGatewayUnavailableException(RuntimeException("read timeout"))
+            return answer
+        }
+        override suspend fun queryInstitutionTransferStatus(
+            transfer: InstitutionTransfer,
+        ): InstitutionTransferSubmission? {
+            queries++
+            if (queryUnavailable) throw SchemeGatewayUnavailableException(RuntimeException("down"))
+            return taken[transfer.uetr]
         }
     }
 
@@ -134,15 +160,106 @@ class InstitutionTransferServiceTest {
     }
 
     @Test
-    fun `a replay after the scheme was unreachable resumes without repeating ACCEPTED`(): Unit = runBlocking {
+    fun `a timeout after the scheme took it is resolved by status query - exactly one submission`(): Unit =
+        runBlocking {
+            val m = release()
+            gateway.timeoutAfterAccept = true
+            assertThatThrownBy {
+                runBlocking { service.onReleased(parsed(m)) }
+            }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            assertThat(repo.rows.values.single().status).isEqualTo(InstitutionTransferStatus.SUBMISSION_UNKNOWN)
+            assertThat(statuses()).containsExactly("ACCEPTED")
+            gateway.timeoutAfterAccept = false
+            assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.SETTLED)
+            assertThat(gateway.calls).describedAs("never resubmitted").isEqualTo(1)
+            assertThat(gateway.queries).isEqualTo(1)
+            assertThat(gateway.taken).hasSize(1)
+            assertThat(statuses()).containsExactly("ACCEPTED", "SENT", "SETTLED")
+        }
+
+    @Test
+    fun `an unknown submission the scheme never received is resent with the same MsgId and CreDtTm`(): Unit =
+        runBlocking {
+            val m = release()
+            var first = true
+            gateway.next = {
+                if (first) {
+                    first = false
+                    throw SchemeGatewayUnavailableException(RuntimeException("connect refused"))
+                }
+                InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, "<x/>")
+            }
+            assertThatThrownBy {
+                runBlocking { service.onReleased(parsed(m)) }
+            }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.SETTLED)
+            assertThat(gateway.queries).isEqualTo(1)
+            assertThat(gateway.identities).hasSize(2)
+            assertThat(gateway.identities.distinct()).describedAs("same pacs.009 identity on resend").hasSize(1)
+            assertThat(gateway.identities.first().first).startsWith("FI-")
+        }
+
+    @Test
+    fun `a status query that cannot be answered keeps the transfer unknown and sends nothing`(): Unit = runBlocking {
         val m = release()
-        gateway.next = { throw SchemeGatewayUnavailableException(RuntimeException("down")) }
+        gateway.timeoutAfterAccept = true
         assertThatThrownBy {
             runBlocking { service.onReleased(parsed(m)) }
         }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
-        assertThat(statuses()).containsExactly("ACCEPTED")
-        gateway.next = { InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, "<x/>") }
-        assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.SETTLED)
+        gateway.queryUnavailable = true
+        assertThatThrownBy {
+            runBlocking { service.onReleased(parsed(m)) }
+        }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+        assertThat(gateway.calls).isEqualTo(1)
+        assertThat(repo.rows.values.single().status).isEqualTo(InstitutionTransferStatus.SUBMISSION_UNKNOWN)
+    }
+
+    @Test
+    fun `a replay of a settled payment after its value date passed emits no REJECTED and no second transfer`(): Unit =
+        runBlocking {
+            val m = release() + ("valueDate" to InstitutionTransferFixtures.TODAY.toString())
+            service.onReleased(parsed(m))
+            val later = InstitutionTransferService(
+                repo,
+                gateway,
+                mapper,
+                Clock.fixed(InstitutionTransferFixtures.NOW.plus(java.time.Duration.ofDays(10)), ZoneOffset.UTC),
+                1,
+            )
+            assertThat(later.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.SETTLED)
+            assertThat(repo.rows).hasSize(1)
+            assertThat(repo.rejections).isEmpty()
+            assertThat(statuses()).containsExactly("ACCEPTED", "SENT", "SETTLED")
+        }
+
+    @Test
+    fun `a valid release after a recorded rejection is dead-lettered without a transfer`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        assertThatThrownBy { runBlocking { service.onReleased(parsed(release(paymentId = id, amount = "0.00"))) } }
+            .isInstanceOf(InstitutionTransferRefusedException::class.java)
+        assertThatThrownBy { runBlocking { service.onReleased(parsed(release(paymentId = id))) } }
+            .isInstanceOf(InstitutionTransferRefusedException::class.java).hasMessageContaining("already rejected")
+        assertThat(repo.rows).isEmpty()
+        assertThat(gateway.calls).isZero()
+        assertThat(statuses()).containsExactly("REJECTED")
+    }
+
+    @Test
+    fun `a rejection is never recorded for a payment the rail already holds`(): Unit = runBlocking {
+        val m = release()
+        service.onReleased(parsed(m))
+        val written = repo.recordRejectionOnce(
+            InstitutionTransferRejection(
+                UUID.fromString(m["paymentId"] as String),
+                null,
+                "FF01",
+                "x",
+                false,
+                InstitutionTransferFixtures.NOW,
+            ),
+            repo.outbox.first(),
+        )
+        assertThat(written).isFalse()
         assertThat(statuses()).containsExactly("ACCEPTED", "SENT", "SETTLED")
     }
 

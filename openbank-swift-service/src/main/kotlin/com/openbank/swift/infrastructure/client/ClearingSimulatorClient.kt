@@ -8,6 +8,7 @@ import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -36,4 +37,10 @@ interface ClearingSimulatorClient {
     @Consumes("application/xml")
     @Produces("application/xml")
     fun submitInstitutionCreditTransfer(@PathParam("route") route: String, pacs009Xml: String): Uni<String>
+
+    /** The `pacs.002` the scheme holds for a UETR; 404 when it has none (read-only). */
+    @GET
+    @Path("/api/v1/clearing/fi-credit-transfers/status/{uetr}")
+    @Produces("application/xml")
+    fun institutionTransferStatus(@PathParam("uetr") uetr: String): Uni<String>
 }

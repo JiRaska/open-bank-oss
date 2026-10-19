@@ -52,20 +52,35 @@ class InstitutionTransferRepositoryImpl(private val outboxRepoImpl: SwiftOutboxR
         }.flatMap { entity -> persistAll(outbox).replaceWith(entity) }
     }.awaitSuspending().toDomain()
 
+    override suspend fun hasRejection(paymentId: UUID): Boolean = Panache.withSession {
+        Panache.getSession().flatMap { it.find(InstitutionTransferRejectionEntity::class.java, paymentId) }
+    }.awaitSuspending() != null
+
+    /**
+     * One transaction: a transfer already stored under the payment id or idempotency key means the
+     * payment is KNOWN, and a stale replay must never announce it REJECTED — nothing is written.
+     */
     override suspend fun recordRejectionOnce(
         rejection: InstitutionTransferRejection,
         outbox: SwiftOutboxMessage,
     ): Boolean = Panache.withTransaction {
         Panache.getSession().flatMap { session ->
-            session.find(InstitutionTransferRejectionEntity::class.java, rejection.paymentId).flatMap { existing ->
-                if (existing != null) {
-                    Uni.createFrom().item(false)
-                } else {
-                    session.merge(rejection.toEntity())
-                        .flatMap { outboxRepoImpl.persistWithinCurrentTransaction(outbox) }
-                        .replaceWith(true)
+            find("paymentId = ?1 or idempotencyKey = ?2", rejection.paymentId, rejection.idempotencyKey ?: "")
+                .firstResult()
+                .flatMap { known ->
+                    session.find(
+                        InstitutionTransferRejectionEntity::class.java,
+                        rejection.paymentId,
+                    ).flatMap { existing ->
+                        if (known != null || existing != null) {
+                            Uni.createFrom().item(false)
+                        } else {
+                            session.merge(rejection.toEntity())
+                                .flatMap { outboxRepoImpl.persistWithinCurrentTransaction(outbox) }
+                                .replaceWith(true)
+                        }
+                    }
                 }
-            }
         }
     }.awaitSuspending()
 
@@ -73,81 +88,84 @@ class InstitutionTransferRepositoryImpl(private val outboxRepoImpl: SwiftOutboxR
         outbox.fold(Uni.createFrom().item(Unit)) { chain, message ->
             chain.flatMap { outboxRepoImpl.persistWithinCurrentTransaction(message).replaceWith(Unit) }
         }
-
-    private fun InstitutionTransferEntity.applyFrom(t: InstitutionTransfer) {
-        id = t.id
-        paymentId = t.paymentId
-        idempotencyKey = t.idempotencyKey
-        rail = t.rail
-        currency = t.currency
-        amountMinorUnits = t.amountMinorUnits
-        valueDate = t.valueDate
-        debtorBic = t.debtor.bic
-        debtorAccount = t.debtor.accountNumber
-        debtorGlAccountingClass = t.debtorGlAccountingClass
-        creditorBic = t.creditor.bic
-        creditorAccount = t.creditor.accountNumber
-        creditorName = t.creditorName
-        intermediaryBic = t.intermediaryBic
-        remittanceInformation = t.remittanceInformation
-        dealIds = t.dealIds.joinToString(",")
-        flowIds = t.flowIds.joinToString(",")
-        releasedBy = t.releasedBy
-        releasedAt = t.releasedAt
-        synthetic = t.synthetic
-        status = t.status
-        uetr = t.uetr
-        reasonCode = t.reasonCode
-        reason = t.reason
-        rawPacs009 = t.rawPacs009
-        rawMt202 = t.rawMt202
-        createdAt = t.createdAt
-        updatedAt = t.updatedAt
-        ssiVersion = t.ssiVersion
-    }
-
-    private fun InstitutionTransferRejection.toEntity() = InstitutionTransferRejectionEntity().also {
-        it.paymentId = paymentId
-        it.idempotencyKey = idempotencyKey
-        it.reasonCode = reasonCode
-        it.reason = reason
-        it.synthetic = synthetic
-        it.createdAt = createdAt
-    }
-
-    private fun InstitutionTransferEntity.toDomain(): InstitutionTransfer = InstitutionTransfer(
-        id = id,
-        paymentId = paymentId,
-        idempotencyKey = idempotencyKey,
-        rail = rail,
-        amount = moneyOf(amountMinorUnits, currency),
-        valueDate = valueDate,
-        debtor = InstitutionParty(debtorBic, debtorAccount),
-        debtorGlAccountingClass = debtorGlAccountingClass,
-        creditor = InstitutionParty(creditorBic, creditorAccount),
-        creditorName = creditorName,
-        intermediaryBic = intermediaryBic,
-        remittanceInformation = remittanceInformation,
-        dealIds = ids(dealIds),
-        flowIds = ids(flowIds),
-        releasedBy = releasedBy,
-        releasedAt = releasedAt,
-        synthetic = synthetic,
-        status = status,
-        uetr = uetr,
-        reasonCode = reasonCode,
-        reason = reason,
-        rawPacs009 = rawPacs009,
-        rawMt202 = rawMt202,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        version = version,
-        ssiVersion = ssiVersion,
-    )
-
-    private fun moneyOf(minorUnits: Long, currency: String): Money =
-        SwiftMessage.moneyOfMinorUnits(minorUnits, currency)
-
-    private fun ids(joined: String): List<UUID> =
-        if (joined.isBlank()) emptyList() else joined.split(',').map(UUID::fromString)
 }
+
+private fun InstitutionTransferEntity.applyFrom(t: InstitutionTransfer) {
+    id = t.id
+    paymentId = t.paymentId
+    idempotencyKey = t.idempotencyKey
+    rail = t.rail
+    currency = t.currency
+    amountMinorUnits = t.amountMinorUnits
+    valueDate = t.valueDate
+    debtorBic = t.debtor.bic
+    debtorAccount = t.debtor.accountNumber
+    debtorGlAccountingClass = t.debtorGlAccountingClass
+    creditorBic = t.creditor.bic
+    creditorAccount = t.creditor.accountNumber
+    creditorName = t.creditorName
+    intermediaryBic = t.intermediaryBic
+    remittanceInformation = t.remittanceInformation
+    dealIds = t.dealIds.joinToString(",")
+    flowIds = t.flowIds.joinToString(",")
+    releasedBy = t.releasedBy
+    releasedAt = t.releasedAt
+    synthetic = t.synthetic
+    status = t.status
+    uetr = t.uetr
+    reasonCode = t.reasonCode
+    reason = t.reason
+    rawPacs009 = t.rawPacs009
+    rawMt202 = t.rawMt202
+    createdAt = t.createdAt
+    updatedAt = t.updatedAt
+    ssiVersion = t.ssiVersion
+    messageId = t.messageId
+    messageCreatedAt = t.messageCreatedAt
+}
+
+private fun InstitutionTransferRejection.toEntity() = InstitutionTransferRejectionEntity().also {
+    it.paymentId = paymentId
+    it.idempotencyKey = idempotencyKey
+    it.reasonCode = reasonCode
+    it.reason = reason
+    it.synthetic = synthetic
+    it.createdAt = createdAt
+}
+
+private fun InstitutionTransferEntity.toDomain(): InstitutionTransfer = InstitutionTransfer(
+    id = id,
+    paymentId = paymentId,
+    idempotencyKey = idempotencyKey,
+    rail = rail,
+    amount = moneyOf(amountMinorUnits, currency),
+    valueDate = valueDate,
+    debtor = InstitutionParty(debtorBic, debtorAccount),
+    debtorGlAccountingClass = debtorGlAccountingClass,
+    creditor = InstitutionParty(creditorBic, creditorAccount),
+    creditorName = creditorName,
+    intermediaryBic = intermediaryBic,
+    remittanceInformation = remittanceInformation,
+    dealIds = ids(dealIds),
+    flowIds = ids(flowIds),
+    releasedBy = releasedBy,
+    releasedAt = releasedAt,
+    synthetic = synthetic,
+    status = status,
+    uetr = uetr,
+    reasonCode = reasonCode,
+    reason = reason,
+    rawPacs009 = rawPacs009,
+    rawMt202 = rawMt202,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+    version = version,
+    ssiVersion = ssiVersion,
+    messageId = messageId,
+    messageCreatedAt = messageCreatedAt,
+)
+
+private fun moneyOf(minorUnits: Long, currency: String): Money = SwiftMessage.moneyOfMinorUnits(minorUnits, currency)
+
+private fun ids(joined: String): List<UUID> =
+    if (joined.isBlank()) emptyList() else joined.split(',').map(UUID::fromString)

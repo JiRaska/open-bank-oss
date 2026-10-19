@@ -26,6 +26,14 @@ interface SchemeGatewayPort {
      */
     suspend fun submitInstitutionTransfer(transfer: InstitutionTransfer): InstitutionTransferSubmission =
         throw UnsupportedOperationException("this gateway does not carry bank-own transfers")
+
+    /**
+     * Ask the scheme what it holds for [transfer]'s UETR — read-only. `null` = no record, so the
+     * transfer never arrived; otherwise its verdict. [SchemeGatewayUnavailableException] when the
+     * scheme cannot answer.
+     */
+    suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): InstitutionTransferSubmission? =
+        throw UnsupportedOperationException("this gateway does not carry bank-own transfers")
 }
 
 /** The scheme's verdict on a `pacs.009`, from the `pacs.002` `TxSts`. */

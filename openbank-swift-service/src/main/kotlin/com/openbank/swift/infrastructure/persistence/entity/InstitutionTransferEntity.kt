@@ -78,7 +78,7 @@ class InstitutionTransferEntity {
     var releasedBy: String = ""
 
     @field:Column(name = "released_at")
-    var releasedAt: Instant = Instant.EPOCH
+    var releasedAt: Instant = Instant.now()
 
     @field:Column(name = "synthetic")
     var synthetic: Boolean = false
@@ -103,13 +103,19 @@ class InstitutionTransferEntity {
     var rawMt202: String? = null
 
     @field:Column(name = "created_at")
-    var createdAt: Instant = Instant.EPOCH
+    var createdAt: Instant = Instant.now()
 
     @field:Column(name = "updated_at")
-    var updatedAt: Instant = Instant.EPOCH
+    var updatedAt: Instant = Instant.now()
 
     @field:Column(name = "ssi_version")
     var ssiVersion: Long? = null
+
+    @field:Column(name = "message_id")
+    var messageId: String? = null
+
+    @field:Column(name = "message_created_at")
+    var messageCreatedAt: Instant? = null
 
     @field:Version
     @field:Column(name = "version")

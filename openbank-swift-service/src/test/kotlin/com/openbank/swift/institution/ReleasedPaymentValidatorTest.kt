@@ -54,7 +54,11 @@ class ReleasedPaymentValidatorTest {
 
     @ParameterizedTest(name = "{0} -> {2}")
     @MethodSource("negatives")
-    fun `each rule refuses with its ISO reason code`(name: String, m: Map<String, Any?>, expected: String) {
+    fun `each rule refuses with its ISO reason code`(
+        @Suppress("UnusedParameter") name: String,
+        m: Map<String, Any?>,
+        expected: String,
+    ) {
         assertThat(code(m)).isEqualTo(expected)
     }
 

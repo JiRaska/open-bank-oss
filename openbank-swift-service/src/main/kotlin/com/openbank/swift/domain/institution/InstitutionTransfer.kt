@@ -19,7 +19,21 @@ enum class InstitutionTransferRail { CERTIS, TARGET2, SWIFT }
  * stored, not yet on the wire. SENT: the scheme took it. SETTLED: the scheme confirmed settlement
  * (pacs.002 `ACSC`). REJECTED: refused, by this rail's validation or by the scheme.
  */
-enum class InstitutionTransferStatus { ACCEPTED, SENT, SETTLED, REJECTED }
+enum class InstitutionTransferStatus {
+    ACCEPTED,
+
+    /**
+     * Internal, never announced: the pacs.009 identity (MsgId, UETR, CreDtTm) is persisted and the
+     * submission is in flight. A crash here is resolved by querying the scheme, not by resending.
+     */
+    SUBMITTING,
+
+    /** Internal, never announced: no readable answer; resolved by a status query by UETR. */
+    SUBMISSION_UNKNOWN,
+    SENT,
+    SETTLED,
+    REJECTED,
+}
 
 /** The debtor (this bank) or creditor institution: BIC plus the settlement account at it. */
 data class InstitutionParty(val bic: String, val accountNumber: String)
@@ -61,6 +75,10 @@ data class InstitutionTransfer(
     val version: Long = 0,
     /** The counterparty SSI version treasury took the creditor block from (optional). */
     val ssiVersion: Long? = null,
+    /** pacs.009 `GrpHdr/MsgId`, fixed before the first submission and reused on any resend. */
+    val messageId: String? = null,
+    /** pacs.009 `GrpHdr/CreDtTm`, fixed with [messageId]. */
+    val messageCreatedAt: Instant? = null,
 ) {
     val currency: String get() = amount.currency.code
 
@@ -70,6 +88,9 @@ data class InstitutionTransfer(
     companion object {
         /** The pacs.009 / MT202 message type this rail reports on every status event. */
         const val MESSAGE_TYPE: String = "pacs.009"
+
+        /** The deterministic pacs.009 `MsgId` of [t]: `FI-` + its 16-character MT202 reference. */
+        fun messageIdFor(t: InstitutionTransfer): String = "FI-" + Mt202Mapper.reference(t)
 
         /**
          * A deterministic UUID v4-shaped UETR for [paymentId]: SHA-256 of the id with the version

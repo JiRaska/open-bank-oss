@@ -215,6 +215,7 @@ class InstitutionTransferRailIT {
         val xmin: String,
     )
 
+    @Suppress("NestedBlockDepth")
     private fun transferRow(paymentId: UUID): Row? = dataSource.connection.use { c ->
         c.prepareStatement(
             "SELECT status, raw_pacs009, raw_mt202, ssi_version, xmin::text FROM swift_institution_transfers WHERE payment_id = ?",
@@ -226,7 +227,7 @@ class InstitutionTransferRailIT {
                         r.getString(1),
                         r.getString(2),
                         r.getString(3),
-                        r.getObject(4) as Long?,
+                        r.getObject(4) as? Long,
                         r.getString(5),
                     )
                 } else {

@@ -4,6 +4,21 @@
   },
   "interactions": [
     {
+      "description": "GET the status of a UETR the simulator never received",
+      "providerStates": [
+        {
+          "name": "the clearing simulator is available"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
       "description": "POST a bank-own pacs.009 on the TARGET2 route",
       "providerStates": [
         {

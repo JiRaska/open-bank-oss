@@ -24,6 +24,7 @@ import com.openbank.swift.domain.model.SwiftMessage
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
@@ -82,11 +83,13 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
     }
 
     /**
-     * Bank-own transfers: build the `pacs.009` for the rail ([Pacs009InstructionMapper]),
-     * XSD-validate it (a failure is [NonConformingMessageException] — a defect, not retried),
-     * submit it on the rail's route and map the `pacs.002` `TxSts`. Unreachable scheme or an
-     * unreadable answer is [SchemeGatewayUnavailableException], so the caller keeps the transfer
-     * ACCEPTED and the release is redelivered.
+     * Bank-own transfers: build the `pacs.009` for the rail from the transfer's PERSISTED identity
+     * (MsgId, UETR, CreDtTm — [Pacs009InstructionMapper]), XSD-validate it (a failure is
+     * [NonConformingMessageException], never sent), submit it ONCE on the rail's route and map the
+     * `pacs.002`. There is deliberately no automatic retry: a submission is not idempotent from
+     * this side, so a timeout after the scheme took it must not become a second payment. Any
+     * failure to obtain a readable answer is [SchemeGatewayUnavailableException]; the caller marks
+     * the transfer SUBMISSION_UNKNOWN and resolves it by [queryInstitutionTransferStatus].
      */
     @Suppress("TooGenericExceptionCaught")
     override suspend fun submitInstitutionTransfer(transfer: InstitutionTransfer): InstitutionTransferSubmission {
@@ -99,26 +102,56 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
         }
         val status = try {
             statusReader.read(
-                self.submitInstitutionWithResilience(Pacs009InstructionMapper.routeOf(transfer.rail), pacs009),
+                self.submitInstitutionOnce(Pacs009InstructionMapper.routeOf(transfer.rail), pacs009),
             )
         } catch (ex: Exception) {
-            log.warnf(ex, "Scheme gateway unavailable for institution transfer %s; holding", transfer.paymentId)
+            log.warnf(ex, "No readable answer for institution transfer %s; outcome unknown", transfer.paymentId)
             throw SchemeGatewayUnavailableException(ex)
         }
-        val verdict = when (status.status) {
-            PaymentStatus.ACSC -> InstitutionTransferVerdict.SETTLED
-            PaymentStatus.RJCT -> InstitutionTransferVerdict.REJECTED
-            PaymentStatus.ACSP, PaymentStatus.RCVD -> InstitutionTransferVerdict.IN_PROCESS
-        }
-        return InstitutionTransferSubmission(verdict, status.reasonCode, pacs009)
+        return InstitutionTransferSubmission(verdictOf(status.status), status.reasonCode, pacs009)
     }
 
+    /**
+     * Read-only status query by UETR — the only way an unanswered submission is resolved. `null`
+     * when the scheme has no record of the UETR (HTTP 404): the transfer never arrived, and only
+     * then may it be resent (with the same identity). Safe to retry: it moves nothing.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): InstitutionTransferSubmission? {
+        val body = try {
+            self.queryInstitutionWithResilience(transfer.uetr)
+        } catch (ex: WebApplicationException) {
+            if (ex.response?.status == HTTP_NOT_FOUND) return null
+            throw SchemeGatewayUnavailableException(ex)
+        } catch (ex: Exception) {
+            throw SchemeGatewayUnavailableException(ex)
+        }
+        val status = try {
+            statusReader.read(body)
+        } catch (ex: Exception) {
+            throw SchemeGatewayUnavailableException(ex)
+        }
+        return InstitutionTransferSubmission(verdictOf(status.status), status.reasonCode, transfer.rawPacs009.orEmpty())
+    }
+
+    private fun verdictOf(status: PaymentStatus) = when (status) {
+        PaymentStatus.ACSC -> InstitutionTransferVerdict.SETTLED
+        PaymentStatus.RJCT -> InstitutionTransferVerdict.REJECTED
+        PaymentStatus.ACSP, PaymentStatus.RCVD -> InstitutionTransferVerdict.IN_PROCESS
+    }
+
+    // No @Retry here on purpose — see submitInstitutionTransfer.
     @Suppress("MagicNumber")
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
-    @Retry(maxRetries = 2, delay = 300, jitter = 150)
     @Timeout(5_000)
-    open suspend fun submitInstitutionWithResilience(route: String, pacs009Xml: String): String =
+    open suspend fun submitInstitutionOnce(route: String, pacs009Xml: String): String =
         client.submitInstitutionCreditTransfer(route, pacs009Xml).awaitSuspending()
+
+    @Suppress("MagicNumber")
+    @Retry(maxRetries = 2, delay = 300, jitter = 150, abortOn = [WebApplicationException::class])
+    @Timeout(5_000)
+    open suspend fun queryInstitutionWithResilience(uetr: String): String =
+        client.institutionTransferStatus(uetr).awaitSuspending()
 
     @Suppress("MagicNumber")
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
@@ -167,5 +200,6 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
 
     private companion object {
         const val MAX_35 = 35
+        const val HTTP_NOT_FOUND = 404
     }
 }

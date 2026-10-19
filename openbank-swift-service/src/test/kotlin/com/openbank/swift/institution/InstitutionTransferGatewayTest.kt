@@ -13,6 +13,7 @@ import com.openbank.libs.iso20022.PaymentStatusReport
 import com.openbank.swift.application.port.out.InstitutionTransferVerdict
 import com.openbank.swift.application.port.out.NonConformingMessageException
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
+import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.infrastructure.client.ClearingSimulatorClient
 import com.openbank.swift.infrastructure.client.SchemeGatewayAdapter
 import com.openbank.swift.institution.InstitutionTransferFixtures.release
@@ -78,5 +79,45 @@ class InstitutionTransferGatewayTest {
         assertThatThrownBy { runBlocking { adapter.submitInstitutionTransfer(broken) } }
             .isInstanceOf(NonConformingMessageException::class.java)
         verify(exactly = 0) { client.submitInstitutionCreditTransfer(any(), any()) }
+    }
+
+    @Test
+    fun `the institution submission carries no automatic retry, the status query may`() {
+        val methods = SchemeGatewayAdapter::class.java.declaredMethods
+        val submit = methods.single { it.name == "submitInstitutionOnce" }
+        assertThat(submit.getAnnotation(org.eclipse.microprofile.faulttolerance.Retry::class.java))
+            .describedAs("a retried pacs.009 submission can pay twice").isNull()
+        val query = methods.single { it.name == "queryInstitutionWithResilience" }
+        assertThat(query.getAnnotation(org.eclipse.microprofile.faulttolerance.Retry::class.java)).isNotNull()
+    }
+
+    @Test
+    fun `a status query maps the scheme's pacs_002 and a 404 means no record`(): Unit = runBlocking {
+        val t = transfer()
+        every { client.institutionTransferStatus(t.uetr) } returns Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        assertThat(adapter.queryInstitutionTransferStatus(t)!!.verdict).isEqualTo(InstitutionTransferVerdict.SETTLED)
+        every { client.institutionTransferStatus(t.uetr) } returns
+            Uni.createFrom().failure(jakarta.ws.rs.WebApplicationException(404))
+        assertThat(adapter.queryInstitutionTransferStatus(t)).isNull()
+        every { client.institutionTransferStatus(t.uetr) } returns
+            Uni.createFrom().failure(jakarta.ws.rs.WebApplicationException(503))
+        assertThatThrownBy { runBlocking { adapter.queryInstitutionTransferStatus(t) } }
+            .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+        every { client.institutionTransferStatus(t.uetr) } returns Uni.createFrom().item("<garbage")
+        assertThatThrownBy { runBlocking { adapter.queryInstitutionTransferStatus(t) } }
+            .isInstanceOf(SchemeGatewayUnavailableException::class.java)
+    }
+
+    @Test
+    fun `a resend carries the persisted MsgId and CreDtTm`(): Unit = runBlocking {
+        val created = java.time.Instant.parse("2026-10-19T07:00:00Z")
+        val t = transfer().let { it.copy(messageId = InstitutionTransfer.messageIdFor(it), messageCreatedAt = created) }
+        val body = slot<String>()
+        every { client.submitInstitutionCreditTransfer(any(), capture(body)) } returns
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        adapter.submitInstitutionTransfer(t)
+        assertThat(
+            body.captured,
+        ).contains("<MsgId>${t.messageId}</MsgId>", "<CreDtTm>2026-10-19T07:00:00Z</CreDtTm>", "<UETR>${t.uetr}</UETR>")
     }
 }

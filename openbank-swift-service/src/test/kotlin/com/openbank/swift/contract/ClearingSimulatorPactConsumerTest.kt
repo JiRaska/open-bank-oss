@@ -259,4 +259,25 @@ class ClearingSimulatorPactConsumerTest {
             .then()
             .statusCode(404)
     }
+
+    /** The status query by UETR (path pinned as a literal); an unknown UETR is 404 = never received. */
+    @Pact(consumer = "openbank-swift-service", provider = "openbank-clearing-simulator")
+    fun unknownUetrStatusPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the clearing simulator is available")
+        .uponReceiving("GET the status of a UETR the simulator never received")
+        .path("/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f")
+        .method("GET")
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "unknownUetrStatusPact")
+    fun `an unknown UETR status is 404`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .get("/api/v1/clearing/fi-credit-transfers/status/9a0c8e5a-6a3e-4b8e-9c1d-2a7b4c5d6e7f")
+            .then()
+            .statusCode(404)
+    }
 }

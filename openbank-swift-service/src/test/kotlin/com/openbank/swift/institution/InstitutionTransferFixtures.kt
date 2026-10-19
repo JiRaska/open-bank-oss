@@ -74,13 +74,15 @@ object InstitutionTransferFixtures {
         val r = (ReleasedPaymentValidator.validate(parsed(m), TODAY, 1) as ReleaseValidation.Valid).release
         return InstitutionTransfer(
             id = r.paymentId, paymentId = r.paymentId, idempotencyKey = r.idempotencyKey, rail = r.rail,
-            amount = r.amount, valueDate = r.valueDate, debtor = r.debtor, debtorGlAccountingClass = r.debtorGlAccountingClass,
+            amount = r.amount, valueDate = r.valueDate, debtor = r.debtor,
+            debtorGlAccountingClass = r.debtorGlAccountingClass,
             creditor = r.creditor, creditorName = r.creditorName, intermediaryBic = r.intermediaryBic,
             remittanceInformation = r.remittanceInformation, dealIds = r.dealIds, flowIds = r.flowIds,
             releasedBy = r.releasedBy, releasedAt = r.releasedAt, synthetic = r.synthetic,
             status = com.openbank.swift.domain.institution.InstitutionTransferStatus.ACCEPTED,
             uetr = InstitutionTransfer.uetrFor(r.paymentId), reasonCode = null, reason = null,
-            rawPacs009 = null, rawMt202 = null, createdAt = NOW, updatedAt = NOW, ssiVersion = r.ssiVersion,
+            rawPacs009 = null, rawMt202 = null, createdAt = NOW, updatedAt = NOW,
+            ssiVersion = r.ssiVersion,
         )
     }
 }

@@ -27,9 +27,13 @@ interface InstitutionTransferRepository {
     /** Insert or update [transfer] and write [outbox] in the SAME transaction (transactional outbox). */
     suspend fun saveWithOutbox(transfer: InstitutionTransfer, outbox: List<SwiftOutboxMessage>): InstitutionTransfer
 
+    /** True when a release for [paymentId] was already refused (a later valid one is dead-lettered). */
+    suspend fun hasRejection(paymentId: UUID): Boolean
+
     /**
      * Record [rejection] and write [outbox] in one transaction — unless a rejection for the same
-     * payment id already exists, in which case nothing is written. True when this call wrote it.
+     * payment id already exists OR a transfer is stored under its payment id or idempotency key
+     * (checked in the same transaction), in which case nothing is written. True when this call wrote it.
      */
     suspend fun recordRejectionOnce(rejection: InstitutionTransferRejection, outbox: SwiftOutboxMessage): Boolean
 }

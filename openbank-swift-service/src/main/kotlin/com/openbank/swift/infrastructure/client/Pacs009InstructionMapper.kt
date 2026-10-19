@@ -28,7 +28,6 @@ import java.time.ZoneOffset
  * `EndToEndId` and `TxId` are the payment id (hyphens dropped: Max35Text), and the UETR is the transfer's own.
  */
 object Pacs009InstructionMapper {
-    private const val MAX_35 = 35
 
     fun instruction(
         t: InstitutionTransfer,
@@ -48,8 +47,8 @@ object Pacs009InstructionMapper {
             t.creditor.bic
         }
         return InstitutionCreditTransferInstruction(
-            messageId = "FI-$reference".take(MAX_35),
-            creationDateTime = now,
+            messageId = t.messageId ?: InstitutionTransfer.messageIdFor(t),
+            creationDateTime = t.messageCreatedAt?.atOffset(ZoneOffset.UTC) ?: now,
             interbankSettlementDate = t.valueDate,
             instructionId = reference,
             endToEndId = compactId(t),

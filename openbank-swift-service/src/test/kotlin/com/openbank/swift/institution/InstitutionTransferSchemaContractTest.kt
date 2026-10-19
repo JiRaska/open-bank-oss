@@ -29,7 +29,9 @@ class InstitutionTransferSchemaContractTest {
 
     @Test
     fun `every status event the rail can emit conforms to the 9_2 schema`() {
-        for (status in InstitutionTransferStatus.entries) {
+        val announced = InstitutionTransferStatus.entries -
+            setOf(InstitutionTransferStatus.SUBMITTING, InstitutionTransferStatus.SUBMISSION_UNKNOWN)
+        for (status in announced) {
             for (ssi in listOf(null, 3L)) {
                 val event = InstitutionTransferStatusChanged(
                     paymentId = "1b4e28ba-2fa1-4d2e-883f-0016d3cca427",
@@ -85,6 +87,7 @@ class InstitutionTransferSchemaContractTest {
         }.anyMatch { it.contains("at") }
     }
 
+    @Suppress("LongMethod", "CyclomaticComplexMethod", "ReturnCount")
     private fun violations(schema: JsonNode, value: JsonNode, root: JsonNode, path: String = "$"): List<String> {
         val s = if (schema.has("\$ref")) root.at(schema.path("\$ref").asText().removePrefix("#")) else schema
         if (s.has("oneOf")) {
