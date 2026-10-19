@@ -112,6 +112,13 @@ on:
         type: boolean
         required: false
         default: false
+      reconcile_services:
+        description: >-
+          Optional space-separated list of up to three services to filter the reconcile to.
+          Only valid with reconcile=true on main. Each must have a GitOps pin and be stale by
+          the normal build-input equivalence check; Pact and image-freshness gates still apply.
+        required: false
+        default: ""
       bootstrap_image_only:
         description: >-
           Build, sign and attest exactly one service image that has no GitOps manifest yet.
@@ -175,6 +182,7 @@ jobs:
         env:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}
           INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
@@ -247,10 +255,22 @@ jobs:
             # Scheduled and on-demand reconcile must use the hold on LIVE main.
             # Filter before the probe's oldest-first cap and before any build work.
             git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' || return 1
+            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+              if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+                echo "::error::targeted reconcile is available only from refs/heads/main" >&2
+                return 1
+              fi
+              if [ "$(git rev-parse HEAD)" != "$(git rev-parse refs/remotes/origin/main)" ]; then
+                echo "::error::targeted reconcile requires this run's source SHA to be current main" >&2
+                return 1
+              fi
+            fi
             local held
             held="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
               .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)" || return 1
-            RECONCILE_SERVICES="$ALL_SERVICES" RECONCILE_HOLDS="$held" \
+            RECONCILE_SERVICES="$ALL_SERVICES" \
+              RECONCILE_TARGETS="${INPUT_RECONCILE_SERVICES:-}" \
+              RECONCILE_HOLDS="$held" \
               bash .github/scripts/auto-deploy-reconcile-lag.sh
           }
 
@@ -307,6 +327,22 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ] \
+              && [ "${{ github.event.inputs.reconcile }}" != "true" ]; then
+              echo "::error::reconcile_services requires reconcile=true"
+              exit 1
+            fi
+            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+              if [ "${INPUT_CODEPLOY:-false}" = "true" ] \
+                || [ -n "${INPUT_CODEPLOY_PACT_VERSIONS:-}" ]; then
+                echo "::error::targeted reconcile cannot use co-deploy or Pact replay inputs"
+                exit 1
+              fi
+              if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
+                echo "::error::targeted reconcile cannot be combined with bootstrap_image_only"
+                exit 1
+              fi
+            fi
             if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
               if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
                 echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
@@ -337,7 +373,11 @@ jobs:
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
               SERVICES_JSON="$(reconcile_candidates)"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
-                echo "Reconcile: every deployable service is up to date."
+                if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+                  echo "Reconcile: no requested service has an eligible stale GitOps image pin (up to date or held)."
+                else
+                  echo "Reconcile: every deployable service is up to date."
+                fi
                 echo "services=[]" >> "$GITHUB_OUTPUT"
                 echo "any=false" >> "$GITHUB_OUTPUT"
                 exit 0
