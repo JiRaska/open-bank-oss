@@ -116,4 +116,7 @@ class RecordingSpanExporter : SpanExporter {
     override fun shutdown(): CompletableResultCode = CompletableResultCode.ofSuccess()
 
     fun contract(): TraceContract = synchronized(recorded) { TraceContract.from(recorded) }
+
+    /** Snapshot of every recorded span, for tests that must read ids rather than assert a shape. */
+    fun spans(): List<SpanData> = synchronized(recorded) { recorded.toList() }
 }
