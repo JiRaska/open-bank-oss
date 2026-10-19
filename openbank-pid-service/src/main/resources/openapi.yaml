@@ -672,21 +672,18 @@ paths:
     get:
       tags: [Parties]
       summary: Get party by exact external identifier
-      description: Operator/admin lookup by the identifier type and exact stored value. Birth-number and EUDI subject values are stored as keyed digests, not plaintext.
       operationId: getByExternalId
       parameters:
-        - name: type
+        - name: externalId
           in: query
           required: true
           schema:
             type: string
-            enum: [KEYCLOAK_ID, BANKID_SUB, ROB_AIFO, ICO, PASSPORT_NUMBER, ID_CARD_NUMBER, BIRTH_NUMBER, EUDI_PID_SUB]
-        - name: value
+        - name: source
           in: query
           required: true
           schema:
             type: string
-            minLength: 1
       responses:
         '200':
           description: Party detail

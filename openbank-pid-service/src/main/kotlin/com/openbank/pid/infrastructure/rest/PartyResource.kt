@@ -313,11 +313,11 @@ class PartyResource(
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Look up a party by one exact external identifier (PII-minimised response)")
     suspend fun lookupByExternalId(request: ExternalIdLookupRequest): Response {
-        val type = requireNotNull(request.type) { "request field 'type' is required" }
+        val lookupType = requireNotNull(request.type) { "request field 'type' is required" }
+        val type = ExternalIdType.valueOf(lookupType.name)
         val value = requireNotNull(request.value) { "request field 'value' is required" }
         require(value.isNotBlank()) { "request field 'value' must not be blank" }
         require(value.length <= MAX_EXTERNAL_ID_LOOKUP_LENGTH) { "request field 'value' is too long" }
-        require(type in BROWSER_LOOKUP_TYPES) { "request field 'type' is not supported for exact lookup" }
         val party = try {
             getPartyUseCase.getByExternalId(type, value)
         } catch (_: PartyNotFoundException) {
@@ -512,13 +512,6 @@ class PartyResource(
 
     private companion object {
         const val MAX_EXTERNAL_ID_LOOKUP_LENGTH = 256
-        val BROWSER_LOOKUP_TYPES = setOf(
-            ExternalIdType.BANKID_SUB,
-            ExternalIdType.ROB_AIFO,
-            ExternalIdType.ICO,
-            ExternalIdType.PASSPORT_NUMBER,
-            ExternalIdType.ID_CARD_NUMBER,
-        )
     }
 
     private fun Party.toResponse() = PartyResponse(
