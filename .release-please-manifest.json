@@ -60,7 +60,7 @@
   "openbank-vop-service": "0.5.3",
   "openbank-campaign-service": "0.42.0",
   "openbank-tax-reporting-service": "0.46.0",
-  "openbank-delegation-service": "0.23.2",
+  "openbank-delegation-service": "0.23.3",
   "openbank-kyb-service": "0.8.5",
   "openbank-case-coordinator-agent": "0.12.3",
   "openbank-loyalty-service": "0.4.3",
