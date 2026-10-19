@@ -474,8 +474,9 @@ jobs:
       # a second npm ci replacing node_modules while another gate reads the schema.
       - name: Install locked Admin UI dependencies before parallel governance gates
         if: contains(matrix.groups, 'supplychain')
-        run: npm ci --ignore-scripts --no-audit --no-fund
-        working-directory: openbank-admin-ui
+        run: |
+          source .github/scripts/ensure-admin-ui-deps.sh
+          ensure_admin_ui_deps "governance-preflight"
 
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
       # be installed inside the gen-network-policies gate, which happened to be the first
