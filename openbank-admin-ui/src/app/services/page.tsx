@@ -161,7 +161,7 @@ export default function ServicesDocsOverviewPage() {
           const explicitStatic = body.source === 'static' && body.discoveryStatus === 'static' && hasServices
 
           if (completeKubernetes) {
-            liveEmpty = body.services.length === 0
+            liveEmpty = body.services?.length === 0
             if (liveEmpty) src = catalogReady ? 'static' : 'unavailable'
             else src = 'kubernetes'
           } else if (partialKubernetes) {
