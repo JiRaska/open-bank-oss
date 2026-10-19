@@ -8,8 +8,10 @@ import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -28,4 +30,17 @@ interface ClearingSimulatorClient {
     @Consumes("application/xml")
     @Produces("application/xml")
     fun submitCreditTransfer(pacs008Xml: String): Uni<String>
+
+    /** Submit a bank-own `pacs.009` on [route] (`certis` / `target2` / `swift`); returns the `pacs.002`. */
+    @POST
+    @Path("/api/v1/clearing/fi-credit-transfers/{route}")
+    @Consumes("application/xml")
+    @Produces("application/xml")
+    fun submitInstitutionCreditTransfer(@PathParam("route") route: String, pacs009Xml: String): Uni<String>
+
+    /** The `pacs.002` the scheme holds for a UETR; 404 when it has none (read-only). */
+    @GET
+    @Path("/api/v1/clearing/fi-credit-transfers/status/{uetr}")
+    @Produces("application/xml", "application/json")
+    fun institutionTransferStatus(@PathParam("uetr") uetr: String): Uni<String>
 }

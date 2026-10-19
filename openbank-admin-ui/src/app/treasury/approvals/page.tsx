@@ -24,7 +24,7 @@ import { dealActionUrl, getJson, postJson, treasuryUrl } from '@/components/trea
 import { counterpartyListSchema, dealListSchema, dealSchema, type Counterparty, type Deal } from '@/components/treasury/contracts'
 import { dealActions, distinctCounterparties, productLabel, refusalText } from '@/components/treasury/model'
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
-import { principalNameFromToken } from '@/components/balance-sheet/model'
+import { principalNameFromToken } from '@/lib/auth/principal'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { OverrideQueue } from '@/components/treasury/wb/OverrideQueue'
 

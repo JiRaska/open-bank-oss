@@ -32,6 +32,9 @@ spec:
           name: openbank.treasury.deal.events
           patternType: literal
         operations: [Write, Describe]
+      # Bank-own payment rail (contract 9.1 / 9.2): treasury publishes releases and reads the
+      # rail's status stream back. Only treasury holds Write on openbank.treasury.payments, which
+      # is what makes "the producer is treasury" true for the rail's consumer.
       - resource:
           type: topic
           name: openbank.treasury.payments

@@ -159,6 +159,34 @@ spec:
           patternType: prefix
         operations: [Write, Describe, Create]
         host: "*"
+      # Bank-own transfer rail (contract 9.3): read treasury's releases as the connector's default
+      # consumer group (quarkus.application.name), park refused ones in its own DLQ topic, and
+      # publish the status stream. Without any one of these the channel fails quietly under the
+      # deny-by-default cluster.
+      - resource:
+          type: topic
+          name: openbank.treasury.payments
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-swift-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.swift-service.treasury-payments-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.swift.institution-transfers
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ── transaction-service ─────────────────────────────────────────────────────
 apiVersion: kafka.strimzi.io/v1

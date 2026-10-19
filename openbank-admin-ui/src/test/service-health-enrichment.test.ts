@@ -56,6 +56,16 @@ async function flushPromises() {
   await Promise.resolve()
 }
 
+async function accountEntryWhenVersion(expectedVersion: string) {
+  const deadline = Date.now() + 2_000
+  let entry = await accountEntry(routeGet())
+  while (entry.version !== expectedVersion && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    entry = await accountEntry(routeGet())
+  }
+  return entry
+}
+
 describe('Kubernetes health metadata enrichment', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -77,7 +87,9 @@ describe('Kubernetes health metadata enrichment', () => {
     const responsePromise = routeGet()
     const response = await Promise.race([
       responsePromise,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('health route waited for info')), 100)),
+      // Keep this far below the enrichment's eight-second timeout, while allowing
+      // cold module startup and a loaded Vitest worker to schedule the route.
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('health route waited for info')), 1_000)),
     ])
     const entry = await accountEntry(Promise.resolve(response))
     expect(entry.status).toBe('UP')
@@ -95,8 +107,7 @@ describe('Kubernetes health metadata enrichment', () => {
     const first = await accountEntry(routeGet())
     expect(first.version).toBeNull()
     info.resolve(infoResponse('2.0.0'))
-    await flushPromises()
-    const second = await accountEntry(routeGet())
+    const second = await accountEntryWhenVersion('2.0.0')
     expect(second.version).toBe('2.0.0')
     expect(second.gitCommit).toBe('commit-2.0.0')
     expect(fetchMock).toHaveBeenCalledTimes(1)

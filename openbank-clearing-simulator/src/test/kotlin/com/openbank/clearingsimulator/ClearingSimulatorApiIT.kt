@@ -89,4 +89,94 @@ class ClearingSimulatorApiIT {
             statusCode(401)
         }
     }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `submitting a pacs_009 on each route returns an ACSC pacs_002`() {
+        for ((route, xml) in listOf(
+            "target2" to InstitutionTransferFixtures.target2(),
+            "certis" to InstitutionTransferFixtures.certis(),
+            "swift" to InstitutionTransferFixtures.swift(),
+        )) {
+            val body = (
+                Given {
+                    contentType("application/xml")
+                    body(xml)
+                } When {
+                    post("/api/v1/clearing/fi-credit-transfers/$route")
+                } Then {
+                    statusCode(200)
+                }
+                ).extract().body().asString()
+            assertThat(body).describedAs("route %s", route).contains("<TxSts>ACSC</TxSts>")
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `a pacs_009 in the wrong currency for the route is rejected and an unknown route is 404`() {
+        val body = (
+            Given {
+                contentType("application/xml")
+                body(InstitutionTransferFixtures.certis())
+            } When {
+                post("/api/v1/clearing/fi-credit-transfers/target2")
+            } Then {
+                statusCode(200)
+            }
+            ).extract().body().asString()
+        assertThat(body).contains("<TxSts>RJCT</TxSts>", "<Cd>AM03</Cd>")
+
+        Given {
+            contentType("application/xml")
+            body(InstitutionTransferFixtures.target2())
+        } When {
+            post("/api/v1/clearing/fi-credit-transfers/sepa")
+        } Then {
+            statusCode(404)
+        }
+    }
+
+    @Test
+    fun `the pacs_009 route requires authentication`() {
+        Given {
+            contentType("application/xml")
+            body(InstitutionTransferFixtures.target2())
+        } When {
+            post("/api/v1/clearing/fi-credit-transfers/target2")
+        } Then {
+            statusCode(401)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `a submitted pacs_009 is queryable by UETR and an unknown UETR is 404`() {
+        val uetr = "4c4e28ba-2fa1-4d2e-883f-0016d3cca427"
+        Given {
+            contentType("application/xml")
+            body(InstitutionTransferFixtures.pacs009(uetr = uetr))
+        } When {
+            post("/api/v1/clearing/fi-credit-transfers/target2")
+        } Then {
+            statusCode(200)
+        }
+        val body = (
+            Given { this } When { get("/api/v1/clearing/fi-credit-transfers/status/$uetr") } Then
+                { statusCode(200) }
+            )
+            .extract().body().asString()
+        assertThat(body).contains("<TxSts>ACSC</TxSts>")
+        val missing = (
+            Given { this } When
+                { get("/api/v1/clearing/fi-credit-transfers/status/5c4e28ba-2fa1-4d2e-883f-0016d3cca427") } Then
+                {
+                    statusCode(404)
+                }
+            ).extract()
+        assertThat(missing.contentType()).startsWith("application/json")
+        assertThat(missing.path<String>("code")).isEqualTo("UNKNOWN_UETR")
+        assertThat(missing.path<String>("uetr")).isEqualTo("5c4e28ba-2fa1-4d2e-883f-0016d3cca427")
+        assertThat(body).contains("<OrgnlUETR>$uetr</OrgnlUETR>", "<OrgnlMsgId>OB-FI-0001</OrgnlMsgId>")
+    }
 }
