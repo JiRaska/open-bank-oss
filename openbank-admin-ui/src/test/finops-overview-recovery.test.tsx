@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import FinOpsPage from '@/app/finops/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
@@ -49,6 +49,31 @@ function mount(handler?: (path: string) => Promise<Response> | Response | undefi
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('FinOps independent evidence sources', () => {
+  it('shows only the five numerically newest EKS versions and keeps the current version highlighted', async () => {
+    const version = (number: string, isCurrent = false) => ({
+      version: number, eksRelease: `release-${number}`, standardSupportEnds: '2027-01-01',
+      extendedSupportEnds: '2028-01-01', daysToStandardEnd: 100, daysToExtendedEnd: 465,
+      tier: 'standard' as const, runwayStatus: 'ok' as const, isCurrent,
+    })
+    mount(path => path.endsWith('/lifecycle') ? json({
+      ...lifecycle,
+      currentVersion: '1.36',
+      versions: [
+        version('1.9'), version('1.37'), version('1.10'), version('1.33'),
+        version('1.35'), version('1.34'), version('1.36', true), version('1.32'),
+      ],
+    }) : undefined)
+
+    const table = await screen.findByRole('region', { name: 'FinOps data table' })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows).toHaveLength(5)
+    expect(rows.map(row => row.cells[0].textContent?.replace('CURRENT', '').trim())).toEqual([
+      '1.37', '1.36', '1.35', '1.34', '1.33',
+    ])
+    expect(rows[1]).toHaveTextContent('CURRENT')
+    expect(rows[1].getAttribute('style')).toContain('var(--accent-bg)')
+  })
+
   it.each(['http', 'json', 'shape', 'network'])('keeps primary evidence after optional %s failure', async failure => {
     mount(path => {
       if (!path.endsWith('/resources')) return
