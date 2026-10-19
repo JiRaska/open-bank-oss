@@ -130,7 +130,7 @@ class MarketDataResource {
         @PathParam("index") index: String,
         @PathParam("date") date: String,
         @PathParam("batchId") batchId: String,
-    ): BatchResponse = BatchResponse.from(fixings.approve(batchId(batchId), actor()))
+    ): BatchResponse = BatchResponse.from(fixings.approve(batchId(batchId), actor(), index to date(date, "date")))
 
     @POST
     @Path("/fixings/{index}/{date}/manual/{batchId}/reject")
@@ -144,7 +144,12 @@ class MarketDataResource {
         @PathParam("batchId") batchId: String,
         request: RejectRequest,
     ): BatchResponse = BatchResponse.from(
-        fixings.reject(batchId(batchId), requireNotNull(request.reason) { "reason is required" }, actor()),
+        fixings.reject(
+            batchId(batchId),
+            requireNotNull(request.reason) { "reason is required" },
+            actor(),
+            index to date(date, "date"),
+        ),
     )
 
     @GET

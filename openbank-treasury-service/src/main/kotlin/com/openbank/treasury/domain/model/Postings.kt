@@ -159,6 +159,7 @@ data class JournalSpec(
  * It never accrues or matures; its reversal is the flipped settlement. Revaluation of the open
  * position is the ledger's daily FX revaluation, not the treasury's.
  */
+@Suppress("TooManyFunctions") // one function per legacy posting event plus leg builders
 object PostingRules {
     /** ADR-0344 D7: the leg-described products get their journals from the posting-rule matrix. */
     private fun requireLegacy(deal: Deal) =

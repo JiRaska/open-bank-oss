@@ -43,6 +43,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
+@Suppress("LargeClass") // one service, every lifecycle path
 class TreasuryDealServiceTest {
 
     private val monday = DealFixtures.MONDAY

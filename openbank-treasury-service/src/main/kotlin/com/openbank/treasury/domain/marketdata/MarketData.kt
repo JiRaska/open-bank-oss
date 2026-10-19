@@ -200,7 +200,8 @@ data class QualityVerdict(
  * - SUSPICIOUS: it differs from the observation before it by more than `suspiciousJumpBp` basis points.
  */
 object QualityGate {
-    private val BP_PER_PERCENT = BigDecimal(100)
+    private const val BASIS_POINTS_PER_PERCENT = 100
+    private val BP_PER_PERCENT = BigDecimal(BASIS_POINTS_PER_PERCENT)
 
     fun check(
         index: String,

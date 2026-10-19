@@ -306,18 +306,35 @@ class FixingService(
         return batch
     }
 
-    suspend fun approve(batchId: UUID, actor: Actor): ObservationBatch {
-        val batch = marketData.findBatch(batchId) ?: throw ObservationBatchNotFoundException(batchId)
+    suspend fun approve(batchId: UUID, actor: Actor, manualFor: Pair<String, LocalDate>? = null): ObservationBatch {
+        val batch = load(batchId, manualFor)
         val decided = batch.approve(actor, clock.instant())
         marketData.saveBatch(decided, BatchStatus.PENDING)
         return decided
     }
 
-    suspend fun reject(batchId: UUID, reason: String, actor: Actor): ObservationBatch {
-        val batch = marketData.findBatch(batchId) ?: throw ObservationBatchNotFoundException(batchId)
+    suspend fun reject(
+        batchId: UUID,
+        reason: String,
+        actor: Actor,
+        manualFor: Pair<String, LocalDate>? = null,
+    ): ObservationBatch {
+        val batch = load(batchId, manualFor)
         val decided = batch.reject(actor, reason, clock.instant())
         marketData.saveBatch(decided, BatchStatus.PENDING)
         return decided
+    }
+
+    /** A manual-fixing path must name its batch: the index and date of its one observation (else 404). */
+    private suspend fun load(batchId: UUID, manualFor: Pair<String, LocalDate>?): ObservationBatch {
+        val batch = marketData.findBatch(batchId) ?: throw ObservationBatchNotFoundException(batchId)
+        if (manualFor != null) {
+            val row = batch.rows.single()
+            if (batch.kind != BatchKind.MANUAL_FIXING || row.index != manualFor.first || row.date != manualFor.second) {
+                throw ObservationBatchNotFoundException(batchId)
+            }
+        }
+        return batch
     }
 
     suspend fun batches(status: BatchStatus?, limit: Int): List<ObservationBatch> = marketData.batches(status, limit)

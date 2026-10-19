@@ -83,7 +83,7 @@ class FixingApiIT {
                 "select max(version) from reference_records where kind = 'product-type' and record_key = 'IRS' and status = 'PENDING'",
             ).executeQuery().use { rs ->
                 rs.next()
-                rs.getObject(1) as Int?
+                rs.getObject(1) as? Int
             }
         }
         pending?.let { post("/reference/product-type/IRS/versions/$it/approve").then().statusCode(200) }

@@ -47,6 +47,7 @@ import java.time.Clock
 
 /** The use case is a plain class (no CDI annotation in the application layer); wired here. */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one producer per use case
 class TreasuryServiceProducer {
     /**
      * ADR-0315 D9: the simulated counterparties' quotes. Enabled only when the simulated market

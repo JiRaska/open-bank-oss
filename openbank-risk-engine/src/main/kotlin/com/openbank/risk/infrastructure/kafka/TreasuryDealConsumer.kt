@@ -64,6 +64,7 @@ import java.util.UUID
  * read — never acked-and-dropped like a malformed event.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one parser per treasury event type
 class TreasuryDealConsumer {
 
     @Inject

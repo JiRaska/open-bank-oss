@@ -19,6 +19,7 @@ object MarketDataFiles {
     const val MAX_BYTES = 1_048_576
     const val MAX_ROWS = ObservationBatch.MAX_ROWS
     private const val MAX_FIELD = 64
+    private const val COLUMNS = 3
 
     fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
@@ -31,7 +32,7 @@ object MarketDataFiles {
         require(body.size in 1..MAX_ROWS) { "an import file has 1..$MAX_ROWS rows" }
         return body.mapIndexed { i, line ->
             val cols = line.split(',').map { it.trim().removeSurrounding("\"") }
-            require(cols.size == 3) { "row ${i + 1}: expected index,date,value" }
+            require(cols.size == COLUMNS) { "row ${i + 1}: expected index,date,value" }
             row(i + 1, cols[0], cols[1], cols[2])
         }
     }

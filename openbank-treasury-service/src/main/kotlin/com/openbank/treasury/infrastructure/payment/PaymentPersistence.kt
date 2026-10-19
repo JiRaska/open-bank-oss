@@ -128,6 +128,7 @@ class PaymentPanacheRepository : PanacheRepositoryBase<PaymentEntity, UUID>
 class PaymentFlowPanacheRepository : PanacheRepositoryBase<PaymentFlowEntity, UUID>
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // one method per port operation plus the guarded-write helpers
 class PaymentRepositoryImpl(
     private val payments: PaymentPanacheRepository,
     private val links: PaymentFlowPanacheRepository,
