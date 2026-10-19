@@ -147,10 +147,7 @@ class PensionFundWriteReplayIT {
         connection().use { db ->
             db.autoCommit = false
             try {
-                db.prepareStatement("SELECT pg_advisory_xact_lock(?)").use { statement ->
-                    statement.setLong(1, lockKey)
-                    statement.executeQuery().use { rows -> check(rows.next()) }
-                }
+                holdTransactionLock(db, lockKey)
                 post(body, key).then().statusCode(409)
                 assertThat(fundCount(body.getValue("isin").toString())).isZero()
                 assertThat(receiptCount(key)).isZero()
@@ -179,6 +176,13 @@ class PensionFundWriteReplayIT {
             assertThat(fundCount(second.getValue("isin").toString())).isEqualTo(1)
         } finally {
             setIdentity("replay-operator")
+        }
+    }
+
+    private fun holdTransactionLock(db: Connection, lockKey: Long) {
+        db.prepareStatement("SELECT pg_advisory_xact_lock(?)").use { statement ->
+            statement.setLong(1, lockKey)
+            statement.executeQuery().use { rows -> check(rows.next()) }
         }
     }
 
