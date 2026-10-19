@@ -151,6 +151,15 @@ openbank:
       # account. Flip to true only after the ledger carrying migration V32 is live; then delete the
       # LegacyGlChart shim. A reversal always names the original posting's account either way.
       post-by-class: ${OPENBANK_TREASURY_LEDGER_POST_BY_CLASS:false}
+    close:
+      # ADR-0342: treasury is a day-close participant. Every tick re-offers the last lookback-days
+      # completed accounting days to the ledger (PUT /api/v1/ledger/accounting-days/{date}/participants/
+      # treasury) as RAN / SKIPPED / REFUSED, folded from the day-completion record. due-steps are the
+      # steps every accounting day must finish before the day is reported; a day with one unfinished
+      # (or FAILED) is withheld, so the ledger waits and pages. Must match rules.yaml close_participants.
+      enabled: ${OPENBANK_TREASURY_CLOSE_ENABLED:true}
+      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS}
+      lookback-days: 3
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
       # simulated market confirms every BOOKED deal first, so the sandbox lifecycle is unchanged.

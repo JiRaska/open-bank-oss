@@ -1056,6 +1056,9 @@ close_participants:
     interest:
       service: openbank-interest-service
       principal: service-account-openbank-interest
+    treasury:
+      service: openbank-treasury-service
+      principal: service-account-openbank-treasury
 
 money_path_services:
   - openbank-ledger-service

@@ -266,7 +266,8 @@ set) apply equally to the new `ledger.approval.decide` action.
   releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
   counts, service names and bounded automatic failure categories. Operator identities and free-text waiver reasons are intentional audit personal data, not anonymous counts. The closed-day 409 body now also carries
   `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert the application while preserving additive V31 audit history; schema removal needs a separate reviewed retention/rollback plan.
-- **2026-10-19** — **Treasury instrument accounts, `V33` (ADR-0344 D7).** 66 new leaf GL accounts (33 per
+- **2026-10-19** — **Treasury joins the day-close participants (ADR-0342 D2).** `openbank.ledger.close.participants.treasury` with principal `service-account-openbank-treasury` (rules.yaml `close_participants`, gate `close-participants-declared`). No new surface: the existing participation PUT, admitted under treasury's existing `ledger.create` grant and bound to that verified principal. Under `enforce` a missing treasury report holds the day in CUTOFF (stuck-CUTOFF alert, operator waiver releases it).
+- **2026-10-19** — **Treasury instrument accounts, `V33` (ADR-0344 D7).** Also maps the matrix's accounting classes onto them in `accounting_class_gl_map` (78 rows, seeded by code as V32 does, with a count and currency check that fail the migration) and adds nine instrument roles to the closed role vocabulary (CHECK + `AccountingRole`, additive). 66 new leaf GL accounts (33 per
   currency, EUR = CZK code + 1) for the treasury posting-rule matrix: securities by IFRS 9 category and
   their premium/discount, accrued interest per product family, treasury loans, repo payable and reverse
   repo receivable, derivative assets and liabilities at fair value, the FVOCI reserve (EQUITY), realised

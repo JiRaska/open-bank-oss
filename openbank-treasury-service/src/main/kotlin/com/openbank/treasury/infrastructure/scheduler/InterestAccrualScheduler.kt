@@ -8,6 +8,7 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.domain.model.DayStep
 import com.openbank.treasury.domain.model.DayStepRecord
@@ -60,7 +61,14 @@ class InterestAccrualScheduler(
             .onSuccess { r ->
                 runCatching {
                     dayCompletion?.record(
-                        DayStepRecord.of(today, DayStep.ACCRUALS, r.journals, r.failures.size, clock.instant()),
+                        DayStepRecord.of(
+                            today,
+                            DayStep.ACCRUALS,
+                            r.journals,
+                            r.failures.size,
+                            clock.instant(),
+                            refused = r.failures.count { it is AccountingDayClosedException },
+                        ),
                     )
                 }
                     .onFailure { log.error("could not record the ACCRUALS day-completion step", it) }

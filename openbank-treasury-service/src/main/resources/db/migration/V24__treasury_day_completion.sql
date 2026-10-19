@@ -3,7 +3,9 @@
 -- outcome of its step for the bank day it covered (FIXINGS, ACCRUALS, PAYMENTS, REVALUATION,
 -- CORRECTIONS, MATURITIES); a later run of the same step on the same day replaces the row, so the
 -- record always states the last outcome. The day-end close reads it through
--- GET /api/v1/treasury/day-completion/{date}; a step with no row has not run that day.
+-- GET /api/v1/treasury/day-completion/{date}; a step with no row has not run that day. The same rows
+-- back treasury's day-close participation report to the ledger (ADR-0342): journals_posted and
+-- refused_count (postings the ledger refused with 409 ACCOUNTING_DAY_CLOSED) are its counts.
 --
 -- Rollback: DROP TABLE treasury_day_completion; DROP SEQUENCE treasury_day_completion_seq;
 CREATE SEQUENCE IF NOT EXISTS treasury_day_completion_seq START WITH 1 INCREMENT BY 50;
@@ -12,9 +14,11 @@ CREATE TABLE treasury_day_completion (
     business_date  DATE          NOT NULL,
     step           VARCHAR(16)   NOT NULL
         CHECK (step IN ('FIXINGS', 'ACCRUALS', 'PAYMENTS', 'REVALUATION', 'CORRECTIONS', 'MATURITIES')),
-    status         VARCHAR(8)    NOT NULL CHECK (status IN ('DONE', 'SKIPPED', 'FAILED', 'PENDING')),
+    status         VARCHAR(8)    NOT NULL CHECK (status IN ('DONE', 'SKIPPED', 'FAILED', 'REFUSED', 'PENDING')),
     item_count     INT           CHECK (item_count IS NULL OR item_count >= 0),
     detail         VARCHAR(500),
     recorded_at    TIMESTAMPTZ   NOT NULL,
+    journals_posted INT          NOT NULL DEFAULT 0 CHECK (journals_posted >= 0),
+    refused_count  INT           NOT NULL DEFAULT 0 CHECK (refused_count >= 0),
     CONSTRAINT treasury_day_completion_step UNIQUE (business_date, step)
 );

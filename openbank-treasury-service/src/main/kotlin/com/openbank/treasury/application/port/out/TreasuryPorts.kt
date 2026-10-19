@@ -22,6 +22,13 @@ import java.util.UUID
 /** Raised when a command names a deal that does not exist. Mapped to 404. */
 class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId not found")
 
+/**
+ * The ledger refused a posting because its accounting day no longer accepts postings (`409
+ * ACCOUNTING_DAY_CLOSED`, ADR-0342 D4): a close outcome the day's record reports as REFUSED, never
+ * a retryable error.
+ */
+class AccountingDayClosedException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 
@@ -153,6 +160,9 @@ interface DayCompletionRepository {
     suspend fun record(r: com.openbank.treasury.domain.model.DayStepRecord)
 
     suspend fun day(date: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
+
+    /** Every recorded step of the days in [from]..[to] (inclusive): the day-close reporter's input. */
+    suspend fun between(from: LocalDate, to: LocalDate): List<com.openbank.treasury.domain.model.DayStepRecord>
 }
 
 /** A journal the ledger holds for a posted [JournalSpec]: its id and where each leg landed. */

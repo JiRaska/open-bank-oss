@@ -713,6 +713,8 @@ paths:
       description: >-
         Every step (FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS, MATURITIES) with the last
         outcome a run recorded for that bank day; a step no run recorded is PENDING with `at` null.
+        `closeParticipation` is the ADR-0342 report treasury sends the ledger for the day (RAN /
+        SKIPPED / REFUSED), or null while a due step has not finished (the ledger then waits).
       parameters:
         - { name: date, in: path, required: true, schema: { type: string, format: date } }
       responses:
@@ -731,10 +733,20 @@ paths:
                       type: object
                       properties:
                         step: { type: string, enum: [FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS, MATURITIES] }
-                        status: { type: string, enum: [DONE, SKIPPED, FAILED, PENDING] }
+                        status: { type: string, enum: [DONE, SKIPPED, FAILED, REFUSED, PENDING] }
                         count: { type: [integer, 'null'] }
+                        journals: { type: integer, minimum: 0 }
+                        refused: { type: integer, minimum: 0 }
                         detail: { type: [string, 'null'] }
                         at: { type: [string, 'null'], format: date-time }
+                  closeParticipation:
+                    type: [object, 'null']
+                    properties:
+                      participant: { type: string }
+                      outcome: { type: string, enum: [RAN, SKIPPED, REFUSED] }
+                      journalsPosted: { type: integer, minimum: 0 }
+                      itemsProcessed: { type: integer, minimum: 0 }
+                      reason: { type: [string, 'null'], maxLength: 1000 }
 
   /api/v1/treasury/deals/{id}/cash-flows:
     get:

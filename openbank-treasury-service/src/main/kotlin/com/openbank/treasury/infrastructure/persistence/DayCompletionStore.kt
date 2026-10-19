@@ -39,6 +39,12 @@ class DayCompletionEntity : PanacheEntity() {
 
     @Column(name = "recorded_at", nullable = false)
     lateinit var recordedAt: Instant
+
+    @Column(name = "journals_posted", nullable = false)
+    var journalsPosted: Int = 0
+
+    @Column(name = "refused_count", nullable = false)
+    var refusedCount: Int = 0
 }
 
 @ApplicationScoped
@@ -57,14 +63,18 @@ class DayCompletionStore(private val rows: DayCompletionPanacheRepository) : Day
                 e.status = r.status.name
                 e.itemCount = r.count
                 e.detail = r.detail
+                e.journalsPosted = r.journals
+                e.refusedCount = r.refused
                 e.recordedAt = checkNotNull(r.at) { "a recorded step has a time" }
                 if (existing == null) rows.persist(e) else io.smallrye.mutiny.Uni.createFrom().item(e)
             }
         }.awaitSuspending()
     }
 
-    override suspend fun day(date: LocalDate): List<DayStepRecord> = Panache.withSession {
-        rows.find("businessDate", date).list()
+    override suspend fun day(date: LocalDate): List<DayStepRecord> = between(date, date)
+
+    override suspend fun between(from: LocalDate, to: LocalDate): List<DayStepRecord> = Panache.withSession {
+        rows.find("businessDate between ?1 and ?2", from, to).list()
     }.awaitSuspending().map {
         DayStepRecord(
             it.businessDate,
@@ -73,6 +83,8 @@ class DayCompletionStore(private val rows: DayCompletionPanacheRepository) : Day
             it.itemCount,
             it.detail,
             it.recordedAt,
+            it.journalsPosted,
+            it.refusedCount,
         )
     }
 }
