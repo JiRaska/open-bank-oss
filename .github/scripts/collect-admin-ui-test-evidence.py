@@ -16,7 +16,6 @@ import io
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -450,7 +449,7 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
                 raise CollectionError(f"selected artifact for {component} is not from trusted main")
             archive = get_archive(artifact_id)
             payloads = artifact_payload(archive, component, trusted)
-            for relative, content in payloads.items():
+            for relative in payloads:
                 target = repo / relative
                 if target.exists():
                     raise CollectionError(f"refusing to mix downloaded evidence with pre-existing path: {relative}")
