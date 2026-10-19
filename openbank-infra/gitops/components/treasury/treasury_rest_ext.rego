@@ -22,6 +22,7 @@
 #   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
+#   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
 #
@@ -181,4 +182,13 @@ allowed_reasons contains "treasury-approver-cashflow" if {
 		"treasury.cashflow.override.reject",
 		"treasury.deal.send-confirmation",
 	}
+}
+
+# Schedule preview runs the schedule engine: real work per call, so only the roles that build or
+# check a ticket (dealer, back office) may ask for it — not every reader.
+allowed_reasons contains "treasury-schedule-preview" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action == "treasury.deal.preview"
 }

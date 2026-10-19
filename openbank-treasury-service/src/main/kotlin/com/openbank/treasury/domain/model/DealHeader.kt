@@ -112,7 +112,7 @@ data class DealHeader(
     val bookId: String? = null,
     val confirmationsSent: List<SentConfirmation> = emptyList(),
 ) {
-    @Suppress("CyclomaticComplexMethod") // one guard per optional field
+    @Suppress("CyclomaticComplexMethod", "LongMethod") // one guard per optional field
     fun validate() {
         listOf(
             "documents" to documents,
@@ -154,6 +154,25 @@ data class DealHeader(
             require(it.nominal.signum() > 0) { "nominal must be positive" }
             require(it.cleanPrice == null || it.yield == null) { "give a clean price or a yield, not both" }
         }
+        listOfNotNull(
+            regulatory?.lcrCategory,
+            regulatory?.nsfrCategory,
+            legalEntityId,
+            jurisdiction,
+            bookId,
+            businessDayConvention,
+        ).plus(regulatory?.centralBankCodes.orEmpty()).plus(calendars).forEach {
+            require(CODE.matches(it)) { "'$it' is not a code (1..32 of A-Z, 0-9, '_', '.', '-')" }
+        }
+        fees.forEach { require(CODE.matches(it.type)) { "fee type '${it.type}' is not a code" } }
+        documents.forEach {
+            require(it.documentId.length <= MAX_REF && it.documentId.none(Char::isISOControl)) {
+                "documentId is invalid"
+            }
+        }
+        require(counterpartyReference == null || counterpartyReference.none(Char::isISOControl)) {
+            "counterpartyReference has control characters"
+        }
         fraTerms?.let { require(FRA_PERIOD.matches(it.period)) { "FRA period is <start>x<end> in months, e.g. 3x6" } }
     }
 
@@ -166,6 +185,7 @@ data class DealHeader(
         private const val MAX_UTI = 52
         private val HUNDRED = BigDecimal("100")
         private val COUNTRY = Regex("^[A-Z]{2}$")
+        private val CODE = Regex("^[A-Z0-9_.-]{1,32}$")
         private val CCY = Regex("^[A-Z]{3}$")
         private val LEI = Regex("^[A-Z0-9]{20}$")
         private val ISIN = Regex("^[A-Z]{2}[A-Z0-9]{9}[0-9]$")

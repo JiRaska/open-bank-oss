@@ -107,7 +107,9 @@ object DealExport {
         val header = rows.first().keys.toList()
         fun cell(v: Any?): String {
             var s = v?.toString() ?: ""
-            if (s.isNotEmpty() && s[0] in FORMULA_CHARS) s = "'$s"
+            // A spreadsheet ignores leading blanks and control characters before reading a formula.
+            val firstMeaningful = s.trimStart { it.isWhitespace() || it.isISOControl() }.firstOrNull()
+            if (s.firstOrNull() in FORMULA_CHARS || firstMeaningful in FORMULA_CHARS) s = "'$s"
             return "\"" + s.replace("\"", "\"\"") + "\""
         }
         return (
@@ -117,7 +119,7 @@ object DealExport {
             .joinToString("\r\n", postfix = "\r\n")
     }
 
-    private val FORMULA_CHARS = setOf('=', '+', '-', '@')
+    private val FORMULA_CHARS = setOf('=', '+', '-', '@', '\t', '\r', '\n')
 }
 
 data class SendConfirmationRequest(val documentId: String? = null, val channel: String? = null)

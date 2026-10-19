@@ -165,8 +165,9 @@ class TreasuryResource {
 
     @POST
     @Path("/deals/{id}/schedule-preview")
+    @RolesAllowed(DEALER, BACK_OFFICE)
     @Operation(summary = "Generate the cash-flow ledger the deal would have now, without storing it")
-    @Authorize(action = "treasury.deal.read", resource = "#id")
+    @Authorize(action = "treasury.deal.preview", resource = "#id")
     suspend fun preview(@PathParam("id") id: UUID): CashFlowLedgerDto = CashFlowLedgerDto.from(cashFlows.preview(id))
 
     @POST
@@ -303,7 +304,10 @@ class TreasuryResource {
                 product = product,
                 counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
                 currency = requireNotNull(fx?.first ?: request.currency ?: first?.currency) { "currency is required" },
-                principal = requireNotNull(request.principal ?: first?.notional) { "principal is required" },
+                principal = requireNotNull(
+                    request.principal
+                        ?: first?.let { f -> legs.filter { it.currency == f.currency }.maxOf { it.notional } },
+                ) { "principal is required" },
                 rate = requireNotNull(request.rate ?: first?.let { it.rate.rate ?: java.math.BigDecimal.ZERO }) {
                     "rate is required"
                 },

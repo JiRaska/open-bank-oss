@@ -1583,7 +1583,7 @@ components:
       properties:
         counterpartyId: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [BANK, CENTRAL_BANK] }
+        kind: { type: string, enum: [BANK, CENTRAL_BANK] } # 1.19.0: CORPORATE and ISSUER counterparties are not listed here (closed response enum); see GET /reference/counterparty
         synthetic: { type: boolean }
         currency: { type: string }
         limit: { type: number }

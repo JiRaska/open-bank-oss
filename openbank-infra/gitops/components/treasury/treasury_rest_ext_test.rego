@@ -257,3 +257,12 @@ test_override_split_between_back_office_and_approver if {
 	not allowed(approver, "treasury.cashflow.override.propose")
 	not allowed(dealer, "treasury.cashflow.override.propose")
 }
+
+test_schedule_preview_is_dealer_and_back_office_only if {
+	not allowed(approver, "treasury.deal.preview")
+	not allowed(nobody, "treasury.deal.preview")
+	not allowed(agent, "treasury.deal.preview")
+	not allowed(shared_sa, "treasury.deal.preview")
+	allowed(dealer, "treasury.deal.preview")
+	allowed(back_office, "treasury.deal.preview")
+}

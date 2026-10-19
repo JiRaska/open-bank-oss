@@ -60,7 +60,7 @@ class DealV2Test {
         product = ProductType.IRS,
         counterpartyId = "SIMBK-A",
         currency = "CZK",
-        principal = BigDecimal("10000000.00"),
+        principal = legs.firstOrNull()?.notional ?: BigDecimal("10000000.00"),
         rate = BigDecimal("4.00"),
         tradeDate = LocalDate.parse("2026-10-29"),
         valueDate = start,
@@ -227,5 +227,73 @@ class DealV2Test {
     fun `agent inputs are bounded`() {
         assertThatThrownBy { DealFixtures.placement().copy(inputs = "x".repeat(Deal.MAX_INPUTS_CHARS + 1)) }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("inputs")
+    }
+
+    @Test
+    fun `an IRS whose flat principal disagrees with its legs is refused - limits measure the legs`() {
+        val bigLegs = irsLegs.map { it.copy(notional = BigDecimal("10000000000.00")) }
+        assertThatThrownBy {
+            Deal.draft(
+                id = UUID.randomUUID(), product = ProductType.IRS, counterpartyId = "SIMBK-A", currency = "CZK",
+                principal = BigDecimal("1.00"), rate = BigDecimal("4.00"), tradeDate = LocalDate.parse("2026-10-29"),
+                valueDate = start, maturityDate = start.plusYears(2), actor = dealer, at = NOW, legs = bigLegs,
+            )
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("principal")
+        assertThatThrownBy { irs().copy(maturityDate = start.plusYears(1)) }.hasMessageContaining("maturityDate")
+        assertThatThrownBy { irs().copy(valueDate = start.plusDays(1)) }.hasMessageContaining("valueDate")
+        val measured = irs(legs = bigLegs)
+        assertThat(measured.principal).isEqualByComparingTo("10000000000.00")
+        assertThat(measured.days).isEqualTo(java.time.temporal.ChronoUnit.DAYS.between(start, start.plusYears(2)))
+    }
+
+    @Test
+    fun `a 50-year daily leg is refused before any schedule is generated`() {
+        val daily = irsLegs[0].copy(
+            accrualEnd = start.plusYears(50),
+            accrualFrequency = Frequency.DAILY,
+            paymentFrequency = Frequency.DAILY,
+        )
+        assertThatThrownBy {
+            daily.validate()
+        }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("2000 periods")
+    }
+
+    @Test
+    fun `a deal generates at most four thousand periods across its legs`() {
+        // 5 legs of about 1 500 weekly periods each: every leg passes, the deal does not.
+        val weekly = irsLegs[0].copy(
+            accrualEnd = start.plusYears(28),
+            accrualFrequency = Frequency.WEEKLY,
+            paymentFrequency = Frequency.WEEKLY,
+        )
+        weekly.validate()
+        assertThatThrownBy { irs(legs = List(5) { weekly }).copy() }.isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("4000 periods")
+    }
+
+    @Test
+    fun `free code fields are codes`() {
+        assertThatThrownBy {
+            DealHeader(
+                regulatory = com.openbank.treasury.domain.model.RegulatoryTerms(lcrCategory = "=HYPERLINK(1)"),
+            ).validate()
+        }.hasMessageContaining("not a code")
+        assertThatThrownBy {
+            DealHeader(
+                regulatory = com.openbank.treasury.domain.model.RegulatoryTerms(centralBankCodes = listOf("a b")),
+            ).validate()
+        }.hasMessageContaining("not a code")
+        assertThatThrownBy {
+            DealHeader(
+                regulatory = com.openbank.treasury.domain.model.RegulatoryTerms(nsfrCategory = "X".repeat(33)),
+            ).validate()
+        }
+            .hasMessageContaining("not a code")
+        DealHeader(
+            regulatory = com.openbank.treasury.domain.model.RegulatoryTerms(
+                lcrCategory = "L1",
+                centralBankCodes = listOf("CB-01"),
+            ),
+        ).validate()
     }
 }

@@ -307,6 +307,12 @@ class CashFlowLedgerApiIT {
         ).then().statusCode(201).body("legs", hasSize<Any>(2)).body("legs[1].rate.index", equalTo("PRIBOR_3M"))
             .extract().path("dealId")
         post("/deals/$irs/submit").then().statusCode(200).body("scheduleVersion", equalTo(1))
+        // A flat principal that disagrees with the legs would let the limit checks measure a
+        // different deal from the one the schedule books: refused.
+        post(
+            "/deals",
+            """{"product":"IRS","counterpartyId":"SIMBK-A","bookId":"TRADING-BOOK","principal":1.00,"legs":$legs}""",
+        ).then().statusCode(400).body("message", containsString("principal"))
         assertThat(
             count(
                 "select count(*) from deal_cash_flows where deal_id = ? and state = 'FIXED' and kind = 'INTEREST'",

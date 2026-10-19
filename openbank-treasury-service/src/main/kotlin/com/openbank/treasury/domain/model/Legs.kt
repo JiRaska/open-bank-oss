@@ -143,6 +143,9 @@ data class LegSpec(
             "a custom amortisation has at most $MAX_AMORTISATION_ROWS rows"
         }
         require(paymentCalendars.size <= MAX_CALENDARS) { "a leg names at most $MAX_CALENDARS payment calendars" }
+        require(expectedPeriods() <= MAX_PERIODS_PER_LEG) {
+            "a leg generates at most $MAX_PERIODS_PER_LEG periods (this one ${expectedPeriods()}: tenor / frequency)"
+        }
         require(paymentLagBusinessDays in 0..LegRate.MAX_LAG) { "paymentLagBusinessDays must be 0..${LegRate.MAX_LAG}" }
         rate.validate()
         amortisationStart?.let {
@@ -156,6 +159,26 @@ data class LegSpec(
                 "a CUSTOM amortisation repays exactly the notional"
             }
         }
+    }
+
+    /**
+     * An upper bound on the periods this leg generates (tenor / the finer of its two frequencies),
+     * computed BEFORE the engine runs so a request cannot buy unbounded work.
+     */
+    fun expectedPeriods(): Long {
+        val days = java.time.temporal.ChronoUnit.DAYS.between(accrualStart, accrualEnd)
+        fun periods(f: Frequency): Long = when (f) {
+            Frequency.ONCE -> 1
+            Frequency.DAILY -> days
+            Frequency.WEEKLY -> days / DAYS_PER_WEEK + 1
+            else -> java.time.temporal.ChronoUnit.MONTHS.between(accrualStart, accrualEnd) / checkNotNull(f.months) + 1
+        }
+        return maxOf(
+            periods(accrualFrequency),
+            periods(paymentFrequency),
+            rate.resetFrequency?.let(::periods) ?: 0L,
+            1L,
+        )
     }
 
     /** True when the leg is one accrual period paying once — what the bullet generator handles. */
@@ -175,6 +198,8 @@ data class LegSpec(
         const val MAX_TENOR_YEARS = 60L
         const val MAX_AMORTISATION_ROWS = 2000
         const val MAX_CALENDARS = 10
+        const val MAX_PERIODS_PER_LEG = 2000L
+        private const val DAYS_PER_WEEK = 7
         private const val CCY_LENGTH = 3
 
         fun sha256(text: String): String =

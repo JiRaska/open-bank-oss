@@ -29,6 +29,7 @@ import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.CashFlowGenerated
 import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
 import com.openbank.treasury.domain.model.DealCalendars
@@ -349,7 +350,9 @@ class TreasuryDealService(
 
     override suspend fun counterparties(): List<CounterpartyExposure> {
         val overrides = deals.pendingLimitOverrides()
-        return counterparties.list().flatMap { cp -> exposures(cp, overrides) }
+        // The limit view's response enum is closed at BANK | CENTRAL_BANK (openapi): the corporate and
+        // issuer records ADR-0344 D3 added are served by GET /reference/counterparty, not here.
+        return counterparties.list().filter { it.kind in LIMIT_VIEW_KINDS }.flatMap { cp -> exposures(cp, overrides) }
     }
 
     private suspend fun exposures(cp: Counterparty, overrides: List<Deal>): List<CounterpartyExposure> =
@@ -533,5 +536,6 @@ class TreasuryDealService(
         const val MATURE = "MATURE"
         const val REVERSE = "REVERSE"
         const val SEND_CONFIRMATION = "SEND_CONFIRMATION"
+        val LIMIT_VIEW_KINDS = setOf(CounterpartyKind.BANK, CounterpartyKind.CENTRAL_BANK)
     }
 }

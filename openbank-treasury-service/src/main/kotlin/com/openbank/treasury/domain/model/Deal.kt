@@ -231,6 +231,10 @@ data class Deal(
             require(legs.isNotEmpty()) { "a $product deal is described by its legs" }
         }
         require(legs.size <= MAX_LEGS) { "a deal has at most $MAX_LEGS legs" }
+        require(legs.sumOf { runCatching { it.expectedPeriods() }.getOrDefault(0L) } <= MAX_PERIODS_PER_DEAL) {
+            "a deal generates at most $MAX_PERIODS_PER_DEAL periods across its legs"
+        }
+        if (product.legsRequired && legs.isNotEmpty()) requireFlatFieldsFromLegs()
         require(inputs == null || inputs.length <= MAX_INPUTS_CHARS) {
             "inputs is at most $MAX_INPUTS_CHARS characters"
         }
@@ -238,6 +242,32 @@ data class Deal(
     }
 
     val bookId: String? get() = header.bookId
+
+    /**
+     * For a leg-described product the flat fields the limit checks read MUST be the legs' own
+     * figures: currency = the first leg's, principal = the largest notional in that currency,
+     * value date = the earliest accrual start, maturity = the latest accrual end. A request whose
+     * flat fields disagree is refused (400) — otherwise the product and counterparty limits would
+     * measure one deal while the schedule books another.
+     */
+    private fun requireFlatFieldsFromLegs() {
+        val ccy = legs.first().currency
+        val notional = legs.filter { it.currency == ccy }.maxOf { it.notional }
+        require(currency == ccy) { "currency $currency disagrees with the legs ($ccy)" }
+        require(principal.compareTo(notional) == 0) {
+            "principal $principal disagrees with the legs' notional $notional"
+        }
+        require(
+            valueDate == legs.minOf {
+                it.accrualStart
+            },
+        ) { "valueDate disagrees with the legs' earliest accrual start" }
+        require(
+            maturityDate == legs.maxOf {
+                it.accrualEnd
+            },
+        ) { "maturityDate disagrees with the legs' latest accrual end" }
+    }
 
     private fun requireFxSpot() {
         val terms = requireNotNull(fx) { "an FX_SPOT deal needs its FX terms" }
@@ -595,6 +625,7 @@ data class Deal(
         private const val MAX_REFERENCE_LENGTH = 200
         private const val MAX_CHANNEL_LENGTH = 64
         const val MAX_LEGS = 8
+        const val MAX_PERIODS_PER_DEAL = 4000L
         const val MAX_INPUTS_CHARS = 65_536
 
         /** The states [settle] accepts: CONFIRMED, plus BOOKED only when confirmation is not required. */

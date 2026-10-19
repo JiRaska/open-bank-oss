@@ -168,8 +168,10 @@ class ReferenceDataApiIT {
                     assertThat(rs.getBoolean("synthetic")).isFalse()
                 }
         }
+        // The interbank limit view's kind enum is closed (BANK | CENTRAL_BANK): a corporate is not listed there.
         given().`when`().get("/api/v1/treasury/counterparties").then().statusCode(200)
-            .body("counterpartyId", hasItem("CORP-IT-1"))
+            .body("counterpartyId", org.hamcrest.Matchers.not(hasItem("CORP-IT-1")))
+            .body("counterpartyId", hasItem("SIMBK-A"))
     }
 
     @Test
