@@ -8,10 +8,6 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.ClassificationCorrectionRequest
 import com.openbank.pensionfund.application.usecase.PositionClassificationService
-import com.openbank.pensionfund.domain.model.ClassificationTarget
-import com.openbank.pensionfund.domain.model.InstrumentClass
-import com.openbank.pensionfund.domain.model.NavPosition
-import com.openbank.pensionfund.domain.model.PositionClassificationCorrection
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -24,8 +20,6 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
-import java.math.BigDecimal
-import java.time.Instant
 import java.util.UUID
 
 /**

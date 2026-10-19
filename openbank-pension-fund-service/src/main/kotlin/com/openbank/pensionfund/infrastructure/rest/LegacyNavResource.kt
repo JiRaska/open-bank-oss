@@ -8,7 +8,6 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.NavService
 import com.openbank.pensionfund.application.usecase.PositionClassificationService
-import com.openbank.pensionfund.domain.model.TransactionCorrection
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject

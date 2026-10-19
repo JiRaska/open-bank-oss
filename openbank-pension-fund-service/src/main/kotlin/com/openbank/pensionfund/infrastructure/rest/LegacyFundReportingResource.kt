@@ -7,8 +7,6 @@ package com.openbank.pensionfund.infrastructure.rest
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.pensionfund.application.usecase.FundReportingService
-import com.openbank.pensionfund.domain.model.FundPeriodReport
-import com.openbank.pensionfund.domain.model.InstrumentClass
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -19,7 +17,6 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.util.UUID
