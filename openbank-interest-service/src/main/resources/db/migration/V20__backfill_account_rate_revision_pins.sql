@@ -4,9 +4,9 @@
 -- ADR-0341: V19 pins an account at its FIRST accrual. Accounts that already accrued before catalog
 -- sync was switched on have no pin, and without this backfill the first post-sync accrual would pin
 -- them to whatever revision is current - a silent repricing of a live contract. Pin every existing
--- account to the revision whose cached config its latest non-reversed CATALOG-SOURCED accrual used. An account whose latest
--- accrual used an operator-managed config (no catalog snapshot) gets no pin and keeps operator
--- semantics. Reversed accruals are not history. Idempotent: an existing pin is never replaced.
+-- account to the revision used by its latest non-reversed CATALOG-SOURCED accrual, even when a
+-- newer accrual used an operator override. Only accounts with no catalog-sourced accrual history
+-- get no pin. Reversed accruals are not history. Idempotent: an existing pin is never replaced.
 
 -- Fail loudly rather than guess: one cached config must map to exactly one APPLIED revision.
 DO $$
