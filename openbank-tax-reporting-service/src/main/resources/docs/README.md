@@ -44,3 +44,10 @@ on any number.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+
+## Pension-fund API v2 client transition
+
+Pension fund period figures are read from `GET /api/v2/reporting/funds/{fundId}/period-figures`. Query periods, machine identity, authentication configuration and returned figures are unchanged. The separate pension participant-aggregate client remains on `/api/v2/pension/reporting`; other tax providers and this service's own public API do not change versions. Consumer Pact and real reporting fixtures explicitly use the v2 fund path.
+
+A separately approved client rollout requires v2 capability across every active fund backend. The provider's deprecated v1 alias permits existing callers during transition, but source fixtures do not prove live capability or regulator delivery. Roll back clients before a v1-only provider, and preserve the provider's revision pins and widened fee precision. No provisioning, submission or deployment is authorized by this change.
