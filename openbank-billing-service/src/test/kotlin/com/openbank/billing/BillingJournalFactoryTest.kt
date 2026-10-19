@@ -7,7 +7,6 @@ package com.openbank.billing
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.client.BillingJournalFactory
-import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -22,10 +21,6 @@ import java.util.UUID
  */
 class BillingJournalFactoryTest {
 
-    private val accounts = object : BillingLedgerConfig.Gl {
-        override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
-        override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
-    }
     private val systemActorId = UUID.fromString("00000000-0000-0000-0000-0000000000bb")
     private val date = LocalDate.parse("2026-07-01")
 
@@ -43,25 +38,28 @@ class BillingJournalFactoryTest {
         amount = BigDecimal(amount),
         currency = currency,
         description = "Fee charge: Maintenance",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     @Test
-    fun `debits the customer fee-receivable GL with subAccountId set to the account and credits fee income`() {
+    fun `debits the customer deposit class with subAccountId set to the account and credits fee income`() {
         val accountId = UUID.randomUUID().toString()
         val cmd = command("fee-c-$accountId-f1-CZK", accountId = accountId)
-        val lines = BillingJournalFactory.buildLines(cmd, accounts)
+        val lines = BillingJournalFactory.buildLines(cmd)
 
         val debit = lines.single { it.side == "DEBIT" }
         val credit = lines.single { it.side == "CREDIT" }
-        assertThat(debit.glAccountId).isEqualTo(accounts.feeReceivable())
+        // Legs name a class and a role, never a GL account (ADR-0341 D3); the ledger resolves them.
+        assertThat(debit.accountingClass to debit.accountingRole)
+            .isEqualTo("CUSTOMER_DEPOSIT_DEMAND" to "PRINCIPAL")
         assertThat(debit.subAccountId).isEqualTo(UUID.fromString(accountId))
-        assertThat(credit.glAccountId).isEqualTo(accounts.feeIncome())
+        assertThat(credit.accountingClass to credit.accountingRole).isEqualTo("FEE_INCOME_ACCOUNT" to "FEE_INCOME")
         assertThat(credit.subAccountId).isNull()
     }
 
     @Test
     fun `is balanced and single-currency (no FX in phase 2)`() {
-        val lines = BillingJournalFactory.buildLines(command("fee-c-acc-f1-EUR", currency = "EUR"), accounts)
+        val lines = BillingJournalFactory.buildLines(command("fee-c-acc-f1-EUR", currency = "EUR"))
         assertThat(lines).hasSize(2)
         val debit = lines.single { it.side == "DEBIT" }.amount
         val credit = lines.single { it.side == "CREDIT" }.amount
@@ -75,12 +73,12 @@ class BillingJournalFactoryTest {
     @Test
     fun `request carries the idempotency key and a deterministic transaction id stable across replays`() {
         val cmd = command("fee-2026-07-acc-1-f1-CZK")
-        val request = BillingJournalFactory.buildRequest(cmd, accounts, systemActorId, date)
+        val request = BillingJournalFactory.buildRequest(cmd, systemActorId, date)
 
         assertThat(request.idempotencyKey).isEqualTo("fee-2026-07-acc-1-f1-CZK")
         assertThat(request.transactionId)
             .isEqualTo(UUID.nameUUIDFromBytes("fee-2026-07-acc-1-f1-CZK".toByteArray()))
-            .isEqualTo(BillingJournalFactory.buildRequest(cmd, accounts, systemActorId, date).transactionId)
+            .isEqualTo(BillingJournalFactory.buildRequest(cmd, systemActorId, date).transactionId)
         assertThat(request.entryDate).isEqualTo("2026-07-01")
         assertThat(request.valueDate).isEqualTo("2026-07-01")
         assertThat(request.createdBy).isEqualTo(systemActorId)
@@ -96,8 +94,8 @@ class BillingJournalFactoryTest {
             amount = "25",
         )
 
-        val requestA = BillingJournalFactory.buildRequest(feeA, accounts, systemActorId, date)
-        val requestB = BillingJournalFactory.buildRequest(feeB, accounts, systemActorId, date)
+        val requestA = BillingJournalFactory.buildRequest(feeA, systemActorId, date)
+        val requestB = BillingJournalFactory.buildRequest(feeB, systemActorId, date)
 
         assertThat(requestA.idempotencyKey).isNotEqualTo(requestB.idempotencyKey)
         assertThat(requestA.transactionId).isNotEqualTo(requestB.transactionId)
@@ -106,11 +104,11 @@ class BillingJournalFactoryTest {
     @Test
     fun `a non-UUID accountId still yields a stable deterministic subAccountId rather than dropping the tie-out`() {
         val cmd = command("fee-2026-07-not-a-uuid-f1-CZK", accountId = "not-a-uuid")
-        val lines = BillingJournalFactory.buildLines(cmd, accounts)
+        val lines = BillingJournalFactory.buildLines(cmd)
         val debit = lines.single { it.side == "DEBIT" }
         assertThat(debit.subAccountId).isNotNull()
         // Deterministic: same non-UUID accountId always maps to the same synthetic UUID.
-        val linesAgain = BillingJournalFactory.buildLines(cmd, accounts)
+        val linesAgain = BillingJournalFactory.buildLines(cmd)
         assertThat(debit.subAccountId).isEqualTo(linesAgain.single { it.side == "DEBIT" }.subAccountId)
     }
 
@@ -130,22 +128,25 @@ class BillingJournalFactoryTest {
         amount = BigDecimal(amount),
         currency = currency,
         reason = "waiver bug",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     @Test
     fun `a reversal is the exact reverse of the charge — credits fee-receivable, debits fee income`() {
-        val chargeLines = BillingJournalFactory.buildLines(command("fee-2026-07-acc-1-f1-CZK"), accounts)
-        val reversalLines = BillingJournalFactory.buildReversalLines(reversalCommand(), accounts)
+        val chargeLines = BillingJournalFactory.buildLines(command("fee-2026-07-acc-1-f1-CZK"))
+        val reversalLines = BillingJournalFactory.buildReversalLines(reversalCommand())
 
         val chargeDebit = chargeLines.single { it.side == "DEBIT" }
         val chargeCredit = chargeLines.single { it.side == "CREDIT" }
         val reversalCredit = reversalLines.single { it.side == "CREDIT" }
         val reversalDebit = reversalLines.single { it.side == "DEBIT" }
 
-        // Same GL accounts, opposite sides.
-        assertThat(reversalCredit.glAccountId).isEqualTo(chargeDebit.glAccountId)
+        // Same accounting classes, opposite sides.
+        assertThat(reversalCredit.accountingClass).isEqualTo(chargeDebit.accountingClass)
+        assertThat(reversalCredit.accountingRole).isEqualTo(chargeDebit.accountingRole)
         assertThat(reversalCredit.subAccountId).isEqualTo(chargeDebit.subAccountId)
-        assertThat(reversalDebit.glAccountId).isEqualTo(chargeCredit.glAccountId)
+        assertThat(reversalDebit.accountingClass).isEqualTo(chargeCredit.accountingClass)
+        assertThat(reversalDebit.accountingRole).isEqualTo(chargeCredit.accountingRole)
         assertThat(reversalDebit.subAccountId).isNull()
         assertThat(reversalCredit.amount).isEqualByComparingTo(chargeDebit.amount)
         assertThat(reversalDebit.amount).isEqualByComparingTo(chargeCredit.amount)
@@ -153,7 +154,7 @@ class BillingJournalFactoryTest {
 
     @Test
     fun `a reversal is balanced and single-currency`() {
-        val lines = BillingJournalFactory.buildReversalLines(reversalCommand(currency = "EUR"), accounts)
+        val lines = BillingJournalFactory.buildReversalLines(reversalCommand(currency = "EUR"))
         assertThat(lines).hasSize(2)
         val debit = lines.single { it.side == "DEBIT" }.amount
         val credit = lines.single { it.side == "CREDIT" }.amount
@@ -170,14 +171,13 @@ class BillingJournalFactoryTest {
             idempotencyKey = "fee-reversal-2026-07-acc-1-f1-CZK",
             originalIdempotencyKey = "fee-2026-07-acc-1-f1-CZK",
         )
-        val request = BillingJournalFactory.buildReversalRequest(cmd, accounts, systemActorId, date)
+        val request = BillingJournalFactory.buildReversalRequest(cmd, systemActorId, date)
 
         assertThat(request.idempotencyKey).isEqualTo("fee-reversal-2026-07-acc-1-f1-CZK")
         assertThat(request.idempotencyKey).isNotEqualTo(cmd.originalIdempotencyKey)
         // Distinct transaction id from the original charge's — never collapses into a replay.
         val chargeRequest = BillingJournalFactory.buildRequest(
             command(cmd.originalIdempotencyKey, accountId = cmd.accountId, feeId = cmd.feeId),
-            accounts,
             systemActorId,
             date,
         )

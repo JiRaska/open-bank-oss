@@ -122,9 +122,30 @@ class AssessedFeeEntity : PanacheEntityBase() {
     @Column(name = "reversed_at")
     var reversedAt: Instant? = null
 
+    @Column(name = "product_revision_id", columnDefinition = "uuid")
+    var productRevisionId: UUID? = null
+
+    @Column(name = "accounting_class")
+    var accountingClass: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+}
+
+/** ADR-0341 D1: the catalog revision an account is pinned to; written once, never updated in place. */
+@Entity
+@Table(name = "billing_account_pin")
+class BillingAccountPinEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "account_id")
+    lateinit var accountId: String
+
+    @Column(name = "product_revision_id", nullable = false, columnDefinition = "uuid")
+    lateinit var productRevisionId: UUID
+
+    @Column(name = "pinned_at", nullable = false)
+    lateinit var pinnedAt: Instant
 }
