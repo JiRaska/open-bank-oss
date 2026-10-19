@@ -13,13 +13,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock discovery — off-cluster by default (returns null → static probe path)
 vi.mock('@/lib/discovery', () => ({
-  discoverServices: vi.fn().mockResolvedValue(null),
+  discoverServicesSnapshot: vi.fn().mockResolvedValue({ status: 'static', services: [] }),
   prettyLabel: vi.fn((name: string) => name),
   inCluster: vi.fn().mockReturnValue(false),
   resolveInClusterBaseUrl: vi.fn().mockResolvedValue(null),
 }))
 
-import { discoverServices } from '@/lib/discovery'
+import { discoverServicesSnapshot } from '@/lib/discovery'
 
 /** Build a minimal fetch mock: /q/health/ready → healthStatus, /api/v1/info → infoPayload */
 function mockServiceFetch(healthStatus: number, infoPayload?: object) {
@@ -45,7 +45,7 @@ function mockServiceFetch(healthStatus: number, infoPayload?: object) {
 describe('GET /api/services/health', () => {
   beforeEach(() => {
     vi.resetModules()
-    vi.mocked(discoverServices).mockResolvedValue(null)
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'static', services: [] })
     // Use container-mode so probes target predictable hostnames
     process.env.SERVICES_HOST = 'localhost'
   })
@@ -110,12 +110,12 @@ describe('GET /api/services/health', () => {
   })
 
   it('uses kubernetes discovery when discoverServices returns data', async () => {
-    vi.mocked(discoverServices).mockResolvedValue([
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [
       {
         name: 'account-service', namespace: 'openbank', port: 8100,
         group: 'core', ready: true, readyReplicas: 1,
       } as never,
-    ])
+    ] })
     // Info probe for the discovered service
     vi.stubGlobal('fetch', mockServiceFetch(200, { version: '3.0.0' }))
     const { GET } = await import('@/app/api/services/health/route')
@@ -125,7 +125,7 @@ describe('GET /api/services/health', () => {
   })
 
   it('preserves same-named ready workloads in separate namespaces', async () => {
-    vi.mocked(discoverServices).mockResolvedValue([
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'complete', services: [
       {
         name: 'ledger-service', namespace: 'tenant-a', port: 8101,
         group: 'core', ready: true, readyReplicas: 1,
@@ -134,7 +134,7 @@ describe('GET /api/services/health', () => {
         name: 'ledger-service', namespace: 'tenant-b', port: 8101,
         group: 'platform', ready: true, readyReplicas: 1,
       },
-    ])
+    ] })
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })))
     const { GET } = await import('@/app/api/services/health/route')
     const body = await (await GET()).json()
@@ -150,13 +150,41 @@ describe('GET /api/services/health', () => {
     expect(body.byContainer['ledger-service']).toBeUndefined()
   })
 
-  it('falls back to static probe list when discoverServices returns null', async () => {
-    vi.mocked(discoverServices).mockResolvedValue(null)
+  it('falls back to static probe list off-cluster', async () => {
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status: 'static', services: [] })
     vi.stubGlobal('fetch', mockServiceFetch(200))
     const { GET } = await import('@/app/api/services/health/route')
     const body = await (await GET()).json()
     expect(body.source).toBe('static')
     expect(body.services.length).toBeGreaterThan(0)
+  })
+
+  it.each(['partial', 'unavailable'] as const)(
+    'does not turn %s Kubernetes discovery into a static probe or an empty deployed inventory',
+    async (status) => {
+      vi.mocked(discoverServicesSnapshot).mockResolvedValue({ status, services: [] })
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const { GET } = await import('@/app/api/services/health/route')
+      const body = await (await GET()).json()
+      expect(body).toMatchObject({ source: 'kubernetes', discoveryStatus: status, services: [] })
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('keeps observed readiness facts alongside an explicitly partial inventory', async () => {
+    vi.mocked(discoverServicesSnapshot).mockResolvedValue({
+      status: 'partial',
+      services: [{
+        name: 'account-service', namespace: 'accounts', port: 8100,
+        group: 'core', ready: true, replicas: 1, readyReplicas: 1, scaledToZero: false,
+      }],
+    })
+    const { GET } = await import('@/app/api/services/health/route')
+    const body = await (await GET()).json()
+    expect(body).toMatchObject({ source: 'kubernetes', discoveryStatus: 'partial' })
+    expect(body.services).toHaveLength(1)
+    expect(body.services[0]).toMatchObject({ name: 'account-service', status: 'UP', reachable: true })
   })
 
   it('response includes byContainer index keyed by container name', async () => {

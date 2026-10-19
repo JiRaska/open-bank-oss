@@ -21,11 +21,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
  */
 
 const mockAuth = vi.fn()
+const discoveryState = vi.hoisted(() => ({ resolution: null as any }))
 vi.mock('@/auth', () => ({ auth: () => mockAuth() }))
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => true,
-  discoverServices: async () => ([{ name: 'fx-service', namespace: 'fx', ready: 1, desired: 1 }]),
-  resolveInClusterBaseUrl: async () => 'http://fx-service.fx.svc:8119',
+  resolveInClusterService: async () => discoveryState.resolution ?? ({ state: 'found', service: { name: 'fx-service', namespace: 'fx', port: 8119, ready: true, scaledToZero: false }, baseUrl: 'http://fx-service.fx.svc:8119', coverage: 'complete' }),
 }))
 
 async function callRoute() {
@@ -39,6 +39,7 @@ describe('GET /api/fx/rates relays the operator bearer', () => {
 
   beforeEach(() => {
     vi.resetModules()
+    discoveryState.resolution = null
     fetchSpy = vi.fn(async (url: string) => {
       if (String(url).includes('/q/health/ready')) return new Response('', { status: 200 })
       if (String(url).includes('/api/v1/fx/')) return new Response(JSON.stringify([]), { status: 200 })
@@ -80,6 +81,17 @@ describe('GET /api/fx/rates relays the operator bearer', () => {
 
     expect(body.fxService.rates).toEqual([])
     expect(body.fxService.error).toContain('403')
+  })
+
+  it('reports unknown when incomplete discovery did not observe fx-service', async () => {
+    discoveryState.resolution = { state: 'unknown', coverage: 'partial' }
+    mockAuth.mockResolvedValue({ user: { accessToken: 'operator-token' } })
+
+    const body = await callRoute()
+
+    expect(body.fxService.status).toBe('unknown')
+    expect(body.fxService.error).toBe('discovery_unavailable')
+    expect(fetchSpy.mock.calls.filter(c => String(c[0]).includes('/api/v1/fx/'))).toHaveLength(0)
   })
 
   it('reports no error on a genuinely empty but successful read', async () => {

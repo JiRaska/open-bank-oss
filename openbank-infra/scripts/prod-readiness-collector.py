@@ -20,11 +20,13 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
@@ -547,6 +549,45 @@ def all_services() -> list[str]:
     return sorted(out)
 
 
+def source_revision() -> str:
+    """Return the exact source revision that produced this report; never invent one."""
+    candidate = os.environ.get("READINESS_SOURCE_SHA") or os.environ.get("GITHUB_SHA")
+    if not candidate:
+        try:
+            candidate = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError("cannot determine readiness source commit") from exc
+    if not re.fullmatch(r"[0-9a-f]{40}", candidate):
+        raise RuntimeError("READINESS_SOURCE_SHA must be a full 40-character Git SHA")
+    return candidate
+
+
+def build_snapshot(results: list[ServiceReadiness], generated_for: str,
+                   collected_at: str | None = None, source_sha: str | None = None) -> dict:
+    """Serialize complete score evidence with explicit scope and source provenance."""
+    services = [asdict(result) for result in results]
+    roster = "\n".join(sorted(
+        f"{result.service}:{str(result.money_path).lower()}" for result in results
+    )).encode("utf-8")
+    return {
+        "schema_version": 1,
+        "generated_for": generated_for,
+        "collected_at": collected_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "source_sha": source_sha or source_revision(),
+        "scope": {
+            "kind": "service-module-matrix-v1",
+            "service_count": len(services),
+            "money_path_count": sum(1 for result in results if result.money_path),
+            "roster_sha256": hashlib.sha256(roster).hexdigest(),
+        },
+        "dimensions": [{"code": c, "name": n} for c, n in DIMENSIONS],
+        "services": services,
+    }
+
+
 # ---------------------------------------------------------------------------
 def render_table(results: list[ServiceReadiness]):
     glyph = {0: "·", 1: "○", 2: "◐", 3: "●"}
@@ -571,6 +612,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("services", nargs="*", help="service short names (e.g. ledger)")
     ap.add_argument("--all", action="store_true", help="score the whole fleet")
+    ap.add_argument("--source-sha", help="full Git SHA for the source checkout (defaults to READINESS_SOURCE_SHA/GITHUB_SHA/git HEAD)")
     # Default to the real current date so the baked `generated_for` and the TTL
     # decay arithmetic stay live across builds; READINESS_TODAY pins it for tests.
     ap.add_argument("--today", default=os.environ.get("READINESS_TODAY") or date.today().isoformat())
@@ -594,11 +636,7 @@ def main():
         render_table(results)
 
     if args.json:
-        payload = {
-            "generated_for": args.today,
-            "dimensions": [{"code": c, "name": n} for c, n in DIMENSIONS],
-            "services": [asdict(r) for r in results],
-        }
+        payload = build_snapshot(results, args.today, source_sha=args.source_sha)
         Path(args.json).write_text(json.dumps(payload, indent=2, ensure_ascii=False))
         print(f"\nwrote {args.json}", file=sys.stderr)
 

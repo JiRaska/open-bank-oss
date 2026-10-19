@@ -123,4 +123,38 @@ describe('temporal/status does not report an outage as "not deployed" (#7943)', 
     expect(body.temporalDeployed).not.toBe(false)
     expect(body.error).toBeTruthy()
   })
+
+  it('keeps successful workflow counts while returning null for a failed count query', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/-/ready')) return ready()
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      if (query.includes('temporal_workflow_failed[1h]')) return json({ status: 'error', error: 'failed count query' }, 500)
+      const isVector = query.includes('group by (namespace)') || query.includes('sum by (namespace, workflow_type)')
+      const value = query.includes('count(temporal_restarts)') ? '1' : query.includes('StartWorkflowExecution') ? '5' : '2'
+      return json({ status: 'success', data: { result: isVector ? [] : [{ metric: {}, value: [0, value] }] } })
+    }))
+    const { GET } = await import('@/app/api/temporal/status/route')
+    const body = await (await GET()).json()
+
+    expect(body.temporalDeployed).toBe(true)
+    expect(body.degraded).toBe(true)
+    expect(body.metrics.workflows).toMatchObject({ scheduled1h: 5, completed1h: 2, failed1h: null, timedOut1h: 2 })
+  })
+
+  it('keeps workflow-type query failure distinct from a verified empty type list', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/-/ready')) return ready()
+      const query = new URL(String(input)).searchParams.get('query') ?? ''
+      if (query.includes('sum by (namespace, workflow_type)')) return json({ status: 'error', error: 'workflow types query failed' }, 500)
+      const isVector = query.includes('group by (namespace)')
+      const value = query.includes('count(temporal_restarts)') ? '1' : '0'
+      return json({ status: 'success', data: { result: isVector ? [] : [{ metric: {}, value: [0, value] }] } })
+    }))
+    const { GET } = await import('@/app/api/temporal/status/route')
+    const body = await (await GET()).json()
+
+    expect(body.temporalDeployed).toBe(true)
+    expect(body.degraded).toBe(true)
+    expect(body.metrics.workflowTypes).toBeNull()
+  })
 })
