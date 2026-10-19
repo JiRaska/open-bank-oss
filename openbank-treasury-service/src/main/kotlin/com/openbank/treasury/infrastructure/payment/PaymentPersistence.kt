@@ -248,14 +248,18 @@ class PaymentRepositoryImpl(
                 session.createNativeQuery<Int>("select 1 from (select pg_advisory_xact_lock(hashtext(:k))) l")
                     .setParameter("k", fundingKey).singleResult
             }.flatMap {
+                // Lock order: deal rows BEFORE the payment row, the same order a deal change takes
+                // (deal row, then its payments), so a reverse and a release never deadlock.
+                deals.find("dealId in ?1", payment.dealIds).withLock(LockModeType.PESSIMISTIC_WRITE).list()
+            }.flatMap {
                 Panache.getSession().flatMap { session -> unbookedOut(session, payment.currency, payment.valueDate) }
             }.flatMap { pending ->
                 fundingCheck(pending)
                 payments.find("paymentId", payment.paymentId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             }.flatMap { row ->
                 checkNotNull(row) { "payment ${payment.paymentId} disappeared" }
-                check(row.status == PaymentStatus.PROPOSED.name) {
-                    "payment ${payment.paymentId} is now ${row.status}, not PROPOSED"
+                if (row.status != PaymentStatus.PROPOSED.name) {
+                    throw PaymentStaleException("payment ${payment.paymentId} is now ${row.status}, not PROPOSED")
                 }
                 revalidate(payment).map { row }
             }.flatMap { row ->

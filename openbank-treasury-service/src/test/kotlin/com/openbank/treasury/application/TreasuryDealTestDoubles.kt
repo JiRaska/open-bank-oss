@@ -63,6 +63,7 @@ internal class InMemoryDeals : DealRepository {
         command: CommandKey?,
         schedule: com.openbank.treasury.application.port.out.ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        withdrawPayments: Boolean,
     ): Deal {
         rows[deal.id] = deal
         journal?.let { journals += it }

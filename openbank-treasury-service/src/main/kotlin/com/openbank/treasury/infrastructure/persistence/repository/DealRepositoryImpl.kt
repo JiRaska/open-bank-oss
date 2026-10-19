@@ -173,10 +173,17 @@ class DealRepositoryImpl(
         command: CommandKey?,
         schedule: ScheduleWrite?,
         extraEvents: List<DealEvent>,
+        withdrawPayments: Boolean,
     ): Deal {
         val actor = deal.history.lastOrNull()?.actor?.id ?: deal.createdBy.id
         Panache.withTransaction {
-            find("dealId", deal.id).firstResult().flatMap { existing ->
+            val row = if (withdrawPayments) {
+                find("dealId", deal.id).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
+                    .flatMap { locked -> withdraw(deal.id).map { locked } }
+            } else {
+                find("dealId", deal.id).firstResult()
+            }
+            row.flatMap { existing ->
                 val entity = existing ?: DealEntity().apply {
                     dealId = deal.id
                     createdAt = deal.createdAt
@@ -247,6 +254,60 @@ class DealRepositoryImpl(
         "legs" to deal.legs,
         "header" to deal.header.copy(confirmationsSent = emptyList()),
     )
+
+    /**
+     * Under the deal lock: refuse while a payment of the deal is released; else cancel its PROPOSED
+     * payments with scoped, version-bumped updates, free exactly their flows, drop their links and
+     * record the status event — all in the caller's transaction.
+     */
+    private fun withdraw(dealId: java.util.UUID): Uni<Void> = Panache.getSession().flatMap { session ->
+        val like = "%$dealId%"
+        session.createNativeQuery<Any>(
+            "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status in (:released)",
+        ).setParameter("d", like).setParameter("released", RELEASED_STATUSES).resultList.flatMap { released ->
+            released.firstOrNull()?.let {
+                throw com.openbank.treasury.domain.payment.DealHasReleasedPaymentException(
+                    dealId,
+                    java.util.UUID.fromString(it.toString()),
+                )
+            }
+            session.createNativeQuery<Any>(
+                "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status = 'PROPOSED' for update",
+            ).setParameter("d", like).resultList
+        }.flatMap { proposed ->
+            proposed.map { java.util.UUID.fromString(it.toString()) }.fold(Uni.createFrom().voidItem()) { chain, pid ->
+                chain.flatMap {
+                    session.createNativeQuery<Any>(
+                        "update deal_cash_flows set payment_id = null, row_version = row_version + 1 where payment_id = :p",
+                    ).setParameter("p", pid.toString()).executeUpdate()
+                }.flatMap {
+                    session.createNativeQuery<Any>("delete from treasury_payment_flows where payment_id = :p")
+                        .setParameter("p", pid).executeUpdate()
+                }.flatMap {
+                    session.createNativeQuery<Any>(
+                        "update treasury_payments set status = 'CANCELLED', status_reason = :r where payment_id = :p and status = 'PROPOSED'",
+                    ).setParameter("r", "deal $dealId changed").setParameter("p", pid).executeUpdate()
+                }.flatMap { n ->
+                    check(n == 1) { "payment $pid changed while its deal was being changed" }
+                    outbox.persistInTransaction(
+                        OutboxMessage(
+                            aggregateId = pid,
+                            eventType = "treasury.payment.status-changed.v1",
+                            payload = objectMapper.writeValueAsString(
+                                mapOf(
+                                    "paymentId" to pid,
+                                    "status" to "CANCELLED",
+                                    "reason" to "deal $dealId changed",
+                                    "occurredAt" to clock.instant(),
+                                ),
+                            ),
+                            createdAt = clock.instant(),
+                        ),
+                    )
+                }
+            }
+        }
+    }
 
     private fun scheduleRows(s: ScheduleWrite): Uni<Void> {
         val flows = s.flows.map { CashFlowEntity().fill(it) }
@@ -551,6 +612,9 @@ class DealRepositoryImpl(
     }
 
     private companion object {
+        /** Released payments block a deal change; keep in step with PaymentStatus.released. */
+        val RELEASED_STATUSES = listOf("RELEASED", "SENT", "RAIL_NOT_SUPPORTED")
+
         /** Derived from [Deal.LIMIT_CONSUMING_STATES] — never a second, independently-typed literal list. */
         val LIMIT_CONSUMING_STATE_NAMES = Deal.LIMIT_CONSUMING_STATES.map { it.name }
         val LIMIT_CONSUMING_PRODUCT_NAMES = ProductType.entries.filter { it.isAsset }.map { it.name }

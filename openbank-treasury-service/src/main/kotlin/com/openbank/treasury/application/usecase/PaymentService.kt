@@ -232,17 +232,14 @@ class PaymentService(
     }
 
     /**
-     * Before a deal is cancelled, reversed or corrected: a released payment blocks the change (409);
-     * PROPOSED payments are withdrawn (their flows freed) in their own scoped transactions.
+     * Read-only pre-check before a deal change has side effects (e.g. posting a reversal journal):
+     * a released payment refuses it (409). It withdraws NOTHING — the binding check and the
+     * withdrawal of PROPOSED payments run under the deal lock in the change's own transaction
+     * (DealRepository.save withdrawPayments).
      */
     suspend fun guardDealChange(dealId: UUID) {
-        val mine = payments.forDeal(dealId).filter { dealId in it.dealIds }
-        mine.firstOrNull { it.status.released }?.let {
+        payments.forDeal(dealId).firstOrNull { dealId in it.dealIds && it.status.released }?.let {
             throw com.openbank.treasury.domain.payment.DealHasReleasedPaymentException(dealId, it.paymentId)
-        }
-        mine.filter { it.status == PaymentStatus.PROPOSED }.forEach { p ->
-            val withdrawn = p.withdrawn("deal $dealId changed")
-            payments.save(withdrawn, PaymentStatus.PROPOSED, event(withdrawn, null, withdrawn.statusReason))
         }
     }
 

@@ -276,8 +276,10 @@ class TreasuryDealService(
 
     override suspend fun cancel(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, CANCEL, dealId)?.let { return it } }
-        paymentGuard?.invoke(dealId)
-        return deals.save(load(dealId).cancel(actor, clock.instant()), command = cmd(key, CANCEL, dealId))
+        // Domain transition (authorisation, state) FIRST; the payment withdrawal happens in the save's
+        // transaction under the deal lock, so a refused or failed cancel withdraws nothing.
+        val cancelled = load(dealId).cancel(actor, clock.instant())
+        return deals.save(cancelled, command = cmd(key, CANCEL, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String?): Deal {
@@ -370,9 +372,11 @@ class TreasuryDealService(
 
     override suspend fun reverse(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
-        paymentGuard?.invoke(dealId)
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
+        // Read-only pre-check before the reversal journal is posted (no side effect); the binding
+        // check and the withdrawal run again under the deal lock in the save's transaction.
+        paymentGuard?.invoke(dealId)
         check(deal.product.legacy || deal.state != DealState.SETTLED) {
             "a settled ${deal.product} deal is changed by a correction (ADR-0344 D7), not reversed"
         }
@@ -404,7 +408,7 @@ class TreasuryDealService(
                 ),
             ),
         )
-        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+        return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId), withdrawPayments = paymentGuard != null)
     }
 
     override suspend fun sendConfirmation(

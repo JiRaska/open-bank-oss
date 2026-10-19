@@ -8,7 +8,9 @@ import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.application.usecase.PaymentService
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
+import com.openbank.treasury.domain.payment.DealHasReleasedPaymentException
 import com.openbank.treasury.domain.payment.FundingExceededException
+import com.openbank.treasury.domain.payment.PaymentStaleException
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -23,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.future.future
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
@@ -62,6 +65,12 @@ class PaymentApiIT {
 
     @Inject
     lateinit var payments: PaymentService
+
+    @Inject
+    lateinit var deals: com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
+
+    @Inject
+    lateinit var dealRepository: com.openbank.treasury.application.port.out.DealRepository
 
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
@@ -343,32 +352,89 @@ class PaymentApiIT {
 
     @Test
     @Order(27)
-    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `27 - a deal with a released payment cannot be reversed, one with only proposals withdraws them`() {
-        val releasedDeal = jdbc { c ->
-            c.prepareStatement("select deal_ids from treasury_payments where payment_id = '$releasedB'").executeQuery()
-                .use { rs ->
-                    rs.next()
-                    rs.getString(1)
-                }
-        }
-        post("/deals/$releasedDeal/reverse", """{"reason":"booked in error"}""").then().statusCode(409)
-            .body("error", equalTo("PAYMENT_RELEASED"))
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `27 - a refused cancel leaves the deal's PROPOSED payments untouched`() {
+        val before =
+            count("select count(*) from treasury_payments where deal_ids like '%$dealC%' and status = 'PROPOSED'")
+        assertThat(before).isGreaterThan(0)
+        val status = post("/deals/$dealC/cancel").then().extract().statusCode()
+        assertThat(status).isNotEqualTo(200)
         assertThat(
             count("select count(*) from treasury_payments where deal_ids like '%$dealC%' and status = 'PROPOSED'"),
-        ).isGreaterThan(0)
-        post("/deals/$dealC/reverse", """{"reason":"booked in error"}""").then().statusCode(200)
-        assertThat(
-            count("select count(*) from treasury_payments where deal_ids like '%$dealC%' and status = 'PROPOSED'"),
-        ).isEqualTo(0)
+        ).isEqualTo(before)
         assertThat(
             count("select count(*) from deal_cash_flows where deal_id = '$dealC' and payment_id is not null"),
-        ).isEqualTo(0)
+        ).isEqualTo(before)
     }
 
     @Test
     @Order(28)
-    fun `28 - a nostro credit settles only an identified receipt, never ambiguously, never for a dependent uploader`() {
+    fun `28 - under the deal lock a released payment refuses the change and rolls back every withdrawal`() {
+        val releasedDeal = UUID.fromString(
+            jdbc { c ->
+                c.prepareStatement(
+                    "select deal_ids from treasury_payments where payment_id = '$releasedB'",
+                ).executeQuery()
+                    .use { rs ->
+                        rs.next()
+                        rs.getString(1)
+                    }
+            },
+        )
+        val like = "%$releasedDeal%"
+        val proposedBefore =
+            count("select count(*) from treasury_payments where deal_ids like '$like' and status = 'PROPOSED'")
+        val deal = checkNotNull(onContext { dealRepository.findById(releasedDeal) })
+        assertThatThrownBy { onContext { dealRepository.save(deal, withdrawPayments = true) } }
+            .isInstanceOf(DealHasReleasedPaymentException::class.java)
+        assertThat(count("select count(*) from treasury_payments where deal_ids like '$like' and status = 'PROPOSED'"))
+            .isEqualTo(proposedBefore)
+    }
+
+    @Test
+    @Order(29)
+    fun `29 - a reverse and a release racing on one deal - exactly one wins, the other gets a typed 409`() {
+        val payC = paymentOf(outFlow(dealC))
+        ledger.balances[Triple("1001", "CZK", valueDate)] = BigDecimal("1000000000.00")
+        val anna = Actor("anna.approver", ActorType.HUMAN)
+        val rita = Actor("rita.releaser", ActorType.HUMAN)
+        val pool = Executors.newFixedThreadPool(2)
+        val gate = CountDownLatch(1)
+        val reverse = CompletableFuture.supplyAsync({
+            gate.await()
+            runCatching { onContext { deals.reverse(UUID.fromString(dealC), "booked in error", anna, null) } }
+        }, pool)
+        val release = CompletableFuture.supplyAsync({
+            gate.await()
+            runCatching { onContext { payments.release(UUID.fromString(payC), rita) } }
+        }, pool)
+        gate.countDown()
+        val r1 = reverse.get()
+        val r2 = release.get()
+        pool.shutdown()
+        assertThat(listOf(r1, r2).count { it.isSuccess }).isEqualTo(1)
+        if (r1.isSuccess) {
+            assertThat(r2.exceptionOrNull()).isInstanceOf(PaymentStaleException::class.java)
+            assertThat(
+                count("select count(*) from treasury_payments where deal_ids like '%$dealC%' and status = 'PROPOSED'"),
+            ).isEqualTo(0)
+            assertThat(
+                count("select count(*) from deal_cash_flows where deal_id = '$dealC' and payment_id is not null"),
+            ).isEqualTo(0)
+        } else {
+            assertThat(r1.exceptionOrNull()).isInstanceOf(DealHasReleasedPaymentException::class.java)
+            assertThat(
+                count(
+                    "select count(*) from treasury_payments where payment_id = '$payC' and status = 'RAIL_NOT_SUPPORTED'",
+                ),
+            )
+                .isEqualTo(1)
+        }
+    }
+
+    @Test
+    @Order(30)
+    fun `30 - a nostro credit settles only an identified receipt, never ambiguously, never for a dependent uploader`() {
         val inA = jdbc { c ->
             c.prepareStatement(
                 "select payment_id, amount from treasury_payments where direction = 'IN' and deal_ids like '%$dealA%'",

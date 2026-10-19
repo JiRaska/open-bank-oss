@@ -66,6 +66,13 @@ interface DealRepository {
         schedule: ScheduleWrite? = null,
         /** Further outbox events of the same change (e.g. treasury.cashflow.generated). */
         extraEvents: List<DealEvent> = emptyList(),
+        /**
+         * ADR-0344 D6: the change ends the deal's payable life (cancel, reverse, correction). In the
+         * SAME transaction, under a lock on the deal row (the row a payment release locks too): refuse
+         * (DealHasReleasedPaymentException, 409) if any of its payments is released, else withdraw its
+         * PROPOSED payments and free their flows. Commits or rolls back with the deal change.
+         */
+        withdrawPayments: Boolean = false,
     ): Deal
 
     /** The command previously recorded under [key], if any. */
