@@ -7,6 +7,7 @@ package com.openbank.cardprocessing.support
 import com.openbank.cardprocessing.application.usecase.ClearingLedgerPoster
 import com.openbank.cardprocessing.application.usecase.LedgerPostingRedriver
 import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostingAdapter
+import com.openbank.cardprocessing.infrastructure.scheduler.LedgerPostingRedriveSweep
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.logging.Handler
@@ -23,6 +24,7 @@ internal fun capturePostingLogs(block: () -> Unit): List<PostingLogRecord> {
         ClearingLedgerPoster::class.java,
         LedgerPostingRedriver::class.java,
         TransactionLedgerPostingAdapter::class.java,
+        LedgerPostingRedriveSweep::class.java,
     ).map { Logger.getLogger(it.name) }
     val levels = loggers.map { it.level }
     val handler = object : Handler() {

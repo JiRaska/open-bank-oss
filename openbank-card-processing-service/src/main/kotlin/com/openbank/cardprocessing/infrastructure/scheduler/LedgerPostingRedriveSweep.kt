@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Drives [LedgerPostingRedriver] (#13228): cleared card spend whose ledger posting failed or was
- * unreadable is posted again until the books have it.
+ * unreadable is posted again until a completed posting is confirmed.
  *
  * A **`suspend fun`** for the reason in [HoldExpirySweep]: a plain `@Scheduled` method has no Vert.x
  * context, so a reactive repository call from it throws `HR000068` and the job silently never runs.
@@ -31,10 +31,10 @@ import java.util.concurrent.atomic.AtomicLong
  * ## What it publishes
  *  - the ADR-0237 liveness heartbeat, recorded only when a tick actually returned (a heartbeat on the
  *    failure branch would assert the very thing it exists to disprove);
- *  - `openbank.card.processing.ledger.posting.unposted` - clearings still owed a posting;
+ *  - `openbank.card.processing.ledger.posting.unposted` - clearings without a confirmed completed posting;
  *  - `openbank.card.processing.ledger.posting.exhausted` - clearings that used up their attempts and
- *    are no longer retried. **This is the alert**: `> 0` means a debit is not in the books and a human
- *    has to act. Exhausted rows are kept, never dropped.
+ *    are no longer retried. **This is the alert**: `> 0` means a completed posting is unconfirmed
+ *    and a human has to reconcile its outcome. Exhausted rows are kept, never dropped.
  */
 @ApplicationScoped
 class LedgerPostingRedriveSweep(
@@ -66,11 +66,10 @@ class LedgerPostingRedriveSweep(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
         identity = "card-processing-ledger-posting-redrive",
     )
-    @Suppress("TooGenericExceptionCaught")
     suspend fun sweep() {
-        // best-effort per tick: the work is selected by STATE (unposted rows whose backoff elapsed), so a
-        // tick that fails re-selects the same rows next minute and loses nothing; letting the exception
-        // escape would kill the schedule, which is the one outcome that does lose the work.
+        // Work is selected by STATE (unposted rows whose backoff elapsed), so a later tick can retry
+        // rows after a transient failure. Guard each phase independently: failure in the first must
+        // not prevent the second phase from running.
         // The two halves are independent: a failing re-drive must not freeze the gauges (the exhausted
         // gauge is the alert), and a failing gauge refresh must not hide a working re-drive.
         // observed-by: the heartbeat below is recorded only when BOTH halves returned, so either kind of
@@ -92,7 +91,7 @@ class LedgerPostingRedriveSweep(
             exhausted.set(backlog.exhausted)
             if (backlog.exhausted > 0) {
                 log.errorf(
-                    "%d clearing(s) exhausted their ledger posting attempts - the books are missing them",
+                    "%d clearing(s) exhausted their ledger posting attempts - completed postings are unconfirmed",
                     backlog.exhausted,
                 )
             }
@@ -108,7 +107,7 @@ class LedgerPostingRedriveSweep(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        log.errorf(e, "%s failed", what)
+        log.errorf("%s failed (failureType=%s)", what, e.javaClass.simpleName)
         false
     }
 
