@@ -56,13 +56,14 @@ describe('GET /api/finops/ai-costs without data', () => {
 
   it('the FinOps page renders a null total as "No data", never as a formatted dollar amount', () => {
     const page = readFileSync(path.resolve(__dirname, '../app/finops/page.tsx'), 'utf8')
-    expect(page).toContain('totalCostLast7dUsd: number | null')
+    const contracts = readFileSync(path.resolve(__dirname, '../lib/finops/overviewContracts.ts'), 'utf8')
+    expect(contracts).toContain('totalCostLast7dUsd: nullableNumber')
     expect(page).toContain("aiCosts.totalCostLast7dUsd == null")
     expect(page).toContain("'No data'")
   })
   it.each([
-    ['Czech', 'Metriky nákladů na AI nejsou k dispozici.', 'bridge není nasazen'],
-    ['English', 'AI cost metrics are unavailable.', 'bridge is not deployed'],
+    ['Czech', 'Data o AI nákladech nejsou dostupná.', 'bridge není nasazen'],
+    ['English', 'AI cost evidence is unavailable.', 'bridge is not deployed'],
   ])('uses truthful unavailable copy in %s without assuming deployment absence', (_locale, expected, falseClaim) => {
     const page = readFileSync(path.resolve(__dirname, '../app/finops/page.tsx'), 'utf8')
     expect(page).toContain(expected)

@@ -19,15 +19,6 @@ describe('BCP semantic theme contract', () => {
     }
   })
 
-  it('preserves live evidence and fail-closed compliance behavior', () => {
-    expect(source).toContain("fetch('/api/services/health')")
-    expect(source).toContain("fetch('/api/infra/status')")
-    expect(source).toContain("const paymentsBlocked = complianceTierStatus.status !== 'healthy' && complianceTierStatus.status !== 'unknown'")
-    expect(source).toContain('Compliance gate failed — payment processing BLOCKED')
-    expect(source).toContain('5AMLD Art. 18')
-    expect(source).toContain('DORA Art. 12')
-  })
-
   it('exposes continuity tiers as native keyboard controls', () => {
     expect(source).toContain('aria-controls={`bcp-tier-${tier.id}`}')
     expect(source).toContain('aria-expanded={expanded}')

@@ -25,7 +25,7 @@ import {
 } from '@/components/pension/contracts'
 import { canApproveAnnuityProvider, canRequestAnnuityActivation, refusalText, statusLabel } from '@/components/pension/model'
 import { PensionQueue } from '@/components/pension/PensionQueue'
-import { principalNameFromToken } from '@/components/balance-sheet/model'
+import { principalNameFromToken } from '@/lib/auth/principal'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
