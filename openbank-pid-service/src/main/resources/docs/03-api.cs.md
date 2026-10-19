@@ -16,6 +16,7 @@
 | `POST` | `/api/v1/parties` | employee, admin | Vytvoření party (sjednocená identita) | `201` + `PartyResponse`, hlavička `Location` |
 | `GET` | `/api/v1/parties/{id}` | employee, admin, customer | Získání party podle interního UUID | `200` + `PartyResponse` |
 | `GET` | `/api/v1/parties/by-external-id?type=&value=` | employee, admin | Rozlišení party podle externího id (`type`=`ExternalIdType`) | `200` + `PartyResponse` |
+| `POST` | `/api/v1/parties/by-external-id/lookup` | operator, admin | Bezpečné přesné vyhledání pro prohlížeč; identifikátor se posílá v JSON těle a odpověď obsahuje pouze ID nalezené party, stav, čas vytvoření a požadovaný identifikátor | `200` + `ExternalIdLookupResponse` |
 | `GET` | `/api/v1/parties?givenName=&familyName=&email=&role=&status=&limit=20&afterId=` | employee, admin | Vyhledání / keyset stránkování party | `200` + `PartyResponse[]` |
 | `POST` | `/api/v1/parties/{id}/sync/bankid` | employee, admin | Přepis core + kontaktních atributů z bankID | `200` + `PartyResponse` |
 | `POST` | `/api/v1/parties/{id}/sync/rob` | employee, admin | Synchronizace adresy + AIFO z ROB | `200` + `PartyResponse` |
@@ -27,6 +28,16 @@
 | `DELETE` | `/api/v1/parties/{id}/relationships/{relationshipId}` | employee, admin | Ukončení vztahu | `200` + `RelationshipResponse` |
 
 ## Klíčové tvary request/response
+
+### Bezpečné přesné vyhledání externího ID
+
+`POST /api/v1/parties/by-external-id/lookup` přijímá právě jeden identifikátor v JSON těle. Podporované hodnoty `type` jsou `BANKID_SUB`, `ROB_AIFO`, `ICO`, `PASSPORT_NUMBER` a `ID_CARD_NUMBER`; `value` nesmí být prázdné a může mít nejvýše 256 znaků. Endpoint vyžaduje roli operátora nebo administrátora. Při shodě vrátí pouze stabilní ID party, stav party, čas vytvoření a přesně požadovaný identifikátor. Nevrací ostatní externí ID, profilové údaje ani neúspěšně hledaný identifikátor; při nenalezení vrátí `404`.
+
+```json
+{ "type": "BANKID_SUB", "value": "bankid|example" }
+```
+
+Stávající implementace `GET /api/v1/parties/by-external-id` aktuálně čte query parametry `type` a `value`. Její definice v OpenAPI zůstává v této přidávací verzi API beze změny; přesné sladění je vedeno samostatně.
 
 ### `CreatePartyRequest` (POST /parties)
 
