@@ -8,6 +8,8 @@ import { getRegistry } from '@/lib/services/fleet'
 
 export interface ServiceHealthEntry {
   name: string
+  /** Kubernetes namespace; omitted for the off-cluster static probe inventory. */
+  namespace?: string
   port: number
   label: string
   group: 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
@@ -225,6 +227,7 @@ async function fromDiscovery(): Promise<ServiceHealthEntry[] | null> {
       if (reachable && !info) scheduleInfoProbe(key, base)
       return {
         name: d.name,
+        namespace: d.namespace,
         port: d.port,
         label: prettyLabel(d.name),
         group: d.group,
@@ -247,10 +250,24 @@ export async function GET() {
   const source = discovered ? 'kubernetes' : 'static'
 
   const byContainer: Record<string, ServiceHealthEntry> = {}
-  for (const s of services) byContainer[s.container] = s
+  const byWorkload: Record<string, ServiceHealthEntry> = {}
+  const ambiguousContainers = new Set<string>()
+  for (const s of services) {
+    // A bare container key cannot identify two workloads in different namespaces.
+    // Omit that ambiguous alias; services[] and byWorkload retain both records.
+    if (!ambiguousContainers.has(s.container)) {
+      if (byContainer[s.container] === undefined) byContainer[s.container] = s
+      else {
+        delete byContainer[s.container]
+        ambiguousContainers.add(s.container)
+      }
+    }
+    const identity = s.namespace ? `${s.namespace}/${s.container}` : `${s.container}:${s.port}`
+    byWorkload[identity] = s
+  }
 
   return NextResponse.json(
-    { services, byContainer, source },
+    { services, byContainer, byWorkload, source },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

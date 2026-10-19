@@ -124,6 +124,32 @@ describe('GET /api/services/health', () => {
     expect(body.services[0].status).toBe('UP')
   })
 
+  it('preserves same-named ready workloads in separate namespaces', async () => {
+    vi.mocked(discoverServices).mockResolvedValue([
+      {
+        name: 'ledger-service', namespace: 'tenant-a', port: 8101,
+        group: 'core', ready: true, readyReplicas: 1,
+      },
+      {
+        name: 'ledger-service', namespace: 'tenant-b', port: 8101,
+        group: 'platform', ready: true, readyReplicas: 1,
+      },
+    ])
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })))
+    const { GET } = await import('@/app/api/services/health/route')
+    const body = await (await GET()).json()
+
+    expect(body.services).toHaveLength(2)
+    expect(body.services.map((s: { namespace: string; name: string; status: string }) => [s.namespace, s.name, s.status])).toEqual([
+      ['tenant-a', 'ledger-service', 'UP'],
+      ['tenant-b', 'ledger-service', 'UP'],
+    ])
+    expect(body.byWorkload['tenant-a/ledger-service']).toMatchObject({ namespace: 'tenant-a', status: 'UP' })
+    expect(body.byWorkload['tenant-b/ledger-service']).toMatchObject({ namespace: 'tenant-b', status: 'UP' })
+    // The legacy alias is omitted when it becomes ambiguous; the canonical workload index keeps both.
+    expect(body.byContainer['ledger-service']).toBeUndefined()
+  })
+
   it('falls back to static probe list when discoverServices returns null', async () => {
     vi.mocked(discoverServices).mockResolvedValue(null)
     vi.stubGlobal('fetch', mockServiceFetch(200))
