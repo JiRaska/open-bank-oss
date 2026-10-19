@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.1...admin-ui-v3.8.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve accessible labels with UI dependency updates ([#13329](https://github.com/JiRaska/open-bank-oss/issues/13329)) ([638a27c](https://github.com/JiRaska/open-bank-oss/commit/638a27c6ed541d8f6785af8f8b9571b87d84dcce))
+
 ## [3.8.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.0...admin-ui-v3.8.1) (2026-10-19)
 
 
