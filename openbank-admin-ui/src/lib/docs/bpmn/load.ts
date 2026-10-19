@@ -3,9 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // ---------------------------------------------------------------------------
-// BPMN process-diagram loader (server-only). Reads src/content/bpmn/<slug>.yaml,
-// parses it and validates against BpmnProcessSchema — so a malformed or drifted
-// manifest fails `next build` (the CI gate) rather than rendering broken.
+// BPMN process-diagram loader (server-only). Reads validated published source
+// manifests when available; otherwise reads src/content/bpmn/<slug>.yaml from
+// the image and marks that fallback stale at the page boundary. Both paths parse
+// and validate against BpmnProcessSchema before rendering.
 //
 // The slug is the filename, injected here, so it is never authored twice. Order
 // is preserved as authored via an explicit `ORDER` list (the page tabs read it),
@@ -17,6 +18,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse } from 'yaml'
 import { BpmnProcessSchema, type BpmnProcess } from './schema'
+import { resolveAdminUiContent, type ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 const BPMN_DIR = join(process.cwd(), 'src', 'content', 'bpmn')
 
@@ -52,13 +54,32 @@ export function listBpmnSlugs(): string[] {
   const found = readdirSync(BPMN_DIR)
     .filter((f) => f.endsWith('.yaml'))
     .map((f) => f.replace(/\.yaml$/, ''))
-  const ranked = (s: string) => {
+  return found.sort((a, b) => ranked(a) - ranked(b) || a.localeCompare(b))
+}
+
+function ranked(slug: string): number {
+  const rankedOrder = (s: string) => {
     const i = ORDER.indexOf(s)
     return i === -1 ? ORDER.length : i
   }
-  return found.sort((a, b) => ranked(a) - ranked(b) || a.localeCompare(b))
+  return rankedOrder(slug)
 }
 
 export function loadAllBpmnProcesses(): BpmnProcess[] {
   return listBpmnSlugs().map(loadBpmnProcess)
+}
+
+export async function loadBpmnContent(): Promise<{ processes: BpmnProcess[]; contentSource: ContentSourceMetadata }> {
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.bpmnManifests,
+    async () => {
+      try { return listBpmnSlugs().map(slug => ({ slug, yaml: readFileSync(join(BPMN_DIR, `${slug}.yaml`), 'utf8') })) } catch { return null }
+    },
+  )
+  if (!resolved.value) return { processes: [], contentSource: resolved.contentSource }
+  const processes = resolved.value.map(item => {
+    const data = parse(item.yaml) as Record<string, unknown>
+    return BpmnProcessSchema.parse({ ...data, slug: item.slug })
+  }).sort((a, b) => ranked(a.slug) - ranked(b.slug) || a.slug.localeCompare(b.slug))
+  return { processes, contentSource: resolved.contentSource }
 }

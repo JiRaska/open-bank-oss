@@ -29,3 +29,35 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 ## Zapojení při buildu
 
 - **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.
+
+## Globální idempotence a nasazení V22
+
+Klíč zahájení platí přes všechna data zaúčtování. V22 jej rezervuje v
+`transaction_idempotency_keys` databázovým triggerem BEFORE INSERT ve stejné
+transakci jako zaúčtování a iniciační outbox. Souběžný zápis počká na první
+transakci a vrátí její ID a uložený stav. Nový požadavek i opakování vracejí HTTP 201;
+volající musí ověřit stav. PENDING/PROCESSING znamená probíhající zpracování,
+FAILED/REVERSED neznamená úspěšné zaúčtování. Opakování nespouští další workflow.
+Tato záruka se týká zahájení, nikoli všech vedlejších účinků endpointu storna.
+
+V22 před kontrolou a doplněním historie zamkne rodičovskou tabulku i všechny
+připojené oddíly pomocí ACCESS EXCLUSIVE. Nasazení vyžaduje plánovanou bariéru
+zápisů a omezenou dobu čekání na zámek. Historické duplicitní klíče migraci přeruší
+bez změny finančních řádků. Vlastník rekonciliace musí posoudit historii a schválit
+nápravu před opakováním. Nevybírat vítěze automaticky, nemazat historii, neignorovat
+kolize a nespouštět migraci mimo transakci. Před úspěšným dokončením V22 zůstávají
+staré uzly nechráněné; selhání migrace samo nezastaví jejich další zápisy.
+
+Trigger chrání i staré uzly a přímý zápis do připojených oddílů. Nové prázdné oddíly
+jej zdědí. Připojení již naplněného oddílu vyžaduje samostatnou řízenou údržbu:
+zastavit všechny zápisy, zamknout rodiče i oddíl, ověřit klíče proti historii a
+registru, doplnit rezervace, připojit oddíl a ověřit triggery a jednoznačné ukazatele
+před obnovením zápisů. Samotné připojení historii do registru nedoplní. Triggery
+nevypínat. Klíč, ID a datum zaúčtování jsou neměnné; změny stavu jsou povolené.
+Rezervace se při archivaci nebo smazání neuvolňuje. Chybějící nebo poškozený
+ukazatel registru vyvolá chybu a vyžaduje rekonciliaci.
+
+Rollback: vrátit aplikaci a zachovat V22, registr i triggery. Odstranění ochrany
+vyžaduje samostatně schválenou údržbu, souhlas vlastníka a zastavení zápisů i
+opakovaných požadavků na všech uzlech. Migrace ani bezpečný návrat aplikace nemaže
+finanční historii.

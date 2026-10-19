@@ -10,16 +10,22 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 const REPORT = {
+  schema_version: 1,
   generated_for: '2026-08-31',
-  dimensions: [{ code: 'C1', name: 'Code' }],
+  collected_at: '2026-08-31T13:00:00Z',
+  source_sha: 'a'.repeat(40),
+  scope: { kind: 'service-module-matrix-v1', service_count: 1, money_path_count: 1, roster_sha256: 'b'.repeat(64) },
+  dimensions: ['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9'].map(code => ({ code, name: code })),
   services: [{
     service: 'ledger',
     money_path: true,
-    scores: { C1: 3 },
-    evidence: { C1: 'verified' },
+    scores: { C1: 3, C2: 2, C3: 2, C4: 2, C5: 3, C6: 2, C7: 3, C8: 2, C9: 2 },
+    evidence: { C1: 'verified', C2: 'verified', C3: 'verified', C4: 'verified', C5: 'verified', C6: 'verified', C7: 'verified', C8: 'verified', C9: 'verified' },
     gate: 'GO',
   }],
 }
+
+const API_RESPONSE = { status: 'ready', source: 'runtime', report: REPORT, provenance: null }
 
 test('preserves the last verified readiness report through an outage and retry', async ({ page }) => {
   let request = 0
@@ -30,7 +36,7 @@ test('preserves the last verified readiness report through an outage and retry',
       failNextRequest = false
       return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })
     }
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(REPORT) })
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(API_RESPONSE) })
   })
 
   await page.goto('/system/readiness')

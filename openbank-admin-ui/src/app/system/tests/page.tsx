@@ -56,7 +56,7 @@ function StateBadge({ state }: { state: EvidenceState }) {
 
 function TestCaseStateBadge({ state }: { state: TestCaseHistory['state'] }) {
   if (state === 'flaky') return <SharedStatusBadge status="flaky" tone="warning" label="flaky" withDot />
-  return <StateBadge state={state === 'stable' ? 'passed' : state === 'failing' ? 'failed' : 'skipped'} />
+  return <StateBadge state={state === 'stable' ? 'passed' : state === 'failing' ? 'failed' : state === 'stale' ? 'stale' : 'skipped'} />
 }
 
 function Stat({ label, value, tone }: { label: string; value: number | string; tone?: Tone }) {
@@ -209,6 +209,11 @@ const thStyle = { padding: '10px 12px', textAlign: 'left' as const, borderBottom
 const tdStyle = { padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)' }
 const formatTimestamp = (value: string, language: Language, options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' }) =>
   new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', options).format(new Date(value))
+const formatAge = (seconds: number) => {
+  if (seconds < 60) return `${Math.floor(seconds)} s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`
+  return `${Math.floor(seconds / 3600)} h`
+}
 
 function Posture({ report }: { report: TestIntelligenceReport }) {
   const { t, language } = useLanguage()
@@ -236,7 +241,16 @@ function Posture({ report }: { report: TestIntelligenceReport }) {
             <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
             <tbody>{sorted.map(component => (
               <tr key={component.component}>
-                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: 'var(--danger-text)', fontSize: 10 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
+                <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: 'var(--danger-text)', fontSize: 10 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}
+                  {component.running?.runningCommit && <div title={`${component.running.storeStatus}; evidence ${component.running.evidenceCommit ?? component.running.snapshotCommit ?? 'unknown'}`} style={{ marginTop: 4, color: component.running.match === false ? 'var(--warning-text)' : 'var(--text-tertiary)', fontSize: 10, fontWeight: 450 }}>
+                    {component.running.source === 'running-commit' ? t('běžící', 'running') : t('snapshot', 'snapshot')} {component.running.runningCommit.slice(0, 8)}
+                    {' · '}{component.running.evidenceCommit?.slice(0, 8) ?? component.running.snapshotCommit?.slice(0, 8) ?? t('bez SHA důkazu', 'no evidence SHA')}
+                    {' · '}{component.running.latestEvidenceAgeSeconds === null || component.running.latestEvidenceAgeSeconds === undefined
+                      ? t('stáří neznámé', 'age unknown')
+                      : formatAge(component.running.latestEvidenceAgeSeconds)}
+                    {component.running.match === false && component.running.storeStatus !== 'hit' ? ` · ${t('neshoda', 'mismatch')} (${component.running.storeStatus})` : ''}
+                  </div>}
+                </td>
                 {KINDS.map(kind => <td key={kind} data-component={component.component} data-evidence-kind={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
                 <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
               </tr>
@@ -294,7 +308,7 @@ function Execution({ report }: { report: TestIntelligenceReport }) {
 }
 
 function TestCases({ report }: { report: TestIntelligenceReport }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [filter, setFilter] = useState<TestTriageFilter>('all')
   const [query, setQuery] = useState('')
   const flaky = report.testCases.filter(item => item.state === 'flaky')
@@ -308,6 +322,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
     { id: 'flaky', label: t('Flaky', 'Flaky') },
     { id: 'unstable', label: t('Nestabilní commit', 'Unstable commit') },
     { id: 'skipped', label: t('Přeskočeno', 'Skipped') },
+    { id: 'stale', label: t('Zastaralé', 'Stale') },
   ]
   return <div style={{ display: 'grid', gap: 18 }}>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
@@ -341,7 +356,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
       ].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
       <tbody>{visibleTests.map(item => <tr key={item.fingerprint}>
         <td style={tdStyle}><TestCaseStateBadge state={item.state} /></td>
-        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: 'var(--warning-text)', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${item.sameCommitTransitions} změn pass/fail na stejném commitu`, `${item.sameCommitTransitions} same-commit pass/fail transition(s)`)}</div>}</td>
+        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t('Poslední běh:', 'Last run:')} {formatTimestamp(item.lastObservedAt, language)}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: 'var(--warning-text)', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${item.sameCommitTransitions} změn pass/fail na stejném commitu`, `${item.sameCommitTransitions} same-commit pass/fail transition(s)`)}</div>}</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10, maxWidth: 260, overflowWrap: 'anywhere' }}>{item.testDefinitionPath ?? t('nenahlášeno', 'not reported')}</td>
         <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>

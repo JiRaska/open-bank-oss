@@ -4,112 +4,63 @@
 # src/lib/docs/bpmn/schema.ts at build time. `slug` is the filename.
 
 name: Account Closure
-desc: Zrušení účtu včetně vyrovnání zůstatku
+desc: Account service closes only an empty account, emits a status-change event, and requests a customer notification.
 regulation: General Banking Terms
 services:
   - account-service
-  - ledger-service
   - balance-service
   - notification-service
-  - sepa-payment
 steps:
   - id: start
     type: start
     x: 60
     y: 100
-    label: Žádost
-  - id: balance
+    label: Close request
+  - id: close
     type: task
-    x: 180
+    x: 340
     y: 100
-    label: Kontrola zůstatku
+    label: Check balances and close empty account
     lane: core
     apis:
-      - GET /api/v1/accounts/{id}/balance
-    relatedServices:
-      - balance-service
-  - id: gw1
-    type: gateway
-    x: 320
-    y: 100
-    label: Zůstatek=0?
-  - id: transfer
-    type: task
-    x: 320
-    y: 220
-    label: Převod zůstatku
-    lane: payment
-    apis:
-      - POST /api/v1/sepa/outward
-    relatedServices:
-      - sepa-payment
-  - id: freeze
-    type: task
-    x: 460
-    y: 100
-    label: Zmrazení účtu
-    lane: core
-    apis:
-      - PUT /api/v1/accounts/{id}/freeze
+      - POST /api/v1/accounts/{accountId}/close
     relatedServices:
       - account-service
-  - id: ledger
-    type: task
-    x: 600
-    y: 100
-    label: Uzavření Ledgeru
-    lane: core
-    apis:
-      - POST /api/v1/ledger/close
-    relatedServices:
-      - ledger-service
   - id: notify
     type: task
     x: 740
     y: 100
-    label: Notifikace
+    label: Send customer notification request
     lane: platform
-    apis:
-      - POST /api/v1/notifications
     relatedServices:
+      - account-service
       - notification-service
     consumes:
       - openbank.notification.requests
-  - id: archive
-    type: task
-    x: 880
-    y: 100
-    label: Archivace
-    lane: core
-    apis:
-      - PUT /api/v1/accounts/{id}/archive
-    relatedServices:
-      - account-service
   - id: end
     type: end
     x: 980
     y: 100
-    label: Uzavřeno
+    label: Account closed
+  - id: account-event
+    type: event
+    x: 540
+    y: 220
+    label: Account status changed
+    relatedServices:
+      - account-service
+    emits:
+      - openbank.accounts.account.status-changed
 flows:
   - from: start
-    to: balance
-  - from: balance
-    to: gw1
-  - from: gw1
-    to: transfer
-    label: Ne
-  - from: gw1
-    to: freeze
-    label: Ano
-  - from: transfer
-    to: freeze
-  - from: freeze
-    to: ledger
-  - from: ledger
+    to: close
+  - from: close
+    to: account-event
+    kind: async
+    topic: openbank.accounts.account.status-changed
+  - from: close
     to: notify
     kind: async
     topic: openbank.notification.requests
   - from: notify
-    to: archive
-  - from: archive
     to: end

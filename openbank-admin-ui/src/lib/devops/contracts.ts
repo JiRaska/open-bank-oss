@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+export interface DevOpsFinding {
+  id: string
+  detector:
+    | 'D1_CI_PIPELINE_HEALTH'
+    | 'D2_DORA_REGRESSION'
+    | 'D3_RUNNER_CAPACITY'
+    | 'D4_DEPLOY_HEALTH'
+    | 'D5_SSDLC_HYGIENE'
+    | 'D6_INCIDENT_RECURRENCE'
+  severity: 'WARNING' | 'CRITICAL'
+  detectedAt: string
+  title: string
+  rawMetricValue: number
+  threshold: number
+  affectedResource: string
+  doraMetricImpacted:
+    | 'DEPLOYMENT_FREQUENCY'
+    | 'LEAD_TIME_FOR_CHANGES'
+    | 'CHANGE_FAILURE_RATE'
+    | 'TIME_TO_RESTORE'
+    | null
+  rootCause: string | null
+  remediationKind: 'PULL_REQUEST' | 'RUNBOOK_UPDATE' | 'TICKET' | 'NONE'
+  proposalPrUrl: string | null
+  proposedRemediation: string | null
+  // Unknown future states remain renderable as neutral text in AgentInsightsPanel.
+  status: 'OPEN' | 'DIAGNOSED' | 'PROPOSED' | 'APPROVED' | 'REJECTED' | 'RESOLVED' | (string & {})
+  diagnosedAt: string | null
+  proposedAt: string | null
+}

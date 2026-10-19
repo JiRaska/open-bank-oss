@@ -648,3 +648,23 @@ holding slow connections can take more than ten slots and reduce capacity for ot
 transaction callers. Verify the listener policy and 401/429 responses on the Gateway
 address before DNS moves. Roll back the four `api.open-bank.tech` routes together to
 nginx; its Ingress and network allowance remain until Phase 5.
+
+
+## Global initiation key race (#13231)
+
+A concurrent caller can submit the same key on different booking dates, bypassing
+partition-local uniqueness and initiating two money movements. V22 serializes all
+inserts through a nonpartitioned registry primary key before workflow execution;
+the claim, aggregate and initiated outbox commit or roll back together. Database
+triggers cover older application nodes and direct attached-partition writes. Exact
+SQLSTATE 23505 plus the registry constraint identifies replay; unrelated database
+errors propagate. Replay preserves the existing transaction status (HTTP 201 does
+not establish settlement). Registry/row inconsistencies fail closed.
+
+Residual operational controls: historical duplicates block migration and require
+owner-led reconciliation without deleting financial history; keep a write barrier
+until V22 succeeds. Prepopulated partition attachment needs locked validation and
+claim backfill. Retain claims through archival and application rollback. Disabling
+triggers or removing the registry requires separate approval and full write/retry
+quiescence. The existing reversal pre-action status update is outside this initiation
+race fix and is not an all-endpoint exactly-once guarantee.

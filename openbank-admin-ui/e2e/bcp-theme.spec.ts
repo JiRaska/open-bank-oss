@@ -5,8 +5,10 @@ import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 const serviceHealth = {
+  source: 'kubernetes',
+  discoveryStatus: 'complete',
   services: [
-    { name: 'balance-service', status: 'DOWN' },
+    { name: 'balance-service', status: 'UP' },
     { name: 'aml-service', status: 'UP' },
     { name: 'sanctions-service', status: 'UP' },
     { name: 'kyc-service', status: 'UP' },
@@ -37,33 +39,57 @@ test.beforeEach(async ({ context, baseURL, page }) => {
     contentType: 'application/json',
     body: JSON.stringify(infrastructureHealth),
   }))
-  await page.route('**/api/catalog/services', route => route.fulfill({
-    status: 503,
-    contentType: 'application/json',
-    body: '{"error":"temporarily unavailable"}',
-  }))
 })
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`keeps degraded compliance evidence readable and accessible in ${theme} theme`, async ({ page }) => {
+  test(`keeps recovery evidence accurate, keyboard accessible, and readable in ${theme} theme`, async ({ page }) => {
+    const catalogResponse = await page.request.get('/api/catalog/services')
+    expect(catalogResponse.ok()).toBeTruthy()
+    const catalog = await catalogResponse.json() as {
+      available?: boolean
+      services?: Array<{ kind: string; short: string }>
+    }
+    expect(catalog.available).toBe(true)
+    const catalogServices = catalog.services?.filter(service => service.kind === 'service') ?? []
+    const catalogServiceCount = catalogServices.length
+    expect(catalogServiceCount).toBeGreaterThan(0)
+    const catalogShortNames = new Set(catalogServices.map(service => service.short))
+    const observedHealthyCount = serviceHealth.services.filter(service =>
+      service.status === 'UP' && catalogShortNames.has(service.name),
+    ).length
+
     await page.goto('/docs/bcp')
     await expect(page.getByRole('heading', { level: 1, name: /Plán kontinuity provozu|Business Continuity Plan/ })).toBeVisible()
-    if (theme === 'dark') {
-      await page.getByRole('button', { name: /Switch to the dark theme|Přepnout na tmavý motiv/ }).click()
-      await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
+    const themeButton = page.getByRole('button', { name: /Switch to the (light|dark) theme|Přepnout na (světlý|tmavý) motiv/ })
+    const currentlyDark = await themeButton.getAttribute('aria-pressed') === 'true'
+    if ((theme === 'dark') !== currentlyDark) {
+      await themeButton.focus()
+      await page.keyboard.press('Enter')
+    }
+    await expect(themeButton).toHaveAttribute('aria-pressed', String(theme === 'dark'))
+
+    const overallStatus = page.locator('.card').filter({ hasText: /Overall status|Celkový stav/ })
+    await expect(overallStatus.getByText('UNKNOWN', { exact: true })).toBeVisible()
+    await expect(page.getByText(`${observedHealthyCount}/${catalogServiceCount} catalog services healthy`)).toBeVisible()
+
+    const complianceHealth = page.locator('.card').filter({ hasText: /Compliance service health/ })
+    await expect(complianceHealth.getByText('HEALTHY', { exact: true })).toBeVisible()
+    await expect(complianceHealth.getByText(/health probes only; this is not regulatory-control status/).first()).toBeVisible()
+    const paymentHealth = page.locator('.card').filter({ hasText: /Payment-path service health/ })
+    await expect(paymentHealth.getByText('UNVERIFIED', { exact: true })).toBeVisible()
+    await expect(paymentHealth.getByText(/this page does not authorize transactions/)).toBeVisible()
+    await expect(page.getByText(/The BCP policy names a service absent from the current catalog/)).toBeVisible()
+    for (const unsupportedDecision of ['BLOCKED', 'BLOKOVÁNO', 'CLEAR', 'ALLOWED']) {
+      await expect(page.getByText(unsupportedDecision, { exact: true })).toHaveCount(0)
     }
 
-    await expect(page.getByText(/Compliance gate failed — payment processing BLOCKED|Compliance gate selhala — platební zpracování BLOKOVÁNO/)).toBeVisible()
-    await expect(page.getByText(/BLOCKED|BLOKOVÁNO/, { exact: true }).first()).toBeVisible()
-    await expect(page.getByText('1/6', { exact: true }).or(page.getByText('5/6', { exact: true }))).toBeVisible()
-    const firstTier = page.getByRole('button', { name: /Tier 0|Compliance Gate/ }).first()
+    const firstTier = page.getByRole('button', { name: /T0 — Payment execution/ })
     await expect(firstTier).toHaveAttribute('aria-expanded', 'true')
     await firstTier.focus()
     await page.keyboard.press('Enter')
     await expect(firstTier).toHaveAttribute('aria-expanded', 'false')
     await page.keyboard.press('Space')
     await expect(firstTier).toHaveAttribute('aria-expanded', 'true')
-    await page.waitForTimeout(300)
 
     const scan = await new AxeBuilder({ page })
       .include('#main-content')

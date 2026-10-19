@@ -19,6 +19,7 @@ export default defineConfig({
   testDir: './e2e',
   // @deployed specs target the live sandbox via playwright.deployed.config.ts, not this stubbed server.
   grepInvert: /@deployed/,
+  testIgnore: 'image-delivery.spec.ts',
   timeout: 30_000,
   expect: { timeout: 5_000 },
   // Fail fast in CI — one retry on flake

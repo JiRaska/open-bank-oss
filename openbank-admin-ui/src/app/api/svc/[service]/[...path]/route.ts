@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { inCluster, discoverServices } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 import { auth } from '@/auth'
 import { getProxyAllowlist } from '@/lib/services/fleet'
 
@@ -29,53 +29,39 @@ import { getProxyAllowlist } from '@/lib/services/fleet'
 // System Health, cached briefly so the hot proxy path doesn't hit the K8s API on
 // every request while still picking up new services within the TTL.
 // A resolved upstream target. `scaledToZero` means the Deployment exists but is
-// idle at zero replicas (KEDA scale-to-zero, ADR-0057) — distinct from null
-// (undeployed). The proxy short-circuits a scaled-to-zero target with a 503 so
+// idle at zero replicas (KEDA scale-to-zero, ADR-0057) — distinct from absence
+// in a complete inventory. The proxy short-circuits a scaled-to-zero target with a 503 so
 // the UI shows "idle, will wake" instead of "not deployed" or a 10s timeout.
-type ResolvedService = { url: string; scaledToZero: boolean }
+type ResolvedService = { state: 'found'; url: string; scaledToZero: boolean }
+  | { state: 'not_found' }
+  | { state: 'unknown' }
 
-let discoveryCache:
-  | { at: number; map: Record<string, { namespace: string; port: number; scaledToZero: boolean }> }
-  | null = null
-const DISCOVERY_TTL_MS = 30_000
-
-async function resolveInCluster(svcKey: string): Promise<ResolvedService | null> {
-  const now = Date.now()
-  if (!discoveryCache || now - discoveryCache.at > DISCOVERY_TTL_MS) {
-    const discovered = await discoverServices()
-    if (discovered) {
-      // No prototype: `constructor` / `__proto__` / `toString` must be missing keys, not functions.
-      const map: Record<string, { namespace: string; port: number; scaledToZero: boolean }> = Object.create(null)
-      for (const d of discovered) map[d.name] = { namespace: d.namespace, port: d.port, scaledToZero: d.scaledToZero }
-      discoveryCache = { at: now, map }
-    }
-  }
-  const hit = discoveryCache && Object.hasOwn(discoveryCache.map, svcKey) ? discoveryCache.map[svcKey] : undefined
-  return hit ? { url: `http://${svcKey}.${hit.namespace}.svc:${hit.port}`, scaledToZero: hit.scaledToZero } : null
-}
-
-async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
+async function serviceBaseUrl(svcKey: string): Promise<ResolvedService> {
   if (svcKey === 'product-catalog' && process.env.CATALOG_STANDALONE_SIDECAR === 'true') {
-    return { url: 'http://127.0.0.1:8104', scaledToZero: false }
+    return { state: 'found', url: 'http://127.0.0.1:8104', scaledToZero: false }
   }
   // The catalog allowlist gates BOTH paths: an in-cluster workload that discovery can see but the
   // catalog does not list as a business service (agent, sink, unknown deployment) is not reachable
   // through the operator BFF, and a key is data, never a property lookup on a plain object.
   const allowlist = getProxyAllowlist()
-  if (!Object.hasOwn(allowlist, svcKey)) return null
+  if (!Object.hasOwn(allowlist, svcKey)) return { state: 'not_found' }
   if (inCluster()) {
-    // Only proxy to services the cluster actually exposes; an undeployed service
-    // resolves to null → 404 rather than a misleading hang.
-    return resolveInCluster(svcKey)
+    const resolution = await resolveInClusterService(svcKey)
+    if (resolution.state === 'found') {
+      return { state: 'found', url: resolution.baseUrl, scaledToZero: resolution.service.scaledToZero }
+    }
+    return resolution.state === 'not_found'
+      ? { state: 'not_found' }
+      : { state: 'unknown' }
   }
   // Off-cluster (local dev / docker-compose): legacy localhost/container map.
   const svc = allowlist[svcKey]
-  if (!svc) return null
+  if (!svc) return { state: 'not_found' }
   const host =
     process.env.SERVICES_HOST === 'container'
       ? svc.container
       : (process.env.SERVICES_HOST ?? 'localhost')
-  return { url: `http://${host}:${svc.port}`, scaledToZero: false }
+  return { state: 'found', url: `http://${host}:${svc.port}`, scaledToZero: false }
 }
 
 const FORWARD_HEADERS = [
@@ -97,7 +83,10 @@ async function proxy(
   pathSegments: string[],
 ): Promise<NextResponse> {
   const resolved = await serviceBaseUrl(service)
-  if (!resolved) {
+  if (resolved.state === 'unknown') {
+    return NextResponse.json({ error: 'discovery_unavailable' }, { status: 503 })
+  }
+  if (resolved.state === 'not_found') {
     return NextResponse.json({ error: `Unknown service: ${service}` }, { status: 404 })
   }
   // Deployed but idle at zero replicas (KEDA scale-to-zero, ADR-0057). The pod

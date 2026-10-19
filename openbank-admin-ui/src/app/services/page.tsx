@@ -11,6 +11,8 @@ import { BookOpen, FileText, ArrowRight, AlertCircle, Package, Search } from 'lu
 import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buildRegistry, findInRegistry, type ServiceEntry } from '@/lib/services/registry'
 
@@ -96,8 +98,9 @@ function catalogShortFor(registry: readonly ServiceEntry[], c: Candidate): strin
 export default function ServicesDocsOverviewPage() {
   const { t } = useLanguage()
   const [candidates, setCandidates] = useState<Candidate[]>(STATIC_CANDIDATES as readonly Candidate[] as Candidate[])
-  const [source, setSource] = useState<'kubernetes' | 'static' | 'unavailable'>('unavailable')
+  const [source, setSource] = useState<'kubernetes' | 'partial' | 'static' | 'unavailable'>('unavailable')
   const [catalogAvailable, setCatalogAvailable] = useState(false)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [liveInventoryEmpty, setLiveInventoryEmpty] = useState(false)
   const [statuses, setStatuses] = useState<Record<string, DocsStatus>>({})
   const [loading, setLoading] = useState(true)
@@ -124,7 +127,8 @@ export default function ServicesDocsOverviewPage() {
       try {
         const catalogResponse = await fetch('/api/catalog/services', { cache: 'no-store' })
         if (catalogResponse.ok) {
-          const catalog = await catalogResponse.json() as { available?: boolean; services?: CatalogModule[] }
+          const catalog = await catalogResponse.json() as { available?: boolean; services?: CatalogModule[]; contentSource?: ContentSourceMetadata }
+          if (mounted) setContentSource(catalog.contentSource ?? null)
           if (catalog.available === true && Array.isArray(catalog.services)) {
             const derived = buildRegistry(catalog.services)
             const catalogCandidates = catalog.services
@@ -141,7 +145,7 @@ export default function ServicesDocsOverviewPage() {
           }
         }
       } catch { /* keep only the bundled library until a live inventory answers */ }
-      let src: 'kubernetes' | 'static' | 'unavailable' = catalogReady ? 'static' : 'unavailable'
+      let src: 'kubernetes' | 'partial' | 'static' | 'unavailable' = catalogReady ? 'static' : 'unavailable'
       let liveEmpty = false
       try {
         const r = await fetch('/api/services/health', { cache: 'no-store' })
@@ -149,11 +153,30 @@ export default function ServicesDocsOverviewPage() {
           const body = await r.json() as {
             services?: { name: string; label: string; group: string }[]
             source?: string
+            discoveryStatus?: string
           }
-          if (body.source === 'kubernetes' && Array.isArray(body.services)) {
-            liveEmpty = body.services.length === 0
-            if (!liveEmpty) src = 'kubernetes'
-            for (const s of body.services) {
+          const hasServices = Array.isArray(body.services)
+          const completeKubernetes = body.source === 'kubernetes' && body.discoveryStatus === 'complete' && hasServices
+          const partialKubernetes = body.source === 'kubernetes' && body.discoveryStatus === 'partial' && hasServices
+          const explicitStatic = body.source === 'static' && body.discoveryStatus === 'static' && hasServices
+
+          if (completeKubernetes) {
+            liveEmpty = body.services?.length === 0
+            if (liveEmpty) src = catalogReady ? 'static' : 'unavailable'
+            else src = 'kubernetes'
+          } else if (partialKubernetes) {
+            src = 'partial'
+          } else if (explicitStatic) {
+            src = catalogReady ? 'static' : 'unavailable'
+          } else {
+            // Unknown or malformed source metadata cannot establish absence.
+            src = 'partial'
+          }
+
+          // Partial observations remain useful positives, but never turn absent
+          // catalog members into an authoritative undeployed result.
+          if (completeKubernetes || partialKubernetes) {
+            for (const s of body.services ?? []) {
               const registered = fleet.find(service => service.k8sName === s.name || service.container === `openbank-${s.name}`)
               const id = registered?.id ?? s.name.replace(/-service$/, '')
               const existing = byId.get(id)
@@ -242,6 +265,8 @@ export default function ServicesDocsOverviewPage() {
         subtitle={`${t('Per-service business + technical + compliance dokumentace.', 'Per-service business + technical + compliance documentation.')} ${t('Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).', 'Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).')}`}
       />
 
+      <ContentSourceNote source={contentSource} />
+
       {/* Summary banner */}
       <div style={{
         background: 'var(--surface)',
@@ -265,6 +290,10 @@ export default function ServicesDocsOverviewPage() {
                     ? catalogAvailable
                       ? t('katalog a živý cluster', 'build catalog and live cluster')
                       : t('živý cluster a přibalená knihovna', 'live cluster and bundled library')
+                    : source === 'partial'
+                      ? catalogAvailable
+                        ? t('katalog a částečný živý cluster', 'build catalog and partial live cluster')
+                        : t('částečný živý cluster a přibalená knihovna', 'partial live cluster and bundled library')
                     : source === 'static'
                       ? liveInventoryEmpty
                         ? t('katalog; v clusteru žádné služby', 'build catalog; no live workloads')
@@ -277,7 +306,10 @@ export default function ServicesDocsOverviewPage() {
           </div>
         </div>
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '420px', lineHeight: 1.5 }}>
-          {source === 'unavailable'
+          {source === 'partial'
+            ? t('Živý inventář je neúplný. Zobrazené workloady jsou potvrzené, ale absence služby není důkazem, že není nasazená.',
+                'The live inventory is incomplete. Listed workloads are confirmed, but an absent service is not evidence that it is undeployed.')
+            : source === 'unavailable'
             ? liveInventoryEmpty
               ? t('Živý cluster hlásí nula služeb a katalog buildu není dostupný; zobrazena je pouze přibalená dokumentace knihovny.',
                   'The live cluster reports zero service workloads and the build catalog is unavailable; only bundled library documentation is shown.')

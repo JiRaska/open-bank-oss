@@ -72,7 +72,7 @@ describe('payment list evidence', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       requests.push(url)
-      if (url.startsWith('/api/domestic-payments')) return json({ error: 'upstream' }, 502)
+      if (url.startsWith('/api/domestic-payments')) return json({ error: 'upstream_unreachable' }, 502)
       if (url.includes('offset=50')) return json([sepa(51)])
       return json(Array.from({ length: 50 }, (_, index) => sepa(index + 1)))
     }))
@@ -91,11 +91,19 @@ describe('payment list evidence', () => {
   })
 
   it('never renders two unavailable sources as a genuine empty payment history', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'missing' }, 404)))
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'Unknown service: payment-service' }, 404)))
     mount()
 
     await waitFor(() => expect(screen.getAllByText(/is not deployed|není v tomto prostředí nasazená/)).toHaveLength(2))
     expect(screen.queryByText(/No payments found|Nebyly nalezeny žádné platby/)).not.toBeInTheDocument()
+  })
+
+  it('does not mislabel a genuine route-level 404 as an undeployed service', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ error: 'route not found' }, 404)))
+    mount()
+
+    await waitFor(() => expect(screen.getAllByText('Nothing found')).toHaveLength(2))
+    expect(screen.queryByText(/is not deployed in this environment/)).not.toBeInTheDocument()
   })
 
   it('purges all previously authorized payment evidence when either source returns 401', async () => {
