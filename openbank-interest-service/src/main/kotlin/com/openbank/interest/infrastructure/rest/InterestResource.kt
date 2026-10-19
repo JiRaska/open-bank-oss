@@ -17,6 +17,7 @@ import com.openbank.interest.domain.model.InterestRateConfig
 import com.openbank.interest.domain.model.RateConfigNotFoundException
 import com.openbank.interest.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.calendar.AccountingClock
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -88,7 +89,7 @@ class InterestResource(
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "interest.trigger", resource = "")
     fun accrueAll(@QueryParam("date") date: String?): Uni<Response> =
-        accrueUseCase.accrueAll(date?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
+        accrueUseCase.accrueAll(date?.let { LocalDate.parse(it) } ?: AccountingClock.bank(clock).today())
             .map { Response.ok(mapOf("processed" to it)).build() }
 
     @POST
@@ -108,7 +109,13 @@ class InterestResource(
         // compiled to nothing.
         requireNotNull(productId) { "query parameter 'productId' is required" }
         return capitalizeUseCase
-            .capitalize(accountId, productId, toDate?.let { LocalDate.parse(it) } ?: LocalDate.now(clock))
+            .capitalize(
+                accountId,
+                productId,
+                toDate?.let {
+                    LocalDate.parse(it)
+                } ?: AccountingClock.bank(clock).today(),
+            )
             .map { Response.ok(it).build() }
     }
 

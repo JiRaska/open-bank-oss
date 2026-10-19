@@ -67,6 +67,21 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-10-17** — **Interest is the first day-close participant (ADR-0342, #13167).** New outbound
+  edge: `PUT /api/v1/ledger/accounting-days/{date}/participants/interest` to ledger-service, over the
+  same base URL, TLS bucket and named oidc-client `ledger` (Keycloak `openbank-interest`) as the
+  existing journal POST — no new credential, client or port. New table `interest_close_job_run`
+  (V18) recording that the accrual / capitalization job ran for a day; a new hourly
+  `InterestCloseParticipationScheduler` folds those rows into the report. **STRIDE-S:** the ledger
+  accepts the report only from `service-account-openbank-interest`, so another service cannot report
+  for interest and interest cannot report for another participant. **STRIDE-T/R:** the report is
+  derived from the service's own persisted runs, never caller input; a due job with no recorded run
+  produces NO report, so a failed or late run holds the ledger's close instead of reporting a false
+  completion. **STRIDE-D:** a ledger outage only delays the report (re-offered every tick; the day
+  waits). A capitalization the ledger refuses with `ACCOUNTING_DAY_CLOSED` is now counted and
+  reported `REFUSED` instead of only logged; the claim semantics on a rejected post are unchanged.
+  Rollback: revert the application while preserving additive V18 past-run evidence; schema removal needs a separate reviewed retention/rollback plan.
+
 - **2026-10-14** — **Tax-profile resolution now reads party attributes** (ADR-0339 B, #12811). The
   constant-only tax-profile stub is replaced by `PartyTaxProfileProvider`: account
   detail → owning party → taxpayer type (`INDIVIDUAL` vs legal entities) → declared residency
@@ -331,3 +346,5 @@ money-path service, not adjacent.
   reads published terms, cannot author or publish); a revoked scope fails the sync closed and the cursor
   does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
   then idles on 403 (catalog sync stays off by default until the follow-up PR).
+
+- **2026-10-19** — New automatic day-close export boundaries store/report only counts and fixed failure categories, not raw account/product identifiers, exception text or closed-day response bodies. Their aggregate warnings follow the same rule; the newly added account-listing error message omits the throwable. Existing per-account capitalization/recovery logs are outside this correction and are not claimed anonymous. Ledger operator identity/free-text waiver reasons remain intentional audit personal data. Counts, REFUSED/RAN semantics, liveness and the default shadow rollout are unchanged.
