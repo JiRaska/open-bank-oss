@@ -75,6 +75,28 @@ enum class FraSettlement { ADVANCE_DISCOUNTED, ARREARS }
 
 data class FraTerms(val period: String, val settlementConvention: FraSettlement = FraSettlement.ADVANCE_DISCOUNTED)
 
+/**
+ * Early withdrawal of a deposit or early repayment of a loan (ADR-0344 catalogue): whether it is
+ * allowed, the notice it needs, and the penalty in basis points of the amount withdrawn.
+ */
+data class EarlyWithdrawalTerms(
+    val allowed: Boolean,
+    val noticeDays: Int? = null,
+    val penaltyBp: Int? = null,
+    val note: String? = null,
+)
+
+/**
+ * Typed terms of a deposit or loan (MM placement / borrowing, central-bank facilities, LOAN, CASH):
+ * the account the principal moves through, the account interest is paid to or from, and the
+ * early-withdrawal terms. They replaced the free-form agent `inputs` the ticket used to carry them in.
+ */
+data class DepositLoanTerms(
+    val principalAccountId: String? = null,
+    val interestAccountId: String? = null,
+    val earlyWithdrawal: EarlyWithdrawalTerms? = null,
+)
+
 /** One outbound confirmation the bank recorded as sent (ADR-0344 catalogue). */
 data class SentConfirmation(val by: Actor, val at: Instant, val documentId: String?, val channel: String?)
 
@@ -109,6 +131,7 @@ data class DealHeader(
     val securityTerms: SecurityTerms? = null,
     val fxTerms: FxDealTerms? = null,
     val fraTerms: FraTerms? = null,
+    val depositLoanTerms: DepositLoanTerms? = null,
     val bookId: String? = null,
     val confirmationsSent: List<SentConfirmation> = emptyList(),
 ) {
@@ -174,6 +197,25 @@ data class DealHeader(
             "counterpartyReference has control characters"
         }
         fraTerms?.let { require(FRA_PERIOD.matches(it.period)) { "FRA period is <start>x<end> in months, e.g. 3x6" } }
+        depositLoanTerms?.let(::validateDepositLoan)
+    }
+
+    private fun validateDepositLoan(d: DepositLoanTerms) {
+        listOfNotNull(d.principalAccountId, d.interestAccountId).forEach {
+            require(it.isNotBlank() && it.length <= MAX_REF && it.none(Char::isISOControl)) {
+                "a deposit/loan account id is 1..$MAX_REF printable characters"
+            }
+        }
+        d.earlyWithdrawal?.let { e ->
+            require(e.noticeDays == null || e.noticeDays in 0..MAX_NOTICE_DAYS) { "noticeDays is 0..$MAX_NOTICE_DAYS" }
+            require(e.penaltyBp == null || e.penaltyBp in 0..MAX_PENALTY_BP) { "penaltyBp is 0..$MAX_PENALTY_BP" }
+            require(e.allowed || (e.noticeDays == null && e.penaltyBp == null)) {
+                "notice and penalty apply only when early withdrawal is allowed"
+            }
+            require(e.note == null || (e.note.length <= MAX_EW_NOTE && e.note.none(Char::isISOControl))) {
+                "an early-withdrawal note has at most ${MAX_EW_NOTE} printable characters"
+            }
+        }
     }
 
     companion object {
@@ -183,6 +225,9 @@ data class DealHeader(
         private const val MAX_REF = 64
         private const val MAX_NOTE = 2000
         private const val MAX_UTI = 52
+        private const val MAX_NOTICE_DAYS = 3660
+        private const val MAX_EW_NOTE = 256
+        private const val MAX_PENALTY_BP = 10_000
         private val HUNDRED = BigDecimal("100")
         private val COUNTRY = Regex("^[A-Z]{2}$")
         private val CODE = Regex("^[A-Z0-9_.-]{1,32}$")

@@ -213,6 +213,7 @@ fun headerOf(r: DraftDealRequest): DealHeader = DealHeader(
     },
     fxTerms = r.fxTerms,
     fraTerms = r.fraTerms,
+    depositLoanTerms = r.depositLoanTerms,
     bookId = r.bookId,
 )
 

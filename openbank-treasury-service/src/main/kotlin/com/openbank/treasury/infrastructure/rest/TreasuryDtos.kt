@@ -82,6 +82,7 @@ data class DraftDealRequest(
     val securityTerms: SecurityTermsDto? = null,
     val fxTerms: FxDealTermsDto? = null,
     val fraTerms: FraTermsDto? = null,
+    val depositLoanTerms: com.openbank.treasury.domain.model.DepositLoanTerms? = null,
 )
 
 data class ReasonRequest(val reason: String? = null)
@@ -233,6 +234,7 @@ data class DealResponse(
     val securityTerms: SecurityTermsDto?,
     val fxTerms: FxDealTermsDto?,
     val fraTerms: FraTermsDto?,
+    val depositLoanTerms: com.openbank.treasury.domain.model.DepositLoanTerms?,
     val notional: BigDecimal,
     val lastChangedAt: Instant,
     val lastChangedBy: String,
@@ -314,6 +316,7 @@ data class DealResponse(
             securityTerms = d.header.securityTerms,
             fxTerms = d.header.fxTerms,
             fraTerms = d.header.fraTerms,
+            depositLoanTerms = d.header.depositLoanTerms,
             notional = d.legs.firstOrNull()?.notional ?: d.principal,
             lastChangedAt = d.updatedAt,
             lastChangedBy = d.history.lastOrNull()?.actor?.id ?: d.createdBy.id,

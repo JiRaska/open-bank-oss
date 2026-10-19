@@ -2490,6 +2490,7 @@ components:
         securityTerms: { $ref: '#/components/schemas/SecurityTerms' }
         fxTerms: { $ref: '#/components/schemas/FxDealTerms' }
         fraTerms: { $ref: '#/components/schemas/FraTerms' }
+        depositLoanTerms: { $ref: '#/components/schemas/DepositLoanTerms' }
     QuoteBoard:
       type: object
       required: [product, currency, tenorDays, synthetic, quotes]
@@ -2699,6 +2700,7 @@ components:
         securityTerms: { $ref: '#/components/schemas/SecurityTerms' }
         fxTerms: { $ref: '#/components/schemas/FxDealTerms' }
         fraTerms: { $ref: '#/components/schemas/FraTerms' }
+        depositLoanTerms: { $ref: '#/components/schemas/DepositLoanTerms' }
         counterpartyName: { type: [string, 'null'] }
         notional: { type: number, description: First leg notional (= principal for the legacy products) }
         lastChangedAt: { type: string, format: date-time }
@@ -3378,6 +3380,20 @@ components:
         farDate: { type: [string, 'null'], format: date }
         nearRate: { type: [number, 'null'] }
         farRate: { type: [number, 'null'] }
+    DepositLoanTerms:
+      type: object
+      description: Typed terms of a deposit or loan — the principal and interest accounts and the early-withdrawal terms (replaces carrying them in the agent `inputs`)
+      properties:
+        principalAccountId: { type: [string, 'null'], minLength: 1, maxLength: 64 }
+        interestAccountId: { type: [string, 'null'], minLength: 1, maxLength: 64 }
+        earlyWithdrawal:
+          type: [object, 'null']
+          required: [allowed]
+          properties:
+            allowed: { type: boolean }
+            noticeDays: { type: [integer, 'null'], minimum: 0, maximum: 3660 }
+            penaltyBp: { type: [integer, 'null'], minimum: 0, maximum: 10000, description: Basis points of the amount withdrawn; only when allowed }
+            note: { type: [string, 'null'], maxLength: 256 }
     FraTerms:
       type: object
       properties:
