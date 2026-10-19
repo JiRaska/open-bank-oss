@@ -217,6 +217,10 @@ class CashFlowConcurrencyIT {
     @Test
     @Order(6)
     fun `6 - a fixing racing an override keeps its provenance, and a second fixing is refused`() {
+        // Test 5 simulated a regeneration by bumping the deal to schedule version 2. This test works on
+        // a version-1 flow, and the fixing guard (rightly) refuses a flow of a superseded schedule, so
+        // put the deal back on the version the flow belongs to.
+        jdbc { c -> c.prepareStatement("update deals set schedule_version = 1 where deal_id = '$deal'").executeUpdate() }
         val stale = onContext { cashFlows.flows(UUID.fromString(deal), 1) }
             .first { it.state == CashFlowState.PROJECTED && it.fixingDate != null }
         val sha = "a".repeat(64)
