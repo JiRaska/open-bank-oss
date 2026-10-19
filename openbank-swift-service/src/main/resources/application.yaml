@@ -146,6 +146,13 @@ quarkus:
     # so the management interface (default :8085) must be folded back in (else /q/health/* 404s).
     management:
       enabled: false
+  # The resolution sweeper is off under test; InstitutionTransferSweeperIT turns the REAL
+  # scheduler on with a 1s cadence in its own @TestProfile.
+  openbank:
+    swift:
+      institution-transfer:
+        resolution:
+          enabled: false
   # The two bank-own-transfer channels run on the in-memory connector under test, so no class
   # needs a broker unless it opts into one (InstitutionTransferDeadLetterIT re-points the incoming
   # channel at a real broker to prove the DLQ).
@@ -167,6 +174,14 @@ openbank:
     institution-transfer:
       # A release whose valueDate is more than this many days in the past is refused (DT01).
       value-date-past-tolerance-days: 1
+      # Resolution sweeper: unknown submissions and SENT transfers older than min-age are asked
+      # about by UETR every `every`, at most batch-size per pass.
+      resolution:
+        enabled: true
+        every: 60s
+        initial-delay: 30s
+        min-age: PT2M
+        batch-size: 50
     scheme-submission:
       # ADR-0104 D4 SWIFT pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${SWIFT_SCHEME_SUBMISSION_ENABLED:false}

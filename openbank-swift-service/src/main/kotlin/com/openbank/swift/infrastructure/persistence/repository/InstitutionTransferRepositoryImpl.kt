@@ -5,11 +5,13 @@
 package com.openbank.swift.infrastructure.persistence.repository
 
 import com.openbank.libs.domain.money.Money
+import com.openbank.swift.application.port.out.ConcurrentTransitionException
 import com.openbank.swift.application.port.out.InstitutionTransferRejection
 import com.openbank.swift.application.port.out.InstitutionTransferRepository
 import com.openbank.swift.application.port.out.SwiftOutboxMessage
 import com.openbank.swift.domain.institution.InstitutionParty
 import com.openbank.swift.domain.institution.InstitutionTransfer
+import com.openbank.swift.domain.institution.InstitutionTransferStatus
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.infrastructure.persistence.entity.InstitutionTransferEntity
 import com.openbank.swift.infrastructure.persistence.entity.InstitutionTransferRejectionEntity
@@ -19,6 +21,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import org.hibernate.reactive.mutiny.Mutiny
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -38,6 +41,19 @@ class InstitutionTransferRepositoryImpl(private val outboxRepoImpl: SwiftOutboxR
     override suspend fun findByPaymentId(paymentId: UUID): InstitutionTransfer? =
         Panache.withSession { find("paymentId", paymentId).firstResult() }.awaitSuspending()?.toDomain()
 
+    override suspend fun findDueForResolution(cutoff: Instant, limit: Int): List<InstitutionTransfer> =
+        Panache.withSession {
+            find(
+                "status in ?1 and updatedAt < ?2 order by updatedAt",
+                listOf(
+                    InstitutionTransferStatus.SUBMITTING,
+                    InstitutionTransferStatus.SUBMISSION_UNKNOWN,
+                    InstitutionTransferStatus.SENT,
+                ),
+                cutoff,
+            ).page(0, limit).list()
+        }.awaitSuspending().map { it.toDomain() }
+
     override suspend fun saveWithOutbox(
         transfer: InstitutionTransfer,
         outbox: List<SwiftOutboxMessage>,
@@ -45,6 +61,13 @@ class InstitutionTransferRepositoryImpl(private val outboxRepoImpl: SwiftOutboxR
         Panache.getSession().flatMap { session ->
             session.find(InstitutionTransferEntity::class.java, transfer.id).flatMap { existing ->
                 if (existing != null) {
+                    if (existing.version != transfer.version) {
+                        return@flatMap Uni.createFrom().failure(
+                            ConcurrentTransitionException(
+                                "transfer ${transfer.id} moved (version ${existing.version} != ${transfer.version})",
+                            ),
+                        )
+                    }
                     Uni.createFrom().item(existing.apply { applyFrom(transfer) })
                 } else {
                     session.merge(InstitutionTransferEntity().apply { applyFrom(transfer) })

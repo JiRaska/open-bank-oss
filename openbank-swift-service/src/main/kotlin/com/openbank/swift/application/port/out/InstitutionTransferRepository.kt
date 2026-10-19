@@ -24,7 +24,17 @@ interface InstitutionTransferRepository {
 
     suspend fun findByPaymentId(paymentId: UUID): InstitutionTransfer?
 
-    /** Update an existing [transfer] and write [outbox] in the SAME transaction (transactional outbox). */
+    /**
+     * Unknown submissions and SENT transfers last changed before [cutoff], oldest first, at most
+     * [limit] — the resolution sweeper's bounded batch.
+     */
+    suspend fun findDueForResolution(cutoff: java.time.Instant, limit: Int): List<InstitutionTransfer>
+
+    /**
+     * Update an existing [transfer] and write [outbox] in the SAME transaction (transactional
+     * outbox). Optimistic: throws [ConcurrentTransitionException] when the stored version is not
+     * [transfer]'s — another worker (sweeper, redelivery) moved it first, and this write is void.
+     */
     suspend fun saveWithOutbox(transfer: InstitutionTransfer, outbox: List<SwiftOutboxMessage>): InstitutionTransfer
 
     /**
@@ -43,3 +53,6 @@ interface InstitutionTransferRepository {
     /** Take the one-time resend marker under [transfer]'s version; false if anyone else holds/held it. */
     suspend fun takeResendMarker(transfer: InstitutionTransfer): Boolean
 }
+
+/** Another worker advanced the transfer first; the losing write was not applied. */
+class ConcurrentTransitionException(message: String) : IllegalStateException(message)

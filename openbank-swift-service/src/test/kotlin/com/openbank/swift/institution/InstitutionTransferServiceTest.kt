@@ -49,12 +49,29 @@ class InstitutionTransferServiceTest {
             return true
         }
 
+        override suspend fun findDueForResolution(cutoff: java.time.Instant, limit: Int) = rows.values
+            .filter {
+                it.status in setOf(
+                    InstitutionTransferStatus.SUBMITTING,
+                    InstitutionTransferStatus.SUBMISSION_UNKNOWN,
+                    InstitutionTransferStatus.SENT,
+                ) &&
+                    it.updatedAt.isBefore(cutoff)
+            }
+            .sortedBy { it.updatedAt }
+            .take(limit)
+
         override suspend fun findByIdempotencyKey(key: String) = rows.values.firstOrNull { it.idempotencyKey == key }
         override suspend fun findByPaymentId(paymentId: UUID) = rows.values.firstOrNull { it.paymentId == paymentId }
         override suspend fun saveWithOutbox(
             transfer: InstitutionTransfer,
             outbox: List<SwiftOutboxMessage>,
         ): InstitutionTransfer {
+            rows[transfer.id]?.let {
+                if (it.version != transfer.version) {
+                    throw com.openbank.swift.application.port.out.ConcurrentTransitionException("moved")
+                }
+            }
             val saved = transfer.copy(version = (rows[transfer.id]?.version ?: -1) + 1)
             rows[transfer.id] = saved
             this.outbox += outbox
@@ -118,6 +135,10 @@ class InstitutionTransferServiceTest {
 
     private class Metrics : InstitutionTransferMetrics {
         val stops = mutableListOf<ReconciliationCause>()
+        val outcomes = mutableListOf<com.openbank.swift.application.port.out.ResolutionOutcome>()
+        override fun resolution(outcome: com.openbank.swift.application.port.out.ResolutionOutcome) {
+            outcomes += outcome
+        }
         override fun manualReconciliation(rail: InstitutionTransferRail, cause: ReconciliationCause) {
             stops += cause
         }
@@ -381,17 +402,18 @@ class InstitutionTransferServiceTest {
         }
 
     @Test
-    fun `a resend marker taken by another worker stops in MANUAL_RECONCILIATION without sending`(): Unit = runBlocking {
-        val m = release()
-        gateway.next = { throw SchemeGatewayUnavailableException(RuntimeException("connect refused")) }
-        assertThatThrownBy {
-            runBlocking { service.onReleased(parsed(m)) }
-        }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
-        repo.stealNextResend = true
-        assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
-        assertThat(gateway.calls).isEqualTo(1)
-        assertThat(metrics.stops).containsExactly(ReconciliationCause.RESEND_CONTENDED)
-    }
+    fun `a resend marker taken by another worker leaves the transfer to that worker and sends nothing`(): Unit =
+        runBlocking {
+            val m = release()
+            gateway.next = { throw SchemeGatewayUnavailableException(RuntimeException("connect refused")) }
+            assertThatThrownBy {
+                runBlocking { service.onReleased(parsed(m)) }
+            }.isInstanceOf(SchemeGatewayUnavailableException::class.java)
+            repo.stealNextResend = true
+            assertThat(service.onReleased(parsed(m)).status).isEqualTo(InstitutionTransferStatus.SUBMISSION_UNKNOWN)
+            assertThat(gateway.calls).isEqualTo(1)
+            assertThat(metrics.stops).isEmpty()
+        }
 
     @Test
     fun `a rejection that won the claim keeps a later valid release from becoming a transfer`(): Unit = runBlocking {
@@ -416,5 +438,123 @@ class InstitutionTransferServiceTest {
         assertThat(repo.rows).isEmpty()
         assertThat(repo.claims).hasSize(1)
         assertThat(gateway.calls).isZero()
+    }
+
+    private fun inProcess() = InstitutionTransferSubmission(InstitutionTransferVerdict.IN_PROCESS, null, "<x/>")
+
+    @Test
+    fun `ACSP then a later ACSC moves SENT to SETTLED announcing only SETTLED`(): Unit = runBlocking {
+        gateway.next = { inProcess() }
+        val sent = service.onReleased(parsed(release()))
+        assertThat(sent.status).isEqualTo(InstitutionTransferStatus.SENT)
+        gateway.queryAnswer =
+            SchemeStatus.Known(InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, ""))
+        val settled = service.resolveDue(repo.rows.values.single())
+        assertThat(settled.status).isEqualTo(InstitutionTransferStatus.SETTLED)
+        assertThat(settled.rawPacs009).describedAs("the wire message is kept").isEqualTo("<x/>")
+        assertThat(statuses()).containsExactly("ACCEPTED", "SENT", "SETTLED")
+        assertThat(gateway.calls).isEqualTo(1)
+    }
+
+    @Test
+    fun `a SENT transfer still in process is left alone, a later reject rejects it`(): Unit = runBlocking {
+        gateway.next = { inProcess() }
+        service.onReleased(parsed(release()))
+        gateway.queryAnswer = SchemeStatus.Known(inProcess())
+        assertThat(service.resolveDue(repo.rows.values.single()).status).isEqualTo(InstitutionTransferStatus.SENT)
+        assertThat(statuses()).containsExactly("ACCEPTED", "SENT")
+        gateway.queryAnswer =
+            SchemeStatus.Known(InstitutionTransferSubmission(InstitutionTransferVerdict.REJECTED, "AM04", ""))
+        assertThat(service.resolveDue(repo.rows.values.single()).status).isEqualTo(InstitutionTransferStatus.REJECTED)
+        assertThat(statuses()).containsExactly("ACCEPTED", "SENT", "REJECTED")
+    }
+
+    @Test
+    fun `a SENT transfer the scheme does not know, or an ambiguous answer, stops for a human`(): Unit = runBlocking {
+        gateway.next = { inProcess() }
+        service.onReleased(parsed(release()))
+        gateway.queryAnswer = SchemeStatus.NotKnown
+        assertThat(
+            service.resolveDue(repo.rows.values.single()).status,
+        ).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+        assertThat(metrics.stops).containsExactly(ReconciliationCause.SENT_UNKNOWN_TO_SCHEME)
+        assertThat(gateway.calls).describedAs("never resent").isEqualTo(1)
+
+        gateway.next = { inProcess() }
+        service.onReleased(parsed(release()))
+        gateway.queryAnswer = SchemeStatus.Ambiguous(SchemeStatus.MISMATCHED)
+        val second = repo.rows.values.single { it.status == InstitutionTransferStatus.SENT }
+        assertThat(service.resolveDue(second).status).isEqualTo(InstitutionTransferStatus.MANUAL_RECONCILIATION)
+    }
+
+    @Test
+    fun `a stale copy loses on the optimistic version and writes nothing`(): Unit = runBlocking {
+        gateway.next = { inProcess() }
+        service.onReleased(parsed(release()))
+        val stale = repo.rows.values.single()
+        gateway.queryAnswer =
+            SchemeStatus.Known(InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, ""))
+        service.resolveDue(stale)
+        val events = repo.outbox.size
+        assertThatThrownBy { runBlocking { service.resolveDue(stale) } }
+            .isInstanceOf(com.openbank.swift.application.port.out.ConcurrentTransitionException::class.java)
+        assertThat(repo.outbox).hasSize(events)
+    }
+
+    @Test
+    fun `the sweeper takes a bounded batch, isolates a failing item and counts every outcome`(): Unit = runBlocking {
+        gateway.next = { inProcess() }
+        repeat(3) { service.onReleased(parsed(release())) }
+        val ids = repo.rows.values.map { it.paymentId }
+        val failing = ids[1]
+        val flaky = object : SchemeGatewayPort by gateway {
+            override suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus {
+                if (transfer.paymentId == failing) throw IllegalStateException("defect for one item")
+                return SchemeStatus.Known(InstitutionTransferSubmission(InstitutionTransferVerdict.SETTLED, null, ""))
+            }
+        }
+        val clock = Clock.fixed(InstitutionTransferFixtures.NOW.plus(java.time.Duration.ofMinutes(10)), ZoneOffset.UTC)
+        val sweeper = com.openbank.swift.infrastructure.scheduler.InstitutionTransferResolutionSweeper(
+            repo,
+            InstitutionTransferService(repo, flaky, metrics, mapper, clock, 1),
+            metrics,
+            io.mockk.mockk(relaxed = true),
+            clock,
+            true,
+            java.time.Duration.ofMinutes(2),
+            2,
+        )
+        sweeper.sweep()
+        assertThat(metrics.outcomes).hasSize(2)
+        sweeper.sweep()
+        sweeper.sweep()
+        val byStatus = repo.rows.values.groupingBy { it.status }.eachCount()
+        assertThat(byStatus[InstitutionTransferStatus.SETTLED]).isEqualTo(2)
+        assertThat(repo.rows.values.single { it.paymentId == failing }.status).isEqualTo(InstitutionTransferStatus.SENT)
+        assertThat(metrics.outcomes).contains(
+            com.openbank.swift.application.port.out.ResolutionOutcome.SETTLED,
+            com.openbank.swift.application.port.out.ResolutionOutcome.FAILED,
+        )
+    }
+
+    @Test
+    fun `the sweeper does nothing when disabled or when nothing is old enough`(): Unit = runBlocking {
+        gateway.next = { inProcess() }
+        service.onReleased(parsed(release()))
+        val clock = Clock.fixed(InstitutionTransferFixtures.NOW, ZoneOffset.UTC)
+        for (enabled in listOf(false, true)) {
+            com.openbank.swift.infrastructure.scheduler.InstitutionTransferResolutionSweeper(
+                repo,
+                service,
+                metrics,
+                io.mockk.mockk(relaxed = true),
+                clock,
+                enabled,
+                java.time.Duration.ofMinutes(2),
+                50,
+            ).sweep()
+        }
+        assertThat(metrics.outcomes).isEmpty()
+        assertThat(gateway.queries).isZero()
     }
 }

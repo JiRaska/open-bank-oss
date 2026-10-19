@@ -112,6 +112,31 @@ class InstitutionTransferService(
     }
 
     /**
+     * The resolution sweeper's entry for one due transfer (unknown submission or SENT past the
+     * configured age). Unknown states take the same path as a redelivered release ([resolve]):
+     * status query by UETR, single-worker resend claim, MANUAL_RECONCILIATION on ambiguity. A SENT
+     * transfer is asked about too: ACSC settles it (announcing SETTLED only — SENT already went
+     * out), RJCT rejects it, ACSP leaves it; a scheme that does not know a transfer it already
+     * accepted, or any ambiguous answer, stops it for a human. Returns the resulting state.
+     */
+    suspend fun resolveDue(transfer: InstitutionTransfer): InstitutionTransfer = when (transfer.status) {
+        InstitutionTransferStatus.SUBMITTING, InstitutionTransferStatus.SUBMISSION_UNKNOWN -> resolve(transfer)
+        InstitutionTransferStatus.SENT -> when (val status = gateway.queryInstitutionTransferStatus(transfer)) {
+            is SchemeStatus.Known ->
+                if (status.submission.verdict ==
+                    InstitutionTransferVerdict.IN_PROCESS
+                ) {
+                    transfer
+                } else {
+                    apply(transfer, status.submission)
+                }
+            is SchemeStatus.Ambiguous -> manual(transfer, causeOf(status))
+            SchemeStatus.NotKnown -> manual(transfer, ReconciliationCause.SENT_UNKNOWN_TO_SCHEME)
+        }
+        else -> transfer
+    }
+
+    /**
      * First submission. The message identity (MsgId, CreDtTm; the UETR is fixed at creation) is
      * committed as SUBMITTING BEFORE the scheme is called, so any later resend is byte-identical.
      * One call, no automatic retry: no readable answer moves the transfer to SUBMISSION_UNKNOWN
@@ -135,7 +160,7 @@ class InstitutionTransferService(
      * SUBMITTING / SUBMISSION_UNKNOWN. Only an unambiguous answer is acted on: a status naming
      * this MsgId + UETR is applied; the scheme's TYPED "unknown UETR" licenses ONE resend, taken
      * under an optimistic version so only one worker can send it. Anything else — an untyped 404,
-     * a report about another message, still unknown after the resend, a lost marker race — stops
+     * a report about another message, still unknown after the resend — stops
      * in MANUAL_RECONCILIATION: counted, alerted, never resent.
      */
     private suspend fun resolve(transfer: InstitutionTransfer): InstitutionTransfer {
@@ -150,7 +175,9 @@ class InstitutionTransferService(
             is SchemeStatus.Ambiguous -> manual(transfer, causeOf(status))
             SchemeStatus.NotKnown -> when {
                 transfer.resendTaken -> manual(transfer, ReconciliationCause.UNKNOWN_AFTER_RESEND)
-                !repo.takeResendMarker(transfer) -> manual(transfer, ReconciliationCause.RESEND_CONTENDED)
+                // Lost the claim: another worker holds the one resend and owns this transfer now.
+                // Do nothing — marking it here would overwrite the winner (optimistic version).
+                !repo.takeResendMarker(transfer) -> repo.findByPaymentId(transfer.paymentId) ?: transfer
                 else -> send(repo.findByPaymentId(transfer.paymentId) ?: transfer.copy(resendTaken = true))
             }
         }
@@ -244,9 +271,8 @@ class InstitutionTransferService(
             updatedAt = now,
         )
         val events = buildList {
-            if (status ==
-                InstitutionTransferStatus.SETTLED
-            ) {
+            // SETTLED implies SENT — unless SENT was already announced (deferred settlement).
+            if (status == InstitutionTransferStatus.SETTLED && transfer.status != InstitutionTransferStatus.SENT) {
                 add(objectMapper.statusEvent(updated.copy(status = InstitutionTransferStatus.SENT), now))
             }
             // Strictly later than the SENT row, so the outbox's oldest-first claim keeps the order.

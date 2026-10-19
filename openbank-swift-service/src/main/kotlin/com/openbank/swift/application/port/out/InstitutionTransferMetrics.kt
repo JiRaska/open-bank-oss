@@ -17,12 +17,18 @@ enum class ReconciliationCause {
     /** The scheme still did not know the UETR after the one permitted resend. */
     UNKNOWN_AFTER_RESEND,
 
-    /** Another worker already took the resend marker, or the version moved under us. */
-    RESEND_CONTENDED,
+    /** The scheme says it never received a transfer it had already accepted (SENT). */
+    SENT_UNKNOWN_TO_SCHEME,
 }
+
+/** What one resolution-sweeper pass did to one due transfer. A closed vocabulary (metric label). */
+enum class ResolutionOutcome { SETTLED, REJECTED, STILL_SENT, MANUAL_RECONCILIATION, UNRESOLVED, FAILED }
 
 /** Signals of the bank-own transfer rail that an operator must see. */
 interface InstitutionTransferMetrics {
     /** A transfer entered MANUAL_RECONCILIATION — automation stopped; a human must reconcile it. */
     fun manualReconciliation(rail: InstitutionTransferRail, cause: ReconciliationCause)
+
+    /** One due transfer handled by the resolution sweeper, with the outcome it ended in. */
+    fun resolution(outcome: ResolutionOutcome)
 }

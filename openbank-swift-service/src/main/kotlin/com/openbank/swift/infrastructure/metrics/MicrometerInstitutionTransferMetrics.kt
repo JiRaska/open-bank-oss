@@ -6,6 +6,7 @@ package com.openbank.swift.infrastructure.metrics
 
 import com.openbank.swift.application.port.out.InstitutionTransferMetrics
 import com.openbank.swift.application.port.out.ReconciliationCause
+import com.openbank.swift.application.port.out.ResolutionOutcome
 import com.openbank.swift.domain.institution.InstitutionTransferRail
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
@@ -22,7 +23,7 @@ import jakarta.enterprise.context.ApplicationScoped
  */
 @Startup
 @ApplicationScoped
-class MicrometerInstitutionTransferMetrics(registry: MeterRegistry) : InstitutionTransferMetrics {
+class MicrometerInstitutionTransferMetrics(private val registry: MeterRegistry) : InstitutionTransferMetrics {
     private val counters: Map<Pair<InstitutionTransferRail, ReconciliationCause>, Counter> =
         InstitutionTransferRail.entries.flatMap { rail ->
             ReconciliationCause.entries.map { cause ->
@@ -34,11 +35,23 @@ class MicrometerInstitutionTransferMetrics(registry: MeterRegistry) : Institutio
             }
         }.toMap()
 
+    private val outcomes: Map<ResolutionOutcome, Counter> = ResolutionOutcome.entries.associateWith { outcome ->
+        Counter.builder(RESOLUTION)
+            .description("Due bank-own transfers handled by the resolution sweeper, by outcome")
+            .tag("outcome", outcome.name)
+            .register(registry)
+    }
+
     override fun manualReconciliation(rail: InstitutionTransferRail, cause: ReconciliationCause) {
         counters.getValue(rail to cause).increment()
     }
 
+    override fun resolution(outcome: ResolutionOutcome) {
+        outcomes.getValue(outcome).increment()
+    }
+
     companion object {
         const val NAME = "openbank.swift.institution_transfer.manual_reconciliation"
+        const val RESOLUTION = "openbank.swift.institution_transfer.resolution"
     }
 }
