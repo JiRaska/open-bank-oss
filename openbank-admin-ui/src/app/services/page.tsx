@@ -96,7 +96,7 @@ function catalogShortFor(registry: readonly ServiceEntry[], c: Candidate): strin
 export default function ServicesDocsOverviewPage() {
   const { t } = useLanguage()
   const [candidates, setCandidates] = useState<Candidate[]>(STATIC_CANDIDATES as readonly Candidate[] as Candidate[])
-  const [source, setSource] = useState<'kubernetes' | 'static' | 'unavailable'>('unavailable')
+  const [source, setSource] = useState<'kubernetes' | 'partial' | 'static' | 'unavailable'>('unavailable')
   const [catalogAvailable, setCatalogAvailable] = useState(false)
   const [liveInventoryEmpty, setLiveInventoryEmpty] = useState(false)
   const [statuses, setStatuses] = useState<Record<string, DocsStatus>>({})
@@ -141,7 +141,7 @@ export default function ServicesDocsOverviewPage() {
           }
         }
       } catch { /* keep only the bundled library until a live inventory answers */ }
-      let src: 'kubernetes' | 'static' | 'unavailable' = catalogReady ? 'static' : 'unavailable'
+      let src: 'kubernetes' | 'partial' | 'static' | 'unavailable' = catalogReady ? 'static' : 'unavailable'
       let liveEmpty = false
       try {
         const r = await fetch('/api/services/health', { cache: 'no-store' })
@@ -149,10 +149,13 @@ export default function ServicesDocsOverviewPage() {
           const body = await r.json() as {
             services?: { name: string; label: string; group: string }[]
             source?: string
+            discoveryStatus?: string
           }
           if (body.source === 'kubernetes' && Array.isArray(body.services)) {
-            liveEmpty = body.services.length === 0
-            if (!liveEmpty) src = 'kubernetes'
+            const complete = body.discoveryStatus === undefined || body.discoveryStatus === 'complete'
+            liveEmpty = complete && body.services.length === 0
+            if (!complete) src = 'partial'
+            else if (!liveEmpty) src = 'kubernetes'
             for (const s of body.services) {
               const registered = fleet.find(service => service.k8sName === s.name || service.container === `openbank-${s.name}`)
               const id = registered?.id ?? s.name.replace(/-service$/, '')
@@ -265,6 +268,10 @@ export default function ServicesDocsOverviewPage() {
                     ? catalogAvailable
                       ? t('katalog a živý cluster', 'build catalog and live cluster')
                       : t('živý cluster a přibalená knihovna', 'live cluster and bundled library')
+                    : source === 'partial'
+                      ? catalogAvailable
+                        ? t('katalog a částečný živý cluster', 'build catalog and partial live cluster')
+                        : t('částečný živý cluster a přibalená knihovna', 'partial live cluster and bundled library')
                     : source === 'static'
                       ? liveInventoryEmpty
                         ? t('katalog; v clusteru žádné služby', 'build catalog; no live workloads')
@@ -277,7 +284,10 @@ export default function ServicesDocsOverviewPage() {
           </div>
         </div>
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '420px', lineHeight: 1.5 }}>
-          {source === 'unavailable'
+          {source === 'partial'
+            ? t('Živý inventář je neúplný. Zobrazené workloady jsou potvrzené, ale absence služby není důkazem, že není nasazená.',
+                'The live inventory is incomplete. Listed workloads are confirmed, but an absent service is not evidence that it is undeployed.')
+            : source === 'unavailable'
             ? liveInventoryEmpty
               ? t('Živý cluster hlásí nula služeb a katalog buildu není dostupný; zobrazena je pouze přibalená dokumentace knihovny.',
                   'The live cluster reports zero service workloads and the build catalog is unavailable; only bundled library documentation is shown.')

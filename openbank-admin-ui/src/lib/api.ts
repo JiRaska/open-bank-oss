@@ -270,7 +270,15 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
     if (typeof data !== 'object' || data === null || !Array.isArray((data as { services?: unknown }).services)) {
       return { ok: false, failure: 'error' }
     }
-    const services = (data as { services: unknown[] }).services
+    const healthEvidence = data as { services: unknown[]; source?: unknown; discoveryStatus?: unknown }
+    if (
+      (healthEvidence.discoveryStatus !== undefined && healthEvidence.discoveryStatus !== 'complete' && healthEvidence.discoveryStatus !== 'static') ||
+      (healthEvidence.source === 'kubernetes' && healthEvidence.discoveryStatus !== 'complete') ||
+      (healthEvidence.source === 'static' && healthEvidence.discoveryStatus !== undefined && healthEvidence.discoveryStatus !== 'static')
+    ) {
+      return { ok: false, failure: 'error' }
+    }
+    const services = healthEvidence.services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
     if (new Set(services.map(healthEntryIdentity)).size !== services.length) {
       return { ok: false, failure: 'error' }

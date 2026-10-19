@@ -55,6 +55,30 @@ describe('dashboard evidence presentation', () => {
     expect(screen.queryByText('Current platform state cannot be verified')).not.toBeInTheDocument()
   })
 
+  it('does not treat an incomplete Kubernetes inventory as undeployed services', async () => {
+    const twoServices = {
+      ...governance,
+      items: [
+        ...governance.items,
+        { serviceName: 'ledger-service', dataDomain: 'core' },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve(Response.json(
+      url.endsWith('/governance') ? twoServices : {
+        source: 'kubernetes', discoveryStatus: 'partial', services: [health.services[0]],
+      },
+    ))))
+
+    render(wrap(<DashboardPage />))
+
+    expect(await screen.findByText('Service inventory is incomplete')).toBeInTheDocument()
+    expect(screen.getByTitle('UP')).toBeInTheDocument()
+    expect(screen.getByTitle('Deployment cannot be confirmed: inventory is incomplete')).toBeInTheDocument()
+    expect(screen.getByText('Healthy services')).toBeInTheDocument()
+    expect(screen.getByText('Unknown status')).toBeInTheDocument()
+    expect(screen.queryByTitle('Not deployed in this environment')).not.toBeInTheDocument()
+  })
+
   it.each([
     ['UNKNOWN', 'Health status unknown', 'serviceChipUnknown'],
     ['DOWN', 'DOWN', 'serviceChipUnhealthy'],

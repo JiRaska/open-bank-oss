@@ -46,6 +46,13 @@ export interface DiscoveredService {
   image?: string
 }
 
+export type DiscoveryStatus = 'complete' | 'partial' | 'unavailable' | 'static'
+
+export interface ServiceDiscoverySnapshot {
+  status: DiscoveryStatus
+  services: DiscoveredService[]
+}
+
 // Namespace → UI group. Adding a whole new domain namespace requires THREE steps
 // (ADR-0051, "new namespace checklist") — no code deploy needed after this:
 //   1. Add it here (determines the group chip in System Health).
@@ -169,6 +176,7 @@ function k8sGet<T>(path: string): Promise<T> {
 }
 
 interface WorkloadList {
+  metadata?: { continue?: string }
   items: Array<{
     metadata: { name: string; namespace: string; labels?: Record<string, string> }
     spec?: {
@@ -192,71 +200,91 @@ function businessPort(d: WorkloadItem): number {
 }
 
 /**
- * Discover OpenBank services from the cluster. Returns null off-cluster (no SA
- * token) or on any API error, so the caller can fall back to the static list.
+ * Collect a complete OpenBank inventory from the cluster. A failed namespaced
+ * list makes the inventory incomplete; partial results must not be interpreted
+ * as an authoritative list of deployed services.
  *
  * Queries BOTH Deployments and Argo Rollouts — the fleet uses Rollouts for
  * canary/blue-green on money-path services (ADR-0075). Deployments-only discovery
  * misses account-service, ledger-service, balance-service, sepa-payment, etc.
  */
-export async function discoverServices(): Promise<DiscoveredService[] | null> {
-  if (!inCluster()) return null
-  try {
-    const ns = namespaces()
-    // Per-namespace list calls, NOT a cluster-scoped collection request. The SA
-    // holds list/watch only inside the OpenBank domain namespaces via
-    // per-namespace RoleBindings (ADR-0051 least-privilege). A namespace we lack
-    // access to fails soft to [] so a single bad namespace can't blank the view.
-    const [deploymentItems, rolloutItems] = await Promise.all([
-      Promise.all(
-        ns.map((n) =>
-          k8sGet<WorkloadList>(`/apis/apps/v1/namespaces/${n}/deployments?limit=500`)
-            .then((list) => list.items)
-            .catch(() => [] as WorkloadList['items']),
-        ),
-      ).then((r) => r.flat()),
-      Promise.all(
-        ns.map((n) =>
-          k8sGet<WorkloadList>(`/apis/argoproj.io/v1alpha1/namespaces/${n}/rollouts?limit=500`)
-            .then((list) => list.items)
-            .catch(() => [] as WorkloadList['items']),
-        ),
-      ).then((r) => r.flat()),
-    ])
+export async function collectServiceDiscovery(
+  listWorkloads: (path: string) => Promise<WorkloadList>,
+  targetNamespaces: string[] = namespaces(),
+): Promise<ServiceDiscoverySnapshot> {
+  if (targetNamespaces.length === 0) return { status: 'unavailable', services: [] }
 
-    // Merge: Rollouts take precedence when the same name exists in both lists
-    // (Argo Rollouts creates a Deployment stub that we should not double-count).
-    const rolloutNames = new Set(rolloutItems.map((r) => `${r.metadata.namespace}/${r.metadata.name}`))
-    const allItems = [
-      ...deploymentItems.filter(
-        (d) => !rolloutNames.has(`${d.metadata.namespace}/${d.metadata.name}`),
-      ),
-      ...rolloutItems,
-    ]
-
-    return allItems
-      .filter((d) => d.metadata.name !== 'admin-ui')
-      .filter((d) => isBusinessService(d.metadata.name))
-      .map((d) => {
-        const replicas = d.status?.replicas ?? d.spec?.replicas ?? 0
-        const readyReplicas = d.status?.readyReplicas ?? 0
-        const desired = d.spec?.replicas ?? d.status?.replicas ?? 0
-        return {
-          name: d.metadata.name,
-          namespace: d.metadata.namespace,
-          port: businessPort(d),
-          group: NS_GROUP[d.metadata.namespace] ?? 'platform',
-          ready: readyReplicas > 0 && readyReplicas >= replicas,
-          replicas,
-          readyReplicas,
-          scaledToZero: desired === 0 && readyReplicas === 0,
-          image: d.spec?.template?.spec?.containers?.[0]?.image,
-        }
-      })
-      .sort((a, b) => a.name.localeCompare(b.name))
-  } catch {
-    return null
+  const list = async (path: string) => {
+    try {
+      const response = await listWorkloads(path)
+      // A 500-item page with a continuation token is not a complete namespace
+      // inventory. Keep its observed rows, but mark the overall read partial.
+      return { items: response.items, ok: !response.metadata?.continue }
+    } catch {
+      return { items: [] as WorkloadList['items'], ok: false }
+    }
   }
+
+  const [deploymentResults, rolloutResults] = await Promise.all([
+    Promise.all(targetNamespaces.map((n) => list(`/apis/apps/v1/namespaces/${n}/deployments?limit=500`))),
+    Promise.all(targetNamespaces.map((n) => list(`/apis/argoproj.io/v1alpha1/namespaces/${n}/rollouts?limit=500`))),
+  ])
+  const results = [...deploymentResults, ...rolloutResults]
+  const successfulLists = results.filter((result) => result.ok).length
+  const status: DiscoveryStatus = successfulLists === results.length
+    ? 'complete'
+    : successfulLists === 0 ? 'unavailable' : 'partial'
+
+  const deploymentItems = deploymentResults.flatMap((result) => result.items)
+  const rolloutItems = rolloutResults.flatMap((result) => result.items)
+
+  // Merge: Rollouts take precedence when the same name exists in both lists
+  // (Argo Rollouts creates a Deployment stub that should not be double-counted).
+  const rolloutNames = new Set(rolloutItems.map((r) => `${r.metadata.namespace}/${r.metadata.name}`))
+  const allItems = [
+    ...deploymentItems.filter((d) => !rolloutNames.has(`${d.metadata.namespace}/${d.metadata.name}`)),
+    ...rolloutItems,
+  ]
+
+  const services = allItems
+    .filter((d) => d.metadata.name !== 'admin-ui')
+    .filter((d) => isBusinessService(d.metadata.name))
+    .map((d) => {
+      const replicas = d.status?.replicas ?? d.spec?.replicas ?? 0
+      const readyReplicas = d.status?.readyReplicas ?? 0
+      const desired = d.spec?.replicas ?? d.status?.replicas ?? 0
+      return {
+        name: d.metadata.name,
+        namespace: d.metadata.namespace,
+        port: businessPort(d),
+        group: NS_GROUP[d.metadata.namespace] ?? 'platform',
+        ready: readyReplicas > 0 && readyReplicas >= replicas,
+        replicas,
+        readyReplicas,
+        scaledToZero: desired === 0 && readyReplicas === 0,
+        image: d.spec?.template?.spec?.containers?.[0]?.image,
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return { status, services }
+}
+
+/** Return collection state as well as the result so operational consumers can
+ * distinguish an empty cluster from a failed or partial Kubernetes read. */
+export async function discoverServicesSnapshot(): Promise<ServiceDiscoverySnapshot> {
+  if (!inCluster()) return { status: 'static', services: [] }
+  try {
+    return await collectServiceDiscovery((path) => k8sGet<WorkloadList>(path))
+  } catch {
+    return { status: 'unavailable', services: [] }
+  }
+}
+
+/** Compatibility helper for callers that only accept a complete inventory. */
+export async function discoverServices(): Promise<DiscoveredService[] | null> {
+  const snapshot = await discoverServicesSnapshot()
+  return snapshot.status === 'complete' ? snapshot.services : null
 }
 
 // Shared in-cluster base-URL resolver, cached briefly so callers (docs proxy,

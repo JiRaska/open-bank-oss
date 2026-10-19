@@ -118,4 +118,26 @@ describe('service documentation fleet count', () => {
     expect(screen.getByText('2 of 2 documentation entries')).toBeTruthy()
     expect(screen.queryByText(/live from cluster/)).toBeNull()
   })
+
+  it('does not call a partial empty cluster response a verified zero-workload inventory', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input === '/api/catalog/services') {
+        return new Response(JSON.stringify({ available: false, services: [] }), { status: 200 })
+      }
+      if (input === '/api/services/health') {
+        return new Response(JSON.stringify({ source: 'kubernetes', discoveryStatus: 'partial', services: [] }), { status: 200 })
+      }
+      if (input === '/api/services/libs/docs') {
+        return new Response(JSON.stringify({ items: [{ slug: 'README', title: 'Library docs' }] }), { status: 200 })
+      }
+      return new Response(null, { status: 404 })
+    }))
+
+    render(<ServicesDocsOverviewPage />)
+
+    await screen.findByText('The live inventory is incomplete. Listed workloads are confirmed, but an absent service is not evidence that it is undeployed.')
+    expect(screen.getByText(/partial live cluster and bundled library/)).toBeTruthy()
+    expect(screen.queryByText(/reports zero service workloads/)).toBeNull()
+    expect(screen.queryByText(/no live workloads; catalog unavailable/)).toBeNull()
+  })
 })

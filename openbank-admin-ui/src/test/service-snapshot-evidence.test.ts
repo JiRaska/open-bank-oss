@@ -29,6 +29,17 @@ describe('service snapshot evidence', () => {
     await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
   })
 
+  it.each(['partial', 'unavailable'] as const)(
+    'rejects %s Kubernetes discovery instead of treating its service array as complete',
+    async (discoveryStatus) => {
+      vi.stubGlobal('fetch', vi.fn(async () => json({
+        source: 'kubernetes', discoveryStatus,
+        services: [{ name: 'ledger-service', namespace: 'ledger', port: 8101, status: 'UP', reachable: true, latencyMs: 5 }],
+      })))
+      await expect(fetchAllServiceSnapshotsEvidence()).resolves.toEqual({ ok: false, failure: 'error' })
+    },
+  )
+
   it('rejects duplicate services and malformed stack blocks', async () => {
     const malformed = { name: 'ledger-service', port: 8101, status: 'UP', reachable: true, latencyMs: 4, stack: { quarkus: {} } }
     const duplicate = { name: 'ledger-service', port: 8101, status: 'DOWN', reachable: false, latencyMs: null }
