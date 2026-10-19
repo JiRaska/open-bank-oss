@@ -248,8 +248,8 @@ change_requirements:
       - "every treasury product type has at least one fixture; ids are unique"
       - "an independent-oracle fixture's expected block equals the Python oracle's output (never hand-edited)"
     gate: treasury-parity-fixtures
-    enforced: advisory
-    target_enforce_date: "2027-02-19"   # ADR-0344 D9: enforce once the Kotlin replay test consumes the fixtures
+    enforced: enforce                   # ADR-0344 D9: the Kotlin replay test consumes the fixtures
+    enforced_since: "2026-10-19"
     ci_producer: ".github/scripts/check-treasury-parity-fixtures.py"
   outbox_conformance_it_present:
     detect: ["openbank-*/src/main/**/*.kt extending AbstractOutboxDispatcher (supertype, comments stripped)"]

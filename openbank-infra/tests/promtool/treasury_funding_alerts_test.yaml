@@ -20,6 +20,7 @@ tests:
               severity: warning
               currency: CZK
             exp_annotations:
+              subject_period: continuous
               summary: "A treasury payment release was refused: funding account would go negative"
               description: "treasury-service refused to release an outgoing payment in CZK because the funding nostro account would be negative on the value date. Fund the account (or move the payment) and release it again; GET /api/v1/treasury/payments lists the PROPOSED payments."
 
