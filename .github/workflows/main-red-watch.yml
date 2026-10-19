@@ -50,6 +50,7 @@ on:
     # when a new one appears and is neither here nor in its NOT_WATCHED map.
     workflows:
       - "CI"
+      - "Admin UI evidence"
       - "Services CI"
       - "Security scan"
       - "Secret scan"
