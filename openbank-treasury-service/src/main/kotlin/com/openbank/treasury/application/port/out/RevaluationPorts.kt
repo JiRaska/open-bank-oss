@@ -61,17 +61,49 @@ data class RevaluationRecord(
     val recordedAt: Instant,
 )
 
+/**
+ * A revaluation of [asOf] was asked for while the deal already holds one for [latest] ≥ [asOf] that it
+ * does not exactly replay (409 `REVALUATION_OUT_OF_ORDER`). Revaluations are strictly increasing in
+ * date per deal: an earlier date is never back-filled — the next date's change covers it.
+ */
+class RevaluationOutOfOrderException(val dealId: UUID, val asOf: LocalDate, val latest: LocalDate) :
+    RuntimeException("deal $dealId is revalued through $latest; $asOf is not after it and is not a replay")
+
+/** What [RevaluationRepository.claim] found. */
+sealed interface RevaluationClaim {
+    val record: RevaluationRecord
+
+    /** A new row: its change is owed to the ledger (when non-zero) under [RevaluationRecord.idempotencyKey]. */
+    data class Claimed(override val record: RevaluationRecord) : RevaluationClaim
+
+    /** The same (deal, date, snapshot, fair value) was claimed before: an exact replay. */
+    data class Existing(override val record: RevaluationRecord) : RevaluationClaim
+}
+
 interface RevaluationRepository {
     suspend fun find(dealId: UUID, asOf: LocalDate): RevaluationRecord?
-
-    /** The cumulative adjustment of the latest revaluation BEFORE [asOf]; zero when none. */
-    suspend fun cumulativeBefore(dealId: UUID, asOf: LocalDate): BigDecimal
 
     suspend fun forDate(asOf: LocalDate, limit: Int): List<RevaluationRecord>
 
     /**
-     * Store [record] and, when it posted, its journal reference — ONE transaction. Unique on
-     * (deal, date): the loser of a concurrent replay gets false and nothing is written twice.
+     * Under a per-deal transaction lock: an exact replay of (deal, [asOf], snapshot, fair value)
+     * returns [RevaluationClaim.Existing]; a date not after the deal's latest revaluation throws
+     * [RevaluationOutOfOrderException]; otherwise the change against the latest cumulative
+     * adjustment is computed IN the lock and the row is inserted (no journal yet), so two concurrent
+     * runs can never both measure against the same prior. [keyOf] names the ledger key a change owes.
      */
-    suspend fun save(record: RevaluationRecord, journal: LedgerJournalRef?): Boolean
+    @Suppress("LongParameterList")
+    suspend fun claim(
+        dealId: UUID,
+        asOf: LocalDate,
+        snapshotId: UUID,
+        fairValue: BigDecimal,
+        carrying: BigDecimal,
+        target: BigDecimal,
+        keyOf: (change: BigDecimal) -> String?,
+        at: Instant,
+    ): RevaluationClaim
+
+    /** Record the ledger journal of a claimed row and its deal journal reference — ONE transaction. */
+    suspend fun attachJournal(dealId: UUID, asOf: LocalDate, journal: LedgerJournalRef)
 }

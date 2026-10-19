@@ -9,6 +9,8 @@ import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealFairValue
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.RevaluationClaim
+import com.openbank.treasury.application.port.out.RevaluationOutOfOrderException
 import com.openbank.treasury.application.port.out.RevaluationRecord
 import com.openbank.treasury.application.port.out.RevaluationRepository
 import com.openbank.treasury.application.port.out.ValuationPort
@@ -36,6 +38,7 @@ import com.openbank.treasury.domain.model.Side
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
@@ -84,15 +87,45 @@ class RevaluationServiceTest {
         val rows = linkedMapOf<Pair<UUID, LocalDate>, RevaluationRecord>()
         val journals = mutableListOf<LedgerJournalRef>()
         override suspend fun find(dealId: UUID, asOf: LocalDate) = rows[dealId to asOf]
-        override suspend fun cumulativeBefore(dealId: UUID, asOf: LocalDate) =
-            rows.values.filter { it.dealId == dealId && it.asOf < asOf }.maxByOrNull { it.asOf }?.cumulative
-                ?: BigDecimal.ZERO
         override suspend fun forDate(asOf: LocalDate, limit: Int) = rows.values.filter { it.asOf == asOf }.take(limit)
-        override suspend fun save(record: RevaluationRecord, journal: LedgerJournalRef?): Boolean {
-            if (rows.containsKey(record.dealId to record.asOf)) return false
-            rows[record.dealId to record.asOf] = record
-            journal?.let { journals += it }
-            return true
+        override suspend fun claim(
+            dealId: UUID,
+            asOf: LocalDate,
+            snapshotId: UUID,
+            fairValue: BigDecimal,
+            carrying: BigDecimal,
+            target: BigDecimal,
+            keyOf: (BigDecimal) -> String?,
+            at: java.time.Instant,
+        ): RevaluationClaim {
+            val latest = rows.values.filter { it.dealId == dealId }.maxByOrNull { it.asOf }
+            if (latest != null && !latest.asOf.isBefore(asOf)) {
+                if (latest.asOf == asOf &&
+                    latest.snapshotId == snapshotId &&
+                    latest.fairValue.compareTo(fairValue) == 0
+                ) {
+                    return RevaluationClaim.Existing(latest)
+                }
+                throw RevaluationOutOfOrderException(dealId, asOf, latest.asOf)
+            }
+            val change = target - (latest?.cumulative ?: BigDecimal.ZERO)
+            val r =
+                RevaluationRecord(
+                    dealId, asOf, snapshotId, fairValue, carrying, target, change,
+                    keyOf(
+                        change,
+                    ),
+                    null, at,
+                )
+            rows[dealId to asOf] = r
+            return RevaluationClaim.Claimed(r)
+        }
+        override suspend fun attachJournal(dealId: UUID, asOf: LocalDate, journal: LedgerJournalRef) {
+            val r = rows.getValue(dealId to asOf)
+            if (r.journalId == null) {
+                rows[dealId to asOf] = r.copy(journalId = journal.journalId)
+                journals += journal
+            }
         }
     }
 
@@ -215,5 +248,41 @@ class RevaluationServiceTest {
         engine.books[day] = book(day, fv(irs, "10.00"))
         service.revalue(day, irs.id)
         assertThat(days.steps).isEmpty()
+    }
+
+    @Test
+    fun `an earlier date after a later one is refused, never back-filled, the cumulative stays`() = runBlocking<Unit> {
+        val irs = bookedIrs().also { deals.rows[it.id] = it }
+        val d1 = day
+        val d2 = day.plusDays(1)
+        engine.books[d2] = book(d2, fv(irs, "100000.00"))
+        engine.books[d1] = book(d1, fv(irs, "40000.00"))
+        service.revalue(d2)
+        assertThatThrownBy { runBlocking { service.revalue(d1, irs.id) } }
+            .isInstanceOf(RevaluationOutOfOrderException::class.java)
+        val book = service.revalue(d1)
+        assertThat(book.failures.single()).isInstanceOf(RevaluationOutOfOrderException::class.java)
+        assertThat(step().status).isEqualTo(DayStepStatus.FAILED)
+        assertThat(ledger.posted).hasSize(1)
+        assertThat(store.rows.values.single().cumulative).isEqualByComparingTo("100000.00")
+        // A replay of D2 posts nothing new; a different value for D2 is refused, not re-measured.
+        service.revalue(d2)
+        assertThat(ledger.posted).hasSize(1)
+        engine.books[d2] = book(d2, fv(irs, "90000.00"))
+        assertThat(service.revalue(d2).failures.single()).isInstanceOf(RevaluationOutOfOrderException::class.java)
+    }
+
+    @Test
+    fun `a claimed row whose post was lost is posted on the replay under the same key`() = runBlocking<Unit> {
+        val irs = bookedIrs().also { deals.rows[it.id] = it }
+        engine.books[day] = book(day, fv(irs, "500.00"))
+        ledger.failFor = irs.id
+        assertThat(service.revalue(day).failures).hasSize(1)
+        assertThat(store.rows.values.single().journalId).isNull()
+        ledger.failFor = null
+        val replay = service.revalue(day)
+        assertThat(replay.revalued.single().journalId).isNotNull()
+        assertThat(ledger.posted.single().idempotencyKey).isEqualTo("treasury:${irs.id}:revaluation:$day")
+        assertThat(store.journals).hasSize(1)
     }
 }

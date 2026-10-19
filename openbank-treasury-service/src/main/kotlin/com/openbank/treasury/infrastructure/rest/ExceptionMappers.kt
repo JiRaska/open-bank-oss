@@ -131,6 +131,10 @@ class ExceptionMappers {
         error(Response.Status.CONFLICT.statusCode, "PAYMENT_RELEASED", e.message)
 
     @ServerExceptionMapper
+    fun revaluationOutOfOrder(e: com.openbank.treasury.application.port.out.RevaluationOutOfOrderException): Response =
+        error(Response.Status.CONFLICT.statusCode, "REVALUATION_OUT_OF_ORDER", e.message)
+
+    @ServerExceptionMapper
     fun paymentStale(e: com.openbank.treasury.domain.payment.PaymentStaleException): Response =
         error(Response.Status.CONFLICT.statusCode, "PAYMENT_STALE", e.message)
 

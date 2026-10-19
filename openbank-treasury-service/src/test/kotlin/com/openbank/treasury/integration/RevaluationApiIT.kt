@@ -175,8 +175,10 @@ class RevaluationApiIT {
             val results = List(2) {
                 pool.submit(
                     Callable {
-                        post("/revaluations/run?asOf=$next").then().statusCode(200)
-                            .extract().path<Any>("revalued.find { it.dealId == '$irs' }.change").toString()
+                        val r = post("/revaluations/run?asOf=$next").then().extract()
+                        check(r.statusCode() == 200) { "HTTP ${r.statusCode()}: ${r.asString()}" }
+                        checkNotNull(r.path<Any>("revalued.find { it.dealId == '$irs' }.change")) { r.asString() }
+                            .toString()
                     },
                 )
             }.map { it.get() }
@@ -190,6 +192,37 @@ class RevaluationApiIT {
         assertThat(
             count("select count(*) from deal_journals where idempotency_key = 'treasury:$irs:revaluation:$next'"),
         ).isEqualTo(1)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "bert.backoffice", roles = ["ROLE_TREASURY_BACK_OFFICE"])
+    fun `7 - a date before the latest is refused 409 and the cumulative stays the latest fair value`() {
+        val later = today.plusDays(3)
+        val earlier = today.plusDays(2)
+        valuation.byDate[later] = book(later, fv("90000.00"))
+        valuation.byDate[earlier] = book(earlier, fv("50000.00"))
+        post("/revaluations/run?asOf=$later").then().statusCode(200).body("journals", equalTo(1))
+        val journalsBefore = ledger.journals.size
+        post("/revaluations/run?asOf=$earlier&dealId=$irs").then().statusCode(409)
+            .body("error", equalTo("REVALUATION_OUT_OF_ORDER"))
+        post("/revaluations/run?asOf=$earlier").then().statusCode(200).body("failures", hasSize<Any>(1))
+        assertThat(ledger.journals.size).isEqualTo(journalsBefore)
+        assertThat(
+            count("select count(*) from deal_revaluations where deal_id = '$irs' and as_of = '$earlier'"),
+        ).isZero()
+        val cumulative = jdbc { c ->
+            c.prepareStatement(
+                "select cumulative from deal_revaluations where deal_id = '$irs' order by as_of desc limit 1",
+            ).executeQuery().use {
+                it.next()
+                it.getBigDecimal(1)
+            }
+        }
+        assertThat(cumulative).isEqualByComparingTo("90000.00")
+        // The replay of the latest date posts nothing new.
+        post("/revaluations/run?asOf=$later").then().statusCode(200).body("journals", equalTo(0))
+        assertThat(ledger.journals.size).isEqualTo(journalsBefore)
     }
 
     private fun fv(clean: String) = DealFairValue(UUID.fromString(irs), BigDecimal(clean), BigDecimal(clean), null)

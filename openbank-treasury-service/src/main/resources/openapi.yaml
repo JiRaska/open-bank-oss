@@ -1518,6 +1518,8 @@ paths:
                         dealId: { type: string, format: uuid }
                         reason: { type: string, maxLength: 500 }
                   failures: { type: array, maxItems: 5000, items: { type: string, maxLength: 500 } }
+        '409':
+          description: REVALUATION_OUT_OF_ORDER — a single-deal run for a date not after the deal's latest revaluation that is not an exact replay (dates are strictly increasing per deal; an earlier date is never back-filled)
 
   /api/v1/treasury/fixings/{index}/{date}/manual:
     post:

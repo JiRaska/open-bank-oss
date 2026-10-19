@@ -11,6 +11,8 @@ import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.RevaluationClaim
+import com.openbank.treasury.application.port.out.RevaluationOutOfOrderException
 import com.openbank.treasury.application.port.out.RevaluationRecord
 import com.openbank.treasury.application.port.out.RevaluationRepository
 import com.openbank.treasury.application.port.out.ValuationPort
@@ -84,6 +86,11 @@ data class RevaluationRun(
  * reserve, FVTPL and derivatives → unrealised P&L). Idempotent per (deal, snapshot date): the ledger
  * key is `treasury:<dealId>:revaluation:<date>` and the record is unique on the same pair.
  *
+ * Per deal, revaluation dates are STRICTLY INCREASING: a date not after the deal's latest one is
+ * refused ([RevaluationOutOfOrderException], 409) unless it exactly replays it. A missed earlier date
+ * is never back-filled — the next date's change is measured against the latest recorded cumulative
+ * adjustment, so it covers the gap and the cumulative always equals the latest fair value.
+ *
  * The measured amount is the CLEAN value (accrued interest is posted by the accrual run) less the
  * carrying amount — amortised cost for a security, zero for a derivative, which is carried only at
  * its fair value. A deal the engine did not value, valued as unpriced, or valued in another currency
@@ -113,7 +120,12 @@ class RevaluationService(
      */
     suspend fun revalue(asOf: LocalDate, dealId: UUID? = null): RevaluationRun {
         val run = measure(asOf, dealId)
-        if (dealId == null) dayCompletion?.record(run.step(clock.instant()))
+        if (dealId == null) {
+            dayCompletion?.record(run.step(clock.instant()))
+        } else {
+            // A single-deal run asked about one date: refusing it is the answer (409), not a summary.
+            run.failures.firstOrNull { it is RevaluationOutOfOrderException }?.let { throw it }
+        }
         return run
     }
 
@@ -147,10 +159,6 @@ class RevaluationService(
         var journals = 0
         candidates.forEach { (deal, category) ->
             runCatching {
-                revaluations.find(deal.id, asOf)?.let { prior ->
-                    done += prior
-                    return@runCatching
-                }
                 val fv = book.deals[deal.id]
                 val gap = when {
                     fv == null -> "not in the risk engine's valuation of snapshot ${book.snapshotId}"
@@ -163,41 +171,43 @@ class RevaluationService(
                     gaps += RevaluationGap(deal.id, gap)
                     return@runCatching
                 }
+                val clean = checkNotNull(fv?.clean)
                 val carrying = carrying(deal, asOf)
-                val target = RoundingPolicy.TREASURY_AMOUNT.round(checkNotNull(fv?.clean) - carrying)
-                val before = revaluations.cumulativeBefore(deal.id, asOf)
-                val change = target - before
-                val spec = MatrixPostings.revaluation(deal, change, deal.currency, asOf, category)
-                val ref = spec?.let {
-                    val posted = ledger.post(it, asOf, "treasury ${deal.product} revaluation $asOf")
-                    LedgerJournalRef(
-                        deal.id,
-                        PostingEvent.REVALUATION,
-                        it.idempotencyKey,
-                        posted.journalId,
-                        clock.instant(),
-                        posted.accounts,
-                    )
-                }
-                val record = RevaluationRecord(
+                val target = RoundingPolicy.TREASURY_AMOUNT.round(clean - carrying)
+                // Claim first, post second: the change is measured inside the per-deal lock against
+                // the latest recorded cumulative, and the row exists before the ledger is asked, so a
+                // concurrent or out-of-order run cannot measure against the same prior.
+                val claim = revaluations.claim(
                     deal.id,
                     asOf,
                     book.snapshotId,
-                    checkNotNull(fv?.clean),
+                    clean,
                     carrying,
                     target,
-                    change,
-                    spec?.idempotencyKey,
-                    ref?.journalId,
+                    { change ->
+                        MatrixPostings.revaluation(deal, change, deal.currency, asOf, category)?.idempotencyKey
+                    },
                     clock.instant(),
                 )
-                // The loser of a concurrent replay finds the winner's row: same key, same journal.
-                if (!revaluations.save(record, ref)) {
-                    done += checkNotNull(revaluations.find(deal.id, asOf)) { "revaluation of ${deal.id} vanished" }
+                val record = claim.record
+                if (record.idempotencyKey == null || record.journalId != null) {
+                    done += record
                     return@runCatching
                 }
-                done += record
-                if (ref != null) journals++
+                // Owed (new, or a replay whose earlier post was lost): the ledger key makes it idempotent.
+                val spec = checkNotNull(MatrixPostings.revaluation(deal, record.change, deal.currency, asOf, category))
+                val posted = ledger.post(spec, asOf, "treasury ${deal.product} revaluation $asOf")
+                val ref = LedgerJournalRef(
+                    deal.id,
+                    PostingEvent.REVALUATION,
+                    spec.idempotencyKey,
+                    posted.journalId,
+                    clock.instant(),
+                    posted.accounts,
+                )
+                revaluations.attachJournal(deal.id, asOf, ref)
+                done += record.copy(journalId = posted.journalId)
+                if (claim is RevaluationClaim.Claimed) journals++
             }.onFailure { failures += it }
         }
         return RevaluationRun(asOf, book.snapshotId, done, journals, gaps, failures)

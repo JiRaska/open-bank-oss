@@ -5,20 +5,22 @@
 package com.openbank.treasury.infrastructure.revaluation
 
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.RevaluationClaim
+import com.openbank.treasury.application.port.out.RevaluationOutOfOrderException
 import com.openbank.treasury.application.port.out.RevaluationRecord
 import com.openbank.treasury.application.port.out.RevaluationRepository
 import com.openbank.treasury.infrastructure.persistence.repository.DealRepositoryImpl
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
-import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.IdClass
-import jakarta.persistence.PersistenceException
+import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import java.io.Serializable
 import java.math.BigDecimal
@@ -70,8 +72,9 @@ class DealRevaluationEntity : PanacheEntityBase {
 class DealRevaluationPanacheRepository : PanacheRepositoryBase<DealRevaluationEntity, DealRevaluationKey>
 
 /**
- * ADR-0344 D7: the revaluation store. The row and its journal reference commit in ONE transaction;
- * the (deal, date) primary key is the replay guard — the loser of a race reads the winner's row.
+ * ADR-0344 D7: the revaluation store. A claim takes a per-deal transaction advisory lock, so the
+ * revaluations of one deal are serialised and strictly increasing in date; the journal is attached
+ * (row + deal journal reference, one transaction) once the ledger has accepted it.
  */
 @ApplicationScoped
 class RevaluationRepositoryImpl(
@@ -83,28 +86,65 @@ class RevaluationRepositoryImpl(
         rows.find("dealId = ?1 and asOf = ?2", dealId, asOf).firstResult()
     }.awaitSuspending()?.toRecord()
 
-    override suspend fun cumulativeBefore(dealId: UUID, asOf: LocalDate): BigDecimal = Panache.withSession {
-        rows.find("dealId = ?1 and asOf < ?2 order by asOf desc", dealId, asOf).firstResult()
-    }.awaitSuspending()?.cumulative ?: BigDecimal.ZERO
-
     override suspend fun forDate(asOf: LocalDate, limit: Int): List<RevaluationRecord> = Panache.withSession {
         rows.find("asOf = ?1 order by dealId", asOf).page(0, limit).list()
     }.awaitSuspending().map { it.toRecord() }
 
-    override suspend fun save(record: RevaluationRecord, journal: LedgerJournalRef?): Boolean {
-        try {
-            Panache.withTransaction {
-                rows.persist(record.toEntity()).flatMap { _ ->
-                    journal?.let { deals.persistJournal(it) } ?: io.smallrye.mutiny.Uni.createFrom().voidItem()
-                }
-            }.awaitSuspending()
-            return true
-        } catch (e: PersistenceException) {
-            if (find(record.dealId, record.asOf) == null) throw e
-        } catch (e: PgException) {
-            if (find(record.dealId, record.asOf) == null) throw e
+    override suspend fun claim(
+        dealId: UUID,
+        asOf: LocalDate,
+        snapshotId: UUID,
+        fairValue: BigDecimal,
+        carrying: BigDecimal,
+        target: BigDecimal,
+        keyOf: (change: BigDecimal) -> String?,
+        at: Instant,
+    ): RevaluationClaim = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Int>("select 1 from (select pg_advisory_xact_lock(hashtext(:k))) l")
+                .setParameter("k", "treasury-revaluation:$dealId").singleResult
+        }.flatMap {
+            rows.find("dealId = ?1 order by asOf desc", dealId).firstResult()
+        }.flatMap { latest ->
+            if (latest != null && !latest.asOf.isBefore(asOf)) {
+                val replay = latest.asOf == asOf &&
+                    latest.snapshotId == snapshotId &&
+                    latest.fairValue.compareTo(fairValue) == 0
+                if (!replay) throw RevaluationOutOfOrderException(dealId, asOf, latest.asOf)
+                Uni.createFrom().item<RevaluationClaim>(RevaluationClaim.Existing(latest.toRecord()))
+            } else {
+                val change = target - (latest?.cumulative ?: BigDecimal.ZERO)
+                val record = RevaluationRecord(
+                    dealId,
+                    asOf,
+                    snapshotId,
+                    fairValue,
+                    carrying,
+                    target,
+                    change,
+                    keyOf(change),
+                    null,
+                    at,
+                )
+                rows.persist(record.toEntity()).map<RevaluationClaim> { RevaluationClaim.Claimed(record) }
+            }
         }
-        return false
+    }.awaitSuspending()
+
+    override suspend fun attachJournal(dealId: UUID, asOf: LocalDate, journal: LedgerJournalRef) {
+        Panache.withTransaction {
+            // Row lock: a replay that re-posted the same key races the original attach; one attaches.
+            rows.find("dealId = ?1 and asOf = ?2", dealId, asOf).withLock(LockModeType.PESSIMISTIC_WRITE)
+                .firstResult().flatMap { row ->
+                    checkNotNull(row) { "revaluation of $dealId on $asOf vanished" }
+                    if (row.journalId != null) {
+                        Uni.createFrom().voidItem()
+                    } else {
+                        row.journalId = journal.journalId
+                        deals.persistJournal(journal)
+                    }
+                }
+        }.awaitSuspending()
     }
 
     private fun RevaluationRecord.toEntity() = DealRevaluationEntity().also {

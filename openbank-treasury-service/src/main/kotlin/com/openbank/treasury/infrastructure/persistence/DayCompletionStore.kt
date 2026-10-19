@@ -54,8 +54,16 @@ class DayCompletionPanacheRepository : PanacheRepository<DayCompletionEntity>
 class DayCompletionStore(private val rows: DayCompletionPanacheRepository) : DayCompletionRepository {
     /** Upsert on (date, step) under the unique constraint: the last run's outcome is the record. */
     override suspend fun record(r: DayStepRecord) {
+        // Two runs of one step (two pods, or a cron and an on-demand run) upsert the same
+        // (date, step) row: a transaction lock on the pair makes the second see the first's row
+        // instead of failing the unique constraint.
         Panache.withTransaction {
-            rows.find("businessDate = ?1 and step = ?2", r.date, r.step.name).firstResult().flatMap { existing ->
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Int>("select 1 from (select pg_advisory_xact_lock(hashtext(:k))) l")
+                    .setParameter("k", "treasury-day-step:${r.date}:${r.step.name}").singleResult
+            }.flatMap {
+                rows.find("businessDate = ?1 and step = ?2", r.date, r.step.name).firstResult()
+            }.flatMap { existing ->
                 val e = existing ?: DayCompletionEntity().apply {
                     businessDate = r.date
                     step = r.step.name
