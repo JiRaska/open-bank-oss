@@ -7,6 +7,7 @@ package com.openbank.risk.infrastructure.kafka
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.finance.schedule.ScheduleGenerator
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.risk.application.port.out.TreasuryCashFlowStore
@@ -18,6 +19,7 @@ import com.openbank.risk.domain.valuation.DealKind
 import com.openbank.risk.domain.valuation.StoredFlowSet
 import com.openbank.risk.infrastructure.finance.CashFlowDto
 import com.openbank.risk.infrastructure.finance.CashFlowJson
+import com.openbank.risk.infrastructure.finance.LegBounds
 import com.openbank.risk.infrastructure.finance.LegDefaults
 import com.openbank.risk.infrastructure.finance.LegDto
 import com.openbank.risk.infrastructure.finance.LegSpecJson
@@ -56,6 +58,10 @@ import java.util.UUID
  * from malformed: the event was well-formed, the deal is simply out of scope. It is never written
  * to the book and never thrown — an unsupported product must not crash instrument building for
  * every subsequent snapshot.
+ *
+ * ADR-0344 D8: a BOOKED deal whose published legs cannot be built is a real position, so it is
+ * STORED as unvaluable (counted `stored_unvaluable`) and surfaces as a data gap in every valuation
+ * read — never acked-and-dropped like a malformed event.
  */
 @ApplicationScoped
 class TreasuryDealConsumer {
@@ -108,6 +114,10 @@ class TreasuryDealConsumer {
             count(OUTCOME_WRITE_ERROR)
             throw e
         }
+        if (event.legsError != null) {
+            log.warnf("[treasury-deal-in] deal %s stored as UNVALUABLE: %s", event.dealId, event.legsError)
+            count(OUTCOME_STORED_UNVALUABLE)
+        }
         count(if (changed) OUTCOME_STORED else OUTCOME_UNCHANGED)
     }
 
@@ -153,22 +163,31 @@ class TreasuryDealConsumer {
         return null
     }
 
+    /** Published legs as stored JSON, plus why they cannot be built (null when they can). */
+    internal data class PublishedLegs(val json: String, val error: String?)
+
     /**
-     * The legs as canonical JSON after validating them with libs-finance's types (a leg the engine
-     * cannot build is a malformed event, not a deal stored without its legs), or null when absent.
+     * The legs as canonical JSON, validated with libs-finance's types under [LegBounds.BOOKED] (no
+     * pricing-edge bound) and generated once so the per-leg period cap applies. Legs that cannot be
+     * built do NOT make the event malformed: the deal is a real position, so it is stored with the
+     * raw legs and the reason, and every valuation read reports it as a data gap — never dropped.
      */
-    private fun legsJson(node: JsonNode, header: LegDefaults): String? {
+    @Suppress("TooGenericExceptionCaught") // every leg defect is the same "unvaluable" outcome
+    private fun publishedLegs(node: JsonNode, header: LegDefaults): PublishedLegs? {
         val legs = node.get("legs")?.takeIf { it.isArray && it.size() > 0 } ?: return null
-        val dtos = objectMapper.convertValue(legs, object : TypeReference<List<LegDto>>() {})
-        LegSpecJson.toLegs(dtos, header) // validates; throws IllegalArgumentException
-        val resolved = dtos.map {
-            it.copy(
-                paymentCalendars = it.paymentCalendars ?: header.calendars,
-                businessDayConvention =
-                it.businessDayConvention ?: header.businessDayConvention,
-            )
+        return try {
+            val dtos = objectMapper.convertValue(legs, object : TypeReference<List<LegDto>>() {})
+            LegSpecJson.toLegs(dtos, header, LegBounds.BOOKED).forEach { ScheduleGenerator.generate(it) }
+            val resolved = dtos.map {
+                it.copy(
+                    paymentCalendars = it.paymentCalendars ?: header.calendars,
+                    businessDayConvention = it.businessDayConvention ?: header.businessDayConvention,
+                )
+            }
+            PublishedLegs(objectMapper.writeValueAsString(resolved), null)
+        } catch (e: Exception) {
+            PublishedLegs(legs.toString(), "legs cannot be built: ${e.message}")
         }
-        return objectMapper.writeValueAsString(resolved)
     }
 
     /** The event as the book needs it, or null (malformed: logged, counted and acked). */
@@ -177,6 +196,13 @@ class TreasuryDealConsumer {
         val state = STATE_BY_TYPE[type] ?: return malformed("ce-type '$type'", payload)
         return try {
             val node = objectMapper.readTree(payload)
+            val published = publishedLegs(
+                node,
+                LegDefaults(
+                    calendars = node.get("calendars")?.takeIf { it.isArray }?.map { it.asText() },
+                    businessDayConvention = node.text("businessDayConvention"),
+                ),
+            )
             TreasuryDealEvent(
                 state = state,
                 dealId = UUID.fromString(node.text("dealId") ?: return malformed("dealId", payload)),
@@ -190,14 +216,9 @@ class TreasuryDealConsumer {
                 maturityDate = node.text("maturityDate")?.let(LocalDate::parse),
                 kind = DealKind.parse(node.text("kind")),
                 bookId = node.text("bookId"),
-                legsJson = legsJson(
-                    node,
-                    LegDefaults(
-                        calendars = node.get("calendars")?.takeIf { it.isArray }?.map { it.asText() },
-                        businessDayConvention = node.text("businessDayConvention"),
-                    ),
-                ),
+                legsJson = published?.json,
                 scheduleHash = node.text("scheduleHash"),
+                legsError = published?.error,
             )
         } catch (e: Exception) {
             log.errorf(e, "[treasury-deal-in] malformed deal event, acked: %.200s", payload)
@@ -224,6 +245,9 @@ class TreasuryDealConsumer {
         const val OUTCOME_WRITE_ERROR = "write_error"
         const val OUTCOME_UNSUPPORTED_PRODUCT = "unsupported_product"
         const val OUTCOME_IGNORED = "ignored"
+
+        /** A deal whose published legs cannot be built: stored, and a data gap in every valuation read. */
+        const val OUTCOME_STORED_UNVALUABLE = "stored_unvaluable"
 
         /**
          * ADR-0344 D4: treasury's stored ledger of one deal version. Same topic as the deal events

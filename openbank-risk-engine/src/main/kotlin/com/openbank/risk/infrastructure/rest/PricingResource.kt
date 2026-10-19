@@ -9,6 +9,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.risk.application.port.`in`.PricingCommand
 import com.openbank.risk.application.port.`in`.ValuationUseCase
 import com.openbank.risk.domain.capital.ReportingCurrencyTotal
+import com.openbank.risk.infrastructure.finance.LegBounds
 import com.openbank.risk.infrastructure.finance.LegDefaults
 import com.openbank.risk.infrastructure.finance.LegSpecJson
 import jakarta.annotation.security.RolesAllowed
@@ -63,7 +64,11 @@ class PricingResource {
         }
         val currency = body.currency?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
             ?: ReportingCurrencyTotal.REPORTING_CURRENCY
-        val legs = LegSpecJson.toLegs(body.legs, LegDefaults(body.calendars, body.businessDayConvention))
+        val legs = LegSpecJson.toLegs(
+            body.legs,
+            LegDefaults(body.calendars, body.businessDayConvention),
+            LegBounds.PRICING_REQUEST,
+        )
         val result = valuation.price(PricingCommand(asOf, curveSetId, currency, legs))
         return Response.ok(result.toResponse()).build()
     }

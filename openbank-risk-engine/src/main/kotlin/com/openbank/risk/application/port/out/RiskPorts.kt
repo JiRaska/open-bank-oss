@@ -147,6 +147,8 @@ data class TreasuryDealEvent(
     /** The legs as canonical LegSpec JSON (already validated by the consumer), or null. */
     val legsJson: String? = null,
     val scheduleHash: String? = null,
+    /** Set when [legsJson] holds legs that cannot be built: the deal is stored as unvaluable. */
+    val legsError: String? = null,
 )
 
 /**

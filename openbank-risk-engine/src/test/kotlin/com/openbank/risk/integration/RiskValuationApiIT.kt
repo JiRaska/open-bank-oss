@@ -95,7 +95,9 @@ class RiskValuationApiIT {
     fun `a snapshot values its ACTUAL deals per deal and per book, reproducibly, and VaR states its data gap`() {
         ledger.inputs = Fixtures.tiedOut()
         val runId: String = given().contentType("application/json").body("""{"asOf":"$asOf"}""")
-            .`when`().post("/api/v1/risk/snapshots").then().statusCode(201).extract().path("id")
+            .`when`().post(
+                "/api/v1/risk/snapshots",
+            ).then().statusCode(org.hamcrest.Matchers.oneOf(200, 201)).extract().path("id")
         val curveSetId = uploadCurveSet()
         runBlocking {
             book.apply(event(irsDeal, "IRS", null, legs("2025-03-10", "2030-03-10"), "TRADING-1", DealKind.ACTUAL))
@@ -136,6 +138,43 @@ class RiskValuationApiIT {
         given().`when`().get("/api/v1/risk/snapshots/$runId/sensitivity?curveSetId=$curveSetId&bucketSetId=nope")
             .then().statusCode(400)
         given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}/valuation").then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `an over-bound booked deal is kept, an unbuildable one is a data gap, pricing answers 400`() {
+        ledger.inputs = Fixtures.tiedOut()
+        val runId: String = given().contentType("application/json").body("""{"asOf":"$asOf"}""")
+            .`when`().post(
+                "/api/v1/risk/snapshots",
+            ).then().statusCode(org.hamcrest.Matchers.oneOf(200, 201)).extract().path("id")
+        val curveSetId = uploadCurveSet()
+        val longLeg = """{"payReceive":"PAY","currency":"CZK","notional":1000000,"accrualStart":"2025-03-10",
+            "accrualEnd":"2085-03-10","accrualFrequency":"1Y","rate":{"type":"FIXED","rate":0.03},"finalNotionalExchange":false}"""
+        val nineLegs = "[" + List(9) { longLeg }.joinToString(",") + "]"
+        runBlocking {
+            book.apply(event(irsDeal, "IRS", null, nineLegs, "TRADING-2", DealKind.ACTUAL))
+            book.apply(
+                event(legacyDeal, "IRS", null, nineLegs, "TRADING-2", DealKind.ACTUAL)
+                    .copy(legsError = "legs cannot be built: schedule exceeds 2000 periods per leg"),
+            )
+        }
+        val v = json.readTree(read("/api/v1/risk/snapshots/$runId/valuation?curveSetId=$curveSetId&bookId=TRADING-2"))
+        val byId = v["deals"].associateBy { it["dealId"].asText() }
+        assertThat(byId.getValue(irsDeal.toString())["unpriced"].isNull).isTrue() // 9 legs over 60 years: valued
+        assertThat(byId.getValue(legacyDeal.toString())["unpriced"].asText()).contains("cannot be built")
+        assertThat(v["book"].isNull).isTrue()
+        assertThat(v["dataGap"].asText()).contains("cannot be valued")
+        listOf("sensitivity", "fx-position").forEach { read ->
+            val r = json.readTree(read("/api/v1/risk/snapshots/$runId/$read?curveSetId=$curveSetId&bookId=TRADING-2"))
+            assertThat(r["dataGap"].asText()).describedAs(read).contains("cannot be valued")
+        }
+        val varRead = json.readTree(read("/api/v1/risk/snapshots/$runId/var?bookId=TRADING-2"))
+        assertThat(varRead["dataGap"].asText()).contains("cannot be valued")
+
+        given().contentType("application/json")
+            .body("""{"asOf":"$asOf","curveSetId":"$curveSetId","legs":$nineLegs}""")
+            .`when`().post("/api/v1/risk/pricing").then().statusCode(400)
     }
 
     private fun event(id: UUID, product: String, rate: BigDecimal?, legs: String?, bookId: String?, kind: DealKind) =

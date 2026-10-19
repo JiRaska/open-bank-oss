@@ -38,6 +38,11 @@ data class TreasuryDeal(
     /** The legs treasury published (LegSpec), or null for a legacy event — see [TreasuryLegs]. */
     val legs: List<LegSpec>? = null,
     val scheduleHash: String? = null,
+    /**
+     * Why the published legs cannot be built (malformed, or over libs-finance's period cap). Such a
+     * deal is KEPT — it is a real position — and every valuation read reports it as a data gap.
+     */
+    val legsError: String? = null,
 ) {
     val isAsset: Boolean get() = product != MM_BORROWING && product != CNB_LOMBARD
 
@@ -153,6 +158,7 @@ object TreasuryLegs {
     private val PERCENT = BigDecimal.ONE.movePointRight(2)
 
     fun legsOf(deal: TreasuryDeal): List<LegSpec>? {
+        if (deal.legsError != null) return null
         deal.legs?.takeIf { it.isNotEmpty() }?.let { return it }
         if (deal.product !in TreasuryInstrumentMapper.SUPPORTED_PRODUCTS) return null
         val rate = deal.rate ?: return null

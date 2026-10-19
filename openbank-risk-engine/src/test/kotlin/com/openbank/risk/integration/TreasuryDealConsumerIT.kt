@@ -180,6 +180,7 @@ class TreasuryDealConsumerIT {
     lateinit var cashFlows: com.openbank.risk.application.port.out.TreasuryCashFlowStore
 
     private val irs = UUID.randomUUID()
+    private val overBound = UUID.randomUUID()
 
     /**
      * ADR-0344 D2: a NEW-format event (kind, bookId, legs) for a product the snapshot does not
@@ -219,16 +220,27 @@ class TreasuryDealConsumerIT {
         assertThat(legacy.kind.name).isEqualTo("ACTUAL")
         assertThat(legacy.legs).isNull()
 
-        // Legs that libs-finance cannot build make the event malformed, never a deal stored without them.
+        // Legs libs-finance cannot build (here: a daily leg over 60 years, past the period cap) are a
+        // real BOOKED position: stored as unvaluable with the reason and counted — never acked-and-dropped.
+        val unvaluableBefore = outcome("stored_unvaluable")
         val malformedBefore = outcome("malformed")
         source.send(
             record(
                 "treasury.deal.booked.v1",
-                """{"dealId":"${UUID.randomUUID()}","product":"IRS","counterpartyId":"CP1","currency":"CZK",
-                    "principal":1,"valueDate":"2030-01-10","maturityDate":"2032-01-10","legs":[{"payReceive":"SIDEWAYS"}]}""",
+                """{"dealId":"$overBound","product":"IRS","counterpartyId":"CP1","currency":"CZK",
+                    "principal":1000000,"valueDate":"2030-01-10","maturityDate":"2090-01-10","legs":[{"payReceive":"PAY",
+                    "currency":"CZK","notional":1000000,"accrualStart":"2030-01-10","accrualEnd":"2090-01-10",
+                    "accrualFrequency":"1D","rate":{"type":"FIXED","rate":0.03}}]}""",
             ),
         )
-        await { outcome("malformed") >= malformedBefore + 1.0 }
+        await { outcome("stored_unvaluable") >= unvaluableBefore + 1.0 }
+        val kept = runBlocking { book.valuationCandidates(LocalDate.parse("2030-06-01")) }.single {
+            it.dealId ==
+                overBound
+        }
+        assertThat(kept.legs).isNull()
+        assertThat(kept.legsError).contains("exceeds 2000 periods")
+        assertThat(outcome("malformed")).isEqualTo(malformedBefore)
     }
 
     /** ADR-0344 D4: the stored ledger is kept at the latest version; an older version is a no-op. */
@@ -255,7 +267,7 @@ class TreasuryDealConsumerIT {
 
     @org.junit.jupiter.api.AfterEach
     fun cleanup() {
-        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$deal', '$irs')")
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$deal', '$irs', '$overBound')")
         TestDb.execute("DELETE FROM treasury_deal_cash_flows WHERE deal_id = '$irs'")
     }
 

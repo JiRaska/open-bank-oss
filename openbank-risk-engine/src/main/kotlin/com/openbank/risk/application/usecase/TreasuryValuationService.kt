@@ -230,7 +230,7 @@ class TreasuryValuationService(
 
     override suspend fun plannedFlows(asOf: LocalDate, curveSet: CurveSet): List<CashFlow> =
         deals.valuationCandidates(asOf).filter { it.kind == DealKind.PLANNED && it.maturityDate.isAfter(asOf) }
-            .flatMap { deal -> TreasuryLegs.legsOf(deal).orEmpty() }
+            .flatMap { deal -> TreasuryLegs.legsOf(deal).orEmpty().takeIf { buildFailure(it) == null }.orEmpty() }
             .flatMap { leg ->
                 val forward = (leg.rate as? RateSpec.Floating)?.let { f ->
                     CurveIndex.forIndexName(f.index)?.let { curveSet.curves[it] }?.projection()
@@ -273,7 +273,12 @@ class TreasuryValuationService(
         val valuable = scoped.mapNotNull { d ->
             val legs = TreasuryLegs.legsOf(d).orEmpty()
             val flows = stored[d.dealId]
-            if (legs.isEmpty() && flows == null) null else ValuableDeal(d.dealId, d.bookId, d.kind, legs, flows)
+            when {
+                d.legsError != null -> null
+                buildFailure(legs) != null -> null
+                legs.isEmpty() && flows == null -> null
+                else -> ValuableDeal(d.dealId, d.bookId, d.kind, legs, flows)
+            }
         }
         val notValuable = scoped.filter { d -> valuable.none { it.dealId == d.dealId } }
         val currencies = valuable.flatMap { v ->
@@ -326,10 +331,20 @@ class TreasuryValuationService(
                     it.dealId,
                     it.bookId,
                     false,
-                    "no legs published and none derivable for product ${it.product}",
+                    it.legsError
+                        ?: buildFailure(TreasuryLegs.legsOf(it).orEmpty())
+                        ?: "no legs published and none derivable for product ${it.product}",
                 )
         }
         return prepared to unpriced
+    }
+
+    /** Why [legs] cannot be generated (e.g. over the libs-finance period cap), or null when they can. */
+    private fun buildFailure(legs: List<com.openbank.libs.finance.leg.LegSpec>): String? = try {
+        legs.forEach { ScheduleGenerator.generate(it) }
+        null
+    } catch (e: IllegalArgumentException) {
+        "legs cannot be built: ${e.message}"
     }
 
     private fun unpricedOf(id: UUID, book: String?, stored: Boolean, reason: String) = DealValuation(

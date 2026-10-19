@@ -6,11 +6,14 @@ package com.openbank.risk.infrastructure.persistence
 
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.finance.leg.LegSpec
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import com.openbank.risk.domain.valuation.DealKind
+import com.openbank.risk.infrastructure.finance.LegBounds
+import com.openbank.risk.infrastructure.finance.LegDefaults
 import com.openbank.risk.infrastructure.finance.LegDto
 import com.openbank.risk.infrastructure.finance.LegSpecJson
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -55,11 +58,30 @@ class PgTreasuryDealBook(private val pool: Pool, private val objectMapper: Objec
                 event.bookId,
                 event.legsJson?.let { io.vertx.core.json.JsonArray(it) },
                 event.scheduleHash,
+                event.legsError,
             ),
         ),
     ).awaitSuspending().rowCount() > 0
 
+    @Suppress("TooGenericExceptionCaught") // a stored leg that no longer builds is a data gap, never a crash
     private fun Row.toDeal(): TreasuryDeal? {
+        val legs: Result<List<LegSpec>?> = if (getString("legs_error") != null) {
+            Result.success(null)
+        } else {
+            try {
+                Result.success(
+                    getString("legs")?.let { json ->
+                        LegSpecJson.toLegs(
+                            objectMapper.readValue(json, object : TypeReference<List<LegDto>>() {}),
+                            LegDefaults(),
+                            LegBounds.BOOKED,
+                        )
+                    },
+                )
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
         val value = getLocalDate("value_date") ?: return null
         val maturity = getLocalDate("maturity_date") ?: return null
         return TreasuryDeal(
@@ -74,10 +96,11 @@ class PgTreasuryDealBook(private val pool: Pool, private val objectMapper: Objec
             state = getString("state"),
             kind = DealKind.parse(getString("kind")),
             bookId = getString("book_id"),
-            legs = getString("legs")?.let { json ->
-                LegSpecJson.toLegs(objectMapper.readValue(json, object : TypeReference<List<LegDto>>() {}))
-            },
+            legs = legs.getOrNull(),
             scheduleHash = getString("schedule_hash"),
+            legsError = getString("legs_error") ?: legs.exceptionOrNull()?.let {
+                "legs cannot be built: ${it.message}"
+            },
         )
     }
 
@@ -85,7 +108,7 @@ class PgTreasuryDealBook(private val pool: Pool, private val objectMapper: Objec
         // Only rows that can be on the book at asOf: settled ones, and matured ones not yet past it.
         const val COLUMNS =
             "deal_id, product, counterparty_id, currency, principal, rate, value_date, maturity_date, state, " +
-                "kind, book_id, legs::text AS legs, schedule_hash"
+                "kind, book_id, legs::text AS legs, schedule_hash, legs_error"
 
         // ADR-0344 D2: only ACTUAL deals enter the snapshot's instruments.
         const val SELECT =
@@ -101,8 +124,8 @@ class PgTreasuryDealBook(private val pool: Pool, private val objectMapper: Objec
 
         val UPSERT =
             "INSERT INTO treasury_deal (deal_id, product, counterparty_id, currency, principal, rate, value_date, " +
-                "maturity_date, state, kind, book_id, legs, schedule_hash) " +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13) " +
+                "maturity_date, state, kind, book_id, legs, schedule_hash, legs_error) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14) " +
                 "ON CONFLICT (deal_id) DO UPDATE SET " +
                 "state = CASE WHEN ${RANK.format("EXCLUDED.state")} > ${RANK.format("treasury_deal.state")} " +
                 "THEN EXCLUDED.state ELSE treasury_deal.state END, " +
@@ -113,6 +136,8 @@ class PgTreasuryDealBook(private val pool: Pool, private val objectMapper: Objec
                 // a later or older one never overwrites it (amendments arrive as new flow versions).
                 "book_id = COALESCE(treasury_deal.book_id, EXCLUDED.book_id), " +
                 "legs = COALESCE(treasury_deal.legs, EXCLUDED.legs), " +
+                "legs_error = CASE WHEN treasury_deal.legs IS NULL THEN EXCLUDED.legs_error " +
+                "ELSE treasury_deal.legs_error END, " +
                 "schedule_hash = COALESCE(treasury_deal.schedule_hash, EXCLUDED.schedule_hash), " +
                 "updated_at = now() " +
                 "WHERE ${RANK.format("EXCLUDED.state")} > ${RANK.format("treasury_deal.state")} " +

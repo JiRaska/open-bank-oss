@@ -82,6 +82,17 @@ data class LegDto(
     val businessDayConvention: String? = null,
 )
 
+/**
+ * How strictly a leg list is bounded. The bounds protect the PRICING edge from unbounded work; they
+ * must never apply to a deal treasury has already BOOKED — refusing a real position there would
+ * silently drop it from valuation, VaR and limits. A booked deal is bounded only by libs-finance's
+ * own per-leg period cap, and a deal that fails it is stored as unvaluable, never discarded.
+ */
+enum class LegBounds(val maxLegs: Int?, val maxSpanYears: Long?) {
+    PRICING_REQUEST(LegSpecJson.MAX_LEGS, LegSpecJson.MAX_SPAN_YEARS),
+    BOOKED(null, null),
+}
+
 /** Deal-level defaults a leg inherits (contract section 8.1 header: `calendars`, `businessDayConvention`). */
 data class LegDefaults(val calendars: List<String>? = null, val businessDayConvention: String? = null)
 
@@ -92,14 +103,16 @@ data class LegDefaults(val calendars: List<String>? = null, val businessDayConve
  */
 object LegSpecJson {
 
-    fun toLegs(legs: List<LegDto>?, defaults: LegDefaults = LegDefaults()): List<LegSpec> {
+    fun toLegs(legs: List<LegDto>?, defaults: LegDefaults, bounds: LegBounds): List<LegSpec> {
         val list = requireNotNull(legs?.takeIf { it.isNotEmpty() }) { "field 'legs' must hold at least one leg" }
-        require(list.size <= MAX_LEGS) { "field 'legs' holds ${list.size} legs; at most $MAX_LEGS are accepted" }
-        return list.mapIndexed { i, dto -> toLeg(i, dto, defaults) }
+        bounds.maxLegs?.let { max ->
+            require(list.size <= max) { "field 'legs' holds ${list.size} legs; at most $max are accepted" }
+        }
+        return list.mapIndexed { i, dto -> toLeg(i, dto, defaults, bounds) }
     }
 
     @Suppress("CyclomaticComplexMethod")
-    fun toLeg(i: Int, d: LegDto, defaults: LegDefaults = LegDefaults()): LegSpec {
+    fun toLeg(i: Int, d: LegDto, defaults: LegDefaults, bounds: LegBounds): LegSpec {
         fun <T> req(value: T?, field: String): T = requireNotNull(value) { "legs[$i].$field is required" }
         val currency = req(d.currency, "currency").trim().uppercase()
         val accrualFrequency = frequency(i, "accrualFrequency", req(d.accrualFrequency, "accrualFrequency"))
@@ -107,8 +120,10 @@ object LegSpecJson {
         val roll = roll(i, d.businessDayConvention ?: defaults.businessDayConvention)
         val start = date(i, "accrualStart", req(d.accrualStart, "accrualStart"))
         val end = date(i, "accrualEnd", req(d.accrualEnd, "accrualEnd"))
-        require(!end.isAfter(start.plusYears(MAX_SPAN_YEARS))) {
-            "legs[$i]: accrualStart $start to accrualEnd $end exceeds $MAX_SPAN_YEARS years"
+        bounds.maxSpanYears?.let { years ->
+            require(!end.isAfter(start.plusYears(years))) {
+                "legs[$i]: accrualStart $start to accrualEnd $end exceeds $years years"
+            }
         }
         return LegSpec(
             payReceive = enumOf(i, "payReceive", req(d.payReceive, "payReceive")),

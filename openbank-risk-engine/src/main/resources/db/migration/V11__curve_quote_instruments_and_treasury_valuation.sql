@@ -14,7 +14,7 @@
 -- Rollback:
 --   DROP TABLE treasury_deal_cash_flows;
 --   ALTER TABLE treasury_deal DROP COLUMN kind, DROP COLUMN book_id, DROP COLUMN legs,
---       DROP COLUMN schedule_hash;
+--       DROP COLUMN schedule_hash, DROP COLUMN legs_error;
 --   DELETE FROM curve_set_quote WHERE instrument <> 'DEPOSIT';
 --   ALTER TABLE curve_set_quote DROP CONSTRAINT uq_curve_set_quote;
 --   ALTER TABLE curve_set_quote ADD CONSTRAINT uq_curve_set_quote UNIQUE (curve_set_id, curve_index, tenor);
@@ -32,7 +32,9 @@ ALTER TABLE treasury_deal
         CHECK (kind IN ('ACTUAL', 'PLANNED', 'HYPOTHETICAL')),
     ADD COLUMN book_id       VARCHAR(64),
     ADD COLUMN legs          JSONB,
-    ADD COLUMN schedule_hash VARCHAR(128);
+    ADD COLUMN schedule_hash VARCHAR(128),
+    -- Why published legs cannot be built: the deal is kept as an unvaluable position, a data gap.
+    ADD COLUMN legs_error    TEXT;
 
 CREATE TABLE treasury_deal_cash_flows (
     deal_id       UUID         PRIMARY KEY,
