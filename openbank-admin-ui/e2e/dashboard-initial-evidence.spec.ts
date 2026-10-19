@@ -91,7 +91,7 @@ test('work queues wait for the operator role instead of looking empty or mislabe
     ] }),
   }))
   await page.route('**/api/services/health', route => route.fulfill({
-    contentType: 'application/json', body: '{"services":[]}',
+    contentType: 'application/json', body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [] }),
   }))
 
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' })

@@ -5,6 +5,8 @@ import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 
 const serviceHealth = {
+  source: 'kubernetes',
+  discoveryStatus: 'complete',
   services: [
     { name: 'balance-service', status: 'UP' },
     { name: 'aml-service', status: 'UP' },
