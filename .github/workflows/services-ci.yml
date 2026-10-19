@@ -163,7 +163,7 @@ jobs:
               # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
               # the Pact graph.
               #   - code-global input (core libs, gradle, build-logic) -> full-fleet.
-              #     libs-lending and libs-iso20022 follow their declared Gradle consumers.
+              #     libs-lending, libs-iso20022 and libs-finance follow their declared Gradle consumers.
               #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
               #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
               #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
