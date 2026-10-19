@@ -8,6 +8,7 @@
 // typed into this app. Server code only (node:fs); browser code gets the same data from
 // `GET /api/catalog/services` and calls `buildRegistry` itself.
 
+import { COMPANY_TREASURY_KEY } from '@/lib/treasury-company'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
@@ -58,5 +59,9 @@ export function findService(id: string): ServiceEntry | undefined {
 
 /** `/api/svc/<key>` allowlist — see buildProxyAllowlist. */
 export function getProxyAllowlist(): Record<string, { container: string; port: number }> {
-  return buildProxyAllowlist(getRegistry())
+  const allowlist = buildProxyAllowlist(getRegistry())
+  if (Object.hasOwn(allowlist, 'treasury-service')) {
+    allowlist[COMPANY_TREASURY_KEY] = { ...allowlist['treasury-service'], port: 8443 }
+  }
+  return allowlist
 }

@@ -33,3 +33,49 @@ Pravidla hlášená v `breaches[]` jsou `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_P
 ## Kontrakt
 
 Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity jsou aditivní: 1.18.0, s odpovědí 422 u `submit` a `approve`.
+
+
+## Custodian výpisy portfolia
+
+Úplný custodian výpis `semt.002` v XML se nahrává přes `POST /api/v1/treasury/portfolio/statements` s neprázdným `Idempotency-Key` o nejvýše 128 znacích. Nahrání vyžaduje roli schvalovatele treasury a oprávnění `treasury.portfolio.upload`; ukládá držené pozice a nevytváří účetní zápisy.
+
+Nastavte `openbank.treasury.portfolio.entity`, `safekeeping-accounts` a `cfi-classes` pro vlastnící právnickou osobu a povolené účty úschovy. Třídu instrumentu určuje deklarované mapování prefixů CFI; vyhrává nejdelší shoda. Chybějící nebo nepokryté CFI, nepovolený účet úschovy či ocenění ve více měnách odmítají celý výpis. XML reader odmítá také neúplné stránkování, neúplné aktualizace, chybějící či duplicitní ISIN a deklarace DOCTYPE. Přiložené XSD je pracovní podmnožina, nikoli osvědčení úplné shody s ISO standardem zprávy.
+
+`GET /api/v1/treasury/portfolio/period-end?date=YYYY-MM-DD` vrací aktuální výpis přesně k danému datu: právnickou osobu, identifikátory výpisu a verze, měnu a pozice. Množství a ocenění jsou desetinné řetězce. Chybějící výpis vrací 409 `PORTFOLIO_SNAPSHOT_MISSING`, nikoli prázdné portfolio. Uložený prázdný výpis má prázdné pole pozic a výchozí měnu CZK. Historie verzí na `/statements?date=YYYY-MM-DD` může vrátit prázdný seznam, pokud žádná verze neexistuje.
+
+Stejný klíč uloženého výpisu se stejnými bajty vrátí uloženou verzi; jiné bajty pod tímto klíčem vrátí 409. Nahrání bajtů aktuálního výpisu pod jiným klíčem vrátí jeho aktuální verzi. Jiné bajty pro stejnou právnickou osobu a datum vytvoří další verzi a nahradí předchozí; zůstává zachována její identita, SHA-256, nahrávající uživatel a historie nahrazení. Historie odlišuje korekci od původního snapshotu.
+
+Nasazení bez nakonfigurované právnické osoby portfolia odmítá nahrávání a nemá snapshot ke konci období. Účetní knihy penzijní společnosti a bankovního treasury musí zůstat oddělené; před použitím pro reporting nastavte právnickou osobu a povolené účty úschovy. Samotné uložené portfolio neprokazuje sestavení výkazu, sesouhlasení ani zákonné podání.
+
+Každý přijatý klíč, včetně nového klíče pro stejné bajty, je trvale navázán na vrácenou verzi. Po pozdější korekci dál vrací původně přijatou verzi; jiné bajty pod tímto klíčem vrátí 409. Migrace V16 zachovává původní klíče existujících výpisů a doplňuje tabulku těchto vazeb.
+
+
+### Complete multi-account portfolio snapshots
+
+Custodian statements and corrections are versioned independently per configured legal entity,
+safekeeping account and statement date. The period-end read requires a current complete statement
+for every configured account at exactly that date; a missing account is HTTP 409. A complete empty
+account is valid evidence. Positions with the same ISIN are summed only when CFI, instrument class
+and valuation currency agree; incompatible evidence is refused. The response lists each source
+account's statement UUID, statement ID and version in `sourceStatements`, rather than attributing
+an entity-wide portfolio to one account's statement. Accepted replay keys stay bound to their
+original version, including after corrections.
+
+V17 changes only uniqueness scope; existing statement and holding evidence is retained. Rollback
+requires stopping writes and reconciling any multi-account history before restoring entity/date
+uniqueness. Do not delete evidence or pick a single account to make old indexes fit.
+
+### Quantity dimensions and legacy recovery
+
+Every position retains the custodian's explicit `quantityBasis`: `UNIT`, `FACE_AMOUNT` or
+`AMORTISED_VALUE`. Matching ISIN quantities are summed only when this dimension also matches;
+unlike dimensions refuse the complete report with 409 instead of omitting an account. CFI
+classification is not evidence of a quantity dimension.
+
+V18 leaves existing holdings with an unknown (`NULL`) dimension. Those historical rows remain
+immutable evidence, but a period-end report containing them is refused. Upload a verified source
+correction for that account/date to create a new current version with the explicit dimension.
+A byte-identical replay returns its original version and does not repair missing metadata.
+Do not backfill dimensions from instrument class or CFI. Before rollback, stop writes and retain
+the dimension evidence; an older binary cannot safely aggregate unlike dimensions, so keep
+period-end reporting unavailable until forward recovery is complete.

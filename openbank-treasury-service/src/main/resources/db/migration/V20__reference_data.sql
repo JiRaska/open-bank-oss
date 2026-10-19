@@ -73,7 +73,7 @@ ALTER TABLE counterparties ADD CONSTRAINT counterparties_kind_check
 INSERT INTO reference_records (id, kind, record_key, version, status, valid_from, verified, payload,
                                created_by, created_by_type, created_at, reason)
 SELECT nextval('reference_records_seq'), s.kind, s.record_key, 1, 'ACTIVE', DATE '2000-01-01', s.verified,
-       s.payload, 'system:seed', 'SYSTEM', now(), 'seeded by V15 (ADR-0344 D3)'
+       s.payload, 'system:seed', 'SYSTEM', now(), 'seeded by V20 (ADR-0344 D3)'
 FROM (VALUES
     -- Calendars: the kernel's CERTIS (Czech public holidays) and TARGET2 closing days.
     ('calendar', 'CERTIS',  TRUE, '{"code":"CERTIS","baseCalendar":"CERTIS","extraHolidays":[],"removedHolidays":[]}'),
@@ -107,5 +107,5 @@ SELECT nextval('reference_records_seq'), 'counterparty', c.counterparty_id, 1, '
            'limits', json_strip_nulls(json_build_object('CZK', c.limit_czk, 'EUR', c.limit_eur)),
            'nettingAgreementId', NULL
        )::text,
-       'system:seed', 'SYSTEM', now(), 'migrated from the counterparty master by V15 (ADR-0344 D3)'
+       'system:seed', 'SYSTEM', now(), 'migrated from the counterparty master by V20 (ADR-0344 D3)'
 FROM counterparties c;

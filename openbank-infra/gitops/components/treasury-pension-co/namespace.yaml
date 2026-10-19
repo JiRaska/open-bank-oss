@@ -1,0 +1,15 @@
+# Pension company treasury (ADR-0337 amendment: the pension company's own portfolio comes from its
+# OWN treasury-service deployment, never the bank's). App plane. Holds a second treasury-service
+# instance — same image as the bank's `treasury` namespace — plus its single-owner CNPG Postgres.
+# It ingests the custodian's semt.002 statements of holdings and serves the period-end portfolio;
+# every bank-only scheduler and outbound edge is OFF (.github/scripts/check-treasury-instance-switches.py).
+# No public Ingress; callers are tax-reporting (portfolio read) and staff tooling (admin-ui) only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: treasury-pension-co
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

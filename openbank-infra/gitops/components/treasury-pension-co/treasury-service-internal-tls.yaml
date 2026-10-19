@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA certificate for the pension company's treasury-service instance (ADR-0337).
+#   - SERVER: the east-west mTLS listener (8443) tax-reporting reads the portfolio over. ASVS V9.1
+#     (gate asvs-l3-mechanical-subset) refuses a new plaintext http:// inter-service edge.
+#   - CLIENT: the image's %prod TLS buckets (ledger-authority, risk-authority) load their key
+#     store at boot whether or not the rest-client is ever called, so the same secret is mounted
+#     at /mnt/ledger-tls too. Neither rest-client is wired on this instance (no LEDGER_SERVICE_URL,
+#     no RISK_ENGINE_URL), so this identity reaches nothing; it only lets the pod start.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: treasury-service-internal-tls
+  namespace: treasury-pension-co
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: treasury-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: treasury-service.treasury-pension-co.svc
+  dnsNames:
+    - treasury-service.treasury-pension-co.svc
+    - treasury-service.treasury-pension-co.svc.cluster.local
+  usages:
+    - server auth
+    - client auth
+    - digital signature
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

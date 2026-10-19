@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import { COMPANY_TREASURY_KEY, discoveryServiceKey, discoveredBaseUrl, fetchCompanyTreasury } from '@/lib/treasury-company'
 import { NextRequest, NextResponse } from 'next/server'
 import { inCluster, discoverServices } from '@/lib/discovery'
 import { auth } from '@/auth'
@@ -46,12 +47,12 @@ async function resolveInCluster(svcKey: string): Promise<ResolvedService | null>
     if (discovered) {
       // No prototype: `constructor` / `__proto__` / `toString` must be missing keys, not functions.
       const map: Record<string, { namespace: string; port: number; scaledToZero: boolean }> = Object.create(null)
-      for (const d of discovered) map[d.name] = { namespace: d.namespace, port: d.port, scaledToZero: d.scaledToZero }
+      for (const d of discovered) map[discoveryServiceKey(d.name, d.namespace)] = { namespace: d.namespace, port: d.port, scaledToZero: d.scaledToZero }
       discoveryCache = { at: now, map }
     }
   }
   const hit = discoveryCache && Object.hasOwn(discoveryCache.map, svcKey) ? discoveryCache.map[svcKey] : undefined
-  return hit ? { url: `http://${svcKey}.${hit.namespace}.svc:${hit.port}`, scaledToZero: hit.scaledToZero } : null
+  return hit ? { url: discoveredBaseUrl(svcKey, hit.namespace, hit.port), scaledToZero: hit.scaledToZero } : null
 }
 
 async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
@@ -68,6 +69,7 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
     // resolves to null → 404 rather than a misleading hang.
     return resolveInCluster(svcKey)
   }
+  if (svcKey === COMPANY_TREASURY_KEY) return null
   // Off-cluster (local dev / docker-compose): legacy localhost/container map.
   const svc = allowlist[svcKey]
   if (!svc) return null
@@ -158,7 +160,8 @@ async function proxy(
   try {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 10_000)
-    const upstream = await fetch(upstreamUrl, {
+    const send = service === COMPANY_TREASURY_KEY ? fetchCompanyTreasury : fetch
+    const upstream = await send(upstreamUrl, {
       method: req.method,
       headers,
       body: body?.byteLength ? body : undefined,
@@ -175,7 +178,7 @@ async function proxy(
     responseHeaders.set('cache-control', 'no-store')
 
     const data = await upstream.arrayBuffer()
-    return new NextResponse(data, { status: upstream.status, headers: responseHeaders })
+    return new NextResponse([204, 205, 304].includes(upstream.status) ? null : data, { status: upstream.status, headers: responseHeaders })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: 'upstream_unreachable', detail: msg }, { status: 502 })

@@ -72,7 +72,7 @@ class ReferenceRecordEntity : PanacheEntity() {
     @Column(name = "approval_note", columnDefinition = "TEXT")
     var approvalNote: String? = null
 
-    /** Optimistic lock (V16): a second writer that read the row before this one committed fails at flush. */
+    /** Optimistic lock (V21): a second writer that read the row before this one committed fails at flush. */
     @Version
     @Column(name = "row_version", nullable = false)
     var rowVersion: Long = 0

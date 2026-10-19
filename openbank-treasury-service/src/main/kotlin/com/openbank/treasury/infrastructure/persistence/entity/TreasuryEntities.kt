@@ -127,7 +127,7 @@ class DealEntity : PanacheEntity() {
     @Column(name = "fx_side")
     var fxSide: String? = null
 
-    /** ADR-0344 (V17). */
+    /** ADR-0344 (V22). */
     @Column(name = "kind", nullable = false)
     var kind: String = "ACTUAL"
 
