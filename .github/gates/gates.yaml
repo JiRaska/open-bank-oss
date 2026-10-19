@@ -492,9 +492,12 @@ gates:
     budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
     rationale: "A held service keeps its GitOps image pin until release; live strict required checks prevent older green deploy PRs from merging after the hold changes main."
     review_after: "2027-03-30"
-    selftest: python3 .github/scripts/check-deploy-holds.py --self-test
+    selftest: |
+      set -e
+      python3 .github/scripts/check-deploy-holds.py --self-test
+      python3 .github/scripts/test-conjunctive-holds.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts/check-deploy-holds.py", ".github/scripts/merge-deploy-holds.py", ".github/scripts/test-conjunctive-holds.py", "openbank-libs/governance/rules.yaml"]
     run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
 
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
@@ -548,7 +551,9 @@ gates:
       auto-deploy against live PRs, never in ordinary CI.
     review_after: "2027-02-19"
     run: |
+      set -e
       bash .github/scripts/supersede-deploy-prs.sh --self-test
+      python3 .github/scripts/test-supersede-hold-union.py
 
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
@@ -1798,6 +1803,9 @@ gates:
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+      python3 .github/scripts/test-admin-ui-delivery-baseline.py
+      python3 .github/scripts/test-admin-ui-evidence-plan.py
+      node --test .github/scripts/test-publish-admin-ui-gate-health.mjs
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
   # a version.txt, and must be registered in release-please-config.json AND
@@ -6649,6 +6657,34 @@ gates:
     min_subjects: 6   # 6 worker.enabled switches today (2026-09-03)
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
+
+  - id: admin-ui-request-trace-fixtures
+    name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
+    group: supplychain
+    mode: enforced
+    rationale: "Trace instrumentation must be falsified before merge; deploy-only advisory fixtures cannot protect PR changes to collectors or their wrappers."
+    # Review temporary measurement protection after the ordinary-build receipt/comparison window.
+    review_after: "2026-11-17"
+    min_subjects: 3  # successful executed Node fixtures, read from the real TAP summary
+    budget_seconds: 90
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/run-admin-ui-node-trace-fixtures.py"
+      - ".github/scripts/admin_ui_trace_ipc.py"
+      - ".github/scripts/aggregate-admin-ui-http-trace.py"
+      - ".github/scripts/find-latest-main-artifacts.py"
+      - ".github/scripts/test-admin-ui-request-trace.py"
+      - ".github/scripts/trace-admin-ui-curl.py"
+      - ".github/scripts/trace-admin-ui-stage.py"
+      - ".github/workflows/admin-ui-deploy.yml"
+      - "openbank-admin-ui/scripts/collect-gate-health.mjs"
+      - "openbank-admin-ui/scripts/collect-quality-report.mjs"
+      - "openbank-admin-ui/scripts/generate-infra-lifecycle.mjs"
+      - "openbank-admin-ui/scripts/request-send-trace.mjs"
+      - "openbank-admin-ui/scripts/request-send-trace.test.mjs"
+      - "openbank-infra/scripts/build-push-admin-ui.sh"
+    selftest: python3 .github/scripts/test-admin-ui-request-trace.py
+    run: python3 .github/scripts/run-admin-ui-node-trace-fixtures.py
 
   - id: workflow-supply-chain
     name: "workflow action pins, bounded agent and image admission, and fail-closed service CI"

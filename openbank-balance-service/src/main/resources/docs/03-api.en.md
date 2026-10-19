@@ -147,3 +147,18 @@ threshold crossing, cooldown and ownership checks must exist before it becomes a
 - API `/api/v1/...`. v2 runs in parallel for 6 months.
 - Event version in topic name + per-event `v1` suffix in the type.
 - OpenAPI diff in CI prevents breaking changes without a bump.
+
+## Read active holds
+
+`GET /api/v1/balances/{accountId}/holds` returns `{ "holds": [...] }`, or an empty array.
+Each row exposes its id, accountId, amount, currency, reason, referenceId and lifecycle timestamps.
+Only unreleased holds with no expiry or an expiry strictly after the service clock are returned.
+This read does not release funds, update the balance or emit an event; excluding an expired row
+is not evidence that the reservation has been released.
+
+The endpoint uses the sibling reads' `ROLE_API`, `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`
+role gate and `balance.read` OPA decision. When trusted customer-edge supplies
+`X-Customer-Party-Id`, the account owner must match; missing accounts and mismatches return 404.
+Omitting that header retains the existing service-reader path, not a customer ownership proof.
+No identity returns 401 and an unrelated role returns 403. Hold reasons and reference ids are
+sensitive financial metadata; the assistant's `get_balance_holds` tool passes this response through.
