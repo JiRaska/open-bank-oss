@@ -152,4 +152,3 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/treasury": { disposition: "static-direct-load-smoke", path: "/treasury" },
   "/treasury/positions": { disposition: "sidebar-navigation-smoke", path: "/treasury/positions" },
 }
-
