@@ -203,3 +203,33 @@ export type OperatorApplication = z.infer<typeof operatorApplicationSchema>
 
 /** Staff read of a contract's schedule or beneficiary designation (open record, rendered per field). */
 export const openRecordSchema = z.record(z.string(), z.unknown())
+
+/** One state-contribution return (§ 18) as pension-service lists it. */
+export const stateReturnSchema = z.object({
+  id: z.string().min(1),
+  contractId: z.string(),
+  cause: z.string(),
+  amount: decimal,
+  currency: z.string(),
+  discoveredOn: optionalText,
+  dueBy: optionalText,
+  status: z.string(),
+})
+export type StateReturn = z.infer<typeof stateReturnSchema>
+export const stateReturnListSchema = z.array(stateReturnSchema)
+
+/** GET /contracts/{id}/incentives: the contract's claims and the per-incentive ledger balance. */
+export const incentiveStatusSchema = z.object({
+  claims: z.array(z.object({
+    id: z.string().min(1),
+    incentiveId: z.string(),
+    period: z.string(),
+    claimedAmount: decimal,
+    receivedAmount: nullableDecimal,
+    currency: z.string(),
+    status: z.string(),
+    rejectionReason: optionalText,
+  })),
+  balances: z.array(z.object({ incentiveId: z.string(), received: decimal, returned: decimal, net: decimal })),
+})
+export type IncentiveStatus = z.infer<typeof incentiveStatusSchema>

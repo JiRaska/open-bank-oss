@@ -15,7 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, ShortId, StatusBadge } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 import { parseKycCaseEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
 import { parsePartyEvidence, type PartyEvidence } from '@/lib/parties/partyEvidenceContract'
@@ -132,7 +132,7 @@ function PartyDetailPage() {
       <PageHeader
         icon={<Users size={18} aria-hidden="true" />}
         title={party.legalName}
-        subtitle={<span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{party.id}</span>}
+        subtitle={<ShortId value={party.id} copyLabel={t('Kopírovat ID klienta', 'Copy customer ID')} />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{party.legalName}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
           <button
@@ -215,7 +215,7 @@ function PartyDetailPage() {
             {kyc ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                  {t('ID případu:', 'Case ID:')} <span style={{ fontFamily: 'var(--font-mono)' }}>{kyc.id}</span>
+                  {t('KYC případ:', 'KYC case:')} <ShortId value={kyc.id} copyLabel={t('Kopírovat ID případu', 'Copy case ID')} />
                 </div>
                 {kyc.checks.map(check => (
                   <div key={check.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
@@ -484,8 +484,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
               {/* No backend endpoint lists pending approvals (ApprovalStore has no query), so the
                   checker cannot discover this from a queue — the maker relays the id out of band. */}
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                {t('Předejte toto ID schválení druhému operátorovi:', 'Give this approval id to a second operator:')}{' '}
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{pendingSubmit.approvalId}</span>
+                {t('Odkaz na schválení pro druhého operátora (zkopírujte):', 'Approval reference for a second operator (copy):')}{' '}
+                <ShortId value={pendingSubmit.approvalId} copyLabel={t('Kopírovat odkaz na schválení', 'Copy approval reference')} />
               </div>
             </div>
           ) : (

@@ -4,19 +4,11 @@
 
 package com.openbank.standingorder.infrastructure.client
 
+import com.openbank.clients.transaction.api.TransactionsApi
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
-import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.POST
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.core.MediaType
-import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
-import java.math.BigDecimal
-import java.util.UUID
 
 /**
  * REST client for transaction-service's `POST /api/v1/transactions` (#889 follow-up). A
@@ -35,22 +27,4 @@ import java.util.UUID
 // #10486: this client's bearer is minted by the NAMED oidc-client `m2m` - Keycloak client
 // `openbank-standing-order` (ROLE_API only) - never the shared `openbank-services` default client.
 @OidcClientFilter("m2m")
-interface TransactionServiceClient {
-
-    @POST
-    @Path("/api/v1/transactions")
-    @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(MediaType.APPLICATION_JSON)
-    fun initiate(request: InitiateTransactionRequest): Uni<Response>
-}
-
-data class InitiateTransactionRequest(
-    val idempotencyKey: String,
-    val type: String,
-    val sourceAccountId: UUID?,
-    val targetAccountId: UUID?,
-    val amount: BigDecimal,
-    val currencyCode: String,
-    val description: String?,
-    val valueDate: String,
-)
+interface TransactionServiceClient : TransactionsApi

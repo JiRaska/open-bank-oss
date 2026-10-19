@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import type { DevOpsFinding } from '@/app/api/devops/insights/route'
+import type { DevOpsFinding } from '@/lib/devops/contracts'
 
 // Short bilingual label for the DORA metric a finding impacts. Shared between the DevOps page
 // (compact tag on the finding card) and RemediationReviewDialog (final-review detail line) — kept

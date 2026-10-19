@@ -130,8 +130,9 @@ jobs:
           REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          bash .github/scripts/tests/test-resolve-historical-service-ref.sh
           git fetch --quiet origin main
-          resolved_ref="$(git rev-parse --verify "${REF}^{commit}")"
+          resolved_ref="$(bash .github/scripts/resolve-historical-service-ref.sh "$REF")"
           git merge-base --is-ancestor "$resolved_ref" origin/main || {
             echo '::error::Historical provider ref is not on main.'
             exit 1
@@ -533,6 +534,10 @@ jobs:
           set -euo pipefail
           cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
           bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
+          cp .github/scripts/resolve-historical-service-ref.sh \
+            "$RUNNER_TEMP/resolve-historical-service-ref.sh"
+          chmod 700 "$RUNNER_TEMP/resolve-historical-service-ref.sh"
+          bash .github/scripts/tests/test-resolve-historical-service-ref.sh
 
       - name: Check out a requested provider version only after proving it is on main
         if: inputs.ref != '' || inputs.provider_version != ''
@@ -545,7 +550,7 @@ jobs:
           # the full main history, then reject anything that is not an on-main ancestor before it
           # replaces the trusted triggering checkout.
           git fetch --quiet origin main
-          RESOLVED_REF="$(git rev-parse --verify "${REF}^{commit}")"
+          RESOLVED_REF="$(bash "$RUNNER_TEMP/resolve-historical-service-ref.sh" "$REF")"
           if ! git merge-base --is-ancestor "$RESOLVED_REF" origin/main; then
             echo "::error::$REF is not an ancestor of origin/main. A verification may only be" \
                  "published for a commit that is on main (#3306)."
@@ -567,8 +572,10 @@ jobs:
             [ -x "$PROOF_RUNNER" ] || { echo "::error::trusted provider proof runner is absent"; exit 1; }
             PROVIDER_VERSION="$(bash "$PROOF_RUNNER" --resolve "$REQUESTED_PROVIDER_VERSION")"
             FIXTURE_REF="${REQUESTED_FIXTURE_REF:-$GITHUB_SHA}"
-            git fetch --quiet origin main "$FIXTURE_REF"
-            FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
+            # Fetch full main history once, then resolve F from objects already present. An
+            # abbreviated SHA is not a valid fetch refspec on every Git server.
+            git fetch --quiet origin main
+            FIXTURE_VERSION="$(bash "$RUNNER_TEMP/resolve-historical-service-ref.sh" "$FIXTURE_REF")"
             # The script proves P/F/main ancestry and requires this checkout to be P. If P and F
             # are byte-identical in every production build input of SERVICE, it replaces
             # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger and Balance,

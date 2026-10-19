@@ -1,13 +1,13 @@
 {
   "schema": "openbank.infra-lifecycle/v1",
   "source": "endoflife.date + GitOps image tags — ADR-0079",
-  "generatedAt": "2026-09-28T06:45:33.000Z",
+  "generatedAt": "2026-10-19T14:39:24.000Z",
   "components": [
     {
       "id": "postgres",
       "eolProduct": "postgresql",
       "versionSource": "gitops",
-      "gitopsVersion": "18.1",
+      "gitopsVersion": "18.6",
       "releaseNotes": "https://www.postgresql.org/docs/release/{version}/",
       "lifecycle": {
         "cycles": [
@@ -899,8 +899,8 @@
     {
       "id": "valkey",
       "eolProduct": "valkey",
-      "versionSource": "gitops",
-      "gitopsVersion": "8",
+      "versionSource": "unknown",
+      "gitopsVersion": null,
       "releaseNotes": "https://github.com/valkey-io/valkey/releases",
       "lifecycle": {
         "cycles": [
@@ -2027,6 +2027,94 @@
       "versionSource": "gitops",
       "gitopsVersion": "1.5.0",
       "releaseNotes": "https://github.com/kafbat/kafka-ui/releases",
+      "lifecycle": null
+    },
+    {
+      "id": "alertmanager",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "otel-collector",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "pyrra",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "goalert",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "ntfy",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "temporal",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "keda",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "argocd",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "kyverno",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "cert-manager",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
+      "lifecycle": null
+    },
+    {
+      "id": "karpenter",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "gitopsVersion": null,
+      "releaseNotes": null,
       "lifecycle": null
     }
   ]

@@ -81,6 +81,12 @@ def findings(name, doc):
         events = doc.get('on', doc.get(True, {}))
         if events.get('workflow_run', {}).get('branches') != ['main']:
             errors.append('workflow_run must reject non-main branches at the trigger')
+    if name == 'admin-ui-deploy.yml':
+        steps = [step for job in jobs.values() for step in job.get('steps', [])]
+        create_pr = next((step for step in steps if step.get('id') == 'gitops_pr'), {})
+        if create_pr.get('uses', '').startswith('peter-evans/create-pull-request@') and \
+                create_pr.get('with', {}).get('base') != 'main':
+            errors.append('GitOps pull request must declare base: main for exact-SHA checkout')
     if name in ('agent-issue-worker.yml', 'agent-pr-steward.yml'):
         worker = jobs.get('worker', jobs.get('steward', {}))
         if "github.event_name != 'pull_request'" not in worker.get('if', ''):

@@ -47,7 +47,7 @@ Stejný klíč uloženého výpisu se stejnými bajty vrátí uloženou verzi; j
 
 Nasazení bez nakonfigurované právnické osoby portfolia odmítá nahrávání a nemá snapshot ke konci období. Účetní knihy penzijní společnosti a bankovního treasury musí zůstat oddělené; před použitím pro reporting nastavte právnickou osobu a povolené účty úschovy. Samotné uložené portfolio neprokazuje sestavení výkazu, sesouhlasení ani zákonné podání.
 
-Každý přijatý klíč, včetně nového klíče pro stejné bajty, je trvale navázán na vrácenou verzi. Po pozdější korekci dál vrací původně přijatou verzi; jiné bajty pod tímto klíčem vrátí 409. Migrace V16 zachovává původní klíče existujících výpisů a doplňuje tabulku těchto vazeb.
+Každý přijatý klíč, včetně nového klíče pro stejné bajty, je trvale navázán na vrácenou verzi. Po pozdější korekci dál vrací původně přijatou verzi; jiné bajty pod tímto klíčem vrátí 409. Migrace V17 zachovává původní klíče existujících výpisů a doplňuje tabulku těchto vazeb.
 
 
 ### Complete multi-account portfolio snapshots
@@ -61,7 +61,7 @@ account's statement UUID, statement ID and version in `sourceStatements`, rather
 an entity-wide portfolio to one account's statement. Accepted replay keys stay bound to their
 original version, including after corrections.
 
-V17 changes only uniqueness scope; existing statement and holding evidence is retained. Rollback
+V18 changes only uniqueness scope; existing statement and holding evidence is retained. Rollback
 requires stopping writes and reconciling any multi-account history before restoring entity/date
 uniqueness. Do not delete evidence or pick a single account to make old indexes fit.
 
@@ -72,7 +72,7 @@ Every position retains the custodian's explicit `quantityBasis`: `UNIT`, `FACE_A
 unlike dimensions refuse the complete report with 409 instead of omitting an account. CFI
 classification is not evidence of a quantity dimension.
 
-V18 leaves existing holdings with an unknown (`NULL`) dimension. Those historical rows remain
+V19 leaves existing holdings with an unknown (`NULL`) dimension. Those historical rows remain
 immutable evidence, but a period-end report containing them is refused. Upload a verified source
 correction for that account/date to create a new current version with the explicit dimension.
 A byte-identical replay returns its original version and does not repair missing metadata.

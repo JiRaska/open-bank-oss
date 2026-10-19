@@ -100,3 +100,7 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 ## Převod objektů katalogu
 
 Vnořené objekty katalogu zachovávají dosavadní serializovanou podobu polí. Specializovaný převod zachovává výstupní kontrakt; nevyžaduje migraci dat katalogu ani změnu verze API.
+
+## Referenční nabídky a klasifikační schémata (ADR-0341)
+
+Bankovní balíček získává schémata `deposit-v3`, `loan-v3` a `treasury-instrument-v1` a balíček penzí schéma `pension-savings-v3`, která nesou účetní a regulatorní klasifikaci nabídky. Plánovaný seeder `CatalogReferenceOfferingSeeder` vytváří nabídku nástrojů vlastních obchodů treasury (bankovní balíček) a české penzijní nabídky DPS a DIP (ze souboru `catalog-seeds/retirement/cz-illustrative-offerings.json`, balíček penzí), vždy jen když je příslušný balíček povolen. Každá nabídka vzniká s otevřenou revizí ve stavu DRAFT pod systémovým tvůrcem. Publikovat ji musí jiný lidský schvalovatel, takže seedování samo nikdy neučiní revizi připnutelnou a penzijní hodnoty zůstávají ilustrativní do právního a obchodního posouzení. Seeder je idempotentní: existující nabídka zůstane beze změny bez ohledu na stav jejích revizí. Řídí ho `openbank.catalog.reference-offerings-enabled`, ve výchozím stavu zapnuté a v profilu standalone vypnuté.

@@ -74,7 +74,7 @@ steps:
     label: Splátka
     lane: core
     apis:
-      - POST /api/v1/loans/{id}/installments/{iid}/repay
+      - POST /api/v1/lending/loans/{id}/installments/{installmentId}/repay
     relatedServices:
       - lending-service
       - ledger-service
@@ -90,7 +90,7 @@ steps:
     label: Odpis (write-off)
     lane: compliance
     apis:
-      - POST /api/v1/loans/{id}/writeoff
+      - POST /api/v1/lending/loans/{id}/writeoff
     relatedServices:
       - lending-service
       - ledger-service

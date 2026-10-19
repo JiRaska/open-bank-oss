@@ -23,7 +23,7 @@ Reusing a stored upload's key with the same bytes returns that stored version; d
 
 A deployment with no configured portfolio entity rejects uploads and has no period-end snapshot. Keep pension-company and bank treasury books separate; configure the entity and custody account allowlist before using this source for reporting. A stored portfolio alone does not prove reporting assembly, reconciliation or statutory submission.
 
-Every accepted key, including a new key for identical bytes, is durably bound to the returned version. After later corrections it still replays that accepted version; different bytes under that key return 409. Migration V16 preserves existing statements' original keys and adds the binding table.
+Every accepted key, including a new key for identical bytes, is durably bound to the returned version. After later corrections it still replays that accepted version; different bytes under that key return 409. Migration V17 preserves existing statements' original keys and adds the binding table.
 
 
 ### Complete multi-account portfolio snapshots
@@ -37,7 +37,7 @@ account's statement UUID, statement ID and version in `sourceStatements`, rather
 an entity-wide portfolio to one account's statement. Accepted replay keys stay bound to their
 original version, including after corrections.
 
-V17 changes only uniqueness scope; existing statement and holding evidence is retained. Rollback
+V18 changes only uniqueness scope; existing statement and holding evidence is retained. Rollback
 requires stopping writes and reconciling any multi-account history before restoring entity/date
 uniqueness. Do not delete evidence or pick a single account to make old indexes fit.
 
@@ -65,7 +65,7 @@ Every position retains the custodian's explicit `quantityBasis`: `UNIT`, `FACE_A
 unlike dimensions refuse the complete report with 409 instead of omitting an account. CFI
 classification is not evidence of a quantity dimension.
 
-V18 leaves existing holdings with an unknown (`NULL`) dimension. Those historical rows remain
+V19 leaves existing holdings with an unknown (`NULL`) dimension. Those historical rows remain
 immutable evidence, but a period-end report containing them is refused. Upload a verified source
 correction for that account/date to create a new current version with the explicit dimension.
 A byte-identical replay returns its original version and does not repair missing metadata.
