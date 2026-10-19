@@ -1053,30 +1053,6 @@ deploy_holds:
           head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
         - pr: 13320
           head: 80e87f67566284751fe967a18f03d72de9403c7f
-    openbank-pid-service:
-      all_of:
-      - issue: '#12948'
-        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
-          (issue #11503).'
-        release_condition: 'Resolve why #12948 was held, then remove this entry in
-          a reviewed change.'
-        origins:
-        - pr: 13316
-          head: 21ea5467d54781bc07c114b86dc567dcfa624add
-        - pr: 13312
-          head: 9a54a89705521245b179057b0f42084d899c2697
-        - pr: 13311
-          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
-        - pr: 13304
-          head: 8013f5548579be3515980ef118e073967bc1e621
-      - issue: '#13304'
-        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
-          (issue #11503).'
-        release_condition: 'Resolve why #13304 was held, then remove this entry in
-          a reviewed change.'
-        origins:
-        - pr: 13320
-          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-psd2-service:
       all_of:
       - issue: '#12948'
