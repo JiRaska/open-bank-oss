@@ -126,8 +126,25 @@ class ClearingSimulatorService {
             } else {
                 SchemeDecision.rejected(RejectReason.AM03)
             }
-            val statusReport = buildStatusReport(received.endToEndId, received.transactionId, decision, now)
-            ClearingResult(statusReport, decision.settled, creditNotificationXml = null)
+            val report = PaymentStatusReport(
+                messageId = id("SIM-STS-", received.endToEndId),
+                creationDateTime = now.atUtc(),
+                originalEndToEndId = received.endToEndId,
+                originalTransactionId = received.transactionId,
+                status = decision.status,
+                reasonCode = decision.reason?.code,
+                additionalInfo = decision.reason?.description,
+                // Names the message it answers, so a rail can verify a status reply is about the
+                // transfer it asked for (MsgId + UETR) before acting on it.
+                originalMessageId = received.messageId,
+                originalMessageNameId = PACS_009_NAME,
+                originalUetr = received.uetr,
+            )
+            ClearingResult(
+                validated(pacs002Builder.build(report), pacs002Validator, "pacs.002"),
+                decision.settled,
+                null,
+            )
         }
         // Same UETR twice → the same pacs.002 and one settlement (the scheme's dedup key).
         return received.uetr?.let { institutionTransfers.recordOnce(it, decide) } ?: decide()
@@ -210,6 +227,7 @@ class ClearingSimulatorService {
 
     private companion object {
         const val MAX_35 = 35
+        const val PACS_009_NAME = "pacs.009.001.08"
         const val RETURN_ID_SUFFIX_LEN = 8
     }
 }

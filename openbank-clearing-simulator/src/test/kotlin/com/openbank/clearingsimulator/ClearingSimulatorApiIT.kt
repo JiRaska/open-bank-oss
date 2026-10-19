@@ -167,11 +167,16 @@ class ClearingSimulatorApiIT {
             )
             .extract().body().asString()
         assertThat(body).contains("<TxSts>ACSC</TxSts>")
-        Given {
-            this
-        } When { get("/api/v1/clearing/fi-credit-transfers/status/5c4e28ba-2fa1-4d2e-883f-0016d3cca427") } Then
-            {
-                statusCode(404)
-            }
+        val missing = (
+            Given { this } When
+                { get("/api/v1/clearing/fi-credit-transfers/status/5c4e28ba-2fa1-4d2e-883f-0016d3cca427") } Then
+                {
+                    statusCode(404)
+                }
+            ).extract()
+        assertThat(missing.contentType()).startsWith("application/json")
+        assertThat(missing.path<String>("code")).isEqualTo("UNKNOWN_UETR")
+        assertThat(missing.path<String>("uetr")).isEqualTo("5c4e28ba-2fa1-4d2e-883f-0016d3cca427")
+        assertThat(body).contains("<OrgnlUETR>$uetr</OrgnlUETR>", "<OrgnlMsgId>OB-FI-0001</OrgnlMsgId>")
     }
 }

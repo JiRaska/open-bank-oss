@@ -114,7 +114,18 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: No transfer with this UETR.
+          description: No transfer with this UETR — always this typed body, so a client can tell it from any other 404.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, uetr]
+                properties:
+                  code:
+                    type: string
+                    enum: [UNKNOWN_UETR]
+                  uetr:
+                    type: string
 
   /api/v1/clearing/returns:
     post:

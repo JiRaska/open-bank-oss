@@ -74,18 +74,24 @@ class ClearingResource {
 
     /**
      * The `pacs.002` the scheme holds for a bank-own transfer's UETR — read-only. 404 when it has
-     * none: the transfer never arrived. This is how the rail resolves a submission whose answer it
+     * none, with the typed body `{"code":"UNKNOWN_UETR","uetr":...}`: the transfer never arrived. This is how the rail resolves a submission whose answer it
      * lost, instead of resending it.
      */
     @GET
     @Path("/fi-credit-transfers/status/{uetr}")
-    @Produces(MediaType.APPLICATION_XML)
+    // No @Produces: each branch sets its own type (XML pacs.002, or the JSON typed not-found);
+    // declaring one here lets content negotiation overwrite the other branch's type.
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Operation(summary = "Status of a pacs.009 by UETR; 404 when the scheme has no record")
     fun institutionTransferStatus(@PathParam("uetr") uetr: String): Response {
-        val result =
-            simulator.institutionTransfers.statusOf(uetr) ?: throw NotFoundException("no transfer for this UETR")
-        return Response.ok(result.statusReportXml).build()
+        // A TYPED not-found: the rail resends only on this exact answer, never on a bare 404
+        // (which a proxy, a wrong path or a missing route would also produce).
+        val result = simulator.institutionTransfers.statusOf(uetr)
+            ?: return Response.status(Response.Status.NOT_FOUND)
+                .type(MediaType.APPLICATION_JSON)
+                .entity(mapOf("code" to UNKNOWN_UETR, "uetr" to uetr))
+                .build()
+        return Response.ok(result.statusReportXml, MediaType.APPLICATION_XML).build()
     }
 
     /**
@@ -122,5 +128,9 @@ class ClearingResource {
         return result.creditNotificationXml
             ?.let { Response.ok(it).build() }
             ?: Response.noContent().build()
+    }
+
+    private companion object {
+        const val UNKNOWN_UETR = "UNKNOWN_UETR"
     }
 }
