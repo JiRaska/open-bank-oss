@@ -113,11 +113,12 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         type="button"
         onClick={() => setPaletteOpen(true)}
         aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
+        aria-keyshortcuts="Meta+K Control+K"
         className={styles.searchTrigger}
       >
         <Search size={14} aria-hidden="true" />
-        <span style={{ fontSize: '13px' }}>{t('Rychlé hledání…', 'Quick search…')}</span>
-        <kbd style={{
+        <span style={{ fontSize: '13px' }}>{t('Rychlé hledání', 'Quick search')}</span>
+        <kbd aria-hidden="true" style={{
           fontSize: '10px', padding: '1px 5px',
           background: 'var(--surface-3)', border: '1px solid var(--border)',
           borderRadius: '4px', color: 'var(--text-secondary)', fontFamily: 'inherit',
@@ -183,7 +184,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
         </button>
         <button
           type="button"
-          aria-label={t('Přepnout na angličtinu', 'Switch to Czech')}
+          aria-label={`${language.toUpperCase()}: ${t('Přepnout na angličtinu', 'Switch to Czech')}`}
           title={t('Přepnout jazyk', 'Switch language')}
           onClick={() => setLanguage(language === 'en' ? 'cs' : 'en')}
           style={{
@@ -210,7 +211,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
             aria-expanded={menuOpen}
             aria-haspopup="menu"
             aria-controls={menuOpen ? 'admin-user-menu' : undefined}
-            aria-label={t('Otevřít uživatelskou nabídku', 'Open user menu')}
+            aria-label={`${user?.name ?? user?.email ?? 'User'}${roleInfo ? ` ${roleInfo.label}` : ''}: ${t('Otevřít uživatelskou nabídku', 'Open user menu')}`}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px',
               padding: '4px 8px 4px 4px', border: 'none', borderRadius: '20px', cursor: 'pointer',
@@ -221,7 +222,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
             onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.background = 'transparent' }}
           >
-            <div style={{
+            <div aria-hidden="true" style={{
               width: '26px', height: '26px', background: 'var(--accent-text)', borderRadius: '50%',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: '11px', fontWeight: 700, color: 'var(--surface-1)', flexShrink: 0,
