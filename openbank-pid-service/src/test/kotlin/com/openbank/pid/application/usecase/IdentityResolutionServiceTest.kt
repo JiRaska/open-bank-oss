@@ -7,8 +7,8 @@ package com.openbank.pid.application.usecase
 import com.openbank.libs.identity.BlindIndex
 import com.openbank.pid.application.port.`in`.IdentityAdjudicationUseCase
 import com.openbank.pid.application.port.`in`.PriorAdjudication
-import com.openbank.pid.application.port.`in`.ResolveIdentityCommand
 import com.openbank.pid.application.port.`in`.ResolutionResult
+import com.openbank.pid.application.port.`in`.ResolveIdentityCommand
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.CaseVerdict
