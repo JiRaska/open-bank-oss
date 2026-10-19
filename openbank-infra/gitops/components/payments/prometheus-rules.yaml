@@ -135,6 +135,8 @@ spec:
             severity: critical
             service: swift
           annotations:
+            # Event-driven, not periodic: a counter registered at zero that moves only on a stop.
+            subject_period: continuous
             summary: "Bank-own transfer needs manual reconciliation ({{ $labels.rail }}, {{ $labels.cause }})"
             description: "swift-service stopped automating a bank-own transfer because the scheme's answer was ambiguous. It will NOT be resent. Find the transfer in swift_institution_transfers with status MANUAL_RECONCILIATION, confirm its UETR with the scheme, and settle or reject it by hand; treasury still sees it as RELEASED or SENT."
         # SwiftMtMessageProcessingStalled was REMOVED in #5733, for the same reason as

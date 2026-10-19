@@ -4,6 +4,7 @@
 
 package com.openbank.swift.infrastructure.persistence.entity
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.swift.domain.institution.InstitutionTransferRail
 import com.openbank.swift.domain.institution.InstitutionTransferStatus
 import jakarta.persistence.Column
@@ -23,10 +24,10 @@ import java.util.UUID
 class InstitutionTransferEntity {
     @Id
     @field:Column(name = "id")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @field:Column(name = "payment_id", unique = true)
-    var paymentId: UUID = UUID.randomUUID()
+    var paymentId: UUID = Ids.newId()
 
     @field:Column(name = "idempotency_key", unique = true)
     var idempotencyKey: String = ""

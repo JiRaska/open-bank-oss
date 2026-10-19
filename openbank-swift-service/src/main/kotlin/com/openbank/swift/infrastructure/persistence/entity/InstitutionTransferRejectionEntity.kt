@@ -4,6 +4,7 @@
 
 package com.openbank.swift.infrastructure.persistence.entity
 
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
@@ -17,7 +18,7 @@ import java.util.UUID
 class InstitutionTransferRejectionEntity {
     @Id
     @field:Column(name = "payment_id")
-    var paymentId: UUID = UUID.randomUUID()
+    var paymentId: UUID = Ids.newId()
 
     @field:Column(name = "idempotency_key")
     var idempotencyKey: String? = null
