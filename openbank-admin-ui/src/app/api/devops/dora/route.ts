@@ -8,19 +8,7 @@ import path from 'path'
 
 export const dynamic = 'force-dynamic'
 
-// DORA classification thresholds (Google State of DevOps 2023)
-// Lead Time for Changes (hours)
-const LT_ELITE = 1
-const LT_HIGH  = 24
-const LT_MED   = 168     // 1 week
 type DoraLevel = 'elite' | 'high' | 'medium' | 'low'
-
-function classifyLt(hours: number): DoraLevel {
-  if (hours <= LT_ELITE) return 'elite'
-  if (hours <= LT_HIGH)  return 'high'
-  if (hours <= LT_MED)   return 'medium'
-  return 'low'
-}
 // Deployment Frequency + Lead Time come from a build-time git-derived snapshot
 // (scripts/collect-dora.mjs → dora.json), not a live GitHub call: the admin-ui is
 // a read-only consumer and holds no GITHUB_TOKEN (ADR-0061, mirrors the cost/test
@@ -125,7 +113,6 @@ export async function GET() {
     } catch { /* Prometheus unreachable */ }
 
     // ── Compute DORA levels ──────────────────────────────────────────────────
-    const ltLevel   = leadTimeHours              !== null ? classifyLt(leadTimeHours)             : null
     const mttrHours: number | null = mttrHoursFromPrometheus
 
     // The available values are proxies: first-parent commits are not deploy events,
@@ -147,13 +134,15 @@ export async function GET() {
         },
         leadTime: {
           hours: leadTimeHours !== null ? Math.round(leadTimeHours * 10) / 10 : null,
-          level: ltLevel,
+          level: null,
           description: leadTimeHours !== null
             ? leadTimeHours < 1 ? `${Math.round(leadTimeHours * 60)} min`
               : leadTimeHours < 24 ? `${Math.round(leadTimeHours)}h`
               : `${Math.round(leadTimeHours / 24)}d`
             : null,
-          note: leadTimeReason,
+          note: leadTimeHours !== null
+            ? 'Proxy: author-to-committer time for first-parent merge commits; not deployment lead time.'
+            : leadTimeReason,
         },
         changeFailureRate: {
           pct: changeFailureRate,

@@ -37,6 +37,15 @@ describe('GET /api/devops/dora', () => {
     expect(body.metrics.leadTime.note).toMatch(/squash|deploy-event|phase 2/i)
   })
 
+  it('labels author-to-committer duration as a proxy and never grades it as DORA lead time', async () => {
+    process.env.OPENBANK_DORA_REPORT = path.resolve(__dirname, 'fixtures/dora-with-merge-time.sample.json')
+    const { GET } = await import('@/app/api/devops/dora/route')
+    const body = await (await GET()).json()
+    expect(body.metrics.leadTime.hours).toBe(5)
+    expect(body.metrics.leadTime.level).toBeNull()
+    expect(body.metrics.leadTime.note).toMatch(/author-to-committer.*not deployment lead time/i)
+  })
+
 
   it('keeps HTTP 5xx and alert-duration proxies ungraded even when their values look elite', async () => {
     process.env.PROMETHEUS_URL = 'http://prometheus.test'
