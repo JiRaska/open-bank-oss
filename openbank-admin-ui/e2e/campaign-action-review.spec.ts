@@ -29,7 +29,8 @@ const detail = (state: string) => ({
   incentives: null,
   experiment: null,
   contentExperiment: null,
-  sources: { campaign: 'ok', enrolments: 'ok', sends: 'ok', sendSummary: 'ok' },
+  bulkRuns: [],
+  sources: { campaign: 'ok', enrolments: 'ok', sends: 'ok', sendSummary: 'ok', bulkRuns: 'ok' },
 })
 
 test.beforeEach(async ({ context, baseURL }) => {
@@ -71,6 +72,6 @@ test('reviews activation evidence and retains a refused action for retry', async
   await confirm.click()
 
   await expect(dialog).toBeHidden()
-  await expect(page.getByRole('button', { name: /Enrol audience|Zařadit publikum/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Start batch enrolment|Spustit dávkové zařazení/ })).toBeVisible()
   expect(decisions).toBe(2)
 })

@@ -123,11 +123,21 @@ spec:
             (
               time() - max by (namespace, cronjob) (kube_cronjob_created{job="kube-state-metrics"})
             )
+        # A CronJob that is positively reported as suspended (spec.suspend=true) is exempt: it is
+        # paused on purpose (platform/p3-shadow-case-injector since #10606), so its success age grows
+        # forever and the alert could never clear. The exemption is on the ALERT, not on the recorded
+        # age, so the age stays a true measurement for anything else that reads it. A CronJob with no
+        # kube_cronjob_spec_suspend series is NOT exempt (`== 1` selects only suspend=true), and
+        # un-suspending one that is stale fires after `for:` until its first success.
         - alert: CronJobSuccessStale
           expr: |
-            openbank:cronjob_success_age_seconds
-              > on (namespace, cronjob)
-            openbank:cronjob_max_success_age_seconds
+            (
+              openbank:cronjob_success_age_seconds
+                > on (namespace, cronjob)
+              openbank:cronjob_max_success_age_seconds
+            )
+              unless on (namespace, cronjob)
+            (kube_cronjob_spec_suspend{job="kube-state-metrics"} == 1)
           for: 15m
           labels:
             severity: warning
@@ -136,8 +146,8 @@ spec:
             summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not succeeded for {{ $value | humanizeDuration }}"
             description: >-
               Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded.
-              The latest run may have failed, hung, been skipped or never been scheduled, or the
-              CronJob may be suspended. If it is a control (a drift scanner, verifier or probe),
+              The latest run may have failed, hung, been skipped or never been scheduled. A CronJob
+              with spec.suspend=true is exempt, so this one is not suspended. If it is a control (a drift scanner, verifier or probe),
               nothing it guards has been checked for that long. Start with
               kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }} -o wide
               and kubectl -n {{ $labels.namespace }} get jobs --sort-by=.status.startTime

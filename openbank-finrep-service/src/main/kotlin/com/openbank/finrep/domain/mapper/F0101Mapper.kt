@@ -29,9 +29,19 @@ object F0101Mapper {
 
     fun map(snapshot: TrialBalanceSnapshot, asOf: LocalDate): FinrepTemplate {
         val lines = snapshot.lines
-        val cash = sumCodes(lines, "1001", "1100", "1101", "1102", "1103")
+        // 1001/1002: nostro accounts at correspondent banks = other demand deposits (r0040).
+        val demandDeposits = sumCodes(lines, "1001", "1002", "1100", "1101", "1102", "1103")
+        // 1510: ČNB deposit facility is a central-bank balance, so it belongs in r0010 but not in
+        // "other demand deposits" (r0040).
+        val centralBank = sumCodes(lines, "1510")
+        val cash = demandDeposits.add(centralBank)
+        // 1500/1501: money-market placements with credit institutions are loans and advances at
+        // amortised cost; 1520/1521 accrued interest receivable is part of that carrying amount
+        // (IFRS 9). The accrual account is shared with the ČNB facility and cannot be split by
+        // counterparty, so ČNB accrued interest is reported with loans, not cash.
         val loans = sumCodes(
             lines,
+            "1500", "1501", "1520", "1521",
             "1200", "1201", "1202", "1203",
             "1300", "1301", "1302", "1303",
             "1400", "1401", "1402", "1403",
@@ -40,7 +50,7 @@ object F0101Mapper {
         val totalAssets = sumNet(lines, "ASSET")
         val cells = listOf(
             FinrepCell(rowRef = "r0010", colRef = "c0010", value = cash),
-            FinrepCell(rowRef = "r0040", colRef = "c0010", value = cash),
+            FinrepCell(rowRef = "r0040", colRef = "c0010", value = demandDeposits),
             FinrepCell(rowRef = "r0181", colRef = "c0010", value = loans),
             FinrepCell(rowRef = "r0183", colRef = "c0010", value = loans),
             FinrepCell(rowRef = "r0360", colRef = "c0010", value = otherAssets),

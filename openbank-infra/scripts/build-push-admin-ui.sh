@@ -159,9 +159,46 @@ fi
 # read-only vars the CI can-i-deploy gate uses) are exported, the collector folds the
 # real provider-verification verdict from the broker (ADR-0092) into each contract;
 # unset/unreachable → contracts stay 'pending' (fail-soft).
+run_traced_collector() {
+  local trace_stage="$1" trace_auth="$2"
+  shift 2
+  if [ -z "${ADMIN_UI_TRACE_DIR:-}" ]; then
+    "$@"
+    return $?
+  fi
+  (
+    eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage "${trace_stage}" --auth "${trace_auth}")" || true
+    "$@"
+  )
+}
+record_trace_status() {
+  local name="$1" status="$2"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    printf 'TRACE_STATUS_%s=%s\n' "${name}" "${status}" >> "${GITHUB_ENV}" 2>/dev/null || \
+      echo "WARN: could not record trace status for ${name}." >&2
+  fi
+}
 QR_OUT="openbank-admin-ui/quality-report.json"
 echo "==> collect quality report (contracts + mutation scores)"
-if ! ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "${REPO_ROOT}" ) 2>&1; then
+QR_AUTH="none"
+if [ -n "${PACT_BROKER_USERNAME:-}" ] && [ -n "${PACT_BROKER_PASSWORD:-}" ]; then QR_AUTH="pact_broker"; fi
+if [ -z "${ADMIN_UI_TRACE_DIR:-}" ]; then
+  if ! ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "${REPO_ROOT}" ) 2>&1; then
+    [ -f "${QR_OUT}" ] || echo '{"contracts":[],"mutations":[],"serviceScores":[],"collectedAt":null}' > "${QR_OUT}"
+    echo "    WARN: quality-report collector failed; baked empty bundle." >&2
+  fi
+elif [ -z "${PACT_BROKER_URL:-}" ]; then
+  if ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "${REPO_ROOT}" ) 2>&1; then
+    record_trace_status QUALITY_REPORT skipped
+  else
+    record_trace_status QUALITY_REPORT failure
+    [ -f "${QR_OUT}" ] || echo '{"contracts":[],"mutations":[],"serviceScores":[],"collectedAt":null}' > "${QR_OUT}"
+    echo "    WARN: quality-report collector failed; baked empty bundle." >&2
+  fi
+elif run_traced_collector quality_report "${QR_AUTH}" bash -c 'cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "$1"' _ "${REPO_ROOT}" 2>&1; then
+  record_trace_status QUALITY_REPORT success
+else
+  record_trace_status QUALITY_REPORT failure
   [ -f "${QR_OUT}" ] || echo '{"contracts":[],"mutations":[],"serviceScores":[],"collectedAt":null}' > "${QR_OUT}"
   echo "    WARN: quality-report collector failed; baked empty bundle." >&2
 fi
@@ -268,7 +305,15 @@ echo "    governance manifest: ${GOV_SVC_COUNT} services"
 # fails the build if zero lifecycle feeds resolve (the governance-empty lesson).
 IL_OUT="openbank-admin-ui/infra-lifecycle.json"
 echo "==> generate infra lifecycle snapshot (ADR-0077)"
-if ! node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+if [ -z "${ADMIN_UI_TRACE_DIR:-}" ]; then
+  if ! node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+    echo "ERROR: infra-lifecycle generator failed (endoflife.date unreachable?)." >&2
+    exit 1
+  fi
+elif run_traced_collector infra_lifecycle none node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+  record_trace_status INFRA_LIFECYCLE success
+else
+  record_trace_status INFRA_LIFECYCLE failure
   echo "ERROR: infra-lifecycle generator failed (endoflife.date unreachable?)." >&2
   exit 1
 fi
