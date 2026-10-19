@@ -1692,11 +1692,13 @@ paths:
         Release a PROPOSED payment (ROLE_TREASURY_PAYMENT_RELEASER only; never a netted deal's creator or term
         author nor an override proposer or approver of a netted flow; never an AI agent). Refused 422
         FUNDING_EXCEEDED when the funding account would go negative on the value date, net of released
-        payments. A rail with no bank-own debit path ends it RAIL_NOT_SUPPORTED.
+        payments. Contract 9: the release writes the rail instruction to the outbox in the same
+        transaction (status RELEASED); the rail's status events move it to SENT / SETTLED / FAILED.
+        An SSI from which no institution-transfer rail follows ends it RAIL_NOT_SUPPORTED.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
-        '200': { description: Released (SENT or RAIL_NOT_SUPPORTED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '200': { description: Released (RELEASED or RAIL_NOT_SUPPORTED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
         '403': { description: Not a human payment releaser }
         '409': { description: Not PROPOSED }
         '422': { description: FOUR_EYES_VIOLATION or FUNDING_EXCEEDED }
@@ -1839,6 +1841,7 @@ components:
         dealIds: { type: array, maxItems: 500, items: { type: string, format: uuid } }
         idempotencyKey: { type: string }
         railReference: { type: [string, 'null'] }
+        transferRail: { type: [string, 'null'], enum: [CERTIS, TARGET2, SWIFT, null], description: "Contract 9.1: the institution-transfer rail chosen at release." }
         releasedBy: { type: [string, 'null'] }
         statusReason: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }

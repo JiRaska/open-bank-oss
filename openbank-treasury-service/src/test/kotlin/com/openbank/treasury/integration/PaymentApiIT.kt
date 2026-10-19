@@ -313,7 +313,7 @@ class PaymentApiIT {
                 "select count(*) from treasury_outbox where aggregate_id = '$released' " +
                     "and event_type = 'treasury.payment.status-changed.v1'",
             ),
-        ).isEqualTo(4) // PROPOSED, RELEASED, RAIL_NOT_SUPPORTED, MANUALLY_SETTLED
+        ).isEqualTo(3) // PROPOSED, RAIL_NOT_SUPPORTED (one release transaction), MANUALLY_SETTLED
     }
 
     @Test

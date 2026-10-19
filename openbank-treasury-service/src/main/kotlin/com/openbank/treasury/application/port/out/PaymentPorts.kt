@@ -32,11 +32,13 @@ interface PaymentRepository {
      * PROPOSED -> RELEASED under the funding check, serialised per funding bucket: inside ONE
      * transaction it takes a transaction-scoped advisory lock on [fundingKey] (account, currency,
      * value date), recomputes the released-but-unsettled outgoing total of that bucket, calls
-     * [fundingCheck] with it (which throws to refuse), then stores the release and its [event].
+     * [fundingCheck] with it (which throws to refuse), then stores the release and its [events] —
+     * the status change and, for a payment handed to a rail, `treasury.payment.released.v1`
+     * (contract 9) — all in that one transaction.
      */
     suspend fun saveRelease(
         payment: Payment,
-        event: DealEvent,
+        events: List<DealEvent>,
         fundingKey: String,
         fundingCheck: (pendingOut: BigDecimal) -> Unit,
     )
@@ -52,17 +54,4 @@ interface PaymentRepository {
 
     /** Latest-schedule FIXED flows of live ACTUAL deals paid in [from]..[to] and not yet on a payment. */
     suspend fun unpaidFixedFlows(from: LocalDate, to: LocalDate): List<CashFlow>
-}
-
-/** What a rail answered to a hand-off. */
-sealed interface RailHandOff {
-    data class Accepted(val reference: String) : RailHandOff
-
-    /** The rail has no path for a bank-own (non-customer) debit; nothing was sent. */
-    data class NotSupported(val reason: String) : RailHandOff
-}
-
-/** ADR-0344 D6: hands a RELEASED payment to the rail of its SSI (CERTIS, SEPA, TARGET2, SWIFT). */
-fun interface PaymentRailPort {
-    suspend fun handOff(payment: Payment): RailHandOff
 }

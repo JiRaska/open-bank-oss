@@ -137,6 +137,41 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Contract 9.1: treasury.payment.released.v1, written by the release transaction into the
+      # outbox, read by the institution-transfer rail. The topic CR lives with the rail.
+      treasury-payments-out:
+        connector: smallrye-kafka
+        client:
+          id: treasury-service-payments-${quarkus.uuid}
+        topic: openbank.treasury.payments
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+    incoming:
+      # Contract 9.2: the rail's status of each released payment (ACCEPTED/SENT/SETTLED/REJECTED).
+      # group.id / auto.offset.reset NESTED (a dotted leaf key never reaches the connector, #686);
+      # earliest so a status published before the first join is not skipped — the consumer is
+      # idempotent on (paymentId, status), so a re-read is harmless.
+      institution-transfer-status-in:
+        connector: smallrye-kafka
+        topic: openbank.swift.institution-transfers
+        client:
+          id: treasury-service-rail-status-${quarkus.uuid}
+        group:
+          id: treasury-institution-transfer-status
+        auto:
+          offset:
+            reset: earliest
+        # An unknown payment, a foreign key or a contradicting status is rethrown and PARKED here
+        # for a human, never dropped. EXPLICIT per-service topic in the NESTED form (#686, #5752).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.treasury.institution-transfer-status-in
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 openbank:
   outbox:
@@ -159,8 +194,12 @@ openbank:
     payments:
       # ADR-0344 D6: FIXED flows paid within cut-off-window-days of the accounting day are proposed
       # as payments (netted per netting agreement, addressed from the effective SSI). Release is a
-      # human payment releaser's act; until a rail carries bank-own debits it ends RAIL_NOT_SUPPORTED.
+      # human payment releaser's act. Contract 9: release writes treasury.payment.released.v1 in the
+      # same transaction (rail from the SSI: CZK CERTIS, EUR TARGET2, other SWIFT); the rail's status
+      # events move it to SENT / SETTLED / FAILED. RAIL_NOT_SUPPORTED only when no rail follows.
       enabled: ${OPENBANK_TREASURY_PAYMENTS_ENABLED:true}
+      # Contract 9.1 debtor agent: the bank's own BIC (the sandbox bank's, as the fleet uses).
+      own-bic: ${OPENBANK_BIC:OPBKCZ22}
       cut-off-window-days: 2
     close:
       # ADR-0342: treasury is a day-close participant. Every tick re-offers the last lookback-days

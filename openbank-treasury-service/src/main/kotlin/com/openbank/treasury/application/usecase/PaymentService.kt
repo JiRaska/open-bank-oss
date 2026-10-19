@@ -11,9 +11,7 @@ import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.PaymentNotFoundException
-import com.openbank.treasury.application.port.out.PaymentRailPort
 import com.openbank.treasury.application.port.out.PaymentRepository
-import com.openbank.treasury.application.port.out.RailHandOff
 import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.domain.cashflow.FlowDirection
 import com.openbank.treasury.domain.model.Actor
@@ -23,8 +21,11 @@ import com.openbank.treasury.domain.payment.FundingCheck
 import com.openbank.treasury.domain.payment.FundingExceededException
 import com.openbank.treasury.domain.payment.Payment
 import com.openbank.treasury.domain.payment.PaymentProposals
+import com.openbank.treasury.domain.payment.PaymentStaleException
 import com.openbank.treasury.domain.payment.PaymentStatus
 import com.openbank.treasury.domain.payment.ProposalOutcome
+import com.openbank.treasury.domain.payment.RailStatus
+import com.openbank.treasury.domain.payment.RailStatusConflictException
 import com.openbank.treasury.domain.payment.SsiSnapshot
 import com.openbank.treasury.domain.reference.NettingPayload
 import com.openbank.treasury.domain.reference.ReferenceKind
@@ -67,11 +68,62 @@ data class PaymentStatusChanged(
     }
 }
 
+/** Contract 9.1: one party of an institution transfer. */
+data class TransferParty(
+    val bic: String,
+    val accountNumber: String,
+    val glAccountingClass: String? = null,
+    val name: String? = null,
+)
+
+/** Contract 9.1: `treasury.payment.released.v1` on `openbank.treasury.payments`, written in the release transaction. */
+data class PaymentReleased(
+    val paymentId: UUID,
+    val idempotencyKey: String,
+    val rail: String,
+    val currency: String,
+    val amount: String,
+    val valueDate: LocalDate,
+    val debtor: TransferParty,
+    val creditor: TransferParty,
+    val intermediaryBic: String?,
+    val remittanceInformation: String,
+    val dealIds: List<UUID>,
+    val flowIds: List<UUID>,
+    val releasedBy: String,
+    val releasedAt: Instant,
+    val synthetic: Boolean,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.payment.released.v1"
+        const val MAX_TEXT = 140
+    }
+}
+
+/** Contract 9.2: `swift.institution-transfer.status.v1` as treasury reads it. */
+data class InstitutionTransferStatus(
+    val paymentId: UUID,
+    val idempotencyKey: String,
+    val status: RailStatus,
+    val messageType: String?,
+    val schemeReference: String?,
+    val reasonCode: String?,
+    val reason: String?,
+    val at: Instant?,
+    val synthetic: Boolean = false,
+)
+
+/** Who the counterparty is for the released event's creditor name and synthetic taint (ADR-0252). */
+data class CounterpartyIdentity(val name: String, val synthetic: Boolean)
+
 /**
  * ADR-0344 D6: the deal-to-payment chain. FIXED flows inside the cut-off window become PROPOSED
  * payments (netted per netting agreement, addressed from the effective SSI); a human payment
  * releaser who is neither a deal's creator nor a term author releases one; the funding account
- * must not go negative as of the value date (#12115); the payment is then handed to its rail.
+ * must not go negative as of the value date (#12115). Contract 9: the release is ASYNC and ATOMIC —
+ * the RELEASED row and `treasury.payment.released.v1` commit in one transaction (no synchronous rail
+ * call, no crash window between them); the rail's status events then move it to SENT / SETTLED /
+ * FAILED ([onRailStatus]).
  * Incoming flows are expected receipts that a nostro statement entry settles.
  */
 @Suppress("LongParameterList", "TooManyFunctions")
@@ -81,7 +133,6 @@ class PaymentService(
     private val cashFlows: CashFlowRepository,
     private val references: ReferenceRepository,
     private val ledger: LedgerReadPort?,
-    private val rail: PaymentRailPort,
     private val dayCompletion: DayCompletionRepository?,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
@@ -89,6 +140,11 @@ class PaymentService(
     private val onFundingExceeded: (String) -> Unit = {},
     private val onParkedMatch: (UUID) -> Unit = {},
     private val newId: () -> UUID = { UUID.randomUUID() },
+    /** Contract 9.1 debtor agent: the bank's own BIC. */
+    private val ownBic: String = DEFAULT_OWN_BIC,
+    private val counterparty: suspend (String) -> CounterpartyIdentity? = { null },
+    /** Step 2 (ADR-0344 D7): posts the PAYMENT journals of a SENT/SETTLED payment's flows; returns journals posted. */
+    private val postOutflow: suspend (Payment) -> Int = { 0 },
 ) {
     init {
         require(cutOffWindowDays in 0..MAX_WINDOW) { "the payment cut-off window is 0..$MAX_WINDOW days" }
@@ -159,14 +215,99 @@ class PaymentService(
         // ADR-0344 D6 four-eyes, computed NOW: every term author of every netted deal and every
         // proposer and decider of an override on a netted flow; never the proposal-time cache.
         val released = current.release(actor, clock.instant(), authorsOf(current))
-        val (key, check) = funding(released)
-        payments.saveRelease(released, event(released, actor.id, null), key, check)
-        val handed = when (val r = rail.handOff(released)) {
-            is RailHandOff.Accepted -> released.handedOff(r.reference)
-            is RailHandOff.NotSupported -> released.railNotSupported(r.reason)
+        val nostro = ledger?.takeIf {
+            released.direction == FlowDirection.OUT
+        }?.nostroAccounts()?.get(released.currency)
+        val (key, check) = funding(released, nostro)
+        val events = listOfNotNull(
+            event(released, actor.id, released.statusReason),
+            released.transferRail?.let { releasedEvent(released, nostro?.glCode) },
+        )
+        payments.saveRelease(released, events, key, check)
+        return released
+    }
+
+    /**
+     * Contract 9.2, idempotent on (paymentId, status): ACCEPTED records the rail reference, SENT ->
+     * SENT (and posts the outflow journals), SETTLED -> SETTLED with its flows, REJECTED -> FAILED
+     * (flows stay linked, the funding reservation is released because FAILED no longer counts as an
+     * outflow). A replay or a status the payment is already past stores nothing. A concurrent status
+     * on the same payment loses the row lock race, reloads and re-decides. An unknown payment, a key
+     * that is not the payment's own, or a contradicting status is thrown — the consumer's DLQ parks
+     * it for a human, never guessed at.
+     */
+    suspend fun onRailStatus(s: InstitutionTransferStatus): Payment? {
+        var attempt = 0
+        while (true) {
+            val current = railTarget(s)
+            val reason = listOfNotNull(s.reasonCode, s.reason).joinToString(": ").ifBlank { null }
+            val next = current.onRail(s.status, s.schemeReference, reason)
+            if (next == null) {
+                // A replay of SENT/SETTLED still makes sure the outflow journals exist (idempotent keys).
+                if (current.status == PaymentStatus.SENT || current.status == PaymentStatus.SETTLED) {
+                    postOutflow(current)
+                }
+                return null
+            }
+            try {
+                payments.save(
+                    next,
+                    current.status,
+                    event(next, RAIL_ACTOR, reason),
+                    settleFlows = next.status == PaymentStatus.SETTLED,
+                )
+            } catch (e: PaymentStaleException) {
+                if (++attempt >= MAX_STATUS_ATTEMPTS) throw e
+                continue
+            }
+            if (next.status == PaymentStatus.SENT || next.status == PaymentStatus.SETTLED) postOutflow(next)
+            return next
         }
-        payments.save(handed, PaymentStatus.RELEASED, event(handed, actor.id, handed.statusReason))
-        return handed
+    }
+
+    private suspend fun railTarget(s: InstitutionTransferStatus): Payment {
+        val current = payments.find(s.paymentId) ?: throw PaymentNotFoundException(s.paymentId)
+        if (current.idempotencyKey != s.idempotencyKey) {
+            throw RailStatusConflictException(
+                "status for payment ${s.paymentId} carries key ${s.idempotencyKey.take(KEY_ECHO)}, not its own",
+            )
+        }
+        return current
+    }
+
+    private suspend fun releasedEvent(p: Payment, nostroAccount: String?): DealEvent {
+        val ssi = checkNotNull(p.ssi) { "an outgoing payment is addressed from an SSI" }
+        val cp = counterparty(p.counterpartyId)
+        return DealEvent(
+            PaymentReleased.EVENT_TYPE,
+            objectMapper.writeValueAsString(
+                PaymentReleased(
+                    paymentId = p.paymentId,
+                    idempotencyKey = p.idempotencyKey,
+                    rail = checkNotNull(p.transferRail).name,
+                    currency = p.currency,
+                    amount = p.amount.setScale(2).toPlainString(),
+                    valueDate = p.valueDate,
+                    debtor = TransferParty(
+                        bic = ownBic,
+                        accountNumber = nostroAccount ?: "NOSTRO-${p.currency}",
+                        glAccountingClass = com.openbank.treasury.domain.model.AccountingClasses.NOSTRO,
+                    ),
+                    creditor = TransferParty(
+                        bic = checkNotNull(ssi.bic),
+                        accountNumber = ssi.beneficiaryAccount,
+                        name = (cp?.name ?: p.counterpartyId).take(PaymentReleased.MAX_TEXT),
+                    ),
+                    intermediaryBic = ssi.intermediaryBic,
+                    remittanceInformation = ("TREASURY " + p.dealIds.joinToString(" ")).take(PaymentReleased.MAX_TEXT),
+                    dealIds = p.dealIds,
+                    flowIds = p.nettedFlowIds,
+                    releasedBy = checkNotNull(p.releasedBy),
+                    releasedAt = checkNotNull(p.releasedAt),
+                    synthetic = cp?.synthetic ?: true,
+                ),
+            ),
+        )
     }
 
     /** A released payment ends MANUALLY_SETTLED (flows SETTLED) or RETURNED, by an independent human. */
@@ -254,10 +395,13 @@ class PaymentService(
      * #12115: the funding bucket key and the check run INSIDE the release transaction under its
      * advisory lock, so two releases that each fit but together overdraw cannot both pass.
      */
-    private suspend fun funding(p: Payment): Pair<String, (BigDecimal) -> Unit> {
+    private suspend fun funding(
+        p: Payment,
+        nostro: com.openbank.treasury.application.port.out.NostroGl?,
+    ): Pair<String, (BigDecimal) -> Unit> {
         val port = ledger
         if (p.direction != FlowDirection.OUT || port == null) return "none" to { _ -> }
-        val nostro = port.nostroAccounts()[p.currency]
+        nostro
             ?: throw FundingExceededException(
                 FundingCheck.Result(BigDecimal.ZERO, p.amount.negate()),
                 "no funding (nostro) account in ${p.currency}",
@@ -286,7 +430,7 @@ class PaymentService(
     private suspend fun ssiOn(cp: String, ccy: String, on: LocalDate): SsiSnapshot? =
         references.versions(ReferenceKind.SSI, "$cp:$ccy").lastOrNull { it.isEffectiveOn(on) }?.let { r ->
             val s = r.payload as SsiPayload
-            SsiSnapshot(s.rail, s.beneficiaryAccount, s.bic, r.version)
+            SsiSnapshot(s.rail, s.beneficiaryAccount, s.bic, r.version, s.intermediaryBic)
         }
 
     private fun event(p: Payment, actor: String?, reason: String?) = DealEvent(
@@ -300,7 +444,7 @@ class PaymentService(
                 currency = p.currency,
                 amount = p.amount,
                 valueDate = p.valueDate,
-                rail = p.ssi?.rail?.name,
+                rail = p.transferRail?.name ?: p.ssi?.rail?.name,
                 railReference = p.railReference,
                 nettedFlowIds = p.nettedFlowIds,
                 dealIds = p.dealIds,
@@ -313,5 +457,9 @@ class PaymentService(
 
     companion object {
         const val MAX_WINDOW = 31L
+        const val MAX_STATUS_ATTEMPTS = 3
+        const val KEY_ECHO = 64
+        const val RAIL_ACTOR = "rail:institution-transfer"
+        const val DEFAULT_OWN_BIC = "OPBKCZ22"
     }
 }

@@ -919,3 +919,21 @@ spec:
   config:
     retention.ms: 2592000000
     cleanup.policy: delete
+---
+# openbank-treasury-service :: channel `institution-transfer-status-in` (ADR-0344 contract 9.2).
+# New channel, so nothing is parked anywhere to strand. Named explicitly in
+# openbank-treasury-service/src/main/resources/application.yaml (nested form, issue #686); Write
+# granted in components/treasury/kafka-treasury-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.treasury.institution-transfer-status-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete

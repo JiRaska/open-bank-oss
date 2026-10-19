@@ -15,6 +15,7 @@ import com.openbank.treasury.domain.payment.Payment
 import com.openbank.treasury.domain.payment.PaymentStaleException
 import com.openbank.treasury.domain.payment.PaymentStatus
 import com.openbank.treasury.domain.payment.SsiSnapshot
+import com.openbank.treasury.domain.payment.TransferRail
 import com.openbank.treasury.domain.reference.SettlementRail
 import com.openbank.treasury.infrastructure.cashflow.DealLookupPanacheRepository
 import com.openbank.treasury.infrastructure.cashflow.toDomain
@@ -96,6 +97,12 @@ class PaymentEntity : PanacheEntityBase {
 
     @Column(name = "status_reason")
     var statusReason: String? = null
+
+    @Column(name = "transfer_rail")
+    var transferRail: String? = null
+
+    @Column(name = "intermediary_bic")
+    var intermediaryBic: String? = null
 }
 
 @Entity
@@ -146,8 +153,10 @@ class PaymentRepositoryImpl(
                 payments.find("paymentId", payment.paymentId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
                     .flatMap { row ->
                         checkNotNull(row) { "payment ${payment.paymentId} disappeared" }
-                        check(row.status == prior.name) {
-                            "payment ${payment.paymentId} is now ${row.status}, not $prior; reload and retry"
+                        if (row.status != prior.name) {
+                            throw PaymentStaleException(
+                                "payment ${payment.paymentId} is now ${row.status}, not $prior; reload and retry",
+                            )
                         }
                         row.fill(payment)
                         when {
@@ -240,7 +249,7 @@ class PaymentRepositoryImpl(
 
     override suspend fun saveRelease(
         payment: Payment,
-        event: DealEvent,
+        events: List<DealEvent>,
         fundingKey: String,
         fundingCheck: (pendingOut: BigDecimal) -> Unit,
     ) {
@@ -265,14 +274,22 @@ class PaymentRepositoryImpl(
                 revalidate(payment).map { row }
             }.flatMap { row ->
                 row.fill(payment)
-                outbox.persistInTransaction(
-                    OutboxMessage(
-                        aggregateId = payment.paymentId,
-                        eventType = event.eventType,
-                        payload = event.payload,
-                        createdAt = clock.instant(),
-                    ),
-                )
+                // Contract 9: the status change AND treasury.payment.released.v1 commit with the
+                // RELEASED row or not at all — there is no window in which a payment is RELEASED
+                // and the rail was never told, nor one in which the rail was told about a payment
+                // the database never released.
+                events.fold(Uni.createFrom().voidItem()) { acc, e ->
+                    acc.flatMap {
+                        outbox.persistInTransaction(
+                            OutboxMessage(
+                                aggregateId = payment.paymentId,
+                                eventType = e.eventType,
+                                payload = e.payload,
+                                createdAt = clock.instant(),
+                            ),
+                        )
+                    }
+                }
             }
         }.awaitSuspending()
     }
@@ -451,6 +468,8 @@ private fun PaymentEntity.fill(p: Payment) = apply {
     releasedBy = p.releasedBy
     releasedAt = p.releasedAt
     statusReason = p.statusReason
+    transferRail = p.transferRail?.name
+    intermediaryBic = p.ssi?.intermediaryBic
 }
 
 private fun PaymentEntity.toDomain(flowIds: List<UUID>) = Payment(
@@ -461,7 +480,9 @@ private fun PaymentEntity.toDomain(flowIds: List<UUID>) = Payment(
     currency = currency,
     amount = amount,
     valueDate = valueDate,
-    ssi = rail?.let { SsiSnapshot(SettlementRail.valueOf(it), checkNotNull(beneficiaryAccount), bic, ssiVersion ?: 0) },
+    ssi = rail?.let {
+        SsiSnapshot(SettlementRail.valueOf(it), checkNotNull(beneficiaryAccount), bic, ssiVersion ?: 0, intermediaryBic)
+    },
     nettedFlowIds = flowIds.sorted(),
     dealIds = dealIds.split(',').filter(String::isNotBlank).map(UUID::fromString),
     termAuthors = termAuthors.split('\n').filter(String::isNotBlank).toSet(),
@@ -471,4 +492,5 @@ private fun PaymentEntity.toDomain(flowIds: List<UUID>) = Payment(
     releasedBy = releasedBy,
     releasedAt = releasedAt,
     statusReason = statusReason,
+    transferRail = transferRail?.let(TransferRail::valueOf),
 )

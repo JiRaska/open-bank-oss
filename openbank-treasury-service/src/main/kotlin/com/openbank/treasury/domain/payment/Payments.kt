@@ -19,8 +19,12 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * ADR-0344 D6. RAIL_NOT_SUPPORTED: released, but the rail has no path for a bank-own (non-customer)
- * debit, so nothing was handed to it; the payment waits for a manual instruction outside the system.
+ * ADR-0344 D6 + contract 9. RELEASED: released and handed to the institution-transfer rail through
+ * the outbox (`treasury.payment.released.v1`) in the same transaction. SENT / SETTLED / FAILED follow
+ * from the rail's status events. RAIL_NOT_SUPPORTED: released, but no rail can be determined from
+ * the SSI (no BIC, or a rail that contradicts the currency), so nothing was handed to any rail; the
+ * payment waits for a manual instruction outside the system. FAILED: the rail rejected it; its flows
+ * stay linked and an independent human resolves it.
  */
 enum class PaymentStatus {
     PROPOSED,
@@ -40,16 +44,58 @@ enum class PaymentStatus {
 
     /** Once released, a payment never frees its flows: only a terminal manual resolution follows. */
     val released: Boolean get() = this in setOf(RELEASED, SENT, RAIL_NOT_SUPPORTED)
+
+    /** A status an independent human may resolve to MANUALLY_SETTLED or RETURNED. */
+    val resolvable: Boolean get() = released || this == FAILED
 }
 
 /** The counterparty's effective settlement instruction as the payment was addressed from it. */
-data class SsiSnapshot(val rail: SettlementRail, val beneficiaryAccount: String, val bic: String?, val ssiVersion: Int)
+data class SsiSnapshot(
+    val rail: SettlementRail,
+    val beneficiaryAccount: String,
+    val bic: String?,
+    val ssiVersion: Int,
+    val intermediaryBic: String? = null,
+)
+
+/** Contract 9.1: the rail a bank-own institution transfer travels on. */
+enum class TransferRail { CERTIS, TARGET2, SWIFT }
+
+/** What the rail reported about one released payment (contract 9.2). */
+enum class RailStatus { ACCEPTED, SENT, SETTLED, REJECTED }
+
+/** A rail status that cannot apply to the payment as it stands (never released, or contradicts a terminal state). */
+class RailStatusConflictException(message: String) : IllegalStateException(message)
+
+object TransferRails {
+    /**
+     * Contract 9.1: CZK -> CERTIS, EUR -> TARGET2, anything else -> SWIFT, taken from the SSI. The
+     * SSI's own rail must agree with that (a SEPA instruction is the EUR one and travels TARGET2 as
+     * a bank-own transfer); a contradicting rail, or an SSI without the creditor agent's BIC that an
+     * institution transfer needs, determines NO rail — null, and the release ends RAIL_NOT_SUPPORTED.
+     */
+    fun of(currency: String, ssi: SsiSnapshot?): TransferRail? {
+        if (ssi == null || ssi.bic.isNullOrBlank()) return null
+        val expected = when (currency) {
+            "CZK" -> TransferRail.CERTIS
+            "EUR" -> TransferRail.TARGET2
+            else -> TransferRail.SWIFT
+        }
+        val fromSsi = when (ssi.rail) {
+            SettlementRail.CERTIS -> TransferRail.CERTIS
+            SettlementRail.SEPA, SettlementRail.TARGET2 -> TransferRail.TARGET2
+            SettlementRail.SWIFT -> TransferRail.SWIFT
+        }
+        return expected.takeIf { it == fromSsi }
+    }
+}
 
 /**
  * One own-account payment: an outgoing instruction, or (IN) an expected receipt for nostro matching.
  * [nettedFlowIds] are the flows it settles; [termAuthors] everyone who created or changed the terms
  * of any of its deals — none of them may release it.
  */
+@Suppress("TooManyFunctions") // one method per lifecycle transition (release, rail statuses, cancel, resolve, settle)
 data class Payment(
     val paymentId: UUID,
     val status: PaymentStatus,
@@ -68,6 +114,8 @@ data class Payment(
     val releasedBy: String? = null,
     val releasedAt: Instant? = null,
     val statusReason: String? = null,
+    /** Contract 9.1: the institution-transfer rail chosen at release; null before, or RAIL_NOT_SUPPORTED. */
+    val transferRail: TransferRail? = null,
 ) {
     init {
         require(amount.signum() > 0 && amount.scale() <= 2) { "a payment amount is positive with at most 2 decimals" }
@@ -86,6 +134,16 @@ data class Payment(
      * and OPA before this.
      */
     fun release(actor: Actor, at: Instant, authors: Set<String> = termAuthors): Payment {
+        val released = releasedBy(actor, at, authors)
+        val rail = TransferRails.of(currency, ssi)
+            ?: return released.railNotSupported(
+                "RAIL_NOT_SUPPORTED: no institution-transfer rail follows from SSI ${ssi?.rail} in $currency " +
+                    "(missing creditor BIC or a rail that contradicts the currency); instruct this payment manually",
+            )
+        return released.copy(transferRail = rail)
+    }
+
+    private fun releasedBy(actor: Actor, at: Instant, authors: Set<String>): Payment {
         if (actor.type !=
             ActorType.HUMAN
         ) {
@@ -101,10 +159,55 @@ data class Payment(
         return copy(status = PaymentStatus.RELEASED, releasedBy = actor.id, releasedAt = at)
     }
 
-    fun handedOff(reference: String): Payment {
-        check(status == PaymentStatus.RELEASED) { "only a RELEASED payment is handed to a rail" }
-        return copy(status = PaymentStatus.SENT, railReference = reference)
+    /**
+     * Contract 9.2, idempotent on (paymentId, status) and monotone: ACCEPTED records the rail
+     * reference and stays RELEASED; SENT moves RELEASED -> SENT; SETTLED moves RELEASED/SENT ->
+     * SETTLED; REJECTED moves RELEASED/SENT -> FAILED. A replay, or a status the payment is already
+     * past (a late SENT after SETTLED), answers null — nothing to store. A status for a payment that
+     * was never handed to the rail, or one contradicting a terminal outcome (SETTLED after FAILED),
+     * is a [RailStatusConflictException]: never guessed at.
+     */
+    fun onRail(rail: RailStatus, reference: String?, reason: String?): Payment? {
+        val ref = reference?.take(MAX_REFERENCE)
+        return when (rail) {
+            RailStatus.ACCEPTED -> accepted(ref)
+            RailStatus.SENT -> sent(ref)
+            RailStatus.SETTLED -> terminal(rail, PaymentStatus.SETTLED, SETTLED_ALREADY, ref, null)
+            RailStatus.REJECTED ->
+                terminal(rail, PaymentStatus.FAILED, FAILED_ALREADY, ref, (reason ?: "rejected by the rail"))
+        }
     }
+
+    private fun accepted(ref: String?): Payment? = when {
+        status == PaymentStatus.RELEASED -> if (ref == null || ref == railReference) null else copy(railReference = ref)
+        status in AFTER_RELEASE -> null
+        else -> conflict(RailStatus.ACCEPTED)
+    }
+
+    private fun sent(ref: String?): Payment? = when {
+        status == PaymentStatus.RELEASED -> copy(status = PaymentStatus.SENT, railReference = ref ?: railReference)
+        status in AFTER_RELEASE -> null
+        else -> conflict(RailStatus.SENT)
+    }
+
+    private fun terminal(
+        rail: RailStatus,
+        to: PaymentStatus,
+        already: Set<PaymentStatus>,
+        ref: String?,
+        reason: String?,
+    ): Payment? = when (status) {
+        PaymentStatus.RELEASED, PaymentStatus.SENT -> copy(
+            status = to,
+            railReference = ref ?: railReference,
+            statusReason = reason?.take(MAX_REASON) ?: statusReason,
+        )
+        in already -> null
+        else -> conflict(rail)
+    }
+
+    private fun conflict(rail: RailStatus): Nothing =
+        throw RailStatusConflictException("payment $paymentId is $status; a rail status $rail cannot apply")
 
     fun railNotSupported(reason: String): Payment {
         check(status == PaymentStatus.RELEASED) { "only a RELEASED payment is handed to a rail" }
@@ -146,7 +249,9 @@ data class Payment(
             "a released payment resolves to MANUALLY_SETTLED or RETURNED"
         }
         require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a resolution needs a reason (1..$MAX_REASON)" }
-        check(status.released) { "cannot resolve a $status payment (expected RELEASED, SENT or RAIL_NOT_SUPPORTED)" }
+        check(status.resolvable) {
+            "cannot resolve a $status payment (expected RELEASED, SENT, RAIL_NOT_SUPPORTED or FAILED)"
+        }
         if (actor.id == releasedBy || actor.id in authors) {
             throw FourEyesViolationException("four-eyes: the releaser or a term author must not resolve a payment")
         }
@@ -162,6 +267,17 @@ data class Payment(
     companion object {
         const val MAX_FLOWS = 500
         const val MAX_REASON = 500
+        const val MAX_REFERENCE = 140
+
+        private val SETTLED_ALREADY = setOf(PaymentStatus.SETTLED, PaymentStatus.MANUALLY_SETTLED)
+        private val FAILED_ALREADY = setOf(PaymentStatus.FAILED, PaymentStatus.RETURNED)
+        private val AFTER_RELEASE = setOf(
+            PaymentStatus.SENT,
+            PaymentStatus.SETTLED,
+            PaymentStatus.FAILED,
+            PaymentStatus.MANUALLY_SETTLED,
+            PaymentStatus.RETURNED,
+        )
 
         /**
          * Outgoing payments that have (or may have) left the funding account. Shared by the funding

@@ -189,7 +189,6 @@ class TreasuryServiceProducer {
         cashFlows: CashFlowRepository,
         references: ReferenceRepository,
         ledger: LedgerReadPort,
-        rail: com.openbank.treasury.application.port.out.PaymentRailPort,
         dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
         objectMapper: ObjectMapper,
         clock: Clock,
@@ -199,6 +198,12 @@ class TreasuryServiceProducer {
             defaultValue = "2",
         )
         window: Long,
+        @org.eclipse.microprofile.config.inject.ConfigProperty(
+            name = "openbank.treasury.payments.own-bic",
+            defaultValue = com.openbank.treasury.application.usecase.PaymentService.DEFAULT_OWN_BIC,
+        )
+        ownBic: String,
+        counterparties: CounterpartyRepository,
     ): com.openbank.treasury.application.usecase.PaymentService =
         com.openbank.treasury.application.usecase.PaymentService(
             payments,
@@ -206,7 +211,6 @@ class TreasuryServiceProducer {
             cashFlows,
             references,
             ledger,
-            rail,
             dayCompletion,
             objectMapper,
             clock,
@@ -215,6 +219,12 @@ class TreasuryServiceProducer {
                 meterRegistry.counter("openbank.treasury.funding.exceeded", "currency", ccy).increment()
             },
             onParkedMatch = { meterRegistry.counter("openbank.treasury.payments.match.parked").increment() },
+            ownBic = ownBic,
+            counterparty = { id ->
+                counterparties.findById(id)?.let {
+                    com.openbank.treasury.application.usecase.CounterpartyIdentity(it.name, it.synthetic)
+                }
+            },
         )
 
     /** ADR-0337 amendment: the custodian's period-end statement of holdings (`openbank.treasury.portfolio`). */

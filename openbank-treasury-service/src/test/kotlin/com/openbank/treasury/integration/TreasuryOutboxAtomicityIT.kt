@@ -57,7 +57,8 @@ class TreasuryOutboxAtomicityIT {
 
     class NoDispatchInMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out") +
+            InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out", "treasury-payments-out") +
+                InMemoryConnector.switchIncomingChannelsToInMemory("institution-transfer-status-in") +
                 mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = InMemoryConnector.clear()
