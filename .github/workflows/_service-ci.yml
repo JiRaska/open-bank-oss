@@ -130,8 +130,9 @@ jobs:
           REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          bash .github/scripts/tests/test-resolve-historical-service-ref.sh
           git fetch --quiet origin main
-          resolved_ref="$(git rev-parse --verify "${REF}^{commit}")"
+          resolved_ref="$(bash .github/scripts/resolve-historical-service-ref.sh "$REF")"
           git merge-base --is-ancestor "$resolved_ref" origin/main || {
             echo '::error::Historical provider ref is not on main.'
             exit 1
