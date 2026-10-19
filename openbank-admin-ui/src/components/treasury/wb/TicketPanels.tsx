@@ -13,7 +13,7 @@ import {
   FREQUENCIES, KINDS, LINK_RELATIONS, RATE_TYPES, ROLL_DIRECTIONS, STUBS, type Profile,
 } from './catalogue'
 import { fxCounterAmount, fxSpotDate } from '@/components/treasury/model'
-import { bankToday } from '@/components/balance-sheet/model'
+import { bankToday } from '@/lib/format/bankDate'
 import { errorFor, type Errors, type LegForm, type TicketForm } from './ticket'
 import { Field, gridStyle, Section, useFmt, useRefOptions } from './ui'
 

@@ -5,7 +5,7 @@
 // The deal ticket as form state: defaults, client-side validation that mirrors the server's
 // rules (the server stays the control), the DraftDealRequest it builds, and the mapping of a 422
 // back onto the field it concerns. Pure — unit-tested without rendering.
-import { bankToday, isIsoDate } from '@/components/balance-sheet/model'
+import { bankToday, isIsoDate } from '@/lib/format/bankDate'
 import { fxSpotDate } from '@/components/treasury/model'
 import { profileOf, type AnyProduct } from './catalogue'
 import type { Refusal } from './client'

@@ -30,7 +30,7 @@ import { wbGet, wbGetText, wbPost, wbSend, wbUrl } from '@/components/treasury/w
 import { positionCloseSchema, savedFilterListSchema, savedFilterSchema, ticketDealListSchema, type TicketDeal } from '@/components/treasury/wb/types'
 import { downloadText, Field, Notice, NotAvailable, ReadFailure, Section, useFmt, writeFailureText, th, td, tdNum } from '@/components/treasury/wb/ui'
 import { dealFilterQuery, filtersFromSaved, NO_DEAL_FILTERS, type DealFilters } from '@/components/treasury/wb/model'
-import { bankToday } from '@/components/balance-sheet/model'
+import { bankToday } from '@/lib/format/bankDate'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { WbRead } from '@/components/treasury/wb/client'
