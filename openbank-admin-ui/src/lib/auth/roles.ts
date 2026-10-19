@@ -50,6 +50,12 @@ export const ROLES = {
   // #10896: nostro reconciliation. NostroResource's class-level @RolesAllowed (reads) also admits
   // this role, unlike TreasuryResource's — see the treasury:nostro:read comment below.
   TREASURY_SENIOR_APPROVER: "ROLE_TREASURY_SENIOR_APPROVER",
+  // ADR-0344 workbench roles (treasury API 1.19.0 contract): back office proposes cash-flow
+  // overrides, manual fixings and closes; the reference editor proposes reference-data versions;
+  // the payment releaser alone releases a payment to the rail. None of them approves its own item.
+  TREASURY_BACK_OFFICE: "ROLE_TREASURY_BACK_OFFICE",
+  TREASURY_REFERENCE_EDITOR: "ROLE_TREASURY_REFERENCE_EDITOR",
+  TREASURY_PAYMENT_RELEASER: "ROLE_TREASURY_PAYMENT_RELEASER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -61,7 +67,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR, ROLES.TREASURY_PAYMENT_RELEASER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -123,6 +129,17 @@ export const PERMISSIONS = {
   // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
   "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
   "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
+  // ADR-0344 workbench (treasury API 1.19.0). Reads of the new areas (calendar, analysis, fixings,
+  // market data, payments, reference data, reports, day completion) admit every treasury role;
+  // each write mirrors the contract's own role and is never granted to ADMIN. Four-eyes between two
+  // PEOPLE (creator != approver, never an AI principal) is the domain's 422/403, not a role split.
+  "treasury:workbench:view":    [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR, ROLES.TREASURY_PAYMENT_RELEASER],
+  "treasury:backoffice:write":  [ROLES.TREASURY_BACK_OFFICE],
+  "treasury:confirmation:send": [ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_APPROVER],
+  "treasury:decision:approve":  [ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:reference:propose": [ROLES.TREASURY_REFERENCE_EDITOR, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:reference:approve": [ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:payment:release":   [ROLES.TREASURY_PAYMENT_RELEASER],
   // Pension back office (ADR-0334, #12350): exactly the two pension services' @RolesAllowed.
   // Reads admit OPERATOR, ADMIN and AUDITOR; every write (activate, NAV calculate/publish, strategy
   // change submit/decide/apply) admits OPERATOR and ADMIN. Four-eyes between maker and checker is
@@ -402,6 +419,10 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],
+  ['treasury:workbench:view', [
+    '/treasury/calendar', '/treasury/analysis', '/treasury/fixings', '/treasury/market-data',
+    '/treasury/payments', '/treasury/reference', '/treasury/reports', '/treasury/day-completion',
+  ]],
   ['operator-approvals:decide', ['/approvals/sca', '/approvals/settlement']],
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],

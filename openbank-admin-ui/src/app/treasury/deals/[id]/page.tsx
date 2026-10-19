@@ -19,7 +19,9 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { HumanReference, LoadMoreControl, PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { dealActionUrl, getJson, postJson, treasuryUrl, type DealAction } from '@/components/treasury/api'
-import { counterpartyListSchema, dealSchema, type Counterparty, type Deal } from '@/components/treasury/contracts'
+import { counterpartyListSchema, dealSchema, type Counterparty } from '@/components/treasury/contracts'
+import { DealWorkbench } from '@/components/treasury/wb/DealWorkbench'
+import { ticketDealSchema, type TicketDeal } from '@/components/treasury/wb/types'
 import { dealActions, distinctCounterparties, productLabel, refusalText, STATE_TONE, stateLabel } from '@/components/treasury/model'
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
 import { principalNameFromToken } from '@/components/balance-sheet/model'
@@ -62,7 +64,7 @@ function DealDetail({ id }: { id: string }) {
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const money = (v: number) => v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-  const [deal, setDeal] = useState<Deal | null>(null)
+  const [deal, setDeal] = useState<TicketDeal | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [counterparty, setCounterparty] = useState<Counterparty | null>(null)
   const [reason, setReason] = useState('')
@@ -73,7 +75,7 @@ function DealDetail({ id }: { id: string }) {
 
   const load = useCallback(async () => {
     const [res, cps] = await Promise.all([
-      getJson(treasuryUrl(`/deals/${encodeURIComponent(id)}`), dealSchema),
+      getJson(treasuryUrl(`/deals/${encodeURIComponent(id)}`), ticketDealSchema),
       getJson(treasuryUrl('/counterparties'), counterpartyListSchema),
     ])
     if (!res.ok) { setUnavailable({ kind: res.kind }); return }
@@ -363,6 +365,8 @@ function DealDetail({ id }: { id: string }) {
           </>
         )}
       </div>
+
+      <DealWorkbench deal={deal} actor={actor} roles={roles} onChanged={() => void load()} />
     </div>
   )
 }
