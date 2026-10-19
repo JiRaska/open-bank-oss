@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.1...admin-ui-v3.8.0) (2026-10-19)
+
+
+### Features
+
+* **admin-ui:** publish runtime evidence and verify deployable images ([#13337](https://github.com/JiRaska/open-bank-oss/issues/13337)) ([83a53d7](https://github.com/JiRaska/open-bank-oss/commit/83a53d7c21149e093c569f283c98b10b5b9b0725))
+
+
+### Bug Fixes
+
+* **admin-ui:** distinguish collector failures from service outages ([#13334](https://github.com/JiRaska/open-bank-oss/issues/13334)) ([45aedc3](https://github.com/JiRaska/open-bank-oss/commit/45aedc3427d89028a81162a44fcad6391e5e5bc2))
+
 ## [3.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.0...admin-ui-v3.7.1) (2026-10-18)
 
 

@@ -120,6 +120,9 @@ spec:
             # ever added it must allow TCP 443 to the S3 prefix list.
             - name: OPENBANK_EVIDENCE_STORE_URL
               value: https://openbank-sandbox-test-evidence.s3.eu-north-1.amazonaws.com
+            # Data-only publication and rollback; no GitHub or object-store credential in UI.
+            - name: OPENBANK_GATE_HEALTH_STORE_URL
+              value: $(OPENBANK_EVIDENCE_STORE_URL)/admin-ui/gate-health
 
             # agent-service (MCP) is NOT reached via the discovery proxy: the
             # /api/agent/mcp and /api/agent/chat routes resolve it from this env
