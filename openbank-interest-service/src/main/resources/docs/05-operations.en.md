@@ -119,6 +119,11 @@ the pin back. The transaction adapter is required by CDI, with no production pas
 by reading the committed winner only after the failed transaction has rolled back. V20 backfilled a pin for every existing account from its latest non-reversed
 accrual under a catalog-sourced config; operator-managed accounts get no pin and keep operator semantics.
 
+Accrual rate lookup filters the requested currency. The read-only effective-rate lookup without
+a currency keeps its currency-agnostic behavior. Optional filtering is constructed before binding
+parameters, so a null-test placeholder cannot fail PostgreSQL type inference. Account override,
+product fallback and effective-date ordering are unchanged.
+
 **Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`; the daily run skips the
 account with a WARN and counts `openbank.interest.accrual.catalog.revision.unresolved`) when a pin row
 exists but its revision does not resolve to a cached rate config, or when the account has catalog accrual

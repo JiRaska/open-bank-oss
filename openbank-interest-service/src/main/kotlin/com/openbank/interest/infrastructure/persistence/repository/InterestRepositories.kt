@@ -95,16 +95,17 @@ class InterestRateConfigRepositoryImpl @Inject constructor(
         // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
         // currency == null keeps the currency-agnostic view (the read-only effective-rate lookup);
         // accrue passes a non-null currency so a rate resolves only in its own currency (issue #1265).
-        s.createQuery(
+        val currencyFilter = if (currency == null) "" else "AND currency = :ccy "
+        val query = s.createQuery(
             "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
                 "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
-                "AND (:ccy IS NULL OR currency = :ccy) " +
+                currencyFilter +
                 "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
                 "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
             InterestRateConfigEntity::class.java,
         ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
-            .setParameter("ccy", currency)
-            .setMaxResults(1).singleResultOrNull
+        if (currency != null) query.setParameter("ccy", currency)
+        query.setMaxResults(1).singleResultOrNull
     }.map { it?.let(mapper::toDomain) }
 
     @WithSession

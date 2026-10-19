@@ -205,6 +205,7 @@ internal class RevisionPinSupersedeIT {
         val suffix = UUID.randomUUID().toString().replace("-", "")
         val function = "test_accrual_failure_$suffix"
         val trigger = "test_accrual_failure_$suffix"
+        val sequence = "test_accrual_failure_seen_$suffix"
         val request = mapOf(
             "accountId" to account.toString(),
             "productId" to specification.toString(),
@@ -215,10 +216,13 @@ internal class RevisionPinSupersedeIT {
         dataSource.connection.use { db ->
             try {
                 db.createStatement().use { statement ->
+                    // nextval survives rollback, proving the injected fault was reached after lookup.
                     // Only generated UUID/hex values enter DDL; other accounts are unaffected.
+                    statement.execute("CREATE SEQUENCE $sequence")
                     statement.execute(
                         "CREATE FUNCTION $function() RETURNS trigger LANGUAGE plpgsql AS " +
                             "$$ BEGIN IF NEW.account_id = '$account'::uuid THEN " +
+                            "PERFORM nextval('$sequence'); " +
                             "RAISE EXCEPTION 'synthetic accrual insertion failure'; END IF; RETURN NEW; END; $$",
                     )
                     statement.execute(
@@ -228,12 +232,14 @@ internal class RevisionPinSupersedeIT {
                 }
                 given().contentType("application/json").body(request)
                     .post("/api/v1/interest/accrue").then().statusCode(500)
+                assertTriggerReached(db, sequence)
                 assertThat(accountRows("interest_accruals", account)).isZero()
                 assertThat(accountRows("account_rate_revision_pins", account)).isZero()
             } finally {
                 db.createStatement().use { statement ->
                     statement.execute("DROP TRIGGER IF EXISTS $trigger ON interest_accruals")
                     statement.execute("DROP FUNCTION IF EXISTS $function()")
+                    statement.execute("DROP SEQUENCE IF EXISTS $sequence")
                 }
             }
         }
@@ -251,6 +257,52 @@ internal class RevisionPinSupersedeIT {
                     check(rows.next())
                     assertThat(rows.getObject(1, UUID::class.java)).isEqualTo(successfulRevision)
                 }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `EUR accrual filters a newer USD rate while the read lookup remains currency agnostic`() {
+        publish("0.020000000000000000", LocalDate.of(2027, 7, 1), "c-currency-eur")
+        val account = UUID.randomUUID()
+        val usdConfig = UUID.randomUUID()
+        dataSource.connection.use { db ->
+            db.prepareStatement(
+                "INSERT INTO interest_rate_configs (id, product_id, currency, annual_rate, day_count, " +
+                    "effective_from, active, created_at, updated_at) " +
+                    "VALUES (?, ?, 'USD', 0.090000, 'ACT_365', DATE '2027-07-10', true, NOW(), NOW())",
+            ).use {
+                it.setObject(1, usdConfig)
+                it.setString(2, specification.toString())
+                it.executeUpdate()
+            }
+        }
+        val date = LocalDate.of(2027, 7, 15)
+        val unfiltered = onEventLoop { rates.effectiveRate(account, specification.toString(), date) }
+        assertThat(unfiltered!!.id).isEqualTo(usdConfig)
+        assertThat(unfiltered.currency).isEqualTo("USD")
+
+        val response = given().contentType("application/json").body(
+            mapOf(
+                "accountId" to account.toString(),
+                "productId" to specification.toString(),
+                "balance" to BigDecimal("1000.00"),
+                "currency" to "EUR",
+                "accrualDate" to date.toString(),
+            ),
+        ).post("/api/v1/interest/accrue").then().statusCode(201).extract().response()
+        assertThat(response.jsonPath().getString("configId")).isNotEqualTo(usdConfig.toString())
+        assertThat(response.jsonPath().getString("currency")).isEqualTo("EUR")
+        assertThat(BigDecimal(response.jsonPath().getString("accruedAmount"))).isEqualByComparingTo("0.054795")
+    }
+
+    private fun assertTriggerReached(db: java.sql.Connection, sequence: String) {
+        db.createStatement().use { statement ->
+            statement.executeQuery("SELECT last_value, is_called FROM $sequence").use { rows ->
+                check(rows.next())
+                assertThat(rows.getBoolean("is_called")).isTrue()
+                assertThat(rows.getLong("last_value")).isEqualTo(1)
             }
         }
     }

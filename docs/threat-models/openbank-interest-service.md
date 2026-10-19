@@ -354,7 +354,14 @@ rolls back before the service reads the winner. Existing account-specific overri
 lifetime pin selection, V19/V20 backfill and image holds remain unchanged.
 
 A new HTTP/JDBC regression injects an accrual INSERT failure for one synthetic account and
+verifies a nontransactional sequence marker proving the trigger actually executed, then
 requires both pin and accrual to remain absent; after a newer revision arrives, the identical
 request must pin that successful revision. This test has not run for this draft source and
 requires native CI. Source correspondence is not proof of transaction behavior or activation
 readiness. No catalog-sync activation, migration delivery or deployment is authorized here.
+
+Currency-constrained accrual and currency-agnostic read lookup use explicit query branches,
+retaining the account-override/product-default precedence and effective-date order. A native
+regression places a newer USD rate beside EUR terms: the unrestricted read must choose USD,
+while an EUR accrual must retain the EUR config/rate. This distinguishes a working filter from
+a change that merely avoids a database error. The updated native cases remain mandatory.
