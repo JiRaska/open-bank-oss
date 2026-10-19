@@ -1,7 +1,7 @@
 {
   "openbank-account-service": "0.35.0",
   "openbank-admin-ui": "3.8.5",
-  "openbank-agent-service": "1.31.0",
+  "openbank-agent-service": "1.31.1",
   "openbank-aml-service": "0.13.6",
   "openbank-anacredit-service": "0.10.0",
   "openbank-ap2-service": "0.4.2",
