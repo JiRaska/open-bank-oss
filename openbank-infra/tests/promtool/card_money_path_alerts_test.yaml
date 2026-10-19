@@ -137,10 +137,10 @@ tests:
               domain: payments
               service: card-processing
             exp_annotations:
-              summary: Card spend is missing from the books and will not be retried
+              summary: Card ledger posting remains unconfirmed after retries
               description: >-
-                One or more cleared card transactions exhausted their ledger posting attempts. They are kept in card_clearings with posting_status FAILED or UNKNOWN. Do NOT reset blindly: follow the runbook remedy (prove transaction-service has no booking for the ledger key first, then make the rows due again).
-              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+                One or more cleared card transactions exhausted their ledger posting attempts. Completion remains unconfirmed in FAILED or UNKNOWN state. Do NOT reset blindly: follow the runbook reconciliation, checking transaction history and the idempotency registry before any approved re-drive.
+              runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-card-processing-service/src/main/resources/docs/05-operations.en.md#ledger-posting-failed
 
   - interval: 1m
     input_series:
@@ -150,3 +150,27 @@ tests:
       - eval_time: 30m
         alertname: CardLedgerPostingExhausted
         exp_alerts: []
+
+  # The held older image can emit FAILED without the new exhausted gauge.
+  # The existing warning remains actionable; absence is not proof of recovery or retry.
+  - interval: 1m
+    input_series:
+    - series: openbank_card_processing_ledger_postings_total{service="card-processing",outcome="FAILED"}
+      values: 0+1x60
+    alert_rule_test:
+    - eval_time: 45m
+      alertname: CardLedgerPostingFailing
+      exp_alerts:
+      - exp_labels:
+          severity: warning
+          domain: payments
+          service: card-processing
+          outcome: FAILED
+        exp_annotations:
+          subject_period: continuous
+          summary: Card ledger postings are failing
+          description: The clearing is recorded, but ledger completion must be verified. Once the approved re-driver image is deployed and ledger posting is enabled, retries use backoff under the same idempotency key; exhausted attempts trigger CardLedgerPostingExhausted. Until that rollout, do not assume automatic retry. An absent exhausted gauge is not proof of recovery.
+          runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-card-processing-service/src/main/resources/docs/05-operations.en.md#ledger-posting-failed
+    - eval_time: 45m
+      alertname: CardLedgerPostingExhausted
+      exp_alerts: []

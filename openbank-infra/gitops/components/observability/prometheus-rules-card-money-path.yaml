@@ -69,16 +69,17 @@ spec:
             subject_period: continuous
             summary: Card ledger postings are failing
             description: >-
-              The clearing is recorded and the books are not. The authorisation row and its outbox
-              event commit together, so the record survives — but the money is unbooked until the
-              posting succeeds. The ledger-posting re-driver retries it with backoff under the same
-              idempotency key; if it keeps failing, CardLedgerPostingExhausted fires.
-            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+              The clearing is recorded, but ledger completion must be verified. Once the approved
+              re-driver image is deployed and ledger posting is enabled, retries use backoff under the
+              same idempotency key; exhausted attempts trigger CardLedgerPostingExhausted. Until that
+              rollout, do not assume automatic retry. An absent exhausted gauge is not proof of recovery.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-card-processing-service/src/main/resources/docs/05-operations.en.md#ledger-posting-failed
 
         # 2b. THE RE-DRIVER GAVE UP (#13228). A clearing whose ledger posting used up every attempt is
-        # KEPT (never dropped) and counted here: a debit is not in the books and no automation will
-        # retry it. The gauge is refreshed by the re-driver's own tick; its liveness is watched by the
-        # workflow-liveness rules, so a dead re-driver cannot leave this at a stale zero unnoticed.
+        # KEPT (never dropped) and counted here: posting completion remains unconfirmed and no
+        # further automatic retry is due. The deployed re-driver refreshes this gauge on its tick.
+        # Workflow-liveness rules watch versions that register that workflow; an older held image
+        # without the workflow or gauge is not evidence of a healthy re-driver.
         - alert: CardLedgerPostingExhausted
           expr: openbank_card_processing_ledger_posting_exhausted > 0
           for: 10m
@@ -86,13 +87,13 @@ spec:
             severity: critical
             domain: payments
           annotations:
-            summary: Card spend is missing from the books and will not be retried
+            summary: Card ledger posting remains unconfirmed after retries
             description: >-
-              One or more cleared card transactions exhausted their ledger posting attempts. They are
-              kept in card_clearings with posting_status FAILED or UNKNOWN. Do NOT reset
-              blindly: follow the runbook remedy (prove transaction-service has no booking for the ledger
-              key first, then make the rows due again).
-            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-card-processing.md
+              One or more cleared card transactions exhausted their ledger posting attempts. Completion
+              remains unconfirmed in FAILED or UNKNOWN state. Do NOT reset blindly: follow the runbook
+              reconciliation, checking transaction history and the idempotency registry before any
+              approved re-drive.
+            runbook_url: https://github.com/JiRaska/open-bank-oss/blob/main/openbank-card-processing-service/src/main/resources/docs/05-operations.en.md#ledger-posting-failed
 
         # 3. Token reads served from the bank's MIRROR rather than the network.
         #

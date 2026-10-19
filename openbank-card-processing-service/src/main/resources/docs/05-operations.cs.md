@@ -93,6 +93,8 @@ Definované v `openbank-infra/gitops/components/observability/prometheus-rules-c
 
 ### Zaúčtování FAILED
 
+**Podmínka postupného nasazení.** Následující pokyny popisují schválenou verzi s re-driverem, nikoli důkaz jejího nasazení. Před uvolněním holdu image card služby ověřte V22 poskytovatele a získejte výslovný souhlas vlastníka s opakováním backlogu. Nasazení tohoto image aktivuje re-driver, pokud `ledger-posting-enabled` ponechává výchozí hodnotu `true`; samostatný výchozí vypnutý přepínač re-driveru neexistuje. Dokud hold drží starší image, nepředpokládejte automatické opakování, exhausted metriku ani heartbeat workflow. Jejich nepřítomnost nedokládá nápravu.
+
 Clearing je zaznamenán, účetnictví možná ne. Hledejte řádek logu `ledger posting FAILED|UNKNOWN for authorization …` a čítač `outcome=FAILED|UNKNOWN`. `UNKNOWN` znamená nečitelnou odpověď (tělo, které nejde namapovat, přerušené spojení): není známo, zda ledger debet zaúčtoval. Zaúčtování nese idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>`, takže jeho opakování nemůže účtovat dvakrát.
 
 Každý řádek clearingu nese stav zaúčtování (`card_clearings.posting_status` `PENDING` / `POSTED` / `FAILED` / `UNKNOWN`, `posting_attempts`, `posting_last_error`, `posting_next_attempt_at`), zapsaný ve stejné transakci jako clearing. Plánovaný re-driver (`openbank.card-processing.posting-redrive-cron`, výchozí každou minutu, heartbeat `card-processing-ledger-posting-redrive`) zaúčtuje každý nezaúčtovaný řádek znovu s exponenciálním backoffem (`posting-backoff-seconds` 60, strop `posting-backoff-max-seconds` 3600) nejvýše `posting-max-attempts` (12) krát. Opakování stejného clearingu akvirerem ledger stále nezasáhne; jen re-driver.
