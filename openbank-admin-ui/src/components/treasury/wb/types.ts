@@ -121,6 +121,10 @@ export const ticketDealSchema = dealSchema.extend({
     nearRate: decimal.nullish(), farRate: decimal.nullish(),
   }).nullish(),
   fraTerms: z.object({ period: z.string().nullish(), settlementConvention: z.string().nullish() }).nullish(),
+  depositLoanTerms: z.object({
+    principalAccountId: z.string().nullish(), interestAccountId: z.string().nullish(),
+    earlyWithdrawal: z.object({ allowed: z.boolean(), noticeDays: z.number().nullish(), penaltyBp: z.number().nullish(), note: z.string().nullish() }).nullish(),
+  }).nullish(),
   counterpartyName: z.string().nullish(),
   notional: decimal.nullish(),
   lastChangedAt: z.string().nullish(),

@@ -72,6 +72,10 @@ export function CorrectionsPanel({ deal, actor, roles, onChanged }: { deal: Deal
 
   const who = (holds: boolean) => ({ actor, holds, ai })
 
+  // A deployment that does not serve corrections shows no panel (the deal page already says what is
+  // not available on it); a real read failure is still shown.
+  if (list && !list.ok && list.kind === 'not_available') return null
+
   return (
     <Section title={t('Opravy obchodu', 'Deal corrections')} id="deal-corrections">
       {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}

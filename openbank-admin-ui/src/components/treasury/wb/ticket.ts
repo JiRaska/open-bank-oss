@@ -79,7 +79,10 @@ export type TicketForm = {
   // deposit / loan / cash
   principalAccountId: string
   interestAccountId: string
-  earlyWithdrawalTerms: string
+  earlyWithdrawalAllowed: boolean
+  earlyWithdrawalNoticeDays: string
+  earlyWithdrawalPenaltyBp: string
+  earlyWithdrawalNote: string
   // securities
   securityIsin: string
   nominal: string
@@ -144,7 +147,7 @@ export function emptyTicket(product: AnyProduct, today: string): TicketForm {
     tradeDateTime: '', valueDate: product === 'FX_SPOT' ? '' : today, maturityDate: '', validFrom: '', validTo: '', jurisdiction: 'CZ', calendars: '',
     businessDayConvention: 'MODIFIED_FOLLOWING', fixedConvention: false, rollDirection: 'FROM_START', notionalExchange: false,
     singleCurrency: true, note: '', rationale: '', currency: 'CZK', principal: '', rate: '', buyCurrency: 'EUR', sellCurrency: 'CZK',
-    principalAccountId: '', interestAccountId: '', earlyWithdrawalTerms: '',
+    principalAccountId: '', interestAccountId: '', earlyWithdrawalAllowed: false, earlyWithdrawalNoticeDays: '', earlyWithdrawalPenaltyBp: '', earlyWithdrawalNote: '',
     securityIsin: '', nominal: '', priceMode: 'CLEAN_PRICE', priceValue: '', accruedInterest: '', settlementPlace: '', custodyAccountId: '',
     fxBuyAmount: '', fxSellAmount: '', fxRate: '', forwardPoints: '', nearDate: '', farDate: '', nearRate: '', farRate: '',
     fraPeriod: '', fraSettlement: 'ADVANCE_DISCOUNTED',
@@ -191,6 +194,10 @@ export function ticketFromDeal(d: TicketDeal): TicketForm {
     fxBuyAmount: str(d.fxTerms?.buyAmount), fxSellAmount: str(d.fxTerms?.sellAmount), fxRate: str(d.fxTerms?.rate), forwardPoints: str(d.fxTerms?.forwardPoints),
     nearDate: str(d.fxTerms?.nearDate), farDate: str(d.fxTerms?.farDate), nearRate: str(d.fxTerms?.nearRate), farRate: str(d.fxTerms?.farRate),
     fraPeriod: str(d.fraTerms?.period), fraSettlement: str(d.fraTerms?.settlementConvention) || 'ADVANCE_DISCOUNTED',
+    principalAccountId: str(d.depositLoanTerms?.principalAccountId), interestAccountId: str(d.depositLoanTerms?.interestAccountId),
+    earlyWithdrawalAllowed: d.depositLoanTerms?.earlyWithdrawal?.allowed ?? false,
+    earlyWithdrawalNoticeDays: str(d.depositLoanTerms?.earlyWithdrawal?.noticeDays), earlyWithdrawalPenaltyBp: str(d.depositLoanTerms?.earlyWithdrawal?.penaltyBp),
+    earlyWithdrawalNote: str(d.depositLoanTerms?.earlyWithdrawal?.note),
     collIsin: str(d.collateral?.securityIsin), collNominal: str(d.collateral?.nominal), collDirtyPrice: str(d.collateral?.dirtyPrice),
     collHaircut: str(d.collateral?.haircutPercent), collSubstitution: d.collateral?.substitutionAllowed ?? false, collMarginCall: str(d.collateral?.marginCallThreshold),
     cashAccountId: str(d.settlementAccounts?.cashAccountId), securitiesAccountId: str(d.settlementAccounts?.securitiesAccountId),
@@ -296,6 +303,11 @@ export function validateTicket(f: TicketForm, t: T): Errors {
       if (!pos(f.nearRate)) e.nearRate = t('Zadejte kurz blízké nohy.', 'Enter the near-leg rate.')
       if (!pos(f.farRate)) e.farRate = t('Zadejte kurz vzdálené nohy.', 'Enter the far-leg rate.')
     }
+  }
+  if (p.panels.includes('deposit') && f.earlyWithdrawalAllowed) {
+    const intIn = (v: string, max: number) => /^\d+$/.test(v.trim()) && Number(v) <= max
+    if (f.earlyWithdrawalNoticeDays.trim() && !intIn(f.earlyWithdrawalNoticeDays, 3660)) e.earlyWithdrawalNoticeDays = t('Výpovědní lhůta 0–3660 dní.', 'Notice 0–3660 days.')
+    if (f.earlyWithdrawalPenaltyBp.trim() && !intIn(f.earlyWithdrawalPenaltyBp, 10000)) e.earlyWithdrawalPenaltyBp = t('Sankce 0–10000 bp.', 'Penalty 0–10000 bp.')
   }
   if (p.panels.includes('fra') && !/^\d+\s*[xX×]\s*\d+$/.test(f.fraPeriod.trim())) e.fraPeriod = t('Období ve tvaru 3x6.', 'Period in the form 3x6.')
   if (p.panels.includes('collateral')) {
@@ -467,11 +479,12 @@ export function buildRequest(f: TicketForm): Record<string, unknown> {
     }
   }
   if (p.panels.includes('deposit')) {
-    const inputs: Record<string, string> = {}
-    if (f.principalAccountId.trim()) inputs.principalAccountId = f.principalAccountId.trim()
-    if (f.interestAccountId.trim()) inputs.interestAccountId = f.interestAccountId.trim()
-    if (f.earlyWithdrawalTerms.trim()) inputs.earlyWithdrawalTerms = f.earlyWithdrawalTerms.trim()
-    if (Object.keys(inputs).length) out.inputs = inputs
+    // Typed deposit / loan terms (no longer carried in the agent `inputs`).
+    const early = f.earlyWithdrawalAllowed
+      ? { allowed: true, noticeDays: f.earlyWithdrawalNoticeDays.trim() ? Number(f.earlyWithdrawalNoticeDays) : null, penaltyBp: f.earlyWithdrawalPenaltyBp.trim() ? Number(f.earlyWithdrawalPenaltyBp) : null, note: f.earlyWithdrawalNote.trim() || null }
+      : (f.earlyWithdrawalNote.trim() ? { allowed: false, note: f.earlyWithdrawalNote.trim() } : null)
+    const terms = { principalAccountId: f.principalAccountId.trim() || null, interestAccountId: f.interestAccountId.trim() || null, earlyWithdrawal: early }
+    if (terms.principalAccountId || terms.interestAccountId || terms.earlyWithdrawal) out.depositLoanTerms = terms
   }
   if (!out.maturityDate) delete out.maturityDate
   return out

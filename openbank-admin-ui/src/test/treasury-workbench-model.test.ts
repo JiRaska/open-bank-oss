@@ -358,4 +358,13 @@ describe('report provenance and data gaps', () => {
     expect(dataGapOf({ dataGap: '  ' })).toBeNull()
     expect(dataGapOf(null)).toBeNull()
   })
+
+  it('sends deposit and loan terms typed, never in the agent inputs', () => {
+    const f = { ...emptyTicket('LOAN', '2026-10-19'), principalAccountId: 'ACC-P', interestAccountId: 'ACC-I', earlyWithdrawalAllowed: true, earlyWithdrawalNoticeDays: '31', earlyWithdrawalPenaltyBp: '50', earlyWithdrawalNote: '' }
+    const r = buildRequest(f)
+    expect(r.depositLoanTerms).toEqual({ principalAccountId: 'ACC-P', interestAccountId: 'ACC-I', earlyWithdrawal: { allowed: true, noticeDays: 31, penaltyBp: 50, note: null } })
+    expect(r.inputs).toBeUndefined()
+    const none = buildRequest(emptyTicket('LOAN', '2026-10-19'))
+    expect(none.depositLoanTerms).toBeUndefined()
+  })
 })

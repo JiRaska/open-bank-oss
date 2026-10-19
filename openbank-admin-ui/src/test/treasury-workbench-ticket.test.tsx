@@ -108,7 +108,9 @@ describe('deal ticket — product picker and the catalogue’s fields', () => {
     select(/^(Produkt|Product)$/, 'LOAN')
     expect(label(/Principal account|Účet jistiny/)).toBeTruthy()
     expect(label(/Interest account|Účet úroků/)).toBeTruthy()
-    expect(label(/Early-withdrawal|předčasného výběru/)).toBeTruthy()
+    expect(label(/Early withdrawal allowed|Předčasný výběr povolen/)).toBeTruthy()
+    expect(label(/Notice \(days\)|Výpovědní lhůta/)).toBeTruthy()
+    expect(label(/Penalty \(bp\)|Sankce \(bp\)/)).toBeTruthy()
   })
 
   it('has all ten tabs and reaches each with the keyboard-operable tablist', async () => {

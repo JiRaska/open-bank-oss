@@ -361,16 +361,19 @@ export function FraPanel({ form, set, errors, disabled }: PanelProps) {
   )
 }
 
-export function DepositPanel({ form, set, disabled }: PanelProps) {
+export function DepositPanel({ form, set, errors, disabled }: PanelProps) {
   const { t } = useFmt()
   return (
     <Section title={form.product === 'LOAN' ? t('Úvěr', 'Loan') : t('Hotovost / vklad', 'Cash / deposit')} id="ticket-deposit">
       <div style={gridStyle}>
         <Field label={t('Účet jistiny', 'Principal account')}><RefInput kind="account" value={form.principalAccountId} onChange={v => set('principalAccountId', v)} disabled={disabled} /></Field>
         <Field label={t('Účet úroků', 'Interest account')}><RefInput kind="account" value={form.interestAccountId} onChange={v => set('interestAccountId', v)} disabled={disabled} /></Field>
-        <Field label={t('Podmínky předčasného výběru', 'Early-withdrawal terms')}>
-          <input className="input" value={form.earlyWithdrawalTerms} disabled={disabled} onChange={e => set('earlyWithdrawalTerms', e.target.value)} />
-        </Field>
+        <label style={{ fontSize: 12, alignSelf: 'end' }}>
+          <input type="checkbox" checked={form.earlyWithdrawalAllowed} disabled={disabled} onChange={e => set('earlyWithdrawalAllowed', e.target.checked)} /> {t('Předčasný výběr povolen', 'Early withdrawal allowed')}
+        </label>
+        <Field label={t('Výpovědní lhůta (dny)', 'Notice (days)')} error={errors.earlyWithdrawalNoticeDays ?? null}><input className="input" inputMode="numeric" value={form.earlyWithdrawalNoticeDays} disabled={disabled || !form.earlyWithdrawalAllowed} onChange={e => set('earlyWithdrawalNoticeDays', e.target.value)} /></Field>
+        <Field label={t('Sankce (bp)', 'Penalty (bp)')} error={errors.earlyWithdrawalPenaltyBp ?? null}><input className="input" inputMode="numeric" value={form.earlyWithdrawalPenaltyBp} disabled={disabled || !form.earlyWithdrawalAllowed} onChange={e => set('earlyWithdrawalPenaltyBp', e.target.value)} /></Field>
+        <Field label={t('Poznámka k předčasnému výběru', 'Early-withdrawal note')}><input className="input" value={form.earlyWithdrawalNote} disabled={disabled} onChange={e => set('earlyWithdrawalNote', e.target.value)} /></Field>
       </div>
     </Section>
   )
