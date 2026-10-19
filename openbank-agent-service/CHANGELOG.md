@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.1...agent-service-v1.31.0) (2026-10-19)
+
+
+### Features
+
+* **balance:** expose active holds via GET /{accountId}/holds, the read get_balance_holds has called all along ([#13071](https://github.com/JiRaska/open-bank-oss/issues/13071)) ([df80cbb](https://github.com/JiRaska/open-bank-oss/commit/df80cbb61daebd591f0977f481d3e866eed48f0b))
+
 ## [1.30.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.30.0...agent-service-v1.30.1) (2026-10-19)
 
 
