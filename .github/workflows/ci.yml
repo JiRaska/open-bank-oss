@@ -469,12 +469,12 @@ jobs:
           node-version: "26"
 
       # The evidence publisher governance tests include the strict source-content schema,
-      # which imports the UI's YAML/Zod runtime. Install its locked production dependency
-      # graph only in this shard; the publisher itself lazy-loads that schema only for the
-      # content dataset, keeping other dataset publication independent of UI packages.
-      - name: Install locked Admin UI runtime dependencies for evidence publisher tests
+      # which imports the UI's YAML/Zod runtime. The parallel governance-manifest gate also
+      # needs jsdom, so install the complete locked graph before starting gates. This avoids
+      # a second npm ci replacing node_modules while another gate reads the schema.
+      - name: Install locked Admin UI dependencies before parallel governance gates
         if: contains(matrix.groups, 'supplychain')
-        run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: openbank-admin-ui
 
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
