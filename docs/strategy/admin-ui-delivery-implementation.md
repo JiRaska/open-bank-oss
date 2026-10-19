@@ -56,7 +56,12 @@ it is not proof of workflow identity when the issuer omits that claim.
 
 Rollout sequence, through the normal reviewed infrastructure and GitOps paths:
 
-1. Provision the evidence role and selector policy from the Terraform changes.
+1. Review the infrastructure preview, then dispatch **Platform OpenTofu** on `main`
+   with scope `admin-ui-evidence`. This fixed scope targets the publisher role, its
+   inline policy and the evidence bucket policy. A saved-plan check rejects any other
+   managed-resource mutation or any deletion/replacement before apply. OIDC, state
+   locking and applying the same saved plan remain in the existing workflow. This
+   permits activating the dataset without applying unrelated platform changes.
 2. Configure repository variables `ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN` (output
    `admin_ui_evidence_writer_role_arn`), `ADMIN_UI_EVIDENCE_BUCKET` (existing
    `test_evidence_bucket` output), and `ADMIN_UI_EVIDENCE_REGION` for that deployment.
