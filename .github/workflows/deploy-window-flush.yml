@@ -11,6 +11,10 @@
 # and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
 # rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
 # workflows use. A successful manual dispatch of either producer expedites only its matching PR.
+# An open PR labelled merge-priority:repair defers new arming, including manual expedition.
+# Draft/blocked repairs retain priority until an owner removes the label or closes the PR.
+# This does not revoke already-armed auto-merge; owners must disarm those before repair CI.
+# GitHub offers no atomic label-check-and-arm operation; re-reading narrows that race only.
 
 name: Deploy window flush
 
@@ -124,6 +128,14 @@ jobs:
           if [ "$state" != "free" ]; then
             echo "::error::deploy PR #${ARM} is draft or labelled blocked (deployment hold) - refusing to arm auto-merge."
             exit 1
+          fi
+          # Re-read complete priority inventory immediately before arming, including manual runs.
+          # API/shape failures abort; an explicit repair label has no automatic expiry.
+          d="$RUNNER_TEMP/deploy-window-arm"
+          bash .github/scripts/deploy-window-inputs.sh "$d"
+          if jq -e 'any(.[]; .repair_priority)' "$d/prs.json" >/dev/null; then
+            echo "::notice::Open repair-priority PR defers deploy auto-merge."
+            exit 0
           fi
           id="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${ARM}" --jq .node_id)"
           # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell one

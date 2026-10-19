@@ -9,6 +9,12 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 afterEach(cleanup)
 
+function expectSemanticTone(element: HTMLElement, color: string, background: string) {
+  expect(element).toHaveStyle({ color })
+  // Inspect the authored token: computed shorthand serialization varies across DOM versions.
+  expect(element.style.getPropertyValue('background')).toBe(background)
+}
+
 describe('shared agent findings presentation', () => {
   it('does not reintroduce raw colour literals in the shared panel', () => {
     const source = readFileSync(path.join(process.cwd(), 'src/components/agent/AgentInsightsPanel.tsx'), 'utf8')
@@ -24,10 +30,7 @@ describe('shared agent findings presentation', () => {
       </LanguageProvider>,
     )
 
-    expect(screen.getByText('FUTURE_STATE')).toHaveStyle({
-      color: 'var(--text-secondary)',
-      background: 'var(--surface-3)',
-    })
+    expectSemanticTone(screen.getByText('FUTURE_STATE'), 'var(--text-secondary)', 'var(--surface-3)')
   })
 
   it('uses semantic AA text on finding tones and human-decision controls', () => {
@@ -42,12 +45,9 @@ describe('shared agent findings presentation', () => {
       </LanguageProvider>,
     )
 
-    expect(screen.getByText('critical')).toHaveStyle({ color: 'var(--danger-text)', background: 'var(--danger-bg)' })
-    expect(screen.getByText('APPROVED')).toHaveStyle({ color: 'var(--success-text)', background: 'var(--success-bg)' })
-    expect(screen.getByText('Evidence')).toHaveStyle({ color: 'var(--accent-text)', background: 'var(--accent-bg)' })
-    expect(screen.getByRole('button', { name: 'Approve' })).toHaveStyle({
-      color: 'var(--success-text)',
-      background: 'var(--success-bg)',
-    })
+    expectSemanticTone(screen.getByText('critical'), 'var(--danger-text)', 'var(--danger-bg)')
+    expectSemanticTone(screen.getByText('APPROVED'), 'var(--success-text)', 'var(--success-bg)')
+    expectSemanticTone(screen.getByText('Evidence'), 'var(--accent-text)', 'var(--accent-bg)')
+    expectSemanticTone(screen.getByRole('button', { name: 'Approve' }), 'var(--success-text)', 'var(--success-bg)')
   })
 })
