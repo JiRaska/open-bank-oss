@@ -41,6 +41,7 @@ import tempfile
 FIXTURE_DIR = "openbank-treasury-service/src/test/resources/parity"
 ORACLE = "openbank-treasury-service/src/test/parity-oracle/oracle.py"
 REPLAY = "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/TreasuryParityReplayTest.kt"
+HELPER = "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/ParityFixtures.kt"
 SOURCES = {"independent-oracle", "hand-computed", "published-example"}
 REQUIRED = ("id", "product", "source", "sourceNote", "deal", "expected", "tolerance")
 FLOW_KEYS = ("legIndex", "periodIndex", "kind", "paymentDate", "notional", "rate", "amount")
@@ -163,7 +164,11 @@ def check_replay(root: pathlib.Path, fixtures: int):
     out = []
     if re.search(r"@Disabled\b", text):
         out.append(f"{REPLAY} is @Disabled: the fixtures are not replayed")
-    if 'getResource("/parity")' not in text:
+    helper = root / HELPER
+    helper_text = helper.read_text(encoding="utf-8") if helper.exists() else ""
+    whole_dir = 'getResource("/parity")' in text or (
+        "ParityFixtures.fixtures()" in text and 'getResource("/parity")' in helper_text)
+    if not whole_dir:
         out.append(f"{REPLAY} does not replay the whole /parity resource directory")
     m = re.search(r"MIN_FIXTURES\s*=\s*(\d+)", text)
     if not m:
@@ -183,6 +188,8 @@ def self_test(root: pathlib.Path) -> int:
         (t / REPLAY).parent.mkdir(parents=True)
         replay_text = (root / REPLAY).read_text(encoding="utf-8")
         (t / REPLAY).write_text(replay_text, encoding="utf-8")
+        helper_text = (root / HELPER).read_text(encoding="utf-8")
+        (t / HELPER).write_text(helper_text, encoding="utf-8")
         fdir = t / FIXTURE_DIR
         fdir.mkdir(parents=True)
         originals = {p.name: p.read_text(encoding="utf-8") for p in real.glob("*.json")}
@@ -253,6 +260,11 @@ def self_test(root: pathlib.Path) -> int:
         rc, f, _ = run(t)
         cases.append(("known-positive: a @Disabled replay test fails", rc == 1 and any("@Disabled" in x for x in f)))
         (t / REPLAY).write_text(replay_text, encoding="utf-8")
+
+        (t / HELPER).write_text(helper_text.replace('getResource("/parity")', 'getResource("/parity/irs")'), encoding="utf-8")
+        rc, f, _ = run(t)
+        cases.append(("known-positive: a replay narrowed to a sub-directory fails", rc == 1 and any("whole /parity" in x for x in f)))
+        (t / HELPER).write_text(helper_text, encoding="utf-8")
 
         for p in fdir.glob("*.json"):
             p.unlink()

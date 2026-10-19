@@ -1034,6 +1034,7 @@ gates:
       - ".github/scripts/check-treasury-parity-fixtures.py"
       - "openbank-treasury-service/src/test/parity-oracle/oracle.py"
       - "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/TreasuryParityReplayTest.kt"
+      - "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/ParityFixtures.kt"
     selftest: |
       python3 .github/scripts/check-treasury-parity-fixtures.py --self-test
       python3 -m unittest discover -s openbank-treasury-service/src/test/parity-oracle -p 'test_*.py'
