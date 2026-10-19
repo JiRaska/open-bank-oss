@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Admin UI delivery and trustworthy operational evidence
 
-Status: proposal for incremental implementation. This document does not authorize
+Status: incremental implementation in progress; see [implementation and acceptance evidence](admin-ui-delivery-implementation.md). This document does not authorize
 changes to deployment approvals or replace the existing governance rules.
 
 The admin console should let an operator make the right decision quickly. That
@@ -22,8 +22,8 @@ of executable code.
 The CI workflow already caches `.next/cache` and reuses its production build for
 Playwright through `OPENBANK_E2E_PREBUILT`. Preserve these optimizations. The
 container build is a separate compilation: a host-side compiler cache does not
-automatically reach that build. The build script currently supplies no external
-BuildKit cache arguments. Measure cache reuse before assuming all layers rebuild.
+automatically reach that build. The deployment now supplies a scoped external BuildKit cache. Measure its hit rate and
+wall time before attributing an end-to-end improvement to cache reuse.
 
 Relevant sources: `openbank-admin-ui/Dockerfile`,
 `openbank-admin-ui/playwright.config.ts`, `.github/workflows/ci.yml`,
