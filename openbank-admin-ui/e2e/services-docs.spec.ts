@@ -44,7 +44,7 @@ test.describe('/services — Service Documentation page', () => {
   test('shows correct coverage count when all services have docs', async ({ page }) => {
     // Empty off-cluster health falls back to the mocked build catalog.
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     // All docs requests return docs
     await page.route('**/api/services/*/docs', route =>
@@ -68,7 +68,7 @@ test.describe('/services — Service Documentation page', () => {
 
   test('shows 0/N when no services have docs', async ({ page }) => {
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     // All docs requests return 404 (no docs)
     await page.route('**/api/services/*/docs', route =>
@@ -87,7 +87,7 @@ test.describe('/services — Service Documentation page', () => {
 
   test('documented services appear in the documented section', async ({ page }) => {
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     // Playwright uses LIFO: last-registered handler wins for a given URL.
     // Register the catch-all 404 first so the specific account handler (registered
@@ -107,7 +107,7 @@ test.describe('/services — Service Documentation page', () => {
 
   test('page renders inside app shell (sidebar + header)', async ({ page }) => {
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     await page.route('**/api/services/*/docs', route =>
       route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found', service: 'x' }) })
@@ -144,7 +144,7 @@ test.describe('/services — Service Documentation page', () => {
       }) })
     )
     await page.route('**/api/services/health', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static', discoveryStatus: 'static' }) })
     )
     await page.route('**/api/services/*/docs', route =>
       route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })

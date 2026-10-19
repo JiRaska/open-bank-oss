@@ -85,3 +85,7 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 ## Chybový model
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapování je centralizováno v `ExceptionMappers` a generický fallback je delegován na `openbank-libs` (ADR-0049 D4 — služba neregistruje catch-all `Exception` mapper). Typické stavy: `400` (nevyvážené / neplatné zaúčtování), `401`/`403` (auth), `404` (neznámý zápis), `409` (konflikt idempotency klíče).
+
+## Mapa účetních tříd (ADR-0341 D3)
+
+Zdroje posílají na řádku žurnálu `accountingClass` a roli a ledger určí GL účet z vlastní tabulky `accounting_class_gl_map` (migrace V31). Čtecí strana je `GET /api/v1/accounting-classes` a `GET /api/v1/accounting-classes/resolve` pro regulatorní čtenáře a odsouhlasení. Zápisový endpoint záměrně neexistuje: mapa se mění revidovanou migrací stejně jako účtový rozvrh.

@@ -137,3 +137,9 @@ CI per-service pipeline (`.github/workflows/ci-account-service.yml`):
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Volání transaction-service
+
+Úvěrování uvítacího bonusu se odesílá přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319), která HTTP odpověď klasifikuje na jednom místě. Stav 2xx znamená přiznáno jen tehdy, když fasáda přečte transakci ve stavu COMPLETED a adaptér ověří přítomnost jejího identifikátoru; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 nebo odmítnutí 400/422 nadále způsobí selhání přiznání, stejně jako dříve výjimka klienta. Jakýkoli jiný stav nebo ztracené spojení se vyhodí, aby volající zopakoval pokus; požadavek musí zachovat původní idempotentní klíč `welcome-bonus-<accountId>`. Tento zdroj nedokládá živou ochranu poskytovatele pro každé souběžné nebo vícedenní opakování. Konfigurace se nezměnila.
+
+Chybějící identifikátor transakce zůstává nejistým výsledkem a nikdy nepotvrdí přiznání bonusu. Zachovává se tím původní požadavek vazby potvrzení. Oprava nemění přijímané stavy 200/201/202/206. Existující logování výjimek mimo tuto kontrolu není prohlášené za anonymní.

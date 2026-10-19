@@ -14,6 +14,10 @@ The proposal adapter sends requests for the configured GitHub API URL through `S
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
 
+## Trace continuity into Temporal
+
+The fleet `WorkflowClientOptions` (built by `TemporalClientProducer` in `openbank-libs-temporal`) register an OpenTelemetry context propagator, so the check workflow and its activities run in the trace of whoever started them. `TemporalTracePropagationTest` proves an activity sees the caller's trace id, and that without the propagator it sees none.
+
 ## Scheduler heartbeat
 
 The daily check scheduler registers the workflow-liveness heartbeat `liveness-sentinel-check` at startup and records a success only after a check was actually dispatched; a fire skipped because Temporal is disabled does not count. The sentinel cannot watch itself, so `LivenessSentinelHeartbeatAbsent` (in `prometheus-rules-workflow-liveness.yaml`) alerts when that series is missing for 30 minutes.
