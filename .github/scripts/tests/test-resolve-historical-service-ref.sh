@@ -33,10 +33,12 @@ resolved_branch="$(cd "$tmp" && bash "$resolver" main)"
 [ "$resolved_branch" = "$main_sha" ]
 resolved_sha="$(cd "$tmp" && bash "$resolver" "$main_sha")"
 [ "$resolved_sha" = "$main_sha" ]
+resolved_abbreviated_sha="$(cd "$tmp" && bash "$resolver" "${main_sha:0:10}")"
+[ "$resolved_abbreviated_sha" = "$main_sha" ]
 
 if (cd "$tmp" && bash "$resolver" missing-branch >/dev/null 2>&1); then
   echo 'unfetched historical branch unexpectedly resolved' >&2
   exit 1
 fi
 
-echo 'resolve-historical-service-ref: detached branch, SHA, and missing-ref controls passed'
+echo 'resolve-historical-service-ref: detached branch, full/abbreviated SHA, and missing-ref controls passed'
