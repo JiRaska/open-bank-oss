@@ -70,6 +70,11 @@ class TreasuryDealConsumer {
             count(OUTCOME_IGNORED)
             return
         }
+        if (!isActual(payload)) {
+            // ADR-0344 D2: a PLANNED (forecast) or HYPOTHETICAL deal is not exposure; never booked here.
+            count(OUTCOME_NOT_ACTUAL)
+            return
+        }
         val event = parse(type, payload)
         if (event == null) {
             count(OUTCOME_MALFORMED)
@@ -117,6 +122,14 @@ class TreasuryDealConsumer {
         }
     }
 
+    /** Absent `kind` = ACTUAL (every event before treasury AsyncAPI 1.7.0); unparseable JSON is judged by [parse]. */
+    @Suppress("TooGenericExceptionCaught")
+    internal fun isActual(payload: String): Boolean = try {
+        objectMapper.readTree(payload)?.get("kind")?.takeIf { it.isTextual }?.asText()?.let { it == "ACTUAL" } ?: true
+    } catch (e: Exception) {
+        true
+    }
+
     private fun malformed(field: String, payload: String): TreasuryDealEvent? {
         log.warnf("[treasury-deal-in] deal event without a valid %s, acked: %.200s", field, payload)
         return null
@@ -136,6 +149,7 @@ class TreasuryDealConsumer {
         const val OUTCOME_WRITE_ERROR = "write_error"
         const val OUTCOME_UNSUPPORTED_PRODUCT = "unsupported_product"
         const val OUTCOME_IGNORED = "ignored"
+        const val OUTCOME_NOT_ACTUAL = "not_actual"
 
         /** Known treasury types that move nothing in the book (see the class KDoc). */
         val IGNORED_TYPES: Set<String> = setOf(

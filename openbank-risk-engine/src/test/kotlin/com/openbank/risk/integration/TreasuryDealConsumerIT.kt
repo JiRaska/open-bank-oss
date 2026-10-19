@@ -126,6 +126,26 @@ class TreasuryDealConsumerIT {
         assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId }).contains(deal)
     }
 
+    @Test
+    fun `a PLANNED deal is not exposure - counted not_actual and never stored, while ACTUAL and absent kind are`() {
+        val source = connector.source<Any>("treasury-deal-in")
+        val planned = UUID.randomUUID()
+        val plannedPayload = """
+            {"dealId":"$planned","product":"CNB_DEPOSIT_FACILITY","counterpartyId":"CNB","currency":"CZK",
+             "principal":1000.00,"rate":2.50,"valueDate":"$valueDate","maturityDate":"2026-09-28",
+             "createdBy":"d","approvedBy":"a","kind":"PLANNED",
+             "occurredAt":"2026-09-25T07:40:00Z","sourceService":"treasury-service"}
+        """.trimIndent()
+        val before = outcome("not_actual")
+        source.send(record("treasury.deal.booked.v1", plannedPayload))
+        await { outcome("not_actual") >= before + 1.0 }
+        assertThat(runBlocking { book.dealsOnBook(valueDate) }.map { it.dealId }).doesNotContain(planned)
+        assertThat(runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.map { it.dealId }).doesNotContain(planned)
+        // An explicit ACTUAL is processed exactly like an event without the field.
+        source.send(record("treasury.deal.settled.v1", payload(""","ledgerJournalId":"${UUID.randomUUID()}","kind":"ACTUAL"""")))
+        awaitState("SETTLED")
+    }
+
     /**
      * ADR-0315 D2: treasury now emits `treasury.deal.confirmed.v1` between booked and settled. It
      * moves nothing the engine models, so it is acked as `ignored` — never `malformed` — and the
