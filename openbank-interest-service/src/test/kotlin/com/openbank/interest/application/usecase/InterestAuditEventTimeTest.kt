@@ -7,6 +7,7 @@ package com.openbank.interest.application.usecase
 import com.openbank.interest.application.port.out.AccountDirectoryPort
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.InterestAccrualRepository
+import com.openbank.interest.application.port.out.InterestAccrualTransaction
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.LedgerPostingPort
@@ -44,8 +45,9 @@ class InterestAuditEventTimeTest {
 
     private val clock = Clock.fixed(Instant.parse("2026-02-01T11:30:00Z"), ZoneOffset.UTC)
     private val configRepo = mockk<InterestRateConfigRepository>()
-    private val accrualRepo = mockk<InterestAccrualRepository>().also { repository ->
-        every { repository.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
+    private val accrualRepo = mockk<InterestAccrualRepository>()
+    private val accrualTransactions = mockk<InterestAccrualTransaction>().also { transactions ->
+        every { transactions.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
     }
     private val capitalizationRepo = mockk<InterestCapitalizationRepository>()
     private val taxProfilePort = mockk<TaxProfilePort>()
@@ -61,7 +63,7 @@ class InterestAuditEventTimeTest {
         "ACT_365",
         "SAVINGS",
         clock,
-    )
+    ).also { it.accrualTransactions = accrualTransactions }
 
     private val whtSlot: CapturingSlot<WithholdingTax> = slot()
     private val eventSlot: CapturingSlot<OutboxMessage> = slot()

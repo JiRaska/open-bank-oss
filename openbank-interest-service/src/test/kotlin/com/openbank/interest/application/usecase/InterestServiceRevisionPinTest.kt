@@ -5,6 +5,7 @@ package com.openbank.interest.application.usecase
 
 import com.openbank.interest.application.port.out.AccountDirectoryPort
 import com.openbank.interest.application.port.out.InterestAccrualRepository
+import com.openbank.interest.application.port.out.InterestAccrualTransaction
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.LedgerPostingPort
@@ -37,8 +38,9 @@ import java.util.UUID
 class InterestServiceRevisionPinTest {
     private val clock = Clock.fixed(Instant.parse("2027-02-10T00:00:00Z"), ZoneOffset.UTC)
     private val configRepo = mockk<InterestRateConfigRepository>()
-    private val accrualRepo = mockk<InterestAccrualRepository>().also { repository ->
-        every { repository.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
+    private val accrualRepo = mockk<InterestAccrualRepository>()
+    private val accrualTransactions = mockk<InterestAccrualTransaction>().also { transactions ->
+        every { transactions.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
     }
     private val pins = mockk<RateRevisionPinRepository>()
     private val service = InterestService(
@@ -51,7 +53,10 @@ class InterestServiceRevisionPinTest {
         "ACT_365",
         "SAVINGS",
         clock,
-    ).also { it.revisionPins = pins }
+    ).also {
+        it.revisionPins = pins
+        it.accrualTransactions = accrualTransactions
+    }
 
     private val account = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val request = AccrualRequest(account, "SAVINGS", BigDecimal("1000.00"), "EUR", LocalDate.of(2027, 2, 10))

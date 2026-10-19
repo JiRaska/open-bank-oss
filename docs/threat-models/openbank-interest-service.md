@@ -348,7 +348,7 @@ money-path service, not adjacent.
 ### First catalog pin and accrual atomicity
 
 The first catalog revision pin must not survive an unsuccessful accrual write. The accrual
-repository's transaction boundary encompasses natural-key replay lookup, rate/pin resolution
+dedicated accrual unit-of-work boundary encompasses natural-key replay lookup, rate/pin resolution
 and accrual persistence. Nested pin writes share that transaction; a failed unique-key insert
 rolls back before the service reads the winner. Existing account-specific override precedence,
 lifetime pin selection, V19/V20 backfill and image holds remain unchanged.

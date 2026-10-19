@@ -12,6 +12,7 @@ import com.openbank.interest.application.port.out.AccountDirectoryPort
 import com.openbank.interest.application.port.out.AccountSnapshot
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.InterestAccrualRepository
+import com.openbank.interest.application.port.out.InterestAccrualTransaction
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.LedgerPostingPort
@@ -115,12 +116,16 @@ class InterestService(
     @Inject
     internal var revisionPins: RateRevisionPinRepository? = null
 
+    /** Required unit-of-work boundary; handmade tests must supply their explicit test double. */
+    @Inject
+    internal lateinit var accrualTransactions: InterestAccrualTransaction
+
     private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
         // The catalog pin and the day's accrual share one transaction. Read the existing natural
         // key before rate resolution so a retry still works after its config is deactivated.
-        accrualRepo.withAccrual {
+        accrualTransactions.withAccrual {
             accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
                 .flatMap { existing ->
                     if (existing != null) Uni.createFrom().item(existing) else accrueNew(request)

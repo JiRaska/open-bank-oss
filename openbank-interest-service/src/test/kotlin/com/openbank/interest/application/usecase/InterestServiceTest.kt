@@ -11,6 +11,7 @@ import com.openbank.interest.application.port.out.AccountSnapshot
 import com.openbank.interest.application.port.out.BalanceSnapshot
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.InterestAccrualRepository
+import com.openbank.interest.application.port.out.InterestAccrualTransaction
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.LedgerPostingPort
@@ -54,8 +55,9 @@ class InterestServiceTest {
 
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val configRepo = mockk<InterestRateConfigRepository>()
-    private val accrualRepo = mockk<InterestAccrualRepository>().also { repository ->
-        every { repository.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
+    private val accrualRepo = mockk<InterestAccrualRepository>()
+    private val accrualTransactions = mockk<InterestAccrualTransaction>().also { transactions ->
+        every { transactions.withAccrual(any()) } answers { firstArg<() -> Uni<InterestAccrual>>().invoke() }
     }
     private val capitalizationRepo = mockk<InterestCapitalizationRepository>()
     private val taxProfilePort = mockk<TaxProfilePort>()
@@ -71,7 +73,7 @@ class InterestServiceTest {
         "ACT_365",
         "SAVINGS",
         clock,
-    )
+    ).also { it.accrualTransactions = accrualTransactions }
 
     // Captures of the single-transaction capitalization write, filled by stubCapitalization().
     private val capSlot: CapturingSlot<InterestCapitalization> = slot()
