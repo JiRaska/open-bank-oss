@@ -15,6 +15,9 @@ describe('dashboard fleet-health summary', () => {
       total: 3,
       deployed: 2,
       healthy: 1,
+      observed: 2,
+      unknown: 0,
+      unhealthy: 1,
       notDeployed: 1,
       averageHealthCheckLatencyMs: 30,
     })
@@ -30,4 +33,26 @@ describe('dashboard fleet-health summary', () => {
     expect(fleetHealthState(summarizeFleetHealth([{ deployed: true, up: true, latencyMs: 8 }]))).toBe('healthy')
     expect(fleetHealthState(summarizeFleetHealth([{ deployed: true, up: false, latencyMs: 8 }]))).toBe('degraded')
   })
+
+  it('keeps unknown deployed services out of unhealthy counts and neutralizes incomplete samples', () => {
+    const summary = summarizeFleetHealth([
+      { deployed: true, up: true, latencyMs: 8 },
+      { deployed: true, up: false, unknown: true, latencyMs: 9 },
+    ])
+    expect(summary).toMatchObject({ deployed: 2, healthy: 1, observed: 1, unknown: 1, unhealthy: 0 })
+    expect(fleetHealthState(summary)).toBe('unavailable')
+    expect(fleetHealthState(summarizeFleetHealth([
+      { deployed: true, up: true, latencyMs: 8 },
+      { deployed: true, up: false, latencyMs: 9 },
+    ]))).toBe('degraded')
+  })
+  it('keeps a confirmed outage visible when another observation is unknown', () => {
+    const summary = summarizeFleetHealth([
+      { deployed: true, up: false, latencyMs: null },
+      { deployed: true, up: false, unknown: true, latencyMs: null },
+    ])
+    expect(summary).toMatchObject({ observed: 1, unhealthy: 1, unknown: 1 })
+    expect(fleetHealthState(summary)).toBe('degraded')
+  })
+
 })

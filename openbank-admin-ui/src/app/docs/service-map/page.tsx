@@ -22,6 +22,7 @@ import {
   type MapExternalEdge as ExternalEdgeT, type MapExternalNode as ExternalNodeT,
   type MapInfraEdge as InfraEdgeT, type MapInfraNode as InfraNodeT,
 } from '@/lib/governance/service-map-evidence'
+import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 
 // Editorial PROSE per node (display name, map group, one-line description), keyed by registry id.
 // This is NOT the service list: the nodes are one per runnable catalog module (see buildServices),
@@ -473,10 +474,9 @@ export default function ServiceMapPage() {
   // unique across the fleet and an in-cluster inventory is keyed by workload.
   const healthStatuses = useMemo(() => {
     const out: Record<string, HealthStatus> = {}
-    if (healthEntries.length === 0) return out
     for (const svc of SERVICES) {
-      const entry = healthEntries.find(h => h.container === svc.container || h.container === svc.k8s || h.name === svc.k8s || h.name === svc.container.replace(/^openbank-/, ''))
-      out[svc.id] = entry?.status ?? 'UNKNOWN'
+      const entries = healthEntries.filter(h => h.container === svc.container || h.container === svc.k8s || h.name === svc.k8s || h.name === svc.container.replace(/^openbank-/, ''))
+      out[svc.id] = aggregateHealthStatuses(entries.map(entry => entry.status))
     }
     return out
   }, [healthEntries, SERVICES])
