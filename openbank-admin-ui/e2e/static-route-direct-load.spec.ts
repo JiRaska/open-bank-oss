@@ -38,6 +38,16 @@ test.describe('read-only direct loads for static pages outside the sidebar', () 
           writeRequests.push(`${request.method()} ${url.pathname}`)
         }
       })
+      // Observe and block same-origin writes before a page effect can reach a business API.
+      // The assertion below still fails the smoke if a route attempts one; it is never sent.
+      await page.route('**/*', route => {
+        const request = route.request()
+        const url = new URL(request.url())
+        if (url.origin === new URL(baseURL!).origin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
+          return route.fulfill({ status: 405, contentType: 'application/json', body: '{"error":"read_only_direct_load_smoke"}' })
+        }
+        return route.continue()
+      })
 
       const suffix = fixture.route === '/auth/error' ? '?error=AccessDenied'
         : fixture.route === '/auth/forbidden' ? '?path=%2Fapprovals%2Fcommunication'
