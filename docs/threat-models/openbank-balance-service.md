@@ -490,3 +490,21 @@ reconcile them, then revert code. The preference table can be retained for later
 V16 migration contains its explicit drop sequence.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+## Active-holds read boundary
+
+`GET /api/v1/balances/{accountId}/holds` adds a read of hold ids, amounts, currencies,
+reasons, references and lifecycle timestamps for agent-service's `get_balance_holds` tool.
+Cross-account disclosure reveals financial metadata even though this endpoint moves no money.
+The handler retains the sibling read role gate (API/viewer/operator/admin) and `balance.read`
+OPA check. With `X-Customer-Party-Id` from trusted customer-edge, the account-service owner must
+match; unknown accounts and mismatches receive the same 404. Without that header this is the
+existing service-reader path: header absence is not proof of retail ownership. Do not treat
+coarse ROLE_API admission or test identities as evidence of a verified production caller.
+
+The repository excludes released holds and expiry at/before the injected service clock.
+It does not release the expired reservation or change available/reserved balances, and emits no
+outbox event. Consumers must not infer released funds from an absent row. Tests cover real
+HTTP/DB filtering and unchanged rows, anonymous/wrong-role rejection, and owner-guard delegation;
+consumer/provider Pact replay pins the response and the missing-identity refusal. These checks
+do not replace review of trusted header provenance, live OPA policy or production credentials.

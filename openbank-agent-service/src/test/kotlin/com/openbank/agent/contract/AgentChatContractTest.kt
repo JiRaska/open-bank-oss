@@ -63,8 +63,10 @@ class AgentChatContractTest {
     fun `the contract documents the no-tools catalog draft review seam`() {
         assertThat(openapi)
             .contains("/agent/catalog-reviews:")
+            .contains("operationId: catalogReviewCapability")
             .contains("operationId: createCatalogReview")
-            .contains("self-hosted model with no tools")
+            .contains("catalog-only sandbox opt-in is enabled")
+            .contains("registered through the in-cluster LiteLLM gateway")
             .contains("cannot mutate or publish catalog content")
     }
 

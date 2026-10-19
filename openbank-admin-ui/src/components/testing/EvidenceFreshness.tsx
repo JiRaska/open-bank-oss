@@ -26,14 +26,18 @@ export function EvidenceFreshness({ evidence, components }: { evidence?: TestEvi
     ? new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(evidence.asOf))
     : t('neznámé', 'unknown')
   const rc = evidence.runningCommits
-  const src = evidence.source === 'running-commit'
-    ? t('evidence pro běžící commit', 'evidence for the running commit')
-    : t('vestavěný snapshot', 'bundled snapshot')
+  const src = evidence.source === 'mixed'
+    ? t('publikovaný snapshot + důkazy běžících commitů', 'published snapshot + running-commit evidence')
+    : evidence.source === 'published-snapshot'
+      ? t('nezávisle publikovaný snapshot', 'independently published snapshot')
+      : evidence.source === 'unavailable'
+        ? t('zdroj snapshotu nedostupný', 'snapshot source unavailable')
+        : t('vestavěný snapshot', 'bundled snapshot')
   return <section aria-label={t('Čerstvost důkazů', 'Evidence freshness')} data-testid="evidence-freshness"
     style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 8, padding: 12, fontSize: 12 }}>
     <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-        {evidence.source === 'running-commit' ? <GitCommitHorizontal size={13} aria-hidden="true" /> : <Package size={13} aria-hidden="true" />}
+        {evidence.source === 'mixed' ? <GitCommitHorizontal size={13} aria-hidden="true" /> : <Package size={13} aria-hidden="true" />}
         <strong>{t('Zdroj', 'Source')}:</strong> {src}
       </span>
       <span><strong>{t('Snapshot k', 'Snapshot as of')}:</strong> {asOf}{evidence.ageSeconds !== null ? ` (${formatAge(evidence.ageSeconds, language === 'cs')})` : ''}</span>
@@ -41,14 +45,21 @@ export function EvidenceFreshness({ evidence, components }: { evidence?: TestEvi
         ? <span>{t('Běžící commity nejsou známé (mimo cluster).', 'Running commits unknown (off-cluster).')}</span>
         : <span data-testid="running-commit-match"><strong>{t('Odpovídá běžícímu kódu', 'Matches running code')}:</strong> {rc.matchingSnapshot}/{components}
           {rc.fromStore > 0 && <> · {t('ze store', 'from store')} {rc.fromStore}</>}
+          {rc.fromBundledFallback > 0 && <> · {t('starší snapshot fallback', 'bundled fallback')} {rc.fromBundledFallback}</>}
+          {rc.mismatchedEvidence > 0 && <> · {t('commity bez shody', 'commit mismatches')} {rc.mismatchedEvidence}</>}
           {rc.fromEquivalentBuild > 0 && <> ({t('z toho testováno na build-identickém commitu', 'of which tested on a build-identical commit')}: {rc.fromEquivalentBuild})</>}
         </span>}
+      {evidence.dataset.sourceSha && <span><strong>Publisher:</strong> {evidence.dataset.sourceSha.slice(0, 8)} · run {evidence.dataset.runId}/{evidence.dataset.runAttempt}</span>}
+      {evidence.dataset.snapshotAgeSeconds !== null && <span><strong>{t('Stáří dat', 'Dataset age')}:</strong> {formatAge(evidence.dataset.snapshotAgeSeconds, language === 'cs')}</span>}
     </div>
-    {evidence.stale && <div role="alert" style={{ marginTop: 8, color: 'var(--warning-text)', display: 'flex', gap: 6, alignItems: 'center' }}>
+    {(evidence.stale || evidence.dataset.status === 'unavailable') && <div role="alert" style={{ marginTop: 8, color: 'var(--warning-text)', display: 'flex', gap: 6, alignItems: 'center' }}>
       <TriangleAlert size={13} aria-hidden="true" />
-      {evidence.asOf
+      {evidence.dataset.status === 'unavailable'
+        ? t('Konfigurovaný důkazní snapshot není dostupný; obrazový fallback nebyl použit.', 'The configured evidence snapshot is unavailable; the image-bundled fallback was not used.')
+        : evidence.asOf
         ? t('Snapshot je starší než 24 hodin — čísla nemusí odpovídat běžícímu kódu.', 'The snapshot is older than 24 hours — figures may not describe the running code.')
         : t('Stáří dat nelze určit — čísla nelze považovat za aktuální.', 'Data age cannot be determined — do not treat the figures as current.')}
     </div>}
+    {evidence.dataset.error && <div role="status" style={{ marginTop: 6, color: 'var(--text-tertiary)', fontSize: 11 }}>{evidence.dataset.error}</div>}
   </section>
 }

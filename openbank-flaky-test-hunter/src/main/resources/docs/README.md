@@ -6,6 +6,14 @@ Internal development-plane agent API.
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
 
+## Observe an admitted operator workflow
+
+`GET /api/v1/flaky-test-hunter/check/workflows/{workflowId}` is a read-only endpoint for `ROLE_ADMIN`. Supply the exact identifier returned by operator admission. The service accepts only its operator workflow prefix and a valid bounded UTC date identifier; it does not expose arbitrary Temporal workflows or their payloads.
+
+The response contains only `workflowId` and the observed execution `status`. The lookup uses the configured Temporal namespace and a three-second describe deadline. An unknown workflow returns 404; a failed status lookup remains an error, rather than being reported as a completed or absent execution.
+
+An admitted request and a successful workflow execution are separate observations. Execution completion also does not establish approval or application of a proposed change. Clients should timestamp the last observed status and explicitly expose a paused or failed refresh.
+
 ## GitHub proposal egress
 
 The proposal adapter uses `SafeHttpClient` for its configurable GitHub API URL. `openbank.egress.allowed-hosts` defaults to `api.github.com`; explicitly allow the hostname when using a different GitHub API. DNS answers are checked before a connection to a pinned public address; TLS still verifies the original hostname, and redirects are refused. An unlisted host produces no outbound request.
