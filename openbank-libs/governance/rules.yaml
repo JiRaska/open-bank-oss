@@ -31,6 +31,14 @@ deploy_holds:
       issue: "#13231"
       reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
       release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
+    openbank-ledger-service:
+      issue: "#13167"
+      reason: "Day-close participation V31 and its API require owner-controlled first image delivery."
+      release_condition: "The owner approves the exact ledger image and deployment window, accepts V31 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval."
+    openbank-interest-service:
+      issue: "#13167"
+      reason: "Day-close participation V18 and its reporter require owner-controlled first image delivery."
+      release_condition: "The owner approves the exact interest image and deployment window, accepts V18 schema and historical-run evidence semantics without inferred backfill, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval. Preserve every separately required catalog-sync activation condition when holds are combined."
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
