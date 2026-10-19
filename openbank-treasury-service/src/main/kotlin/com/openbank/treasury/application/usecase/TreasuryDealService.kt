@@ -206,6 +206,7 @@ class TreasuryDealService(
                             carriedOverrides = g.write.carried.size,
                             conflicts = g.write.conflicts.size,
                             occurredAt = withSchedule.updatedAt,
+                            flows = g.flows.map(com.openbank.treasury.domain.model.LedgerFlowItem::of),
                         ),
                     ),
                 ),

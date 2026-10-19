@@ -123,6 +123,10 @@ class ExceptionMappers {
     ).build()
 
     @ServerExceptionMapper
+    fun batchNotFound(e: com.openbank.treasury.application.port.out.ObservationBatchNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
 

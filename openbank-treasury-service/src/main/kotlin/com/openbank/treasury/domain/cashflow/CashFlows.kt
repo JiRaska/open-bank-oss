@@ -57,6 +57,12 @@ data class CashFlow(
     val originalPaymentDate: LocalDate? = null,
     val originalAmount: BigDecimal? = null,
     val overrideId: UUID? = null,
+    /** ADR-0344 D5: where an OBSERVED rate came from (IMPORT | MANUAL | FEED) and its provenance hash. */
+    val fixingSource: String? = null,
+    val fixingSha256: String? = null,
+    val fixedAt: Instant? = null,
+    /** ADR-0344 D6: the payment this flow is settled through, once one is proposed. */
+    val paymentId: String? = null,
 ) {
     init {
         require(amount == null || amount.signum() >= 0) {

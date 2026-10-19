@@ -65,6 +65,7 @@ class DayCloseParticipantsIT {
             "openbank.ledger.close.participants-mode" to "enforce",
             "authz.enforce" to "false",
             "openbank.ledger.close.participants.interest.principal" to INTEREST_PRINCIPAL,
+            "openbank.ledger.close.participants.treasury.principal" to "service-account-openbank-treasury",
         )
     }
 
@@ -119,6 +120,7 @@ class DayCloseParticipantsIT {
                 cut,
                 OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
             )
+            otherParticipantsReported(date)
         }
     }
 
@@ -242,6 +244,21 @@ class DayCloseParticipantsIT {
     }
 
     /** Future cutoff instant keeps any cron verdict ineligible while the manual HTTP path is tested. */
+    /** Every declared participant other than interest (treasury, ADR-0344 D7) has reported: these tests are about interest. */
+    private suspend fun otherParticipantsReported(date: LocalDate) {
+        participation.report(
+            ReportParticipationCommand(
+                businessDate = date,
+                participant = "treasury",
+                outcome = ParticipationOutcome.RAN,
+                journalsPosted = 0,
+                itemsProcessed = 0,
+                reason = null,
+                callerPrincipal = "service-account-openbank-treasury",
+            ),
+        )
+    }
+
     private fun seedManualDay(date: LocalDate) {
         onEventLoop {
             val now = Instant.now()
@@ -251,6 +268,7 @@ class DayCloseParticipantsIT {
                 cut,
                 OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
             )
+            otherParticipantsReported(date)
         }
     }
 

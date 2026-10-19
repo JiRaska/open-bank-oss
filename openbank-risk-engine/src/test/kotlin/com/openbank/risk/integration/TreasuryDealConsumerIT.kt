@@ -266,6 +266,46 @@ class TreasuryDealConsumerIT {
         assertThat(outcome("malformed")).isEqualTo(malformedBefore)
     }
 
+    /** ADR-0344 D5: a fixing patches the stored set of the SAME deal version; another version is a no-op. */
+    @Test
+    fun `a cash-flow fixing patches the stored floating flow of the same deal version`() {
+        val deal = UUID.randomUUID()
+        val source = connector.source<Any>("treasury-deal-in")
+        fun row(state: String, amount: String, rateSource: String) = """{"flowId":"${UUID.randomUUID()}","legIndex":1,
+            "periodIndex":0,"kind":"INTEREST","direction":"IN","currency":"CZK","accrualStart":"2030-01-10",
+            "accrualEnd":"2030-04-10","paymentDate":"2030-04-10","rate":0.0362,"rateSource":"$rateSource",
+            "amount":$amount,"state":"$state"}"""
+        source.send(
+            record(
+                "treasury.cashflow.generated.v1",
+                """{"dealId":"$deal","dealVersion":3,"scheduleHash":"h3","flows":[${row(
+                    "PROJECTED",
+                    "null",
+                    "PROJECTED",
+                )}]}""",
+            ),
+        )
+        await { runBlocking { cashFlows.latest(listOf(deal)) }[deal]?.dealVersion == 3 }
+        val fixed = """{"dealId":"$deal","dealVersion":3,"flows":[${row("FIXED", "90500.00", "OBSERVED")}]}"""
+        source.send(record("treasury.cashflow.fixed.v1", fixed))
+        await { runBlocking { cashFlows.latest(listOf(deal)) }.getValue(deal).flows.single().state == "FIXED" }
+        val stored = runBlocking { cashFlows.latest(listOf(deal)) }.getValue(deal).flows.single()
+        assertThat(stored.amount).isEqualByComparingTo("90500.00")
+        assertThat(stored.isFact).isTrue()
+        // A fixing of another version changes nothing; a PROJECTED row in a fixed event is malformed.
+        val unchangedBefore = outcome("unchanged")
+        source.send(record("treasury.cashflow.fixed.v1", fixed.replace("\"dealVersion\":3", "\"dealVersion\":2")))
+        await { outcome("unchanged") >= unchangedBefore + 1.0 }
+        val malformedBefore = outcome("malformed")
+        source.send(
+            record(
+                "treasury.cashflow.fixed.v1",
+                """{"dealId":"$deal","dealVersion":3,"flows":[${row("PROJECTED", "null", "PROJECTED")}]}""",
+            ),
+        )
+        await { outcome("malformed") >= malformedBefore + 1.0 }
+    }
+
     /** ADR-0344 D4: the stored ledger is kept at the latest version; an older version is a no-op. */
     @Test
     fun `cash-flow events keep the latest deal version only`() {

@@ -87,6 +87,15 @@ class CashFlowEntity : PanacheEntity() {
 
     @Column(name = "payment_id")
     var paymentId: String? = null
+
+    @Column(name = "fixing_source")
+    var fixingSource: String? = null
+
+    @Column(name = "fixing_sha256")
+    var fixingSha256: String? = null
+
+    @Column(name = "fixed_at")
+    var fixedAt: java.time.Instant? = null
 }
 
 @Entity

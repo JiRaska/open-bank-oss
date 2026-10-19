@@ -40,6 +40,8 @@ class TreasuryCloseParticipationCronIT {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.treasury.close.report-cron" to "* * * * * ?",
             "openbank.treasury.close.lookback-days" to "5",
+            "openbank.treasury.close.due-steps" to "ACCRUALS",
+            "openbank.treasury.fixing.enabled" to "false",
             "openbank.treasury.accrual.enabled" to "false",
         )
     }

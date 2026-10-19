@@ -192,10 +192,82 @@ data class CashFlowGenerated(
     val carriedOverrides: Int,
     val conflicts: Int,
     val occurredAt: Instant,
+    /**
+     * The stored rows themselves (asyncapi 1.8.0). The risk engine keeps them as the deal's facts;
+     * before 1.8.0 they were absent and every event was acked by it as malformed.
+     */
+    val flows: List<LedgerFlowItem> = emptyList(),
     val sourceService: String = SOURCE_SERVICE,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.cashflow.generated.v1"
+    }
+}
+
+/** One stored cash-flow row as [CashFlowGenerated] carries it (contract `CashFlow`, ADR-0344 D4). */
+data class LedgerFlowItem(
+    val flowId: UUID,
+    val legIndex: Int,
+    val periodIndex: Int,
+    val kind: String,
+    val direction: String,
+    val currency: String,
+    val accrualStart: LocalDate?,
+    val accrualEnd: LocalDate?,
+    val fixingDate: LocalDate?,
+    val paymentDate: LocalDate,
+    val notional: BigDecimal?,
+    val rate: BigDecimal?,
+    val rateSource: String,
+    val amount: BigDecimal?,
+    val state: String,
+    val manual: Boolean,
+) {
+    companion object {
+        fun of(f: com.openbank.treasury.domain.cashflow.CashFlow) = LedgerFlowItem(
+            f.flowId, f.legIndex, f.periodIndex, f.kind.name, f.direction.name, f.currency, f.accrualStart,
+            f.accrualEnd, f.fixingDate, f.paymentDate, f.notional, f.rate, f.rateSource.name, f.amount,
+            f.state.name, f.manual,
+        )
+    }
+}
+
+/** One flow fixed by [CashFlowFixed]: its slot, the observed rate and the amount it now pays. */
+data class FixedFlowItem(
+    val flowId: UUID,
+    val legIndex: Int,
+    val periodIndex: Int,
+    val kind: String,
+    val direction: String,
+    val currency: String,
+    val accrualStart: LocalDate?,
+    val accrualEnd: LocalDate?,
+    val paymentDate: LocalDate,
+    val rate: BigDecimal,
+    val amount: BigDecimal,
+    val rateSource: String,
+    val state: String,
+)
+
+/**
+ * ADR-0344 D5: floating flows of one deal moved PROJECTED/MISSING -> FIXED from an observed index
+ * value that passed the quality gate. [sha256] is the provenance hash of (index, date, value, source).
+ */
+data class CashFlowFixed(
+    val dealId: UUID,
+    val dealVersion: Int,
+    val scheduleVersion: Int,
+    val index: String,
+    val fixingDate: LocalDate,
+    val value: BigDecimal,
+    val source: String,
+    val sha256: String,
+    val flows: List<FixedFlowItem>,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.fixed.v1"
     }
 }
 

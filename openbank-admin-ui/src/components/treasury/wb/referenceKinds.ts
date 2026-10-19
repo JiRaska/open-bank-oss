@@ -191,6 +191,7 @@ export const KINDS: KindSpec[] = [
   generic('accounting-settings', 'Účetní nastavení (pravidla zaúčtování, mapování GL)', 'Accounting settings (posting rules, GL mapping)', 'accounts'),
   generic('balance-sheet-side', 'Strany rozvahy', 'Balance-sheet sides', 'accounts'),
   generic('dealing-filter', 'Filtry obchodního přehledu', 'Dealing-view filters', 'config'),
+  generic('internal-rate-sheet', 'Interní sazebníky', 'Internal rate sheets', 'market'),
 ]
 
 export const KIND_BY_ID: Record<string, KindSpec> = Object.fromEntries(KINDS.map(k => [k.kind, k]))

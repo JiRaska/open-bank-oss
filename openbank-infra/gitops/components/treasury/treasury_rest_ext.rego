@@ -90,6 +90,9 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.reference.read",
 		"treasury.cashflow.read",
 		"treasury.calendar.read",
+		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
+		"treasury.fixing.read",
+		"treasury.marketdata.read",
 	}
 }
 
@@ -224,4 +227,20 @@ allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 	not input.principal.service_account == null
 	"ROLE_API" in input.principal.roles
 	input.action == "treasury.portfolio.inspect"
+}
+
+# ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
+# an approver (a different human, checked in the domain and the database) activates them. No role
+# both writes and activates market data; machines and AI agents get nothing from this file.
+allowed_reasons contains "treasury-back-office-market-data" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+}
+
+allowed_reasons contains "treasury-approver-market-data" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+	role in input.principal.roles
+	input.action == "treasury.marketdata.approve"
 }

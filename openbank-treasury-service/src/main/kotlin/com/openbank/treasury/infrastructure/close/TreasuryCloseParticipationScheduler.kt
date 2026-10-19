@@ -40,7 +40,7 @@ class TreasuryCloseParticipationScheduler(
     private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.treasury.close.enabled", defaultValue = "true")
     private val enabled: Boolean,
-    @ConfigProperty(name = "openbank.treasury.close.due-steps", defaultValue = "ACCRUALS")
+    @ConfigProperty(name = "openbank.treasury.close.due-steps", defaultValue = "ACCRUALS,FIXINGS")
     dueStepsConfig: String,
     @ConfigProperty(name = "openbank.treasury.close.lookback-days", defaultValue = "3")
     private val lookbackDays: Long,

@@ -9,8 +9,14 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.7.0
+  version: 1.8.0
   description: |
+    1.8.0 (additive, ADR-0344 D5): `CashFlowGenerated.flows` carries the stored rows (the risk
+    engine's stored-flow consumer requires them; before 1.8.0 it acked every such event as
+    malformed). New on the same topic: `treasury.cashflow.fixed.v1` — floating flows of one deal
+    version moved PROJECTED/MISSING -> FIXED from an observed index value that passed the quality
+    gate, with the value, its source and SHA-256 provenance hash.
+
     1.7.0 (additive, ADR-0344 slice 2): `DealBooked` gains `kind` (ACTUAL | PLANNED — absent means
     ACTUAL; a consumer that books exposure must ignore PLANNED), `bookId`, `legs`, `scheduleVersion`
     and `scheduleHash`; `ProductType` lists the leg-described products (a consumer must tolerate a
@@ -77,6 +83,8 @@ channels:
         $ref: '#/components/messages/CashFlowGenerated'
       CashFlowOverridden:
         $ref: '#/components/messages/CashFlowOverridden'
+      CashFlowFixed:
+        $ref: '#/components/messages/CashFlowFixed'
 
 operations:
   publishTreasuryDealEvents:
@@ -127,6 +135,11 @@ components:
       summary: "A four-eyes override of one cash flow was approved or rejected (ADR-0344 D4). Nothing posted."
       payload:
         $ref: '#/components/schemas/CashFlowOverridden'
+    CashFlowFixed:
+      name: treasury.cashflow.fixed.v1
+      summary: "Floating flows of one deal version were FIXED from an observed index value that passed the quality gate (ADR-0344 D5)."
+      payload:
+        $ref: '#/components/schemas/CashFlowFixed'
 
   schemas:
     ProductType:
@@ -293,6 +306,11 @@ components:
         carriedOverrides: { type: integer }
         conflicts: { type: integer, description: Approved overrides that could not be carried over }
         occurredAt: { type: string, format: date-time }
+        flows:
+          type: array
+          maxItems: 20000
+          description: 1.8.0 — the stored rows (absent before 1.8.0)
+          items: { $ref: '#/components/schemas/LedgerFlowItem' }
         sourceService: { $ref: '#/components/schemas/SourceService' }
 
     CashFlowOverridden:
@@ -313,3 +331,64 @@ components:
         decidedBy: { type: string, description: Never equal to proposedBy (four-eyes) }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    LedgerFlowItem:
+      type: object
+      description: "Constructor properties of `LedgerFlowItem` in `TreasuryEventPayloads.kt`."
+      required: [flowId, legIndex, periodIndex, kind, direction, currency, paymentDate, rateSource, state, manual]
+      properties:
+        flowId: { type: string, format: uuid }
+        legIndex: { type: integer }
+        periodIndex: { type: integer }
+        kind: { type: string, enum: [PRINCIPAL, INTEREST, FEE, NOTIONAL_EXCHANGE, PREMIUM] }
+        direction: { type: string, enum: [IN, OUT] }
+        currency: { type: string }
+        accrualStart: { type: [string, 'null'], format: date }
+        accrualEnd: { type: [string, 'null'], format: date }
+        fixingDate: { type: [string, 'null'], format: date }
+        paymentDate: { type: string, format: date }
+        notional: { type: [number, 'null'] }
+        rate: { type: [number, 'null'] }
+        rateSource: { type: string, enum: [FIXED, OBSERVED, PROJECTED, RATE_UNTIL_FIRST_FIXING, MISSING] }
+        amount: { type: [number, 'null'] }
+        state: { type: string, enum: [PROJECTED, FIXED, DUE, SETTLED, POSTED, CANCELLED] }
+        manual: { type: boolean }
+
+    CashFlowFixed:
+      type: object
+      description: "Constructor properties of `CashFlowFixed` in `TreasuryEventPayloads.kt`."
+      required: [dealId, dealVersion, scheduleVersion, index, fixingDate, value, source, sha256, flows, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        dealVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        index: { type: string }
+        fixingDate: { type: string, format: date }
+        value: { type: number, description: The observed index value in percent }
+        source: { type: string, enum: [IMPORT, MANUAL, FEED] }
+        sha256: { type: string, description: 'SHA-256 of index|date|value|source' }
+        flows:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/FixedFlowItem' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    FixedFlowItem:
+      type: object
+      description: "Constructor properties of `FixedFlowItem` in `TreasuryEventPayloads.kt`."
+      required: [flowId, legIndex, periodIndex, kind, direction, currency, paymentDate, rate, amount, rateSource, state]
+      properties:
+        flowId: { type: string, format: uuid }
+        legIndex: { type: integer }
+        periodIndex: { type: integer }
+        kind: { type: string }
+        direction: { type: string, enum: [IN, OUT] }
+        currency: { type: string }
+        accrualStart: { type: [string, 'null'], format: date }
+        accrualEnd: { type: [string, 'null'], format: date }
+        paymentDate: { type: string, format: date }
+        rate: { type: number }
+        amount: { type: number }
+        rateSource: { type: string, enum: [OBSERVED] }
+        state: { type: string, enum: [FIXED] }

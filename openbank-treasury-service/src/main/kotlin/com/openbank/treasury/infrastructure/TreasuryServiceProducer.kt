@@ -111,6 +111,34 @@ class TreasuryServiceProducer {
     fun scheduleService(references: ReferenceRepository, cashFlows: CashFlowRepository, clock: Clock): ScheduleService =
         ScheduleService(references, cashFlows, clock)
 
+    /** ADR-0344 D5: the fixing workflow and its four-eyes market data. */
+    @Produces
+    @ApplicationScoped
+    fun fixingService(
+        flows: com.openbank.treasury.application.port.out.FixingFlowRepository,
+        deals: DealRepository,
+        schedules: ScheduleService,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+    ): com.openbank.treasury.application.usecase.FixingService =
+        com.openbank.treasury.application.usecase.FixingService(
+            flows,
+            deals,
+            schedules,
+            marketData,
+            dayCompletion,
+            objectMapper,
+            clock,
+        )
+
+    /** ADR-0344 D5: no feed ingests the interbank indices yet; the port is where one plugs in. */
+    @Produces
+    @ApplicationScoped
+    fun indexFeed(): com.openbank.treasury.application.port.out.IndexFeed =
+        com.openbank.treasury.application.port.out.IndexFeed { emptyList() }
+
     @Produces
     @ApplicationScoped
     fun cashFlowUseCase(

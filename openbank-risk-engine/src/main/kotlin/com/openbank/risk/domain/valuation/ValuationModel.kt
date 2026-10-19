@@ -122,7 +122,19 @@ data class StoredFlowSet(
     val dealVersion: Int,
     val scheduleHash: String,
     val flows: List<StoredCashFlow>,
-)
+) {
+    /**
+     * ADR-0344 D5 (`treasury.cashflow.fixed`): the same deal version with the [fixed] flows replacing
+     * the rows of the same slot (leg, period, kind). A fixed flow whose slot is not in the set is
+     * refused: the set it was fixed against is not the one stored.
+     */
+    fun withFixed(fixed: List<StoredCashFlow>): StoredFlowSet {
+        val bySlot = fixed.associateBy { Triple(it.legIndex, it.periodIndex, it.kind) }
+        val slots = flows.map { Triple(it.legIndex, it.periodIndex, it.kind) }.toSet()
+        require(bySlot.keys.all { it in slots }) { "a fixed flow names a slot the stored set of $dealId does not hold" }
+        return copy(flows = flows.map { bySlot[Triple(it.legIndex, it.periodIndex, it.kind)] ?: it })
+    }
+}
 
 /** A deal as the valuation reads it: its legs (published or derived) and any stored flows. */
 data class ValuableDeal(

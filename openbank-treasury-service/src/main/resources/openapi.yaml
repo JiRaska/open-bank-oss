@@ -44,7 +44,10 @@ info:
   #         (/reference/{kind}), deal v2 request/response fields (kind, bookId, legs, calendars,
   #         securities, regulatory terms; eleven more request products), the stored cash-flow
   #         ledger with four-eyes overrides and conflicts, and deal versions. 422
-  #         REFERENCE_NOT_EFFECTIVE lists Error.missingReferences.
+  #         REFERENCE_NOT_EFFECTIVE lists Error.missingReferences. Slice 3 (same unreleased
+  #         version): fixings and market data (/fixings, /market-data/*, ADR-0344 D5), the
+  #         day-completion record with the ADR-0342 participation it sends, and the
+  #         internal-rate-sheet reference kind.
   version: 1.20.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
@@ -1431,6 +1434,222 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/treasury/fixings:
+    get:
+      tags: [Treasury]
+      operationId: listFixings
+      summary: The fixings of one date (ADR-0344 D5) — DUE, FIXED or BLOCKED by the market-data quality gate
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [DUE, FIXED, BLOCKED] } }
+      responses:
+        '200':
+          description: One row per (index, fixing date)
+          content:
+            application/json:
+              schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
+        '400': { description: Missing or malformed date or status }
+
+  /api/v1/treasury/fixings/run:
+    post:
+      tags: [Treasury]
+      operationId: runFixings
+      summary: Fix every due index of the date that passes the quality gate; block (and open a case for) the rest
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  fixedFlows: { type: integer, minimum: 0 }
+                  fixedIndices: { type: array, maxItems: 500, items: { type: string } }
+                  blocked: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
+                  failures: { type: integer, minimum: 0 }
+
+  /api/v1/treasury/fixings/{index}/{date}/manual:
+    post:
+      tags: [Treasury]
+      operationId: proposeManualFixing
+      summary: Propose a manual fixing — PENDING until a different human approves (never an AI agent)
+      parameters:
+        - { name: index, in: path, required: true, schema: { type: string, maxLength: 32 } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rate, reason, source]
+              properties:
+                rate: { type: number, description: Percent, within ±100, at most 8 decimals }
+                reason: { type: string, minLength: 1, maxLength: 900 }
+                source: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        '201': { description: The PENDING batch, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '400': { description: Invalid rate, reason or source }
+        '422': { description: The index is not effective on that date }
+
+  /api/v1/treasury/fixings/{index}/{date}/manual/{batchId}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveManualFixing
+      summary: Approve a manual fixing (422 FOUR_EYES_VIOLATION for its proposer, 403 for a non-human)
+      parameters:
+        - { name: index, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: APPROVED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '403': { description: Not a human approver }
+        '409': { description: Not PENDING, or an ACTIVE value already exists for that index-date }
+        '422': { description: Four-eyes violation }
+
+  /api/v1/treasury/fixings/{index}/{date}/manual/{batchId}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectManualFixing
+      summary: Reject a manual fixing
+      parameters:
+        - { name: index, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 1000 } } } } }
+      responses:
+        '200': { description: REJECTED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+
+  /api/v1/treasury/market-data/factors:
+    get:
+      tags: [Treasury]
+      operationId: listMarketFactors
+      summary: ACTIVE index observations (factor history), optionally of one index
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: index, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        '200':
+          description: Observations
+          content:
+            application/json:
+              schema: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/IndexObservation' } }
+
+  /api/v1/treasury/market-data/export:
+    get:
+      tags: [Treasury]
+      operationId: exportMarketData
+      summary: CSV export of ACTIVE observations; every cell quoted and formula-leading cells neutralised
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: index, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: CSV, content: { text/csv: { schema: { type: string } } } }
+
+  /api/v1/treasury/market-data/import:
+    post:
+      tags: [Treasury]
+      operationId: importMarketData
+      summary: Import observations (CSV index,date,value or a JSON array) as one PENDING four-eyes batch; at most 1 MiB and 5000 rows
+      parameters:
+        - { name: reason, in: query, required: true, schema: { type: string, maxLength: 1000 } }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string, maxLength: 1048576 } }
+          application/json:
+            schema:
+              type: array
+              maxItems: 5000
+              items: { type: object, properties: { index: { type: string }, date: { type: string, format: date }, value: { type: number } } }
+      responses:
+        '201': { description: The PENDING batch, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '400': { description: A bad row (the whole file is refused), or over the size or row bounds }
+
+  /api/v1/treasury/market-data/imports:
+    get:
+      tags: [Treasury]
+      operationId: listMarketDataBatches
+      summary: Market-data batches (imports and manual fixings), newest first
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, APPROVED, REJECTED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        '200':
+          description: Batches
+          content:
+            application/json:
+              schema: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/MarketDataBatch' } }
+
+  /api/v1/treasury/market-data/imports/{batchId}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveMarketDataImport
+      summary: Approve an import — its observations become ACTIVE (four-eyes, human only)
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: APPROVED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '403': { description: Not a human approver }
+        '404': { description: No such batch }
+        '409': { description: Not PENDING, or an ACTIVE value already exists for one of its index-dates }
+        '422': { description: Four-eyes violation }
+
+  /api/v1/treasury/market-data/imports/{batchId}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectMarketDataImport
+      summary: Reject an import
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 1000 } } } } }
+      responses:
+        '200': { description: REJECTED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+
+  /api/v1/treasury/market-data/quality:
+    get:
+      tags: [Treasury]
+      operationId: getMarketDataQuality
+      summary: Suspicious (stale, jump) and missing values for the indices due on a date
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The quality report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  suspicious:
+                    type: array
+                    maxItems: 500
+                    items:
+                      type: object
+                      properties:
+                        index: { type: string }
+                        date: { type: string, format: date }
+                        value: { type: [number, 'null'] }
+                        previous: { type: [number, 'null'] }
+                        jumpBp: { type: [integer, 'null'] }
+                        staleDays: { type: [integer, 'null'] }
+                        reason: { type: [string, 'null'] }
+                  missing:
+                    type: array
+                    maxItems: 500
+                    items: { type: object, properties: { index: { type: string }, date: { type: string, format: date }, dealCount: { type: integer } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1514,6 +1733,45 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    Fixing:
+      type: object
+      properties:
+        index: { type: string }
+        fixingDate: { type: string, format: date }
+        status: { type: string, enum: [DUE, FIXED, BLOCKED] }
+        rate: { type: [number, 'null'] }
+        source: { type: [string, 'null'] }
+        dealCount: { type: integer }
+        flowIds: { type: array, maxItems: 10000, items: { type: string, format: uuid } }
+        blockReason: { type: [string, 'null'] }
+        staleDays: { type: [integer, 'null'] }
+        jumpBp: { type: [integer, 'null'] }
+        missing: { type: boolean }
+    IndexObservation:
+      type: object
+      properties:
+        index: { type: string }
+        date: { type: string, format: date }
+        value: { type: number, description: Percent }
+        source: { type: string, enum: [IMPORT, MANUAL, FEED] }
+        status: { type: string, enum: [PENDING, ACTIVE, REJECTED] }
+        batchId: { type: string, format: uuid }
+        sha256: { type: string, description: 'SHA-256 of index|date|value|source' }
+    MarketDataBatch:
+      type: object
+      properties:
+        batchId: { type: string, format: uuid }
+        kind: { type: string, enum: [IMPORT, MANUAL_FIXING, FEED] }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        reason: { type: string }
+        fileSha256: { type: [string, 'null'] }
+        rowCount: { type: integer }
+        rows: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/IndexObservation' } }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        decisionReason: { type: [string, 'null'] }
     ProductType:
       type: string
       # x-extensible-enum, not enum (1.8.0, #10896): products GROW as ADR-0315 D2 lands them
@@ -2297,7 +2555,8 @@ components:
              party-group, party-type, country, document-type, account, settlement-place, product-type,
              loan-type, communication-channel, market-factor, own-capital-item, period-length, scenario,
              behavioural-scenario, calculation-settings, limit-settings, derivative-conversion-factor,
-             collateral-haircut, portfolio-group, accounting-settings, balance-sheet-side, dealing-filter]
+             collateral-haircut, portfolio-group, accounting-settings, balance-sheet-side, dealing-filter,
+             internal-rate-sheet]
     ReferenceStatus:
       type: string
       enum: [PENDING, ACTIVE, SUPERSEDED, REJECTED]

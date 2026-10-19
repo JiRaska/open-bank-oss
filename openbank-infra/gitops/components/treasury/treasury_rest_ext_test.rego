@@ -363,3 +363,32 @@ test_tax_reporting_explicit_null_marker_is_not_legacy if {
 		not portfolio_allowed(p, "treasury.portfolio.inspect")
 	}
 }
+
+# --- ADR-0344 D5 fixings and market data: must-DENY first ---
+
+test_market_data_proposer_cannot_approve_and_approver_cannot_propose if {
+	not allowed(back_office, "treasury.marketdata.approve")
+	not allowed(approver, "treasury.marketdata.import")
+	not allowed(approver, "treasury.fixing.manual")
+	not allowed(dealer, "treasury.marketdata.import")
+	allowed(back_office, "treasury.marketdata.import")
+	allowed(back_office, "treasury.fixing.manual")
+	allowed(back_office, "treasury.fixing.run")
+	allowed(approver, "treasury.marketdata.approve")
+	allowed(senior, "treasury.marketdata.approve")
+}
+
+test_market_data_machines_and_agents_get_nothing if {
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.marketdata.import")
+		not allowed(p, "treasury.marketdata.approve")
+		not allowed(p, "treasury.fixing.manual")
+		not allowed(p, "treasury.fixing.run")
+	}
+}
+
+test_staff_read_fixings_and_market_data if {
+	allowed(dealer, "treasury.fixing.read")
+	allowed(approver, "treasury.marketdata.read")
+	not allowed(agent, "treasury.marketdata.read")
+}

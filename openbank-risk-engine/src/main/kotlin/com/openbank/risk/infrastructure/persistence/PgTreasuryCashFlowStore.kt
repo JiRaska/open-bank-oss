@@ -33,6 +33,14 @@ class PgTreasuryCashFlowStore(private val pool: Pool, private val objectMapper: 
         ),
     ).awaitSuspending().rowCount() > 0
 
+    override suspend fun replace(set: StoredFlowSet): Boolean = pool.preparedQuery(REPLACE).execute(
+        Tuple.of(
+            set.dealId,
+            set.dealVersion,
+            io.vertx.core.json.JsonArray(objectMapper.writeValueAsString(set.flows.map(CashFlowJson::toDto))),
+        ),
+    ).awaitSuspending().rowCount() > 0
+
     override suspend fun latest(dealIds: Collection<UUID>): Map<UUID, StoredFlowSet> {
         if (dealIds.isEmpty()) return emptyMap()
         return pool.preparedQuery(
@@ -56,6 +64,9 @@ class PgTreasuryCashFlowStore(private val pool: Pool, private val objectMapper: 
                 "deal_version = EXCLUDED.deal_version, schedule_hash = EXCLUDED.schedule_hash, " +
                 "flows = EXCLUDED.flows, received_at = now() " +
                 "WHERE EXCLUDED.deal_version > treasury_deal_cash_flows.deal_version"
+        const val REPLACE =
+            "UPDATE treasury_deal_cash_flows SET flows = $3::jsonb, received_at = now() " +
+                "WHERE deal_id = $1 AND deal_version = $2"
         const val SELECT =
             "SELECT deal_id, deal_version, schedule_hash, flows::text AS flows FROM treasury_deal_cash_flows " +
                 "WHERE deal_id = ANY($1)"

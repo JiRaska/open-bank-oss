@@ -126,6 +126,20 @@ class ScheduleService(
         )
     }
 
+    /**
+     * ADR-0344 D5: an index's conventions and its fixing calendar as effective on [on] — the quality
+     * thresholds the fixing gate applies, and the calendar its staleness is counted on.
+     */
+    suspend fun indexTerms(code: String, on: LocalDate): Pair<IndexPayload, FinanceCalendar> {
+        val index = effective(ReferenceKind.INDEX, code, on).payload as IndexPayload
+        val calendar = effective(ReferenceKind.CALENDAR, index.fixingCalendar, on).payload as CalendarPayload
+        return index to OverlayCalendar(
+            Calendars.of(base(calendar.baseCalendar)),
+            calendar.extraHolidays.toSet(),
+            calendar.removedHolidays.toSet(),
+        )
+    }
+
     private suspend fun effective(kind: ReferenceKind, key: String, on: LocalDate): ReferenceRecord =
         references.versions(kind, key).lastOrNull { it.isEffectiveOn(on) }
             ?: throw ReferenceNotEffectiveException(listOf(ReferenceRef(kind, key)), on)

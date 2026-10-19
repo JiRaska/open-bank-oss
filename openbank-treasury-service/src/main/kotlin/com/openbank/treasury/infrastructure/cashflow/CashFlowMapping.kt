@@ -39,6 +39,10 @@ internal fun CashFlowEntity.fill(f: CashFlow) = apply {
     originalPaymentDate = f.originalPaymentDate
     originalAmount = f.originalAmount
     overrideId = f.overrideId
+    fixingSource = f.fixingSource
+    fixingSha256 = f.fixingSha256
+    fixedAt = f.fixedAt
+    paymentId = f.paymentId
 }
 
 internal fun CashFlowEntity.toDomain() = CashFlow(
@@ -64,6 +68,10 @@ internal fun CashFlowEntity.toDomain() = CashFlow(
     originalPaymentDate = originalPaymentDate,
     originalAmount = originalAmount,
     overrideId = overrideId,
+    fixingSource = fixingSource,
+    fixingSha256 = fixingSha256,
+    fixedAt = fixedAt,
+    paymentId = paymentId,
 )
 
 internal fun CashFlowOverrideEntity.fill(o: CashFlowOverride) = apply {
