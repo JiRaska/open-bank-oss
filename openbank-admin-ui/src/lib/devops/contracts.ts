@@ -26,7 +26,8 @@ export interface DevOpsFinding {
   remediationKind: 'PULL_REQUEST' | 'RUNBOOK_UPDATE' | 'TICKET' | 'NONE'
   proposalPrUrl: string | null
   proposedRemediation: string | null
-  status: 'OPEN' | 'DIAGNOSED' | 'PROPOSED' | 'APPROVED' | 'REJECTED' | 'RESOLVED'
+  // Unknown future states remain renderable as neutral text in AgentInsightsPanel.
+  status: 'OPEN' | 'DIAGNOSED' | 'PROPOSED' | 'APPROVED' | 'REJECTED' | 'RESOLVED' | (string & {})
   diagnosedAt: string | null
   proposedAt: string | null
 }

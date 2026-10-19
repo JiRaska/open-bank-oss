@@ -171,7 +171,7 @@ function isDevOpsFinding(value: unknown): value is DevOpsFinding {
     && oneOf(finding.remediationKind, ['PULL_REQUEST', 'RUNBOOK_UPDATE', 'TICKET', 'NONE'])
     && nullableString(finding.proposalPrUrl)
     && nullableString(finding.proposedRemediation)
-    && oneOf(finding.status, ['OPEN', 'DIAGNOSED', 'PROPOSED', 'APPROVED', 'REJECTED', 'RESOLVED'])
+    && typeof finding.status === 'string' && finding.status.length > 0
     && nullableString(finding.diagnosedAt)
     && nullableString(finding.proposedAt)
 }
@@ -466,6 +466,7 @@ function DevOpsContent() {
                 : t('DevOps nálezy nejsou dostupné. Aktuální stav nelze potvrdit.', 'DevOps findings are unavailable. Current health cannot be confirmed.')}
             onApprove={canDecide ? id => decide(id, 'approve') : undefined}
             onReject={canDecide ? id => decide(id, 'reject') : undefined}
+            canDecideFinding={finding => finding.status === 'PROPOSED'}
             decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
             decidingId={canDecide ? deciding : null}
           />
