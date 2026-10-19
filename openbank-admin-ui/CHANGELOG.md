@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.8.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.1...admin-ui-v3.8.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve accessible labels with UI dependency updates ([#13329](https://github.com/JiRaska/open-bank-oss/issues/13329)) ([638a27c](https://github.com/JiRaska/open-bank-oss/commit/638a27c6ed541d8f6785af8f8b9571b87d84dcce))
+
+## [3.8.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.0...admin-ui-v3.8.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve health identity across namespaces ([#13356](https://github.com/JiRaska/open-bank-oss/issues/13356)) ([8590616](https://github.com/JiRaska/open-bank-oss/commit/8590616bd329b141332ce43ddd0fa8d83c2f7872))
+
 ## [3.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.7.1...admin-ui-v3.8.0) (2026-10-19)
 
 
