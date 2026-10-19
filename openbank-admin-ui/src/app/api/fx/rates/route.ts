@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { CURRENCY_META } from '@/lib/currency-meta'
-import { inCluster, discoverServices, resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 
 // Off-cluster (local dev / docker-compose) fallback only. In-cluster we resolve
 // fx-service through discovery, never this literal — the real Service is
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
 // discovery so the FX page can show a calm "idle (scale-to-zero)" badge instead of a
 // misleading red "down" — and so a genuinely-up service isn't mislabelled red just
 // because the old hardcoded `openbank-fx-service` host never resolved.
-type FxStatus = 'up' | 'scaled_to_zero' | 'down' | 'not_deployed'
+type FxStatus = 'up' | 'scaled_to_zero' | 'down' | 'not_deployed' | 'unknown'
 
 async function resolveFxService(): Promise<{ status: FxStatus; baseUrl: string | null }> {
   if (!inCluster()) {
@@ -31,14 +31,17 @@ async function resolveFxService(): Promise<{ status: FxStatus; baseUrl: string |
       return { status: 'down', baseUrl: FX_SERVICE_URL }
     }
   }
-  const discovered = await discoverServices()
-  const fx = discovered?.find((d) => d.name === 'fx-service')
-  if (!fx) return { status: 'not_deployed', baseUrl: null }
+  const resolution = await resolveInClusterService('fx-service')
+  if (resolution.state === 'unknown' || resolution.state === 'off_cluster') {
+    return { status: 'unknown', baseUrl: null }
+  }
+  if (resolution.state === 'not_found') return { status: 'not_deployed', baseUrl: null }
+  const fx = resolution.service
   if (fx.scaledToZero) return { status: 'scaled_to_zero', baseUrl: null }
   // readyReplicas IS the kubelet's /q/health/ready verdict re-published by the control
-  // plane, so we trust discovery's readiness rather than a second in-band health probe.
-  const baseUrl = await resolveInClusterBaseUrl('fx-service')
-  return { status: fx.ready ? 'up' : 'down', baseUrl }
+  // plane. Use the same positive snapshot for the Service URL; do not perform a second
+  // discovery read that could turn this observation into a false negative.
+  return { status: fx.ready ? 'up' : 'down', baseUrl: resolution.baseUrl }
 }
 
 async function fetchCnbRates() {
@@ -169,9 +172,11 @@ export async function GET() {
       conversions: conversions.status === 'fulfilled' ? conversions.value.rows : [],
       // Present so an unauthenticated or failing read is distinguishable from an empty one,
       // matching the `error` field cnb and ecb already carry above.
-      error: fxRates.status === 'fulfilled'
-        ? fxRates.value.error
-        : String((fxRates as PromiseRejectedResult).reason),
+      error: fx.status === 'unknown'
+        ? 'discovery_unavailable'
+        : fxRates.status === 'fulfilled'
+          ? fxRates.value.error
+          : String((fxRates as PromiseRejectedResult).reason),
       conversionsError: conversions.status === 'fulfilled'
         ? conversions.value.error
         : String((conversions as PromiseRejectedResult).reason),

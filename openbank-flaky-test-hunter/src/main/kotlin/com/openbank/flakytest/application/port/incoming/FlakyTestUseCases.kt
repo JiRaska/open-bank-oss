@@ -18,8 +18,8 @@ interface RunFlakyTestCheckUseCase {
     /**
      * Starts a sweep and returns its workflow id WITHOUT waiting.
      *
-     * What the schedule uses. A sweep runs several collect activities, drift detectors and an LLM
-     * diagnosis per finding, so it can take many minutes; waiting inline would pin a scheduler
+     * What the CI-failure webhook uses. A sweep runs several collect activities, drift detectors and an LLM
+     * diagnosis per finding, so it can take many minutes; waiting inline would pin a request
      * thread for the whole run and make a slow sweep indistinguishable from a hung one. Temporal
      * owns the execution and its history is the durable record.
      *
@@ -31,6 +31,13 @@ interface RunFlakyTestCheckUseCase {
      */
     suspend fun startDetached(trigger: RunTrigger, idempotencyKey: String? = null): String
 }
+
+/** Read-only Temporal status for a bounded operator-triggered workflow handle. */
+interface GetOperatorWorkflowStatusUseCase {
+    fun getStatus(workflowId: String): OperatorWorkflowStatus
+}
+
+data class OperatorWorkflowStatus(val workflowId: String, val status: String)
 
 interface GetFindingsUseCase {
     suspend fun getActive(): List<FlakyTestFinding>

@@ -108,3 +108,7 @@ A repeated submit with the same `idempotencyKey` returns the existing message. A
 - **API axis:** `openapi.yaml: info.version` (1.0.0) bumped independently from the OpenAPI diff.
 - CI is path-scoped (only changed services build). CD via ArgoCD on image-tag bump.
 - **Money-path:** every PR needs 2 approvals + the maintained [threat model](../../../../docs/threat-models/openbank-swift-service.md).
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

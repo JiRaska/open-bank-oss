@@ -1,6 +1,21 @@
 # 01 — Overview (business)
 
-## Proč openbank-libs existuje
+## Současná struktura a zdroje pravdy
+
+Sdílená knihovna se dělí na `openbank-libs-domain` (doménové typy a porty bez frameworku)
+a `openbank-libs-runtime` (adaptéry Quarkus, HTTP resources a integrace CDI). `openbank-libs`
+je kompatibilní zastřešující modul a domov governance a dokumentace, nikoli samostatně nasazená služba.
+Konzumenty a verze určují projektové závislosti Gradle, `version.txt` jednotlivých komponent
+a `/api/v1/info` běžící služby. Vydání knihovny neznamená, že ji již používá každá nasazená služba.
+Service Health/Tech Inventory ukazují pozorovanou verzi knihovny pro jednotlivé služby.
+
+Tyto stránky popisují zdrojové kontrakty a jsou součástí revize Admin UI uvedené u dokumentu.
+Spustitelné služby publikují dokumentaci svého nasazeného sestavení na `/q/openbank/docs`.
+Kapitola architektury popisuje aktuální hranice modulů. Počty v následující historii auditu
+patří k tehdejší migraci, nikoli k dnešní flotile.
+
+## Historický důvod vzniku (květen 2026)
+
 
 Před květnovým auditem 2026 byl OpenBank monorepo s ~28 Quarkus mikroslužbami, kde každá služba měla **vlastní implementaci** stejných cross-cutting věcí:
 
@@ -13,7 +28,7 @@ Před květnovým auditem 2026 byl OpenBank monorepo s ~28 Quarkus mikroslužbam
 
 Audit napočítal **~4 500 řádků duplikovaného Kotlinu** a několik regulatorních děr (K1-K7), kde stejný bug existoval ve více službách najednou.
 
-**openbank-libs centralizuje vše, co MÁ být stejné napříč službami**, a nutí, aby fix landoval jednou pro celou flotilu — ne 28×.
+**openbank-libs centralizuje vše, co MÁ být stejné napříč službami**, a nutí, aby fix landoval jednou pro celou flotilu napříč konzumenty.
 
 ## Hodnota pro projekt
 
@@ -76,12 +91,12 @@ Když vznikne nový OpenBank service `openbank-foo-service`:
 ## Co openbank-libs **NENÍ**
 
 - **Není to ORM framework** — Panache + Hibernate Reactive zůstávají Quarkus extensions; libs jen poskytuje sdílenou outbox `@MappedSuperclass`
-- **Není to API gateway** — Kong / Istio gateway sedí mimo
+- **Není to API gateway** — edge gateway se konfiguruje samostatně v GitOps
 - **Není to Quarkus extension** — kód běží v každém service classloader jako normální JAR (Jandex index zajistí discovery)
 - **Není to runtime sidecar** — žádný separátní pod, žádný HTTP overhead
 - **Není to placeholder pro domain logic** — žádná business pravidla, jen value objects a primitives
 
-## Roadmapa (z ADR 0014)
+## Historická roadmapa (ADR 0014; nejde o živý report dodávky)
 
 | Fáze | Stav | Co to přidává |
 |---|---|---|

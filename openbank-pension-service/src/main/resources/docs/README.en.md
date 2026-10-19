@@ -103,6 +103,13 @@ This stage provides server authentication; it does not establish mutual TLS.
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
 
+## Published DIP catalog regression
+
+Run `./gradlew :openbank-pension-service:dipCrossServiceIT` from the repository root.
+The task supplies `openbank.test.dip.fixture` from the product-catalog seed at
+`openbank-product-catalog/src/main/resources/catalog-seeds/retirement/cz-illustrative-offerings.json`.
+This synthetic fixture test does not verify a live catalog, publication or deployment.
+
 ## Repeatable synthetic demonstration
 
 Run `python3 openbank-pension-service/demo/pension_demo.py run` from the repository root.
@@ -136,3 +143,7 @@ null-valued map entries; they do not send JSON null as an alternative value.
 Partner responses may add fields without breaking parsing; decimal amounts
 and date handling retain the protocol contract. The protocol contract tests
 validate outgoing requests and parse the documented offer examples.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

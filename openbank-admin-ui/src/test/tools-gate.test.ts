@@ -247,24 +247,21 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     expect(gateTools).toContain(tool)
   })
 
-  it('the middleware matcher excludes /api/gate and pre-auth brand assets', () => {
-    // Without this the middleware answers an unauthenticated sub-request with a
-    // 302 and nginx turns the gate into a 500 — dashboards unreachable for
-    // everyone, including the operators the gate would have admitted.
-    //
-    // Read the MATCHER, not the file: the exclusion is explained by a comment
-    // three lines above it that also contains the string "api/gate", so a
-    // whole-file grep stays green after the exclusion itself is deleted. That is
-    // exactly what happened when this assertion was fed the deleted case.
-    const matcher = readFileSync('src/proxy.ts', 'utf8')
+  it('includes /api/gate for selective slash handling while bypassing auth and pre-auth surfaces', () => {
+    const proxy = readFileSync('src/proxy.ts', 'utf8')
+    const matcher = proxy
       .replace(/\/\/.*$/gm, '')
       .match(/matcher:\s*\[([\s\S]*?)\]/)?.[1]
     expect(matcher, 'middleware config.matcher not found').toBeDefined()
-    expect(matcher).toMatch(/api\/gate/)
-    // The login page renders the Explorer from /public/brand before a session
-    // exists. Matching /brand here redirects the image request back to login,
-    // leaving the new experience deployed but the mascot invisible.
-    expect(matcher).toMatch(/brand\//)
+    expect(matcher).toMatch(/\(\?\!_next\/static\|_next\/image\)/)
+    expect(matcher).not.toMatch(/api\/gate/)
+    // The authorization route owns its session/permission decision; the proxy
+    // must skip its auth redirect and leave its original trailing slash intact.
+    expect(proxy).toMatch(/pathname === "\/api\/gate" \|\| pathname\.startsWith\("\/api\/gate\/"\)[\s\S]{0,100}NextResponse\.next\(\)/)
+    // These were previously excluded from the matcher and remain explicitly
+    // unauthenticated after it is broadened for canonical trailing-slash redirects.
+    expect(proxy).toMatch(/pathname\.startsWith\("\/brand\/"\)/)
+    expect(proxy).toMatch(/pathname === "\/api\/auth" \|\| pathname\.startsWith\("\/api\/auth\/"\)/)
   })
 
   // Every tool, not just the first one. A gate wider than the nav hides access

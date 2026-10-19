@@ -87,3 +87,7 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 ## Error model
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapping is centralized in `ExceptionMappers` and deferred to `openbank-libs` for the generic fallback (ADR-0049 D4 — the service does not register a catch-all `Exception` mapper). Typical statuses: `400` (unbalanced / invalid posting), `401`/`403` (auth), `404` (unknown journal), `409` (idempotency-key conflict).
+
+## Accounting-class map (ADR-0341 D3)
+
+Posters send an `accountingClass` and a role on each journal line and the ledger resolves the GL account from its own `accounting_class_gl_map` table (migration V31). The read side is `GET /api/v1/accounting-classes` and `GET /api/v1/accounting-classes/resolve`, for regulatory readers and reconciliations. There is deliberately no write endpoint: the map changes by reviewed migration, as the chart does.
