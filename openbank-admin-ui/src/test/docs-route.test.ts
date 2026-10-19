@@ -20,6 +20,7 @@ vi.mock('next/headers', () => ({
 // (language resolution, cache headers, 404 shape), not the loader internals.
 vi.mock('@/lib/services/docs', () => ({
   loadDocsIndex: vi.fn(),
+  DocsDiscoveryIncompleteError: class DocsDiscoveryIncompleteError extends Error {},
 }))
 
 import { cookies } from 'next/headers'
@@ -74,6 +75,18 @@ describe('GET /api/services/[name]/docs', () => {
     expect(res.status).toBe(404)
     const body = await res.json()
     expect(body).toMatchObject({ error: expect.any(String), service: 'unknown-svc' })
+  })
+
+  it('returns 503 instead of a false missing-docs 404 when discovery is incomplete', async () => {
+    const { DocsDiscoveryIncompleteError } = await import('@/lib/services/docs')
+    vi.mocked(loadDocsIndex).mockRejectedValue(new DocsDiscoveryIncompleteError())
+    const { GET } = await import('@/app/api/services/[name]/docs/route')
+
+    const res = await GET(new Request('http://localhost/api/services/account/docs'), ctx('account'))
+
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'service discovery incomplete', service: 'account' })
+    expect(res.headers.get('Cache-Control')).toBe('no-store')
   })
 
   it('passes ?lang query param to loadDocsIndex', async () => {

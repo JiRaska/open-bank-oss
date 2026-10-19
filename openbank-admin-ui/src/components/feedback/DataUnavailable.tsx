@@ -14,7 +14,7 @@
 // empty/offline UX on every page. Pair it with `classifyBffFailure()` for BFF
 // calls, or pass `kind="no_data"` / `kind="error"` for internal data sources.
 
-import { ServerOff, ShieldAlert, AlertTriangle, Inbox, SearchX, Moon } from 'lucide-react'
+import { ServerOff, ShieldAlert, AlertTriangle, Inbox, SearchX, Moon, HelpCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { BffFailure } from '@/lib/services/bff'
 
@@ -49,6 +49,14 @@ function copyFor(kind: UnavailableKind, service: string, feature: string, lang: 
         detail: cs
           ? `Tato obrazovka vyžaduje běžící ${service}. V tomto prostředí zatím nasazená není — jakmile ji ArgoCD nasadí, data se načtou automaticky.`
           : `This screen needs a running ${service}. It isn't deployed here yet — once ArgoCD rolls it out, the data loads automatically.`,
+      }
+    case 'discovery_unavailable':
+      return {
+        icon: <HelpCircle size={28} style={{ color: 'var(--warning)' }} />,
+        title: cs ? 'Stav nasazení nelze ověřit' : 'Deployment status is unknown',
+        detail: cs
+          ? 'Inventář služeb Kubernetes se nepodařilo načíst úplně. Tento výsledek nepotvrzuje, zda je služba nasazená nebo zdravá. Zkuste to znovu, až bude zjišťování dostupné.'
+          : 'The Kubernetes service inventory could not be read completely. This result does not establish whether the service is deployed or healthy. Retry when discovery is available.',
       }
     case 'scaled_to_zero':
       return {

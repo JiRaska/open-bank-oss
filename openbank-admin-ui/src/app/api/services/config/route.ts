@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
-import { discoverServices } from '@/lib/discovery'
+import { discoverServicesSnapshot } from '@/lib/discovery'
 import { getRegistry } from '@/lib/services/fleet'
 
 export const dynamic = 'force-dynamic'
@@ -101,11 +101,20 @@ async function probeDiscovered(d: { name: string; namespace: string; port: numbe
 }
 
 export async function GET() {
-  const discovered = await discoverServices()
-  if (discovered) {
-    const results = await Promise.all(discovered.map(probeDiscovered))
+  const snapshot = await discoverServicesSnapshot()
+  if (snapshot.status === 'static') {
+    const results = await Promise.all(staticServices().map(probeService))
     return NextResponse.json(results)
   }
-  const results = await Promise.all(staticServices().map(probeService))
+  const results = await Promise.all(snapshot.services.map(probeDiscovered))
+  if (snapshot.status !== 'complete') {
+    // Keep positive observations available for diagnostics, while making the incomplete
+    // inventory an explicit failed read for legacy array-only consumers.
+    return NextResponse.json({
+      error: 'discovery_unavailable',
+      discoveryStatus: snapshot.status,
+      services: results,
+    }, { status: 503 })
+  }
   return NextResponse.json(results)
 }

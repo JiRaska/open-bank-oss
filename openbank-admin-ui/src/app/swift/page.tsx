@@ -62,6 +62,7 @@ export default function SwiftPage() {
                 idle: t('swift-service spí (scale-to-zero), probouzí se…', 'swift-service idle (scaled to zero), waking…'),
                 down: t('swift-service neodpovídá', 'swift-service is not responding'),
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
               }}
             />
             <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>

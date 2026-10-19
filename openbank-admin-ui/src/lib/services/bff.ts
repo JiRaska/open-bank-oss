@@ -78,6 +78,7 @@ export function componentFolder(k8sName: string): string {
  * The proxy (src/app/api/svc/[service]/[...path]/route.ts) emits a stable JSON
  * `{ error }` body per case, so we can tell them apart reliably:
  *   - 404 `{error:"Unknown service: <svc>"}` → not deployed / not discovered
+ *   - 503 `{error:"discovery_unavailable"}` → inventory incomplete; deployment state is unknown
  *   - 503 `{error:"scaled_to_zero"}`         → deployed but idle at 0 replicas (KEDA, ADR-0057)
  *   - 401/403                                 → no session or insufficient permission
  *   - 502 `{error:"upstream_unreachable"}`   → deployed but the pod didn't answer
@@ -86,6 +87,7 @@ export function componentFolder(k8sName: string): string {
 export type BffFailure =
   | 'not_deployed'
   | 'scaled_to_zero'
+  | 'discovery_unavailable'
   | 'unauthorized'
   | 'unreachable'
   | 'not_found'
@@ -103,6 +105,7 @@ export async function classifyBffFailure(res: Response): Promise<BffFailure> {
   } catch {
     // non-JSON body (e.g. an HTML error page) — fall through to status-only
   }
+  if (res.status === 503 && error === 'discovery_unavailable') return 'discovery_unavailable'
   if (res.status === 404 && error.startsWith('Unknown service')) return 'not_deployed'
   if (res.status === 503 && error === 'scaled_to_zero') return 'scaled_to_zero'
   if (res.status === 401 || res.status === 403) return 'unauthorized'
