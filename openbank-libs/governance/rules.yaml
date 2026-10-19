@@ -23,262 +23,1506 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
   services:
-    openbank-card-issuance-service:
-      issue: "#13080"
-      reason: "Inherited from held deploy PR #13080 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13080 was held, then remove this entry in a reviewed change."
     openbank-account-service:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
-    openbank-ap2-service:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
-    openbank-domestic-payment:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
-    openbank-fraud-service:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
-    openbank-interest-service:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
-    openbank-sanctions-service:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
-    openbank-transaction-service:
-      issue: "#13079"
-      reason: "Inherited from held deploy PR #13079 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #13079 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-agent-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13343
+          head: a5a21bfb2de544fb298452b4acfc06bdb8e083ba
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-aml-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-anacredit-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-ap2-service:
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-audit-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-authz-policy-auditor:
+      all_of:
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-balance-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-billing-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-campaign-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-card-issuance-service:
+      all_of:
+      - issue: '#13080'
+        reason: 'Inherited from held deploy PR #13080 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13080 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-card-processing-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
     openbank-case-coordinator-agent:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-clearing-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-clearing-simulator:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
     openbank-communication-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-consent-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-context-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-control-liveness-sentinel:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13322
+          head: c2a21cc33a7fa357b009ae7c7e5c25fd0bcab688
     openbank-copilot-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-delegation-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-devops-agent:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-dispute-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-docs-truth-agent:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-document-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-domestic-payment:
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-engagement-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-finops-agent:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-finrep-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-flaky-test-hunter:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+    openbank-fraud-service:
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-fx-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-governance-auditor:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-incentive-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-interest-service:
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-kyb-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-kyc-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
     openbank-ledger-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-lending-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-loyalty-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-mcp-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-notification-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-onboarding-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-party-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
     openbank-pension-fund-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-pid-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-psd2-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-referral-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-release-steward:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13338
+          head: 80b553ee12ce3a2b58aed07be78002fc3bddcc4b
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-risk-engine:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-sanctions-service:
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-sca-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-sdd-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-security-scanner:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
     openbank-sepa-instant:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-sepa-payment:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-settlement-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-standing-order-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
     openbank-statement-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-swift-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-tpp-registry-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
+    openbank-transaction-service:
+      all_of:
+      - issue: '#13079'
+        reason: 'Inherited from held deploy PR #13079 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13079 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13335
+          head: da61644844be4634929198f80a4111e3324f8ac1
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
     openbank-treasury-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-vop-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
     openbank-wealth-service:
-      issue: "#12948"
-      reason: "Inherited from held deploy PR #12948 while preserving the hold owner (issue #11503)."
-      release_condition: "Resolve why #12948 was held, then remove this entry in a reviewed change."
+      all_of:
+      - issue: '#12948'
+        reason: 'Inherited from held deploy PR #12948 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #12948 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13316
+          head: 21ea5467d54781bc07c114b86dc567dcfa624add
+        - pr: 13312
+          head: 9a54a89705521245b179057b0f42084d899c2697
+        - pr: 13311
+          head: 7525ca6d132c74cc2ebf344bb91748e13f436e79
+        - pr: 13304
+          head: 8013f5548579be3515980ef118e073967bc1e621
+      - issue: '#13304'
+        reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
+          (issue #11503).'
+        release_condition: 'Resolve why #13304 was held, then remove this entry in
+          a reviewed change.'
+        origins:
+        - pr: 13326
+          head: 232d062d6e1cb2a577724b262ce6065af541c91e
+        - pr: 13320
+          head: 80e87f67566284751fe967a18f03d72de9403c7f
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).

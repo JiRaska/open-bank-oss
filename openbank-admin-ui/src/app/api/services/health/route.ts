@@ -66,16 +66,76 @@ async function probeInfo(base: string): Promise<{ version?: string; gitCommit?: 
   // cutoff manifested as "N/A everywhere" in the Tech Stack chips. The call
   // itself is cheap (BuildInfo singleton cached at JVM startup); the wall-
   // clock cost is dominated by JVM scheduling under contention.
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 8000)
-    const res = await fetch(`${base}/api/v1/info`, { signal: ctrl.signal, cache: 'no-store' })
-    clearTimeout(timer)
-    if (!res.ok) return null
-    const body = await res.json() as { version?: string; gitCommit?: string; stack?: ServiceStackEntry }
-    return { version: body.version, gitCommit: body.gitCommit, stack: body.stack }
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        ctrl.abort()
+        resolve(null)
+      }, 8000)
+    })
+    const request = (async () => {
+      const res = await fetch(`${base}/api/v1/info`, { signal: ctrl.signal, cache: 'no-store' })
+      if (!res.ok) return null
+      const body = await res.json() as { version?: string; gitCommit?: string; stack?: ServiceStackEntry }
+      return { version: body.version, gitCommit: body.gitCommit, stack: body.stack }
+    })()
+    return await Promise.race([request, timeout])
   } catch {
     return null
+  } finally {
+    // The deadline covers both the response and body parsing, and is released on
+    // every completion path so background enrichment does not retain timers.
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+type ServiceInfo = NonNullable<Awaited<ReturnType<typeof probeInfo>>>
+const INFO_CACHE_TTL_MS = 60_000
+const MAX_INFO_ENTRIES = 512
+const infoCache = new Map<string, { value: ServiceInfo; expiresAt: number }>()
+const infoInFlight = new Map<string, Promise<ServiceInfo | null>>()
+let activeInfoKeys = new Set<string>()
+
+function infoKey(base: string, desiredImage: string | undefined): string {
+  return `${base}\n${desiredImage ?? ''}`
+}
+
+function cacheInfo(key: string, value: ServiceInfo): void {
+  if (!activeInfoKeys.has(key)) return
+  infoCache.delete(key)
+  while (infoCache.size >= MAX_INFO_ENTRIES) {
+    const oldest = infoCache.keys().next().value
+    if (oldest === undefined) break
+    infoCache.delete(oldest)
+  }
+  infoCache.set(key, { value, expiresAt: Date.now() + INFO_CACHE_TTL_MS })
+}
+
+function scheduleInfoProbe(key: string, base: string): void {
+  if (infoInFlight.has(key) || infoInFlight.size >= MAX_INFO_ENTRIES) return
+  const pending = probeInfo(base)
+  infoInFlight.set(key, pending)
+  void pending
+    .then((value) => {
+      if (value) cacheInfo(key, value)
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      if (infoInFlight.get(key) === pending) infoInFlight.delete(key)
+    })
+}
+
+function trimInfoState(currentKeys: Set<string>): void {
+  activeInfoKeys = currentKeys
+  for (const [key, entry] of infoCache) {
+    if (!currentKeys.has(key) || entry.expiresAt <= Date.now()) infoCache.delete(key)
+  }
+  while (infoCache.size > MAX_INFO_ENTRIES) {
+    const oldest = infoCache.keys().next().value
+    if (oldest === undefined) break
+    infoCache.delete(oldest)
   }
 }
 
@@ -92,11 +152,22 @@ async function probeService(
     (async () => {
       try {
         const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 8000)
-        const res = await fetch(`${base}${HEALTH_PATH}`, { signal: ctrl.signal, cache: 'no-store' })
-        clearTimeout(timer)
-        // Reachable = we got an HTTP response at all (200 UP, 503 DOWN-but-alive).
-        return { ok: true, status: res.status }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          const res = await Promise.race([
+            fetch(`${base}${HEALTH_PATH}`, { signal: ctrl.signal, cache: 'no-store' }),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => {
+                ctrl.abort()
+                reject(new Error('health probe timed out'))
+              }, 8000)
+            }),
+          ])
+          // Reachable = we got an HTTP response at all (200 UP, 503 DOWN-but-alive).
+          return { ok: true, status: res.status }
+        } finally {
+          if (timer !== undefined) clearTimeout(timer)
+        }
       } catch {
         // Connection refused / DNS failure / timeout — the service is not reachable.
         return { ok: false, status: 0 }
@@ -130,14 +201,28 @@ async function probeService(
 // dev) discoverServices() returns null and we fall back to static probing.
 async function fromDiscovery(): Promise<ServiceHealthEntry[] | null> {
   const discovered = await discoverServices()
-  if (!discovered) return null
+  if (!discovered) {
+    trimInfoState(new Set())
+    return null
+  }
+
+  const keyed = discovered.map((d) => {
+    const base = `http://${d.name}.${d.namespace}.svc:${d.port}`
+    return { d, base, key: infoKey(base, d.image) }
+  })
+  const currentKeys = new Set(keyed.map(({ key }) => key))
+  trimInfoState(currentKeys)
 
   return Promise.all(
-    discovered.map(async (d): Promise<ServiceHealthEntry> => {
-      const base = `http://${d.name}.${d.namespace}.svc:${d.port}`
+    keyed.map(({ d, base, key }): ServiceHealthEntry => {
       const reachable = d.readyReplicas > 0
-      // Only enrich running services; a probe against a down service just times out.
-      const info = reachable ? await probeInfo(base) : null
+      // Kubernetes readiness is authoritative and returned immediately. Info is
+      // best-effort enrichment: use only fresh metadata, and refresh it in the
+      // background so a slow service cannot delay the health response.
+      const cached = infoCache.get(key)
+      const info = cached && cached.expiresAt > Date.now() ? cached.value : null
+      if (cached && !info) infoCache.delete(key)
+      if (reachable && !info) scheduleInfoProbe(key, base)
       return {
         name: d.name,
         port: d.port,

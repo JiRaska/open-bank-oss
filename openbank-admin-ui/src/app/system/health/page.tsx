@@ -7,7 +7,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { RefreshCw, Clock, CheckCircle2, AlertTriangle, XCircle, Wifi, WifiOff, Tag, Cpu, GitCommit, Activity } from 'lucide-react'
-import { fetchAllServiceSnapshots, fetchAllServiceConfigSnapshots, fetchAllGovernanceManifests } from '@/lib/api'
+import { fetchAllServiceSnapshotsEvidence, fetchAllServiceConfigSnapshots, fetchAllGovernanceManifests } from '@/lib/api'
 import type { ServiceSnapshot, ServiceConfigResponse } from '@/types'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { cn } from '@/lib/utils'
@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { HEALTH_INSIGHTS } from '@/components/insights/catalog'
 import { OperationalEvidence } from '@/components/observability/OperationalEvidence'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 const POLL = 15_000
 
@@ -29,40 +30,54 @@ export default function SystemHealthPage() {
   const [loading, setLoading]       = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [healthFailure, setHealthFailure] = useState<UnavailableKind | null>(null)
+  const [metadataUnavailable, setMetadataUnavailable] = useState(false)
   const isRefreshingRef = useRef(false)
+  const metadataInFlightRef = useRef(false)
   const refreshCounterRef = useRef(0)
+
+  // Optional enrichment has its own in-flight guard. It must never delay health,
+  // discard a successful health sample, or prevent the next health poll.
+  const refreshMetadata = useCallback(async () => {
+    if (metadataInFlightRef.current) return
+    metadataInFlightRef.current = true
+    try {
+      const [cfgs, govs] = await Promise.allSettled([
+        fetchAllServiceConfigSnapshots(), fetchAllGovernanceManifests(),
+      ])
+      const map: Record<string, ServiceConfigResponse | null> = {}
+      if (cfgs.status === 'fulfilled') cfgs.value.forEach(c => { map[c.name] = c.config })
+      setConfigMap(map)
+      setGovMap(govs.status === 'fulfilled' ? govs.value.byService : {})
+      setGovTimestamp(govs.status === 'fulfilled' ? govs.value.timestamp : null)
+      setMetadataUnavailable(cfgs.status === 'rejected' || govs.status === 'rejected')
+    } catch {
+      setConfigMap({})
+      setGovMap({})
+      setGovTimestamp(null)
+      setMetadataUnavailable(true)
+    } finally {
+      metadataInFlightRef.current = false
+    }
+  }, [])
 
   const refresh = useCallback(async (spinner = false) => {
     if (isRefreshingRef.current) return
     isRefreshingRef.current = true
     if (spinner) setRefreshing(true)
-    
+    void refreshMetadata()
+
     const currentCounter = ++refreshCounterRef.current
     try {
-      const [snaps, cfgs, govs] = await Promise.all([
-        fetchAllServiceSnapshots(), 
-        fetchAllServiceConfigSnapshots(),
-        fetchAllGovernanceManifests()
-      ])
+      const evidence = await fetchAllServiceSnapshotsEvidence()
       if (currentCounter !== refreshCounterRef.current) return
-      
-      setSnapshots(snaps)
-      const map: Record<string, ServiceConfigResponse | null> = {}
-      cfgs.forEach(c => { map[c.name] = c.config })
-      setConfigMap(map)
-      setGovMap(govs.byService)
-      setGovTimestamp(govs.timestamp)
-      setLastRefreshed(new Date())
-    }
-    catch (e) {
-      // Any of the three fetches failing rejects the Promise.all. The BFF being
-      // unreachable is expected (in the sandbox most of the fleet isn't deployed),
-      // so keep the last-known-good maps and let `finally` drop the spinner — the
-      // page degrades to its empty/stale state. Without this catch the rejection
-      // escaped the effect as an unhandled promise rejection on every failed poll.
-      if (currentCounter === refreshCounterRef.current) {
-        console.error('Failed to load service health snapshots', e)
+      if (!evidence.ok) {
+        setHealthFailure(evidence.failure)
+        return
       }
+      setSnapshots(evidence.snapshots)
+      setHealthFailure(null)
+      setLastRefreshed(new Date())
     }
     finally {
       if (currentCounter === refreshCounterRef.current) {
@@ -71,28 +86,30 @@ export default function SystemHealthPage() {
       }
       isRefreshingRef.current = false
     }
-  }, [])
+  }, [refreshMetadata])
 
   useEffect(() => { 
-    refresh()
+    const initial = setTimeout(() => void refresh(), 0)
     const id = setInterval(() => refresh(), POLL)
-    return () => clearInterval(id) 
+    return () => { clearTimeout(initial); clearInterval(id) }
   }, [refresh])
 
   const up       = snapshots.filter(s => s.reachable && s.health?.status === 'UP').length
-  const degraded = snapshots.filter(s => s.reachable && s.health?.status !== 'UP').length
-  const down     = snapshots.filter(s => !s.reachable).length
+  const degraded = snapshots.filter(s => s.reachable && s.health?.status === 'DOWN').length
+  const down     = snapshots.filter(s => !s.reachable && s.health !== null).length
+  const unknown  = snapshots.filter(s => s.health === null).length
+  const hasSample = lastRefreshed !== null
 
   return (
     <div>
       <PageHeader
         icon={<Activity size={20} aria-hidden="true" />}
         title={t('Zdraví systému', 'System Health')}
-        subtitle={`${t('Živý stav · automatická obnova každých', 'Live status · auto-refresh every')} ${POLL / 1000}s`}
+        subtitle={`${t('Kontrola stavu každých', 'Health check every')} ${POLL / 1000}s`}
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Clock size={12} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(dateLocale)}
+              <Clock size={12} aria-hidden="true" /> {t('Poslední úspěšná kontrola:', 'Last successful check:')} {lastRefreshed.toLocaleString(dateLocale)}
             </span>
           )}
           <button type="button" className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing} aria-busy={refreshing} aria-label={t('Obnovit zdraví systému', 'Refresh system health')}>
@@ -101,6 +118,23 @@ export default function SystemHealthPage() {
           </button>
         </div>}
       />
+
+      {healthFailure && <DataUnavailable
+        kind={healthFailure}
+        lang={language}
+        title={hasSample
+          ? t('Zobrazuji poslední ověřený stav služeb', 'Showing the last verified health snapshot')
+          : t('Stav služeb se nepodařilo ověřit', 'Service health could not be verified')}
+        detail={healthFailure === 'unauthorized'
+          ? t('Vypršela relace nebo chybí oprávnění. Přihlaste se znovu. Nejde o potvrzený výpadek služeb.', 'Your session expired or access was denied. Sign in again. This does not confirm a service outage.')
+          : hasSample
+            ? t('Obnova selhala. Údaje níže jsou z poslední úspěšné kontroly a nemusí odpovídat aktuálnímu stavu.', 'The refresh failed. Values below are from the last successful check and may no longer reflect current health.')
+            : t('Zdroj měření není dostupný nebo nevrátil platná data. To neznamená, že služby neběží.', 'The health collector is unavailable or returned invalid data. This does not mean the services are down.')}
+      />}
+      {metadataUnavailable && <p role="status">{t(
+        'Některé údaje konfigurace nebo governance nejsou dostupné. Zdraví služeb se ověřuje nezávisle.',
+        'Some configuration or governance details are unavailable. Service health is checked independently.',
+      )}</p>}
 
       <OperationalEvidence />
 
@@ -111,11 +145,18 @@ export default function SystemHealthPage() {
         />
 
       {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
+      {hasSample && snapshots.length > 0 && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         <SummaryCard label={t('V pořádku', 'Healthy')}     count={up}       total={snapshots.length} icon={<CheckCircle2 size={16}/>} color="var(--success)" bg="var(--success-bg)" border="var(--success-border)" />
         <SummaryCard label={t('Zhoršené', 'Degraded')}    count={degraded} total={snapshots.length} icon={<AlertTriangle size={16}/>} color="var(--warning)" bg="var(--warning-bg)" border="var(--warning-border)" />
         <SummaryCard label={t('Nedostupné', 'Unreachable')} count={down}     total={snapshots.length} icon={<XCircle size={16}/>}      color="var(--danger)"  bg="var(--danger-bg)"  border="var(--danger-border)" />
-      </div>
+        {unknown > 0 && <SummaryCard label={t('Neznámý stav', 'Unknown')} count={unknown} total={snapshots.length} icon={<Activity size={16}/>} color="var(--text-secondary)" bg="var(--surface-2)" border="var(--border)" />}
+      </div>}
+
+      {hasSample && snapshots.length === 0 && !healthFailure && <DataUnavailable
+        kind="no_data" lang={language}
+        title={t('Žádná pozorování zdraví služeb', 'No service health observations')}
+        detail={t('Zdroj vrátil prázdný seznam. Zdraví služeb nelze vyhodnotit.', 'The collector returned an empty inventory. Service health cannot be assessed.')}
+      />}
 
       {/* Service grid */}
       {loading ? (
@@ -127,7 +168,7 @@ export default function SystemHealthPage() {
           {snapshots.map(s => <ServiceCard key={s.name} snapshot={s} resilience={configMap[s.name] ?? null} governance={govMap[s.name]} govTimestamp={govTimestamp} />)}
         </div>
       )}
-      <CatalogDriftBanner present={snapshots.map(s => s.name)} />
+      {hasSample && !healthFailure && snapshots.length > 0 && <CatalogDriftBanner present={snapshots.map(s => s.name)} />}
     </div>
   )
 }
@@ -158,13 +199,13 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { name, port, info, health, rateLimitMax, rateLimitRemaining, apiVersion, latencyMs, reachable } = snapshot
 
-  const isUp = reachable && health?.status === 'UP'
-  const isDegraded = reachable && !isUp
-  const isDown = !reachable
+  const isUnknown = health === null
+  const isDegraded = reachable && health?.status === 'DOWN'
+  const isDown = !reachable && !isUnknown
 
-  const dotColor = isDown ? 'var(--danger)' : isDegraded ? 'var(--warning)' : 'var(--success)'
+  const dotColor = isUnknown ? 'var(--text-tertiary)' : isDown ? 'var(--danger)' : isDegraded ? 'var(--warning)' : 'var(--success)'
   const statusLabel = isDown ? 'DOWN' : health?.status ?? 'UNKNOWN'
-  const pillClass = isDown ? 'pill pill-danger' : isDegraded ? 'pill pill-warning' : 'pill pill-success'
+  const pillClass = isUnknown ? 'pill' : isDown ? 'pill pill-danger' : isDegraded ? 'pill pill-warning' : 'pill pill-success'
 
   const ratePct = rateLimitMax && rateLimitRemaining != null
     ? Math.round((rateLimitRemaining / rateLimitMax) * 100) : null
