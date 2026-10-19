@@ -839,7 +839,10 @@ paths:
       tags: [Treasury]
       operationId: approveReferenceRecord
       summary: >-
-        Approve a PENDING version (ROLE_TREASURY_APPROVER). It becomes ACTIVE; an ACTIVE version
+        Approve a PENDING version (ROLE_TREASURY_APPROVER; for kind `counterparty`, whose records carry
+        the credit limits, ROLE_TREASURY_SENIOR_APPROVER — a raised limit is refused otherwise with 403
+        SENIOR_APPROVAL_REQUIRED, and the limits before and after are recorded in approvalNote). A
+        counterparty or ssi version may not start before today (422 REFERENCE_BACKDATED). It becomes ACTIVE; an ACTIVE version
         of the same key it overlaps is closed at its validFrom (or SUPERSEDED when it would start
         no earlier). The proposer may not approve; an AI agent may never approve.
       parameters:
@@ -1285,7 +1288,7 @@ components:
           type: string
           description: >-
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
-            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, SCHEDULE_ENGINE_UNAVAILABLE
+            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE
         message:
           type: [string, 'null']
         breaches:
@@ -1991,6 +1994,7 @@ components:
         verifiedBy: { type: [string, 'null'] }
         reason: { type: [string, 'null'] }
         decisionReason: { type: [string, 'null'] }
+        approvalNote: { type: [string, 'null'], description: 'What the approval changed, e.g. a counterparty''s limits before and after' }
     ReferenceHistory:
       type: object
       required: [kind, key, versions]

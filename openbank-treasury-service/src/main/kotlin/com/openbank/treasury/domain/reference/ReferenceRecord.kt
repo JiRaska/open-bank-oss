@@ -42,6 +42,8 @@ data class ReferenceRecord(
     val approvedAt: Instant? = null,
     val verifiedBy: Actor? = null,
     val decisionReason: String? = null,
+    /** What the approval changed that a reviewer must see later, e.g. counterparty limits before/after. */
+    val approvalNote: String? = null,
 ) {
     init {
         require(version >= 1) { "version starts at 1" }
@@ -60,12 +62,43 @@ data class ReferenceRecord(
     fun overlaps(other: ReferenceRecord): Boolean = (other.validTo == null || validFrom.isBefore(other.validTo)) &&
         (validTo == null || other.validFrom.isBefore(validTo))
 
-    /** Four-eyes activation. The previous ACTIVE versions are resolved by [ReferenceSupersession]. */
-    fun approve(actor: Actor, at: Instant): ReferenceRecord {
+    /**
+     * Four-eyes activation. The previous ACTIVE versions are resolved by [ReferenceSupersession].
+     *
+     * A counterparty record carries the credit limits the booking check reads, so approving one is a
+     * limit decision: any currency limit RAISED against [effectiveNow] (the version effective today;
+     * none = every limit starts from zero) needs a [seniorApprover] — the same authority the senior
+     * limit override needs, so this is never the cheaper path round it. The limits before and after
+     * are recorded in [approvalNote]. A counterparty or SSI version may not start before [today]:
+     * a back-dated change would rewrite what was effective for deals already checked against it.
+     */
+    fun approve(
+        actor: Actor,
+        at: Instant,
+        today: LocalDate,
+        seniorApprover: Boolean = false,
+        effectiveNow: ReferenceRecord? = null,
+    ): ReferenceRecord {
         requireHuman(actor, "approve")
         requireStatus(ReferenceStatus.PENDING, "approve")
         requireNotProposer(actor, "approve")
-        return copy(status = ReferenceStatus.ACTIVE, approvedBy = actor, approvedAt = at)
+        requireNotBackdated(kind, validFrom, today)
+        val note = (payload as? CounterpartyPayload)?.let { limitDecision(it, effectiveNow, seniorApprover) }
+        return copy(status = ReferenceStatus.ACTIVE, approvedBy = actor, approvedAt = at, approvalNote = note)
+    }
+
+    private fun limitDecision(next: CounterpartyPayload, effectiveNow: ReferenceRecord?, senior: Boolean): String? {
+        val before = (effectiveNow?.payload as? CounterpartyPayload)?.limits.orEmpty()
+        val raised = next.limits.filter { (ccy, amount) -> amount > (before[ccy] ?: java.math.BigDecimal.ZERO) }
+        if (raised.isNotEmpty() && !senior) {
+            throw SeniorApprovalRequiredException(
+                "raising counterparty ${next.id} limits (${raised.keys.sorted().joinToString()}) needs a senior approver",
+            )
+        }
+        if (before == next.limits) return null
+        val ccys = (before.keys + next.limits.keys).sorted()
+        return "limits " + ccys.joinToString("; ") { "$it ${before[it] ?: "none"} -> ${next.limits[it] ?: "none"}" } +
+            " (previous version ${effectiveNow?.version ?: "none"})"
     }
 
     fun reject(actor: Actor, reason: String, at: Instant): ReferenceRecord {
@@ -108,6 +141,17 @@ data class ReferenceRecord(
     companion object {
         private const val MAX_REASON = 1000
 
+        /** Kinds whose history deals were checked or paid against: never changed retroactively. */
+        val NO_BACKDATING = setOf(ReferenceKind.COUNTERPARTY, ReferenceKind.SSI)
+
+        fun requireNotBackdated(kind: ReferenceKind, validFrom: LocalDate, today: LocalDate) {
+            if (kind in NO_BACKDATING &&
+                validFrom.isBefore(today)
+            ) {
+                throw ReferenceBackdatedException(kind, validFrom, today)
+            }
+        }
+
         /**
          * A new PENDING version. A human or an AI agent may propose; a service account or the
          * system may not (seeds are written by migrations, not through this door).
@@ -123,12 +167,14 @@ data class ReferenceRecord(
             reason: String,
             actor: Actor,
             at: Instant,
+            today: LocalDate,
         ): ReferenceRecord {
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not propose reference data")
             }
             require(reason.isNotBlank() && reason.length <= MAX_REASON) { "a proposal needs a reason (1..$MAX_REASON)" }
             payload.validate()
+            requireNotBackdated(kind, validFrom, today)
             return ReferenceRecord(
                 kind = kind,
                 key = key,
@@ -178,3 +224,10 @@ class ReferenceNotEffectiveException(val missing: List<ReferenceRef>, val on: Lo
 /** No version of the named record. Mapped to 404. */
 class ReferenceNotFoundException(ref: ReferenceRef, version: Int? = null) :
     NoSuchElementException("reference record $ref${version?.let { " version $it" } ?: ""} not found")
+
+/** A counterparty or SSI version starting before today. Mapped to 422 REFERENCE_BACKDATED. */
+class ReferenceBackdatedException(kind: ReferenceKind, validFrom: LocalDate, today: LocalDate) :
+    RuntimeException("a ${kind.wire} version may not start before today ($today); validFrom $validFrom is back-dated")
+
+/** Raising a counterparty limit through reference data needs the senior approver. Mapped to 403. */
+class SeniorApprovalRequiredException(message: String) : RuntimeException(message)

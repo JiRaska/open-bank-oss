@@ -232,12 +232,14 @@ interface ReferenceDataUseCase {
 
     suspend fun propose(command: ProposeReferenceCommand, actor: Actor, key: String): ReferenceRecord
 
+    /** [seniorApprover]: the caller holds the senior approver role (needed to raise a counterparty limit). */
     suspend fun approve(
         kind: ReferenceKind,
         recordKey: String,
         version: Int,
         actor: Actor,
         key: String,
+        seniorApprover: Boolean,
     ): ReferenceRecord
 
     suspend fun reject(

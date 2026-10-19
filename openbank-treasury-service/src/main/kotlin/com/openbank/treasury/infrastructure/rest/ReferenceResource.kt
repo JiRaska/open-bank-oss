@@ -117,16 +117,23 @@ class ReferenceResource {
 
     @POST
     @Path("/{kind}/{key}/versions/{version}/approve")
-    @RolesAllowed(APPROVER)
+    @RolesAllowed(APPROVER, SENIOR_APPROVER)
     @Operation(summary = "Approve a PENDING version; supersedes the overlapping ACTIVE one (422 four-eyes)")
-    @Authorize(action = "treasury.reference.approve")
+    @Authorize(action = "treasury.reference.approve", resource = "#kind")
     suspend fun approve(
         @PathParam("kind") kind: String,
         @PathParam("key") recordKey: String,
         @PathParam("version") version: String,
         @HeaderParam("Idempotency-Key") key: String?,
     ): ReferenceRecordResponse = ReferenceRecordResponse.from(
-        references.approve(ReferenceKind.fromWire(kind), recordKey, version(version), actor(), requireKey(key)),
+        references.approve(
+            ReferenceKind.fromWire(kind),
+            recordKey,
+            version(version),
+            actor(),
+            requireKey(key),
+            identity.hasRole(SENIOR_APPROVER),
+        ),
         codec,
     )
 
@@ -206,6 +213,7 @@ data class ReferenceRecordResponse(
     val verifiedBy: String?,
     val reason: String?,
     val decisionReason: String?,
+    val approvalNote: String?,
 ) {
     companion object {
         fun from(r: ReferenceRecord, codec: ReferencePayloadCodec) = ReferenceRecordResponse(
@@ -225,6 +233,7 @@ data class ReferenceRecordResponse(
             verifiedBy = r.verifiedBy?.id,
             reason = r.reason,
             decisionReason = r.decisionReason,
+            approvalNote = r.approvalNote,
         )
     }
 }

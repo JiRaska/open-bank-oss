@@ -9,6 +9,7 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.time.Instant
 import java.time.LocalDate
 
@@ -67,6 +68,14 @@ class ReferenceRecordEntity : PanacheEntity() {
 
     @Column(name = "decision_reason", columnDefinition = "TEXT")
     var decisionReason: String? = null
+
+    @Column(name = "approval_note", columnDefinition = "TEXT")
+    var approvalNote: String? = null
+
+    /** Optimistic lock (V16): a second writer that read the row before this one committed fails at flush. */
+    @Version
+    @Column(name = "row_version", nullable = false)
+    var rowVersion: Long = 0
 }
 
 /**

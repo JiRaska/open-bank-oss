@@ -52,7 +52,7 @@ class ReferenceDataApiIT {
     """.trimIndent()
 
     private val counterpartyProposal = """
-        {"key":"CORP-IT-1","validFrom":"2000-01-01","reason":"new corporate client",
+        {"key":"CORP-IT-1","validFrom":"$today","reason":"new corporate client",
          "payload":{"id":"CORP-IT-1","name":"Integration Corporate","kind":"CORPORATE","lei":null,
                     "countryCode":"CZ","limits":{"CZK":1000000.00},"nettingAgreementId":null}}
     """.trimIndent()
@@ -85,6 +85,14 @@ class ReferenceDataApiIT {
             .body("status", equalTo("PENDING")).body("version", equalTo(2)).body("verified", equalTo(false))
         post("/calendar/CERTIS/versions/2/approve").then().statusCode(422).body("error", equalTo("FOUR_EYES_VIOLATION"))
         post("/counterparty", counterpartyProposal).then().statusCode(201).body("status", equalTo("PENDING"))
+        // Back-dating a counterparty (its limits) or an SSI is refused outright.
+        post("/counterparty", counterpartyProposal.replace("\"validFrom\":\"$today\"", "\"validFrom\":\"2000-01-01\""))
+            .then().statusCode(422).body("error", equalTo("REFERENCE_BACKDATED"))
+        // For the concurrency case (test 7): a TARGET2 version two approvers will race on.
+        post(
+            "/calendar",
+            calendarProposal.replace("CERTIS", "TARGET2"),
+        ).then().statusCode(201).body("version", equalTo(2))
         // A payload with an unknown field is refused, not silently ignored.
         post(
             "/book",
@@ -137,7 +145,18 @@ class ReferenceDataApiIT {
             .body("status", equalTo("REJECTED"))
         post("/calendar/CERTIS/versions/2/verify").then().statusCode(200).body("verified", equalTo(true))
 
+        // A new counterparty's limits are a raise from zero: an ordinary approver may not activate them.
+        post("/counterparty/CORP-IT-1/versions/1/approve").then().statusCode(403)
+            .body("error", equalTo("SENIOR_APPROVAL_REQUIRED"))
+        assertThat(status("counterparty", "CORP-IT-1", 1)).isEqualTo("PENDING")
+    }
+
+    @Test
+    @Order(51)
+    @TestSecurity(user = "sam.senior", roles = ["ROLE_TREASURY_SENIOR_APPROVER"])
+    fun `51 - a senior approver activates the raised limits, and the approval records them`() {
         post("/counterparty/CORP-IT-1/versions/1/approve").then().statusCode(200)
+            .body("approvalNote", org.hamcrest.Matchers.containsString("CZK none -> 1000000"))
         jdbc { c ->
             c.prepareStatement(
                 "select kind, limit_czk, synthetic from counterparties where counterparty_id = 'CORP-IT-1'",
@@ -159,6 +178,38 @@ class ReferenceDataApiIT {
     fun `6 - the dependency query lists the indices fixing on a calendar and deals facing a counterparty`() {
         given().`when`().get("/api/v1/treasury/reference/dependencies/calendar/CERTIS").then().statusCode(200)
             .body("dependants.id", hasItem("PRIBOR_3M")).body("dependants.id", hasItem("CZEONIA"))
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `7 - two concurrent approvals of one version - exactly one wins, the other is a 409`() {
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        val start = java.util.concurrent.CountDownLatch(1)
+        val calls = (1..2).map {
+            pool.submit<Int> {
+                start.await()
+                post("/calendar/TARGET2/versions/2/approve").then().extract().statusCode()
+            }
+        }
+        start.countDown()
+        val codes = calls.map { it.get(30, java.util.concurrent.TimeUnit.SECONDS) }.sorted()
+        pool.shutdown()
+        assertThat(codes).containsExactly(200, 409)
+        jdbc { c ->
+            c.prepareStatement(
+                "select count(*) from reference_records where kind = 'calendar' and record_key = 'TARGET2' and status = 'ACTIVE' and approved_by is not null",
+            ).executeQuery().use { rs ->
+                rs.next()
+                assertThat(rs.getInt(1)).isEqualTo(1)
+            }
+            c.prepareStatement(
+                "select count(*) from reference_commands where kind = 'calendar' and record_key = 'TARGET2' and action = 'APPROVE'",
+            ).executeQuery().use { rs ->
+                rs.next()
+                assertThat(rs.getInt(1)).isEqualTo(1)
+            }
+        }
     }
 
     private fun status(kind: String, key: String, version: Int): String? = jdbc { c ->

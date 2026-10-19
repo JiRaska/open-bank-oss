@@ -39,8 +39,23 @@ interface ReferenceRepository {
     /** The subset of [refs] with no ACTIVE version effective on [on]. */
     suspend fun notEffective(refs: Collection<ReferenceRef>, on: LocalDate): List<ReferenceRef>
 
-    /** All writes and the command key in ONE transaction. Throws IllegalStateException on a stale prior status. */
+    /** A NEW version (prior status null) and its command key, in one transaction. */
     suspend fun save(writes: List<ReferenceWrite>, command: ReferenceCommandKey?)
+
+    /**
+     * Decide on an existing record under lock: every version of (kind, key) is read `FOR UPDATE`,
+     * [decide] runs on that locked state (so supersession is resolved against what is really
+     * stored, never a snapshot read before the lock), and its writes are stored — each checked
+     * against the locked row's full prior state and an optimistic `row_version` — with the command
+     * key, all in ONE transaction. A concurrent decision therefore waits, then sees the outcome and
+     * is refused (409); it never overwrites it.
+     */
+    suspend fun decide(
+        kind: ReferenceKind,
+        key: String,
+        command: ReferenceCommandKey,
+        decide: (List<ReferenceRecord>) -> List<ReferenceWrite>,
+    ): List<ReferenceRecord>
 
     suspend fun findCommand(key: String): ReferenceCommandKey?
 }

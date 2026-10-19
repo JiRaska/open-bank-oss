@@ -48,6 +48,7 @@ class ReferenceDataService(
     override suspend fun propose(command: ProposeReferenceCommand, actor: Actor, key: String): ReferenceRecord {
         replay(key, PROPOSE, command.kind, command.key, null)?.let { return it }
         val next = (records.versions(command.kind, command.key).maxOfOrNull { it.version } ?: 0) + 1
+        val today = AccountingClock.bank(clock).today()
         val record = ReferenceRecord.propose(
             kind = command.kind,
             key = command.key,
@@ -58,6 +59,7 @@ class ReferenceDataService(
             reason = command.reason,
             actor = actor,
             at = clock.instant(),
+            today = today,
         )
         records.save(
             listOf(ReferenceWrite(record, null)),
@@ -72,16 +74,29 @@ class ReferenceDataService(
         version: Int,
         actor: Actor,
         key: String,
+        seniorApprover: Boolean,
     ): ReferenceRecord {
         replay(key, APPROVE, kind, recordKey, version)?.let { return it }
-        val versions = records.versions(kind, recordKey)
-        val pending = versions.find(kind, recordKey, version)
-        val approved = pending.approve(actor, clock.instant())
-        val displaced = ReferenceSupersession.resolve(approved, versions.filter { it.status == ReferenceStatus.ACTIVE })
-        val writes = listOf(ReferenceWrite(approved, ReferenceStatus.PENDING)) +
-            displaced.map { ReferenceWrite(it, ReferenceStatus.ACTIVE) }
-        records.save(writes, ReferenceCommandKey(key, APPROVE, kind, recordKey, version))
-        return approved
+        val today = AccountingClock.bank(clock).today()
+        val at = clock.instant()
+        return records.decide(
+            kind,
+            recordKey,
+            ReferenceCommandKey(key, APPROVE, kind, recordKey, version),
+        ) { versions ->
+            val pending = versions.find(kind, recordKey, version)
+            val effectiveNow = versions.lastOrNull { it.isEffectiveOn(today) }
+            val approved = pending.approve(actor, at, today, seniorApprover, effectiveNow)
+            val displaced = ReferenceSupersession.resolve(
+                approved,
+                versions.filter {
+                    it.status ==
+                        ReferenceStatus.ACTIVE
+                },
+            )
+            listOf(ReferenceWrite(approved, ReferenceStatus.PENDING)) +
+                displaced.map { ReferenceWrite(it, ReferenceStatus.ACTIVE) }
+        }.first { it.version == version }
     }
 
     override suspend fun reject(
@@ -93,15 +108,15 @@ class ReferenceDataService(
         key: String,
     ): ReferenceRecord {
         replay(key, REJECT, kind, recordKey, version)?.let { return it }
-        val rejected = records.versions(
-            kind,
-            recordKey,
-        ).find(kind, recordKey, version).reject(actor, reason, clock.instant())
-        records.save(
-            listOf(ReferenceWrite(rejected, ReferenceStatus.PENDING)),
-            ReferenceCommandKey(key, REJECT, kind, recordKey, version),
-        )
-        return rejected
+        val at = clock.instant()
+        return records.decide(kind, recordKey, ReferenceCommandKey(key, REJECT, kind, recordKey, version)) { versions ->
+            listOf(
+                ReferenceWrite(
+                    versions.find(kind, recordKey, version).reject(actor, reason, at),
+                    ReferenceStatus.PENDING,
+                ),
+            )
+        }.single()
     }
 
     override suspend fun verify(
@@ -112,13 +127,10 @@ class ReferenceDataService(
         key: String,
     ): ReferenceRecord {
         replay(key, VERIFY, kind, recordKey, version)?.let { return it }
-        val current = records.versions(kind, recordKey).find(kind, recordKey, version)
-        val verified = current.verify(actor)
-        records.save(
-            listOf(ReferenceWrite(verified, current.status)),
-            ReferenceCommandKey(key, VERIFY, kind, recordKey, version),
-        )
-        return verified
+        return records.decide(kind, recordKey, ReferenceCommandKey(key, VERIFY, kind, recordKey, version)) { versions ->
+            val current = versions.find(kind, recordKey, version)
+            listOf(ReferenceWrite(current.verify(actor), current.status))
+        }.single()
     }
 
     override suspend fun dependencies(kind: ReferenceKind, key: String): List<ReferenceDependant> {

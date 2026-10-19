@@ -96,6 +96,39 @@ class ReferenceRepositoryImpl(
         }.awaitSuspending()
     }
 
+    override suspend fun decide(
+        kind: ReferenceKind,
+        key: String,
+        command: ReferenceCommandKey,
+        decide: (List<ReferenceRecord>) -> List<ReferenceWrite>,
+    ): List<ReferenceRecord> {
+        val today = AccountingClock.bank(clock).today()
+        return Panache.withTransaction {
+            find("kind = ?1 and recordKey = ?2 order by version asc", kind.wire, key)
+                .withLock(LockModeType.PESSIMISTIC_WRITE)
+                .list()
+                .flatMap { rows ->
+                    val locked = rows.map { it.toDomain() }
+                    val writes = decide(locked)
+                    writes.forEach { w ->
+                        val row = checkNotNull(rows.firstOrNull { it.version == w.record.version }) {
+                            "reference ${w.record.ref} version ${w.record.version} disappeared"
+                        }
+                        val prior = locked.first { it.version == w.record.version }
+                        check(w.priorStatus != null && prior.status == w.priorStatus) {
+                            "reference ${w.record.ref} version ${w.record.version} is now ${prior.status}, not ${w.priorStatus}; reload and retry"
+                        }
+                        row.fill(w.record)
+                    }
+                    writes.map { it.record }
+                        .filter { it.kind == ReferenceKind.COUNTERPARTY && it.status == ReferenceStatus.ACTIVE }
+                        .fold(Uni.createFrom().voidItem()) { chain, r -> chain.flatMap { project(r, today) } }
+                        .flatMap { persistCommand(command) }
+                        .map { writes.map { it.record } }
+                }
+        }.awaitSuspending()
+    }
+
     private fun write(w: ReferenceWrite): Uni<Void> {
         val r = w.record
         return find("kind = ?1 and recordKey = ?2 and version = ?3", r.kind.wire, r.key, r.version)
@@ -183,6 +216,7 @@ class ReferenceRepositoryImpl(
         approvedAt = r.approvedAt
         verifiedBy = r.verifiedBy?.id
         decisionReason = r.decisionReason
+        approvalNote = r.approvalNote
     }
 
     private fun ReferenceRecordEntity.toDomain(): ReferenceRecord {
@@ -203,6 +237,7 @@ class ReferenceRepositoryImpl(
             approvedAt = approvedAt,
             verifiedBy = verifiedBy?.let { Actor(it, ActorType.HUMAN) },
             decisionReason = decisionReason,
+            approvalNote = approvalNote,
         )
     }
 }
