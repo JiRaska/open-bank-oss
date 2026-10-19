@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.finance.cashflow.FixingSource
 import com.openbank.treasury.application.port.out.DayCompletionRepository
@@ -86,7 +87,7 @@ class FixingService(
     private val dayCompletion: DayCompletionRepository?,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
-    private val newId: () -> UUID = { UUID.randomUUID() },
+    private val newId: () -> UUID = { Ids.newId() },
 ) {
     /** The fixings of [date]: what is due, what was fixed, what is blocked. [status] narrows it. */
     suspend fun fixings(date: LocalDate, status: FixingStatus?): List<FixingView> {

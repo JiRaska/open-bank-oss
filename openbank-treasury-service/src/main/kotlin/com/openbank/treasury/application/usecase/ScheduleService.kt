@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.calendar.BusinessCalendar
 import com.openbank.libs.finance.calendar.Calendars
@@ -48,7 +49,7 @@ class ScheduleService(
     private val references: ReferenceRepository,
     private val cashFlows: CashFlowRepository,
     private val clock: Clock,
-    private val newId: () -> UUID = { UUID.randomUUID() },
+    private val newId: () -> UUID = { Ids.newId() },
 ) {
     /** Every reference record [deal] names must be ACTIVE on its trade date (else 422 with the list). */
     suspend fun requireEffective(deal: Deal) {

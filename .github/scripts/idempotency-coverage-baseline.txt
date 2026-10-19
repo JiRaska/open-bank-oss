@@ -142,3 +142,21 @@ openbank-pension-fund-service POST /api/v1/strategies/{strategyId}/changes  # ba
 openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
 openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
 openbank-pension-fund-service POST /api/v1/strategy-changes/{changeId}/apply  # lifecycle/action endpoint on an addressed resource — replay refused 409 by StrategyChange state — ADR-0334
+openbank-treasury-service POST /api/v1/treasury/analysis/cash-flows  # read-only analysis (POST only for a structured body); mutates nothing, replay is harmless — ADR-0344 contract 8.4 exception
+openbank-treasury-service POST /api/v1/treasury/deals/{id}/schedule-preview  # read-only preview; persists nothing, replay is harmless — ADR-0344 contract 8.1 exception
+openbank-treasury-service POST /api/v1/treasury/fixings/run  # operator trigger; a fixed flow is no longer due, so a re-run fixes nothing twice — ADR-0344 D5 exception; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/fixings/{index}/{date}/manual  # creation POST (PENDING manual fixing) with no idempotency key today — four-eyes approval before effect; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/fixings/{index}/{date}/manual/{batchId}/approve  # lifecycle/action endpoint on an addressed resource — replay guarded by batch state (PENDING only); burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/fixings/{index}/{date}/manual/{batchId}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by batch state (PENDING only); burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/market-data/import  # creation POST (PENDING batch, SHA-256 provenance) with no idempotency key today — four-eyes approval before effect; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/market-data/imports/{batchId}/approve  # lifecycle/action endpoint on an addressed resource — replay guarded by batch state (PENDING only); burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/market-data/imports/{batchId}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by batch state (PENDING only); burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/market-data/internal-rate-sheets  # creation POST (PENDING rate sheet) with no idempotency key today — four-eyes approval before effect; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/market-data/internal-rate-sheets/{id}/approve  # lifecycle/action endpoint on an addressed resource — locked row, PENDING only, a replay is 409 RATE_SHEET_STALE; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/market-data/internal-rate-sheets/{id}/reject  # lifecycle/action endpoint on an addressed resource — locked row, PENDING only, a replay is 409 RATE_SHEET_STALE; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/payments/propose  # operator trigger; proposal keys payments by their flows (a flow is on at most one live payment), so a re-run proposes nothing twice — ADR-0344 D6; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/payments/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by payment state (PROPOSED only); burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/payments/{id}/release  # lifecycle/action endpoint on an addressed resource — locked row, PROPOSED only, a replay is 409 PAYMENT_STALE; burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/payments/{id}/resolve  # lifecycle/action endpoint on an addressed resource — replay guarded by payment state (resolvable only); burn-down #8351
+openbank-treasury-service POST /api/v1/treasury/revaluations/run  # operator trigger; idempotent per (deal, valuation date) by key and claimed row — ADR-0344 D7/D8 exception
+openbank-treasury-service POST /api/v1/treasury/views/deal-filters  # per-user saved view, upsert by (user, name); not money-moving — ADR-0344 contract 8.2 exception

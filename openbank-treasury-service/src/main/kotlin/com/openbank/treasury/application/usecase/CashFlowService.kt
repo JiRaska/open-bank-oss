@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.treasury.application.port.`in`.CashFlowLedgerView
 import com.openbank.treasury.application.port.`in`.CashFlowUseCase
@@ -41,7 +42,7 @@ class CashFlowService(
     private val schedules: ScheduleService,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
-    private val newId: () -> UUID = { UUID.randomUUID() },
+    private val newId: () -> UUID = { Ids.newId() },
 ) : CashFlowUseCase {
 
     override suspend fun ledger(dealId: UUID, scheduleVersion: Int?): CashFlowLedgerView {

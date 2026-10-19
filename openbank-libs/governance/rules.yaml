@@ -4601,6 +4601,14 @@ security_sensitive_paths:
   openbank-treasury-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # ADR-0344: the market-data provenance hash (SHA-256), the payment netting key, the leg
+      # schedule hash, and the two outbound m2m OIDC clients (ledger close, risk valuation).
+      - "src/main/kotlin/**/marketdata/MarketData.kt"
+      - "src/main/kotlin/**/marketdata/MarketDataFiles.kt"
+      - "src/main/kotlin/**/domain/model/Legs.kt"
+      - "src/main/kotlin/**/domain/payment/Payments.kt"
+      - "src/main/kotlin/**/close/LedgerCloseParticipationClient.kt"
+      - "src/main/kotlin/**/revaluation/RiskValuationClient.kt"
       - "src/main/kotlin/**/approval/**"
       - "src/main/kotlin/**/security/**"
       - "src/main/kotlin/**/filter/**"

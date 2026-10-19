@@ -141,6 +141,35 @@ spec:
             # #10896 FX rate check against fx-service (the bank's fixing).
             - name: OPENBANK_TREASURY_FX_SPOT_RATE_CHECK_ENABLED
               value: "false"
+            # ADR-0344 bank day-close chain: fixings, payment proposals, corrections posting,
+            # fair-value revaluation and the ledger close participation all post to or report on
+            # the BANK ledger and day — none of it belongs to a custodian instance.
+            - name: OPENBANK_TREASURY_FIXING_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_FIXING_CRON
+              value: "off"
+            - name: OPENBANK_TREASURY_PAYMENTS_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_PAYMENTS_CRON
+              value: "off"
+            - name: OPENBANK_TREASURY_CORRECTIONS_POSTING_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_CORRECTIONS_POSTING_INTERVAL
+              value: "off"
+            - name: OPENBANK_TREASURY_REVALUATION_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_REVALUATION_CRON
+              value: "off"
+            - name: OPENBANK_TREASURY_CLOSE_ENABLED
+              value: "false"
+            - name: OPENBANK_TREASURY_CLOSE_REPORT_CRON
+              value: "off"
+            # Contract 9: the bank-own payment rail edge, both directions — a pension-only topic name
+            # out (no KafkaTopic or credentials exist for it) and the status consumer off.
+            - name: MP_MESSAGING_OUTGOING_TREASURY_PAYMENTS_OUT_TOPIC
+              value: openbank.treasury-pension-co.payments.disabled
+            - name: MP_MESSAGING_INCOMING_INSTITUTION_TRANSFER_STATUS_IN_ENABLED
+              value: "false"
             # Keycloak runs in `iam`. Same realm and shared client as the bank instance.
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank

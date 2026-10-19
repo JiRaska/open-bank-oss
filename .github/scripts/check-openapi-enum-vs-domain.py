@@ -93,6 +93,19 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — a DELIBERATE SUBSET (ADR-0344). The legacy counterparty list response
+    # (GET /api/v1/treasury/counterparties) returns only BANK and CENTRAL_BANK rows; CORPORATE and
+    # ISSUER counterparties live in reference data and are listed by GET /reference/counterparty,
+    # whose schema carries the full CounterpartyKind. A closed response enum may not grow silently.
+    "openbank-treasury-service:BANK,CENTRAL_BANK":
+        "ADR-0344 — legacy counterparty list `kind`: NOT drift. Deliberate subset of CounterpartyKind; "
+        "CORPORATE / ISSUER are served by the reference-data counterparty endpoint.",
+    # NOT drift — a DELIBERATE SUPERSET (ADR-0344). Treasury accepts UNADJUSTED (no roll at all) as
+    # a deal's business-day convention; libs-domain's BusinessDayConvention models only the four
+    # rolling conventions, and an UNADJUSTED leg simply never calls the roller.
+    "openbank-treasury-service:FOLLOWING,MODIFIED_FOLLOWING,MODIFIED_PRECEDING,PRECEDING,UNADJUSTED":
+        "ADR-0344 — business-day convention: NOT drift. UNADJUSTED is the no-roll convention the "
+        "libs-domain roller has no member for, by design.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an

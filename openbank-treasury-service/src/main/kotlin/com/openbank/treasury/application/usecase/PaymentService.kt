@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.DayCompletionRepository
@@ -61,7 +62,7 @@ data class PaymentStatusChanged(
     val actor: String?,
     val reason: String?,
     val occurredAt: Instant,
-    val sourceService: String = "openbank-treasury-service",
+    val sourceService: String = "treasury-service",
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.payment.status-changed.v1"
@@ -141,7 +142,7 @@ class PaymentService(
     private val cutOffWindowDays: Long,
     private val onFundingExceeded: (String) -> Unit = {},
     private val onParkedMatch: (UUID) -> Unit = {},
-    private val newId: () -> UUID = { UUID.randomUUID() },
+    private val newId: () -> UUID = { Ids.newId() },
     /** Contract 9.1 debtor agent: the bank's own BIC. */
     private val ownBic: String = DEFAULT_OWN_BIC,
     private val counterparty: suspend (String) -> CounterpartyIdentity? = { null },

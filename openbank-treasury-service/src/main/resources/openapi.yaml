@@ -1615,7 +1615,7 @@ paths:
                         legIndex: { type: integer }
                         flowId: { type: string, format: uuid }
                         kind: { type: string }
-                        dealKind: { type: string, enum: [ACTUAL, PLANNED] }
+                        dealKind: { $ref: '#/components/schemas/DealKind' }
                         state: { type: string }
                   flowsTruncated: { type: boolean }
                   fxRates:

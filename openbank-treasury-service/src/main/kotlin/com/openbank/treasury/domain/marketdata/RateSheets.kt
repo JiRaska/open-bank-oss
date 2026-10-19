@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.marketdata
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.ActorType
@@ -95,7 +96,7 @@ data class RateSheet(
             ) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not propose a rate sheet")
             }
-            return RateSheet(UUID.randomUUID(), name.trim(), effectiveFrom, rates, RateSheetStatus.PENDING, actor, at)
+            return RateSheet(Ids.newId(), name.trim(), effectiveFrom, rates, RateSheetStatus.PENDING, actor, at)
         }
     }
 }

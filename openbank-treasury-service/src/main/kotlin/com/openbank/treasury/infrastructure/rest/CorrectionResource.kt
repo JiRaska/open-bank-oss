@@ -144,7 +144,7 @@ class CorrectionResource {
     @Authorize(action = "treasury.deal.correction.propose", resource = "#id")
     suspend fun propose(
         @PathParam("id") id: UUID,
-        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
         request: CorrectionRequest,
     ): Response {
         val ch = request.changes
@@ -176,7 +176,7 @@ class CorrectionResource {
     suspend fun approve(
         @PathParam("id") id: UUID,
         @PathParam("correctionId") correctionId: UUID,
-        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
     ): CorrectionDto = CorrectionDto.from(corrections.approve(id, correctionId, actor(), requireKey(key)), mapper)
 
     @POST
@@ -189,7 +189,7 @@ class CorrectionResource {
     suspend fun overrideLimit(
         @PathParam("id") id: UUID,
         @PathParam("correctionId") correctionId: UUID,
-        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
         request: ReasonRequest,
     ): CorrectionDto = CorrectionDto.from(
         corrections.overrideLimit(
@@ -210,7 +210,7 @@ class CorrectionResource {
     suspend fun reject(
         @PathParam("id") id: UUID,
         @PathParam("correctionId") correctionId: UUID,
-        @HeaderParam(IDEMPOTENCY_KEY) key: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
         request: ReasonRequest,
     ): CorrectionDto = CorrectionDto.from(
         corrections.reject(

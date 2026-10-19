@@ -85,7 +85,7 @@ deal's stored cash-flow ledger, never from flat fields. Keys `treasury:<dealId>:
 ledger `V33` set (securities by IFRS 9 category, premium/discount, accrued interest per family,
 loans, repo/reverse-repo, derivative fair value, FVOCI reserve, realised/unrealised P&L, memo pairs
 for commitments and collateral). Derivatives are recognised on trade date as a commitment memo.
-**STRIDE-T (wrong account / unbalanced):** every row resolves through `TreasuryChart`; a flow with
+**STRIDE-T (wrong account / unbalanced):** every row resolves through `PostingMatrix` to an accounting class the ledger maps (`LegacyGlChart` only as the pre-ADR-0341 rollout shim); a flow with
 no matching row is refused (`NoPostingRuleException`), never posted to a guess; `PostingMatrixLifecycleTest`
 replays every non-legacy parity fixture's whole life (all three IFRS 9 categories for securities) and
 asserts every journal balances, only seeded accounts are touched, every balance-sheet account the deal

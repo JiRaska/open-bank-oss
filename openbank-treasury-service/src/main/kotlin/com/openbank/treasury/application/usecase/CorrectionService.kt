@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.libs.domain.calendar.AccountingClock
@@ -88,7 +89,7 @@ class CorrectionService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val bookCategory: suspend (bookId: String?) -> Ifrs9Category = { Ifrs9Category.AMORTISED_COST },
-    private val newId: () -> UUID = { UUID.randomUUID() },
+    private val newId: () -> UUID = { Ids.newId() },
     /**
      * The booking path's own term vetting (TreasuryDealUseCase.vetCorrection): references, FX flag,
      * product mandate, counterparty limit under an optional senior override. Required: a correction

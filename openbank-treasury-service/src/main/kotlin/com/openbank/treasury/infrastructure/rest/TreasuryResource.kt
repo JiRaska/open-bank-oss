@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -298,7 +299,7 @@ class TreasuryResource {
         val report = deals.positions(date)
         val close = views.recordClose(
             PositionClose(
-                snapshotId = UUID.randomUUID(),
+                snapshotId = Ids.newId(),
                 date = date,
                 bookId = request.bookId,
                 scenario = request.scenario,

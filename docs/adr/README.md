@@ -348,7 +348,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0341](0341-pinned-product-revision-is-the-single-source-of-price-accounting-class-and-regulatory-class.md) | Pinned product revision is the single source of price, accounting class and regulatory class | Proposed | Planned | product-catalog,fees-billing,ledger,regulatory-reporting | — |
 | [0342](0342-product-services-are-day-close-participants-the-accounting-day-waits-for.md) | Product services are day-close participants the accounting day waits for | Proposed | Partial | accounting-close,ledger,interest | — |
 | [0343](0343-merge-train-replaces-strict-up-to-date-on-main.md) | Merge train replaces strict up-to-date on main | Proposed | Partial | ci,governance,release-versioning | — |
-| [0344](0344-treasury-instrument-model-multi-leg-schedules-fixings-and-the-cash-flow-ledger.md) | Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain | Proposed | Planned | architecture,ledger,payments,accounting-close | — |
+| [0344](0344-treasury-instrument-model-multi-leg-schedules-fixings-and-the-cash-flow-ledger.md) | Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain | Proposed | Partial | architecture,ledger,payments,accounting-close | — |
 
 ## By tag
 

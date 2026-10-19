@@ -97,6 +97,8 @@ spec:
           labels:
             severity: warning
           annotations:
+            # Each refusal is an on-demand release, not a periodic job: the window follows real traffic.
+            subject_period: continuous
             summary: "A treasury payment release was refused: funding account would go negative"
             description: >-
               treasury-service refused to release an outgoing payment in {{ $labels.currency }}
