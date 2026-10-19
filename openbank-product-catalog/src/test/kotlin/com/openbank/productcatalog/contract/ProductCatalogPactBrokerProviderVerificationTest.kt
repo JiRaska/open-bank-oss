@@ -98,15 +98,8 @@ class ProductCatalogPactBrokerProviderVerificationTest {
             .then().statusCode(404)
     }
 
-    /**
-     * No seeding: `CURRENT_PERSONAL` carries four seeded fees in `ProductSeed` on every boot.
-     * Keep this broker replay state in lock-step with the always-on `@PactFolder` verifier so a
-     * newly published billing pact cannot pass on a PR and then strand at `can-i-deploy`.
-     */
-    @State("a product with fees exists for code CURRENT_PERSONAL")
-    fun feeBearingProductIsSeeded() {
-        // Intentionally empty — see the KDoc above.
-    }
+    @State("a published v1-projected deposit revision exists for billing")
+    fun publishedLegacyDepositRevisionExists() = catalogFixtures.publishedLegacyDepositRevisionExists()
 
     /**
      * The pact-pinned UUID is deliberately absent from `ProductSeed`; the seeded catalogue
