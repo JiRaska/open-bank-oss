@@ -3,6 +3,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 resolver="$repo_root/.github/scripts/resolve-historical-service-ref.sh"
+# run-gates supplies a private index for the real checkout. A scratch repository must
+# use its own index and object store or its commit can reference unavailable blobs.
+unset GIT_INDEX_FILE GIT_DIR GIT_WORK_TREE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
