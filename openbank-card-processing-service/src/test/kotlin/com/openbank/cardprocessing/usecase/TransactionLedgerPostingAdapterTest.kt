@@ -232,13 +232,16 @@ class TransactionLedgerPostingAdapterTest {
     fun `adapter cancellation propagates without reporting a failed booking`() {
         val cancellation = CancellationException("cancelled")
         every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(cancellation)
-        assertThat(
-            assertThrows<CancellationException> {
-                runBlocking {
-                    TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
-                        .postClearedSpend(authorization("CZK"), 1_000, "clr-cancelled")
-                }
-            },
-        ).isSameAs(cancellation)
+        val propagated = assertThrows<CancellationException> {
+            runBlocking {
+                TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
+                    .postClearedSpend(authorization("CZK"), 1_000, "clr-cancelled")
+            }
+        }
+        // Coroutine stack recovery may copy the exception at a suspension boundary. The original
+        // must remain in its causal chain; cap traversal so a malformed cyclic chain cannot hang.
+        assertThat(generateSequence<Throwable>(propagated) { it.cause }.take(16).any { it === cancellation })
+            .describedAs("the original cancellation propagates directly or through a recovered coroutine stack")
+            .isTrue()
     }
 }
