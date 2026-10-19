@@ -49,6 +49,9 @@ class RiskEnginePactBrokerProviderVerificationTest {
     @Inject
     lateinit var testIdentity: TestIdentityAssociation
 
+    @Inject
+    lateinit var dealBook: com.openbank.risk.application.port.out.TreasuryDealBook
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -81,4 +84,7 @@ class RiskEnginePactBrokerProviderVerificationTest {
     /** treasury's curve-set reads (ADR-0315 D9); the same state as the folder replay. */
     @State(CurveSetPactState.NAME)
     fun curveSetWithCzeonia(): Map<String, Any> = CurveSetPactState.seed()
+
+    @State(ValuationPactState.NAME)
+    fun tiedOutRunValuingAnIrs(): Map<String, Any> = ValuationPactState.seed(ledger, dealBook)
 }

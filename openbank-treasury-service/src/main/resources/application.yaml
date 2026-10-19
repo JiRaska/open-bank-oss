@@ -186,6 +186,11 @@ openbank:
       # account. Flip to true only after the ledger carrying migration V32 is live; then delete the
       # LegacyGlChart shim. A reversal always names the original posting's account either way.
       post-by-class: ${OPENBANK_TREASURY_LEDGER_POST_BY_CLASS:false}
+    revaluation:
+      # ADR-0344 D7/D8: the daily revaluation of the accounting day off the risk engine's TIED_OUT
+      # snapshot of that date (read as treasury's own m2m identity, risk.snapshot.list +
+      # risk.valuation.read). A deal the engine could not value marks the REVALUATION step FAILED.
+      enabled: ${OPENBANK_TREASURY_REVALUATION_ENABLED:true}
     fixing:
       # ADR-0344 D5: the hourly fixing pass for the accounting day (re-runs are harmless). It fixes
       # only from ACTIVE (four-eyes approved) observations that pass the quality gate; a blocked
@@ -208,7 +213,7 @@ openbank:
       # steps every accounting day must finish before the day is reported; a day with one unfinished
       # (or FAILED) is withheld, so the ledger waits and pages. Must match rules.yaml close_participants.
       enabled: ${OPENBANK_TREASURY_CLOSE_ENABLED:true}
-      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS,FIXINGS,PAYMENTS,CORRECTIONS}
+      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS,FIXINGS,PAYMENTS,REVALUATION,CORRECTIONS}
       lookback-days: 3
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The

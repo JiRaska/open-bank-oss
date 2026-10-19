@@ -99,6 +99,8 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.marketdata.read",
 		# ADR-0344 D6: own-account payments.
 		"treasury.payment.read",
+		# ADR-0344 D7/D8: the revaluation record of a date.
+		"treasury.revaluation.read",
 	}
 }
 
@@ -265,7 +267,7 @@ allowed_reasons contains "service-tax-reporting-portfolio-read" if {
 allowed_reasons contains "treasury-back-office-market-data" if {
 	treasury_staff
 	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run", "treasury.revaluation.run"}
 }
 
 allowed_reasons contains "treasury-approver-market-data" if {

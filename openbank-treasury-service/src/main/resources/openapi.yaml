@@ -1474,6 +1474,51 @@ paths:
                   blocked: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
                   failures: { type: integer, minimum: 0 }
 
+  /api/v1/treasury/revaluations:
+    get:
+      tags: [Treasury]
+      operationId: listRevaluations
+      summary: The fair-value revaluations recorded for one valuation date (ADR-0344 D7/D8)
+      parameters:
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+      responses:
+        '200':
+          description: One row per revalued deal
+          content:
+            application/json:
+              schema: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/Revaluation' } }
+
+  /api/v1/treasury/revaluations/run:
+    post:
+      tags: [Treasury]
+      operationId: runRevaluation
+      summary: Revalue the fair-value deals (or one, by dealId) off the risk engine's TIED_OUT valuation of the date; a deal it did not value is a gap, never a zero
+      parameters:
+        - { name: asOf, in: query, required: true, schema: { type: string, format: date } }
+        - { name: dealId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asOf: { type: string, format: date }
+                  snapshotId: { type: string, format: uuid, nullable: true }
+                  revalued: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/Revaluation' } }
+                  journals: { type: integer, minimum: 0 }
+                  gaps:
+                    type: array
+                    maxItems: 5000
+                    items:
+                      type: object
+                      properties:
+                        dealId: { type: string, format: uuid }
+                        reason: { type: string, maxLength: 500 }
+                  failures: { type: array, maxItems: 5000, items: { type: string, maxLength: 500 } }
+
   /api/v1/treasury/fixings/{index}/{date}/manual:
     post:
       tags: [Treasury]
@@ -1974,6 +2019,18 @@ components:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    Revaluation:
+      type: object
+      description: One deal's revaluation on one date (ADR-0344 D7/D8); amounts in the deal currency
+      properties:
+        dealId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        snapshotId: { type: string, format: uuid }
+        fairValue: { type: number, description: The clean fair value the risk engine reported }
+        carrying: { type: number, description: Amortised cost for a security, zero for a derivative }
+        cumulative: { type: number, description: Cumulative fair-value adjustment after this date }
+        change: { type: number, description: The change this date posted through the REVALUATION event }
+        journalId: { type: string, format: uuid, nullable: true }
     CorrectionChanges:
       type: object
       description: The partial terms a correction changes; absent = unchanged. Legs are replaced as a whole.

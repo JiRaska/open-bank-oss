@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury-pension-co
   annotations:
-    openbank.tech/policy-checksum: "dd5c621320d0b23d"
+    openbank.tech/policy-checksum: "b3c02cc8a5d744bd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -862,6 +862,8 @@ data:
     		"treasury.marketdata.read",
     		# ADR-0344 D6: own-account payments.
     		"treasury.payment.read",
+    		# ADR-0344 D7/D8: the revaluation record of a date.
+    		"treasury.revaluation.read",
     	}
     }
 
@@ -1028,7 +1030,7 @@ data:
     allowed_reasons contains "treasury-back-office-market-data" if {
     	treasury_staff
     	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
-    	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+    	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run", "treasury.revaluation.run"}
     }
 
     allowed_reasons contains "treasury-approver-market-data" if {

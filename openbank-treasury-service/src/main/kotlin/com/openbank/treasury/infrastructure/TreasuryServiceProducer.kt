@@ -181,6 +181,31 @@ class TreasuryServiceProducer {
             vet = { deal, override -> dealUseCase.get().vetCorrection(deal, override) },
         )
 
+    /** ADR-0344 D7/D8: revaluation off the risk engine's valuation, posted through the matrix. */
+    @Produces
+    @ApplicationScoped
+    @Suppress("LongParameterList")
+    fun revaluationService(
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        valuation: com.openbank.treasury.application.port.out.ValuationPort,
+        revaluations: com.openbank.treasury.application.port.out.RevaluationRepository,
+        ledger: LedgerPostingPort,
+        references: ReferenceRepository,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
+        clock: Clock,
+    ): com.openbank.treasury.application.usecase.RevaluationService =
+        com.openbank.treasury.application.usecase.RevaluationService(
+            deals,
+            cashFlows,
+            valuation,
+            revaluations,
+            ledger,
+            clock,
+            BookCategories(references, clock)::of,
+            dayCompletion,
+        )
+
     /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
     @Produces
     @ApplicationScoped

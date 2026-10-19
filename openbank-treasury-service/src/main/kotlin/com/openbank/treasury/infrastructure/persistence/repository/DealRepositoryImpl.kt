@@ -574,7 +574,7 @@ class DealRepositoryImpl(
         return if (fresh.isEmpty()) Uni.createFrom().voidItem() else transitions.persist(fresh).replaceWithVoid()
     }
 
-    private fun persistJournal(ref: LedgerJournalRef): Uni<Void> = journals.persist(
+    internal fun persistJournal(ref: LedgerJournalRef): Uni<Void> = journals.persist(
         DealJournalEntity().apply {
             dealId = ref.dealId
             event = ref.event.name

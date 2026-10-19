@@ -412,6 +412,22 @@ test_staff_read_fixings_and_market_data if {
 	not allowed(agent, "treasury.marketdata.read")
 }
 
+# --- ADR-0344 D7/D8 revaluation: must-DENY first ---
+
+test_revaluation_run_is_back_office_only if {
+	not allowed(dealer, "treasury.revaluation.run")
+	not allowed(approver, "treasury.revaluation.run")
+	every p in [shared_sa, renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.revaluation.run")
+	}
+	# Reads: as every treasury `.read`, a ROLE_OPERATOR holder reaches it through operator-read-any.
+	every p in [renamed_sa, agent, nobody] {
+		not allowed(p, "treasury.revaluation.read")
+	}
+	allowed(back_office, "treasury.revaluation.run")
+	allowed(dealer, "treasury.revaluation.read")
+}
+
 # --- ADR-0344 D6 payments: must-DENY first ---
 
 releaser := {"service_account": false, "type": "HUMAN", "id": "rita-1", "roles": ["ROLE_TREASURY_PAYMENT_RELEASER"]}
