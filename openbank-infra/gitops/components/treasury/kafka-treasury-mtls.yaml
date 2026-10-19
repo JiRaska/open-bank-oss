@@ -1,8 +1,9 @@
 # Kafka mTLS identity + ACLs for openbank-treasury-service (ADR-0137 Tier 2).
 #
-# treasury-service only PRODUCES openbank.treasury.deal.events (its outbox). It consumes nothing,
-# so it holds no Read ACL and needs no consumer group: the ACL set is the whole statement of what
-# this identity can do.
+# treasury-service PRODUCES openbank.treasury.deal.events and openbank.treasury.payments (its
+# outbox) and CONSUMES openbank.swift.institution-transfers (the bank-own rail's status stream) as
+# consumer group openbank-treasury-service. The ACL set is the whole statement of what this
+# identity can do.
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
 # service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same name in
@@ -28,3 +29,21 @@ spec:
           name: openbank.treasury.deal.events
           patternType: literal
         operations: [Write, Describe]
+      # Bank-own payment rail (contract 9.1 / 9.2): treasury publishes releases and reads the
+      # rail's status stream back. Only treasury holds Write on openbank.treasury.payments, which
+      # is what makes "the producer is treasury" true for the rail's consumer.
+      - resource:
+          type: topic
+          name: openbank.treasury.payments
+          patternType: literal
+        operations: [Write, Describe]
+      - resource:
+          type: topic
+          name: openbank.swift.institution-transfers
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-treasury-service
+          patternType: literal
+        operations: [Read]

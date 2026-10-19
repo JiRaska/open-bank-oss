@@ -17,3 +17,21 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Bank-own payment releases (contract 9.1, treasury.payment.released.v1) — written by
+# treasury-service's outbox in the same transaction that moves the payment to RELEASED, read only
+# by swift-service (the financial-institution transfer rail). Keyed by paymentId. Its consumer's
+# dead-letter topic is openbank.dlq.swift-service.treasury-payments-in (kafka/kafka-dlq-topics.yaml).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.treasury.payments
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
