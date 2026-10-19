@@ -6,7 +6,6 @@ package com.openbank.treasury.domain.model
 
 import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -26,12 +25,31 @@ import java.util.UUID
  *   until then, so it consumes the counterparty's CZK limit by its CZK equivalent while
  *   PENDING_APPROVAL, BOOKED or CONFIRMED. `isAsset = false`: it opens no placement-like claim.
  */
-enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
-    MM_PLACEMENT(isAsset = true),
-    MM_BORROWING(isAsset = false),
-    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true),
-    CNB_LOMBARD(isAsset = false, isCnbFacility = true),
-    FX_SPOT(isAsset = false),
+enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false, val legacy: Boolean = false) {
+    MM_PLACEMENT(isAsset = true, legacy = true),
+    MM_BORROWING(isAsset = false, legacy = true),
+    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true, legacy = true),
+    CNB_LOMBARD(isAsset = false, isCnbFacility = true, legacy = true),
+    FX_SPOT(isAsset = false, legacy = true),
+
+    // ADR-0344 D2: instruments described by their legs. Captured, scheduled and four-eyes booked
+    // now; settlement, maturity and posting arrive with the posting-rule matrix (ADR-0344 D7), so
+    // until then [Deal.settle] and [Deal.mature] refuse them.
+    CASH(isAsset = false),
+    TREASURY_BILL(isAsset = true),
+    BOND(isAsset = true),
+    BILL_OF_EXCHANGE(isAsset = true),
+    LOAN(isAsset = true),
+    FX_FORWARD(isAsset = false),
+    FX_SWAP(isAsset = false),
+    FRA(isAsset = false),
+    IRS(isAsset = false),
+    REPO(isAsset = false),
+    REVERSE_REPO(isAsset = true),
+    ;
+
+    /** ADR-0344 D2: the products whose legs the client must send (no flat-field derivation). */
+    val legsRequired: Boolean get() = !legacy
 }
 
 /** The bank's side of an FX spot deal, on the FOREIGN currency: BUY = the bank buys it and pays CZK. */
@@ -170,6 +188,16 @@ data class Deal(
     /** Present exactly when `product == FX_SPOT`. */
     val fx: FxTerms? = null,
     val history: List<DealTransition> = emptyList(),
+    /** ADR-0344 D2: only ACTUAL books, posts and pays. */
+    val kind: DealKind = DealKind.ACTUAL,
+    /** The instrument's legs; derived from the flat fields for the legacy products ([LegacyLegs]). */
+    val legs: List<LegSpec> = emptyList(),
+    val header: DealHeader = DealHeader.EMPTY,
+    /** The terms version (1 at draft). */
+    val version: Int = 1,
+    /** 0 until the first cash-flow ledger is generated at submission (ADR-0344 D4). */
+    val scheduleVersion: Int = 0,
+    val scheduleHash: String? = null,
 ) {
     init {
         require(currency in SUPPORTED_CURRENCIES) { "currency must be one of $SUPPORTED_CURRENCIES" }
@@ -188,7 +216,7 @@ data class Deal(
             require(counterpartyId == CNB_COUNTERPARTY_ID) {
                 "the ČNB $facility's counterparty is $CNB_COUNTERPARTY_ID"
             }
-            require(maturityDate == DayCount.nextBusinessDay(valueDate)) {
+            require(maturityDate == DealCalendars.overnight(valueDate, currency)) {
                 "the ČNB $facility is overnight: maturityDate must be the next business day"
             }
             if (product == ProductType.CNB_LOMBARD) {
@@ -197,7 +225,19 @@ data class Deal(
         } else {
             require(counterpartyId != CNB_COUNTERPARTY_ID) { "interbank products cannot face the central bank" }
         }
+        require(scheduleVersion >= 0 && version >= 1) { "versions are positive" }
+        header.validate()
+        if (product.legsRequired) {
+            require(legs.isNotEmpty()) { "a $product deal is described by its legs" }
+        }
+        require(legs.size <= MAX_LEGS) { "a deal has at most $MAX_LEGS legs" }
+        require(inputs == null || inputs.length <= MAX_INPUTS_CHARS) {
+            "inputs is at most $MAX_INPUTS_CHARS characters"
+        }
+        legs.forEach { it.validate() }
     }
+
+    val bookId: String? get() = header.bookId
 
     private fun requireFxSpot() {
         val terms = requireNotNull(fx) { "an FX_SPOT deal needs its FX terms" }
@@ -208,9 +248,12 @@ data class Deal(
             "an FX deal rate must be less than $FX_RATE_LIMIT (deals.rate is NUMERIC(9,6): at most 3 integer digits)"
         }
         require(maturityDate == valueDate) { "an FX spot deal has no maturity: maturityDate equals valueDate" }
-        require(!DayCount.isWeekend(valueDate)) { "an FX spot value date must be a business day" }
-        require(!valueDate.isAfter(DayCount.spotDate(tradeDate))) {
-            "an FX spot value date is at most T+2 business days (${DayCount.spotDate(tradeDate)}); later is a forward"
+        require(DealCalendars.isSpotBusinessDay(valueDate, currency)) {
+            "an FX spot value date must be a business day in both currencies"
+        }
+        val spot = DealCalendars.spotDate(tradeDate, currency)
+        require(!valueDate.isAfter(spot)) {
+            "an FX spot value date is at most T+2 business days ($spot); later is a forward"
         }
         require(terms.counterAmount.compareTo(counterAmountOf(principal, rate)) == 0) {
             "the CZK counter amount must be principal x rate, half-up to 2 dp"
@@ -275,7 +318,13 @@ data class Deal(
     val days: Long get() = ChronoUnit.DAYS.between(valueDate, maturityDate)
 
     /** Interest at maturity, ACT/360, rounded half-up to the currency's 2 minor units. */
-    val interest: BigDecimal get() = DayCount.act360Interest(principal, rate, valueDate, maturityDate)
+    val interest: BigDecimal get() = SimpleInterest.of(
+        principal,
+        rate,
+        DayCountConvention.ACT_360,
+        valueDate,
+        maturityDate,
+    )
 
     /**
      * ADR-0315 D4: the counterparty check is RECORDED here (a breach may still book under a senior
@@ -286,6 +335,7 @@ data class Deal(
     fun submit(actor: Actor, check: LimitCheck, at: Instant, productCheck: ProductLimitCheck): Deal {
         requireHuman(actor, "submit")
         requireState(DealState.DRAFT, "submit")
+        check(kind != DealKind.HYPOTHETICAL) { "a HYPOTHETICAL deal is priced only and can never be submitted" }
         if (productCheck.breached) throw ProductLimitBreachedException(productCheck)
         return transition(DealState.PENDING_APPROVAL, actor, at, limitNote(check))
             .copy(submittedBy = actor, limitCheck = check)
@@ -404,6 +454,7 @@ data class Deal(
             }
         }
         check(!valueDate.isAfter(today)) { "deal cannot settle before its value date $valueDate" }
+        requirePostable("settle")
         return transition(DealState.SETTLED, actor, at, null)
     }
 
@@ -411,6 +462,7 @@ data class Deal(
         requireHumanOrSystem(actor, "mature")
         check(product != ProductType.FX_SPOT) { "an FX spot deal has no maturity; it is final once SETTLED" }
         requireState(DealState.SETTLED, "mature")
+        requirePostable("mature")
         check(!maturityDate.isAfter(today)) { "deal cannot mature before its maturity date $maturityDate" }
         return transition(DealState.MATURED, actor, at, null)
     }
@@ -433,12 +485,61 @@ data class Deal(
         return transition(DealState.REVERSED, actor, at, "reversed: $reason")
     }
 
+    /**
+     * ADR-0344 D7 boundary: only an ACTUAL deal of a product with posting rules moves cash or posts.
+     * PLANNED never does; the leg-described products wait for the posting-rule matrix.
+     */
+    private fun requirePostable(action: String) {
+        check(kind == DealKind.ACTUAL) { "a $kind deal never posts or pays; it cannot $action" }
+        check(product.legacy) { "$product has no posting rules yet (ADR-0344 D7); it cannot $action" }
+    }
+
+    /** The ledger schedule generated at submission (ADR-0344 D4). */
+    fun withSchedule(version: Int, hash: String): Deal {
+        require(version > scheduleVersion) { "a schedule version only grows" }
+        return copy(scheduleVersion = version, scheduleHash = hash)
+    }
+
+    /**
+     * Record that the bank's confirmation went to the counterparty (ADR-0344 catalogue). Back office
+     * or an approver, never an AI agent and never the deal's creator or submitter; changes no state
+     * and posts nothing. Only a concluded deal (BOOKED or later, not CANCELLED/REVERSED) is confirmed.
+     */
+    fun recordConfirmationSent(actor: Actor, at: Instant, documentId: String?, channel: String?): Deal {
+        requireHuman(actor, "send the confirmation of")
+        check(state in setOf(DealState.BOOKED, DealState.CONFIRMED, DealState.SETTLED, DealState.MATURED)) {
+            "only a booked deal is confirmed to the counterparty (deal is $state)"
+        }
+        val role = when (actor.id) {
+            createdBy.id -> "creator"
+            submittedBy?.id -> "submitter"
+            else -> null
+        }
+        role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not send its confirmation") }
+        require(documentId == null || documentId.length <= MAX_REFERENCE_LENGTH) { "documentId is too long" }
+        require(channel == null || channel.length <= MAX_CHANNEL_LENGTH) { "channel is too long" }
+        val sent = SentConfirmation(actor, at, documentId, channel)
+        return copy(
+            header = header.copy(confirmationsSent = header.confirmationsSent + sent),
+            updatedAt = at,
+            history = history + DealTransition(
+                state,
+                state,
+                actor,
+                at,
+                "confirmation sent" + (documentId?.let { " (document $it)" } ?: "") +
+                    (channel?.let { " via $it" } ?: ""),
+            ),
+        )
+    }
+
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
-        get() = when (product) {
-            ProductType.FX_SPOT -> state in FX_LIMIT_CONSUMING_STATES
-            else -> product.isAsset && state in LIMIT_CONSUMING_STATES
-        }
+        get() = kind == DealKind.ACTUAL &&
+            when (product) {
+                ProductType.FX_SPOT -> state in FX_LIMIT_CONSUMING_STATES
+                else -> product.isAsset && state in LIMIT_CONSUMING_STATES
+            }
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(
         state = to,
@@ -492,6 +593,9 @@ data class Deal(
         private const val FX_RATE_SCALE = 6
         private val FX_RATE_LIMIT = BigDecimal("1000")
         private const val MAX_REFERENCE_LENGTH = 200
+        private const val MAX_CHANNEL_LENGTH = 64
+        const val MAX_LEGS = 8
+        const val MAX_INPUTS_CHARS = 65_536
 
         /** The states [settle] accepts: CONFIRMED, plus BOOKED only when confirmation is not required. */
         fun settleableStates(confirmationRequired: Boolean): Set<DealState> =
@@ -543,6 +647,9 @@ data class Deal(
             rationale: String? = null,
             inputs: String? = null,
             fxSide: FxSide? = null,
+            kind: DealKind = DealKind.ACTUAL,
+            legs: List<LegSpec> = emptyList(),
+            header: DealHeader = DealHeader.EMPTY,
         ): Deal {
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not draft a treasury deal")
@@ -558,8 +665,8 @@ data class Deal(
             }
             val maturity = when {
                 product == ProductType.FX_SPOT -> valueDate
-                product.isCnbFacility -> DayCount.nextBusinessDay(valueDate)
-                maturityDate == null -> DayCount.nextBusinessDay(valueDate) // overnight
+                product.isCnbFacility -> DealCalendars.overnight(valueDate, currency)
+                maturityDate == null -> DealCalendars.overnight(valueDate, currency) // overnight
                 else -> maturityDate
             }
             return Deal(
@@ -580,43 +687,11 @@ data class Deal(
                 inputs = inputs,
                 fx = fxSide?.let { FxTerms(it, counterAmountOf(principal, rate)) },
                 history = listOf(DealTransition(from = null, to = DealState.DRAFT, actor = actor, at = at)),
-            )
+                kind = kind,
+                legs = legs,
+                header = header,
+            ).let { d -> if (product.legacy && legs.isEmpty()) d.copy(legs = LegacyLegs.derive(d)) else d }
         }
-    }
-}
-
-/**
- * Day-count and calendar helpers.
- *
- * **No holiday calendar yet**: a business day is Monday-Friday. Czech and TARGET2 holidays are
- * not modelled, so an "overnight" deal struck the day before a holiday matures on the holiday.
- */
-object DayCount {
-    private const val DAYS_IN_YEAR_ACT360 = 360
-    private const val PERCENT = 100
-
-    private const val SPOT_LAG_BUSINESS_DAYS = 2
-
-    fun isWeekend(date: LocalDate): Boolean = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
-
-    fun nextBusinessDay(date: LocalDate): LocalDate {
-        var d = date.plusDays(1)
-        while (isWeekend(d)) d = d.plusDays(1)
-        return d
-    }
-
-    /** FX spot value date: T+2 business days (weekends skipped; no holiday calendar, as above). */
-    fun spotDate(tradeDate: LocalDate): LocalDate =
-        (1..SPOT_LAG_BUSINESS_DAYS).fold(tradeDate) { d, _ -> nextBusinessDay(d) }
-
-    /** principal × rate/100 × days/360, half-up to 2 dp. */
-    fun act360Interest(principal: BigDecimal, ratePercent: BigDecimal, from: LocalDate, to: LocalDate): BigDecimal {
-        val days = BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to))
-        val quotient = RoundingPolicy.TREASURY_INTEREST_WORK.divide(
-            principal.multiply(ratePercent).multiply(days),
-            BigDecimal.valueOf((PERCENT * DAYS_IN_YEAR_ACT360).toLong()),
-        )
-        return RoundingPolicy.TREASURY_AMOUNT.round(quotient)
     }
 }
 

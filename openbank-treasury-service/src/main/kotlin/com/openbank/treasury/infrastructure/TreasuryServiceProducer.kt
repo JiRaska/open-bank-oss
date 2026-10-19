@@ -5,10 +5,12 @@
 package com.openbank.treasury.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.treasury.application.port.`in`.CashFlowUseCase
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
 import com.openbank.treasury.application.port.`in`.NostroReconciliationUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryQuoteUseCase
+import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.CurveSetPort
 import com.openbank.treasury.application.port.out.DealReferenceLookup
@@ -20,9 +22,12 @@ import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
+import com.openbank.treasury.application.usecase.CashFlowService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
+import com.openbank.treasury.application.usecase.ProductMandate
 import com.openbank.treasury.application.usecase.ReferenceDataService
+import com.openbank.treasury.application.usecase.ScheduleService
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.model.BreakAlertPolicy
@@ -72,6 +77,8 @@ class TreasuryServiceProducer {
         confirmationRequired: Boolean,
         quotes: SimulatedQuoteService,
         productLimits: ProductLimitConfig,
+        schedules: ScheduleService,
+        references: ReferenceRepository,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -85,7 +92,25 @@ class TreasuryServiceProducer {
         confirmationRequired,
         quotes,
         productLimits.toPolicy(),
+        schedules,
+        ProductMandate(references, productLimits.toPolicy(), clock)::policy,
     )
+
+    /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
+    @Produces
+    @ApplicationScoped
+    fun scheduleService(references: ReferenceRepository, cashFlows: CashFlowRepository, clock: Clock): ScheduleService =
+        ScheduleService(references, cashFlows, clock)
+
+    @Produces
+    @ApplicationScoped
+    fun cashFlowUseCase(
+        deals: DealRepository,
+        cashFlows: CashFlowRepository,
+        schedules: ScheduleService,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+    ): CashFlowUseCase = CashFlowService(deals, cashFlows, schedules, objectMapper, clock)
 
     /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
     @Produces

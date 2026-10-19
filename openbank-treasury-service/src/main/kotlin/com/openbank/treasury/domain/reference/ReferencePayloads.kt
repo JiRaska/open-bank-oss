@@ -21,7 +21,36 @@ enum class ReferenceKind(val wire: String) {
     BOOK("book"),
     BUCKET_SET("bucket-set"),
     REGULATORY_CODE("regulatory-code"),
+
+    // ADR-0344 functional baseline catalogue. product-type has a typed payload (it is the product
+    // mandate); the others are generic records — a code or id, a name, attributes as given — until
+    // a slice needs to read one, at which point it gets a typed payload like the kinds above.
+    PRODUCT_TYPE("product-type"),
+    PARTY_GROUP("party-group"),
+    PARTY_TYPE("party-type"),
+    COUNTRY("country"),
+    DOCUMENT_TYPE("document-type"),
+    ACCOUNT("account"),
+    SETTLEMENT_PLACE("settlement-place"),
+    LOAN_TYPE("loan-type"),
+    COMMUNICATION_CHANNEL("communication-channel"),
+    MARKET_FACTOR("market-factor"),
+    OWN_CAPITAL_ITEM("own-capital-item"),
+    PERIOD_LENGTH("period-length"),
+    SCENARIO("scenario"),
+    BEHAVIOURAL_SCENARIO("behavioural-scenario"),
+    CALCULATION_SETTINGS("calculation-settings"),
+    LIMIT_SETTINGS("limit-settings"),
+    DERIVATIVE_CONVERSION_FACTOR("derivative-conversion-factor"),
+    COLLATERAL_HAIRCUT("collateral-haircut"),
+    PORTFOLIO_GROUP("portfolio-group"),
+    ACCOUNTING_SETTINGS("accounting-settings"),
+    BALANCE_SHEET_SIDE("balance-sheet-side"),
+    DEALING_FILTER("dealing-filter"),
     ;
+
+    /** The kinds stored as [GenericPayload]. */
+    val generic: Boolean get() = ordinal > PRODUCT_TYPE.ordinal
 
     companion object {
         fun fromWire(value: String): ReferenceKind = entries.firstOrNull { it.wire == value }
@@ -337,7 +366,7 @@ data class BucketSetPayload(val id: String, val name: String, val buckets: List<
     }
 }
 
-enum class RegulatoryList { CNB, DISIFE23, EMIR_PRODUCT, LCR, NSFR }
+enum class RegulatoryList { CNB, DISIFE23, EMIR_PRODUCT, LCR, NSFR, TRADE_REPORTING, CLASSIFICATION }
 
 data class RegulatoryCodePayload(val list: RegulatoryList, val code: String, val label: String) : ReferencePayload {
     override val recordKind get() = ReferenceKind.REGULATORY_CODE
@@ -347,5 +376,52 @@ data class RegulatoryCodePayload(val list: RegulatoryList, val code: String, val
     override fun validate() {
         requireCode(code, "code")
         requireText(label, "label")
+    }
+}
+
+/**
+ * product-type (ADR-0344 catalogue): the product mandate that used to live only in configuration —
+ * whether the product may be dealt at all, the largest principal per deal by currency (the
+ * currency set is the allowed list) and the longest tenor. Once a version is ACTIVE it is the
+ * authority; configuration seeds only the products that have no record.
+ */
+data class ProductTypePayload(
+    val code: String,
+    val permitted: Boolean,
+    val maxPrincipal: Map<String, BigDecimal> = emptyMap(),
+    val maxTenorDays: Long? = null,
+    val allowedCurrencies: List<String>? = null,
+) : ReferencePayload {
+    override val recordKind get() = ReferenceKind.PRODUCT_TYPE
+
+    override fun key() = code
+
+    override fun validate() {
+        requireCode(code, "code")
+        maxPrincipal.forEach { (ccy, amount) ->
+            requireCurrency(ccy, "maxPrincipal currency")
+            require(amount.signum() > 0) { "maxPrincipal in $ccy must be positive" }
+        }
+        require(maxTenorDays == null || maxTenorDays > 0) { "maxTenorDays must be positive" }
+        allowedCurrencies?.let {
+            require(it.toSet() == maxPrincipal.keys) { "allowedCurrencies must equal the maxPrincipal currencies" }
+        }
+        if (permitted) require(maxPrincipal.isNotEmpty()) { "a permitted product names at least one currency" }
+    }
+}
+
+/** A catalogue record without a dedicated schema: `code` (or `id`) is the key, `name` required. */
+data class GenericPayload(override val recordKind: ReferenceKind, val fields: Map<String, Any?>) : ReferencePayload {
+    override fun key(): String = (fields["code"] ?: fields["id"])?.toString() ?: ""
+
+    override fun validate() {
+        require(recordKind.generic) { "${recordKind.wire} has a typed payload" }
+        requireCode(key(), "code")
+        requireText(fields["name"]?.toString() ?: "", "name")
+        require(fields.size <= MAX_FIELDS) { "a record has at most $MAX_FIELDS fields" }
+    }
+
+    private companion object {
+        const val MAX_FIELDS = 64
     }
 }

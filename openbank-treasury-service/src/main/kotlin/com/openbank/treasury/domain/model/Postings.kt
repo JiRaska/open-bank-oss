@@ -132,8 +132,12 @@ object TreasuryChart {
  * position is the ledger's daily FX revaluation, not the treasury's.
  */
 object PostingRules {
+    /** ADR-0344 D7: the leg-described products get their journals from the posting-rule matrix. */
+    private fun requireLegacy(deal: Deal) =
+        check(deal.product.legacy) { "${deal.product} has no posting rules yet (ADR-0344 D7)" }
 
     fun settlement(deal: Deal): JournalSpec {
+        requireLegacy(deal)
         val p = deal.principal
         val ccy = deal.currency
         val nostro = TreasuryChart.code(ccy, "nostro")
@@ -151,6 +155,7 @@ object PostingRules {
                 PostingLine(liabilityCode(deal), Side.CREDIT, p, ccy),
             )
             ProductType.FX_SPOT -> fxSpotSettlement(deal)
+            else -> error("${deal.product} has no posting rules yet (ADR-0344 D7)")
         }
         return JournalSpec(deal.id, PostingEvent.SETTLED, lines)
     }
@@ -183,7 +188,7 @@ object PostingRules {
 
     /** The journal accruing [date]'s interest, or null when that day adds nothing. */
     fun accrual(deal: Deal, date: LocalDate): JournalSpec? {
-        if (deal.product == ProductType.FX_SPOT) return null
+        if (deal.product == ProductType.FX_SPOT || !deal.product.legacy) return null
         val amount = accruedThrough(deal, date) - accruedThrough(deal, date.minusDays(1))
         if (amount.signum() <= 0) return null
         val ccy = deal.currency
@@ -202,6 +207,7 @@ object PostingRules {
     }
 
     fun maturity(deal: Deal, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec {
+        requireLegacy(deal)
         require(deal.product != ProductType.FX_SPOT) { "an FX spot deal has no maturity journal" }
         val p = deal.principal
         val i = deal.interest
@@ -235,6 +241,7 @@ object PostingRules {
                 line(TreasuryChart.code(ccy, "expense"), Side.DEBIT, rest, ccy),
                 PostingLine(nostro, Side.CREDIT, p + i, ccy),
             )
+            else -> error("${deal.product} has no posting rules yet (ADR-0344 D7)")
         }
         return JournalSpec(deal.id, PostingEvent.MATURED, lines)
     }

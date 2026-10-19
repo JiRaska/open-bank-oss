@@ -42,6 +42,12 @@ data class DealBooked(
      * within it). Additive and optional, so `v1` consumers are unaffected.
      */
     val productLimit: ProductLimitApplied? = null,
+    /** ADR-0344 D2 (additive): ACTUAL books and pays; PLANNED is booked for the forecast only. Absent = ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
+    val bookId: String? = null,
+    val legs: List<LegSpec> = emptyList(),
+    val scheduleVersion: Int = 0,
+    val scheduleHash: String? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.booked.v1"
@@ -64,6 +70,8 @@ data class DealConfirmed(
     val simulated: Boolean,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
+    /** ADR-0344 D2 (additive): absent = ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.confirmed.v1"
@@ -124,6 +132,8 @@ data class DealReversed(
     val fxSide: FxSide? = null,
     /** FX_SPOT only: the CZK leg (`principal` x `rate`); null for money-market deals. */
     val counterAmount: BigDecimal? = null,
+    /** ADR-0344 D2 (additive): absent = ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.reversed.v1"
@@ -162,5 +172,50 @@ data class ProductLimitApplied(val decision: String, val maxPrincipal: BigDecima
 
         fun of(limit: ProductLimit, currency: String) =
             ProductLimitApplied(WITHIN, limit.maxPrincipal[currency], limit.maxTenorDays)
+    }
+}
+
+/**
+ * ADR-0344 D4: a cash-flow ledger version was generated (at submission). Carries counts and the
+ * hash, not the rows: consumers read the rows through the API by `scheduleVersion`.
+ */
+data class CashFlowGenerated(
+    val dealId: UUID,
+    val product: ProductType,
+    val kind: DealKind,
+    val bookId: String?,
+    val dealVersion: Int,
+    val scheduleVersion: Int,
+    val scheduleHash: String,
+    val flowCount: Int,
+    val projectedCount: Int,
+    val carriedOverrides: Int,
+    val conflicts: Int,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.generated.v1"
+    }
+}
+
+/** ADR-0344 D4: a four-eyes cash-flow override was approved or rejected. */
+data class CashFlowOverridden(
+    val dealId: UUID,
+    val flowId: UUID,
+    val overrideId: UUID,
+    val status: String,
+    val paymentDate: LocalDate?,
+    val amount: BigDecimal?,
+    val originalPaymentDate: LocalDate?,
+    val originalAmount: BigDecimal?,
+    val reason: String,
+    val proposedBy: String,
+    val decidedBy: String,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.overridden.v1"
     }
 }

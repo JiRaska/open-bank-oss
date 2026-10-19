@@ -27,11 +27,13 @@ import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.CashFlowGenerated
 import com.openbank.treasury.domain.model.Counterparty
-import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
+import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.domain.model.DealConfirmed
+import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealMatured
 import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
@@ -79,7 +81,16 @@ class TreasuryDealService(
      * service constructed without a mandate must not book as though every product were permitted.
      */
     private val productLimits: ProductLimitPolicy,
+    /**
+     * ADR-0344 D3/D4: reference validation and the cash-flow ledger. Null only in unit tests of the
+     * lifecycle alone; the CDI producer always wires it.
+     */
+    private val schedules: ScheduleService? = null,
+    /** ADR-0344 catalogue: the product mandate from the reference store (config seeds the rest). */
+    private val mandate: (suspend () -> ProductLimitPolicy)? = null,
 ) : TreasuryDealUseCase {
+
+    private suspend fun policy(): ProductLimitPolicy = mandate?.invoke() ?: productLimits
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
@@ -88,7 +99,7 @@ class TreasuryDealService(
         val today = bankToday()
         val tradeDate = command.tradeDate ?: today
         val valueDate = command.valueDate
-            ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
+            ?: if (command.product == ProductType.FX_SPOT) DealCalendars.spotDate(tradeDate, command.currency) else null
         val drafted = Deal.draft(
             id = Ids.newId(),
             product = command.product,
@@ -104,7 +115,11 @@ class TreasuryDealService(
             rationale = command.rationale,
             inputs = command.inputs,
             fxSide = command.fxSide,
+            kind = command.kind,
+            legs = command.legs,
+            header = command.header,
         )
+        schedules?.requireEffective(drafted)
         // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
         val deal = if (fxTolerance.enabled) {
             drafted.checkRate(fxMid.mid(drafted.currency, tradeDate), fxTolerance.tolerancePercent, now)
@@ -117,9 +132,39 @@ class TreasuryDealService(
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = load(dealId)
+        schedules?.requireEffective(deal)
+        val submitted = deal.submit(actor, limitCheck(deal), clock.instant(), policy().evaluate(deal))
+        // ADR-0344 D4: the cash-flow ledger is generated at submission and stored with it.
+        val generated = schedules?.generate(submitted)
+        val withSchedule = generated?.let { submitted.withSchedule(it.write.scheduleVersion, it.hash) } ?: submitted
+        val events = generated?.let { g ->
+            listOf(
+                DealEvent(
+                    CashFlowGenerated.EVENT_TYPE,
+                    objectMapper.writeValueAsString(
+                        CashFlowGenerated(
+                            dealId = withSchedule.id,
+                            product = withSchedule.product,
+                            kind = withSchedule.kind,
+                            bookId = withSchedule.bookId,
+                            dealVersion = withSchedule.version,
+                            scheduleVersion = withSchedule.scheduleVersion,
+                            scheduleHash = g.hash,
+                            flowCount = g.flows.size,
+                            projectedCount = g.flows.count { it.amount == null },
+                            carriedOverrides = g.write.carried.size,
+                            conflicts = g.write.conflicts.size,
+                            occurredAt = withSchedule.updatedAt,
+                        ),
+                    ),
+                ),
+            )
+        }.orEmpty()
         return deals.save(
-            deal.submit(actor, limitCheck(deal), clock.instant(), productLimits.evaluate(deal)),
+            withSchedule,
             command = cmd(key, SUBMIT, dealId),
+            schedule = generated?.write,
+            extraEvents = events,
         )
     }
 
@@ -128,7 +173,7 @@ class TreasuryDealService(
         val deal = load(dealId)
         // Re-checked at approval: exposure may have moved, and the product mandate may have been
         // tightened, since submission (ADR-0315 D4).
-        val productCheck = productLimits.evaluate(deal)
+        val productCheck = policy().evaluate(deal)
         val booked = deal.approve(actor, limitCheck(deal), clock.instant(), productCheck)
         val event = DealEvent(
             DealBooked.EVENT_TYPE,
@@ -148,6 +193,11 @@ class TreasuryDealService(
                     fxSide = booked.fx?.side,
                     counterAmount = booked.fx?.counterAmount,
                     productLimit = productCheck.limit?.let { ProductLimitApplied.of(it, booked.currency) },
+                    kind = booked.kind,
+                    bookId = booked.bookId,
+                    legs = booked.legs,
+                    scheduleVersion = booked.scheduleVersion,
+                    scheduleHash = booked.scheduleHash,
                 ),
             ),
         )
@@ -188,6 +238,7 @@ class TreasuryDealService(
                     confirmedBy = actor.id,
                     simulated = actor == Actor.SIMULATED_MARKET,
                     occurredAt = confirmed.updatedAt,
+                    kind = confirmed.kind,
                 ),
             ),
         )
@@ -273,10 +324,23 @@ class TreasuryDealService(
                     occurredAt = reversed.updatedAt,
                     fxSide = reversed.fx?.side,
                     counterAmount = reversed.fx?.counterAmount,
+                    kind = reversed.kind,
                 ),
             ),
         )
         return deals.save(reversed, ref, event, cmd(key, REVERSE, dealId))
+    }
+
+    override suspend fun sendConfirmation(
+        dealId: UUID,
+        documentId: String?,
+        channel: String?,
+        actor: Actor,
+        key: String?,
+    ): Deal {
+        key?.let { k -> replay(k, SEND_CONFIRMATION, dealId)?.let { return it } }
+        val sent = load(dealId).recordConfirmationSent(actor, clock.instant(), documentId, channel)
+        return deals.save(sent, command = cmd(key, SEND_CONFIRMATION, dealId))
     }
 
     override suspend fun get(dealId: UUID): DealView = DealView(load(dealId), deals.journals(dealId))
@@ -343,8 +407,11 @@ class TreasuryDealService(
         // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
         // the settlement pass below finds them CONFIRMED whatever `confirmationRequired` says. A
         // quoted deal struck off the counterparty's quote is DECLINED: it stays BOOKED for a person.
-        val confirmations = deals.list(DealState.BOOKED).map { d -> runCatching { simulatedConfirm(d, market) } }
+        val confirmations = deals.list(DealState.BOOKED).filter {
+            it.kind == DealKind.ACTUAL && it.product.legacy
+        }.map { d -> runCatching { simulatedConfirm(d, market) } }
         val settleable = Deal.settleableStates(confirmationRequired)
+        // ADR-0344: a PLANNED or HYPOTHETICAL deal is never confirmed, settled or matured by the market.
         val moves = deals.dueForSettlement(today, settleable).map { d -> runCatching { settle(d.id, market) } } +
             deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, market) } }
         return SimulatedMarketRun(
@@ -465,5 +532,6 @@ class TreasuryDealService(
         const val SETTLE = "SETTLE"
         const val MATURE = "MATURE"
         const val REVERSE = "REVERSE"
+        const val SEND_CONFIRMATION = "SEND_CONFIRMATION"
     }
 }

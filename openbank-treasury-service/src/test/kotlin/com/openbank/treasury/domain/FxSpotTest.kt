@@ -11,7 +11,7 @@ import com.openbank.treasury.domain.DealFixtures.approver
 import com.openbank.treasury.domain.DealFixtures.bankA
 import com.openbank.treasury.domain.DealFixtures.dealer
 import com.openbank.treasury.domain.DealFixtures.fxSpot
-import com.openbank.treasury.domain.model.DayCount
+import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.FxTerms
@@ -32,10 +32,12 @@ class FxSpotTest {
 
     @Test
     fun `spot is T+2 business days, skipping the weekend`() {
-        assertThat(DayCount.spotDate(MONDAY)).isEqualTo(MONDAY.plusDays(2)) // Wednesday
-        assertThat(DayCount.spotDate(MONDAY.plusDays(3))).isEqualTo(FRIDAY.plusDays(3)) // Thu -> Mon
-        assertThat(DayCount.spotDate(FRIDAY)).isEqualTo(FRIDAY.plusDays(4)) // Fri -> Tue
-        assertThat(DayCount.spotDate(FRIDAY.plusDays(1))).isEqualTo(FRIDAY.plusDays(4)) // Sat -> Tue
+        assertThat(DealCalendars.spotDate(MONDAY, "EUR")).isEqualTo(MONDAY.plusDays(2)) // Wednesday
+        // #11670: Monday 2026-09-28 is a Czech holiday (CERTIS), so every spot that spanned it under the
+        // old weekend-only calendar now rolls one CZK business day further. Nothing else changes.
+        assertThat(DealCalendars.spotDate(MONDAY.plusDays(3), "EUR")).isEqualTo(FRIDAY.plusDays(4)) // Thu -> Tue
+        assertThat(DealCalendars.spotDate(FRIDAY, "EUR")).isEqualTo(FRIDAY.plusDays(5)) // Fri -> Wed (28th closed)
+        assertThat(DealCalendars.spotDate(FRIDAY.plusDays(1), "EUR")).isEqualTo(FRIDAY.plusDays(5)) // Sat -> Wed
     }
 
     @Test

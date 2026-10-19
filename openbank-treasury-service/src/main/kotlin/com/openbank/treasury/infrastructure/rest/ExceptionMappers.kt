@@ -68,6 +68,14 @@ class ExceptionMappers {
         error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
 
     @ServerExceptionMapper
+    fun cashFlowNotFound(e: com.openbank.treasury.application.usecase.CashFlowNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun scheduleEngine(e: com.openbank.treasury.domain.cashflow.ScheduleEngineUnavailableException): Response =
+        error(UNPROCESSABLE, "SCHEDULE_ENGINE_UNAVAILABLE", e.message)
+
+    @ServerExceptionMapper
     fun statementNotFound(e: StatementNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 

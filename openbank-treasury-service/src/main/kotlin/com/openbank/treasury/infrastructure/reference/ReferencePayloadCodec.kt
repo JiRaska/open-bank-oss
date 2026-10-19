@@ -12,8 +12,10 @@ import com.openbank.treasury.domain.reference.BookPayload
 import com.openbank.treasury.domain.reference.BucketSetPayload
 import com.openbank.treasury.domain.reference.CalendarPayload
 import com.openbank.treasury.domain.reference.CounterpartyPayload
+import com.openbank.treasury.domain.reference.GenericPayload
 import com.openbank.treasury.domain.reference.IndexPayload
 import com.openbank.treasury.domain.reference.NettingPayload
+import com.openbank.treasury.domain.reference.ProductTypePayload
 import com.openbank.treasury.domain.reference.ReferenceKind
 import com.openbank.treasury.domain.reference.ReferencePayload
 import com.openbank.treasury.domain.reference.RegulatoryCodePayload
@@ -39,6 +41,10 @@ class ReferencePayloadCodec(objectMapper: ObjectMapper) {
 
     fun read(kind: ReferenceKind, node: JsonNode): ReferencePayload {
         require(node.isObject) { "payload must be a JSON object" }
+        if (kind.generic) {
+            @Suppress("UNCHECKED_CAST")
+            return GenericPayload(kind, writer.convertValue(node, Map::class.java) as Map<String, Any?>)
+        }
         return try {
             strict.treeToValue(node, typeOf(kind))
         } catch (e: com.fasterxml.jackson.core.JacksonException) {
@@ -48,9 +54,11 @@ class ReferencePayloadCodec(objectMapper: ObjectMapper) {
 
     fun read(kind: ReferenceKind, json: String): ReferencePayload = read(kind, strict.readTree(json))
 
-    fun write(payload: ReferencePayload): String = writer.writeValueAsString(payload)
+    fun write(payload: ReferencePayload): String =
+        writer.writeValueAsString(if (payload is GenericPayload) payload.fields else payload)
 
-    fun tree(payload: ReferencePayload): JsonNode = writer.valueToTree(payload)
+    fun tree(payload: ReferencePayload): JsonNode =
+        writer.valueToTree(if (payload is GenericPayload) payload.fields else payload)
 
     private fun typeOf(kind: ReferenceKind): Class<out ReferencePayload> = when (kind) {
         ReferenceKind.CALENDAR -> CalendarPayload::class.java
@@ -62,5 +70,7 @@ class ReferencePayloadCodec(objectMapper: ObjectMapper) {
         ReferenceKind.BOOK -> BookPayload::class.java
         ReferenceKind.BUCKET_SET -> BucketSetPayload::class.java
         ReferenceKind.REGULATORY_CODE -> RegulatoryCodePayload::class.java
+        ReferenceKind.PRODUCT_TYPE -> ProductTypePayload::class.java
+        else -> error("${kind.wire} is generic")
     }
 }

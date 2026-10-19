@@ -127,7 +127,7 @@ class TreasuryOutboxAtomicityIT {
             from deals d
             join treasury_outbox o on o.aggregate_id = d.deal_id
             join deal_transitions t on t.deal_id = d.deal_id and t.to_state = 'BOOKED'
-            where d.deal_id = ?
+            where d.deal_id = ? and o.event_type = 'treasury.deal.booked.v1'
             order by o.id
             """.trimIndent(),
         ).use { statement ->

@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
 
     implementation(project(":openbank-libs-domain"))
+    // ADR-0344 D1: schedule generation, accrual and calendars (framework-free).
+    implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.test.security)

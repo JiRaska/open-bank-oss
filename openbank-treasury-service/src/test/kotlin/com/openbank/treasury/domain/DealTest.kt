@@ -17,13 +17,15 @@ import com.openbank.treasury.domain.DealFixtures.withinLimit
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.ActorType
-import com.openbank.treasury.domain.model.DayCount
+import com.openbank.treasury.domain.model.DayCountConvention
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.DealCalendars
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.SimpleInterest
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Nested
@@ -457,14 +459,39 @@ class DealTest {
 
         @Test
         fun `a year of 365 days earns more than the nominal rate under ACT-360`() {
-            val i = DayCount.act360Interest(BigDecimal("1000000"), BigDecimal("3.60"), MONDAY, MONDAY.plusDays(365))
+            val i = SimpleInterest.of(
+                BigDecimal("1000000"),
+                BigDecimal("3.60"),
+                DayCountConvention.ACT_360,
+                MONDAY,
+                MONDAY.plusDays(365),
+            )
             assertThat(i).isEqualByComparingTo("36500.00")
         }
 
         @Test
-        fun `overnight from a Friday matures on Monday - no holiday calendar`() {
-            assertThat(DayCount.nextBusinessDay(FRIDAY)).isEqualTo(LocalDate.parse("2026-09-28"))
-            assertThat(DayCount.nextBusinessDay(MONDAY)).isEqualTo(LocalDate.parse("2026-09-22"))
+        fun `overnight follows the currency's holiday calendar (#11670)`() {
+            // Friday 2026-09-25: Monday 28 September is Czech Statehood Day — closed in CERTIS, open in
+            // TARGET2. The weekend-only calendar this replaces matured both on the 28th.
+            assertThat(DealCalendars.overnight(FRIDAY, "CZK")).isEqualTo(LocalDate.parse("2026-09-29"))
+            assertThat(DealCalendars.overnight(FRIDAY, "EUR")).isEqualTo(LocalDate.parse("2026-09-28"))
+            assertThat(DealCalendars.overnight(MONDAY, "CZK")).isEqualTo(LocalDate.parse("2026-09-22"))
+        }
+
+        @Test
+        fun `Christmas rolls a CZK overnight past three holidays and a weekend, a EUR one past two`() {
+            // 2026-12-23 Wed; 24/25/26 Dec closed in CERTIS (26 is a Saturday), 25/26 in TARGET2.
+            assertThat(
+                DealCalendars.overnight(LocalDate.parse("2026-12-23"), "CZK"),
+            ).isEqualTo(LocalDate.parse("2026-12-28"))
+            assertThat(
+                DealCalendars.overnight(LocalDate.parse("2026-12-23"), "EUR"),
+            ).isEqualTo(LocalDate.parse("2026-12-24"))
+            // A deal valued ON the 24th (a CZK holiday) still matures on the next CZK business day.
+            assertThat(
+                DealCalendars.overnight(LocalDate.parse("2026-12-24"), "CZK"),
+            ).isEqualTo(LocalDate.parse("2026-12-28"))
+            // The weekend-only answer, for the record: 2026-12-24 and 2026-12-25 respectively.
         }
 
         @Test
@@ -497,11 +524,13 @@ class DealTest {
             )
             assertThat(lombard().maturityDate).isEqualTo(LocalDate.parse("2026-09-22"))
             val fri = lombard(valueDate = FRIDAY)
-            assertThat(fri.maturityDate).isEqualTo(LocalDate.parse("2026-09-28"))
-            assertThat(fri.days).isEqualTo(3)
-            // 1 000 000 × 5.75 % × 3 / 360 = 479.1666… -> 479.17
+            // #11670: Monday 2026-09-28 is a CERTIS holiday, so a Friday lombard now runs to Tuesday —
+            // the ONLY change the calendar makes; the ACT/360 arithmetic is the same.
+            assertThat(fri.maturityDate).isEqualTo(LocalDate.parse("2026-09-29"))
+            assertThat(fri.days).isEqualTo(4)
+            // 1 000 000 × 5.75 % × 4 / 360 = 638.888… -> 638.89 (3 days, the old weekend-only answer: 479.17)
             assertThat(lombard(valueDate = FRIDAY).copy(principal = BigDecimal("1000000.00")).interest)
-                .isEqualByComparingTo("479.17")
+                .isEqualByComparingTo("638.89")
             assertThat(fri.product.isAsset).describedAs("a borrowing: consumes no limit").isFalse()
             assertThat(LimitCheck.of(bankA, fri, BigDecimal.ZERO).dealAmount).isEqualByComparingTo("0")
             assertThatThrownBy { lombard(currency = "EUR") }.isInstanceOf(IllegalArgumentException::class.java)

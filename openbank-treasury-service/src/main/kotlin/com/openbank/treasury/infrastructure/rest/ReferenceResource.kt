@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.treasury.application.port.`in`.ProposeReferenceCommand
+import com.openbank.treasury.application.port.`in`.ReferenceActivity
 import com.openbank.treasury.application.port.`in`.ReferenceDataUseCase
 import com.openbank.treasury.application.port.`in`.ReferenceDependant
 import com.openbank.treasury.application.port.`in`.ReferenceHistory
@@ -16,7 +17,9 @@ import com.openbank.treasury.domain.reference.ReferenceKind
 import com.openbank.treasury.domain.reference.ReferenceRecord
 import com.openbank.treasury.domain.reference.ReferenceStatus
 import com.openbank.treasury.infrastructure.reference.ReferencePayloadCodec
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.security.identity.SecurityIdentity
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
@@ -45,6 +48,7 @@ import java.time.LocalDate
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER, BACK_OFFICE, REFERENCE_EDITOR)
+@Suppress("TooManyFunctions") // one endpoint per contract operation
 class ReferenceResource {
 
     @Inject
@@ -174,6 +178,69 @@ class ReferenceResource {
         references.verify(ReferenceKind.fromWire(kind), recordKey, version(version), actor(), requireKey(key)),
         codec,
     )
+
+    @GET
+    @Path("/{kind}/export")
+    @Operation(summary = "Every version of every record of one kind, in the GET shape")
+    @Authorize(action = "treasury.reference.read")
+    suspend fun export(@PathParam("kind") kind: String): List<ReferenceRecordResponse> =
+        references.list(ReferenceKind.fromWire(kind), null, null).map { ReferenceRecordResponse.from(it, codec) }
+
+    @POST
+    @Path("/{kind}/import")
+    @RolesAllowed(REFERENCE_EDITOR, BACK_OFFICE)
+    @Operation(summary = "Propose many versions at once; all-or-nothing; each PENDING until four-eyes approval")
+    @Authorize(action = "treasury.reference.import")
+    suspend fun import(
+        @PathParam("kind") kind: String,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: List<ReferenceProposalRequest>?,
+    ): Response {
+        val k = ReferenceKind.fromWire(kind)
+        val items = requireNotNull(request) { "a JSON array of proposals is required" }
+        val commands = items.mapIndexed { i, r ->
+            try {
+                ProposeReferenceCommand(
+                    kind = k,
+                    key = requireNotNull(r.key) { "key is required" },
+                    validFrom = requireNotNull(r.validFrom) { "validFrom is required" },
+                    validTo = r.validTo,
+                    payload = codec.read(k, requireNotNull(r.payload) { "payload is required" }),
+                    reason = requireNotNull(r.reason) { "reason is required" },
+                )
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException("item $i: ${e.message}", e)
+            }
+        }
+        val created = references.importProposals(k, commands, actor(), requireKey(key))
+        return Response.status(Response.Status.CREATED).entity(
+            created.map {
+                ReferenceRecordResponse.from(it, codec)
+            },
+        ).build()
+    }
+
+    @GET
+    @Path("/user-activity")
+    @Operation(summary = "Read-only: who proposed, approved, rejected or verified reference data, newest first")
+    @Authorize(action = "treasury.reference.read")
+    suspend fun activity(@QueryParam("since") since: Instant?): List<ReferenceActivity> = references.activity(since)
+
+    @GET
+    @Path("/application-version-history")
+    @Operation(summary = "Read-only: the schema migrations applied to this service's store")
+    @Authorize(action = "treasury.reference.read")
+    suspend fun versionHistory(): List<Map<String, Any?>> = Panache.getSession().flatMap { s ->
+        s.createNativeQuery<Array<Any?>>(
+            "select version, description, installed_on from flyway_schema_history where success order by installed_rank",
+        ).resultList
+    }.awaitSuspending().map { row: Array<Any?> ->
+        mapOf<String, Any?>(
+            "version" to row[0]?.toString(),
+            "description" to row[1]?.toString(),
+            "installedOn" to row[2]?.toString(),
+        )
+    }
 
     @GET
     @Path("/dependencies/{kind}/{key}")

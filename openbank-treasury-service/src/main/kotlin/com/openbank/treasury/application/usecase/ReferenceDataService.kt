@@ -6,6 +6,7 @@ package com.openbank.treasury.application.usecase
 
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.application.port.`in`.ProposeReferenceCommand
+import com.openbank.treasury.application.port.`in`.ReferenceActivity
 import com.openbank.treasury.application.port.`in`.ReferenceDataUseCase
 import com.openbank.treasury.application.port.`in`.ReferenceDependant
 import com.openbank.treasury.application.port.`in`.ReferenceHistory
@@ -29,6 +30,7 @@ import java.time.LocalDate
  * [ReferenceRecord]; this class loads, applies, and stores the result in one transaction, with the
  * prior status of every row it rewrites so a concurrent decision is refused, never overwritten.
  */
+@Suppress("TooManyFunctions") // one use case per steward operation, plus its load/replay helpers
 class ReferenceDataService(
     private val records: ReferenceRepository,
     private val deals: DealReferenceLookup,
@@ -143,6 +145,64 @@ class ReferenceDataService(
         return fromRecords + fromDeals
     }
 
+    override suspend fun importProposals(
+        kind: ReferenceKind,
+        commands: List<ProposeReferenceCommand>,
+        actor: Actor,
+        key: String,
+    ): List<ReferenceRecord> {
+        require(commands.isNotEmpty() && commands.size <= MAX_IMPORT) { "an import carries 1..$MAX_IMPORT items" }
+        records.findCommand(key)?.let { prior ->
+            require(prior.action == IMPORT && prior.kind == kind) {
+                "Idempotency-Key was already used for ${prior.action} on another request"
+            }
+            // Replay: every record of the import shares its proposer and timestamp.
+            val first = records.versions(kind, prior.recordKey).first { it.version == prior.version }
+            return records.list(kind, null, null).filter {
+                it.createdBy == first.createdBy &&
+                    it.createdAt == first.createdAt
+            }
+        }
+        val today = AccountingClock.bank(clock).today()
+        val at = clock.instant()
+        val next = mutableMapOf<String, Int>()
+        val proposed = commands.mapIndexed { i, c ->
+            require(c.kind == kind) { "item $i is a ${c.kind.wire}, not a ${kind.wire}" }
+            val version = (next[c.key] ?: (records.versions(kind, c.key).maxOfOrNull { it.version } ?: 0)) + 1
+            next[c.key] = version
+            try {
+                ReferenceRecord.propose(
+                    kind, c.key, version, c.validFrom, c.validTo, c.payload, c.reason, actor, at, today,
+                )
+            } catch (e: IllegalArgumentException) {
+                throw IllegalArgumentException("item $i: ${e.message}", e)
+            }
+        }
+        val head = proposed.first()
+        records.save(
+            proposed.map {
+                ReferenceWrite(it, null)
+            },
+            ReferenceCommandKey(key, IMPORT, kind, head.key, head.version),
+        )
+        return proposed
+    }
+
+    override suspend fun activity(since: java.time.Instant?): List<ReferenceActivity> =
+        ReferenceKind.entries.flatMap { k -> records.list(k, null, null) }.flatMap { r ->
+            buildList {
+                add(ReferenceActivity(r.createdAt, r.createdBy.id, PROPOSE, r.kind.wire, r.key, r.version))
+                val decided = r.approvedAt
+                if (decided != null && r.approvedBy != null) {
+                    val action = if (r.status == ReferenceStatus.REJECTED) REJECT else APPROVE
+                    add(ReferenceActivity(decided, r.approvedBy.id, action, r.kind.wire, r.key, r.version))
+                }
+                r.verifiedBy?.let {
+                    add(ReferenceActivity(decided ?: r.createdAt, it.id, VERIFY, r.kind.wire, r.key, r.version))
+                }
+            }
+        }.filter { since == null || !it.at.isBefore(since) }.sortedByDescending { it.at }
+
     /** Throws [ReferenceNotEffectiveException] listing every ref with no ACTIVE version on [on]. */
     suspend fun requireEffective(refs: Collection<ReferenceRef>, on: LocalDate) {
         val missing = records.notEffective(refs.distinct(), on)
@@ -180,5 +240,7 @@ class ReferenceDataService(
         const val APPROVE = "APPROVE"
         const val REJECT = "REJECT"
         const val VERIFY = "VERIFY"
+        const val IMPORT = "IMPORT"
+        const val MAX_IMPORT = 500
     }
 }

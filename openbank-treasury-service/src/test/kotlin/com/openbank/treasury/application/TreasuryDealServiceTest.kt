@@ -486,8 +486,11 @@ class TreasuryDealServiceTest {
 
     @Test
     fun `an FX spot drafted on a Friday values on the next Tuesday`(): Unit = runBlocking {
-        clock = Clock.fixed(DealFixtures.FRIDAY.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
-        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(DealFixtures.FRIDAY.plusDays(4))
+        // The Friday a week after DealFixtures.FRIDAY: the Monday after FRIDAY itself is a CERTIS holiday
+        // (2026-09-28), which is exercised in FxSpotTest; this case is about the weekend alone.
+        val friday = DealFixtures.FRIDAY.plusDays(7)
+        clock = Clock.fixed(friday.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(friday.plusDays(4))
     }
 
     @Test

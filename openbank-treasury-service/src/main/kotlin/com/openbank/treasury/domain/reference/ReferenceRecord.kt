@@ -83,8 +83,36 @@ data class ReferenceRecord(
         requireStatus(ReferenceStatus.PENDING, "approve")
         requireNotProposer(actor, "approve")
         requireNotBackdated(kind, validFrom, today)
-        val note = (payload as? CounterpartyPayload)?.let { limitDecision(it, effectiveNow, seniorApprover) }
+        val note = when (val p = payload) {
+            is CounterpartyPayload -> limitDecision(p, effectiveNow, seniorApprover)
+            is ProductTypePayload -> mandateDecision(p, effectiveNow, seniorApprover)
+            else -> null
+        }
         return copy(status = ReferenceStatus.ACTIVE, approvedBy = actor, approvedAt = at, approvalNote = note)
+    }
+
+    /**
+     * A product mandate is the other limit family: widening it (permitting the product, a new
+     * currency, a higher maximum or a longer tenor) needs the senior approver too.
+     */
+    private fun mandateDecision(next: ProductTypePayload, effectiveNow: ReferenceRecord?, senior: Boolean): String? {
+        val before = effectiveNow?.payload as? ProductTypePayload
+        val widened = next.permitted &&
+            (
+                before == null ||
+                    !before.permitted ||
+                    next.maxPrincipal.any { (ccy, amount) ->
+                        amount >
+                            (before.maxPrincipal[ccy] ?: java.math.BigDecimal.ZERO)
+                    } ||
+                    (next.maxTenorDays ?: Long.MAX_VALUE) > (before.maxTenorDays ?: Long.MAX_VALUE)
+                )
+        if (widened && !senior) {
+            throw SeniorApprovalRequiredException("widening the ${next.code} product mandate needs a senior approver")
+        }
+        if (before == next) return null
+        return "mandate ${before?.let { "${it.permitted}/${it.maxPrincipal}/${it.maxTenorDays}" } ?: "config"} -> " +
+            "${next.permitted}/${next.maxPrincipal}/${next.maxTenorDays} (previous version ${effectiveNow?.version ?: "none"})"
     }
 
     private fun limitDecision(next: CounterpartyPayload, effectiveNow: ReferenceRecord?, senior: Boolean): String? {
