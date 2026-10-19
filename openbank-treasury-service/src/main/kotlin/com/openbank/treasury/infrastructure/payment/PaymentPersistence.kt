@@ -436,12 +436,19 @@ class PaymentRepositoryImpl(
     private companion object {
         const val MAX_FLOWS = 10_000
 
+        /**
+         * Σ of the signed amounts (OUT +, IN -) of every flow on an outgoing payment in an outflow
+         * status whose PAYMENT journal the ledger does not hold yet. Per FLOW, not per payment: once
+         * a flow's journal is posted its amount is already in the ledger balance, so counting the
+         * payment's whole amount again would double count a partly-booked netted payment.
+         */
         const val UNBOOKED_OUT_SQL =
-            "select coalesce(sum(p.amount), 0) from treasury_payments p where p.direction = 'OUT' " +
-                "and p.currency = :ccy and p.value_date <= :vd and p.status in (:statuses) and exists (" +
-                "select 1 from treasury_payment_flows l where l.payment_id = p.payment_id and not exists (" +
+            "select coalesce(sum(case when f.direction = 'OUT' then f.amount else -f.amount end), 0) " +
+                "from treasury_payments p join treasury_payment_flows l on l.payment_id = p.payment_id " +
+                "join deal_cash_flows f on f.flow_id = l.flow_id where p.direction = 'OUT' " +
+                "and p.currency = :ccy and p.value_date <= :vd and p.status in (:statuses) and not exists (" +
                 "select 1 from deal_journals j where j.deal_id = l.deal_id " +
-                "and j.idempotency_key like ('%:' || cast(l.flow_id as varchar))))"
+                "and j.idempotency_key like ('%:' || cast(l.flow_id as varchar)))"
 
         /** A deal pays only once it is booked; a draft, cancelled or reversed deal never does. */
         val PAYABLE_STATES = setOf("BOOKED", "CONFIRMED", "SETTLED")

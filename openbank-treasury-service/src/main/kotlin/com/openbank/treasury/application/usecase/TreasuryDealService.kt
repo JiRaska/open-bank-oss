@@ -529,6 +529,12 @@ class TreasuryDealService(
         )
     }
 
+    override suspend fun postOutflow(dealId: UUID, through: LocalDate): Int {
+        val deal = load(dealId)
+        if (deal.product.legacy || deal.state != DealState.SETTLED) return 0
+        return matrixAccrueAndPay(deal, minOf(through, deal.maturityDate))
+    }
+
     /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */
     private suspend fun accrueThrough(deal: Deal, through: LocalDate): Int {
         if (!deal.product.legacy) return matrixAccrueAndPay(deal, through)

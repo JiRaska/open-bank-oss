@@ -204,6 +204,8 @@ class TreasuryServiceProducer {
         )
         ownBic: String,
         counterparties: CounterpartyRepository,
+        dealUseCase:
+        jakarta.enterprise.inject.Instance<com.openbank.treasury.application.port.`in`.TreasuryDealUseCase>,
     ): com.openbank.treasury.application.usecase.PaymentService =
         com.openbank.treasury.application.usecase.PaymentService(
             payments,
@@ -220,6 +222,21 @@ class TreasuryServiceProducer {
             },
             onParkedMatch = { meterRegistry.counter("openbank.treasury.payments.match.parked").increment() },
             ownBic = ownBic,
+            // Step 2 (ADR-0344 D7): a SENT payment's flows post their PAYMENT journals now, so the
+            // ledger balance itself carries the outflow. Resolved lazily (the deal use case depends
+            // on this bean for its payment guard).
+            postOutflow = { p ->
+                p.dealIds.sumOf { dealUseCase.get().postOutflow(it, p.valueDate) }
+            },
+            onOutflowFailed = { id, e ->
+                meterRegistry.counter("openbank.treasury.payments.outflow.failed").increment()
+                org.jboss.logging.Logger.getLogger("com.openbank.treasury.payments")
+                    .warnf(
+                        "outflow journals of payment %s not posted yet (retried by replay / daily run): %s",
+                        id,
+                        e.message,
+                    )
+            },
             counterparty = { id ->
                 counterparties.findById(id)?.let {
                     com.openbank.treasury.application.usecase.CounterpartyIdentity(it.name, it.synthetic)

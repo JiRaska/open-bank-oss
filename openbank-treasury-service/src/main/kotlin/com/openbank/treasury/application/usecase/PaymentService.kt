@@ -145,6 +145,7 @@ class PaymentService(
     private val counterparty: suspend (String) -> CounterpartyIdentity? = { null },
     /** Step 2 (ADR-0344 D7): posts the PAYMENT journals of a SENT/SETTLED payment's flows; returns journals posted. */
     private val postOutflow: suspend (Payment) -> Int = { 0 },
+    private val onOutflowFailed: (UUID, Throwable) -> Unit = { _, _ -> },
 ) {
     init {
         require(cutOffWindowDays in 0..MAX_WINDOW) { "the payment cut-off window is 0..$MAX_WINDOW days" }
@@ -245,7 +246,7 @@ class PaymentService(
             if (next == null) {
                 // A replay of SENT/SETTLED still makes sure the outflow journals exist (idempotent keys).
                 if (current.status == PaymentStatus.SENT || current.status == PaymentStatus.SETTLED) {
-                    postOutflow(current)
+                    outflow(current)
                 }
                 return null
             }
@@ -260,9 +261,18 @@ class PaymentService(
                 if (++attempt >= MAX_STATUS_ATTEMPTS) throw e
                 continue
             }
-            if (next.status == PaymentStatus.SENT || next.status == PaymentStatus.SETTLED) postOutflow(next)
+            if (next.status == PaymentStatus.SENT || next.status == PaymentStatus.SETTLED) outflow(next)
             return next
         }
+    }
+
+    /**
+     * The status is already committed; a ledger outage here must not dead-letter it. The same keys
+     * are posted by the next replay and, at the latest, by the daily matrix run on the payment date;
+     * until then the funding check still counts the flows as unbooked, so nothing is overdrawn.
+     */
+    private suspend fun outflow(p: Payment) {
+        runCatching { postOutflow(p) }.onFailure { onOutflowFailed(p.paymentId, it) }
     }
 
     private suspend fun railTarget(s: InstitutionTransferStatus): Payment {
