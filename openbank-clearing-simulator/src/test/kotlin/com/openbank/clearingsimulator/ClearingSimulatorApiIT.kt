@@ -148,4 +148,30 @@ class ClearingSimulatorApiIT {
             statusCode(401)
         }
     }
+
+    @Test
+    @TestSecurity(user = "rail", roles = ["ROLE_API"])
+    fun `a submitted pacs_009 is queryable by UETR and an unknown UETR is 404`() {
+        val uetr = "4c4e28ba-2fa1-4d2e-883f-0016d3cca427"
+        Given {
+            contentType("application/xml")
+            body(InstitutionTransferFixtures.pacs009(uetr = uetr))
+        } When {
+            post("/api/v1/clearing/fi-credit-transfers/target2")
+        } Then {
+            statusCode(200)
+        }
+        val body = (
+            Given { this } When { get("/api/v1/clearing/fi-credit-transfers/status/$uetr") } Then
+                { statusCode(200) }
+            )
+            .extract().body().asString()
+        assertThat(body).contains("<TxSts>ACSC</TxSts>")
+        Given {
+            this
+        } When { get("/api/v1/clearing/fi-credit-transfers/status/5c4e28ba-2fa1-4d2e-883f-0016d3cca427") } Then
+            {
+                statusCode(404)
+            }
+    }
 }

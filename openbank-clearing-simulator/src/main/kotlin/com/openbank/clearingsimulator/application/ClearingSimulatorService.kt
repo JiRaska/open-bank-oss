@@ -65,6 +65,9 @@ class ClearingSimulatorService {
     private val camt054Builder = Camt054Builder()
     private val engine = SchemeDecisionEngine()
 
+    /** Bank-own transfers already taken, by UETR (deduplication + status query). */
+    val institutionTransfers = InstitutionTransferRegistry()
+
     /**
      * Generates a `pacs.004` R-transaction XML for the given [ReturnRequest]. Called by the
      * `/api/v1/clearing/returns` endpoint which forwards the XML to the sepa-payment return handler.
@@ -117,13 +120,17 @@ class ClearingSimulatorService {
     ): ClearingResult {
         val received = parseWith(pacs009Xml, pacs009Validator) { pacs009Reader.read(it) }
             ?: return ClearingResult(rejectInvalid(now), settled = false, creditNotificationXml = null)
-        val decision = if (route.accepts(received.currency, received.clearingSystem)) {
-            engine.decide(received.amount)
-        } else {
-            SchemeDecision.rejected(RejectReason.AM03)
+        val decide = {
+            val decision = if (route.accepts(received.currency, received.clearingSystem)) {
+                engine.decide(received.amount)
+            } else {
+                SchemeDecision.rejected(RejectReason.AM03)
+            }
+            val statusReport = buildStatusReport(received.endToEndId, received.transactionId, decision, now)
+            ClearingResult(statusReport, decision.settled, creditNotificationXml = null)
         }
-        val statusReport = buildStatusReport(received.endToEndId, received.transactionId, decision, now)
-        return ClearingResult(statusReport, decision.settled, creditNotificationXml = null)
+        // Same UETR twice → the same pacs.002 and one settlement (the scheme's dedup key).
+        return received.uetr?.let { institutionTransfers.recordOnce(it, decide) } ?: decide()
     }
 
     /**

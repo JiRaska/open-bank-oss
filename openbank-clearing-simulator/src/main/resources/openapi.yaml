@@ -86,6 +86,36 @@ paths:
         '404':
           description: Unknown clearing route.
 
+  /api/v1/clearing/fi-credit-transfers/status/{uetr}:
+    get:
+      tags: [Clearing simulator]
+      summary: Status of a pacs.009 by UETR; 404 when the scheme has no record
+      operationId: institutionTransferStatus
+      description: >-
+        Read-only. Returns the pacs.002 the simulator recorded for the UETR. A pacs.009 resubmitted
+        with a UETR already taken gets that same pacs.002 back and does not settle again.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: uetr
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ISO 20022 pacs.002.001.10 recorded for the UETR.
+          content:
+            application/xml:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No transfer with this UETR.
+
   /api/v1/clearing/returns:
     post:
       tags: [Clearing simulator]

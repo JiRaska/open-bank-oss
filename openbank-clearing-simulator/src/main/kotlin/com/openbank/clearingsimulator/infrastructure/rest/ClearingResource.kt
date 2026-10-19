@@ -11,6 +11,7 @@ import com.openbank.clearingsimulator.infrastructure.client.SepaPaymentClient
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -69,6 +70,22 @@ class ClearingResource {
     fun submitInstitutionCreditTransfer(@PathParam("route") route: String, pacs009Xml: String): Response {
         val clearingRoute = ClearingRoute.fromPath(route) ?: throw NotFoundException("unknown clearing route")
         return Response.ok(simulator.clearInstitutionTransfer(clearingRoute, pacs009Xml).statusReportXml).build()
+    }
+
+    /**
+     * The `pacs.002` the scheme holds for a bank-own transfer's UETR — read-only. 404 when it has
+     * none: the transfer never arrived. This is how the rail resolves a submission whose answer it
+     * lost, instead of resending it.
+     */
+    @GET
+    @Path("/fi-credit-transfers/status/{uetr}")
+    @Produces(MediaType.APPLICATION_XML)
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Operation(summary = "Status of a pacs.009 by UETR; 404 when the scheme has no record")
+    fun institutionTransferStatus(@PathParam("uetr") uetr: String): Response {
+        val result =
+            simulator.institutionTransfers.statusOf(uetr) ?: throw NotFoundException("no transfer for this UETR")
+        return Response.ok(result.statusReportXml).build()
     }
 
     /**

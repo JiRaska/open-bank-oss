@@ -81,4 +81,44 @@ class ClearingSimulatorInstitutionTransferTest {
         assertThat(ClearingRoute.fromPath("Certis")).isEqualTo(ClearingRoute.CERTIS)
         assertThat(ClearingRoute.fromPath("sepa")).isNull()
     }
+
+    @Test
+    fun `the same UETR twice returns the same pacs_002 and settles exactly once`() {
+        val uetr = "1b4e28ba-2fa1-4d2e-883f-0016d3cca427"
+        val xml = InstitutionTransferFixtures.pacs009(uetr = uetr)
+        val first = service.clearInstitutionTransfer(ClearingRoute.TARGET2, xml, Instant.parse("2026-10-19T09:00:00Z"))
+        val second = service.clearInstitutionTransfer(ClearingRoute.TARGET2, xml, Instant.parse("2026-10-19T09:05:00Z"))
+        assertThat(second).isEqualTo(first)
+        assertThat(service.institutionTransfers.settledCount()).isEqualTo(1)
+        assertThat(service.institutionTransfers.statusOf(uetr)).isEqualTo(first)
+        assertThat(service.institutionTransfers.statusOf("00000000-0000-4000-8000-000000000000")).isNull()
+    }
+
+    @Test
+    fun `different UETRs settle separately and a message without one is not deduplicated`() {
+        service.clearInstitutionTransfer(
+            ClearingRoute.TARGET2,
+            InstitutionTransferFixtures.pacs009(uetr = "2b4e28ba-2fa1-4d2e-883f-0016d3cca427"),
+        )
+        service.clearInstitutionTransfer(
+            ClearingRoute.TARGET2,
+            InstitutionTransferFixtures.pacs009(uetr = "3b4e28ba-2fa1-4d2e-883f-0016d3cca427"),
+        )
+        service.clearInstitutionTransfer(ClearingRoute.TARGET2, InstitutionTransferFixtures.pacs009())
+        assertThat(service.institutionTransfers.settledCount()).isEqualTo(2)
+    }
+
+    @Test
+    fun `the registry evicts the oldest entry beyond its capacity`() {
+        val registry = com.openbank.clearingsimulator.application.InstitutionTransferRegistry(capacity = 1)
+        val r = com.openbank.clearingsimulator.application.ClearingResult(
+            "x",
+            settled = true,
+            creditNotificationXml = null,
+        )
+        registry.recordOnce("a") { r }
+        registry.recordOnce("b") { r }
+        assertThat(registry.statusOf("a")).isNull()
+        assertThat(registry.statusOf("b")).isEqualTo(r)
+    }
 }

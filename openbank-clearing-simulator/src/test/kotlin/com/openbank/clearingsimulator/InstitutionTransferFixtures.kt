@@ -19,6 +19,7 @@ object InstitutionTransferFixtures {
         amount: String = "1000.00",
         currency: String = "EUR",
         clearingSystem: ClearingSystem? = ClearingSystem(code = "TGT"),
+        uetr: String? = null,
     ): String = Pacs009Builder().build(
         InstitutionCreditTransferInstruction(
             messageId = "OB-FI-0001",
@@ -27,7 +28,7 @@ object InstitutionTransferFixtures {
             instructionId = null,
             endToEndId = "E2E-FI-0001",
             transactionId = "TX-FI-0001",
-            uetr = null,
+            uetr = uetr,
             amount = BigDecimal(amount),
             currency = currency,
             settlementMethod = if (clearingSystem == null) SettlementMethod.INDA else SettlementMethod.CLRG,
