@@ -227,17 +227,38 @@ inherit_hold() {
     echo "supersede: DRY_RUN — would inherit hold: #$keep -> rules.yaml deploy_holds [${listed% }] + draft + 'blocked' (from held #$n)."
     return 0
   fi
+  local donor_head keep_head current_head donor_blob donor_rules donor_file
+  donor_head="$(gh pr view "$n" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
+  keep_head="$(gh pr view "$keep" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
+  [[ "$donor_head" =~ ^[0-9a-f]{40}$ && "$keep_head" =~ ^[0-9a-f]{40}$ ]] || return 1
   branch="$(gh pr view "$keep" --repo "$REPO" --json headRefName --jq .headRefName)" || return 1
-  blob="$(gh api "repos/$REPO/contents/$RULES_PATH?ref=$branch")" || return 1
-  sha="$(jq -r .sha <<<"$blob")"
-  rules="$(jq -r .content <<<"$blob" | base64 --decode)" || return 1
+  # Read immutable snapshots. Missing/malformed owner metadata cannot be invented.
+  donor_blob="$(gh api "repos/$REPO/contents/$RULES_PATH?ref=$donor_head")" || return 1
+  blob="$(gh api "repos/$REPO/contents/$RULES_PATH?ref=$keep_head")" || return 1
+  sha="$(jq -er '.sha | select(type == "string" and length > 0)' <<<"$blob")" || return 1
+  donor_rules="$(jq -er '.content | select(type == "string")' <<<"$donor_blob" | base64 --decode && printf .)" || return 1
+  donor_rules="${donor_rules%.}"
+  rules="$(jq -er '.content | select(type == "string")' <<<"$blob" | base64 --decode && printf .)" || return 1
+  rules="${rules%.}"
+  donor_file="$(mktemp "${TMPDIR:-/tmp}/supersede-donor-rules.XXXXXX")" || return 1
+  printf '%s' "$donor_rules" >"$donor_file" || { rm -f "$donor_file"; return 1; }
   # shellcheck disable=SC2086
-  new="$(add_hold_entries "$n" "$keep" $services <<<"$rules")" || return 1
+  if ! new="$(printf '%s' "$rules" | "${DEPLOY_HOLD_PYTHON:-python3}" "$(dirname "${BASH_SOURCE[0]}")/merge-deploy-holds.py" \
+      --donor "$donor_file" --pr "$n" --head "$donor_head" $services && printf .)"; then
+    rm -f "$donor_file"
+    return 1
+  fi
+  new="${new%.}"
+  rm -f "$donor_file"
+  current_head="$(gh pr view "$n" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
+  [ "$current_head" = "$donor_head" ] || return 1
+  current_head="$(gh pr view "$keep" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
+  [ "$current_head" = "$keep_head" ] || return 1
   if [ "$new" != "$rules" ]; then
     if ! (
       request_file="$(mktemp "${TMPDIR:-/tmp}/supersede-hold-request.XXXXXX")" || exit 1
       trap 'rm -f "$request_file"' EXIT
-      printf '%s\n' "$new" | base64 | tr -d '\n' | \
+      printf '%s' "$new" | base64 | tr -d '\n' | \
         jq -Rs --arg message "chore(gitops): inherit deploy hold from #$n (issue #11503)" \
           --arg sha "$sha" --arg branch "$branch" \
           '{message: $message, content: ., sha: $sha, branch: $branch}' >"$request_file" || exit 1
@@ -246,16 +267,11 @@ inherit_hold() {
       return 1
     fi
   fi
-  gh pr comment "$keep" --repo "$REPO" --body \
-"Deployment hold inherited from #$n, which is draft or labelled \`blocked\`.
-
-An overlapping image pin does not clear an owner's hold (issue #11503). This PR's branch now carries a
-\`deploy_holds\` entry in \`$RULES_PATH\` for: ${listed% }. The \`deploy-hold-image-pins\` gate
-refuses this PR's pin change for those services while the entry exists; undrafting or removing the
-\`blocked\` label does not release it. Release = a reviewed change removing the entry once the reason
-for #$n's hold is resolved.
-
-(\`.github/scripts/supersede-deploy-prs.sh\`)"
+  # Conditions are copied, but draft/blocked state is an independent owner restriction.
+  # There is no reviewed transfer authority in this prototype. Keep the donor OPEN,
+  # even after a successful union; return failure so no caller reaches closure or arming.
+  echo "::error::supersede: raw conditions preserved; #$n remains OPEN pending owner transfer review."
+  return 1
 }
 
 # OVERLAP<TAB>services | DISJOINT | UNKNOWN. Use added image services rather than arbitrary shared
@@ -804,20 +820,43 @@ HOOK
   mkdir -p "$fake_bin"
   awk 'BEGIN {
     print "deploy_holds:"
-    print "  services:"
+    print "  services: {}"
     for (i = 1; i <= 5000; i++) printf "# synthetic fixture line %05d %070d\n", i, i
     print "commits:"
     print "  marker: test"
   }' >"$rules_file"
   jq -n --rawfile rules "$rules_file" \
     '{sha: "synthetic-rules-sha", content: ($rules | @base64)}' >"$blob_file"
+  local donor_fixture="$tmp/donor.yaml" donor_blob_fixture="$tmp/donor-blob.json"
+  cat >"$donor_fixture" <<'DONOR'
+deploy_holds:
+  services:
+    openbank-sanctions-service:
+      issue: '#11492'
+      reason: sanctions owner hold
+      release_condition: sanctions owner review
+    openbank-account-service:
+      issue: '#13010'
+      reason: account owner hold
+      release_condition: account owner review
+DONOR
+  jq -n --rawfile rules "$donor_fixture" '{sha: "donor-rules-sha", content: ($rules | @base64)}' >"$donor_blob_fixture"
   cat >"$fake_bin/gh" <<'HOOK'
 #!/usr/bin/env bash
 set -euo pipefail
 case "${1:-}" in
   pr)
     case "${2:-}" in
-      view) printf '%s\n' "$FAKE_GH_KEEP_BRANCH"; printf 'pr:view\n' >>"$FAKE_GH_EVENTS" ;;
+      view)
+        if [[ " $* " == *" headRefOid "* ]]; then
+          case "${3:-}" in
+            11491|13010|13040) printf '%040d\n' 1 ;;
+            *) printf '%040d\n' 2 ;;
+          esac
+        else
+          printf '%s\n' "$FAKE_GH_KEEP_BRANCH"
+        fi
+        printf 'pr:view\n' >>"$FAKE_GH_EVENTS" ;;
       ready) printf 'pr:ready\n' >>"$FAKE_GH_EVENTS"; [ "${FAKE_GH_FAIL_READY:-false}" != true ] || exit 44 ;;
       edit) printf 'pr:edit\n' >>"$FAKE_GH_EVENTS"; [ "${FAKE_GH_FAIL_EDIT:-false}" != true ] || exit 45 ;;
       comment) printf 'pr:comment\n' >>"$FAKE_GH_EVENTS" ;;
@@ -836,7 +875,11 @@ case "${1:-}" in
       [ "${FAKE_GH_FAIL_PUT:-false}" != "true" ] || exit 42
     else
       printf 'api:get\n' >>"$FAKE_GH_EVENTS"
-      cat "$FAKE_GH_RULES_BLOB"
+      if [[ "${2:-}" == *"ref=$(printf '%040d' 1)" ]]; then
+        cat "$FAKE_GH_DONOR_BLOB"
+      else
+        cat "$FAKE_GH_RULES_BLOB"
+      fi
     fi
     ;;
   *) echo "unexpected fake gh command" >&2; exit 92 ;;
@@ -856,7 +899,8 @@ head -c 12 | "$FAKE_BASE64_REAL"
 exit 43
 HOOK
   chmod +x "$fake_bin/gh" "$fake_bin/base64"
-  add_hold_entries 11491 11499 openbank-sanctions-service <"$rules_file" >"$expected_file"
+  "${DEPLOY_HOLD_PYTHON:-python3}" "$(dirname "${BASH_SOURCE[0]}")/merge-deploy-holds.py" \
+    --donor "$donor_fixture" --pr 11491 --head "$(printf '%040d' 1)" openbank-sanctions-service <"$rules_file" >"$expected_file"
   payload_len="$(jq -r '.content | length' "$blob_file")"
   if [ "$payload_len" -le 131072 ]; then
     echo "SELF-TEST FAIL case 11: synthetic base64 rules payload is not oversized ($payload_len bytes)"; ok=1
@@ -868,29 +912,20 @@ HOOK
   export FAKE_BASE64_REAL="$base64_bin"
   export FAKE_BASE64_FAIL_PARTIAL=false
   export FAKE_GH_RULES_BLOB="$blob_file"
+  export FAKE_GH_DONOR_BLOB="$donor_blob_fixture"
   export FAKE_GH_PUT_BODY="$body_file"
   export FAKE_GH_EVENTS="$events_file"
   export DRY_RUN=false
   export FAKE_GH_FAIL_PUT=false
   : >"$events_file"
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 1 ]; then
-    echo "SELF-TEST FAIL case 11: successful hold transfer did not stop auto-merge (rc=$rc); got: $out"; ok=1
-  elif [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
-    echo "SELF-TEST FAIL case 11: request temp file was not cleaned up"; ok=1
-  elif ! jq -e --arg message 'chore(gitops): inherit deploy hold from #11491 (issue #11503)' \
-      --arg branch "$new_keep_branch" --rawfile expected "$expected_file" \
-      '.message == $message and .sha == "synthetic-rules-sha" and .branch == $branch
-       and (.content | @base64d) == $expected and (.content | length) > 131072' \
-      "$body_file" >/dev/null; then
-    echo "SELF-TEST FAIL case 11: large JSON PUT body did not preserve full rules payload and metadata; got: $out"; ok=1
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\npr:view\npr:view\napi:get\napi:get\npr:view\npr:view\napi:put' ] \
+     || [ -n "$(find "$request_tmp" -type f -print -quit)" ] \
+     || ! jq -e --rawfile expected "$expected_file" '(.content | @base64d) == $expected' "$body_file" >/dev/null \
+     || ! jq -e '.content | length > 131072' "$body_file" >/dev/null; then
+    echo "SELF-TEST FAIL case 11: transport/union/cleanup or protected no-close ordering failed; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
   else
-    expected_events=$'pr:ready\npr:edit\npr:view\napi:get\napi:put\npr:comment\npr:comment\npr:close'
-    if [ "$(cat "$events_file")" != "$expected_events" ]; then
-      echo "SELF-TEST FAIL case 11: hold transfer/action ordering changed; got events: $(tr '\n' ' ' <"$events_file")"; ok=1
-    else
-      echo "self-test case 11 OK (oversized JSON request preserved; hold transfer precedes close)"
-    fi
+    echo "self-test case 11 OK (exact-head complete union transported; protected, no close, clean temp files)"
   fi
 
   # case 12 — a failed contents PUT must leave the survivor protected and the predecessor open.
@@ -898,10 +933,11 @@ HOOK
   export FAKE_BASE64_FAIL_PARTIAL=false
   export FAKE_GH_FAIL_PUT=true
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put' ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
-    echo "SELF-TEST FAIL case 12: failed hold PUT lost survivor protection, closed a predecessor, leaked its request file, or returned success; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\npr:view\npr:view\napi:get\napi:get\npr:view\npr:view\napi:put' ] \
+     || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 12: transport/union/cleanup or protected no-close ordering failed; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
   else
-    echo "self-test case 12 OK (failed hold PUT keeps survivor draft/blocked and predecessor open)"
+    echo "self-test case 12 OK (exact-head transport failure refuses closure; protected, no close, clean temp files)"
   fi
 
   # case 13 — a producer that emits a prefix then fails must never let that partial JSON reach gh.
@@ -910,10 +946,12 @@ HOOK
   export FAKE_GH_FAIL_PUT=false
   export FAKE_BASE64_FAIL_PARTIAL=true
   out="$(run "$P" 11499 "$NEW" "$(printf '11491\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get' ] || [ -e "$body_file" ] || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
-    echo "SELF-TEST FAIL case 13: producer failure reached PUT/close or lost survivor protection or leaked its request file; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\npr:view\npr:view\napi:get\napi:get\npr:view\npr:view' ] \
+     || [ -n "$(find "$request_tmp" -type f -print -quit)" ] \
+     || [ -e "$body_file" ]; then
+    echo "SELF-TEST FAIL case 13: transport/union/cleanup or protected no-close ordering failed; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
   else
-    echo "self-test case 13 OK (partial producer failure keeps survivor protected and stops before PUT/close)"
+    echo "self-test case 13 OK (exact-head transport failure refuses closure; protected, no close, clean temp files)"
   fi
 
   # case 14 — the real rules source uses the explicit empty-map form. Normalize ONLY that
@@ -993,16 +1031,18 @@ HOOK
   fi
 
   # case 20 — the partial overlap path performs the durable transfer, but still never closes the
-  # incompletely covered predecessor. Only the intersecting account service enters deploy_holds.
+  # incompletely covered predecessor. Every durable donor condition is copied, including outside the pin overlap.
   : >"$events_file"
   local partial_expected="$tmp/partial-expected.yaml"
-  add_hold_entries 13010 13011 openbank-account-service <"$rules_file" >"$partial_expected"
+  "${DEPLOY_HOLD_PYTHON:-python3}" "$(dirname "${BASH_SOURCE[0]}")/merge-deploy-holds.py" \
+    --donor "$donor_fixture" --pr 13010 --head "$(printf '%040d' 1)" openbank-account-service <"$rules_file" >"$partial_expected"
   out="$(run "$P" 13011 "$NEW" "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put\npr:comment' ] \
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\npr:view\npr:view\napi:get\napi:get\npr:view\npr:view\napi:put' ] \
+     || [ -n "$(find "$request_tmp" -type f -print -quit)" ] \
      || ! jq -e --rawfile expected "$partial_expected" '(.content | @base64d) == $expected' "$body_file" >/dev/null; then
-    echo "SELF-TEST FAIL case 20: partial overlap did not durably transfer only shared pins and leave predecessor open; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+    echo "SELF-TEST FAIL case 20: transport/union/cleanup or protected no-close ordering failed; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
   else
-    echo "self-test case 20 OK (partial overlap durably held shared pin; predecessor stayed open)"
+    echo "self-test case 20 OK (exact-head complete union transported; protected, no close, clean temp files)"
   fi
 
   # case 21 — if the partial overlap transfer fails, both protections remain attempted and neither
@@ -1010,11 +1050,11 @@ HOOK
   : >"$events_file"
   export FAKE_GH_FAIL_PUT=true
   out="$(run "$P" 13011 "$NEW" "$(printf '13010\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put' ] \
-     || contains_text "$out" 'would close #13010'; then
-    echo "SELF-TEST FAIL case 21: failed partial transfer closed predecessor or lost protection; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\npr:view\npr:view\napi:get\napi:get\npr:view\npr:view\napi:put' ] \
+     || [ -n "$(find "$request_tmp" -type f -print -quit)" ]; then
+    echo "SELF-TEST FAIL case 21: transport/union/cleanup or protected no-close ordering failed; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
   else
-    echo "self-test case 21 OK (failed partial transfer leaves predecessor open and survivor protected)"
+    echo "self-test case 21 OK (exact-head transport failure refuses closure; protected, no close, clean temp files)"
   fi
 
   # case 22 — STALE_KEEP cannot bypass an overlapping hold. Protect the descendant as well as
@@ -1059,17 +1099,18 @@ HOOK
   fi
 
   # case 26 — same-manifest file coverage cannot close a held predecessor when KEEP contains only
-  # one of its two service pins. Transfer only the shared account pin and leave the old PR open.
+  # one of its two service pins. Copy all durable conditions and leave the old PR open.
   export DRY_RUN=false FAKE_GH_FAIL_PUT=false
   : >"$events_file"
-  add_hold_entries 13040 13041 openbank-account-service <"$rules_file" >"$partial_expected"
+  "${DEPLOY_HOLD_PYTHON:-python3}" "$(dirname "${BASH_SOURCE[0]}")/merge-deploy-holds.py" \
+    --donor "$donor_fixture" --pr 13040 --head "$(printf '%040d' 1)" openbank-account-service <"$rules_file" >"$partial_expected"
   out="$(run "$P" 13041 "$NEW" "$(printf '13040\t%s%s\t1' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\napi:get\napi:put\npr:comment' ] \
-     || contains_text "$out" 'would close #13040' \
+  if [ "$rc" -ne 1 ] || [ "$(cat "$events_file")" != $'pr:ready\npr:edit\npr:view\npr:view\npr:view\napi:get\napi:get\npr:view\npr:view\napi:put' ] \
+     || [ -n "$(find "$request_tmp" -type f -print -quit)" ] \
      || ! jq -e --rawfile expected "$partial_expected" '(.content | @base64d) == $expected' "$body_file" >/dev/null; then
-    echo "SELF-TEST FAIL case 26: same-manifest partial pin coverage closed held predecessor or transferred wrong services; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
+    echo "SELF-TEST FAIL case 26: transport/union/cleanup or protected no-close ordering failed; rc=$rc events=$(tr '\n' ' ' <"$events_file")"; ok=1; dump_out "$out"
   else
-    echo "self-test case 26 OK (same manifest but missing held pin -> transfer overlap, keep predecessor open)"
+    echo "self-test case 26 OK (exact-head complete union transported; protected, no close, clean temp files)"
   fi
 
   # case 27 — a changed-file producer can emit apparent full coverage and then fail. Its partial

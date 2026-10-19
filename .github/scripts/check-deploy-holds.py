@@ -56,13 +56,78 @@ def holds(text, allow_absent=False):
     for service, item in entries.items():
         if not isinstance(service, str) or not SERVICE.fullmatch(service):
             raise InvalidHold(f"invalid held service {service!r}")
-        if not isinstance(item, dict) or set(item) != {"issue", "reason", "release_condition"}:
-            raise InvalidHold(f"{service}: expected issue, reason, release_condition")
-        if (not isinstance(item["issue"], str) or not re.fullmatch(r"#[1-9][0-9]*", item["issue"])
-                or any(not isinstance(item[field], str) or not item[field].strip()
-                       for field in ("reason", "release_condition"))):
-            raise InvalidHold(f"{service}: invalid hold metadata")
+        constraints(item, service)
     return entries
+
+
+FIELDS = ("issue", "reason", "release_condition")
+
+
+def constraints(item, service="hold"):
+    """Normalize without interpreting human release conditions or granting authority."""
+    if not isinstance(item, dict):
+        raise InvalidHold(f"{service}: hold must be a mapping")
+    if set(item) == set(FIELDS):
+        values = [item]
+    elif set(item) == {"all_of"} and isinstance(item["all_of"], list) and item["all_of"]:
+        values = item["all_of"]
+    else:
+        raise InvalidHold(f"{service}: expected legacy triple or nonempty all_of")
+    seen = set()
+    for value in values:
+        if not isinstance(value, dict) or set(value) not in (set(FIELDS), set(FIELDS) | {"origins"}):
+            raise InvalidHold(f"{service}: invalid constraint fields")
+        if (not isinstance(value["issue"], str)
+                or not re.fullmatch(r"#[1-9][0-9]*", value["issue"])
+                or any(not isinstance(value[f], str) or not value[f].strip() for f in FIELDS[1:])):
+            raise InvalidHold(f"{service}: invalid hold metadata")
+        key = tuple(value[f] for f in FIELDS)
+        if key in seen:
+            raise InvalidHold(f"{service}: duplicate constraint")
+        seen.add(key)
+        if "origins" in value:
+            origins = value["origins"]
+            if not isinstance(origins, list) or not origins:
+                raise InvalidHold(f"{service}: origins must be nonempty")
+            origin_keys = set()
+            for origin in origins:
+                if (not isinstance(origin, dict) or set(origin) != {"pr", "head"}
+                        or type(origin["pr"]) is not int or origin["pr"] <= 0
+                        or not isinstance(origin["head"], str)
+                        or not re.fullmatch(r"[0-9a-f]{40}", origin["head"])):
+                    raise InvalidHold(f"{service}: invalid origin")
+                origin_key = (origin["pr"], origin["head"])
+                if origin_key in origin_keys:
+                    raise InvalidHold(f"{service}: duplicate origin")
+                origin_keys.add(origin_key)
+    return values
+
+
+def union_holds(*sources):
+    """Exact raw-string union; provenance is evidence, never release approval."""
+    merged = {}
+    for source in sources:
+        for service, item in source.items():
+            target = merged.setdefault(service, {})
+            for value in constraints(item, service):
+                key = tuple(value[f] for f in FIELDS)
+                target.setdefault(key, set()).update(
+                    (o["pr"], o["head"]) for o in value.get("origins", []))
+    result = {}
+    for service, values in sorted(merged.items()):
+        items = []
+        for key, origins in sorted(values.items()):
+            value = dict(zip(FIELDS, key))
+            if origins:
+                value["origins"] = [{"pr": pr, "head": head} for pr, head in sorted(origins)]
+            items.append(value)
+        result[service] = items[0] if len(items) == 1 and "origins" not in items[0] else {"all_of": items}
+    return result
+
+
+def describe(item):
+    return "; ".join(f"{v['issue']} — {v['reason']}. Release condition: {v['release_condition']}"
+                     for v in constraints(item))
 
 
 def git(root, *args):
@@ -152,7 +217,7 @@ def filter_tags(root, raw):
                                           for k, v in tags.items()):
         raise InvalidHold("image tag map must be a string-to-string object")
     for service in sorted(entries.keys() & tags.keys()):
-        print(f"::notice::{service} held by {entries[service]['issue']}; leaving its image pin unchanged. "
+        print(f"::notice::{service} held by {describe(entries[service])}; leaving its image pin unchanged. "
               "Scheduled reconcile will re-offer it after the hold is removed.", file=sys.stderr)
     return {service: tag for service, tag in tags.items() if service not in entries}
 
@@ -188,13 +253,13 @@ def check(root, base):
     # A PR must not remove a hold and change its image in the same diff. The hold
     # release is reviewed and merged first; a successor PR may then advance the pin.
     previous = holds(at_base(root, base, RULES), allow_absent=True)
-    held = previous | head
+    held = union_holds(previous, head)
     violations = changed_held_pins(root, base, held)
     validate_services(root, held, {service for service, _, _, _ in violations})
     for service, path, old, new in violations:
-        issue = held[service]["issue"]
+        issue = describe(held[service])
         print(f"::error file={path}::{service} deploy held by {issue}; image pin changed "
-              f"{old} -> {new}. Release condition: {held[service]['release_condition']}")
+              f"{old} -> {new}.")
     print(f"deploy holds: {len(held)} service(s), {len(violations)} blocked pin change(s)")
     return 1 if violations else 0
 
