@@ -178,15 +178,6 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         }.awaitSuspending().map { it.toDomain() }
     }
 
-    private fun snapshotDate(value: Any?): LocalDate = when (value) {
-        is LocalDate -> value
-        is java.sql.Date -> value.toLocalDate()
-        else -> inconsistentRegistry()
-    }
-
-    private fun inconsistentRegistry(): Nothing =
-        throw PersistenceException("Transaction idempotency registry is inconsistent")
-
     private companion object {
         /**
          * The saga is still in flight in exactly these two states; COMPLETED / FAILED / REVERSED
@@ -196,6 +187,15 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         val NON_TERMINAL_STATUSES = listOf(TransactionStatus.PENDING.name, TransactionStatus.PROCESSING.name)
     }
 }
+
+private fun snapshotDate(value: Any?): LocalDate = when (value) {
+    is LocalDate -> value
+    is java.sql.Date -> value.toLocalDate()
+    else -> inconsistentRegistry()
+}
+
+private fun inconsistentRegistry(): Nothing =
+    throw PersistenceException("Transaction idempotency registry is inconsistent")
 
 private data class SearchCondition(val clause: String, val params: List<Any>)
 

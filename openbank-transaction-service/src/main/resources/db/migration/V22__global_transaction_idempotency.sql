@@ -51,6 +51,6 @@ CREATE TRIGGER guard_transaction_idempotency_identity
 BEFORE UPDATE ON transactions
 FOR EACH ROW EXECUTE FUNCTION guard_transaction_idempotency_identity();
 -- Deliberately no DELETE trigger: retained claims prevent reuse after archival/deletion.
--- Safe application rollback retains this registry and both triggers. Removing protection is
+-- Rollback: safe application rollback retains this registry and both triggers. Removing protection is
 -- a separately approved maintenance operation with every writer AND retry source quiesced;
 -- never release keys or remove financial history as a rollback. See service docs, V22 rollout.

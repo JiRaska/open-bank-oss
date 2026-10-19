@@ -25,7 +25,7 @@ info:
   # Also additive: TransactionPage.pagination now declares the fields the server actually sends
   # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
   # never sent, is kept and labelled. No path, parameter or status code changes.
-  version: 1.21.0
+  version: 1.21.1
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0

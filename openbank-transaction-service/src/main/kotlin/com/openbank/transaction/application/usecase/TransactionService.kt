@@ -33,8 +33,10 @@ import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.api.trace.Tracer
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
+import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Clock
@@ -217,7 +219,9 @@ class TransactionService(
                     payload = eventPublisher.initiatedPayload(transaction),
                 ),
             )
-        } catch (e: RuntimeException) {
+        } catch (e: PersistenceException) {
+            return recoverConcurrentReplay(e, command.idempotencyKey)
+        } catch (e: PgException) {
             return recoverConcurrentReplay(e, command.idempotencyKey)
         }
 

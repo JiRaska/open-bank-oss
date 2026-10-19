@@ -130,18 +130,7 @@ class TransactionGlobalIdempotencyIT {
     fun `missing claim and wrong pointer both fail closed without a new booking`() {
         listOf("delete", "wrong-pointer").forEach { damage ->
             val key = UUID.randomUUID().toString()
-            dataSource.connection.use { c ->
-                insert(c, key, LocalDate.of(2025, 1, 1))
-                c.createStatement().use { statement ->
-                    val sql = if (damage == "delete") {
-                        "delete from transaction_idempotency_keys where idempotency_key='$key'"
-                    } else {
-                        "update transaction_idempotency_keys set transaction_id='${UUID.randomUUID()}' " +
-                            "where idempotency_key='$key'"
-                    }
-                    statement.executeUpdate(sql)
-                }
-            }
+            damageRegistry(key, damage)
             assertThat(post(key).statusCode).isEqualTo(500)
             assertThat(count("transactions", key)).isEqualTo(1)
         }
@@ -218,6 +207,19 @@ class TransactionGlobalIdempotencyIT {
             assertThatThrownBy { s.execute("update transactions_future set idempotency_key='changed'") }
                 .isInstanceOf(SQLException::class.java).hasMessageContaining("immutable")
             assertThat(scalar(c, "select count(*) from transaction_idempotency_keys")).isEqualTo(1)
+        }
+    }
+
+    private fun damageRegistry(key: String, damage: String) {
+        dataSource.connection.use { c ->
+            insert(c, key, LocalDate.of(2025, 1, 1))
+            val sql = if (damage == "delete") {
+                "delete from transaction_idempotency_keys where idempotency_key='$key'"
+            } else {
+                "update transaction_idempotency_keys set transaction_id='${UUID.randomUUID()}' " +
+                    "where idempotency_key='$key'"
+            }
+            c.createStatement().use { it.executeUpdate(sql) }
         }
     }
 
