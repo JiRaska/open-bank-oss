@@ -8,7 +8,9 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.treasury.application.port.out.CashFlowConflictException
 import com.openbank.treasury.application.port.out.CommandKey
+import com.openbank.treasury.application.port.out.CorrectionCommit
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealReferenceLookup
@@ -19,6 +21,8 @@ import com.openbank.treasury.application.port.out.ScheduleWrite
 import com.openbank.treasury.application.port.out.TreasuryOutboxRepository
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
+import com.openbank.treasury.domain.model.CorrectionBlockedByPaymentException
+import com.openbank.treasury.domain.model.CorrectionStaleException
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
@@ -275,39 +279,218 @@ class DealRepositoryImpl(
                 "select cast(payment_id as varchar) from treasury_payments where deal_ids like :d and status = 'PROPOSED' for update",
             ).setParameter("d", like).resultList
         }.flatMap { proposed ->
-            proposed.map { java.util.UUID.fromString(it.toString()) }.fold(Uni.createFrom().voidItem()) { chain, pid ->
-                chain.flatMap {
-                    session.createNativeQuery<Any>(
-                        "update deal_cash_flows set payment_id = null, row_version = row_version + 1 where payment_id = :p",
-                    ).setParameter("p", pid.toString()).executeUpdate()
-                }.flatMap {
-                    session.createNativeQuery<Any>("delete from treasury_payment_flows where payment_id = :p")
-                        .setParameter("p", pid).executeUpdate()
-                }.flatMap {
-                    session.createNativeQuery<Any>(
-                        "update treasury_payments set status = 'CANCELLED', status_reason = :r where payment_id = :p and status = 'PROPOSED'",
-                    ).setParameter("r", "deal $dealId changed").setParameter("p", pid).executeUpdate()
-                }.flatMap { n ->
-                    check(n == 1) { "payment $pid changed while its deal was being changed" }
-                    outbox.persistInTransaction(
-                        OutboxMessage(
-                            aggregateId = pid,
-                            eventType = "treasury.payment.status-changed.v1",
-                            payload = objectMapper.writeValueAsString(
-                                mapOf(
-                                    "paymentId" to pid,
-                                    "status" to "CANCELLED",
-                                    "reason" to "deal $dealId changed",
-                                    "occurredAt" to clock.instant(),
-                                ),
-                            ),
-                            createdAt = clock.instant(),
-                        ),
-                    )
-                }
-            }
+            cancelProposed(session, dealId, proposed.map { java.util.UUID.fromString(it.toString()) })
         }
     }
+
+    /** Cancel each PROPOSED payment (scoped, guarded on its status), free its flows, record the event. */
+    private fun cancelProposed(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        pids: List<java.util.UUID>,
+    ): Uni<Void> = pids.fold(Uni.createFrom().voidItem()) { chain, pid ->
+        chain.flatMap {
+            session.createNativeQuery<Any>(
+                "update deal_cash_flows set payment_id = null, row_version = row_version + 1 where payment_id = :p",
+            ).setParameter("p", pid.toString()).executeUpdate()
+        }.flatMap {
+            session.createNativeQuery<Any>("delete from treasury_payment_flows where payment_id = :p")
+                .setParameter("p", pid).executeUpdate()
+        }.flatMap {
+            session.createNativeQuery<Any>(
+                "update treasury_payments set status = 'CANCELLED', status_reason = :r where payment_id = :p and status = 'PROPOSED'",
+            ).setParameter("r", "deal $dealId changed").setParameter("p", pid).executeUpdate()
+        }.flatMap { n ->
+            check(n == 1) { "payment $pid changed while its deal was being changed" }
+            outbox.persistInTransaction(
+                OutboxMessage(
+                    aggregateId = pid,
+                    eventType = "treasury.payment.status-changed.v1",
+                    payload = objectMapper.writeValueAsString(
+                        mapOf(
+                            "paymentId" to pid,
+                            "status" to "CANCELLED",
+                            "reason" to "deal $dealId changed",
+                            "occurredAt" to clock.instant(),
+                        ),
+                    ),
+                    createdAt = clock.instant(),
+                ),
+            )
+        }
+    }
+
+    /**
+     * ADR-0344 D7: an approved correction, in ONE transaction under the deal-row lock (see
+     * [CorrectionCommit]). [correctionRow] writes the correction's own row in the same transaction.
+     */
+    fun commitCorrection(c: CorrectionCommit, correctionRow: () -> Uni<Void>): Uni<Void> = Panache.withTransaction {
+        val deal = c.deal
+        find("dealId", deal.id).withLock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).firstResult()
+            .flatMap { locked ->
+                checkNotNull(locked) { "deal ${deal.id} disappeared" }
+                if (locked.dealVersion != c.correction.baseVersion ||
+                    locked.scheduleVersion != c.correction.baseScheduleVersion
+                ) {
+                    throw CorrectionStaleException(
+                        "deal ${deal.id} changed while the correction was being approved: propose it again",
+                    )
+                }
+                Panache.getSession().flatMap { session ->
+                    session.createNativeQuery<Any>(FINGERPRINT_SQL).setParameter("d", deal.id)
+                        .setParameter("v", c.correction.baseScheduleVersion).singleResult
+                        .flatMap { fp ->
+                            if ((fp as Number).toLong() != c.baseFingerprint) {
+                                throw CashFlowConflictException(
+                                    "the deal's schedule changed (a fixing, override or payment landed) while the " +
+                                        "correction was being approved: approve it again",
+                                )
+                            }
+                            blockingOnChanged(session, deal.id, c.changedFlowIds)
+                        }
+                        .flatMap { proposedOnChanged(session, c.changedFlowIds) }
+                        .flatMap { pids -> cancelProposed(session, deal.id, pids) }
+                        .flatMap { writeCorrection(session, locked, c, correctionRow) }
+                }
+            }
+    }
+
+    /** The writes of an approved correction, after the guards passed and the payments were withdrawn. */
+    private fun writeCorrection(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        locked: DealEntity,
+        c: CorrectionCommit,
+        correctionRow: () -> Uni<Void>,
+    ): Uni<Void> {
+        val deal = c.deal
+        locked.fill(deal)
+        locked.lastChangedBy = c.correction.decidedBy?.id
+        return transitions.count("dealId", deal.id)
+            .flatMap { stored -> appendTransitions(deal, stored.toInt()) }
+            .flatMap { persistCommand(c.command) }
+            .flatMap { correctionVersionRow(c) }
+            .flatMap { c.schedule?.let { scheduleRows(it) } ?: Uni.createFrom().voidItem() }
+            // The new rows must be in the database before the native updates below read them.
+            .flatMap { session.flush() }
+            .flatMap { repointPayments(session, deal.id, c) }
+            .flatMap { correctionRow() }
+            .flatMap {
+                c.events.fold(Uni.createFrom().voidItem()) { chain, e ->
+                    chain.flatMap {
+                        outbox.persistInTransaction(
+                            OutboxMessage(
+                                aggregateId = deal.id,
+                                eventType = e.eventType,
+                                payload = e.payload,
+                                createdAt = clock.instant(),
+                            ),
+                        )
+                    }
+                }
+            }
+    }
+
+    /**
+     * The payments that survive the correction follow their flows onto the new schedule version.
+     * The payment link is never written by a whole-row save, so it is carried here by its own
+     * scoped update, slot for slot: from every UNCHANGED flow still on a payment (a withdrawn one was
+     * unlinked above), and from a CHANGED flow whose payment already settled (posted history). Then
+     * the unchanged flows' payment rows are re-pointed, so a PROPOSED one stays releasable and a
+     * released one keeps settling the rows the deal now has.
+     */
+    private fun repointPayments(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        c: CorrectionCommit,
+    ): Uni<Void> {
+        val schedule = c.schedule ?: return Uni.createFrom().voidItem()
+        val changed = c.changedFlowIds.ifEmpty { setOf(java.util.UUID(0, 0)) }.toList()
+        val slot = "n.leg_index = o.leg_index and n.period_index = o.period_index and n.kind = o.kind"
+        return session.createNativeQuery<Any>(
+            "update deal_cash_flows n set payment_id = o.payment_id, row_version = n.row_version + 1 " +
+                "from deal_cash_flows o where o.deal_id = :d and o.schedule_version = :base and " +
+                "n.deal_id = :d and n.schedule_version = :v and $slot and o.payment_id is not null and " +
+                "(o.flow_id not in (:changed) or exists (select 1 from treasury_payments p where " +
+                "cast(p.payment_id as varchar) = o.payment_id and p.status in ('SETTLED', 'MANUALLY_SETTLED')))",
+        ).setParameter("d", dealId).setParameter("base", c.correction.baseScheduleVersion)
+            .setParameter("v", schedule.scheduleVersion).setParameter("changed", changed).executeUpdate()
+            .flatMap {
+                session.createNativeQuery<Any>(
+                    "update treasury_payment_flows pf set flow_id = n.flow_id from deal_cash_flows n " +
+                        "where pf.deal_id = :d and n.deal_id = :d and n.schedule_version = :v " +
+                        "and n.leg_index = pf.leg_index and n.period_index = pf.period_index and n.kind = pf.kind " +
+                        "and n.payment_id = cast(pf.payment_id as varchar) and pf.flow_id not in (:changed)",
+                ).setParameter("d", dealId).setParameter("v", schedule.scheduleVersion)
+                    .setParameter("changed", changed).executeUpdate()
+            }.flatMap {
+                // ADR-0344 D7: an unchanged observed fixing keeps its provenance (source, hash, time);
+                // the provenance columns, like the payment link, are only ever written by scoped updates.
+                session.createNativeQuery<Any>(
+                    "update deal_cash_flows n set fixing_source = o.fixing_source, fixing_sha256 = o.fixing_sha256, " +
+                        "fixed_at = o.fixed_at, row_version = n.row_version + 1 from deal_cash_flows o " +
+                        "where o.deal_id = :d and o.schedule_version = :base and n.deal_id = :d and " +
+                        "n.schedule_version = :v and $slot and o.fixing_sha256 is not null and " +
+                        "n.rate_source = 'OBSERVED' and n.fixing_date = o.fixing_date",
+                ).setParameter("d", dealId).setParameter("base", c.correction.baseScheduleVersion)
+                    .setParameter("v", schedule.scheduleVersion).executeUpdate()
+            }.replaceWithVoid()
+    }
+
+    /** Σ row_version + count over one schedule version's flows (see CorrectionRepository.fingerprint). */
+    fun fingerprint(dealId: java.util.UUID, scheduleVersion: Int): Uni<Long> = Panache.withSession {
+        Panache.getSession().flatMap { s ->
+            s.createNativeQuery<Any>(FINGERPRINT_SQL).setParameter("d", dealId).setParameter("v", scheduleVersion)
+                .singleResult.map { (it as Number).toLong() }
+        }
+    }
+
+    private fun blockingOnChanged(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        dealId: java.util.UUID,
+        changed: Set<java.util.UUID>,
+    ): Uni<Void> {
+        if (changed.isEmpty()) return Uni.createFrom().voidItem()
+        return session.createNativeQuery<Array<Any>>(
+            "select cast(p.payment_id as varchar), cast(f.flow_id as varchar) from treasury_payments p " +
+                "join treasury_payment_flows f on f.payment_id = p.payment_id " +
+                "where f.flow_id in (:f) and p.status in (:blocking)",
+        ).setParameter("f", changed.toList()).setParameter("blocking", RELEASED_STATUSES).resultList.map { rows ->
+            rows.firstOrNull()?.let {
+                throw CorrectionBlockedByPaymentException(
+                    dealId,
+                    java.util.UUID.fromString(it[0].toString()),
+                    java.util.UUID.fromString(it[1].toString()),
+                )
+            }
+        }.replaceWithVoid()
+    }
+
+    private fun proposedOnChanged(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        changed: Set<java.util.UUID>,
+    ): Uni<List<java.util.UUID>> {
+        if (changed.isEmpty()) return Uni.createFrom().item(emptyList())
+        return session.createNativeQuery<Any>(
+            "select cast(p.payment_id as varchar) from treasury_payments p where p.status = 'PROPOSED' and " +
+                "p.payment_id in (select f.payment_id from treasury_payment_flows f where f.flow_id in (:f)) " +
+                "order by 1 for update",
+        ).setParameter("f", changed.toList()).resultList.map { r -> r.map { java.util.UUID.fromString(it.toString()) } }
+    }
+
+    /** The correction's terms version: authored by its PROPOSER (a term author for every later release). */
+    private fun correctionVersionRow(c: CorrectionCommit): Uni<Void> = versions.persist(
+        DealVersionEntity().apply {
+            dealId = c.deal.id
+            version = c.deal.version
+            termsJson = objectMapper.writeValueAsString(terms(c.deal))
+            scheduleVersion = c.deal.scheduleVersion.takeIf { it > 0 }
+            scheduleHash = c.deal.scheduleHash
+            createdBy = c.correction.proposedBy.id
+            createdAt = clock.instant()
+            changes = "correction ${c.correction.correctionId} approved by ${c.correction.decidedBy?.id}: " +
+                c.correction.reason.take(MAX_CHANGES_REASON)
+        },
+    ).replaceWithVoid()
 
     private fun scheduleRows(s: ScheduleWrite): Uni<Void> {
         val flows = s.flows.map { CashFlowEntity().fill(it) }
@@ -623,5 +806,9 @@ class DealRepositoryImpl(
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
+
+        const val MAX_CHANGES_REASON = 200
+        const val FINGERPRINT_SQL =
+            "select coalesce(sum(row_version), 0) + count(*) from deal_cash_flows where deal_id = :d and schedule_version = :v"
     }
 }

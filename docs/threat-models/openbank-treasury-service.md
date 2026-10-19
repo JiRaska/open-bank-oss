@@ -95,8 +95,39 @@ day's accrual under its date; the ledger deduplicates on the key; `CashFlowLedge
 IRS through settle → accrue → pay → mature over real HTTP and Postgres and counts six payment keys.
 **Residual:** an unfixed floating flow cannot post until the fixing workflow (ADR-0344 D5) fixes it;
 revaluation journals exist as rules and a pure function but are not yet fed by the risk engine's
-valuation; a settled matrix deal is not reversible (a correction is the route, ADR-0344 D7); the cash
+valuation; a settled matrix deal is taken back by a full-unwind correction (see Corrections); the cash
 counter-account of a CASH movement (1690) is cleared by the other side's booking, not by treasury.
+
+## Corrections (ADR-0344 D7)
+
+`POST /deals/{id}/corrections` proposes partial new terms (or a full unwind) of a BOOKED, CONFIRMED
+or SETTLED leg-described deal; `/approve` and `/reject` decide it. **STRIDE-E (self-approval):**
+the decider must be a human (`ActorNotPermittedException`, 403) who is not the proposer, the deal's
+creator, submitter, draft editors or the proposer of an earlier correction (`FourEyesViolationException`,
+422); the policy splits proposing (dealer, back office) from deciding (approver), and a database
+CHECK refuses `decided_by = proposed_by` and a non-human decider. A correction's terms version is
+recorded as authored by its PROPOSER, so the payment releaser rule (never a term author) covers it.
+**STRIDE-T (race with a payment release / a fixing):** approval commits in ONE transaction under the
+deal-row lock that release and fixing take too: the base schedule must still match the fingerprint
+read before the plan (Σ row_version + count — any fixing, override or payment link changes it; else
+409 FLOW_CHANGED), a payment whose status blocks a deal change (`PaymentStatus.blocksDealChange`)
+on a CHANGED flow refuses it (409 PAYMENT_RELEASED), PROPOSED payments of changed flows are
+withdrawn (scoped, guarded updates), and payments of unchanged flows are re-pointed onto the new
+version. A fixing that lands after the commit is refused because its rows are no longer on the
+current schedule; a release after it is refused stale. `CorrectionApiIT` races approval against a
+release and asserts exactly one wins with a typed 409, and drives both guards by effect.
+**STRIDE-T (wrong amounts):** delta journals are the matrix's re-derivation of every event the deal
+has reached under the new version minus the same under the old one, netted per (class, role,
+currency) and keyed `treasury:<dealId>:correction:<correctionId>:<event>:<flow-slot|date>`;
+`CorrectionDeltaTest` holds `old + delta == new` per account and `old + unwind == 0`. Stored observed
+fixings are re-supplied by their provenance hash, so an unchanged FIXED period stays FIXED with the
+same source and hash. **Repudiation / partial failure:** the new version commits first and the
+delta journals post afterwards under idempotent keys; an APPROVED correction whose journals are not
+all posted is finished by the CORRECTIONS day step (`CorrectionPostingScheduler`), which reports
+FAILED (holding the close) or REFUSED (closed day) — a closed day moves the journal into today's open
+day and records the original value date. **Residual:** a CHANGED flow already SETTLED keeps its
+settled payment; the cash difference is posted by the delta journals and settled by a new
+instruction outside this flow.
 
 ## STRIDE analysis
 

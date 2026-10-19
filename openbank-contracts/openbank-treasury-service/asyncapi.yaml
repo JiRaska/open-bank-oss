@@ -23,6 +23,10 @@ info:
     institution-transfer rail once released. RAIL_NOT_SUPPORTED remains only for a payment whose
     SSI determines no rail. `PaymentReleased.ssiVersion` (additive to contract 9.1) names the SSI
     version re-verified under lock at release; a changed instruction is refused 409 SSI_CHANGED.
+    Also new in 1.9.0 (ADR-0344 D7) on the deal feed: `treasury.deal.corrected.v1` — a four-eyes
+    correction was approved; the new terms version and its cash-flow ledger committed in the same
+    transaction (a `treasury.cashflow.generated.v1` accompanies it unless the deal was fully
+    unwound) and `deltaJournals` journals are owed to the ledger under `treasury:<dealId>:correction:*`.
 
     1.8.0 (additive, ADR-0344 D5): `CashFlowGenerated.flows` carries the stored rows (the risk
     engine's stored-flow consumer requires them; before 1.8.0 it acked every such event as
@@ -101,6 +105,8 @@ channels:
         $ref: '#/components/messages/CashFlowOverridden'
       CashFlowFixed:
         $ref: '#/components/messages/CashFlowFixed'
+      DealCorrected:
+        $ref: '#/components/messages/DealCorrected'
       PaymentStatusChanged:
         $ref: '#/components/messages/PaymentStatusChanged'
 
@@ -197,6 +203,11 @@ components:
       summary: "The rail's status of a released payment (contract 9.2)."
       payload:
         $ref: '#/components/schemas/InstitutionTransferStatus'
+    DealCorrected:
+      name: treasury.deal.corrected.v1
+      summary: "A four-eyes correction of a booked deal was approved; its delta journals are owed to the ledger (ADR-0344 D7)."
+      payload:
+        $ref: '#/components/schemas/DealCorrected'
     CashFlowFixed:
       name: treasury.cashflow.fixed.v1
       summary: "Floating flows of one deal version were FIXED from an observed index value that passed the quality gate (ADR-0344 D5)."
@@ -204,6 +215,26 @@ components:
         $ref: '#/components/schemas/CashFlowFixed'
 
   schemas:
+    DealCorrected:
+      type: object
+      description: "Constructor properties of `DealCorrected` in `TreasuryEventPayloads.kt`."
+      required: [dealId, correctionId, product, fromVersion, toVersion, scheduleVersion, fullUnwind, changedFlows, deltaJournals, effectiveFrom, reason, proposedBy, approvedBy, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        correctionId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        fromVersion: { type: integer }
+        toVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        fullUnwind: { type: boolean, description: "True: the deal ended REVERSED and every posted journal is offset." }
+        changedFlows: { type: integer }
+        deltaJournals: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        reason: { type: string }
+        proposedBy: { type: string }
+        approvedBy: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
     ProductType:
       type: string
       enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT, CASH, TREASURY_BILL, BOND, BILL_OF_EXCHANGE, LOAN, FX_FORWARD, FX_SWAP, FRA, IRS, REPO, REVERSE_REPO]

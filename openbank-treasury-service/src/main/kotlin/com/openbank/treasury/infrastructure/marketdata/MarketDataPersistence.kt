@@ -370,26 +370,39 @@ class FixingFlowRepositoryImpl(
      */
     override suspend fun applyFixing(dealId: UUID, flows: List<CashFlow>, event: DealEvent) {
         Panache.withTransaction {
-            flows.fold(Uni.createFrom().voidItem()) { acc, f ->
-                acc.flatMap {
-                    flowRepo.update(
-                        "state = 'FIXED', rate = ?1, amount = ?2, rateSource = 'OBSERVED', fixingSource = ?3, " +
-                            "fixingSha256 = ?4, fixedAt = ?5, rowVersion = rowVersion + 1 " +
-                            "where flowId = ?6 and state = 'PROJECTED' and rateSource in ('PROJECTED', 'MISSING') " +
-                            "and fixingSha256 is null",
-                        checkNotNull(f.rate),
-                        checkNotNull(f.amount),
-                        checkNotNull(f.fixingSource),
-                        checkNotNull(f.fixingSha256),
-                        checkNotNull(f.fixedAt),
-                        f.flowId,
-                    ).map { n ->
-                        if (n != 1) {
-                            throw CashFlowConflictException(
-                                "flow ${f.flowId} is no longer an unfixed PROJECTED row: fixed concurrently",
-                            )
-                        }
-                    }.replaceWithVoid()
+            // ADR-0344 D7: lock the deal row (the row a correction approval locks) and refuse a fixing
+            // of a schedule a correction has superseded meanwhile; the next run fixes the new one.
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Any>("select schedule_version from deals where deal_id = :d for update")
+                    .setParameter("d", dealId).singleResult
+            }.map { current ->
+                flows.firstOrNull { it.scheduleVersion != (current as Number).toInt() }?.let {
+                    throw CashFlowConflictException(
+                        "deal $dealId was re-scheduled (correction) while flow ${it.flowId} was being fixed",
+                    )
+                }
+            }.replaceWithVoid().flatMap {
+                flows.fold(Uni.createFrom().voidItem()) { acc, f ->
+                    acc.flatMap {
+                        flowRepo.update(
+                            "state = 'FIXED', rate = ?1, amount = ?2, rateSource = 'OBSERVED', fixingSource = ?3, " +
+                                "fixingSha256 = ?4, fixedAt = ?5, rowVersion = rowVersion + 1 " +
+                                "where flowId = ?6 and state = 'PROJECTED' " +
+                                "and rateSource in ('PROJECTED', 'MISSING') and fixingSha256 is null",
+                            checkNotNull(f.rate),
+                            checkNotNull(f.amount),
+                            checkNotNull(f.fixingSource),
+                            checkNotNull(f.fixingSha256),
+                            checkNotNull(f.fixedAt),
+                            f.flowId,
+                        ).map { n ->
+                            if (n != 1) {
+                                throw CashFlowConflictException(
+                                    "flow ${f.flowId} is no longer an unfixed PROJECTED row: fixed concurrently",
+                                )
+                            }
+                        }.replaceWithVoid()
+                    }
                 }
             }.flatMap {
                 outbox.persistInTransaction(

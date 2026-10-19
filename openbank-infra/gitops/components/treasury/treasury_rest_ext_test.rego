@@ -257,6 +257,21 @@ test_override_split_between_back_office_and_approver if {
 	not allowed(dealer, "treasury.cashflow.override.propose")
 }
 
+test_correction_split_between_proposers_and_approver if {
+	allowed(dealer, "treasury.deal.correction.propose")
+	allowed(back_office, "treasury.deal.correction.propose")
+	not allowed(approver, "treasury.deal.correction.propose")
+	allowed(approver, "treasury.deal.correction.approve")
+	allowed(approver, "treasury.deal.correction.reject")
+	not allowed(dealer, "treasury.deal.correction.approve")
+	not allowed(back_office, "treasury.deal.correction.approve")
+	every p in [agent, shared_sa, renamed_sa, nobody] {
+		not allowed(p, "treasury.deal.correction.propose")
+		not allowed(p, "treasury.deal.correction.approve")
+		not allowed(p, "treasury.deal.correction.reject")
+	}
+}
+
 test_schedule_preview_is_dealer_and_back_office_only if {
 	not allowed(approver, "treasury.deal.preview")
 	not allowed(nobody, "treasury.deal.preview")

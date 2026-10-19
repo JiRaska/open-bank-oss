@@ -152,6 +152,33 @@ class TreasuryServiceProducer {
         clock: Clock,
     ): CashFlowUseCase = CashFlowService(deals, cashFlows, schedules, objectMapper, clock)
 
+    /** ADR-0344 D7: four-eyes corrections of booked deals. */
+    @Produces
+    @ApplicationScoped
+    @Suppress("LongParameterList")
+    fun correctionService(
+        deals: DealRepository,
+        corrections: com.openbank.treasury.application.port.out.CorrectionRepository,
+        cashFlows: CashFlowRepository,
+        schedules: ScheduleService,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
+        ledger: LedgerPostingPort,
+        references: ReferenceRepository,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+    ): com.openbank.treasury.application.usecase.CorrectionService =
+        com.openbank.treasury.application.usecase.CorrectionService(
+            deals,
+            corrections,
+            cashFlows,
+            schedules,
+            marketData,
+            ledger,
+            objectMapper,
+            clock,
+            BookCategories(references, clock)::of,
+        )
+
     /** ADR-0344 D3: the reference-data steward; the plain service is also what deal capture validates against. */
     @Produces
     @ApplicationScoped

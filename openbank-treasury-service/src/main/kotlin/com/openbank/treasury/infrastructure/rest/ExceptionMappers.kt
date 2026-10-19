@@ -158,6 +158,25 @@ class ExceptionMappers {
     fun notPermitted(e: ActorNotPermittedException): Response =
         error(Response.Status.FORBIDDEN.statusCode, "ACTOR_NOT_PERMITTED", e.message)
 
+    @ServerExceptionMapper
+    fun correctionNotFound(e: com.openbank.treasury.application.usecase.CorrectionNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
+    fun correctionStale(e: com.openbank.treasury.domain.model.CorrectionStaleException): Response =
+        error(Response.Status.CONFLICT.statusCode, "CORRECTION_STALE", e.message)
+
+    @ServerExceptionMapper
+    fun correctionBlocked(e: com.openbank.treasury.domain.model.CorrectionBlockedByPaymentException): Response =
+        Response.status(Response.Status.CONFLICT.statusCode).entity(
+            mapOf(
+                "error" to "PAYMENT_RELEASED",
+                "message" to e.message,
+                "paymentId" to e.paymentId,
+                "flowId" to e.flowId,
+            ),
+        ).build()
+
     private fun error(status: Int, code: String, message: String?): Response =
         Response.status(status).entity(mapOf("error" to code, "message" to message)).build()
 

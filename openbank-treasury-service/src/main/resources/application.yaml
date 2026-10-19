@@ -208,7 +208,7 @@ openbank:
       # steps every accounting day must finish before the day is reported; a day with one unfinished
       # (or FAILED) is withheld, so the ledger waits and pages. Must match rules.yaml close_participants.
       enabled: ${OPENBANK_TREASURY_CLOSE_ENABLED:true}
-      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS,FIXINGS,PAYMENTS}
+      due-steps: ${OPENBANK_TREASURY_CLOSE_DUE_STEPS:ACCRUALS,FIXINGS,PAYMENTS,CORRECTIONS}
       lookback-days: 3
     confirmation:
       # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
