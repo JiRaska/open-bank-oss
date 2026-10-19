@@ -102,24 +102,12 @@ class TransactionLedgerPostingAdapter(
                     PostingResult(PostingOutcome.FAILED, null, CONFLICT_DETAIL)
                 }
 
-                is TransactionCallOutcome.Rejected -> {
-                    log.errorf(
-                        "ledger posting for authorization %s rejected (HTTP %d)",
-                        authorization.id,
-                        outcome.status,
-                    )
-                    PostingResult(
-                        PostingOutcome.FAILED,
-                        null,
-                        "HTTP ${outcome.status}",
-                    )
-                }
+                is TransactionCallOutcome.Rejected -> failedHttpPosting(authorization.id, outcome.status)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: TransactionHttpException) {
-            log.errorf("ledger posting failed for authorization %s (HTTP %d)", authorization.id, e.status)
-            PostingResult(PostingOutcome.FAILED, null, "HTTP ${e.status}")
+            failedHttpPosting(authorization.id, e.status)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // Unproven completion is not a settlement verdict: the debit may or may not be booked. It must NOT be
             // rethrown (this runs after the clearing committed and nobody retries the caller) and must
@@ -142,6 +130,11 @@ class TransactionLedgerPostingAdapter(
             )
             PostingResult(PostingOutcome.FAILED, null, "POSTING_FAILED")
         }
+    }
+
+    private fun failedHttpPosting(authorizationId: UUID, status: Int): PostingResult {
+        log.errorf("ledger posting failed for authorization %s (HTTP %d)", authorizationId, status)
+        return PostingResult(PostingOutcome.FAILED, null, "HTTP $status")
     }
 
     /** Loud, but once a minute with a count: a re-driver sweeping a backlog must not log one line per row. */
