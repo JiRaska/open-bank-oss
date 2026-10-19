@@ -24,10 +24,11 @@ data class RedriveResult(val attempted: Int, val skippedDisabled: Int)
  * never recorded an outcome), FAILED and UNKNOWN.
  *
  * Every attempt presents the SAME ledger idempotency key as the first one (the adapter derives it
- * from the authorisation and the clearing key), and transaction-service dedupes on it. That dedupe is
- * NOT race-safe (#13231), so the real protection is that two attempts never run on one row at once:
- * a row is claimed (a lease on its next-attempt time plus a fresh claim token) before it is posted,
- * and an outcome is recorded only while the row still carries that token and is not POSTED.
+ * from the authorisation and the clearing key). A claim token fences recorded outcomes, not remote
+ * calls: a slow HTTP request can overlap a later attempt after its lease expires. Transaction-service
+ * V22 supplies the provider-wide, race-safe key registry (#13231); verify that migration before
+ * deploying the re-driver image. Each attempt claims the row with a fresh token, and records its
+ * outcome only while the row still carries that token and is not POSTED.
  *
  * One bad row never stops the batch: an exception, or an authorisation that cannot be found, is
  * recorded as a counted FAILED attempt, so such a row reaches the ceiling and the alert instead of
