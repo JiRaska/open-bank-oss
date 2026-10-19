@@ -202,7 +202,15 @@ def check_workflow(fetch, repository, sha, workflow):
                      "jobs")
     for name in WORKFLOWS[workflow]:
         matches = [job for job in jobs if job.get("name") == name]
-        if len(matches) != 1 or matches[0].get("status") != "completed" or matches[0].get("conclusion") != "success":
+        if len(matches) > 1:
+            raise RuntimeError(f"{workflow} has ambiguous exact-source jobs named {name}")
+        if not matches or matches[0].get("status") != "completed":
+            # The workflow-run completion event can become visible before the
+            # jobs endpoint has indexed every job (or its terminal state). Keep
+            # one-shot workflow_run checks pending; later completion events can
+            # retry. This is never authorization: callers proceed only on True.
+            return False
+        if matches[0].get("conclusion") != "success":
             raise RuntimeError(f"{workflow} lacks successful exact-source job {name}")
     return True
 

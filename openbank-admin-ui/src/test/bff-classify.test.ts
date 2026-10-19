@@ -4,6 +4,8 @@
 
 import { describe, it, expect } from 'vitest'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 function res(status: number, body?: unknown): Response {
   return new Response(body === undefined ? '' : JSON.stringify(body), {
@@ -50,5 +52,19 @@ describe('classifyBffFailure', () => {
   it('handles a non-JSON body without throwing', async () => {
     const html = new Response('<html>oops</html>', { status: 503, headers: { 'content-type': 'text/html' } })
     expect(await classifyBffFailure(html)).toBe('error')
+  })
+
+  it('uses the shared distinction in payments, infrastructure, and lineage views', () => {
+    const pages = [
+      'src/app/payments/page.tsx',
+      'src/app/infrastructure/page.tsx',
+      'src/app/docs/lineage/page.tsx',
+    ]
+    for (const page of pages) {
+      const source = readFileSync(path.resolve(process.cwd(), page), 'utf8')
+      expect(source, page).toContain('classifyBffFailure(res)')
+    }
+    const payments = readFileSync(path.resolve(process.cwd(), pages[0]), 'utf8')
+    expect(payments).not.toMatch(/res\.status\s*===\s*404\s*\?\s*'not_deployed'/)
   })
 })

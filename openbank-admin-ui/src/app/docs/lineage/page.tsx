@@ -13,6 +13,7 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import { classifyBffFailure } from '@/lib/services/bff'
 import {
   parseGovernanceLineage,
   type GovernanceLineageService as GovService,
@@ -88,7 +89,7 @@ export default function LineageFlowPage() {
           setSelected(null)
           setHasVerifiedSnapshot(false)
         }
-        setUnavailable({ kind: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable' })
+        setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
       const evidence = parseGovernanceLineage(await res.json())

@@ -10,6 +10,9 @@
 // screen. Each assertion below fails against that code.
 
 import { NextRequest } from 'next/server'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
@@ -138,5 +141,39 @@ describe('security BFF relays the operator bearer', () => {
     const body = await (await GET()).json()
 
     expect(body).toEqual({ available: false, reason: 'unauthorized' })
+  })
+
+  it('serves the newer scanner report when both sources are available', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify({ generatedAt: '2026-10-18T00:00:00Z', source: 'bundle' }))
+      vi.stubGlobal('fetch', jsonOk({ generatedAt: '2026-10-19T00:00:00Z', source: 'scanner' }))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, report: { source: 'scanner' } })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to the bundle when the live scanner rejects the session', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify({ generatedAt: '2026-10-18T00:00:00Z', source: 'bundle' }))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, report: { source: 'bundle' } })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

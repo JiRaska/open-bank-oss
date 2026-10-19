@@ -116,9 +116,26 @@ async function fromScanner(): Promise<NextResponse | null> {
 }
 
 export async function GET() {
-  return (await fromBundle())
-    ?? (await fromScanner())
-    ?? NextResponse.json(
+  const [bundle, scanner] = await Promise.all([fromBundle(), fromScanner()])
+  if (bundle && scanner) {
+    const [bundleBody, scannerBody] = await Promise.all([
+      bundle.clone().json().catch(() => null),
+      scanner.clone().json().catch(() => null),
+    ])
+    // A scanner outage must not hide the last usable report. When both sources
+    // provide reports, compare their source timestamps; request time is not data
+    // freshness. If only one report has a parseable timestamp, prefer that one.
+    if (scannerBody?.available === true && bundleBody?.available === true) {
+      const bundleTime = Date.parse(bundleBody.report?.generatedAt ?? '')
+      const scannerTime = Date.parse(scannerBody.report?.generatedAt ?? '')
+      if (Number.isFinite(scannerTime) && (!Number.isFinite(bundleTime) || scannerTime > bundleTime)) return scanner
+      if (Number.isFinite(bundleTime)) return bundle
+      return scanner
+    }
+    if (bundleBody?.available === true) return bundle
+    return scanner
+  }
+  return bundle ?? scanner ?? NextResponse.json(
       { available: false, reason: 'not_deployed', detail: 'no CI security report bundled and no scanner configured' } satisfies Unavailable,
       { status: 200 },
     )

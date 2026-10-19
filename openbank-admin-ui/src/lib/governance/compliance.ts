@@ -33,9 +33,13 @@ export interface ComplianceControl {
   references: string[]
   evidence: string
   evidenceSource?: string
+  /** Authored catalogue value, kept separate from the observed signal. */
+  declaredStatus: ControlStatus
   status: ControlStatus
   derivedFrom?: string
-  /** True when `status` was overridden from a live derived signal. */
+  /** The derived signal state. `unknown` means no valid signal was available. */
+  signalState?: 'true' | 'false' | 'unknown'
+  /** True only when a boolean derived signal was present. */
   live?: boolean
 }
 
@@ -44,6 +48,7 @@ export interface ComplianceCatalog {
   controls: ComplianceControl[]
   /** Per-framework coverage: enforced vs total controls touching that framework. */
   coverage: Record<string, { enforced: number; total: number }>
+  posture: { source: string; collectedAt: string | null } | null
 }
 
 function catalogFile(): string {
@@ -95,11 +100,12 @@ export async function loadComplianceCatalog(): Promise<ComplianceCatalog | null>
   // but leaves an already-honest partial/audit/planned status untouched.
   const posture = await loadSecurityPosture()
   const controls: ComplianceControl[] = authored.map(c => {
-    if (!c.derivedFrom) return c
+    const declaredStatus = c.declaredStatus ?? c.status
+    if (!c.derivedFrom) return { ...c, declaredStatus }
     const signal = signalValue(posture, c.derivedFrom)
-    if (signal === undefined) return c
-    if (signal) return { ...c, status: 'enforced', live: true }
-    return { ...c, status: c.status === 'enforced' ? 'planned' : c.status, live: true }
+    if (signal === undefined) return { ...c, declaredStatus, status: 'unknown', signalState: 'unknown', live: false }
+    if (signal) return { ...c, declaredStatus, status: 'enforced', signalState: 'true', live: true }
+    return { ...c, declaredStatus, status: declaredStatus === 'enforced' ? 'planned' : declaredStatus, signalState: 'false', live: true }
   })
 
   // Per-framework coverage roll-up.
@@ -113,5 +119,10 @@ export async function loadComplianceCatalog(): Promise<ComplianceCatalog | null>
     }
   }
 
-  return { frameworks, controls, coverage }
+  return {
+    frameworks,
+    controls,
+    coverage,
+    posture: posture ? { source: posture.source, collectedAt: posture.collectedAt } : null,
+  }
 }

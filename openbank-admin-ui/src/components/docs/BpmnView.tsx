@@ -19,7 +19,7 @@
 // ADR-0003/0050) was invisible.
 // ---------------------------------------------------------------------------
 
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GitBranch, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import type { BpmnProcess, BpmnStep } from '@/lib/docs/bpmn/schema'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
@@ -149,54 +149,77 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, 'up' | 'down' | 'loading' | 'unknown'>>({})
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const requestGeneration = useRef(0)
+  const activeController = useRef<AbortController | null>(null)
 
-  const stepsWithDetails = process.steps.filter(
+  const stepsWithDetails = useMemo(() => process.steps.filter(
     (s) => s.apis?.length || s.relatedServices?.length || s.emits?.length || s.consumes?.length,
-  )
+  ), [process.steps])
   const isChecking = Object.values(statuses).some((status) => status === 'loading')
 
-  const checkServices = async () => {
+  const checkServices = useCallback(async () => {
     const servicesToCheck = Array.from(new Set(stepsWithDetails.flatMap((s) => s.relatedServices || [])))
-
-    const newStatuses = { ...statuses }
-    servicesToCheck.forEach((s) => (newStatuses[s] = 'loading'))
-    setStatuses(newStatuses)
+    const generation = ++requestGeneration.current
+    activeController.current?.abort()
+    const controller = new AbortController()
+    activeController.current = controller
+    const timeout = setTimeout(() => controller.abort(), 8_000)
+    setStatuses((prev) => {
+      const next = { ...prev }
+      servicesToCheck.forEach((service) => { next[service] = 'loading' })
+      return next
+    })
 
     try {
-      const res = await fetch('/api/services/health')
-      if (res.ok) {
-        const data = await res.json()
-        const healthMap: Record<string, 'up' | 'down'> = {}
-        if (data && data.services) {
-          data.services.forEach((s: { name: string; status: string; port: number }) => {
-            const sname = s.name.replace(/^openbank-/, '')
-            healthMap[sname] = s.status === 'UP' ? 'up' : 'down'
-          })
-        }
-        setStatuses((prev) => {
-          const updated = { ...prev }
-          servicesToCheck.forEach((svc) => {
-            updated[svc] = healthMap[svc] !== undefined ? healthMap[svc] : 'down'
-          })
-          return updated
-        })
-      } else {
-        setStatuses((prev) => {
-          const updated = { ...prev }
-          servicesToCheck.forEach((svc) => (updated[svc] = 'down'))
-          return updated
-        })
+      const res = await fetch('/api/services/health', { signal: controller.signal, cache: 'no-store' })
+      if (!res.ok) throw new Error(`Health request returned ${res.status}`)
+      const data: unknown = await res.json()
+      if (!data || typeof data !== 'object' || !('services' in data) || !Array.isArray(data.services)) {
+        throw new Error('Health response has no services list')
       }
-    } catch {
+      const healthMap: Record<string, 'up' | 'down' | 'unknown'> = {}
+      for (const item of data.services) {
+        if (!item || typeof item !== 'object' || !('name' in item) || typeof item.name !== 'string') continue
+        const service = item.name.replace(/^openbank-/, '')
+        const status = 'status' in item ? item.status : undefined
+        healthMap[service] = status === 'UP' ? 'up' : status === 'DOWN' ? 'down' : 'unknown'
+      }
+      if (generation !== requestGeneration.current) return
       setStatuses((prev) => {
         const updated = { ...prev }
-        servicesToCheck.forEach((svc) => (updated[svc] = 'down'))
+        servicesToCheck.forEach((svc) => { updated[svc] = healthMap[svc] ?? 'unknown' })
         return updated
       })
+    } catch {
+      if (generation !== requestGeneration.current) return
+      setStatuses((prev) => {
+        const updated = { ...prev }
+        servicesToCheck.forEach((svc) => (updated[svc] = 'unknown'))
+        return updated
+      })
+    } finally {
+      clearTimeout(timeout)
+      if (generation === requestGeneration.current) {
+        setLastRefresh(new Date())
+        activeController.current = null
+      }
     }
+  }, [stepsWithDetails])
 
-    setLastRefresh(new Date())
-  }
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void checkServices()
+    }
+    refreshWhenVisible()
+    const interval = window.setInterval(refreshWhenVisible, 60_000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      requestGeneration.current += 1
+      activeController.current?.abort()
+    }
+  }, [checkServices])
 
   return (
     <div style={{ marginTop: '24px' }}>
@@ -216,7 +239,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
             borderRadius: '6px', color: 'var(--text-secondary)', cursor: 'pointer',
           }}>
           <RefreshCw size={14} aria-hidden="true" />
-          {lastRefresh ? `${t('Aktualizováno', 'Refreshed')} ${lastRefresh.toLocaleTimeString(dateLocale)}` : t('Ověřit stav', 'Check status')}
+          {lastRefresh ? `${t('Kontrola stavu', 'Status checked')} ${lastRefresh.toLocaleTimeString(dateLocale)}` : t('Ověřit stav', 'Check status')}
         </button>
       </div>
 
@@ -269,7 +292,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{t('Služby a stav', 'Services & status')}</div>
                 {step.relatedServices?.length ? step.relatedServices.map((svc) => {
-                  const status = statuses[svc]
+                  const status = statuses[svc] ?? 'unknown'
                   return (
                     <div key={svc} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                       <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{svc}</div>
@@ -338,6 +361,10 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
             📋 {process.regulation}
           </div>
         </div>
+
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 16px' }}>
+          {t('Diagram je autorský referenční popis procesu; nezobrazuje živé spuštění workflow.', 'This is an authored process reference; it does not show live workflow execution.')}
+        </p>
 
         <BpmnDiagram process={process} />
 

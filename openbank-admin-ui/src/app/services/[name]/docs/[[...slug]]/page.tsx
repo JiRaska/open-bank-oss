@@ -117,7 +117,7 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
             {source === 'live' ? <Wifi size={10} /> : <HardDrive size={10} />}
             {source === 'live'
               ? `live · v${index?.version ?? '?'}${index?.gitCommit && index.gitCommit !== 'unknown' ? ` · ${index.gitCommit.slice(0, 12)}` : ''}`
-              : t('snímek z buildu Admin UI', 'Admin UI build snapshot')}
+              : `${t('snímek z buildu Admin UI', 'Admin UI build snapshot')}${index?.version ? ` · v${index.version}` : ''}${index?.gitCommit && index.gitCommit !== 'unknown' ? ` · ${index.gitCommit.slice(0, 12)}` : ''}`}
           </div>
         )}
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>

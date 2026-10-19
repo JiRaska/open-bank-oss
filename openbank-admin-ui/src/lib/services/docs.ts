@@ -142,6 +142,9 @@ async function indexFromBundle(serviceDir: string, requestedLang: string): Promi
     return {
       service: serviceDir,
       source: 'bundle',
+      version: process.env.BUILD_VERSION ?? process.env.NEXT_PUBLIC_BUILD_VERSION,
+      gitCommit: process.env.BUILD_GIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_GIT_SHA,
+      buildTime: process.env.BUILD_DATE ?? process.env.NEXT_PUBLIC_BUILD_DATE,
       requestedLang,
       availableLanguages,
       items,

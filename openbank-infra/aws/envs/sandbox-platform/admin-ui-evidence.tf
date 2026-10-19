@@ -1,4 +1,9 @@
-# Gate Health publication is independent of image delivery. This role cannot push
+locals {
+  admin_ui_evidence_datasets  = ["gate-health", "readiness", "test-intelligence", "security-kpis"]
+  admin_ui_evidence_selectors = [for dataset in local.admin_ui_evidence_datasets : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${dataset}/current.json"]
+}
+
+# Admin UI evidence publication is independent of image delivery. This role cannot push
 # images, edit GitOps, or change other components' immutable test evidence.
 data "aws_iam_policy_document" "admin_ui_evidence_assume" {
   statement {
@@ -33,12 +38,9 @@ resource "aws_iam_role" "admin_ui_evidence" {
 
 data "aws_iam_policy_document" "admin_ui_evidence" {
   statement {
-    sid     = "GateHealthSnapshotsAndConditionalSelector"
-    actions = ["s3:GetObject", "s3:PutObject"]
-    resources = [
-      "${aws_s3_bucket.test_evidence.arn}/admin-ui/gate-health/current.json",
-      "${aws_s3_bucket.test_evidence.arn}/admin-ui/gate-health/snapshots/*",
-    ]
+    sid       = "AdminUiSnapshotsAndConditionalSelectors"
+    actions   = ["s3:GetObject", "s3:PutObject"]
+    resources = concat(local.admin_ui_evidence_selectors, [for dataset in local.admin_ui_evidence_datasets : "${aws_s3_bucket.test_evidence.arn}/admin-ui/${dataset}/snapshots/*"])
   }
   statement {
     # The publisher lists this exact key before reading the selector, so initial
@@ -49,7 +51,7 @@ data "aws_iam_policy_document" "admin_ui_evidence" {
     condition {
       test     = "StringEquals"
       variable = "s3:prefix"
-      values   = ["admin-ui/gate-health/current.json"]
+      values   = [for dataset in local.admin_ui_evidence_datasets : "admin-ui/${dataset}/current.json"]
     }
   }
 }

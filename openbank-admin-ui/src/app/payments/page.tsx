@@ -136,9 +136,7 @@ async function fetchPayments(url: string, type: PaymentSource, offset: number): 
     const params = new URLSearchParams({ limit: String(PAYMENT_PAGE_SIZE), offset: String(offset) })
     const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) {
-      const failure = res.status === 404
-        ? 'not_deployed'
-        : res.status === 502 ? 'unreachable' : await classifyBffFailure(res)
+      const failure = await classifyBffFailure(res)
       return { ok: false, failure }
     }
     const data = await res.json().catch(() => null)
