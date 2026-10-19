@@ -83,7 +83,8 @@ Cache reuse does not bypass source checks, signing or browser validation.
 
 After signing, delivery starts the exact image by registry digest on loopback and runs
 an authenticated Playwright probe against its actual standalone server. The probe checks
-unauthenticated rejection, source revision, protected page rendering and static assets.
+unauthenticated rejection, source revision, protected page rendering, static assets and
+a client-side theme interaction that proves hydration.
 There is no second Next.js build or mocked BFF in that probe. Only success allows the
 GitOps PR to be opened. The PR records the tested digest, and the workflow retains image
 metadata and browser proof. The existing immutable deployment tag continues to identify
@@ -93,6 +94,10 @@ the deployed environment still needs its separate authenticated read-only smoke 
 `build-push-admin-ui.sh --collect-only --no-sbom` prepares real image inputs for local
 validation without an image push or GitOps change. `test-admin-ui-image.sh` accepts a
 registry digest or local immutable image ID and creates only disposable local auth.
+
+If a run fails after pushing its immutable tag, start a new workflow dispatch rather
+than rerunning that run's build step. The existing tag includes the run ID, so a new
+dispatch has a new tag; retrying the same pushed tag is not an artifact-resume mechanism.
 
 ## Incremental module boundaries
 

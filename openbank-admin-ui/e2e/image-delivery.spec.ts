@@ -26,6 +26,11 @@ test('the deployable image enforces auth and serves its stamped source and UI', 
   await expect(page.getByRole('main')).toBeVisible()
   await expect(page).toHaveURL(/\/system\/health/)
   await expect(page.getByRole('heading').first()).toBeVisible()
+  // A client-side state change also proves hydration, not only server-rendered HTML.
+  const themeToggle = page.getByRole('button', { name: /Switch to the (dark|light) theme/ })
+  const wasPressed = await themeToggle.getAttribute('aria-pressed')
+  await themeToggle.click()
+  await expect(themeToggle).toHaveAttribute('aria-pressed', wasPressed === 'true' ? 'false' : 'true')
   expect(assets.length).toBeGreaterThan(0)
   expect(assets.every(status => status === 200 || status === 304)).toBe(true)
   expect(errors).toEqual([])

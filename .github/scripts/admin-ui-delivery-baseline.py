@@ -223,7 +223,7 @@ def analyze_fixture(fixture: dict[str, Any], *, target: int, max_attempts: int) 
         if not isinstance(jobs_entry, dict) or not isinstance(jobs_entry.get("jobs"), list):
             exclusions["unavailable_attempt_data"] += 1
             continue
-        row, status = attempt_row(run, {**attempt, "run_attempt": number}, jobs_entry["jobs"])
+        row, _status = attempt_row(run, {**attempt, "run_attempt": number}, jobs_entry["jobs"])
         if row is None:
             exclusions["skipped_or_not_started"] += 1
             continue
@@ -265,7 +265,6 @@ def fetch_live(repo: str, *, target: int, max_runs: int, max_attempts: int) -> d
         if len(batch) < MAX_PAGE_SIZE:
             break
     runs = runs[:max_runs]
-    fixture: dict[str, Any] = {"workflow_runs": runs, "attempt_jobs": {}, "attempts": {}}
     exclusions: dict[str, int] = {"skipped_or_not_started": 0, "unavailable_attempt_data": 0}
     rows: list[dict[str, Any]] = []
     scanned = 0
