@@ -25,8 +25,8 @@
         },
         "accrualStart": "2027-06-30",
         "accrualEnd": "2028-12-30",
-        "accrualFrequency": "6M",
-        "paymentFrequency": "6M",
+        "accrualFrequency": "SEMI_ANNUAL",
+        "paymentFrequency": "SEMI_ANNUAL",
         "stub": "NONE",
         "adjustPaymentDate": true,
         "adjustAccrualPeriod": true,
@@ -47,7 +47,7 @@
     "flows": [
       {
         "legIndex": 0,
-        "periodIndex": 0,
+        "periodIndex": -1,
         "kind": "NOTIONAL_EXCHANGE",
         "direction": "OUT",
         "currency": "EUR",
@@ -57,7 +57,7 @@
         "paymentDate": "2027-06-30",
         "notional": "4000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "4000000.00"
       },
       {
@@ -108,7 +108,7 @@
       {
         "legIndex": 0,
         "periodIndex": 2,
-        "kind": "NOTIONAL_EXCHANGE",
+        "kind": "PRINCIPAL",
         "direction": "IN",
         "currency": "EUR",
         "accrualStart": null,
@@ -117,7 +117,7 @@
         "paymentDate": "2028-12-29",
         "notional": "4000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "4000000.00"
       }
     ]

@@ -85,6 +85,8 @@ pitest {
         "com.openbank.treasury.domain.*",
         "com.openbank.treasury.application.usecase.*",
         "com.openbank.treasury.nostro.*",
+        // The golden-fixture replay (ADR-0344 D9) exercises the ledger shape end to end.
+        "com.openbank.treasury.parity.*",
     )
     // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
     // must not fail the run, so the threshold is 0 until the score is measured and sustained.

@@ -1017,21 +1017,23 @@ gates:
   # Kotlin replay test that compares the cash-flow ledger with these fixtures lands in a later
   # ADR-0344 slice; it then graduates to enforced (rules.yaml: treasury_parity_fixtures).
   - id: treasury-parity-fixtures
-    name: "treasury parity fixtures are well-formed, complete and oracle-true (ADR-0344 D9, advisory)"
+    name: "treasury parity fixtures are well-formed, complete, oracle-true and replayed (ADR-0344 D9, enforced)"
     group: data
-    mode: advisory
+    mode: enforced
     rationale: >-
       A parity fixture is evidence only while its expected flows come from an oracle independent
       of the code under test; re-deriving them on every run is what stops a fixture being edited
-      to match a defect. Advisory until the Kotlin replay test lands, since until then nothing
-      consumes the fixtures.
+      to match a defect. TreasuryParityReplayTest replays every fixture through the service's own
+      ledger path in the treasury build, and this gate fails if that replay is missing, disabled or
+      narrowed — so a fixture can neither drift from the oracle nor sit unreplayed.
     review_after: 2027-02-19
     min_subjects: 30   # 36 fixtures across all 16 product types today (2026-10-19)
     budget_seconds: 20   # measured 0.3 s locally (2026-10-19)
-    verified: "2026-10-19 — no Kotlin replay test consumes the fixtures yet (ADR-0344 phase 0 slice pending); 36 fixtures, 0 findings"
+    verified: "2026-10-19 — 36 fixtures, 0 findings; TreasuryParityReplayTest 36/36 replayed through ScheduleService"
     selftest_inputs:
       - ".github/scripts/check-treasury-parity-fixtures.py"
       - "openbank-treasury-service/src/test/parity-oracle/oracle.py"
+      - "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/TreasuryParityReplayTest.kt"
     selftest: |
       python3 .github/scripts/check-treasury-parity-fixtures.py --self-test
       python3 -m unittest discover -s openbank-treasury-service/src/test/parity-oracle -p 'test_*.py'

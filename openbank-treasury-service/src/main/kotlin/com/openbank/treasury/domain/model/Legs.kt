@@ -129,6 +129,8 @@ data class LegSpec(
     val amortisationStart: LocalDate? = null,
     /** `calendar` reference keys for payment dates; empty = the deal's calendars. */
     val paymentCalendars: List<String> = emptyList(),
+    /** Month-end anchors stay at month end when rolled (ISDA end-of-month rule). */
+    val endOfMonth: Boolean = false,
 ) {
     fun validate() {
         require(currency.length == CCY_LENGTH && currency.all { it in 'A'..'Z' }) { "leg currency must be ISO 4217" }
@@ -191,10 +193,13 @@ data class LegSpec(
      * SHA-256 of the leg's canonical text. An override survives regeneration only while the hash of
      * the leg that produced its flow is unchanged (ADR-0344 D4).
      */
-    fun specHash(): String = sha256(toString())
+    fun specHash(): String = sha256(if (endOfMonth) toString() else toString().removeSuffix(NO_EOM_SUFFIX) + ")")
 
     companion object {
         const val SCHEMA_VERSION = 1
+
+        /** A leg without the EOM rule hashes exactly as before the field existed (overrides survive). */
+        private const val NO_EOM_SUFFIX = ", endOfMonth=false)"
         const val MAX_TENOR_YEARS = 60L
         const val MAX_AMORTISATION_ROWS = 2000
         const val MAX_CALENDARS = 10

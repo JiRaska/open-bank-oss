@@ -60,7 +60,7 @@ CREATE TABLE deal_cash_flows (
     flow_id                UUID          NOT NULL UNIQUE,
     deal_id                UUID          NOT NULL REFERENCES deals (deal_id),
     schedule_version       INT           NOT NULL CHECK (schedule_version >= 1),
-    leg_index              INT           NOT NULL CHECK (leg_index >= 0),
+    leg_index              INT           NOT NULL CHECK (leg_index >= -1), -- -1 = a deal-level flow (FRA settlement, security purchase)
     period_index           INT           NOT NULL CHECK (period_index >= -1),
     kind                   VARCHAR(20)   NOT NULL
         CHECK (kind IN ('PRINCIPAL', 'INTEREST', 'FEE', 'NOTIONAL_EXCHANGE', 'PREMIUM')),

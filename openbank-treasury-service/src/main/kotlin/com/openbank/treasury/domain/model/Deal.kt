@@ -48,6 +48,9 @@ enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false,
     REVERSE_REPO(isAsset = true),
     ;
 
+    /** A cash movement or an FX outright settles on ONE date: its maturity may equal its value date. */
+    val settlesOnOneDay: Boolean get() = this == CASH || this == FX_FORWARD
+
     /** ADR-0344 D2: the products whose legs the client must send (no flat-field derivation). */
     val legsRequired: Boolean get() = !legacy
 }
@@ -208,7 +211,11 @@ data class Deal(
         if (product == ProductType.FX_SPOT) requireFxSpot() else require(fx == null) { "only FX_SPOT carries FX terms" }
         if (product != ProductType.FX_SPOT) {
             require(rate <= MAX_RATE) { "rate is an annual percentage and must not exceed $MAX_RATE" }
-            require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
+            if (product.settlesOnOneDay) {
+                require(!maturityDate.isBefore(valueDate)) { "maturityDate must not precede valueDate" }
+            } else {
+                require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
+            }
         }
         if (product.isCnbFacility) {
             val facility = if (product == ProductType.CNB_LOMBARD) "lombard facility" else "deposit facility"
@@ -257,11 +264,26 @@ data class Deal(
         require(principal.compareTo(notional) == 0) {
             "principal $principal disagrees with the legs' notional $notional"
         }
-        require(
-            valueDate == legs.minOf {
-                it.accrualStart
-            },
-        ) { "valueDate disagrees with the legs' earliest accrual start" }
+        if (product == ProductType.BOND) {
+            // A bond purchase settles on its value date somewhere within the coupon schedule
+            // (secondary market): the coupon leg keeps the security's own dates.
+            require(
+                !valueDate.isBefore(
+                    legs.minOf {
+                        it.accrualStart
+                    },
+                ) &&
+                    valueDate.isBefore(legs.maxOf { it.accrualEnd }),
+            ) {
+                "a bond's valueDate lies within its coupon schedule"
+            }
+        } else {
+            require(
+                valueDate == legs.minOf {
+                    it.accrualStart
+                },
+            ) { "valueDate disagrees with the legs' earliest accrual start" }
+        }
         require(
             maturityDate == legs.maxOf {
                 it.accrualEnd

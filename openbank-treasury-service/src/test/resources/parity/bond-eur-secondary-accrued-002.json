@@ -25,8 +25,8 @@
         },
         "accrualStart": "2025-06-15",
         "accrualEnd": "2029-06-15",
-        "accrualFrequency": "12M",
-        "paymentFrequency": "12M",
+        "accrualFrequency": "ANNUAL",
+        "paymentFrequency": "ANNUAL",
         "stub": "NONE",
         "adjustPaymentDate": true,
         "adjustAccrualPeriod": false,
@@ -62,7 +62,7 @@
         "paymentDate": "2026-11-20",
         "notional": "2000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2025000.00"
       },
       {
@@ -77,7 +77,7 @@
         "paymentDate": "2026-11-20",
         "notional": "2000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "28136.99"
       },
       {
@@ -128,7 +128,7 @@
       {
         "legIndex": 0,
         "periodIndex": 3,
-        "kind": "NOTIONAL_EXCHANGE",
+        "kind": "PRINCIPAL",
         "direction": "IN",
         "currency": "EUR",
         "accrualStart": null,
@@ -137,7 +137,7 @@
         "paymentDate": "2029-06-15",
         "notional": "2000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2000000.00"
       }
     ]

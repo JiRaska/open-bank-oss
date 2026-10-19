@@ -32,6 +32,9 @@ def ref(*codes):
     return {"indices": {c: INDICES[c] for c in codes}}
 
 
+WIRE_FREQ = {"TERM": "ONCE", "1M": "MONTHLY", "3M": "QUARTERLY", "6M": "SEMI_ANNUAL", "12M": "ANNUAL"}
+
+
 def leg(pay_receive, ccy, notional, start, end, freq, day_count, rate, *, stub="NONE",
         adjust_payment=True, adjust_accrual=False, lag=0, initial=False, final=False,
         amortisation="BULLET", eom=False):
@@ -39,7 +42,7 @@ def leg(pay_receive, ccy, notional, start, end, freq, day_count, rate, *, stub="
         "payReceive": pay_receive, "currency": ccy, "notional": notional,
         "amortisation": {"type": amortisation, "schedule": []},
         "accrualStart": start, "accrualEnd": end,
-        "accrualFrequency": freq, "paymentFrequency": freq, "stub": stub,
+        "accrualFrequency": WIRE_FREQ[freq], "paymentFrequency": WIRE_FREQ[freq], "stub": stub,
         "adjustPaymentDate": adjust_payment, "adjustAccrualPeriod": adjust_accrual,
         "paymentLagBusinessDays": lag, "dayCount": day_count, "rate": rate,
         "initialNotionalExchange": initial, "finalNotionalExchange": final,
@@ -56,7 +59,7 @@ def fixed(r):
 def floating(index, spread="0", *, cap=None, floor=None, applies="INDEX", until_first=None, lag=2,
              reset="6M"):
     return {"type": "FLOATING", "index": index, "spread": spread, "fixingLagBusinessDays": lag,
-            "resetFrequency": reset, "cap": cap, "floor": floor, "capFloorAppliesTo": applies,
+            "resetFrequency": WIRE_FREQ[reset], "cap": cap, "floor": floor, "capFloorAppliesTo": applies,
             "rateUntilFirstFixing": until_first}
 
 
@@ -302,6 +305,9 @@ def build():
     fixtures = []
     for fid, note, dl, fixings, refdata in CASES:
         dl = dl if dl is not None else REPOS[fid]
+        legs = oracle.derived_legs(dl)
+        if legs is not None and dl["product"] != "FX_SPOT":
+            dl = {**dl, "legs": legs}
         fx_ = {"id": fid, "product": dl["product"], "source": "independent-oracle", "sourceNote": note,
                "deal": dl, "fixings": fixings, "referenceData": refdata}
         fx_["expected"] = oracle.compute(fx_)

@@ -25,8 +25,8 @@
         },
         "accrualStart": "2026-11-16",
         "accrualEnd": "2030-03-15",
-        "accrualFrequency": "12M",
-        "paymentFrequency": "12M",
+        "accrualFrequency": "ANNUAL",
+        "paymentFrequency": "ANNUAL",
         "stub": "SHORT_INITIAL",
         "adjustPaymentDate": true,
         "adjustAccrualPeriod": false,
@@ -62,7 +62,7 @@
         "paymentDate": "2026-11-16",
         "notional": "10000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "9985000.00"
       },
       {
@@ -128,7 +128,7 @@
       {
         "legIndex": 0,
         "periodIndex": 3,
-        "kind": "NOTIONAL_EXCHANGE",
+        "kind": "PRINCIPAL",
         "direction": "IN",
         "currency": "CZK",
         "accrualStart": null,
@@ -137,7 +137,7 @@
         "paymentDate": "2030-03-15",
         "notional": "10000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "10000000.00"
       }
     ]

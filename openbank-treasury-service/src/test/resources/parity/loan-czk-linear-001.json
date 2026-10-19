@@ -25,8 +25,8 @@
         },
         "accrualStart": "2026-11-05",
         "accrualEnd": "2027-11-05",
-        "accrualFrequency": "3M",
-        "paymentFrequency": "3M",
+        "accrualFrequency": "QUARTERLY",
+        "paymentFrequency": "QUARTERLY",
         "stub": "NONE",
         "adjustPaymentDate": true,
         "adjustAccrualPeriod": true,
@@ -47,7 +47,7 @@
     "flows": [
       {
         "legIndex": 0,
-        "periodIndex": 0,
+        "periodIndex": -1,
         "kind": "NOTIONAL_EXCHANGE",
         "direction": "OUT",
         "currency": "CZK",
@@ -57,7 +57,7 @@
         "paymentDate": "2026-11-05",
         "notional": "10000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "10000000.00"
       },
       {
@@ -87,7 +87,7 @@
         "paymentDate": "2027-02-05",
         "notional": "10000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2500000.00"
       },
       {
@@ -117,7 +117,7 @@
         "paymentDate": "2027-05-05",
         "notional": "7500000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2500000.00"
       },
       {
@@ -147,7 +147,7 @@
         "paymentDate": "2027-08-05",
         "notional": "5000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2500000.00"
       },
       {
@@ -177,7 +177,7 @@
         "paymentDate": "2027-11-05",
         "notional": "2500000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2500000.00"
       }
     ]

@@ -8,6 +8,7 @@ import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.cashflow.CashFlowProjector
+import com.openbank.libs.finance.cashflow.FixingSource
 import com.openbank.libs.finance.cashflow.ProjectedCashFlow
 import com.openbank.libs.finance.leg.AmortisationSpec
 import com.openbank.libs.finance.leg.CapFloorAppliesTo
@@ -48,6 +49,8 @@ data class ScheduleContext(
     val roll: DateRoll,
     val rollDirection: RollDirection,
     val newId: () -> UUID,
+    /** Observed index fixings known at generation, in annual PERCENT like every treasury rate; none = every period unfixed. */
+    val fixings: FixingSource = FixingSource.NONE,
 )
 
 /** A leg the shared engine cannot express. Mapped to 422 SCHEDULE_ENGINE_UNAVAILABLE. */
@@ -61,7 +64,7 @@ class ScheduleEngineUnavailableException(message: String, cause: Throwable? = nu
  * - rates are annual percentages here and decimal fractions in the engine (÷100 in, ×100 out);
  * - amounts become non-negative with a direction from the bank's side;
  * - a floating period without an observed fixing (no fixing source and no forward curve at
- *   generation) is still a ROW — PROJECTED with no amount and its fixing date — because the engine
+ *   generation) is still a ROW — state PROJECTED, rate source MISSING, no amount, its fixing date — because the engine
  *   leaves an unfixed period out of its projection and a ledger must not lose a flow;
  * - fixed and exchange flows are FIXED, a contractual rate until first fixing is FIXED too.
  *
@@ -85,7 +88,8 @@ object ScheduleAdapter {
         } catch (e: IllegalArgumentException) {
             throw ScheduleEngineUnavailableException("leg $index cannot be scheduled: ${e.message}", e)
         }
-        val projection = CashFlowProjector.project(schedule)
+        val observed = FixingSource { index, date -> ctx.fixings.observed(index, date)?.let(::pct) }
+        val projection = CashFlowProjector.project(schedule, observed)
         val hash = leg.specHash()
         val projected = projection.flows.map { row(it, index, leg, hash, ctx) }
         val projectedPeriods = projection.flows.filter {
@@ -110,7 +114,7 @@ object ScheduleAdapter {
                     paymentDate = p.paymentDate,
                     notional = p.notional,
                     rate = null,
-                    rateSource = RateSource.PROJECTED,
+                    rateSource = RateSource.MISSING,
                     amount = null,
                     state = CashFlowState.PROJECTED,
                     legHash = hash,
@@ -197,6 +201,7 @@ object ScheduleAdapter {
                 accrualFrequency = frequency(leg.accrualFrequency),
                 paymentFrequency = frequency(leg.paymentFrequency),
                 stub = stub(leg.stub, ctx.rollDirection),
+                endOfMonth = leg.endOfMonth,
             ),
             dates = DateRules(
                 calendar = calendar,
@@ -224,7 +229,13 @@ object ScheduleAdapter {
                         lagBusinessDays = r.fixingLagBusinessDays ?: ctx.fixingLag(index) ?: 0,
                         calendar = ctx.fixingCalendar(index) ?: calendar,
                     ),
-                    resetFrequency = frequency(r.resetFrequency ?: leg.accrualFrequency),
+                    // A single-period leg (an FRA, a bullet deposit) fixes once whatever tenor the
+                    // index resets on: its reset IS the period.
+                    resetFrequency = if (leg.accrualFrequency == Frequency.ONCE) {
+                        FinanceFrequency.Zero
+                    } else {
+                        frequency(r.resetFrequency ?: leg.accrualFrequency)
+                    },
                     bounds = RateBounds(
                         cap = r.cap?.let(::pct),
                         floor = r.floor?.let(::pct),

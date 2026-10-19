@@ -208,9 +208,16 @@ def dec(text) -> Decimal:
 # --------------------------------------------------------------------------------------------
 
 _FREQ_MONTHS = {"1M": 1, "3M": 3, "6M": 6, "12M": 12}
+# The service's LegSpec frequency names (the fixture wire form) -> the oracle's tenor tokens.
+_WIRE_FREQ = {"ONCE": "TERM", "MONTHLY": "1M", "QUARTERLY": "3M", "SEMI_ANNUAL": "6M", "ANNUAL": "12M"}
+
+
+def freq_of(text: str) -> str:
+    return _WIRE_FREQ.get(text, text)
 
 
 def periods_per_year(freq: str) -> int:
+    freq = freq_of(freq)
     if freq not in _FREQ_MONTHS:
         raise OracleError(f"no periods-per-year for frequency {freq}")
     return 12 // _FREQ_MONTHS[freq]
@@ -223,6 +230,9 @@ def unadjusted_schedule(start, end, freq, stub, eom=False):
     roll BACKWARD from end. A LONG stub merges the would-be short stub into its neighbour. NONE
     refuses a schedule that does not divide evenly.
     """
+    freq = freq_of(freq)
+    if freq == "TERM" and end == start:
+        return [start, end]  # an exchange-only leg settling on one day
     if end <= start:
         raise OracleError("schedule end must be after start")
     if freq == "TERM":
@@ -296,9 +306,9 @@ def _clamp(x, floor, cap):
 
 def leg_periods(deal, leg):
     """Period boundaries for one leg: (unadjusted, accrual, payment) date lists."""
-    cals = leg.get("calendars") or deal.get("calendars") or ["WEEKEND_ONLY"]
-    conv = leg.get("businessDayConvention") or deal.get("businessDayConvention", "MODIFIED_FOLLOWING")
-    if leg.get("accrualFrequency", "TERM") != leg.get("paymentFrequency", leg.get("accrualFrequency", "TERM")):
+    cals = leg.get("paymentCalendars") or deal.get("calendars") or ["WEEKEND_ONLY"]
+    conv = deal.get("businessDayConvention", "MODIFIED_FOLLOWING")
+    if freq_of(leg.get("accrualFrequency", "TERM")) != freq_of(leg.get("paymentFrequency", leg.get("accrualFrequency", "TERM"))):
         raise OracleError("accrualFrequency != paymentFrequency (compounding) is out of scope")
     unadj = unadjusted_schedule(d(leg["accrualStart"]), d(leg["accrualEnd"]),
                                 leg.get("accrualFrequency", "TERM"), leg.get("stub", "NONE"),
@@ -323,6 +333,8 @@ def _period_rates(deal, leg, accrual_unadj, conv, cals, fixings, refdata):
     """Per-period (rate_percent|None, fixingDate|None, rateSource)."""
     spec = leg["rate"]
     n = len(accrual_unadj) - 1
+    if spec["type"] == "NONE":
+        return [(None, None, None)] * n
     if spec["type"] == "FIXED":
         r = dec(spec["rate"])
         return [(r, None, "FIXED")] * n
@@ -339,13 +351,15 @@ def _period_rates(deal, leg, accrual_unadj, conv, cals, fixings, refdata):
     until_first = spec.get("rateUntilFirstFixing")
     observed = _fixing_lookup(fixings)
     out = []
-    seen_observed = False
     for i in range(n):
         start = adjust(accrual_unadj[i], conv, cals)
         fdate = add_business_days(start, -lag, fix_cals)
         raw = observed.get((index, fdate.isoformat()))
-        if raw is not None:
-            seen_observed = True
+        if i == 0 and until_first is not None:
+            # The rate until the first fixing is the contractually agreed first-period rate, known
+            # at trade: it applies to period 0 even when an index value is published for its date.
+            out.append((dec(until_first), fdate, "RATE_UNTIL_FIRST_FIXING"))
+        elif raw is not None:
             if applies == "INDEX":
                 rate = _clamp(raw, floor, cap) + spread
             elif applies == "INDEX_PLUS_SPREAD":
@@ -353,8 +367,6 @@ def _period_rates(deal, leg, accrual_unadj, conv, cals, fixings, refdata):
             else:
                 raise OracleError(f"unknown capFloorAppliesTo {applies}")
             out.append((rate, fdate, "OBSERVED"))
-        elif until_first is not None and not seen_observed:
-            out.append((dec(until_first), fdate, "RATE_UNTIL_FIRST_FIXING"))
         else:
             out.append((None, fdate, "MISSING"))
     return out
@@ -371,8 +383,8 @@ def leg_flows(deal, leg_index, leg, fixings, refdata):
     flows = []
     if leg.get("initialNotionalExchange", False):
         start_pay = adjust(unadj[0], conv, cals)
-        flows.append(_flow(leg_index, 0, "NOTIONAL_EXCHANGE", _flip(direction), ccy, start_pay,
-                           notional, notional))
+        flows.append(_flow(leg_index, -1, "NOTIONAL_EXCHANGE", _flip(direction), ccy, start_pay,
+                           notional, notional, rate_source="FIXED"))
     outstanding = notional
     annuity = None
     if amort == "ANNUITY":
@@ -385,8 +397,11 @@ def leg_flows(deal, leg_index, leg, fixings, refdata):
     elif amort != "BULLET":
         raise OracleError(f"amortisation {amort} is out of the oracle's scope")
     dc = leg["dayCount"]
+    no_rate = leg["rate"]["type"] == "NONE"
     for i in range(n):
         rate, fdate, source = rates[i]
+        if no_rate:
+            continue
         yf = year_fraction(accrual[i], accrual[i + 1], dc)
         interest = None if rate is None else money(outstanding * rate / HUNDRED * yf)
         flows.append(_flow(leg_index, i, "INTEREST", direction, ccy, payment[i], outstanding,
@@ -399,11 +414,14 @@ def leg_flows(deal, leg_index, leg, fixings, refdata):
         else:
             principal = outstanding if last else annuity - interest
         flows.append(_flow(leg_index, i, "PRINCIPAL", direction, ccy, payment[i], outstanding,
-                           principal))
+                           principal, rate_source="FIXED"))
         outstanding -= principal
     if amort == "BULLET" and leg.get("finalNotionalExchange", False):
-        flows.append(_flow(leg_index, n - 1, "NOTIONAL_EXCHANGE", direction, ccy, payment[-1],
-                           notional, notional))
+        # An interest-bearing leg repays PRINCIPAL; an exchange-only leg (FX, cash, a discount
+        # security's consideration and redemption) moves its amount as a NOTIONAL_EXCHANGE.
+        kind = "NOTIONAL_EXCHANGE" if no_rate else "PRINCIPAL"
+        flows.append(_flow(leg_index, n - 1, kind, direction, ccy, payment[-1],
+                           notional, notional, rate_source="FIXED"))
     return flows
 
 
@@ -418,11 +436,26 @@ def legs_flows(deal, fixings, refdata):
 # Products that are not a plain sum of legs
 # --------------------------------------------------------------------------------------------
 
+def exchange_leg(pay_receive, ccy, amount, day):
+    """An exchange-only leg (no rate) paying or receiving [amount] once, on [day] (rolled)."""
+    return {
+        "payReceive": pay_receive, "currency": ccy, "notional": fmt_amount(amount),
+        "amortisation": {"type": "BULLET", "schedule": []},
+        "accrualStart": day.isoformat(), "accrualEnd": day.isoformat(),
+        "accrualFrequency": "ONCE", "paymentFrequency": "ONCE", "stub": "NONE",
+        "adjustPaymentDate": True, "adjustAccrualPeriod": False, "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360", "rate": {"type": "NONE"},
+        "initialNotionalExchange": False, "finalNotionalExchange": True,
+    }
+
+
+def _side(direction_in: bool) -> str:
+    return "RECEIVE" if direction_in else "PAY"
+
+
 def _cash(deal):
-    cals = deal["calendars"]
-    pay = adjust(d(deal["valueDate"]), deal.get("businessDayConvention", "FOLLOWING"), cals)
-    amt = dec(deal["amount"])
-    return {"flows": [_flow(0, 0, "PRINCIPAL", deal["direction"], deal["currency"], pay, amt, amt)]}
+    return {"legs": [exchange_leg(_side(deal["direction"] == "IN"), deal["currency"], dec(deal["amount"]),
+                                  d(deal["valueDate"]))]}
 
 
 def spot_date(trade_date, cals, lag=2):
@@ -437,15 +470,11 @@ def fx_forward_rate(spot, base_rate, quote_rate, days, base_basis=360, quote_bas
     return (dec(spot) * num / den).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
-def _fx_pair_flows(period, base, quote, side, base_amount, rate, value_date):
-    base_dir = "IN" if side == "BUY" else "OUT"
-    quote_amount = money(base_amount * rate)
-    return [
-        _flow(0, period, "NOTIONAL_EXCHANGE", base_dir, base, value_date, base_amount, base_amount,
-              rate=rate, rate_source="FIXED"),
-        _flow(1, period, "NOTIONAL_EXCHANGE", _flip(base_dir), quote, value_date, quote_amount,
-              quote_amount, rate=rate, rate_source="FIXED"),
-    ]
+def _fx_pair_legs(base, quote, side, base_amount, rate, value_date):
+    """The base currency is received when bought, the quote currency paid; both on [value_date]."""
+    buy = side == "BUY"
+    return [exchange_leg(_side(buy), base, base_amount, value_date),
+            exchange_leg(_side(not buy), quote, money(base_amount * rate), value_date)]
 
 
 def _fx(deal):
@@ -457,19 +486,18 @@ def _fx(deal):
     spot = dec(deal["spotRate"])
     product = deal["product"]
     if product == "FX_SPOT":
-        return {"spotDate": sd.isoformat(),
-                "flows": _fx_pair_flows(0, base, quote, deal["side"], amount, spot, sd)}
+        return {"spotDate": sd.isoformat(), "legs": _fx_pair_legs(base, quote, deal["side"], amount, spot, sd)}
     far = adjust(add_months(sd, _FREQ_MONTHS[deal["tenor"]], True), "MODIFIED_FOLLOWING", cals)
     days = (far - sd).days
     fwd = fx_forward_rate(spot, deal["baseRate"], deal["quoteRate"], days)
     out = {"spotDate": sd.isoformat(), "farDate": far.isoformat(), "days": days,
            "forwardRate": fmt_rate(fwd)}
     if product == "FX_FORWARD":
-        out["flows"] = _fx_pair_flows(0, base, quote, deal["side"], amount, fwd, far)
+        out["legs"] = _fx_pair_legs(base, quote, deal["side"], amount, fwd, far)
         return out
     far_side = "SELL" if deal["side"] == "BUY" else "BUY"
-    out["flows"] = (_fx_pair_flows(0, base, quote, deal["side"], amount, spot, sd)
-                    + _fx_pair_flows(1, base, quote, far_side, amount, fwd, far))
+    out["legs"] = (_fx_pair_legs(base, quote, deal["side"], amount, spot, sd)
+                   + _fx_pair_legs(base, quote, far_side, amount, fwd, far))
     return out
 
 
@@ -487,16 +515,26 @@ def _discount_security(deal):
     else:
         factor = ONE / (ONE + y * days / basis)  # simple money-market yield
     price = money(nominal * factor)
-    side_in = deal.get("side", "BUY") == "BUY"
+    buy = deal.get("side", "BUY") == "BUY"
     ccy = deal["currency"]
     return {
         "days": int(days),
         "pricePer100": fmt_rate((HUNDRED * factor).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)),
-        "flows": [
-            _flow(0, 0, "PRINCIPAL", "OUT" if side_in else "IN", ccy, value, nominal, price),
-            _flow(0, 0, "PRINCIPAL", "IN" if side_in else "OUT", ccy, maturity, nominal, nominal),
-        ],
+        # The consideration on the value date, the face at (unadjusted) maturity, rolled on payment.
+        "legs": [exchange_leg(_side(not buy), ccy, price, value),
+                 exchange_leg(_side(buy), ccy, nominal, d(deal["maturityDate"]))],
     }
+
+
+# Products whose deal ticket the oracle derives into exchange-only legs from the deal terms.
+DERIVED = {"CASH": _cash, "FX_SPOT": _fx, "FX_FORWARD": _fx, "FX_SWAP": _fx,
+           "TREASURY_BILL": _discount_security, "BILL_OF_EXCHANGE": _discount_security}
+
+
+def derived_legs(deal):
+    """The legs a deal ticket sends for a DERIVED product (None for a leg-described product)."""
+    fn = DERIVED.get(deal["product"])
+    return fn(deal)["legs"] if fn else None
 
 
 def _bond(deal, fixings, refdata):
@@ -512,9 +550,9 @@ def _bond(deal, fixings, refdata):
             yf = year_fraction(accrual[i], value, leg["dayCount"])
             accrued = money(nominal * dec(leg["rate"]["rate"]) / HUNDRED * yf)
     ccy = leg["currency"]
-    settle = [_flow(None, None, "PRINCIPAL", "OUT", ccy, value, nominal, clean)]
+    settle = [_flow(None, None, "PRINCIPAL", "OUT", ccy, value, nominal, clean, rate_source="FIXED")]
     if accrued:
-        settle.append(_flow(None, None, "INTEREST", "OUT", ccy, value, nominal, accrued))
+        settle.append(_flow(None, None, "INTEREST", "OUT", ccy, value, nominal, accrued, rate_source="FIXED"))
     return {"accruedInterest": fmt_amount(accrued), "flows": settle + flows}
 
 
@@ -572,12 +610,16 @@ def compute(fixture) -> dict:
     product = deal["product"]
     if product not in PRODUCTS:
         raise OracleError(f"unknown product {product}")
-    if product == "CASH":
-        return _cash(deal)
-    if product in ("FX_SPOT", "FX_FORWARD", "FX_SWAP"):
-        return _fx(deal)
-    if product in ("TREASURY_BILL", "BILL_OF_EXCHANGE"):
-        return _discount_security(deal)
+    if product in DERIVED:
+        out = DERIVED[product](deal)
+        legs = out.pop("legs")
+        # FX_SPOT is a legacy product: the service derives its legs from the flat fields, so the
+        # fixture carries none. Every other DERIVED product's ticket sends the legs; they must be
+        # exactly the oracle's derivation, so a hand edit of a leg cannot pass.
+        if product != "FX_SPOT" and deal.get("legs") != legs:
+            raise OracleError(f"{product} deal legs disagree with the oracle's derivation from the deal terms")
+        out["flows"] = legs_flows({**deal, "legs": legs}, fixings, refdata)
+        return out
     if product == "BOND":
         return _bond(deal, fixings, refdata)
     if product == "FRA":

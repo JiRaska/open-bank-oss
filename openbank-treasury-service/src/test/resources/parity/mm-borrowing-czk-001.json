@@ -25,8 +25,8 @@
         },
         "accrualStart": "2026-11-04",
         "accrualEnd": "2027-02-04",
-        "accrualFrequency": "TERM",
-        "paymentFrequency": "TERM",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
         "stub": "NONE",
         "adjustPaymentDate": true,
         "adjustAccrualPeriod": true,
@@ -47,7 +47,7 @@
     "flows": [
       {
         "legIndex": 0,
-        "periodIndex": 0,
+        "periodIndex": -1,
         "kind": "NOTIONAL_EXCHANGE",
         "direction": "IN",
         "currency": "CZK",
@@ -57,7 +57,7 @@
         "paymentDate": "2026-11-04",
         "notional": "30000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "30000000.00"
       },
       {
@@ -78,7 +78,7 @@
       {
         "legIndex": 0,
         "periodIndex": 0,
-        "kind": "NOTIONAL_EXCHANGE",
+        "kind": "PRINCIPAL",
         "direction": "OUT",
         "currency": "CZK",
         "accrualStart": null,
@@ -87,7 +87,7 @@
         "paymentDate": "2027-02-04",
         "notional": "30000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "30000000.00"
       }
     ]

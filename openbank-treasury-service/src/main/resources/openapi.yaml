@@ -1819,6 +1819,7 @@ components:
         finalNotionalExchange: { type: boolean, default: false }
         amortisationStart: { type: [string, 'null'], format: date }
         paymentCalendars: { type: array, items: { type: string }, description: '`calendar` keys; empty = the deal calendars' }
+        endOfMonth: { type: boolean, default: false, description: 'ISDA end-of-month rule: a month-end anchor rolls to month ends' }
     RegulatoryTerms:
       type: object
       properties:

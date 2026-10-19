@@ -15,7 +15,11 @@ WHAT IT CHECKS
      how 2.675 becomes 2.67), `tolerance.amount` present;
   2. completeness: every product type in the contract's list has at least one fixture;
   3. uniqueness: no two fixtures share an `id`, and the file name is `<id>.json`;
-  4. truth: `expected` == oracle.compute(fixture) for `independent-oracle` fixtures.
+  4. truth: `expected` == oracle.compute(fixture) for `independent-oracle` fixtures;
+  5. replay: the Kotlin `TreasuryParityReplayTest` exists, is not @Disabled, replays the whole
+     `/parity` resource directory (so a fixture can never sit there unreplayed) and its
+     MIN_FIXTURES floor does not exceed the fixture count. The test itself runs in the treasury
+     service build on every PR that touches the service, fixtures included.
 
 Exit codes: 0 clean, 1 findings, 2 cannot run (no fixture directory / oracle import failed).
 
@@ -36,6 +40,7 @@ import tempfile
 
 FIXTURE_DIR = "openbank-treasury-service/src/test/resources/parity"
 ORACLE = "openbank-treasury-service/src/test/parity-oracle/oracle.py"
+REPLAY = "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity/TreasuryParityReplayTest.kt"
 SOURCES = {"independent-oracle", "hand-computed", "published-example"}
 REQUIRED = ("id", "product", "source", "sourceNote", "deal", "expected", "tolerance")
 FLOW_KEYS = ("legIndex", "periodIndex", "kind", "paymentDate", "notional", "rate", "amount")
@@ -146,7 +151,26 @@ def run(root: pathlib.Path):
             covered.add(fx["product"])
     for p in sorted(products - covered):
         findings.append(f"product {p} has no parity fixture (ADR-0344 D9: at least one per product type)")
+    findings.extend(check_replay(root, len(files)))
     return (1 if findings else 0), findings, len(files)
+
+
+def check_replay(root: pathlib.Path, fixtures: int):
+    path = root / REPLAY
+    if not path.exists():
+        return [f"{REPLAY} is missing: no fixture is replayed against the service (ADR-0344 D9)"]
+    text = path.read_text(encoding="utf-8")
+    out = []
+    if re.search(r"@Disabled\b", text):
+        out.append(f"{REPLAY} is @Disabled: the fixtures are not replayed")
+    if 'getResource("/parity")' not in text:
+        out.append(f"{REPLAY} does not replay the whole /parity resource directory")
+    m = re.search(r"MIN_FIXTURES\s*=\s*(\d+)", text)
+    if not m:
+        out.append(f"{REPLAY} declares no MIN_FIXTURES floor")
+    elif int(m.group(1)) > fixtures:
+        out.append(f"{REPLAY} expects at least {m.group(1)} fixtures, the directory has {fixtures}")
+    return out
 
 
 def self_test(root: pathlib.Path) -> int:
@@ -156,6 +180,9 @@ def self_test(root: pathlib.Path) -> int:
         t = pathlib.Path(tmp)
         (t / ORACLE).parent.mkdir(parents=True)
         (t / ORACLE).write_text((root / ORACLE).read_text(encoding="utf-8"), encoding="utf-8")
+        (t / REPLAY).parent.mkdir(parents=True)
+        replay_text = (root / REPLAY).read_text(encoding="utf-8")
+        (t / REPLAY).write_text(replay_text, encoding="utf-8")
         fdir = t / FIXTURE_DIR
         fdir.mkdir(parents=True)
         originals = {p.name: p.read_text(encoding="utf-8") for p in real.glob("*.json")}
@@ -216,6 +243,16 @@ def self_test(root: pathlib.Path) -> int:
                lambda fx: (fx.__setitem__("source", "hand-computed"), fx["expected"]["flows"][1].__setitem__("amount", "140972.23")))
         rc, f, _ = run(t)
         cases.append(("known-negative: a hand-computed fixture is not re-derived by the oracle", rc == 0))
+
+        reset()
+        (t / REPLAY).unlink()
+        rc, f, _ = run(t)
+        cases.append(("known-positive: a missing replay test fails", rc == 1 and any("is missing" in x for x in f)))
+
+        (t / REPLAY).write_text(replay_text.replace("class TreasuryParityReplayTest", "@Disabled\nclass TreasuryParityReplayTest"), encoding="utf-8")
+        rc, f, _ = run(t)
+        cases.append(("known-positive: a @Disabled replay test fails", rc == 1 and any("@Disabled" in x for x in f)))
+        (t / REPLAY).write_text(replay_text, encoding="utf-8")
 
         for p in fdir.glob("*.json"):
             p.unlink()

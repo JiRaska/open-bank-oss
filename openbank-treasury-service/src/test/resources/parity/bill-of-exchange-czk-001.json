@@ -19,7 +19,55 @@
       "CERTIS"
     ],
     "businessDayConvention": "FOLLOWING",
-    "side": "BUY"
+    "side": "BUY",
+    "legs": [
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "2936897.49",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-02",
+        "accrualEnd": "2026-11-02",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "NONE"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      },
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "3000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2027-05-03",
+        "accrualEnd": "2027-05-03",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "NONE"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      }
+    ]
   },
   "fixings": [],
   "referenceData": {},
@@ -30,22 +78,22 @@
       {
         "legIndex": 0,
         "periodIndex": 0,
-        "kind": "PRINCIPAL",
+        "kind": "NOTIONAL_EXCHANGE",
         "direction": "OUT",
         "currency": "CZK",
         "accrualStart": null,
         "accrualEnd": null,
         "fixingDate": null,
         "paymentDate": "2026-11-02",
-        "notional": "3000000.00",
+        "notional": "2936897.49",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "2936897.49"
       },
       {
-        "legIndex": 0,
+        "legIndex": 1,
         "periodIndex": 0,
-        "kind": "PRINCIPAL",
+        "kind": "NOTIONAL_EXCHANGE",
         "direction": "IN",
         "currency": "CZK",
         "accrualStart": null,
@@ -54,7 +102,7 @@
         "paymentDate": "2027-05-03",
         "notional": "3000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "3000000.00"
       }
     ]

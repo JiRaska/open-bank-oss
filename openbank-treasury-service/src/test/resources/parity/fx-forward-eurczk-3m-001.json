@@ -18,7 +18,55 @@
     ],
     "tenor": "3M",
     "baseRate": "2.0500",
-    "quoteRate": "3.5000"
+    "quoteRate": "3.5000",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "EUR",
+        "notional": "2000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2027-02-04",
+        "accrualEnd": "2027-02-04",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "NONE"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      },
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "48949778.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2027-02-04",
+        "accrualEnd": "2027-02-04",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "NONE"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      }
+    ]
   },
   "fixings": [],
   "referenceData": {},
@@ -39,7 +87,7 @@
         "fixingDate": null,
         "paymentDate": "2027-02-04",
         "notional": "2000000.00",
-        "rate": "24.474889",
+        "rate": null,
         "rateSource": "FIXED",
         "amount": "2000000.00"
       },
@@ -54,7 +102,7 @@
         "fixingDate": null,
         "paymentDate": "2027-02-04",
         "notional": "48949778.00",
-        "rate": "24.474889",
+        "rate": null,
         "rateSource": "FIXED",
         "amount": "48949778.00"
       }

@@ -10,6 +10,7 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.math.exp
+import com.openbank.libs.domain.calendar.DayCount as KernelDayCount
 
 /** One pillar as the risk engine serves it: a continuously-compounded zero rate (decimal), ACT/365F. */
 data class CurvePillar(val date: LocalDate, val zeroRate: BigDecimal)
@@ -81,8 +82,6 @@ object QuotePricer {
     val QUOTED_PRODUCTS: Set<ProductType> = setOf(ProductType.MM_PLACEMENT, ProductType.MM_BORROWING)
 
     private val CURVE_BY_CURRENCY = mapOf(Deal.CZK to "CZEONIA", Deal.EUR to "ESTR")
-    private const val DAYS_ACT360 = 360.0
-    private const val DAYS_ACT365 = 365.0
     private const val PERCENT = 100.0
     private val BP_TO_PERCENT = BigDecimal("0.01")
 
@@ -97,9 +96,11 @@ object QuotePricer {
     fun midRate(curve: MarketCurve, asOf: LocalDate, tenorDays: Int): BigDecimal {
         require(tenorDays >= MIN_TENOR_DAYS) { "tenorDays must be at least $MIN_TENOR_DAYS" }
         require(curve.pillars.isNotEmpty()) { "curve ${curve.index} has no pillars" }
-        val z = zeroAt(curve.pillars.sortedBy { it.date }, asOf.plusDays(tenorDays.toLong()))
-        val df = exp(-z * tenorDays / DAYS_ACT365)
-        val simple = (1.0 / df - 1.0) * DAYS_ACT360 / tenorDays * PERCENT
+        val end = asOf.plusDays(tenorDays.toLong())
+        val z = zeroAt(curve.pillars.sortedBy { it.date }, end)
+        // Year fractions from the kernel day counts (ADR-0344 D1), never a local 360/365.
+        val df = exp(-z * KernelDayCount.ACT_365_FIXED.yearFraction(asOf, end).toDouble())
+        val simple = (1.0 / df - 1.0) / KernelDayCount.ACT_360.yearFraction(asOf, end).toDouble() * PERCENT
         return RoundingPolicy.RATE_PERCENT.round(BigDecimal.valueOf(simple))
     }
 
@@ -158,3 +159,5 @@ object QuotePricer {
 
 /** No quote can be priced: no curve set, no curve for the currency, or the risk engine unreachable. Mapped to 503. */
 class QuoteUnavailableException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+private fun com.openbank.libs.domain.calendar.YearFraction.toDouble(): Double = numerator.toDouble() / denominator

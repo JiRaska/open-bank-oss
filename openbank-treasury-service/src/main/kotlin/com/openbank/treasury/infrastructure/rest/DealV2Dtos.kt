@@ -95,6 +95,7 @@ data class LegSpecDto(
     val rate: LegRateDto? = null,
     val initialNotionalExchange: Boolean? = null,
     val finalNotionalExchange: Boolean? = null,
+    val endOfMonth: Boolean? = null,
 ) {
     fun toDomain(): LegSpec = LegSpec(
         payReceive = requireNotNull(payReceive) { "leg payReceive is required" },
@@ -117,6 +118,7 @@ data class LegSpecDto(
         finalNotionalExchange = finalNotionalExchange ?: false,
         amortisationStart = amortisationStart,
         paymentCalendars = paymentCalendars.orEmpty(),
+        endOfMonth = endOfMonth ?: false,
     )
 
     companion object {
@@ -139,6 +141,7 @@ data class LegSpecDto(
             rate = LegRateDto.from(l.rate),
             initialNotionalExchange = l.initialNotionalExchange,
             finalNotionalExchange = l.finalNotionalExchange,
+            endOfMonth = l.endOfMonth,
         )
     }
 }

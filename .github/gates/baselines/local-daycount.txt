@@ -5,5 +5,3 @@ openbank-interest-service/src/main/kotlin/com/openbank/interest/domain/model/Int
 openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/Settlement.kt|year-basis|DAYS_IN_YEAR  # #11670
 openbank-pension-fund-service/src/main/kotlin/com/openbank/pensionfund/domain/model/Precision.kt|year-basis|DAY_COUNT_BASIS  # #11670
 openbank-simulation/src/main/kotlin/com/openbank/simulation/scenario/InterestAccrualScenario.kt|year-basis|DAYS_PER_YEAR  # #11670
-openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Quote.kt|year-basis|DAYS_ACT360  # #11670
-openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Quote.kt|year-basis|DAYS_ACT365  # #11670

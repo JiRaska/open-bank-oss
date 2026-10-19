@@ -15,7 +15,32 @@
     "calendars": [
       "CERTIS"
     ],
-    "businessDayConvention": "FOLLOWING"
+    "businessDayConvention": "FOLLOWING",
+    "legs": [
+      {
+        "payReceive": "PAY",
+        "currency": "CZK",
+        "notional": "1000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-17",
+        "accrualEnd": "2026-11-17",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": false,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "NONE"
+        },
+        "initialNotionalExchange": false,
+        "finalNotionalExchange": true
+      }
+    ]
   },
   "fixings": [],
   "referenceData": {},
@@ -24,7 +49,7 @@
       {
         "legIndex": 0,
         "periodIndex": 0,
-        "kind": "PRINCIPAL",
+        "kind": "NOTIONAL_EXCHANGE",
         "direction": "OUT",
         "currency": "CZK",
         "accrualStart": null,
@@ -33,7 +58,7 @@
         "paymentDate": "2026-11-18",
         "notional": "1000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "1000000.00"
       }
     ]

@@ -33,7 +33,7 @@
         "fixingDate": null,
         "paymentDate": "2027-03-31",
         "notional": "500000.00",
-        "rate": "24.2000",
+        "rate": null,
         "rateSource": "FIXED",
         "amount": "500000.00"
       },
@@ -48,7 +48,7 @@
         "fixingDate": null,
         "paymentDate": "2027-03-31",
         "notional": "12100000.00",
-        "rate": "24.2000",
+        "rate": null,
         "rateSource": "FIXED",
         "amount": "12100000.00"
       }

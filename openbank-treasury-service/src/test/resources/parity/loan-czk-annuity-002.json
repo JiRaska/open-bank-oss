@@ -25,8 +25,8 @@
         },
         "accrualStart": "2026-11-05",
         "accrualEnd": "2027-11-05",
-        "accrualFrequency": "1M",
-        "paymentFrequency": "1M",
+        "accrualFrequency": "MONTHLY",
+        "paymentFrequency": "MONTHLY",
         "stub": "NONE",
         "adjustPaymentDate": true,
         "adjustAccrualPeriod": true,
@@ -47,7 +47,7 @@
     "flows": [
       {
         "legIndex": 0,
-        "periodIndex": 0,
+        "periodIndex": -1,
         "kind": "NOTIONAL_EXCHANGE",
         "direction": "OUT",
         "currency": "CZK",
@@ -57,7 +57,7 @@
         "paymentDate": "2026-11-05",
         "notional": "1000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "1000000.00"
       },
       {
@@ -87,7 +87,7 @@
         "paymentDate": "2026-12-07",
         "notional": "1000000.00",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "80733.10"
       },
       {
@@ -117,7 +117,7 @@
         "paymentDate": "2027-01-05",
         "notional": "919266.90",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "81776.52"
       },
       {
@@ -147,7 +147,7 @@
         "paymentDate": "2027-02-05",
         "notional": "837490.38",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "81878.98"
       },
       {
@@ -177,7 +177,7 @@
         "paymentDate": "2027-03-05",
         "notional": "755611.40",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "82288.37"
       },
       {
@@ -207,7 +207,7 @@
         "paymentDate": "2027-04-05",
         "notional": "673323.03",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "82699.81"
       },
       {
@@ -237,7 +237,7 @@
         "paymentDate": "2027-05-05",
         "notional": "590623.22",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "83113.31"
       },
       {
@@ -267,7 +267,7 @@
         "paymentDate": "2027-06-07",
         "notional": "507509.91",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "83359.71"
       },
       {
@@ -297,7 +297,7 @@
         "paymentDate": "2027-07-07",
         "notional": "424150.20",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "83945.68"
       },
       {
@@ -327,7 +327,7 @@
         "paymentDate": "2027-08-05",
         "notional": "340204.52",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "84478.81"
       },
       {
@@ -357,7 +357,7 @@
         "paymentDate": "2027-09-06",
         "notional": "255725.71",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "84745.18"
       },
       {
@@ -387,7 +387,7 @@
         "paymentDate": "2027-10-05",
         "notional": "170980.53",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "85240.02"
       },
       {
@@ -417,7 +417,7 @@
         "paymentDate": "2027-11-05",
         "notional": "85740.51",
         "rate": null,
-        "rateSource": null,
+        "rateSource": "FIXED",
         "amount": "85740.51"
       }
     ]

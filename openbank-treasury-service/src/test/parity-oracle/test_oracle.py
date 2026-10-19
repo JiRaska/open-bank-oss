@@ -193,6 +193,25 @@ class Products(unittest.TestCase):
         self.assertEqual(rates, ["5.1000", "4.0000", "4.0000", None])
         self.assertEqual(idx[1]["rateSource"], "RATE_UNTIL_FIRST_FIXING")
 
+    def test_rate_until_first_fixing_is_the_contractual_period_zero_rate(self):
+        # Market meaning: the first-period rate agreed at trade. It holds for period 0 even when
+        # an index value is published for period 0's fixing date; later periods use fixings only.
+        leg = {"payReceive": "RECEIVE", "currency": "CZK", "notional": "1000000.00",
+               "accrualStart": "2026-11-05", "accrualEnd": "2027-05-05", "accrualFrequency": "QUARTERLY",
+               "paymentFrequency": "QUARTERLY", "stub": "NONE", "dayCount": "ACT/360", "adjustAccrualPeriod": True,
+               "rate": {"type": "FLOATING", "index": "PRIBOR_3M", "spread": "0", "fixingLagBusinessDays": 2,
+                        "rateUntilFirstFixing": "5.0000"}}
+        ref = {"indices": {"PRIBOR_3M": {"fixingCalendar": "CERTIS", "fixingLagBusinessDays": 2}}}
+        flows = o.leg_flows({"calendars": CZ}, 0, leg, [{"index": "PRIBOR_3M", "date": "2026-11-03", "rate": "3.0000"}], ref)
+        self.assertEqual([(f["rate"], f["rateSource"]) for f in flows],
+                         [("5.0000", "RATE_UNTIL_FIRST_FIXING"), (None, "MISSING")])
+
+    def test_a_hand_edited_derived_leg_is_refused(self):
+        fx = json.loads((FIXTURES / "tbill-czk-3m-001.json").read_text(encoding="utf-8"))
+        fx["deal"]["legs"][0]["notional"] = "9918222.21"
+        with self.assertRaises(o.OracleError):
+            o.compute(fx)
+
     def test_linear_residual(self):
         # 10,000,000 / 3 = 3,333,333.33 twice, residual 3,333,333.34 last.
         flows = o.leg_flows({"calendars": CZ}, 0, {

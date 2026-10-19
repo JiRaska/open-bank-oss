@@ -9,10 +9,12 @@ import com.openbank.libs.domain.calendar.BusinessCalendar
 import com.openbank.libs.finance.calendar.Calendars
 import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
+import com.openbank.libs.finance.cashflow.FixingSource
 import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
 import com.openbank.treasury.application.port.out.ScheduleWrite
 import com.openbank.treasury.domain.cashflow.CashFlow
+import com.openbank.treasury.domain.cashflow.ProductLedger
 import com.openbank.treasury.domain.cashflow.ScheduleAdapter
 import com.openbank.treasury.domain.cashflow.ScheduleContext
 import com.openbank.treasury.domain.cashflow.ScheduleRegeneration
@@ -69,7 +71,7 @@ class ScheduleService(
     }.distinct()
 
     /** Generate the next schedule version for [deal], carrying its approved overrides. Stores nothing. */
-    suspend fun generate(deal: Deal): GeneratedSchedule {
+    suspend fun generate(deal: Deal, fixings: FixingSource = FixingSource.NONE): GeneratedSchedule {
         val asOf = if (deal.header.fixedConvention) {
             deal.tradeDate
         } else {
@@ -109,8 +111,9 @@ class ScheduleService(
             roll = roll(deal),
             rollDirection = deal.header.rollDirection,
             newId = newId,
+            fixings = fixings,
         )
-        val generated = ScheduleAdapter.generate(deal.legs, ctx)
+        val generated = ProductLedger.shape(deal, ScheduleAdapter.generate(deal.legs, ctx), ctx)
         val approved = if (previous == 0) emptyList() else cashFlows.overrides(deal.id)
         val regen = ScheduleRegeneration.regenerate(generated, approved, previous, newId, clock.instant())
         val conflicted = approved.filter { o -> regen.conflicts.any { it.overrideId == o.overrideId } }
