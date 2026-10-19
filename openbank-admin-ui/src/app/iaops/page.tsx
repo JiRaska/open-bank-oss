@@ -63,11 +63,11 @@ interface GovData {
 
 interface AgentCostEntry {
   agentId: string
-  costLast24hUsd: number
-  costLast7dUsd: number
+  costLast24hUsd: number | null
+  costLast7dUsd: number | null
   budgetMonthlyUsd: number | null
   budgetUsedPct: number | null
-  burnRate: 'low' | 'normal' | 'high' | 'exceeded'
+  burnRate: 'low' | 'normal' | 'high' | 'exceeded' | null
 }
 
 interface MetricsCoverage {
@@ -603,10 +603,10 @@ function IAOpsContent() {
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                             <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              {costCoverage?.windows['24h'].partial ? `${costCoverage.windows['24h'].availableHours}h / 24h` : '24h'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
+                              {costCoverage?.windows['24h'].partial ? `${costCoverage.windows['24h'].availableHours}h / 24h` : '24h'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{costEntry.costLast24hUsd == null ? t('Žádná data', 'No data') : `$${costEntry.costLast24hUsd.toFixed(2)}`}</strong>
                             </span>
                             <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              {costCoverage?.windows['7d'].partial ? `${costCoverage.windows['7d'].availableHours}h / 7d` : '7d'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
+                              {costCoverage?.windows['7d'].partial ? `${costCoverage.windows['7d'].availableHours}h / 7d` : '7d'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{costEntry.costLast7dUsd == null ? t('Žádná data', 'No data') : `$${costEntry.costLast7dUsd.toFixed(2)}`}</strong>
                             </span>
                             {budgetPct != null && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '120px' }}>
