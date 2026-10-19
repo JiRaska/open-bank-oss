@@ -31,9 +31,13 @@ test.describe('read-only direct loads for static pages outside the sidebar', () 
 
       const pageErrors: string[] = []
       const writeRequests: string[] = []
+      const feedbackRequests: string[] = []
       page.on('pageerror', error => pageErrors.push(error.message))
       page.on('request', request => {
         const url = new URL(request.url())
+        if (fixture.route === '/feedback' && url.pathname.includes('/api/feedback/')) {
+          feedbackRequests.push(`${request.method()} ${url.pathname}`)
+        }
         if (url.origin === new URL(baseURL!).origin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
           writeRequests.push(`${request.method()} ${url.pathname}`)
         }
@@ -48,6 +52,11 @@ test.describe('read-only direct loads for static pages outside the sidebar', () 
         }
         return route.continue()
       })
+      if (fixture.route === '/feedback') {
+        await page.route('**/api/feedback/screen-feedback**', route =>
+          route.fulfill({ status: 404, contentType: 'application/json', body: '{"available":false,"error":"fixture_not_found"}' }),
+        )
+      }
 
       const suffix = fixture.route === '/auth/error' ? '?error=AccessDenied'
         : fixture.route === '/auth/forbidden' ? '?path=%2Fapprovals%2Fcommunication'
@@ -66,6 +75,11 @@ test.describe('read-only direct loads for static pages outside the sidebar', () 
 
       const main = page.locator(isPublic ? 'main' : '#main-content').first()
       await expect(main, `${fixture.route} main content`).toBeVisible()
+      if (fixture.route === '/feedback') {
+        await expect(main.getByText(/^(Loading…|Načítám…)$/), `feedback API ${feedbackRequests.join(', ')}`).toBeHidden()
+        await expect(main.getByRole('heading', { level: 1, name: /Screen feedback|Zpětná vazba k obrazovkám/i })).toBeVisible()
+        await expect(main.getByText(/ClickHouse is not responding|ClickHouse neodpovídá/i)).toBeVisible()
+      }
       const h1 = main.getByRole('heading', { level: 1 }).first()
       if (isPublic) {
         await expect(h1).toBeVisible()
