@@ -6,9 +6,9 @@
 // group shape, Loki chart + pinned app version, EKS support lifecycle). Every value is PARSED
 // from the file that decides it; a value that cannot be parsed THROWS. There is deliberately no
 // default anywhere in this file: a guessed version is exactly the defect this replaces.
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
 import path from 'node:path'
-import { parse } from 'yaml'
+import { parse, parseAllDocuments } from 'yaml'
 
 export const SOURCES = {
   variables: 'openbank-infra/aws/envs/sandbox-substrate/variables.tf',
@@ -129,8 +129,8 @@ export function parseStrimziChart(yamlText) {
   return v
 }
 
-// Terraform resource types per inventory key. An IaC item is "present" only when an ENV
-// instantiates it (directly, or through a module that defines it) - a module nobody calls is not.
+// Terraform declaration types per inventory key. Include environments that declare them
+// directly or reference their module; never claim evaluated instances or running resources.
 const IAC_TYPES = {
   route53: ['aws_route53_zone'],
   cloudfront: ['aws_cloudfront_distribution'],
@@ -139,40 +139,151 @@ const IAC_TYPES = {
   cloudtrail: ['aws_cloudtrail'],
   awsConfig: ['aws_config_configuration_recorder'],
   objectLock: ['aws_s3_bucket_object_lock_configuration'],
+  helmReleases: ['helm_release'],
 }
 
-function tfText(dir) {
-  return readdirSync(dir).filter(f => f.endsWith('.tf')).map(f => readFileSync(path.join(dir, f), 'utf8')).join('\n')
+function tfSources(dir, repoRoot) {
+  return readdirSync(dir).filter(f => f.endsWith('.tf')).sort().map(f => ({
+    sourceFile: path.relative(repoRoot, path.join(dir, f)),
+    text: strip(readFileSync(path.join(dir, f), 'utf8')),
+  }))
+}
+
+// Mask comments, strings and heredocs before structural brace matching. This is a
+// declaration reader, not HCL evaluation; count/for_each instances remain unknown.
+function hclMask(text) {
+  return text.replace(/"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*|<<-?(\w+)[^\n]*\n[\s\S]*?^\s*\1\s*$/gm,
+    value => value.startsWith('"') ? `"${' '.repeat(value.length - 2)}"` : value.replace(/[^\n]/g, ' '))
+}
+
+function braceDepth(text) {
+  return [...text].reduce((depth, char) => depth + (char === '{' ? 1 : char === '}' ? -1 : 0), 0)
+}
+
+function declarationBlocks(text) {
+  const masked = hclMask(text)
+  let balance = 0
+  for (const char of masked) {
+    balance += char === '{' ? 1 : char === '}' ? -1 : 0
+    if (balance < 0) throw new Error('Unbalanced Terraform declaration braces')
+  }
+  if (balance !== 0) throw new Error('Unbalanced Terraform declaration braces')
+  const blocks = []
+  for (const match of masked.matchAll(/\b(module|resource)\s+"[^"\n]*"(?:\s+"[^"\n]*")?\s*\{/g)) {
+    if (braceDepth(masked.slice(0, match.index)) !== 0) continue
+    const start = match.index + match[0].length
+    let end = start
+    let depth = 1
+    while (end < masked.length && depth) {
+      if (masked[end] === '{') depth++
+      if (masked[end] === '}') depth--
+      end++
+    }
+    if (depth) throw new Error('Unclosed Terraform declaration block')
+    const labels = [...text.slice(match.index, start).matchAll(/"([^"\n]*)"/g)].map(item => item[1])
+    blocks.push({ kind: match[1], labels, body: text.slice(start, end - 1) })
+  }
+  return blocks
+}
+
+function localModuleSource(body) {
+  const masked = hclMask(body)
+  const matches = [...masked.matchAll(/\bsource\s*=\s*"[^"\n]*"/g)]
+    .filter(match => braceDepth(masked.slice(0, match.index)) === 0)
+  if (matches.length !== 1) return null
+  const match = matches[0]
+  const literal = body.slice(match.index, match.index + match[0].length).match(/"([^"\n]*)"$/)?.[1]
+  return literal && /^\.\.?\//.test(literal) && !literal.includes('${') ? literal : null
 }
 
 export function deriveIac(repoRoot) {
   const aws = path.join(repoRoot, 'openbank-infra', 'aws')
-  const modules = Object.fromEntries(
-    readdirSync(path.join(aws, 'modules')).map(m => [m, strip(tfText(path.join(aws, 'modules', m)))]),
-  )
   const out = Object.fromEntries(Object.keys(IAC_TYPES).map(k => [k, []]))
-  for (const env of readdirSync(path.join(aws, 'envs'))) {
-    const dir = path.join(aws, 'envs', env)
-    if (!statSync(dir).isDirectory()) continue
-    let text = strip(tfText(dir))
-    for (const m of text.matchAll(/source\s*=\s*"[./]*\/modules\/([\w-]+)"/g)) text += '\n' + (modules[m[1]] ?? '')
-    for (const [key, types] of Object.entries(IAC_TYPES)) {
-      if (types.some(t => new RegExp(`resource\\s+"${t}"`).test(text))) out[key].push(env)
+  const helmReleaseDeclarations = []
+  const moduleTraversalGaps = []
+  for (const environment of readdirSync(path.join(aws, 'envs')).sort()) {
+    const rootDir = path.join(aws, 'envs', environment)
+    if (!statSync(rootDir).isDirectory()) continue
+    const found = new Set()
+    const visit = (dir, modulePath, ancestors) => {
+      if (ancestors.has(dir)) {
+        moduleTraversalGaps.push({ environment, modulePath, reason: 'cycle' })
+        return
+      }
+      if (!dir.startsWith(`${path.resolve(repoRoot)}/`) || !existsSync(dir) || !statSync(dir).isDirectory()) {
+        moduleTraversalGaps.push({ environment, modulePath, reason: 'unresolved-local-module' })
+        return
+      }
+      const next = new Set([...ancestors, dir])
+      for (const source of tfSources(dir, repoRoot)) {
+        for (const block of declarationBlocks(source.text)) {
+          if (block.kind === 'resource') {
+            const [type, name] = block.labels
+            for (const [key, types] of Object.entries(IAC_TYPES)) if (types.includes(type)) found.add(key)
+            if (type === 'helm_release') {
+              helmReleaseDeclarations.push({
+                environment, sourceFile: source.sourceFile,
+                address: `${modulePath ? `${modulePath}.` : ''}helm_release.${name}`,
+                instanceExpansion: 'unknown',
+              })
+            }
+          } else {
+            const callPath = `${modulePath ? `${modulePath}.` : ''}module.${block.labels[0]}`
+            const relative = localModuleSource(block.body)
+            if (relative) visit(path.resolve(dir, relative), callPath, next)
+            else moduleTraversalGaps.push({ environment, modulePath: callPath, reason: 'external-or-dynamic-source' })
+          }
+        }
+      }
     }
+    visit(path.resolve(rootDir), '', new Set())
+    for (const key of found) out[key].push(environment)
   }
-  return out
+  return { ...out, helmReleaseDeclarations, moduleTraversalGaps }
+}
+
+function applicationSources(application) {
+  const spec = application?.spec ?? {}
+  const sources = [...(spec.source ? [spec.source] : []), ...(Array.isArray(spec.sources) ? spec.sources : [])]
+  return (sources.length ? sources : [null]).map(source => {
+    if (typeof source?.chart === 'string' && source.chart && !source.path) return { kind: 'helm-chart', chart: source.chart }
+    if (typeof source?.path === 'string' && source.path && !source.chart
+      && !path.posix.isAbsolute(source.path) && !source.path.split('/').includes('..')) {
+      return { kind: 'manifest-path', path: source.path }
+    }
+    return { kind: 'unknown' }
+  })
 }
 
 export function deriveGitopsInventory(repoRoot) {
   const gitops = path.join(repoRoot, SOURCES.gitops)
   const names = dir => readdirSync(path.join(gitops, dir))
-  const apps = names('apps').filter(f => /\.ya?ml$/.test(f)).map(f => f.replace(/\.ya?ml$/, '')).sort()
+  const appFiles = names('apps').filter(f => /\.ya?ml$/.test(f)).sort()
+  const apps = appFiles.map(f => f.replace(/\.ya?ml$/, '')).sort()
+  const applications = appFiles.flatMap(file => {
+    const sourceFile = path.posix.join(SOURCES.gitops, 'apps', file)
+    const documents = parseAllDocuments(readCached(path.join(repoRoot, sourceFile)))
+    return (documents.length ? documents : [null]).map(document => {
+      if (document?.errors.length) throw new Error(`${sourceFile}: ${document.errors[0].message}`)
+      const application = document?.toJSON()
+      const known = application?.kind === 'Application'
+      return {
+        kind: known ? 'application' : 'unknown',
+        name: known && typeof application.metadata?.name === 'string' ? application.metadata.name : null,
+        namespace: known && typeof application.spec?.destination?.namespace === 'string' ? application.spec.destination.namespace : null,
+        sourceFile,
+        sources: known ? applicationSources(application) : [{ kind: 'unknown' }],
+        workloadMapping: 'unknown',
+      }
+    })
+  })
   const components = names('components').filter(f => statSync(path.join(gitops, 'components', f)).isDirectory()).sort()
   if (apps.length === 0 || components.length === 0) throw new Error(`${SOURCES.gitops}: no apps/components found`)
   const files = walkYaml(gitops).map(readCached)
   const has = re => files.some(t => re.test(t))
   return {
     apps,
+    applications,
     components,
     clickhouse: has(/image:\s*\S*clickhouse\/clickhouse-server/),
     istio: has(/(?:image:\s*\S*istio\/|chart:\s*istiod)/),
