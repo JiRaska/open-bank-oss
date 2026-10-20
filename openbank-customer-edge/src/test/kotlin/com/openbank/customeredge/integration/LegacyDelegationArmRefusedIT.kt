@@ -213,6 +213,7 @@ class LegacyDelegationArmRefusedIT {
     class StubUpstreams : QuarkusTestResourceLifecycleManager {
 
         override fun start(): Map<String, String> {
+            lastStubGeneration = -1
             val s = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
             s.createContext("/protocol/openid-connect/token") { ex ->
                 respond(ex, 200, """{"access_token":"stub-token","expires_in":300}""")
@@ -222,7 +223,12 @@ class LegacyDelegationArmRefusedIT {
                 counts.computeIfAbsent(path) { AtomicInteger() }.incrementAndGet()
                 val handler = routes[path]
                 if (handler == null) {
-                    respond(ex, 404, """{"error":"no stub registered for $path"}""")
+                    val resetAfterRegistration = lastStubGeneration >= 0 && resetGeneration.get() > lastStubGeneration
+                    respond(
+                        ex,
+                        404,
+                        """{"error":"no stub registered","routeCount":${routes.size},"resetAfterRegistration":$resetAfterRegistration}""",
+                    )
                 } else {
                     val (status, body) = handler(ex.requestHeaders.getFirst("X-Customer-Party-Id"))
                     respond(ex, status, body)
@@ -231,6 +237,7 @@ class LegacyDelegationArmRefusedIT {
             s.executor = null
             s.start()
             server = s
+            System.setProperty(ROUTES_ID_PROPERTY, System.identityHashCode(routes).toString())
             val base = "http://127.0.0.1:${s.address.port}"
             return mapOf(
                 "openbank.upstream.token-url" to base,
@@ -248,8 +255,9 @@ class LegacyDelegationArmRefusedIT {
         override fun stop() {
             server?.stop(0)
             server = null
-            routes.clear()
-            counts.clear()
+            reset()
+            lastStubGeneration = -1
+            System.clearProperty(ROUTES_ID_PROPERTY)
         }
 
         private fun respond(ex: HttpExchange, status: Int, body: String) {
@@ -260,17 +268,28 @@ class LegacyDelegationArmRefusedIT {
         }
 
         companion object {
+            private const val ROUTES_ID_PROPERTY = "openbank.test.legacy-delegation.routes-id"
             private var server: HttpServer? = null
             private val routes = ConcurrentHashMap<String, (String?) -> Pair<Int, String>>()
             private val counts = ConcurrentHashMap<String, AtomicInteger>()
+            private val resetGeneration = AtomicInteger()
+
+            @Volatile private var lastStubGeneration = -1
 
             fun stub(path: String, handler: (String?) -> Pair<Int, String>) {
+                val runningRoutesId = System.getProperty(ROUTES_ID_PROPERTY)
+                check(runningRoutesId == System.identityHashCode(routes).toString()) {
+                    "LegacyDelegationArmRefusedIT test method and HTTP resource have different route registries " +
+                        "(resource=$runningRoutesId, test=${System.identityHashCode(routes)})"
+                }
                 routes[path] = handler
+                lastStubGeneration = resetGeneration.get()
             }
 
             fun hits(path: String): Int = counts[path]?.get() ?: 0
 
             fun reset() {
+                resetGeneration.incrementAndGet()
                 routes.clear()
                 counts.clear()
             }

@@ -9,6 +9,7 @@ import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * One loopback server standing in for every upstream of the business-approval flow: party (mandate
@@ -22,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
 
     override fun start(): Map<String, String> {
+        lastStubGeneration = -1L
         val s = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         s.createContext("/protocol/openid-connect/token") { ex ->
             respond(ex, 200, """{"access_token":"stub-token","expires_in":300}""")
@@ -40,7 +42,12 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
             }
             val handler = routes[key]
             if (handler == null) {
-                respond(ex, 404, """{"error":"no stub registered for $key"}""")
+                val resetAfterRegistration = lastStubGeneration >= 0 && resetGeneration.get() > lastStubGeneration
+                respond(
+                    ex,
+                    404,
+                    """{"error":"no stub registered","routeCount":${routes.size},"resetAfterRegistration":$resetAfterRegistration}""",
+                )
             } else {
                 val (status, out) = handler(body)
                 respond(ex, status, out)
@@ -49,6 +56,7 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
         s.executor = null
         s.start()
         server = s
+        System.setProperty(ROUTES_ID_PROPERTY, System.identityHashCode(routes).toString())
         val base = "http://127.0.0.1:${s.address.port}"
         return mapOf(
             "openbank.upstream.token-url" to base,
@@ -71,6 +79,8 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
         server?.stop(0)
         server = null
         reset()
+        lastStubGeneration = -1L
+        System.clearProperty(ROUTES_ID_PROPERTY)
     }
 
     private fun respond(ex: HttpExchange, status: Int, body: String) {
@@ -91,18 +101,29 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
     }
 
     companion object {
+        private const val ROUTES_ID_PROPERTY = "openbank.test.business-approval.routes-id"
         private var server: HttpServer? = null
         private val routes = ConcurrentHashMap<String, (String) -> Pair<Int, String>>()
         private val requests = mutableListOf<Request>()
+        private val resetGeneration = AtomicLong()
+
+        @Volatile private var lastStubGeneration = -1L
 
         fun stub(method: String, path: String, status: Int = 200, body: String) {
+            val runningRoutesId = System.getProperty(ROUTES_ID_PROPERTY)
+            check(runningRoutesId == System.identityHashCode(routes).toString()) {
+                "BusinessApprovalStubs test method and HTTP resource have different route registries " +
+                    "(resource=$runningRoutesId, test=${System.identityHashCode(routes)})"
+            }
             routes["$method $path"] = { status to body }
+            lastStubGeneration = resetGeneration.get()
         }
 
         fun requests(method: String, path: String): List<Request> =
             synchronized(requests) { requests.filter { it.method == method && it.path == path } }
 
         fun reset() {
+            resetGeneration.incrementAndGet()
             routes.clear()
             synchronized(requests) { requests.clear() }
         }
