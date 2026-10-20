@@ -73,6 +73,7 @@ function isServiceHealthPayload(value: unknown): value is ServiceHealthPayload {
 
 export default function BcpPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [health, setHealth] = useState<ServiceHealth>({})
   const [tiers, setTiers] = useState<BcpTier[]>([])
   const [catalogServiceNames, setCatalogServiceNames] = useState<string[]>([])
@@ -315,7 +316,7 @@ export default function BcpPage() {
         actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastSuccessfulRefresh && (
             <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-              {t('Poslední úspěšné načtení:', 'Last successful refresh:')} {lastSuccessfulRefresh.toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-GB')}
+              {t('Poslední úspěšné načtení:', 'Last successful refresh:')} {lastSuccessfulRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <PrintDocumentButton />
