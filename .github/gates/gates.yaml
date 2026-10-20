@@ -558,7 +558,7 @@ gates:
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
   - id: deploy-window-decision
-    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    selftest_exempt: "is-a-test-suite — the run: exercises deploy-window decisions and producer isolation"
     name: "deploy window batches bot deploy commits without losing a deploy"
     group: gitops
     mode: enforced
@@ -574,7 +574,9 @@ gates:
     review_after: "2027-03-30"
     budget_seconds: 15
     run: |
+      set -e
       python3 .github/scripts/deploy-window.py --self-test
+      python3 .github/scripts/test-deploy-producer-isolation.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -6891,3 +6893,25 @@ gates:
     selftest_inputs: [".github/scripts/check-dynamic-db-roles-declared.py"]
     run: |
       python3 .github/scripts/check-dynamic-db-roles-declared.py --root .
+
+  # rules.yaml enum_reference_data: business vocabulary hard-coded as a Kotlin enum. Ratchet over
+  # two mechanically decidable shapes (numeric-encoded values, cross-module value-set copies);
+  # today's 99 findings are baselined against #13434-#13441, a new one or a stale entry fails.
+  - id: enum-reference-data-ratchet
+    name: "enum reference-data ratchet (rules.yaml enum_reference_data, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # ~1s measured locally 2026-10-20
+    rationale: >-
+      An enum value naming a threshold (UP_TO_30K, DAYS_7) or an enum re-declaring another
+      module's value set (three benchmark-index enums, seven AML risk enums on three scales) is
+      reference data in code: changing it is a release in every copy, and the copies drift.
+      Ratchet so the 2026-10-20 estate is tracked and no new copy lands unnoticed.
+    review_after: '2027-04-20'
+    verified: "2026-10-20 — origin/main b99d45e14b: correcting Kotlin string/comment masking revealed 3 enum classes missed by the initial scan; 674 enum classes, 34 numeric + 65 duplicate findings (97 initial + 2 newly tracked #13441), with both newly revealed declarations manually checked; generic lifecycle-only overlaps excluded after a first pass reported 146 pairs, ~60% unrelated status machines; injected enum exits 1; disabling either half fails self-test"
+    min_subjects: 337   # 674 enum classes measured 2026-10-20; half
+    selftest: python3 .github/scripts/check-enum-reference-data.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-enum-reference-data.py --root .
