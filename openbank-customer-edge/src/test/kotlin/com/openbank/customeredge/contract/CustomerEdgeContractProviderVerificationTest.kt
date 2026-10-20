@@ -50,7 +50,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * (`GET /api/v1/accounts/{accountId}`) stubbed — [ownedAccountFixture] is that shared fixture.
  */
 @QuarkusTest
-@QuarkusTestResource(StubUpstreamResource::class)
+@QuarkusTestResource(StubUpstreamResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "customer:$PARTY_ID", roles = ["ROLE_CUSTOMER"])
 @OidcSecurity(claims = [Claim(key = "party_id", value = PARTY_ID)])
 @Provider("openbank-customer-edge")
