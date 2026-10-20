@@ -164,6 +164,20 @@ class BusinessSigningTest {
     }
 
     @Test
+    fun `a swept expiry retains its refusal and a rejected request stays closed after its deadline`() {
+        val expired = request().copy(status = ApprovalStatus.EXPIRED)
+        assertThatThrownBy { expired.sign(b, UUID.randomUUID(), now.plusSeconds(3600)) }
+            .isInstanceOfSatisfying(SignatureRefusedException::class.java) {
+                assertThat(it.refusal).isEqualTo(SignatureRefusal.EXPIRED)
+            }
+        val rejected = request().reject(b, "no", now)
+        assertThatThrownBy { rejected.sign(c, UUID.randomUUID(), now.plusSeconds(3600)) }
+            .isInstanceOfSatisfying(SignatureRefusedException::class.java) {
+                assertThat(it.refusal).isEqualTo(SignatureRefusal.NOT_PENDING)
+            }
+    }
+
+    @Test
     fun `IBANs compare in one normal form`() {
         assertThat(Iban.normalize(" cz65 0800 0000 1920 0014 5399 ")).isEqualTo("CZ6508000000192000145399")
         assertThatThrownBy { Iban.normalize("not-an-iban") }.isInstanceOf(IllegalArgumentException::class.java)

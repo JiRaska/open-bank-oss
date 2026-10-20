@@ -18,6 +18,10 @@ on:
       - "openbank-delegation-service/src/test/kotlin/com/openbank/delegation/contract/ClientRoute.kt"
       - "openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt"
       - "**/build.gradle.kts"
+      # Ledger regeneration loads this profile and its manifest before filtering tests.
+      - "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt"
+      - "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml"
+      - "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
@@ -51,6 +55,10 @@ on:
       - "openbank-delegation-service/src/test/kotlin/com/openbank/delegation/contract/ClientRoute.kt"
       - "openbank-customer-edge/src/test/kotlin/com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt"
       - "**/build.gradle.kts"
+      # Ledger regeneration loads this profile and its manifest before filtering tests.
+      - "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt"
+      - "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml"
+      - "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
@@ -335,6 +343,8 @@ jobs:
             exit 1
           fi
           echo "Coverage OK — every pact in the classified regeneration scope was rewritten (JVM required: $JVM_REQUIRED)."
+          cp -- "${RUNNER_TEMP}/expected-jvm-pacts.txt" \
+            "${RUNNER_TEMP}/verified-jvm-pacts.txt"
 
       - name: Fail on drift between regenerated and committed pacts
         run: |
@@ -359,6 +369,7 @@ jobs:
         run: >-
           python3 .github/scripts/publish-admin-ui-pacts.py prepare
           --marker "${RUNNER_TEMP}/pact-regen-marker"
+          --jvm-pacts-manifest "${RUNNER_TEMP}/verified-jvm-pacts.txt"
           --bundle "${RUNNER_TEMP}/admin-ui-pacts.json"
 
       - name: Hand off verified admin UI contracts

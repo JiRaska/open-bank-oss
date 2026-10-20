@@ -52,8 +52,6 @@ steps:
     y: 100
     label: Notifikace PINu
     lane: platform
-    apis:
-      - POST /api/v1/notifications
     relatedServices:
       - notification-service
     consumes:

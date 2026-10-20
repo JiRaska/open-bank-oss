@@ -7,7 +7,7 @@
 #   3. Bakes a linux/arm64 Docker image and pushes it to ECR with the tag
 #      `sandbox-<short-SHA>` — matching the convention used by build-push-service.sh.
 #   4. Rewrites the image: line in each service's gitops manifest.
-#   5. Opens a PR (`chore/gitops-auto-deploy-<sha>`) and enables auto-merge, so the
+#   5. Opens a PR (`chore/gitops-auto-deploy-<sha>-run<id>`) and enables auto-merge, so the
 #      manifest update lands on main as soon as CI is green.
 #
 # The PR is opened by a bot identity, which satisfies the issue-hygiene exemption (bot PR →
@@ -112,6 +112,13 @@ on:
         type: boolean
         required: false
         default: false
+      reconcile_services:
+        description: >-
+          Optional space-separated list of up to three services to filter the reconcile to.
+          Only valid with reconcile=true on main. Each must have a GitOps pin and be stale by
+          the normal build-input equivalence check; Pact and image-freshness gates still apply.
+        required: false
+        default: ""
       bootstrap_image_only:
         description: >-
           Build, sign and attest exactly one service image that has no GitOps manifest yet.
@@ -175,6 +182,9 @@ jobs:
         env:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}
+          INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
+          INPUT_BOOTSTRAP_IMAGE_ONLY: ${{ github.event.inputs.bootstrap_image_only }}
           INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
@@ -247,10 +257,22 @@ jobs:
             # Scheduled and on-demand reconcile must use the hold on LIVE main.
             # Filter before the probe's oldest-first cap and before any build work.
             git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' || return 1
+            if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+              if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+                echo "::error::targeted reconcile is available only from refs/heads/main" >&2
+                return 1
+              fi
+              if [ "$(git rev-parse HEAD)" != "$(git rev-parse refs/remotes/origin/main)" ]; then
+                echo "::error::targeted reconcile requires this run's source SHA to be current main" >&2
+                return 1
+              fi
+            fi
             local held
             held="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
               .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)" || return 1
-            RECONCILE_SERVICES="$ALL_SERVICES" RECONCILE_HOLDS="$held" \
+            RECONCILE_SERVICES="$ALL_SERVICES" \
+              RECONCILE_TARGETS="${INPUT_RECONCILE_SERVICES:-}" \
+              RECONCILE_HOLDS="$held" \
               bash .github/scripts/auto-deploy-reconcile-lag.sh
           }
 
@@ -307,6 +329,7 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh
             if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
               if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
                 echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
@@ -337,7 +360,11 @@ jobs:
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
               SERVICES_JSON="$(reconcile_candidates)"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
-                echo "Reconcile: every deployable service is up to date."
+                if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
+                  echo "Reconcile: no requested service has an eligible stale GitOps image pin (up to date or held)."
+                else
+                  echo "Reconcile: every deployable service is up to date."
+                fi
                 echo "services=[]" >> "$GITHUB_OUTPUT"
                 echo "any=false" >> "$GITHUB_OUTPUT"
                 exit 0
@@ -1218,6 +1245,7 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
+          RECONCILE_TARGETS: ${{ github.event.inputs.reconcile_services }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
@@ -1308,7 +1336,9 @@ jobs:
           # then land as ONE commit on main instead of one each. A pin is carried only while main
           # still holds the tag that PR replaced, so a service main has moved since is never
           # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
-          if [ -n "${GH_TOKEN:-}" ]; then
+          # An explicitly bounded recovery keeps only its requested service pins.
+          # Routine producers retain train aggregation and all existing hold checks.
+          if [ -n "${GH_TOKEN:-}" ] && [ -z "${RECONCILE_TARGETS:-}" ]; then
             OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
             # Re-read the live hold after the main reset. Filtering this run's tags alone
             # is insufficient: an older unarmed PR may contain a held image pin.
@@ -1415,7 +1445,9 @@ jobs:
           # create-pull-request targets that stale ref and includes every intervening main
           # commit in the deploy PR instead of only the rewritten GitOps manifests.
           base: main
-          branch: chore/gitops-auto-deploy-${{ github.sha }}
+          # Independent producers at the same source must never rewrite one another.
+          # A rerun retains its run ID and updates only its own candidate.
+          branch: chore/gitops-auto-deploy-${{ github.sha }}-run${{ github.run_id }}
           delete-branch: true
           commit-message: "chore(gitops): auto-deploy sandbox-${{ github.sha && github.sha || '' }}"
           title: "chore(gitops): auto-deploy services @ ${{ github.sha }}"
@@ -1465,6 +1497,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
             'chore/gitops-auto-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'

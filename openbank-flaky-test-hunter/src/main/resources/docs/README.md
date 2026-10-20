@@ -6,6 +6,14 @@ Internal development-plane agent API.
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
 
+## Observe an admitted operator workflow
+
+`GET /api/v1/flaky-test-hunter/check/workflows/{workflowId}` is a read-only endpoint for `ROLE_ADMIN`. Supply the exact identifier returned by operator admission. The service accepts only its operator workflow prefix and a valid bounded UTC date identifier; it does not expose arbitrary Temporal workflows or their payloads.
+
+The response contains only `workflowId` and the observed execution `status`. The lookup uses the configured Temporal namespace and a three-second describe deadline. An unknown workflow returns 404; a failed status lookup remains an error, rather than being reported as a completed or absent execution.
+
+An admitted request and a successful workflow execution are separate observations. Execution completion also does not establish approval or application of a proposed change. Clients should timestamp the last observed status and explicitly expose a paused or failed refresh.
+
 ## GitHub proposal egress
 
 The proposal adapter uses `SafeHttpClient` for its configurable GitHub API URL. `openbank.egress.allowed-hosts` defaults to `api.github.com`; explicitly allow the hostname when using a different GitHub API. DNS answers are checked before a connection to a pinned public address; TLS still verifies the original hostname, and redirects are refused. An unlisted host produces no outbound request.
@@ -37,6 +45,16 @@ Implementation and local tests do not supply those runtime proofs.
 
 Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent.github.pr_open` for every attempted PR path, including denials, and `flaky-test-hunter.github.ticket_opened` when no fix enters the PR path. The event carries `policy_decision` (ALLOW only when the gate allowed **and** the PR was actually opened), `policy_blocked`, `policy_denial_reason`, the evaluated `tool`/`resource`/`pr_branch`, `pr_url` for an opened PR, and `proposal_url` for the selected PR or ticket. A refusal is as auditable as an opened PR; a blocked mechanical fix (`policy_blocked: true`) is distinguishable from a finding that had no fix at all.
 
+## Input and dispositions
+
+The deployed agent's input is the Admin UI Test Intelligence snapshot, posted after every collection to `POST /api/v1/flaky-test-hunter/evidence/analyze`. The static source scan reads a repository checkout under `openbank.flaky-test-hunter.repo-root`, and the deployed pod mounts none. The weekly scheduled sweep was therefore removed on 2026-10-17, because it scanned an empty tree. The scan remains reachable through `POST /check/trigger` and the CI-failure webhook, and `RunTrigger.SCHEDULED` survives only as a deprecated value so past Temporal histories still deserialize.
+
+A finding with no mechanical fix opens a GitHub issue labelled `flaky-test` with the finding and diagnosis. An open issue with the same title is reused, so a re-run does not flood the tracker. The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. Ticket and diagnosis text from an issue is treated as untrusted input.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

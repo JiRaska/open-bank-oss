@@ -51,6 +51,13 @@ data class OutboxMessage(
      * hand-off boundary; [OutboxKafkaHeaders] reconstructs the transport header from this value.
      */
     val synthetic: Boolean = false,
+    /**
+     * W3C `traceparent` of the request that produced this event, captured at write time. The
+     * dispatcher runs later on a scheduler thread with no request context, so without this the
+     * relayed record starts a new trace and the consumer cannot be linked to the producing request.
+     * `null` when the writer did not capture one (every service that has not adopted it).
+     */
+    val traceparent: String? = null,
 )
 
 data class OutboxEntry(
@@ -75,4 +82,6 @@ data class OutboxEntry(
      */
     val claimedAt: Instant? = null,
     val nextAttemptAt: Instant? = null,
+    /** W3C `traceparent` captured when the row was written; `null` for tables without `trace_context`. */
+    val traceparent: String? = null,
 )

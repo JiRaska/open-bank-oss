@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+# ADR-0333: a started workflow with no ACTIVE enrolment cannot contact a customer;
+# this alert makes its pending repair visible instead of silently treating it as success.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-campaign-start-intent-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.campaign.start-intents
+      rules:
+        - alert: CampaignJourneyStartIntentStale
+          expr: max(openbank_campaign_journey_start_intent_stale{service="campaign"}) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "A campaign journey start has no committed enrolment"
+            description: >-
+              At least one direct or triggered journey start intent is older than 15 minutes.
+              Check campaign state, admission capacity, Temporal and the enrolment database;
+              keep bulk runs held until their own recipient ledger is reconciled.
+        - alert: CampaignJourneyStartIntentEvidenceUnavailable
+          expr: min(openbank_campaign_journey_start_intent_stale{service="campaign"}) < 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Campaign journey start intent evidence is unavailable"
+            description: >-
+              Campaign-service cannot count unresolved start intents. Check the database and
+              the observation job; an absent count cannot establish that admission recovered.

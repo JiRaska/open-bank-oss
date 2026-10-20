@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
@@ -33,6 +34,12 @@ class PublicationTest(unittest.TestCase):
             p.write_text(json.dumps({"consumer": {"name": "openbank-admin-ui"},
                                      "provider": {"name": provider},
                                      "interactions": [{"description": provider}]}))
+        # The verified JVM receipt is repo-wide, while this publisher bundles only Admin UI.
+        (self.root / "pacts" / "openbank-ledger-openbank-payment-service.json").write_text(
+            json.dumps({"consumer": {"name": "openbank-ledger"},
+                        "provider": {"name": "openbank-payment-service"},
+                        "interactions": [{"description": "ledger payment"}]})
+        )
         def git(*args):
             return subprocess.check_output(["git", *args], cwd=self.root, stderr=subprocess.DEVNULL)
         git("init")
@@ -43,7 +50,9 @@ class PublicationTest(unittest.TestCase):
         self.marker = self.root / "marker"
         self.marker.touch()
         os.utime(self.marker, ns=(1, 1))
-        self.bundle = publisher.prepare(self.root, self.sha, self.marker)
+        self.jvm_manifest = self.root / "verified-jvm-pacts.txt"
+        self.jvm_manifest.write_text("")
+        self.bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
         self.env = {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/main",
                     "PACT_BROKER_URL": "https://broker.example", "PACT_BROKER_USERNAME": "fixture",
                     "PACT_BROKER_PASSWORD": "test-only"}
@@ -51,6 +60,118 @@ class PublicationTest(unittest.TestCase):
     def body(self, bundle=None):
         return publisher.payload(self.root, self.sha, self.bundle if bundle is None else bundle,
                                  "https://example.test/build")
+
+    def run_prepare_cli(self, sha, bundle, marker=None, jvm_manifest=None):
+        env = dict(os.environ, GITHUB_SHA=sha)
+        return subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("publish-admin-ui-pacts.py")),
+             "prepare", "--root", str(self.root), "--marker", str(marker or self.marker),
+             "--jvm-pacts-manifest", str(jvm_manifest or self.jvm_manifest),
+             "--bundle", str(bundle)],
+            cwd=self.root, env=env, text=True,
+            capture_output=True, check=False,
+        )
+
+    def test_prepare_cli_classifies_bad_revision_without_local_details(self):
+        result = self.run_prepare_cli("0" * 40, self.root / "bundle.json")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pact publication failed at source-validation", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+
+    def test_prepare_cli_classifies_modified_source_without_local_details(self):
+        pact = next((self.root / "pacts").glob("openbank-admin-ui-*.json"))
+        pact.write_text(pact.read_text() + " ")
+        result = self.run_prepare_cli(self.sha, self.root / "bundle.json")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pact publication failed at source-validation", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+
+    def test_prepare_cli_rejects_missing_freshness_proof(self):
+        result = self.run_prepare_cli(self.sha, self.root / "bundle.json",
+                                      jvm_manifest=self.root / "missing-manifest")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pact publication failed at freshness-proof", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+
+    def test_prepare_cli_classifies_missing_marker_without_local_details(self):
+        result = self.run_prepare_cli(self.sha, self.root / "bundle.json",
+                                      marker=self.root / "missing-marker")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pact publication failed at marker-read", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+
+    def test_prepare_cli_classifies_bundle_write_failure_without_local_details(self):
+        result = self.run_prepare_cli(self.sha, self.root)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Pact publication failed at bundle-write", result.stderr)
+        self.assertNotIn(str(self.root), result.stderr)
+
+    def test_prepare_accepts_archive_verified_jvm_contract_with_older_runner_clock(self):
+        pact = self.root / "pacts" / "openbank-ledger-openbank-payment-service.json"
+        os.utime(pact, ns=(1, 1))
+        self.jvm_manifest.write_text(f"{pact.relative_to(self.root)}\n")
+        bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertNotIn(str(pact.relative_to(self.root)), bundle["files"])
+
+    def test_prepare_accepts_repo_wide_jvm_manifest_and_bundles_only_admin_ui(self):
+        pacts = sorted((self.root / "pacts").glob("*.json"))
+        jvm_paths = [pacts[0].relative_to(self.root), pacts[-1].relative_to(self.root)]
+        for pact in pacts:
+            os.utime(pact, ns=(1, 1))
+        for pact in pacts[1:-1]:
+            os.utime(pact, None)
+        self.jvm_manifest.write_text("".join(f"{path}\n" for path in sorted(jvm_paths)))
+        bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(len(bundle["files"]), 5)
+        self.assertNotIn(str(jvm_paths[-1]), bundle["files"])
+
+    def test_prepare_rejects_stale_pactjs_and_uncovered_jvm_contracts(self):
+        pacts = sorted((self.root / "pacts").glob("*.json"))
+        os.utime(pacts[0], ns=(1, 1))
+        os.utime(pacts[1], ns=(1, 1))
+        self.jvm_manifest.write_text("")
+        with self.assertRaises(publisher.PublicationFailure) as js_failure:
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(js_failure.exception.stage, "freshness")
+
+        os.utime(pacts[1], None)
+        self.jvm_manifest.write_text(f"{pacts[0].relative_to(self.root)}\n")
+        bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertIn(str(pacts[0].relative_to(self.root)), bundle["files"])
+
+    def test_prepare_rejects_duplicate_or_out_of_scope_jvm_manifest(self):
+        pact = next((self.root / "pacts").glob("*.json"))
+        relative = pact.relative_to(self.root)
+        self.jvm_manifest.write_text(f"{relative}\n{relative}\n")
+        with self.assertRaises(publisher.PublicationFailure) as duplicate:
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(duplicate.exception.stage, "freshness-proof")
+        self.jvm_manifest.write_text("pacts/not-tracked.json\n")
+        with self.assertRaises(publisher.PublicationFailure) as out_of_scope:
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(out_of_scope.exception.stage, "freshness-proof")
+
+    def test_prepare_rejects_symlink_manifest(self):
+        target = self.root / "manifest-target"
+        target.write_text("")
+        link = self.root / "manifest-link"
+        link.symlink_to(target)
+        with self.assertRaises(publisher.PublicationFailure) as failure:
+            publisher.prepare(self.root, self.sha, self.marker, link)
+        self.assertEqual(failure.exception.stage, "freshness-proof")
+
+    def test_prepare_rejects_invalid_utf8_manifest(self):
+        self.jvm_manifest.write_bytes(b"\xff\xfe")
+        with self.assertRaises(publisher.PublicationFailure) as failure:
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(failure.exception.stage, "freshness-proof")
+
+    def test_prepare_rejects_noncanonical_path_in_manifest(self):
+        pact = next((self.root / "pacts").glob("*.json"))
+        self.jvm_manifest.write_text(f"../{pact.relative_to(self.root)}\n")
+        with self.assertRaises(publisher.PublicationFailure) as failure:
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(failure.exception.stage, "freshness-proof")
 
     def test_real_consumer_and_generator_inputs_trigger_both_lanes(self):
         workflow = Path(__file__).parents[1] / "workflows" / "pact-drift-check.yml"
@@ -86,7 +207,7 @@ class PublicationTest(unittest.TestCase):
 
     def test_revision_mismatch(self):
         with self.assertRaises(ValueError):
-            publisher.prepare(self.root, "0" * 40, self.marker)
+            publisher.prepare(self.root, "0" * 40, self.marker, self.jvm_manifest)
         bad = copy.deepcopy(self.bundle); bad["sourceSha"] = "0" * 40
         with self.assertRaises(ValueError): self.body(bad)
 
@@ -107,12 +228,32 @@ class PublicationTest(unittest.TestCase):
         p = self.root / next(iter(self.bundle["files"]))
         p.write_text(p.read_text() + " ")
         with self.assertRaises(ValueError): self.body()
-        p.unlink(); p.symlink_to(self.marker)
+        p.unlink(); p.symlink_to(self.root / "not-a-contract")
         with self.assertRaises(ValueError): self.body()
 
-    def test_not_regenerated(self):
-        self.marker.touch()
-        with self.assertRaises(ValueError): publisher.prepare(self.root, self.sha, self.marker)
+    def test_archive_restored_jvm_contracts_are_proved_by_the_archive_not_mtime(self):
+        # The drift job restores JVM-generated admin-ui pacts with `tar -x`, which keeps their
+        # generation-time mtime — older than the marker. Main was red on exactly this (#10076).
+        jvm = {"pacts/openbank-admin-ui-openbank-product-catalog.json",
+               "pacts/openbank-admin-ui-openbank-flaky-test-hunter.json",
+               "pacts/openbank-admin-ui-openbank-case-coordinator-agent.json"}
+        os.utime(self.marker, ns=(10, 10))
+        for name in self.bundle["files"]:
+            if name not in jvm:
+                os.utime(self.root / name, ns=(20, 20))  # PactJS: rewritten after the marker
+        for name in jvm:
+            os.utime(self.root / name, ns=(1, 1))  # restored with the archive's old mtime
+        self.jvm_manifest.write_text("")
+        with self.assertRaises(publisher.PublicationFailure):
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.jvm_manifest.write_text("".join(f"{name}\n" for name in sorted(jvm)))
+        bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(set(bundle["files"]), set(self.bundle["files"]))
+        # The exemption is per file: a PactJS contract that was NOT rewritten still fails.
+        os.utime(self.root / "pacts/openbank-admin-ui-openbank-billing-service.json", ns=(1, 1))
+        with self.assertRaises(publisher.PublicationFailure) as stale:
+            publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
+        self.assertEqual(stale.exception.stage, "freshness")
 
     def test_untrusted_events_never_contact_broker(self):
         for event, ref in [("pull_request", "refs/heads/main"), ("push", "refs/heads/topic"),

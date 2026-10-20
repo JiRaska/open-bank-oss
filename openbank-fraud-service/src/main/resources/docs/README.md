@@ -13,3 +13,7 @@ The generated `00-build` page in this same documentation index reports the relea
 ## Integration test setup
 
 Under the `%test` profile, Kafka output from `fraud-outbox-out` and outbox dispatch are disabled by default. `TransactionSignalConsumerBootIT` uses its Testcontainers resource to enable the output channel while it checks the broker-backed consumer path. These settings apply only to tests; production outbox configuration is unchanged.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

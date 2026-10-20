@@ -216,7 +216,32 @@ repositories {
     mavenCentral()
 }
 
+// The dependency set EVERY openbank.quarkus-service module declared, verbatim, before it moved
+// here: measured 69 of 69 modules applying this plugin. Only the universal set lives here, and
+// that is deliberate. An extension merely on the classpath is ACTIVE in Quarkus (flyway,
+// hibernate-reactive, kafka, redis each boot, read config and add attack surface), so adding a
+// dependency that "most" services have would change behaviour for the rest. Anything short of
+// 69/69 (jackson-kotlin 68, libs-runtime 56, flyway 65, ...) stays in the module's own file.
+// The typed `libs.*` accessor is not generated for precompiled script plugins; the catalog is
+// read through VersionCatalogsExtension, the same way openbank.static-analysis reads detekt.
+val catalog = the<VersionCatalogsExtension>().named("libs")
+fun lib(alias: String) = catalog.findLibrary(alias)
+    .orElseThrow { IllegalStateException("$alias missing in libs.versions.toml") }
+
 dependencies {
+    "implementation"(enforcedPlatform(lib("quarkus-bom")))
+    listOf(
+        "quarkus-kotlin",
+        "quarkus-resteasy-reactive",
+        "quarkus-resteasy-reactive-jackson",
+        "quarkus-smallrye-health",
+        "quarkus-smallrye-openapi",
+        "quarkus-oidc",
+        "quarkus-micrometer-registry-prometheus",
+        "quarkus-config-yaml",
+    ).forEach { "implementation"(lib(it)) }
+    listOf("quarkus-junit5", "assertj", "rest-assured-kotlin").forEach { "testImplementation"(lib(it)) }
+
     // Structured console logging. `quarkus.log.console.json` is a key that ONLY this extension
     // reads: without it on the application's classpath the key is accepted, does nothing, and
     // the console falls back to the text pattern formatter. Declared here rather than in

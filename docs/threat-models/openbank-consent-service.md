@@ -149,7 +149,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   `ConsentRevocationOutboxIT` (real Postgres: status change + outbox row commit together) plus the
   updated `ConsentServiceTest` / `ConsentExpirationJobTest`.
 - **2026-05-30** — Added `consent_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
-  surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  surface/boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
   clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
@@ -214,7 +214,7 @@ escalating a consent is a direct path to unauthorized data access or payment ini
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline

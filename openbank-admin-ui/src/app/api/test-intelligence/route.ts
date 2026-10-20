@@ -6,6 +6,12 @@ import path from 'path'
 import { NextResponse } from 'next/server'
 import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
 import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
+import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshotCache'
+import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
+import { loadRunningCommits } from '@/lib/evidence/runningCommits'
+import { createEvidenceSnapshotReader, type EvidenceSnapshotResult } from '@/lib/evidence/publishedSnapshot'
+import { testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from '@/lib/evidence/testIntelligenceSnapshot'
+import { buildEvidenceMeta, etagOf, ifNoneMatchHits, overlayRunningEvidence } from '@/lib/evidence/overlay'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
 
@@ -426,11 +432,37 @@ function attachAiEvalAssurance(report: TestIntelligenceReport): TestIntelligence
   } catch { return report }
 }
 
-export async function GET(): Promise<NextResponse> {
+type DatasetResult = EvidenceSnapshotResult<TestIntelligenceReport>
+
+function datasetMeta(result: DatasetResult) {
+  return {
+    status: result.status,
+    sourceSha: result.provenance?.sourceSha ?? null,
+    runId: result.provenance?.runId ?? null,
+    runAttempt: result.provenance?.runAttempt ?? null,
+    snapshot: result.provenance?.snapshot ?? null,
+    sha256: result.provenance?.sha256 ?? null,
+    collectedAt: result.provenance?.collectedAt ?? null,
+    expiresAt: result.provenance?.expiresAt ?? null,
+    pointerExpired: result.provenance?.pointerExpired ?? null,
+    snapshotAgeMs: result.provenance?.snapshotAgeMs ?? null,
+    ...(result.error ? { error: result.error } : {}),
+  }
+}
+
+async function assembleReport(file: string, publishedReader: ReturnType<typeof createEvidenceSnapshotReader<TestIntelligenceReport>>): Promise<{
+  report: TestIntelligenceReport; runningKnown: boolean; dataset: ReturnType<typeof datasetMeta>
+}> {
+  const published = await publishedReader.read()
+  const dataset = datasetMeta(published)
+  if (published.status === 'unavailable') {
+    const report = emptyReport(`Published Test Intelligence snapshot unavailable: ${published.error ?? 'no validated snapshot'}`)
+    return { report, runningKnown: false, dataset }
+  }
   try {
-    const parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
+    const parsed = published.snapshot ?? JSON.parse(await fs.readFile(file, 'utf8')) as TestIntelligenceReport
     if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.components)) {
-      return NextResponse.json(emptyReport('Unsupported test-intelligence report schema'))
+      return { report: emptyReport('Unsupported test-intelligence report schema'), runningKnown: false, dataset }
     }
     const compatible = {
       ...parsed, history: parsed.history ?? [], performanceHistory: parsed.performanceHistory ?? [], runHistory: parsed.runHistory ?? [], testCases: parsed.testCases ?? [], clientExperiences: parsed.clientExperiences ?? [],
@@ -440,10 +472,47 @@ export async function GET(): Promise<NextResponse> {
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },
       })),
     }
-    const current = enforceRuntimeFreshness(compatible)
+    // Running commits come from ONE Kubernetes list call, never from the services (#13201).
+    const running = await loadRunningCommits().catch(() => null)
+    const joined = await overlayRunningEvidence(compatible, running, (component, commit) => commitEvidence.read(component, commit))
+    const current = enforceRuntimeFreshness(joined)
     const withJourneys = await attachLiveJourneys(current)
-    return NextResponse.json(attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), { headers: { 'Cache-Control': 'no-store' } })
+    return { report: attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), runningKnown: running !== null, dataset }
   } catch {
-    return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))
+    return { report: emptyReport(published.status === 'stale'
+      ? `Published Test Intelligence snapshot stale and no usable snapshot was available: ${published.error ?? 'unknown reason'}`
+      : 'test-intelligence.json is not bundled'), runningKnown: false, dataset }
   }
+}
+
+// One assembled report per snapshot file, refreshed at most every CACHE_TTL_MS however many
+// viewers poll: the Prometheus/Tempo/Kubernetes/store fan-out is paid per TTL, not per request.
+const CACHE_TTL_MS = 30_000
+const commitEvidence = createCommitEvidenceReader()
+type AssembledReport = { report: TestIntelligenceReport; runningKnown: boolean; dataset: ReturnType<typeof datasetMeta> }
+const caches = new Map<string, SnapshotCache<AssembledReport>>()
+function cacheFor(file: string) {
+  const baseUrl = testIntelligenceSnapshotBaseUrl()
+  const key = `${file}\0${baseUrl ?? '<disabled>'}`
+  let cache = caches.get(key)
+  if (!cache) {
+    const publishedReader = createEvidenceSnapshotReader({
+      baseUrl,
+      validateSnapshot: validateTestIntelligenceSnapshot,
+      collectedAt: testIntelligenceCollectedAt,
+    })
+    cache = createSnapshotCache({ load: () => assembleReport(file, publishedReader), ttlMs: CACHE_TTL_MS })
+    caches.set(key, cache)
+  }
+  return cache
+}
+
+export async function GET(req: Request): Promise<Response> {
+  const { value, producedAt } = await cacheFor(reportFile()).get()
+  const payload = JSON.stringify({ ...value.report, evidence: buildEvidenceMeta(value.report, value.runningKnown, producedAt, value.dataset) })
+  const etag = etagOf(payload)
+  // `no-cache` = always revalidate; an unchanged poll is a bodyless 304.
+  const headers = { 'Cache-Control': 'private, no-cache', ETag: etag }
+  if (ifNoneMatchHits(req.headers.get('if-none-match') ?? null, etag)) return new Response(null, { status: 304, headers })
+  return new NextResponse(payload, { headers: { ...headers, 'Content-Type': 'application/json' } })
 }

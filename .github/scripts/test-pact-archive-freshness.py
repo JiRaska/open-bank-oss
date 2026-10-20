@@ -17,6 +17,19 @@ JS = 'pacts/openbank-ui-openbank-provider.json'
 
 
 class ArchiveFreshnessTest(unittest.TestCase):
+    def test_publication_follows_freshness_proofs_without_cross_runner_marker(self):
+        workflow = yaml.safe_load(WORKFLOW.read_text())['jobs']['drift-check']['steps']
+        names = [step.get('name') for step in workflow]
+        archive = names.index('Verify shard coverage and restore regenerated JVM contracts')
+        freshness = names.index('Verify every committed pact was actually regenerated')
+        prepare = names.index('Prepare verified admin UI contracts')
+        self.assertLess(archive, freshness)
+        self.assertLess(freshness, prepare)
+        self.assertIn('--marker', workflow[prepare].get('run', ''))
+        self.assertIn('--jvm-pacts-manifest', workflow[prepare].get('run', ''))
+        self.assertIn('verified-jvm-pacts.txt', workflow[prepare].get('run', ''))
+        self.assertIn('cp -- "${RUNNER_TEMP}/expected-jvm-pacts.txt"', workflow[freshness].get('run', ''))
+
     def test_workflow_runs_this_test_for_relevant_changes(self):
         workflow = yaml.safe_load(WORKFLOW.read_text())
         triggers = workflow.get('on', workflow.get(True))
@@ -101,6 +114,7 @@ class ArchiveFreshnessTest(unittest.TestCase):
             self.assertEqual((root / JVM).read_text(), 'fresh generated contract')
             r = self.run_step('Verify every committed pact was actually regenerated', root, tmp)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual((tmp / 'verified-jvm-pacts.txt').read_text(), JVM + '\n')
 
     def test_missing_archive_member_cannot_reuse_stale_checkout(self):
         with tempfile.TemporaryDirectory() as d:
@@ -130,6 +144,7 @@ class ArchiveFreshnessTest(unittest.TestCase):
             r = self.run_step('Verify every committed pact was actually regenerated', root, tmp)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn(JS, r.stdout)
+            self.assertFalse((tmp / 'verified-jvm-pacts.txt').exists())
 
     def test_js_only_scope_keeps_js_freshness_and_ignores_jvm_output(self):
         with tempfile.TemporaryDirectory() as d:

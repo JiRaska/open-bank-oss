@@ -23,7 +23,8 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { findService } from './fleet'
 import { serviceBaseUrl, k8sNameOf, type ServiceEntry } from './registry'
-import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
+import { resolveAdminUiContent, type ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 // A fleet-wide overview probes many pods concurrently; 2s produced false
 // "documentation unavailable" cards during normal JVM scheduling delays.
@@ -48,6 +49,7 @@ export interface DocsIndex {
   gitCommit?: string
   buildTime?: string
   source: 'live' | 'bundle'
+  contentSource?: ContentSourceMetadata
   requestedLang: string
   availableLanguages: string[]
   /**
@@ -62,6 +64,7 @@ export interface DocsIndex {
 
 export interface DocsDocument {
   source: 'live' | 'bundle'
+  contentSource?: ContentSourceMetadata
   lang: string
   availableLanguages: string[]
   markdown: string
@@ -110,11 +113,25 @@ function resolveLangFromMap<T>(langMap: Map<string, T>, requested: string): T | 
 
 async function indexFromBundle(serviceDir: string, requestedLang: string): Promise<DocsIndex | null> {
   const dir = path.join(docsBundleRoot(), serviceDir, 'docs')
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.libsDocs,
+    async () => {
+      try {
+        const entries = (await fs.readdir(dir)).filter(file => file.endsWith('.md'))
+        return await Promise.all(entries.map(async file => ({
+          path: `openbank-libs/docs/${file}`,
+          markdown: await fs.readFile(path.join(dir, file), 'utf-8'),
+        })))
+      } catch { return null }
+    },
+  )
+  if (!resolved.value) return null
   try {
-    const entries = await fs.readdir(dir)
+    const files = resolved.value.map(item => ({ file: path.basename(item.path), markdown: item.markdown }))
     // Group filenames → slug → { lang → filename }
     const bySlug = new Map<string, Map<string, string>>()
-    for (const file of entries) {
+    const fileContent = new Map(files.map(item => [item.file, item.markdown]))
+    for (const { file } of files) {
       const parsed = parseSlugAndLang(file)
       if (!parsed) continue
       const slug = parsed.slug.toUpperCase() === 'README' ? 'index' : parsed.slug
@@ -125,7 +142,8 @@ async function indexFromBundle(serviceDir: string, requestedLang: string): Promi
     for (const [slug, langMap] of [...bySlug.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const filename = resolveLangFromMap(langMap, requestedLang)
       if (!filename) continue
-      const content = await fs.readFile(path.join(dir, filename), 'utf-8')
+      const content = fileContent.get(filename)
+      if (content === undefined) continue
       const titleMatch = content.match(/^#\s+(.+)$/m)
       const langPresent = [...langMap.keys()].filter(l => l !== '').sort()
       const availableLanguages = langPresent.length > 0 ? langPresent : ['']
@@ -148,6 +166,10 @@ async function indexFromBundle(serviceDir: string, requestedLang: string): Promi
       gitCommit: process.env.BUILD_GIT_SHA,
       buildTime: process.env.BUILD_DATE,
       source: 'bundle',
+      contentSource: resolved.contentSource,
+      version: process.env.BUILD_VERSION ?? process.env.NEXT_PUBLIC_BUILD_VERSION,
+      gitCommit: process.env.BUILD_GIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_GIT_SHA,
+      buildTime: process.env.BUILD_DATE ?? process.env.NEXT_PUBLIC_BUILD_DATE,
       requestedLang,
       availableLanguages,
       items,
@@ -161,6 +183,20 @@ async function docFromBundle(serviceDir: string, slug: string, requestedLang: st
   const resolvedSlug = slug === 'index' ? 'README' : slug
   if (!SAFE_SLUG_RE.test(resolvedSlug.toLowerCase())) return null
   const dir = path.join(docsBundleRoot(), serviceDir, 'docs')
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.libsDocs,
+    async () => {
+      try {
+        const entries = (await fs.readdir(dir)).filter(file => file.endsWith('.md'))
+        const docs = await Promise.all(entries.map(async file => ({
+          path: `openbank-libs/docs/${file}`,
+          markdown: await fs.readFile(path.join(dir, file), 'utf-8'),
+        })))
+        return docs
+      } catch { return null }
+    },
+  )
+  if (!resolved.value) return null
   // Try in order: requested → "" (language-agnostic) → en → cs → any
   const candidates = [
     `${resolvedSlug}.${requestedLang}.md`,
@@ -169,23 +205,20 @@ async function docFromBundle(serviceDir: string, slug: string, requestedLang: st
       .filter(l => l !== requestedLang)
       .map(l => `${resolvedSlug}.${l}.md`),
   ]
-  let availableLanguages: string[] = []
-  try {
-    const entries = await fs.readdir(dir)
-    availableLanguages = entries
-      .map(f => parseSlugAndLang(f))
+  const files = resolved.value.map(item => ({ file: path.basename(item.path), markdown: item.markdown }))
+  const availableLanguages = files
+      .map(({ file }) => parseSlugAndLang(file))
       .filter((x): x is { slug: string; lang: string } => x !== null)
       .filter(p => p.slug === resolvedSlug && p.lang !== '')
       .map(p => p.lang)
       .sort()
-  } catch { /* dir missing entirely */ }
 
   for (const cand of candidates) {
-    try {
-      const markdown = await fs.readFile(path.join(dir, cand), 'utf-8')
+    const markdown = files.find(item => item.file === cand)?.markdown
+    if (markdown !== undefined) {
       const chosenLang = parseSlugAndLang(cand)?.lang ?? ''
-      return { source: 'bundle', lang: chosenLang, availableLanguages, markdown }
-    } catch { /* try next */ }
+      return { source: 'bundle', contentSource: resolved.contentSource, lang: chosenLang, availableLanguages, markdown }
+    }
   }
   return null
 }
@@ -196,16 +229,26 @@ async function docFromBundle(serviceDir: string, slug: string, requestedLang: st
  * Base URL for talking to a running service from the admin-ui server process.
  *   • In-cluster → real Service DNS (`<name>.<namespace>.svc:<port>`) resolved
  *     via the ADR-0051 discovery feed — the same path the BFF proxy and System
- *     Health use. Returns null when the service isn't deployed (→ docs degrade to
- *     a calm "not available" 404 instead of hanging on an unresolvable host).
+ *     Health use. Returns null only when a complete inventory confirms absence;
+ *     incomplete discovery is surfaced as unavailable rather than a false 404.
  *   • Off-cluster (local dev / docker-compose) → legacy localhost/container map.
  * The old code always used the compose hostname / localhost, which does not
  * resolve inside the Kubernetes pod — so docs for *running* services silently
  * 404'd in the sandbox.
  */
+export class DocsDiscoveryIncompleteError extends Error {
+  constructor() {
+    super('Kubernetes service discovery is incomplete')
+    this.name = 'DocsDiscoveryIncompleteError'
+  }
+}
+
 async function liveBaseUrl(svc: ServiceEntry): Promise<string | null> {
   if (inCluster()) {
-    return resolveInClusterBaseUrl(k8sNameOf(svc))
+    const result = await resolveInClusterService(k8sNameOf(svc))
+    if (result.state === 'found') return result.baseUrl
+    if (result.state === 'unknown') throw new DocsDiscoveryIncompleteError()
+    return null
   }
   return serviceBaseUrl(svc)
 }
@@ -217,8 +260,14 @@ async function docsBaseUrl(id: string): Promise<string | null> {
   const svc = findService(id)
   if (svc) return liveBaseUrl(svc)
   if (!inCluster()) return null
-  return (await resolveInClusterBaseUrl(id))
-    ?? (await resolveInClusterBaseUrl(`${id}-service`))
+  let discoveryIncomplete = false
+  for (const name of [id, `${id}-service`]) {
+    const result = await resolveInClusterService(name)
+    if (result.state === 'found') return result.baseUrl
+    if (result.state === 'unknown') discoveryIncomplete = true
+  }
+  if (discoveryIncomplete) throw new DocsDiscoveryIncompleteError()
+  return null
 }
 
 async function indexFromLive(id: string, requestedLang: string): Promise<DocsIndex | null> {

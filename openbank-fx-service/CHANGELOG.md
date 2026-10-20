@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.19.0...fx-service-v0.20.0) (2026-10-17)
+
+
+### Features
+
+* **fx:** fx-rates-read synthetic journey — scope-derived identity for the published rate sheet ([#12850](https://github.com/JiRaska/open-bank-oss/issues/12850)) ([230d596](https://github.com/JiRaska/open-bank-oss/commit/230d596fa32ae71a58510c75ec7b2961e12931ee))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.18.1...fx-service-v0.19.0) (2026-10-16)
 
 
