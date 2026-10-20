@@ -7,6 +7,8 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { auth } from '@/auth'
 import { inCluster, resolveInClusterService } from '@/lib/discovery'
+import { classifySecurityReportFreshness, parseSecurityReportTimestamp } from '@/lib/security/reportFreshness'
+import { parseSecurityEnvelope } from '@/lib/security/summary'
 
 // ── Security posture: READ-ONLY consumer of CI-produced results ──────────────
 //
@@ -110,9 +112,14 @@ async function fromScanner(): Promise<NextResponse | null> {
       const payload: Unavailable = { available: false, reason, detail }
       return NextResponse.json(payload, { status: 200 })
     }
-    const report = await res.json().catch(() => null)
-    if (report == null) {
-      const payload: Unavailable = { available: false, reason: 'error', detail: 'Invalid JSON from scanner' }
+    const body = await res.json().catch(() => null)
+    let report: unknown
+    try {
+      const envelope = parseSecurityEnvelope({ available: true, report: body })
+      if (!envelope.available) throw new Error('Invalid report')
+      report = envelope.report
+    } catch {
+      const payload: Unavailable = { available: false, reason: 'error', detail: 'Invalid report from scanner' }
       return NextResponse.json(payload, { status: 200 })
     }
     return NextResponse.json({ available: true, report }, { status: 200 })
@@ -134,18 +141,51 @@ export async function GET() {
     // A scanner outage must not hide the last usable report. When both sources
     // provide reports, compare their source timestamps; request time is not data
     // freshness. If only one report has a parseable timestamp, prefer that one.
+    const scannerStatus = scannerBody?.available === true
+      ? 'available' as const
+      : 'unavailable' as const
     if (scannerBody?.available === true && bundleBody?.available === true) {
-      const bundleTime = Date.parse(bundleBody.report?.generatedAt ?? '')
-      const scannerTime = Date.parse(scannerBody.report?.generatedAt ?? '')
-      if (Number.isFinite(scannerTime) && (!Number.isFinite(bundleTime) || scannerTime > bundleTime)) return scanner
-      if (Number.isFinite(bundleTime)) return bundle
-      return scanner
+      const bundleTime = parseSecurityReportTimestamp(bundleBody.report?.generatedAt)
+      const scannerTime = parseSecurityReportTimestamp(scannerBody.report?.generatedAt)
+      if (scannerTime !== null && (bundleTime === null || scannerTime > bundleTime)) {
+        return withReportMetadata(scannerBody.report, 'scanner', scannerStatus)
+      }
+      if (bundleTime !== null) return withReportMetadata(bundleBody.report, 'ci-bundle', scannerStatus)
+      return withReportMetadata(scannerBody.report, 'scanner', scannerStatus)
     }
-    if (bundleBody?.available === true) return bundle
+    if (bundleBody?.available === true) return withReportMetadata(bundleBody.report, 'ci-bundle', scannerStatus)
+    if (scannerBody?.available === true) return withReportMetadata(scannerBody.report, 'scanner', scannerStatus)
     return scanner
   }
-  return bundle ?? scanner ?? NextResponse.json(
+  if (bundle) {
+    const bundleBody = await bundle.clone().json().catch(() => null)
+    if (bundleBody?.available === true) return withReportMetadata(bundleBody.report, 'ci-bundle', 'not-configured')
+    return bundle
+  }
+  if (scanner) {
+    const scannerBody = await scanner.clone().json().catch(() => null)
+    if (scannerBody?.available === true) return withReportMetadata(scannerBody.report, 'scanner', 'available')
+    return scanner
+  }
+  return NextResponse.json(
       { available: false, reason: 'not_deployed', detail: 'no CI security report bundled and no scanner configured' } satisfies Unavailable,
       { status: 200 },
     )
+}
+
+function withReportMetadata(
+  report: unknown,
+  source: 'scanner' | 'ci-bundle',
+  scannerStatus: 'available' | 'unavailable' | 'not-configured',
+): NextResponse {
+  const generatedAt = typeof report === 'object' && report !== null && 'generatedAt' in report
+    ? report.generatedAt
+    : undefined
+  return NextResponse.json({
+    available: true,
+    report,
+    source,
+    scannerStatus,
+    freshness: classifySecurityReportFreshness(generatedAt),
+  }, { status: 200, headers: { 'Cache-Control': 'no-store' } })
 }
