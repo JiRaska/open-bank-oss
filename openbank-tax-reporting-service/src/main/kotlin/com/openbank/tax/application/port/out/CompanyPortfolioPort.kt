@@ -4,16 +4,10 @@
 
 package com.openbank.tax.application.port.out
 
+import com.openbank.libs.iso20022.HoldingQuantityType
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
-
-/** Meaning of a treasury position's quantity; values from different bases cannot be summed. */
-enum class PortfolioQuantityBasis {
-    UNIT,
-    FACE_AMOUNT,
-    AMORTISED_VALUE,
-}
 
 /** One holding of the pension company's own investment portfolio at a period end. */
 data class CompanyPortfolioPosition(
@@ -22,7 +16,7 @@ data class CompanyPortfolioPosition(
     val quantity: BigDecimal,
     val valuation: BigDecimal,
     val valuationCurrency: String,
-    val quantityBasis: PortfolioQuantityBasis,
+    val quantityBasis: HoldingQuantityType,
 )
 
 /** Identifies one period-end custodian statement returned by treasury for a safekeeping account. */

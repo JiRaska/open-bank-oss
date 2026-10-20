@@ -5,12 +5,12 @@
 package com.openbank.tax.infrastructure.returns.pension
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.iso20022.HoldingQuantityType
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.tax.application.port.out.CompanyPortfolio
 import com.openbank.tax.application.port.out.CompanyPortfolioPort
 import com.openbank.tax.application.port.out.CompanyPortfolioPosition
 import com.openbank.tax.application.port.out.CompanyPortfolioSourceStatement
-import com.openbank.tax.application.port.out.PortfolioQuantityBasis
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -155,7 +155,7 @@ class TreasuryCompanyPortfolio(
 
         private fun decodePosition(index: Int, position: TreasuryPositionDto): CompanyPortfolioPosition {
             val rawBasis = position.quantityBasis ?: bad("positions[$index].quantityBasis absent")
-            val basis = PortfolioQuantityBasis.entries.firstOrNull { it.name == rawBasis }
+            val basis = HoldingQuantityType.entries.firstOrNull { it.name == rawBasis }
                 ?: bad("positions[$index].quantityBasis '$rawBasis' is unsupported")
             return CompanyPortfolioPosition(
                 instrumentClass = position.instrumentClass ?: bad("positions[$index].instrumentClass absent"),
@@ -213,7 +213,7 @@ data class Psp3412PsRow(
     val isin: String,
     val quantity: BigDecimal,
     val valuation: BigDecimal,
-    val quantityBasis: PortfolioQuantityBasis,
+    val quantityBasis: HoldingQuantityType,
 )
 
 /** The assembled return: instrument-level [rows] and the catalogue [datapoints] derived from them. */

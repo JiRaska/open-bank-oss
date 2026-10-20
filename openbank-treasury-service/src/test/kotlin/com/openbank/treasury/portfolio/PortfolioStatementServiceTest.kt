@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.portfolio
 
+import com.openbank.libs.iso20022.HoldingQuantityType
 import com.openbank.treasury.application.port.out.DuplicatePortfolioStatementException
 import com.openbank.treasury.application.port.out.PortfolioSnapshotMissingException
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
@@ -15,7 +16,6 @@ import com.openbank.treasury.domain.model.CfiClassMapping
 import com.openbank.treasury.domain.model.CustodyHolding
 import com.openbank.treasury.domain.model.CustodyStatement
 import com.openbank.treasury.domain.model.Isin
-import com.openbank.treasury.domain.model.PortfolioQuantityBasis
 import com.openbank.treasury.infrastructure.iso20022.Semt002Statements
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -108,14 +108,14 @@ class PortfolioStatementServiceTest {
     @Test
     fun `all explicit ISO quantity dimensions survive parsing and classification`() {
         val parsed = statement()
-        assertThat(parsed.holdings[0].quantityBasis).isEqualTo(PortfolioQuantityBasis.FACE_AMOUNT)
-        assertThat(parsed.holdings[2].quantityBasis).isEqualTo(PortfolioQuantityBasis.UNIT)
+        assertThat(parsed.holdings[0].quantityBasis).isEqualTo(HoldingQuantityType.FACE_AMOUNT)
+        assertThat(parsed.holdings[2].quantityBasis).isEqualTo(HoldingQuantityType.UNIT)
         val amortised = Semt002Statements.parse(
             String(fixture()).replace("<FaceAmt>", "<AmtsdVal>").replace("</FaceAmt>", "</AmtsdVal>").toByteArray(),
         )
         val classified = classes.classify("pension-co", amortised, "CZK")
-        assertThat(classified.positions[0].quantityBasis).isEqualTo(PortfolioQuantityBasis.AMORTISED_VALUE)
-        assertThat(classified.positions[2].quantityBasis).isEqualTo(PortfolioQuantityBasis.UNIT)
+        assertThat(classified.positions[0].quantityBasis).isEqualTo(HoldingQuantityType.AMORTISED_VALUE)
+        assertThat(classified.positions[2].quantityBasis).isEqualTo(HoldingQuantityType.UNIT)
     }
 
     @Test

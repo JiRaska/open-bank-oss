@@ -45,7 +45,6 @@ duplicate openbank-ledger-service AccountingRole  # #13441
 duplicate openbank-lending-service LoanRateIndex  # #13434
 duplicate openbank-libs-domain ProposalState  # #13441
 duplicate openbank-libs-domain WaiveOperator  # #13441
-duplicate openbank-libs-iso20022 HoldingQuantityType  # #13441
 duplicate openbank-libs-lending CreditProductKind  # #13441
 duplicate openbank-libs-lending PolicyOperator  # #13441
 duplicate openbank-libs-runtime SuppressionReason  # #13441
@@ -67,9 +66,7 @@ duplicate openbank-sepa-payment AmlCaseRiskLevel  # #13435
 duplicate openbank-sepa-payment FraudVerdict  # #13439
 duplicate openbank-sepa-payment ScreeningDecision  # #13439
 duplicate openbank-sepa-payment ScreeningMatchStatus  # #13439
-duplicate openbank-tax-reporting-service PortfolioQuantityBasis  # #13441
 duplicate openbank-treasury-service LedgerRole  # #13441
-duplicate openbank-treasury-service PortfolioQuantityBasis  # #13441
 numeric openbank-kyb-service ExpectedTurnover OVER_10M  # #13436
 numeric openbank-kyb-service ExpectedTurnover UP_TO_100K  # #13436
 numeric openbank-kyb-service ExpectedTurnover UP_TO_10M  # #13436
