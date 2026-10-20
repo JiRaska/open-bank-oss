@@ -57,7 +57,6 @@ test('content dataset is bound to its reviewed-source collection time and SHA fi
 test('content publication uses only the admin-ui/content prefix and preserves source provenance', async () => {
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const snapshot = JSON.parse(collectAdminUiContent({ sourceSha }).toString('utf8'))
-  assert.equal(snapshot.content.clusterTopology, undefined, 'publisher stays compatible with deployed readers until explicitly enabled')
   const h = harness(snapshot, { ...env, EVIDENCE_SOURCE_SHA: sourceSha })
   try {
     await h.publish('content', { now: () => Date.now() + 1_000 })

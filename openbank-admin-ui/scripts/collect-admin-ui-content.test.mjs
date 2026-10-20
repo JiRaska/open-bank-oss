@@ -72,6 +72,7 @@ test('schema v1 accepts older snapshots without cluster topology and rejects mal
 
 test('validator rejects mismatched provenance, malformed policy, unsafe inventory paths and oversize content', () => {
   const source = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA }).toString('utf8'))
+  assert.equal(source.content.clusterTopology, undefined, 'default publisher output stays compatible with deployed readers')
   const bad = mutate => {
     const copy = structuredClone(source)
     mutate(copy)
