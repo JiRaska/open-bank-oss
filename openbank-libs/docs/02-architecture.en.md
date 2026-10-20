@@ -6,6 +6,7 @@
 flowchart LR
   Service[Quarkus service] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
+  Finance[openbank-libs-finance] --> Domain
   Legacy[openbank-libs compatibility umbrella] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -14,6 +15,8 @@ flowchart LR
 ```
 
 `openbank-libs-domain` contains shared domain primitives and ports. Its build file documents the framework boundary; it must not import Quarkus or CDI. `openbank-libs-runtime` contains framework adapters, HTTP resources and CDI wiring. It exports domain types to consumers. The root `openbank-libs` module remains a compatibility umbrella for existing dependencies; it no longer owns the library source.
+
+`openbank-libs-finance` uses the domain kernel's `BusinessCalendar` and `BusinessDayConvention` for financial schedules. Its `DateRoll` name is a Kotlin type alias for the shared convention, not a second enum. `UNADJUSTED` leaves a date unchanged even on a holiday; the four existing roll conventions retain their order and behavior. Calendar closures and any extra holidays affect schedule fingerprints, so changing them can change a schedule's version.
 
 The service owns its documentation files at `src/main/resources/docs/`. The common Gradle convention generates `00-build.md` during `processResources` and packages it beside authored Markdown. `ClasspathMarkdownLoader` reads those classpath resources, `DocsCatalog` selects language variants and hashes content, and `DocsResource` publishes the index, metadata and documents from the running build. The Admin UI fetches the running endpoint through Kubernetes discovery. This keeps the displayed service documentation tied to the deployed image.
 
