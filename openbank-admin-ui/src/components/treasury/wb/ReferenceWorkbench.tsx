@@ -28,8 +28,7 @@ import { downloadText, Field, Notice, ReadFailure, recordLabel, Section, td, th,
 
 type ErrorMap = Record<string, string>
 const STATUS_TONE: Record<string, Tone> = { PENDING: 'warning', ACTIVE: 'success', SUPERSEDED: 'neutral', REJECTED: 'danger' }
-const READONLY = ['user-activity', 'application-version-history'] as const
-type View = string // a kind id or a READONLY id
+type View = string // a reference kind id, or one of the two read-only views: 'user-activity' | 'application-version-history'
 type Tab = 'records' | 'pending' | 'io'
 
 export function statusText(s: string, t: (cs: string, en: string) => string): string {

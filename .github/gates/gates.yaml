@@ -4105,7 +4105,10 @@ gates:
   - id: libs-annotations-implemented
     name: "openbank-libs annotations are implemented, and no doc names a phantom one (#4011, enforced)"
     group: kotlin
-    budget_seconds: 37
+    # 37 s -> 60 s (2026-10-20): the scan is linear in Kotlin sources under the libs and every
+    # service; ADR-0344 added a libs module and ~800 sources, and CI measured 37.2 s while a local
+    # run takes 17 s. Raised deliberately, not to hide a slowdown in the checker itself.
+    budget_seconds: 60
     mode: enforced
     selftest_inputs: [".github/scripts/check-libs-annotations-implemented.py"]
     selftest: |
