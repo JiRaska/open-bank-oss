@@ -144,6 +144,8 @@ class PensionCoInstanceSwitchesIT {
             "OPENBANK_OUTBOX_DISPATCH_ENABLED" to "openbank.outbox.dispatch-enabled",
             "OPENBANK_OUTBOX_POLL_INTERVAL" to "openbank.outbox.poll-interval",
             "MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_TOPIC" to "mp.messaging.outgoing.ledger-events-out.topic",
+            "MP_MESSAGING_OUTGOING_LEDGER_EVENTS_OUT_LAZY_CLIENT" to
+                "mp.messaging.outgoing.ledger-events-out.lazy-client",
             "OPENBANK_LEDGER_TIEOUT_CRON" to "openbank.ledger.tieout.cron",
             "OPENBANK_LEDGER_TIEOUT_FRESHNESS_CRON" to "openbank.ledger.tieout.freshness-cron",
             "OPENBANK_LEDGER_FX_REVALUATION_CRON" to "openbank.ledger.fx-revaluation.cron",
