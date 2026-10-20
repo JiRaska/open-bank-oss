@@ -1235,7 +1235,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-26a069c7
 
           imagePullPolicy: IfNotPresent
           ports:
