@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.0...account-service-v0.35.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **account:** preserve booking proof across transaction client consumers ([#13222](https://github.com/JiRaska/open-bank-oss/issues/13222)) ([427ce5a](https://github.com/JiRaska/open-bank-oss/commit/427ce5a055719d8e5f0cc805f44b581b9bf5c55f))
+
 ## [0.35.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.34.3...account-service-v0.35.0) (2026-10-16)
 
 
