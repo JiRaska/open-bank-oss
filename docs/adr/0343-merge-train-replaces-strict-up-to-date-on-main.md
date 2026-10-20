@@ -245,12 +245,27 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    merge would move the carrier's base; the carrier's own "main moved since publish" check also
    rejects it if one ever does), and at most one per tick, since a merge makes every other
    strict-lane head behind;
-2. if the head is up to date and its required CI is still running, *reserves* main: settle reports
-   in-flight, so no train is built under it, and no other strict-lane PR is updated;
+2. if the head is up to date and its required CI has not concluded (running, or not yet reported —
+   the normal state for the first minutes after update-branch), *reserves* main for the oldest such
+   PR: settle reports in-flight, so no train is built under it, no fast-lane status is posted (one
+   posted earlier is withdrawn to `pending`), and no other strict-lane PR is updated or merged. The
+   reservation lapses `STRICT_RESERVE_SECONDS` (90 min) after the head commit, so a hung or
+   never-starting CI cannot freeze main;
 3. if it is green but behind, calls update-branch (pinned to the judged head) for the oldest such PR
-   only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
-   and a later tick merges it. With strict off `auto-update-armed-prs.yml` exits before enumerating
-   PRs, so the train owns this update.
+   only — one per tick, none while main is reserved or a train carrier is in flight, and only when
+   no strict-lane head is already green over live main (that one merges first, at no CI cost) — so
+   CI is never flooded and the fresh head is not overtaken before its CI ends. The tick that updates
+   also reports in-flight, so its own train build does not go ahead. Its CI then runs and a later
+   tick merges it. With strict off `auto-update-armed-prs.yml` exits before enumerating PRs, so the
+   train owns this update.
+
+   *Amended 2026-10-20 (strict-lane starvation).* As first written the reservation held only for a
+   head with an already-reported pending context, and blocked trains and strict updates but not fast
+   merges or a second strict merge. Measured over 103 `merge-train.yml` runs (2026-10-19 17:00Z to
+   2026-10-20 17:20Z), one manual-lane PR was updated five times and merged zero times: each fresh
+   head was overtaken by a strict merge in the same tick as its update, by a train that was already
+   in flight when it was updated, or by a fast-lane merge, so its CI always concluded on a head that
+   was behind again.
 Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
 fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
 symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming

@@ -66,6 +66,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -91,6 +92,11 @@ TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
 STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
 STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
+# A strict-lane head that contains live main and whose CI has not concluded holds main reserved for at
+# most this long after its head commit (an update-branch merge commit is stamped when it is made), so a
+# hung or never-starting CI cannot freeze main. Far above the measured strict-lane CI window.
+STRICT_RESERVE_SECONDS = 90 * 60
+clock = time.time      # the self-test moves time forward through this
 OK_STATES = frozenset({"success"})
 # Fast-lane exclusions.
 PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/", "docs/adr/", ".github/")
@@ -310,7 +316,10 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     if ok:
         return "green", why
     member = [c for c in required if c != STATUS_CONTEXT]
-    if why.startswith("required context pending") and not any(
+    # "never reported" is the normal state for the first minutes after update-branch: no workflow has
+    # registered its check yet. Treating it as anything but pending released the reservation exactly
+    # when it was needed (ADR-0343 strict-lane starvation).
+    if why.startswith(("required context pending", "required context never reported")) and not any(
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
@@ -1117,11 +1126,19 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red)
     fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
+    reserved = strict_reservation(git, base, strict)
     for m in fast:
+        if reserved is not None:
+            # Main is reserved for a strict-lane PR whose CI is running on a head over this main: a
+            # fast merge now would put it behind again. Withdraw a success posted before the
+            # reservation began, so auto-merge cannot act on it either.
+            if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] == "success":
+                gh.post_status(m.head_sha, "pending", f"fast lane: main reserved for strict-lane #{reserved}")
+            continue
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
         summary["fast"].append(m.number)
-    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary)
+    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, reserved)
     stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
 
@@ -1196,52 +1213,89 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
             summary["refreshed"].append(n)
 
 
-def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict) -> None:
-    """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
-    contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
-    date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
-    behind -> update-branch for the oldest one only, and none while another is reserved, so CI is never
-    flooded. Nothing here executes PR
-    code: ancestry is a git query, the rest is the API."""
-    summary.setdefault("strict", [])
-    summary.setdefault("updated", [])
-    updated = False
+def strict_reservation(git, base: str, strict: list, now: float | None = None) -> int | None:
+    """The strict-lane PR main is reserved for, or None. It is the OLDEST strict-lane PR whose head
+    already contains live main and whose required CI has not concluded (pending or not yet reported),
+    within STRICT_RESERVE_SECONDS of its head commit. While it holds, nothing else moves main — no
+    train is built, no fast-lane status is posted, no other strict-lane PR is updated or merged —
+    because any of those puts the reserved head behind again and wastes the CI cycle it is running.
+    That was the starvation: the reservation was only taken for an already-REPORTED pending context,
+    and even then blocked trains and strict updates but not fast merges or another strict merge."""
+    now = clock() if now is None else now
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
-        current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
-        if current and state == "pending":
-            log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
-            summary["in_flight"] = True
-            updated = True  # one strict-lane PR in progress at a time: no other update while it runs
+        if state != "pending":
             continue
-        if state != "green":
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
             continue
+        stamp = git("log", "-1", "--format=%ct", head, check=False).stdout.strip()
+        age = now - int(stamp) if stamp.isdigit() else STRICT_RESERVE_SECONDS + 1
+        if age > STRICT_RESERVE_SECONDS:
+            log(f"::warning::#{n} strict: CI unconcluded {int(age) // 60} min after its head commit — "
+                f"reservation expired (cap {STRICT_RESERVE_SECONDS // 60} min), main is not held for it")
+            continue
+        return n
+    return None
+
+
+def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict,
+                reserved: int | None = None) -> None:
+    """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
+    contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
+    date + CI not concluded -> main is RESERVED (strict_reservation: in_flight, so no train is built,
+    no fast-lane status, no other strict update or merge until it concludes or the cap expires);
+    green but behind -> update-branch for the oldest one only, and none while main is reserved or a
+    train is in flight, so the updated head is not overtaken before its CI ends. Nothing here
+    executes PR code: ancestry is a git query, the rest is the API."""
+    summary.setdefault("strict", [])
+    summary.setdefault("updated", [])
+    if reserved is not None:
+        log(f"#{reserved:>6} strict    up to date, CI running: main reserved for it")
+        summary["in_flight"] = True
+        for _state, view in strict:
+            if view["number"] != reserved:
+                log(f"#{view['number']:>6} strict    waits: main reserved for #{reserved}")
+        return
+    green = [(view, git("merge-base", "--is-ancestor", base, view["head_sha"], check=False).returncode == 0)
+             for state, view in strict if state == "green"]
+    # A head that is already green over live main costs no CI: merge it first (oldest such), and only
+    # when there is none spend a CI cycle updating the oldest behind one.
+    for view, current in green:
         if not current:
-            if updated or shadow:
-                continue
-            ok = gh.update_branch(n, head)
-            log(f"#{n:>6} strict    behind main {base[:12]}: update-branch {'requested' if ok else 'refused'}")
-            if ok:
-                updated = True
-                summary["updated"].append(n)
             continue
+        n, head = view["number"], view["head_sha"]
         if carrier_in_flight:
             log(f"#{n:>6} strict    green and up to date, but a train is in flight over main — next tick")
-            continue
+            return
         if shadow:
             log(f"#{n:>6} strict    green and up to date (shadow: no status, no merge)")
             continue
         if gh.main_sha() != base:
             log(f"#{n:>6} strict    main moved since it was read — next tick")
-            break
+            return
         gh.post_status(head, "success", f"strict lane: green on an up-to-date head over main {base[:12]}")
         merged = gh.merge(n, head)
         if not merged:
             log(f"#{n:>6} strict    did not merge; stopping")
-            break
+            return
         summary["strict"].append(n)
         summary["merged"].append(n)
-        break  # main moved: every other strict-lane head is now behind it
+        return  # main moved: every other strict-lane head is now behind it
+    for view, current in green:
+        if current or shadow:
+            continue
+        n, head = view["number"], view["head_sha"]
+        if carrier_in_flight:
+            log(f"#{n:>6} strict    behind main, but a train is in flight — an update now would be overtaken; next tick")
+            return
+        ok = gh.update_branch(n, head)
+        log(f"#{n:>6} strict    behind main {base[:12]}: update-branch {'requested' if ok else 'refused'}")
+        if ok:
+            summary["updated"].append(n)
+            # Main is held for it from now on: this run's train build must not go ahead either,
+            # since the new head has no CI yet and settle first sees it pending on the next tick.
+            summary["in_flight"] = True
+            return
 
 
 def write_output(key: str, value: str) -> None:
@@ -1403,7 +1457,7 @@ class FakeGitHub:
                 out.update(self.main_sequence[sha].pop(0))
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
             out.setdefault(ctx, None if state == "pending" else state)
-        return out
+        return {c: v for c, v in out.items() if v != "absent"}   # "absent": the context never reported
 
     def app_statuses(self, sha):
         out = {}
@@ -1458,6 +1512,8 @@ class FakeGitHub:
         return n
 
     def close_carrier(self, n): self.carriers[n]["state"] = "closed"
+
+    def carriers_open(self): return [n for n, c in self.carriers.items() if c["state"] == "open"]
 
 
 def _synthetic_origin(root: str) -> None:
@@ -2169,6 +2225,76 @@ def self_test() -> int:
             gh.head_checks.clear()
             settle_now()
             check("strict lane: once green on the updated head a later tick merges it", gh.merged == [35], str(gh.merged))
+            gh.updates.clear()
+            reset()
+
+            # ---- strict-lane starvation (the #13433 shape: updated four times, never merged) ----
+            # Each case reserves main for pW (#35) on an up-to-date head whose CI has not concluded,
+            # then offers settle something else that would move main. Known-positive: before the fix
+            # every one of these moved main and left #35 behind again.
+            def reserved_for_35(**checks):
+                open_only("pW")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = checks
+
+            # (a) right after update-branch nothing has REPORTED yet: that is pending, not "not strict".
+            reserved_for_35(**{c: "absent" for c in SYN_REQUIRED[:4]})
+            open_only("p1")
+            s, st = tick()
+            check("strict starvation: a head whose CI has not yet reported still reserves main (no train)",
+                  s["in_flight"] and st == "in-flight" and gh.merged == [] and not gh.carriers_open(),
+                  f"{s} {st} merged={gh.merged}")
+            gh.head_checks.clear()
+            reset()
+
+            # (b) a fast-lane PR gets no merge-train success while main is reserved, and one posted
+            # before the reservation began is withdrawn.
+            reserved_for_35(**{"gates (data)": None})
+            open_only("pF")
+            gh.post_status(gh.prs[34]["head"]["sha"], "success", "fast lane: posted before the reservation")
+            s = settle_now()
+            check("strict starvation: no fast-lane success while main is reserved; an earlier one is withdrawn",
+                  s["in_flight"] and s["fast"] == [] and strict_desc(34)[0] == "pending", f"{s} {strict_desc(34)}")
+            gh.head_checks.clear()
+            reset()
+
+            # (c) another strict-lane PR, green and up to date, does not merge past the reserved one.
+            reserved_for_35(**{"gates (data)": None})
+            open_only("pW2")
+            s = settle_now()
+            check("strict starvation: a younger green strict-lane PR does not merge while main is reserved",
+                  s["in_flight"] and gh.merged == [] and not strict_desc(36)[0], f"{s} merged={gh.merged}")
+            # ...and once the reserved head is green, it merges first (oldest).
+            gh.head_checks.clear()
+            settle_now()
+            check("strict starvation: the reserved PR merges first once its CI is green", gh.merged == [35], str(gh.merged))
+            reset()
+
+            # (d) a hung CI cannot freeze main: past the cap the reservation lapses.
+            reserved_for_35(**{"gates (data)": None})
+            open_only("pW2")
+            real_clock = globals()["clock"]
+            globals()["clock"] = lambda: real_clock() + STRICT_RESERVE_SECONDS + 60
+            try:
+                s = settle_now()
+            finally:
+                globals()["clock"] = real_clock
+            check("strict starvation: a reservation older than the cap lapses and main moves again",
+                  gh.merged == [36], f"{s} merged={gh.merged}")
+            gh.head_checks.clear()
+            reset()
+
+            # (e) an update-branch is not issued while a train is in flight: the train would merge
+            # under the fresh head before its CI ended.
+            open_only("p1")
+            tick()
+            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+            open_only("pW", "p2")
+            gh.prs[2]["auto_merge"] = None
+            gh.merge(2, gh.prs[2]["head"]["sha"])          # pW is now behind main
+            gh.merged.clear()
+            settle_now()
+            check("strict starvation: no update-branch while a train is in flight", gh.updates == [], str(gh.updates))
+            gh.pending_shas.clear()
             gh.updates.clear()
             reset()
 
