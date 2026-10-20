@@ -89,6 +89,8 @@ BUNDLE_REF = "refs/heads/merge-train-bundle"
 # Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
+STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
+STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 OK_STATES = frozenset({"success"})
 # Fast-lane exclusions.
 PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/", "docs/adr/", ".github/")
@@ -840,7 +842,8 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
 
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
-                    limit: int = 64, strict: list | None = None) -> tuple[list[Member], dict[int, dict]]:
+                    limit: int = 64, strict: list | None = None,
+                    red: list | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
@@ -857,6 +860,15 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if fetched != p["head"]["sha"]:
             log(f"#{n:>6} skip      fetched head differs from the API head (pushed meanwhile)")
             continue
+        # The ordinary candidate list is capped, but stale-red refresh must still inspect every
+        # armed PR. Once full, check only the verified head's required statuses: no diff, app-status,
+        # or strict-lane work is needed to decide whether it is red and belongs in the refresh queue.
+        if len(out) >= limit and red is not None:
+            view = pr_view(repo, p, [])
+            failing = stale_red_candidate(view, member_required, gh.checks(fetched))
+            if failing:
+                red.append((view, failing))
+            continue
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
@@ -869,11 +881,15 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             if state:
                 log(f"#{n:>6} strict    {state}: {swhy}")
                 strict.append((state, view))
+        if not ok and red is not None:
+            failing = stale_red_candidate(view, member_required, checks)
+            if failing:
+                red.append((view, failing))
         if ok:
             out.append(Member(n, view["title"], view["body"], fetched, view["head_ref"], view["created_at"],
                               ref=fetched, files=files))
             apps[n] = app
-        if len(out) >= limit:
+        if len(out) >= limit and red is None:
             break
     return out, apps
 
@@ -1026,7 +1042,7 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
 
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
-    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": []}
+    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [], "refreshed": []}
     if not shadow:
         # Phase 1 is gated on the live ruleset, not on the env flag alone: until it requires the App-pinned
         # context with strict off, behave exactly as shadow. Flip order of env vs ruleset is irrelevant.
@@ -1097,7 +1113,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     base = live_base(gh, git)
     regen_text = main_regen_text(git, base)
     strict: list = []
-    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict)
+    red: list = []
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red)
     fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
     for m in fast:
@@ -1105,7 +1122,78 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
         summary["fast"].append(m.number)
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary)
+    stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
+
+
+def stale_red_candidate(pr: dict, member_required: list[str], checks: dict[str, str | None]) -> list[str]:
+    """The required contexts (merge-train aside) that are FAILURE on a same-repo PR that agent-pr-guard
+    did not refuse. Empty = not a stale-red candidate. live_candidates only ever passes armed, non-draft
+    PRs here; attribution to main is decided later, against main's own CI."""
+    if not pr.get("same_repo", True):
+        return []
+    for name, state in checks.items():
+        if GUARD_CONTEXT_HINT in name and state not in OK_STATES and state is not None:
+            return []
+    return [c for c in member_required if c != STATUS_CONTEXT and checks.get(c) == "failure"]
+
+
+def main_ci_result(gh, git, ctx: str, sha: str, cache: dict | None = None, depth: int = STALE_RED_WALK) -> tuple[str, str] | None:
+    """main's own CI verdict for `ctx` at `sha`: the push run's result on that commit, or on the nearest
+    first-parent ancestor that has a completed one. (commit, conclusion) or None."""
+    walk = git("rev-list", "--first-parent", f"--max-count={depth}", sha, check=False).stdout.split()
+    for c in walk:
+        if cache is not None and c in cache:
+            res = cache[c]
+        else:
+            res = gh.checks(c)
+            if cache is not None:
+                cache[c] = res
+        if res.get(ctx) is not None:
+            return c, res[ctx]
+    return None
+
+
+def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict) -> None:
+    """Stale-red refresh (ADR-0343): an armed PR left red only because MAIN was red when its CI ran gets
+    ONE update-branch once main is green again. Every failing required context must have failed on main
+    at the PR's merge-base (or its nearest ancestor with a result) and be green on the current tip; and
+    the PR must be behind main. After the refresh its merge-base IS the fixed main, so a PR still red
+    then fails the attribution test and is never refreshed again — no loop. Oldest first, at most
+    STALE_RED_CAP per tick. Git queries and the API only; no PR code runs."""
+    summary.setdefault("refreshed", [])
+    cache: dict = {}
+    for view, failing in red:
+        if len(summary["refreshed"]) >= STALE_RED_CAP:
+            break
+        n, head = view["number"], view["head_sha"]
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0:
+            log(f"#{n:>6} stale-red not behind main — red on its own merits")
+            continue
+        mb = git("merge-base", head, base, check=False).stdout.strip()
+        if not mb:
+            continue
+        why = None
+        for ctx in failing:
+            at_base = main_ci_result(gh, git, ctx, mb, cache)
+            if not at_base or at_base[1] != "failure":
+                why = f"{ctx} was not red on main at its base {mb[:12]} — its own defect"
+                break
+            at_tip = main_ci_result(gh, git, ctx, base)
+            if not at_tip or at_tip[1] not in OK_STATES:
+                why = f"{ctx} is not green on main yet — no point refreshing"
+                break
+        if why:
+            log(f"#{n:>6} stale-red skip: {why}")
+            continue
+        msg = f"stale-red refresh: {', '.join(failing)} was red on main {mb[:12]}, green on {base[:12]}"
+        if shadow:
+            log(f"#{n:>6} {msg} (shadow: no update)")
+            continue
+        ok = gh.update_branch(n, head)
+        log(f"#{n:>6} {msg}: update-branch {'requested' if ok else 'refused'}")
+        if ok:
+            summary["refreshed"].append(n)
 
 
 def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict) -> None:
@@ -1275,6 +1363,7 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
+        self.main_sequence: dict[str, list] = {}  # main sha -> successive check overrides, one per read
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
         self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
 
@@ -1309,7 +1398,9 @@ class FakeGitHub:
                 failing = [c for c in r.stdout.strip().split(",") if c]
                 self.g("worktree", "remove", "--force", wt)
                 self._ci[sha] = {**{c: ("failure" if c in failing else "success") for c in SYN_REQUIRED[:3]}, "issue-hygiene": "success"}
-            out = dict(self._ci[sha])
+            out = {**self._ci[sha], **self.head_checks.get(sha, {})}
+            if self.main_sequence.get(sha):            # main CI finishing mid-tick: next read differs
+                out.update(self.main_sequence[sha].pop(0))
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
             out.setdefault(ctx, None if state == "pending" else state)
         return out
@@ -2133,6 +2224,132 @@ def self_test() -> int:
             check("strict lane: main re-checked right before the merge; a moved main means no merge",
                   gh.merged == [], f"merged={gh.merged}")
             reset()
+
+            # ---- stale-red refresh: PRs left red by a red MAIN get one update-branch once main is green ----
+            VM = "Validate manifests"
+
+            def stale_red(*branches, base_red=True, tip_red=False, behind=True):
+                """Open `branches` red on VM; main at their base red on VM (or not); main then gets a
+                fix commit (unless not behind) whose own CI is green on VM (or still red)."""
+                gh.updates.clear()
+                gh.head_checks.clear()
+                open_only(*branches)
+                if base_red:
+                    gh.head_checks[base0] = {VM: "failure"}
+                if behind:
+                    pathlib.Path(origin, "svc", "fix.txt").parent.mkdir(parents=True, exist_ok=True)
+                    pathlib.Path(origin, "svc", "fix.txt").write_text("fix\n")
+                    gh.g("add", "-A")
+                    gh.g("commit", "-q", "-m", "fix main")
+                    if tip_red:
+                        gh.head_checks[gh.main_sha()] = {VM: "failure"}
+                for br in branches:
+                    gh.head_checks[gh.prs[numbers[br]]["head"]["sha"]] = {VM: "failure"}
+
+            def stale_done():
+                gh.head_checks.clear()
+                gh.main_sequence.clear()
+                gh.updates.clear()
+                reset()
+
+            stale_red("p1")
+            s = settle_now()
+            check("stale-red: red on a context main was red on at its base, green on the tip -> refreshed",
+                  gh.updates == [1] and s["refreshed"] == [1] and gh.merged == [], f"updates={gh.updates} {s}")
+            # After the refresh its base contains the fixed main; still red -> never refreshed again.
+            gh.head_checks[gh.prs[1]["head"]["sha"]] = {VM: "failure"}
+            gh.updates.clear()
+            s = settle_now()
+            check("stale-red: a refreshed PR still red is not refreshed again (no loop)",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1", base_red=False)
+            s = settle_now()
+            check("stale-red: red on a context that was green on main at its base -> NOT refreshed (own defect)",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            # Not behind: main's CI for the tip finishes mid-tick (a re-run of the failed job going
+            # green), so one read says red and the next green. Only the behind test stops it.
+            stale_red("p1", behind=False)
+            gh.main_sequence[base0] = [{VM: "failure"}, {VM: "success"}]
+            s = settle_now()
+            check("stale-red: red but not behind main -> NOT refreshed",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p4", "p2", "p1")
+            s = settle_now()
+            check("stale-red: three eligible PRs -> only 2 refreshed, oldest first",
+                  gh.updates == [1, 2] and s["refreshed"] == [1, 2], f"updates={gh.updates} {s}")
+            stale_done()
+
+            # The green candidate cap must not hide a later red PR from the independent stale-red
+            # scan. Reuse one verified tree for these synthetic PRs; the status result is sequenced
+            # per API read so the first 64 qualify and the 65th is stale-red.
+            saved_prs, old_checks = gh.prs, gh.checks
+            gh.prs = {}
+            shared_head = gh.g("rev-parse", "p1").stdout.strip()
+            for i in range(65):
+                n = 1000 + i
+                gh.prs[n] = {"number": n, "state": "open", "draft": False, "auto_merge": {"x": 1},
+                             "title": f"p{n}", "body": "", "created_at": f"{i:03d}",
+                             "user": {"login": "someone"},
+                             "head": {"ref": "p1", "sha": shared_head, "repo": {"full_name": "o/r"}}}
+            reads = [0]
+
+            def sequenced_checks(sha):
+                reads[0] += 1
+                result = {c: "success" for c in SYN_REQUIRED[:4]}
+                if reads[0] == 65:
+                    result["Validate manifests"] = "failure"
+                return result
+
+            gh.checks = sequenced_checks
+            red = []
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0,
+                                           Untrainable(SYN_INVENTORY), red=red)
+            check("stale-red: a later red PR is inspected after the 64-green candidate cap",
+                  len(cands) == 64 and reads[0] == 65 and len(red) == 1 and red[0][0]["number"] == 1064,
+                  f"candidates={len(cands)} status_reads={reads[0]} red={[x[0]['number'] for x in red]}")
+            gh.prs, gh.checks = saved_prs, old_checks
+
+            stale_red("p1", tip_red=True)
+            s = settle_now()
+            check("stale-red: main tip still red on that context -> NOT refreshed",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.prs[1]["auto_merge"] = None
+            s = settle_now()
+            check("stale-red: a disarmed PR is NOT refreshed", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.prs[1]["draft"] = True
+            s = settle_now()
+            check("stale-red: a draft PR is NOT refreshed", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.head_checks[gh.prs[1]["head"]["sha"]]["gates / agent-pr-guard"] = "failure"
+            s = settle_now()
+            check("stale-red: a PR agent-pr-guard refused is NOT refreshed",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.prs[1]["head"]["repo"] = {"full_name": "fork/r"}
+            s = settle_now()
+            check("stale-red: a fork PR is NOT refreshed", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            s = mode_settle(gh, Git(clone("settle")), "o/r", True)
+            check("stale-red: shadow settle refreshes nothing", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
     finally:
         for k, v in saved.items():
             if v is None:
