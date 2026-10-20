@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -166,7 +167,18 @@ def safe_archive_members(archive: bytes) -> list[tuple[zipfile.ZipInfo, PurePosi
         return selected
 
 
-def artifact_payload(archive: bytes, component: str, run: dict) -> dict[str, bytes]:
+def _timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def artifact_payload(archive: bytes, component: str, run: dict, *, repo_slug: str,
+                     expected_path: str, resolve_attempt=None, artifact_created_at: str | None = None) -> dict[str, bytes]:
     entries = safe_archive_members(archive)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         envelope_entries = [(info, path) for info, path in entries if path.name == "run.json"]
@@ -182,10 +194,52 @@ def artifact_payload(archive: bytes, component: str, run: dict) -> dict[str, byt
         if envelope.get("component") != component:
             raise CollectionError(f"{component}: envelope component identity mismatch")
         evidence_run = envelope["run"]
-        if (evidence_run.get("branch") != "main" or str(evidence_run.get("id")) != str(run.get("id"))
-                or evidence_run.get("attempt") != run.get("run_attempt")
-                or evidence_run.get("commit") != run.get("head_sha")):
+        claimed_attempt = evidence_run.get("attempt")
+        current_attempt = run.get("run_attempt")
+        if (evidence_run.get("branch") != "main"
+                or evidence_run.get("id") != str(run.get("id"))
+                or type(claimed_attempt) is not int or type(current_attempt) is not int
+                or not isinstance(run.get("id"), int)):
             raise CollectionError(f"{component}: envelope run identity does not match trusted GitHub run metadata")
+
+        # Artifacts can outlive a later rerun. A lower envelope attempt is accepted
+        # only after independently resolving that exact GitHub attempt; current-run
+        # metadata alone cannot authenticate bytes emitted by an earlier attempt.
+        if claimed_attempt > current_attempt:
+            raise CollectionError(f"{component}: envelope claims a future GitHub run attempt")
+        if claimed_attempt == current_attempt:
+            producer_run = run
+        else:
+            if resolve_attempt is None:
+                raise CollectionError(f"{component}: trusted metadata for the claimed run attempt is unavailable")
+            producer_run = resolve_attempt(run["id"], claimed_attempt)
+        if (not isinstance(producer_run, dict)
+                or not trusted_run(producer_run, repo_slug, expected_path)
+                or type(producer_run.get("id")) is not int
+                or producer_run.get("id") != run.get("id")
+                or type(producer_run.get("run_attempt")) is not int
+                or producer_run.get("run_attempt") != claimed_attempt
+                or producer_run.get("head_sha") != run.get("head_sha")
+                or evidence_run.get("commit") != producer_run.get("head_sha")):
+            raise CollectionError(f"{component}: envelope run identity does not match trusted GitHub run metadata")
+
+        observed_at = _timestamp(evidence_run.get("observedAt"))
+        created_at = _timestamp(artifact_created_at)
+        started_at = _timestamp(producer_run.get("run_started_at"))
+        finished_at = _timestamp(producer_run.get("updated_at"))
+        if claimed_attempt < current_attempt:
+            if not all((started_at, observed_at, created_at, finished_at)):
+                raise CollectionError(f"{component}: prior-attempt timestamp provenance is unavailable or invalid")
+            if not started_at <= observed_at <= created_at <= finished_at:
+                raise CollectionError(f"{component}: prior-attempt timestamp provenance is inconsistent")
+        if artifact_created_at is not None and created_at is None:
+            raise CollectionError(f"{component}: artifact creation timestamp is invalid")
+        if created_at and observed_at and created_at < observed_at:
+            raise CollectionError(f"{component}: artifact predates its run envelope")
+        if created_at and started_at and created_at < started_at:
+            raise CollectionError(f"{component}: artifact predates the claimed producer attempt")
+        if created_at and finished_at and created_at > finished_at:
+            raise CollectionError(f"{component}: artifact postdates the claimed producer attempt")
 
         staged = {f"{component}/build/test-intelligence/run.json": raw}
         junit_count = 0
@@ -305,6 +359,18 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
     core.setdefault("warnings", []).append(
         f"Cross-workflow history and observations were reused from trusted aggregate collected at {seed['collectedAt']}; current repository catalogues and service component posture were recollected."
     )
+    # Keep the JS collector's existing detail window after merging historical
+    # rows: otherwise every publication can grow beyond that bounded window.
+    # Aggregate execution totals remain complete and independent of these rows.
+    cases = core.get("testCases")
+    if isinstance(cases, list) and len(cases) > 2000:
+        priority = {"flaky": 0, "failing": 1, "skipped": 2, "stable": 3}
+        core["testCases"] = sorted(cases, key=lambda row: (
+            priority.get(row.get("state"), 4), -row.get("wastedDurationMs", 0), row.get("name", ""),
+        ))[:2000]
+        core["warnings"].append(
+            f"Test-case detail is limited to 2000 prioritized rows; {len(cases) - 2000} historical detail rows omitted. Component execution totals are unchanged."
+        )
     return core
 
 
@@ -377,12 +443,14 @@ def api_bytes(url: str, token: str) -> bytes:
 
 
 def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
-            fetch_page=None, fetch_run=None, fetch_archive=None, seed=SEED_UNSET, run_collector=None) -> dict:
+            fetch_page=None, fetch_run=None, fetch_attempt=None, fetch_archive=None,
+            seed=SEED_UNSET, run_collector=None) -> dict:
     components = repo_components(repo)
     if not token:
         raise CollectionError("GITHUB_TOKEN is required to read trusted CI artifacts")
     artifact_cache: dict[str, dict] = {}
     run_cache: dict[int, dict] = {}
+    attempt_cache: dict[tuple[int, int], dict] = {}
 
     def page(name: str, page_number: int) -> list[dict]:
         if fetch_page:
@@ -400,8 +468,9 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
 
     def workflow_run(run_id: int) -> dict:
         if fetch_run:
-            return fetch_run(run_id)
-        if run_id not in run_cache:
+            if run_id not in run_cache:
+                run_cache[run_id] = fetch_run(run_id)
+        elif run_id not in run_cache:
             run_cache[run_id] = api_json(f"{API_ORIGIN}/repos/{repo_slug}/actions/runs/{run_id}", token)
         value = run_cache[run_id]
         head_repo = value.get("head_repository")
@@ -410,6 +479,25 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             "head_repository": head_repo.get("full_name") if isinstance(head_repo, dict) else None,
             "head_sha": value.get("head_sha"), "head_branch": value.get("head_branch"),
             "run_attempt": value.get("run_attempt"), "id": value.get("id"),
+            "run_started_at": value.get("run_started_at"), "updated_at": value.get("updated_at"),
+        }
+
+    def workflow_attempt(run_id: int, attempt: int) -> dict:
+        key = (run_id, attempt)
+        if key not in attempt_cache:
+            if fetch_attempt:
+                attempt_cache[key] = fetch_attempt(run_id, attempt)
+            else:
+                attempt_cache[key] = api_json(
+                    f"{API_ORIGIN}/repos/{repo_slug}/actions/runs/{run_id}/attempts/{attempt}", token)
+        value = attempt_cache[key]
+        head_repo = value.get("head_repository")
+        return {
+            "path": value.get("path"), "event": value.get("event"),
+            "head_repository": head_repo.get("full_name") if isinstance(head_repo, dict) else None,
+            "head_sha": value.get("head_sha"), "head_branch": value.get("head_branch"),
+            "run_attempt": value.get("run_attempt"), "id": value.get("id"),
+            "run_started_at": value.get("run_started_at"), "updated_at": value.get("updated_at"),
         }
 
     planned: list[tuple[str, int | None]] = []
@@ -448,7 +536,12 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
             if not trusted_run(trusted, repo_slug, producer) or metadata.get("expired"):
                 raise CollectionError(f"selected artifact for {component} is not from trusted main")
             archive = get_archive(artifact_id)
-            payloads = artifact_payload(archive, component, trusted)
+            payloads = artifact_payload(
+                archive, component, trusted, repo_slug=repo_slug,
+                expected_path=producer,
+                resolve_attempt=workflow_attempt,
+                artifact_created_at=metadata.get("created_at"),
+            )
             for relative in payloads:
                 target = repo / relative
                 if target.exists():
@@ -479,7 +572,10 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
         report = merge_ancillary(core, seed_report)
         report.setdefault("warnings", []).extend(warnings)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        # This is a transport snapshot, not a reviewed source document. Preserve
+        # every observation while avoiding whitespace consuming the shared 2 MiB
+        # publisher/reader budget. Both boundaries still reject oversized data.
+        output.write_text(json.dumps(report, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
         return {"components": components, "staged": [component for component, aid in planned if aid is not None],
                 "missing": absent, "seededAncillary": seed_report is not None, "output": str(output)}
     finally:
