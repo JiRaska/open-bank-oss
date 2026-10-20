@@ -5,6 +5,7 @@
 package com.openbank.treasury.integration
 
 import com.openbank.treasury.application.port.out.LedgerReadPort
+import com.openbank.treasury.application.port.out.NostroGl
 import com.openbank.treasury.domain.model.LedgerNostroLine
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
@@ -31,7 +32,14 @@ class FakeLedgerRead : LedgerReadPort {
     /** GL codes whose balance read fails upstream (e.g. a ledger not serving the route yet). */
     val unavailableAccounts = java.util.concurrent.CopyOnWriteArraySet<String>()
 
-    override suspend fun nostroLines(glCode: String, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
+    /** The ledger's nostro map, as V32 seeds it. */
+    override suspend fun nostroAccounts(): Map<String, NostroGl> = mapOf(
+        "CZK" to NostroGl("1001", java.util.UUID.fromString("a0000000-0000-0000-0000-000000001001")),
+        "EUR" to NostroGl("1002", java.util.UUID.fromString("a0000000-0000-0000-0000-000000001002")),
+    )
+
+    override suspend fun nostroLines(nostro: NostroGl, from: LocalDate, to: LocalDate): List<LedgerNostroLine> {
+        val glCode = nostro.glCode
         queries += "lines:$glCode:$from..$to"
         return lines.filter { it.first == glCode && it.second.entryDate in from..to }.map { it.second }
     }

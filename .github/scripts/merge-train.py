@@ -57,6 +57,7 @@ from __future__ import annotations
 import argparse
 import base64
 import fnmatch
+import inspect
 import json
 import os
 import pathlib
@@ -689,6 +690,31 @@ def paginate(path: str, key: str | None = None) -> list:
         page += 1
 
 
+def ruleset_guard(rules, app_id) -> str | None:
+    """Why settle must NOT merge yet, or None when the ruleset says the train owns merging (ADR-0343 phase 1).
+
+    Both must hold: `merge-train` is a required context pinned to THIS App's integration id (so no other
+    actor's status can satisfy it), and strict up-to-date is off on every rule that carries it. Anything
+    unreadable or unparseable refuses: the guard fails closed."""
+    try:
+        want = int(str(app_id).strip())
+    except (TypeError, ValueError):
+        return "GITOPS_APP_ID is not an integer, cannot verify the pin"
+    pinned, strict = False, False
+    for r in rules if isinstance(rules, list) else []:
+        if not isinstance(r, dict) or r.get("type") != "required_status_checks":
+            continue
+        params = r.get("parameters") or {}
+        strict = strict or bool(params.get("strict_required_status_checks_policy"))
+        pinned = pinned or any(isinstance(c, dict) and c.get("context") == STATUS_CONTEXT and c.get("integration_id") == want
+                               for c in params.get("required_status_checks") or [])
+    if not pinned:
+        return f"ruleset does not require `{STATUS_CONTEXT}` pinned to integration {want}"
+    if strict:
+        return "strict up-to-date is still on"
+    return None
+
+
 class GitHub:
     """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
@@ -705,6 +731,12 @@ class GitHub:
             if r.get("type") == "required_status_checks":
                 ctx += [c["context"] for c in r["parameters"]["required_status_checks"]]
         return sorted(set(ctx))
+
+    def merge_guard(self) -> str | None:
+        code, data = api("GET", f"/repos/{self.repo}/rules/branches/{self.branch}")
+        if code != 200:
+            return f"cannot read the ruleset ({code})"
+        return ruleset_guard(data, os.environ.get("GITOPS_APP_ID", ""))
 
     def main_sha(self) -> str:
         return get(f"/repos/{self.repo}/git/ref/heads/{self.branch}")["object"]["sha"]
@@ -958,6 +990,13 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
     summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": []}
+    if not shadow:
+        # Phase 1 is gated on the live ruleset, not on the env flag alone: until it requires the App-pinned
+        # context with strict off, behave exactly as shadow. Flip order of env vs ruleset is irrelevant.
+        why = gh.merge_guard()
+        if why:
+            log(f"::notice::merge guard: shadow behaviour, nothing merges — {why}")
+            shadow = True
     required = gh.required()
     train_required = [c for c in required if c != STATUS_CONTEXT and c not in TREE_INDEPENDENT_CONTEXTS]
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
@@ -1041,7 +1080,6 @@ TOP = [
     ("manual dispatch", "workflow_dispatch:"),
     ("concurrency group", "group: merge-train"),
     ("never cancels a train in flight", "cancel-in-progress: false"),
-    ("shadow mode is the default", "MERGE_TRAIN_SHADOW: \"true\""),
 ]
 _ISOLATION = [("script from origin/main", "show origin/main:.github/scripts/merge-train.py"),
               ("isolated python", "python3 -I -S"), ("no system git config", "GIT_CONFIG_NOSYSTEM: \"1\""),
@@ -1053,7 +1091,8 @@ JOB_MUST = {
               ("build hands over a bundle", "actions/upload-artifact@")],
     "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
                                                               ("publish runs publish", "\" publish")],
-    "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle")],
+    "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
+                                                           ("settle gets the App id for the ruleset guard", "GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}")],
 }
 JOB_FORBID = {
     "build": [("build must not mint the App token", "create-github-app-token"), ("build must not see App secrets", "GITOPS_APP_")],
@@ -1081,6 +1120,12 @@ def check_declaration() -> int:
     code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     jobs = job_sections(code)
     fails = [label for label, needle in TOP if needle not in code]
+    if not re.search(r'^\s*MERGE_TRAIN_SHADOW: "(true|false)"\s*$', code, re.MULTILINE):
+        fails.append('MERGE_TRAIN_SHADOW must be declared as "true" or "false"')
+    # The safety is a runtime property: settle must consult the live ruleset before merging, whatever the flag says.
+    guard_src = inspect.getsource(mode_settle)
+    if "gh.merge_guard()" not in guard_src or inspect.getsource(ruleset_guard).count("integration_id") < 1:
+        fails.append("settle must gate merging on the live ruleset (merge_guard / ruleset_guard)")
     if "contents: write" in code:
         fails.append("GITHUB_TOKEN must stay read-only (writes use the App token)")
     for job in JOB_MUST:
@@ -1092,7 +1137,7 @@ def check_declaration() -> int:
         fails += [label for label, needle in JOB_FORBID[job] if needle in sec]
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
-    n = len(TOP) + 1 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
+    n = len(TOP) + 3 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
     print(f"SUBJECTS={n}")
     print("merge-train declaration OK" if not fails else f"{len(fails)} declaration failure(s)")
     return 1 if fails else 0
@@ -1138,6 +1183,12 @@ class FakeGitHub:
         self.carriers: dict[int, dict] = {}
         self._ci: dict[str, dict] = {}
         self.foreign_after_merge: str | None = None
+        # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
+        self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
+
+    def merge_guard(self):
+        return ruleset_guard([{"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": self.rs_strict, "required_status_checks": self.rs_checks}}], self.app_id)
 
     def g(self, *a, check=True):
         return sh(["git", "-c", "core.hooksPath=/dev/null", *a], cwd=self.origin, check=check, env=base_env())
@@ -1848,6 +1899,28 @@ def self_test() -> int:
             check("shadow: settle posts success on the verified head and merges nothing",
                   gh.merged == [] and gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "success")
             reset()
+
+            # Phase 1 runtime guard (ADR-0343): shadow=false alone must not merge. Each negative case
+            # changes ONE thing from the all-satisfied ruleset, so it cannot pass for another reason.
+            def guarded(label, want_merged, **rs):
+                open_only("p1")
+                tick()
+                gh.rs_checks, gh.rs_strict, gh.app_id = ([{"context": STATUS_CONTEXT, "integration_id": 4242}], False, "4242")
+                for k, v in rs.items():
+                    setattr(gh, k, v)
+                mode_settle(gh, Git(clone("settle")), "o/r", False)
+                st = gh.app_statuses(gh.prs[1]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0]
+                check(f"phase-1 guard: {label}", (gh.merged == [1]) == want_merged and (want_merged or st == "success"),
+                      f"merged={gh.merged} status={st}")
+                gh.rs_checks, gh.rs_strict, gh.app_id = ([{"context": STATUS_CONTEXT, "integration_id": 4242}], False, "4242")
+                reset()
+
+            guarded("ruleset without merge-train -> no merge, status still posted", False, rs_checks=[{"context": "other", "integration_id": 4242}])
+            guarded("merge-train unpinned -> no merge", False, rs_checks=[{"context": STATUS_CONTEXT}])
+            guarded("merge-train pinned to another integration -> no merge", False, rs_checks=[{"context": STATUS_CONTEXT, "integration_id": 99}])
+            guarded("strict still on -> no merge", False, rs_strict=True)
+            guarded("GITOPS_APP_ID unset -> no merge", False, app_id="")
+            guarded("pinned to the App, strict off -> merges", True)
 
             # A foreign merge landing during settle stops the merges after the first.
             open_only("p1", "p2")

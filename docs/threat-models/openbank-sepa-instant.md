@@ -180,7 +180,7 @@ not change any existing request's outcome until explicitly flipped.
   - **Rollback**: revert the commit; the previous behaviour was a silent synthetic ALLOW.
 
 - **2026-05-30** — Added `sct_inst_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
-  surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  surface/boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-11** — Added outbox-backlog gauge (`openbank.outbox.backlog`, tagged `service="sepa-instant"`)
   + `countProcessable()` on the outbox port (ADR-0077 / ADR-0079). Touches the **I — information

@@ -100,3 +100,9 @@ The `MandateExpiryScheduler` cron is **disabled by default** (`openbank.sdd.expi
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Collection debit booking
+
+The collection-debit consumer books the debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a readable COMPLETED transaction counts as debited; any other 2xx state (FAILED, in progress, unreadable) is thrown as completion-uncertain and retried with the same idempotency key. A 409 is an idempotent success. A refusal (400/422) throws `SddDebitFailedException` so the event reaches the DLQ. Any other answer or a dropped connection is thrown and retried with the same idempotency key. No configuration changed.
+
+Before retry logging, completion-uncertain exceptions retain only their controlled status and discard body-binding causes that can contain provider payloads. Retry counts and original idempotency keys remain unchanged. Other exception logging and the shared response-close logger remain outside this bounded guarantee.
