@@ -151,4 +151,12 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/treasury/nostro": { disposition: "sidebar-navigation-smoke", path: "/treasury/nostro" },
   "/treasury": { disposition: "static-direct-load-smoke", path: "/treasury" },
   "/treasury/positions": { disposition: "sidebar-navigation-smoke", path: "/treasury/positions" },
+  "/treasury/analysis/cash-flows": { disposition: "sidebar-navigation-smoke", path: "/treasury/analysis/cash-flows" },
+  "/treasury/calendar": { disposition: "sidebar-navigation-smoke", path: "/treasury/calendar" },
+  "/treasury/day-completion": { disposition: "sidebar-navigation-smoke", path: "/treasury/day-completion" },
+  "/treasury/fixings": { disposition: "sidebar-navigation-smoke", path: "/treasury/fixings" },
+  "/treasury/market-data": { disposition: "sidebar-navigation-smoke", path: "/treasury/market-data" },
+  "/treasury/payments": { disposition: "sidebar-navigation-smoke", path: "/treasury/payments" },
+  "/treasury/reference": { disposition: "sidebar-navigation-smoke", path: "/treasury/reference" },
+  "/treasury/reports": { disposition: "sidebar-navigation-smoke", path: "/treasury/reports" },
 }

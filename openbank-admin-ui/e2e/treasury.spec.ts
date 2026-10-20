@@ -3,6 +3,7 @@
 // in every spec here); the hide-approve-from-the-creator rule is covered by treasury-pages.test.tsx.
 import { expect, test } from '@playwright/test'
 import { signInWithRoles } from './helpers/auth'
+import { KINDS } from '../src/components/treasury/wb/referenceKinds'  // the editor lists every kind + two read-only views
 
 const deal = (dealId: string, state: string, createdBy: string) => ({
   dealId, product: 'MM_PLACEMENT', counterpartyId: 'SIM-A', currency: 'CZK', principal: 1000000, rate: 4.25,
@@ -70,7 +71,7 @@ test.describe('deal ticket', () => {
     await page.route('**/api/svc/treasury-service/api/v1/treasury/counterparties', route => route.fulfill(json(counterparties)))
     await page.route('**/api/svc/treasury-service/api/v1/treasury/deals**', route => {
       const req = route.request()
-      requests.push(`${req.method()} ${new URL(req.url()).pathname}`)
+      requests.push(`${req.method()} ${new URL(req.url()).pathname.replace('/api/svc/treasury-service', '')}`)
       const path = new URL(req.url()).pathname
       if (req.method() === 'POST' && path.endsWith('/deals')) return route.fulfill(json({ ...deal('d-new', 'DRAFT', 'e2e-operator'), submittedBy: null }, 201))
       if (path.endsWith('/d-new/schedule-preview')) {
@@ -147,7 +148,7 @@ test.describe('workbench areas', () => {
     }])))
     await page.goto('/treasury/reference')
     const main = page.locator('main')
-    await expect(main.getByRole('navigation', { name: /kinds|druhy/i }).getByRole('button')).toHaveCount(33, { timeout: 20_000 })
+    await expect(main.getByRole('navigation', { name: /kinds|druhy/i }).getByRole('button')).toHaveCount(KINDS.length + 2, { timeout: 20_000 })
     await main.getByRole('tab', { name: /Pending queue|Ke schválení/ }).click()
     await expect(main.getByRole('button', { name: /^(Approve|Schválit)$/ })).toHaveCount(1)
   })
