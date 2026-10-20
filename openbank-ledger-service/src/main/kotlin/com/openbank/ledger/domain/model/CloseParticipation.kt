@@ -4,27 +4,50 @@
 
 package com.openbank.ledger.domain.model
 
+import com.openbank.libs.close.CloseOutcome
 import java.time.Instant
 import java.time.LocalDate
 
 /**
- * What one close participant says about one accounting day (ADR-0342 D1).
+ * The ledger's answer for one participant on one accounting day (ADR-0342 D1): either what the
+ * participant REPORTED -- the shared [CloseOutcome] owned by libs-domain, not redeclared here -- or
+ * an operator WAIVER, which only the ledger can write and which therefore has no [CloseOutcome].
  *
- * - [RAN]      — the job ran for the day; `journalsPosted` / `itemsProcessed` say how much.
- * - [SKIPPED]  — nothing was due, or the job is switched off. A reason is mandatory.
- * - [REFUSED]  — the job had work and the ledger refused it because the day no longer accepts
- *                postings (ADR-0342 D4). A reason is mandatory.
- * - [WAIVED]   — an operator declared the participant not required for this day. Written only by
- *                the operator path, never by a participant; a reason is mandatory.
+ * - `RAN` / `SKIPPED` / `REFUSED` -- the participant's report ([reported] is non-null).
+ * - `WAIVED` -- an operator declared the participant not required for the day ([reported] is null).
+ *   Written only by the operator path, never by a participant; a reason is mandatory.
+ *
+ * [name] is the stored and wire form and equals the old enum constant names, so rows and JSON are
+ * unchanged.
  */
-enum class ParticipationOutcome {
-    RAN,
-    SKIPPED,
-    REFUSED,
-    WAIVED,
-    ;
+class ParticipationOutcome private constructor(val reported: CloseOutcome?) {
+    val name: String get() = reported?.name ?: WAIVED_NAME
 
     val requiresReason: Boolean get() = this != RAN
+
+    override fun equals(other: Any?) = other is ParticipationOutcome && other.reported == reported
+
+    override fun hashCode() = reported.hashCode()
+
+    override fun toString() = name
+
+    companion object {
+        private const val WAIVED_NAME = "WAIVED"
+        val RAN = ParticipationOutcome(CloseOutcome.RAN)
+        val SKIPPED = ParticipationOutcome(CloseOutcome.SKIPPED)
+        val REFUSED = ParticipationOutcome(CloseOutcome.REFUSED)
+        val WAIVED = ParticipationOutcome(null)
+
+        fun of(reported: CloseOutcome): ParticipationOutcome = when (reported) {
+            CloseOutcome.RAN -> RAN
+            CloseOutcome.SKIPPED -> SKIPPED
+            CloseOutcome.REFUSED -> REFUSED
+        }
+
+        /** Parses the stored form; throws [IllegalArgumentException] for anything unknown. */
+        fun valueOf(value: String): ParticipationOutcome =
+            if (value == WAIVED_NAME) WAIVED else of(CloseOutcome.valueOf(value))
+    }
 }
 
 /**

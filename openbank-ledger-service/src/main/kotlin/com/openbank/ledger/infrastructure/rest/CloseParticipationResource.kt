@@ -157,26 +157,19 @@ data class ReportParticipationRequest(
 data class WaiveParticipationRequest(val reason: String?)
 
 /**
- * What the completeness view shows per participant: the latest [ParticipationOutcome], or [MISSING]
- * for a declared participant that has not reported. A wire vocabulary of its own, because MISSING is
- * the absence of a record and never a stored outcome.
+ * What the completeness view shows per participant: the latest [ParticipationOutcome] name, or
+ * [MISSING] for a declared participant that has not reported. MISSING is the absence of a record and
+ * never a stored outcome, so it is a wire constant here rather than a second outcome vocabulary.
  */
-enum class ParticipantDayStatus {
-    RAN,
-    SKIPPED,
-    REFUSED,
-    WAIVED,
-    MISSING,
-    ;
+object ParticipantDayStatus {
+    const val MISSING = "MISSING"
 
-    companion object {
-        fun of(outcome: ParticipationOutcome): ParticipantDayStatus = valueOf(outcome.name)
-    }
+    fun of(outcome: ParticipationOutcome): String = outcome.name
 }
 
 data class ParticipationResponse(
     val participant: String,
-    val status: ParticipantDayStatus,
+    val status: String,
     val journalsPosted: Int,
     val itemsProcessed: Int,
     val reason: String?,
