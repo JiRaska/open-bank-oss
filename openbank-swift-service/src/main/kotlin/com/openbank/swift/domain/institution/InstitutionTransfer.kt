@@ -9,42 +9,11 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-/** The rail a bank-own transfer settles on — chosen by treasury from the settlement instructions. */
-enum class InstitutionTransferRail { CERTIS, TARGET2, SWIFT }
+/** The rail a bank-own transfer settles on — chosen by treasury; owned by `openbank-libs-iso20022`. */
+typealias InstitutionTransferRail = com.openbank.libs.iso20022.InstitutionTransferRail
 
-/**
- * Lifecycle of a bank-own (financial-institution) credit transfer. ACCEPTED: validated and
- * stored, not yet on the wire. SENT: the scheme took it. SETTLED: the scheme confirmed settlement
- * (pacs.002 `ACSC`). REJECTED: refused, by this rail's validation or by the scheme.
- */
-enum class InstitutionTransferStatus {
-    ACCEPTED,
-
-    /**
-     * Internal, never announced: the pacs.009 identity (MsgId, UETR, CreDtTm) is persisted and the
-     * submission is in flight. A crash here is resolved by querying the scheme, not by resending.
-     */
-    SUBMITTING,
-
-    /** Internal, never announced: no readable answer; resolved by a status query by UETR. */
-    SUBMISSION_UNKNOWN,
-
-    /**
-     * Internal, terminal for automation: the scheme's answer about this transfer was ambiguous (a
-     * bare 404, a status for another message, or still unknown after the one permitted resend).
-     * Nothing is resent; a human reconciles against the scheme. Counted and alerted.
-     */
-    MANUAL_RECONCILIATION,
-    SENT,
-    SETTLED,
-    REJECTED,
-    ;
-
-    companion object {
-        /** The statuses contract 9.2 publishes; the others are internal and never leave the rail. */
-        val ANNOUNCED: Set<InstitutionTransferStatus> = setOf(ACCEPTED, SENT, SETTLED, REJECTED)
-    }
-}
+/** Lifecycle of a bank-own transfer on this rail; owned by `openbank-libs-iso20022` (contract 9.2). */
+typealias InstitutionTransferStatus = com.openbank.libs.iso20022.InstitutionTransferStatus
 
 /** The debtor (this bank) or creditor institution: BIC plus the settlement account at it. */
 data class InstitutionParty(val bic: String, val accountNumber: String)
