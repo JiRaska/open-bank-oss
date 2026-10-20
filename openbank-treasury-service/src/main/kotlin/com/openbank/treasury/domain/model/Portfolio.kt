@@ -7,8 +7,8 @@ package com.openbank.treasury.domain.model
 import java.math.BigDecimal
 import java.time.LocalDate
 
-/** The custodian's quantity dimension; never inferred from instrument classification. */
-enum class PortfolioQuantityBasis { UNIT, FACE_AMOUNT, AMORTISED_VALUE }
+/** Compatibility source name for the shared custodian quantity dimension. */
+typealias PortfolioQuantityBasis = com.openbank.libs.domain.portfolio.PortfolioQuantityBasis
 
 /**
  * One instrument of a custodian's period-end statement of holdings (semt.002 `BalForAcct`), as the

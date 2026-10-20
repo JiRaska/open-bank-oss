@@ -4,6 +4,7 @@
 
 package com.openbank.libs.iso20022
 
+import com.openbank.libs.domain.portfolio.PortfolioQuantityBasis
 import com.openbank.libs.xml.SecureXml
 import org.w3c.dom.Element
 import org.xml.sax.SAXException
@@ -13,17 +14,8 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
 
-/** How a custodian states a holding's quantity (semt.002 `FinancialInstrumentQuantity33Choice`). */
-enum class HoldingQuantityType {
-    /** `Unit`: a number of units (shares, fund units). */
-    UNIT,
-
-    /** `FaceAmt`: the nominal of a debt instrument. */
-    FACE_AMOUNT,
-
-    /** `AmtsdVal`: the amortised value of a debt instrument. */
-    AMORTISED_VALUE,
-}
+/** semt.002 `FinancialInstrumentQuantity33Choice`, mapped explicitly to the shared quantity dimension. */
+typealias HoldingQuantityType = PortfolioQuantityBasis
 
 /** One `BalForAcct` of a statement of holdings: one instrument in the safekeeping account. */
 data class SecuritiesHolding(

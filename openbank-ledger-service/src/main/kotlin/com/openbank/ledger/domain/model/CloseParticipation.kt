@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.domain.model
 
+import com.openbank.libs.domain.close.CloseOutcome
 import java.time.Instant
 import java.time.LocalDate
 
@@ -17,14 +18,31 @@ import java.time.LocalDate
  * - [WAIVED]   — an operator declared the participant not required for this day. Written only by
  *                the operator path, never by a participant; a reason is mandatory.
  */
-enum class ParticipationOutcome {
-    RAN,
-    SKIPPED,
-    REFUSED,
-    WAIVED,
-    ;
-
+sealed interface ParticipationOutcome {
+    val name: String
     val requiresReason: Boolean get() = this != RAN
+
+    /** A participant may report only the outcomes owned by the shared participant contract. */
+    data class Reported(val value: CloseOutcome) : ParticipationOutcome {
+        override val name: String get() = value.name
+        override fun toString(): String = name
+    }
+
+    /** A human operator's explicit exception; never constructible from a participant report. */
+    data object Waived : ParticipationOutcome {
+        override val name: String = "WAIVED"
+        override fun toString(): String = name
+    }
+
+    companion object {
+        val RAN: ParticipationOutcome = Reported(CloseOutcome.RAN)
+        val SKIPPED: ParticipationOutcome = Reported(CloseOutcome.SKIPPED)
+        val REFUSED: ParticipationOutcome = Reported(CloseOutcome.REFUSED)
+        val WAIVED: ParticipationOutcome = Waived
+
+        fun valueOf(value: String): ParticipationOutcome =
+            if (value == WAIVED.name) WAIVED else Reported(CloseOutcome.valueOf(value))
+    }
 }
 
 /**

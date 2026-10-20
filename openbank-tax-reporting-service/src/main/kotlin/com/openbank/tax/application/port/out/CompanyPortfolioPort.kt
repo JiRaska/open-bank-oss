@@ -8,12 +8,8 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
-/** Meaning of a treasury position's quantity; values from different bases cannot be summed. */
-enum class PortfolioQuantityBasis {
-    UNIT,
-    FACE_AMOUNT,
-    AMORTISED_VALUE,
-}
+/** Compatibility source name for the shared custodian quantity dimension. */
+typealias PortfolioQuantityBasis = com.openbank.libs.domain.portfolio.PortfolioQuantityBasis
 
 /** One holding of the pension company's own investment portfolio at a period end. */
 data class CompanyPortfolioPosition(

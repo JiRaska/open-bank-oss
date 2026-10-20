@@ -11,11 +11,7 @@ import java.time.LocalDate
  * What a day-close participant reports to the ledger for one accounting day (ADR-0342 D1).
  * `WAIVED` is deliberately absent: only an operator, on the ledger side, can waive a participant.
  */
-enum class CloseOutcome {
-    RAN,
-    SKIPPED,
-    REFUSED,
-}
+typealias CloseOutcome = com.openbank.libs.domain.close.CloseOutcome
 
 /** One participation report. The ledger addresses it by `(businessDate, participant)`. */
 data class CloseParticipationReport(
