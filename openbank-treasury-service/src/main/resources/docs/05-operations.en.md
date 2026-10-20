@@ -28,8 +28,21 @@ Deploying Treasury before the ledger is safe while the flag is `false`.
 
 Nostro reconciliation follows the same switch: with `false` the nostro accounts come from the built-in
 shim chart, so an older ledger answering 404 on the class map cannot stop uploads or reconciliation; with
-`true` the ledger map is read once per upload or reconcile run. A reversal always offsets the accounts
-recorded on the deal's own journals (`deal_journals.resolved_accounts`), whatever the map says today.
+`true` the ledger map is read once per upload or reconcile run. A reversal offsets, per GL account,
+exactly what the deal's own journals posted there (`deal_journals.resolved_accounts`), whatever the map
+says today: accruals that landed on two accounts across a map re-point are unwound as two lines.
+
+**Reversal refused with 409 `REVERSAL_ACCOUNTS_UNKNOWN`.** A journal being reversed has no recorded
+accounts (posted before `V15`, or the ledger's answer could not be paired with its legs) or a record
+that does not match its legs. Treasury refuses rather than re-resolving the class against today's
+map, and posts nothing; the deal stays `SETTLED`. To proceed:
+
+1. Take the journal id from the error message and read that journal's lines from the ledger (its own
+   record of where each leg landed, in sequence order). For a journal posted before ADR-0341 they are
+   the fixed `a0000000-0000-0000-0000-00000000<code>` accounts; cross-check, do not assume.
+2. Under a change record with a second reviewer, write `deal_journals.resolved_accounts` for that row:
+   one `class|role|currency|glAccountId` line per leg, in the order the posting table emits the legs.
+3. Retry the reversal (the failed attempt stored no command key, so the same `Idempotency-Key` works).
 
 **Rollback.** With the flag `true` the legs carry no account, so an older ledger (below `V32`) refuses
 every line. There is no rollback by configuration alone: set `OPENBANK_TREASURY_LEDGER_POST_BY_CLASS=false` and redeploy Treasury FIRST,

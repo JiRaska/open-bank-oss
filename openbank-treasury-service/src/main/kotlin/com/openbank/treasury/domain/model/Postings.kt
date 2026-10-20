@@ -44,8 +44,8 @@ data class PostingLine(
     val amount: BigDecimal,
     val currency: String,
     /**
-     * Set ONLY on a reversal leg, to the account the ORIGINAL posting of this class/role/currency
-     * actually landed on ([ResolvedAccount]). The ledger map may be re-pointed between a settlement
+     * Set ONLY on a reversal leg, to the account the reversed postings actually landed on
+     * ([ResolvedAccount]); a class split across accounts yields one leg per account ([PinnedReversal]). The ledger map may be re-pointed between a settlement
      * and its reversal by a reviewed migration; a reversal that re-resolved the class would then
      * offset a different account than the one it is reversing. Null on every other leg.
      */
@@ -228,4 +228,96 @@ object PostingRules {
 
     private fun optional(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal): PostingLine? =
         if (amount.signum() > 0) leg(deal, role, side, amount) else null
+}
+
+/**
+ * A journal being reversed cannot be offset account by account: it carries no recorded accounts (posted
+ * before `deal_journals.resolved_accounts` existed, or the ledger's answer could not be paired with its
+ * legs), or the recorded accounts do not match the legs it posted. Refused rather than re-resolved
+ * against today's class map, which could offset a different account than the one that was posted to.
+ * Mapped to 409 `REVERSAL_ACCOUNTS_UNKNOWN`; the operator remedy is in the service docs (backfill the
+ * row from the ledger's own journal, then retry).
+ */
+class ReversalAccountsUnknownException(message: String) : IllegalStateException(message)
+
+/** One journal the deal posted, as the posting table regenerates it, with what the ledger recorded for it. */
+data class PostedJournalRecord(val journalId: UUID, val spec: JournalSpec, val accounts: List<ResolvedAccount>)
+
+/**
+ * Pins a reversal to what was actually posted (ADR-0341 D3, follow-up to #13205). The signed amounts
+ * of every reversed journal are netted per `(class, role, currency, glAccountId)` and each account is
+ * offset by exactly its own net, so accruals that landed on account A before a map re-point and on B
+ * after it are unwound as two lines, A and B, each by what it received. Never re-resolves: a journal
+ * without recorded accounts, or whose recorded accounts do not match its legs, fails the reversal.
+ *
+ * [rule] (the posting-table reversal) stays authoritative for WHAT is reversed: per class leg, the
+ * per-account lines must sum to the rule's amount, or the reversal is refused as inconsistent.
+ */
+object PinnedReversal {
+    private data class ClassKey(val accountingClass: String, val role: LedgerRole, val currency: String)
+
+    private fun PostingLine.classKey() = ClassKey(accountingClass, role, currency)
+    private fun PostingLine.signed() = if (side == Side.DEBIT) amount else amount.negate()
+
+    fun build(rule: JournalSpec, reversed: List<PostedJournalRecord>): JournalSpec {
+        val posted = netPerAccount(reversed)
+        val ruleNet = LinkedHashMap<ClassKey, BigDecimal>()
+        rule.lines.forEach { ruleNet.merge(it.classKey(), it.signed(), BigDecimal::add) }
+        val keys = ruleNet.keys + posted.keys.filter { k -> posted.getValue(k).values.any { it.signum() != 0 } }
+        keys.forEach { k -> requireOffsetsRule(rule.dealId, k, posted[k], ruleNet[k] ?: BigDecimal.ZERO) }
+        return rule.copy(lines = keys.flatMap { k -> offsetLines(k, posted[k].orEmpty()) })
+    }
+
+    /** Signed amounts posted, per class key and, inside it, per account in first-posted order. */
+    private fun netPerAccount(reversed: List<PostedJournalRecord>): Map<ClassKey, Map<UUID, BigDecimal>> {
+        val posted = LinkedHashMap<ClassKey, LinkedHashMap<UUID, BigDecimal>>()
+        reversed.forEach { journal ->
+            requireRecorded(journal)
+            journal.spec.lines.zip(journal.accounts).forEach { (line, account) ->
+                posted.getOrPut(line.classKey()) { LinkedHashMap() }
+                    .merge(account.glAccountId, line.signed(), BigDecimal::add)
+            }
+        }
+        return posted
+    }
+
+    private fun requireRecorded(journal: PostedJournalRecord) {
+        val what = "journal ${journal.journalId} (${journal.spec.idempotencyKey})"
+        if (journal.accounts.isEmpty()) {
+            throw ReversalAccountsUnknownException(
+                "$what has no recorded accounts; refusing to re-resolve it against today's ledger map",
+            )
+        }
+        val matches = journal.accounts.size == journal.spec.lines.size &&
+            journal.accounts.zip(journal.spec.lines).all { (a, l) ->
+                a.accountingClass == l.accountingClass && a.role == l.role && a.currency == l.currency
+            }
+        if (!matches) {
+            throw ReversalAccountsUnknownException(
+                "$what: recorded accounts do not match its ${journal.spec.lines.size} legs",
+            )
+        }
+    }
+
+    private fun requireOffsetsRule(dealId: UUID, k: ClassKey, posted: Map<UUID, BigDecimal>?, ruleNet: BigDecimal) {
+        val offset = posted?.values?.fold(BigDecimal.ZERO, BigDecimal::add)?.negate() ?: BigDecimal.ZERO
+        if (offset.compareTo(ruleNet) != 0) {
+            throw ReversalAccountsUnknownException(
+                "reversal of $dealId: ${k.accountingClass}/${k.role}/${k.currency} offsets $offset by the recorded " +
+                    "journals but $ruleNet by the posting table; the records do not match",
+            )
+        }
+    }
+
+    private fun offsetLines(k: ClassKey, perAccount: Map<UUID, BigDecimal>): List<PostingLine> =
+        perAccount.filterValues { it.signum() != 0 }.map { (account, net) ->
+            PostingLine(
+                k.accountingClass,
+                k.role,
+                if (net.signum() > 0) Side.CREDIT else Side.DEBIT,
+                net.abs(),
+                k.currency,
+                account,
+            )
+        }
 }
