@@ -4,8 +4,8 @@
 
 package com.openbank.treasury.domain.cashflow
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.money.CurrencyCode
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.cashflow.CashFlowProjector
 import com.openbank.libs.finance.cashflow.FixingSource
@@ -46,7 +46,7 @@ data class ScheduleContext(
     val fixingCalendar: (index: String) -> FinanceCalendar?,
     val fixingLag: (index: String) -> Int?,
     /** The deal's business-day convention; null = unadjusted. */
-    val roll: DateRoll,
+    val roll: BusinessDayConvention,
     val rollDirection: RollDirection,
     val newId: () -> UUID,
     /** Observed index fixings known at generation, in annual PERCENT like every treasury rate; none = every period unfixed. */

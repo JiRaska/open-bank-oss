@@ -6,10 +6,10 @@ package com.openbank.risk.infrastructure.finance
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.domain.calendar.BusinessCalendar
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.finance.calendar.Calendars
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.leg.AmortisationSpec
 import com.openbank.libs.finance.leg.CapFloorAppliesTo
@@ -242,8 +242,9 @@ object LegSpecJson {
             ?: throw IllegalArgumentException("legs[$i].dayCount '$raw' is not one of ${DayCount.entries}")
     }
 
-    private fun roll(i: Int, raw: String?): DateRoll =
-        raw?.let { enumOf<DateRoll>(i, "businessDayConvention", it) } ?: DateRoll.MODIFIED_FOLLOWING
+    private fun roll(i: Int, raw: String?): BusinessDayConvention =
+        raw?.let { enumOf<BusinessDayConvention>(i, "businessDayConvention", it) }
+            ?: BusinessDayConvention.MODIFIED_FOLLOWING
 
     /** Calendar codes: a centre (`CERTIS`, `TARGET2`, `WEEKEND-ONLY`) or an ISO currency. Joint when several. */
     fun calendar(codes: List<String>): FinanceCalendar = Calendars.joint(

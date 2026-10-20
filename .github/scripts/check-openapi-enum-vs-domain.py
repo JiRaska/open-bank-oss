@@ -100,12 +100,6 @@ BASELINE: dict[str, str] = {
     "openbank-treasury-service:BANK,CENTRAL_BANK":
         "ADR-0344 — legacy counterparty list `kind`: NOT drift. Deliberate subset of CounterpartyKind; "
         "CORPORATE / ISSUER are served by the reference-data counterparty endpoint.",
-    # NOT drift — a DELIBERATE SUPERSET (ADR-0344). Treasury accepts UNADJUSTED (no roll at all) as
-    # a deal's business-day convention; libs-domain's BusinessDayConvention models only the four
-    # rolling conventions, and an UNADJUSTED leg simply never calls the roller.
-    "openbank-treasury-service:FOLLOWING,MODIFIED_FOLLOWING,MODIFIED_PRECEDING,PRECEDING,UNADJUSTED":
-        "ADR-0344 — business-day convention: NOT drift. UNADJUSTED is the no-roll convention the "
-        "libs-domain roller has no member for, by design.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an

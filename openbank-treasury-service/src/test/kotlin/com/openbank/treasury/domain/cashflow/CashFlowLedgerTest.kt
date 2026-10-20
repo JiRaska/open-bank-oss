@@ -4,8 +4,8 @@
 
 package com.openbank.treasury.domain.cashflow
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.finance.calendar.Calendars
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorNotPermittedException
@@ -37,7 +37,7 @@ class CashFlowLedgerTest {
     private val agent = Actor("agent:treasury-assistant", ActorType.AI_AGENT)
     private val dealId = UUID.randomUUID()
 
-    private fun ctx(version: Int = 1, roll: DateRoll = DateRoll.UNADJUSTED) = ScheduleContext(
+    private fun ctx(version: Int = 1, roll: BusinessDayConvention = BusinessDayConvention.UNADJUSTED) = ScheduleContext(
         dealId = dealId,
         scheduleVersion = version,
         calendarFor = { Calendars.forCurrencies(it.currency) },
@@ -130,7 +130,10 @@ class CashFlowLedgerTest {
 
         @Test
         fun `an IRS fixed leg is four FIXED coupons, the floating leg four PROJECTED rows awaiting fixings`() {
-            val flows = ScheduleAdapter.generate(listOf(fixed, floating), ctx(roll = DateRoll.MODIFIED_FOLLOWING))
+            val flows = ScheduleAdapter.generate(
+                listOf(fixed, floating),
+                ctx(roll = BusinessDayConvention.MODIFIED_FOLLOWING),
+            )
             val fixedRows = flows.filter { it.legIndex == 0 && it.kind == CashFlowKind.INTEREST }
             val floatRows = flows.filter { it.legIndex == 1 && it.kind == CashFlowKind.INTEREST }
             assertThat(fixedRows).hasSize(4).allMatch {

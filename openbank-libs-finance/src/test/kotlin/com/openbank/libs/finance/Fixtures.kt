@@ -5,10 +5,10 @@
 package com.openbank.libs.finance
 
 import com.openbank.libs.domain.calendar.BusinessCalendar
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.finance.calendar.Calendars
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.leg.DateRules
 import com.openbank.libs.finance.leg.LegSpec
@@ -38,7 +38,7 @@ fun fixedLeg(
     frequency: Frequency = Frequency.QUARTERLY,
     rate: RateSpec = RateSpec.Fixed(bd("0.036")),
     notional: NotionalSpec = NotionalSpec(bd("1000000"), finalExchange = false),
-    dates: DateRules = DateRules(TARGET2, DateRoll.MODIFIED_FOLLOWING),
+    dates: DateRules = DateRules(TARGET2, BusinessDayConvention.MODIFIED_FOLLOWING),
     stub: StubType = StubType.SHORT_INITIAL,
     dayCount: DayCount = DayCount.ACT_360,
 ): LegSpec = LegSpec(

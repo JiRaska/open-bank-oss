@@ -4,11 +4,11 @@
 
 package com.openbank.libs.finance.product
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.calendar.YearFraction
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.RoundingPolicy
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.leg.DateRules
 import com.openbank.libs.finance.leg.FixingConvention
@@ -35,7 +35,7 @@ data class DealTerms(
     val start: LocalDate,
     val end: LocalDate,
     val calendar: FinanceCalendar,
-    val roll: DateRoll = DateRoll.MODIFIED_FOLLOWING,
+    val roll: BusinessDayConvention = BusinessDayConvention.MODIFIED_FOLLOWING,
     val rounding: RoundingPolicy = RoundingPolicy.TREASURY_AMOUNT,
 )
 
@@ -148,7 +148,12 @@ object LegTemplates {
             stub = StubType.SHORT_INITIAL,
             endOfMonth = true,
         ),
-        dates = DateRules(terms.calendar, DateRoll.FOLLOWING, adjustAccrualPeriod = false, adjustPaymentDate = true),
+        dates = DateRules(
+            terms.calendar,
+            BusinessDayConvention.FOLLOWING,
+            adjustAccrualPeriod = false,
+            adjustPaymentDate = true,
+        ),
         rate = RateSpec.Fixed(coupon.rate),
         dayCount = coupon.dayCount,
         rounding = terms.rounding,
@@ -269,7 +274,7 @@ private fun fxLeg(side: PayReceive, amount: FxAmount, start: LocalDate, end: Loc
         currency = amount.currency,
         notional = NotionalSpec(amount.amount, finalExchange = true),
         schedule = ScheduleSpec(start, end, Frequency.Zero),
-        dates = DateRules(calendar, DateRoll.FOLLOWING),
+        dates = DateRules(calendar, BusinessDayConvention.FOLLOWING),
         rate = RateSpec.None,
         dayCount = DayCount.ACT_360,
     )
@@ -291,7 +296,7 @@ private fun swapLeg(
         finalExchangeAmount = farAmount,
     ),
     schedule = ScheduleSpec(period.start, period.end, Frequency.Zero),
-    dates = DateRules(calendar, DateRoll.FOLLOWING),
+    dates = DateRules(calendar, BusinessDayConvention.FOLLOWING),
     rate = RateSpec.None,
     dayCount = DayCount.ACT_360,
 )

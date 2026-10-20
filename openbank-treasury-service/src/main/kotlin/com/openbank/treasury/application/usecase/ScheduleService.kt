@@ -6,9 +6,9 @@ package com.openbank.treasury.application.usecase
 
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.calendar.BusinessCalendar
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.finance.calendar.Calendars
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.cashflow.FixingSource
 import com.openbank.treasury.application.port.out.CashFlowRepository
@@ -152,8 +152,9 @@ class ScheduleService(
     }
 
     /** The legacy products never rolled a captured date; the others default to modified following. */
-    private fun roll(deal: Deal): DateRoll = deal.header.businessDayConvention?.let(DateRoll::valueOf)
-        ?: if (deal.product.legacy) DateRoll.UNADJUSTED else DateRoll.MODIFIED_FOLLOWING
+    private fun roll(deal: Deal): BusinessDayConvention =
+        deal.header.businessDayConvention?.let(BusinessDayConvention::valueOf)
+            ?: if (deal.product.legacy) BusinessDayConvention.UNADJUSTED else BusinessDayConvention.MODIFIED_FOLLOWING
 
     /** The legs and the exact reference versions used: a change to either is a different schedule. */
     private fun hash(legs: List<LegSpec>, used: List<ReferenceRecord>): String = sha256(

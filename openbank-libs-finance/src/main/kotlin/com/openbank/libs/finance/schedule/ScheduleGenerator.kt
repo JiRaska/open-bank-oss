@@ -4,8 +4,8 @@
 
 package com.openbank.libs.finance.schedule
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.YearFraction
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.leg.DateRules
 import com.openbank.libs.finance.leg.LegSpec
 import com.openbank.libs.finance.leg.RateSpec
@@ -108,7 +108,7 @@ object ScheduleGenerator {
         val boundary = if (convention.inArrears) accrual.end else accrual.start
         val reference = rules.calendar.roll(boundary, rules.roll)
         return if (convention.lagBusinessDays == 0) {
-            convention.calendar.roll(reference, DateRoll.PRECEDING)
+            convention.calendar.roll(reference, BusinessDayConvention.PRECEDING)
         } else {
             convention.calendar.addBusinessDays(reference, -convention.lagBusinessDays)
         }
