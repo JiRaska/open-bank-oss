@@ -22,7 +22,15 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
-  services: {}
+  services:
+    openbank-transaction-service:
+      issue: "#13231"
+      reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
+      release_condition: "The maintenance owner approves the exact target image and deployment window, the writer and retry barrier is active, and duplicate-key reconciliation, bounded lock wait and rollback plans are accepted."
+    openbank-card-processing-service:
+      issue: "#13231"
+      reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
+      release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
@@ -252,6 +260,19 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-31"   # ADR-0320: enforce once P1 has one migrated consumer
     ci_producer: ".github/scripts/check-raw-http-client.py"
+  threat_model_test_evidence:
+    # A threat-model mitigation that cites a test proves only that the test EXISTS under
+    # threat-model-claims-resolve. This asks the next question: did it run, green, in the latest
+    # Test Intelligence envelope for its component (`@Tag("verifies:<scope>/<ref>")` / the
+    # Playwright `@verifies:<scope>/<ref>` title token make the link machine-readable, #13171).
+    detect: ["a docs/threat-models/*.md mitigation row citing a *Test/*IT/*Spec class, or a verifies:<scope>/<row-id> tag"]
+    require:
+      - "the cited test (or the tests declaring the row's verifies id) ran in the latest scheduled main run and every result is passed"
+      - "a component with no envelope is unknown, never a verdict; an unreadable corpus is UNRESOLVED, not a failure"
+    gate: threat-model-test-evidence
+    enforced: advisory
+    target_enforce_date: "2027-01-31"   # ADR-0144: enforce after one full month of advisory output is triaged
+    ci_producer: ".github/scripts/check-threat-model-test-evidence.py"
   resilience_profile_declaration:
     detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
     require:
@@ -2460,6 +2481,24 @@ kafka_dotted_keys:
   baseline_is_checked_both_ways: true
   ci_producer: .github/scripts/check-kafka-dotted-keys.py
 
+enum_reference_data:
+  # Business vocabulary a bank changes by decision (turnover bands, notice periods, risk scales,
+  # rate indices) must not be a Kotlin `enum class` owned by more than one module, nor carry its
+  # numbers in value names. Two shapes are enforced because both are decidable without judgement:
+  #   numeric_encoded_values — a value name encoding a threshold/band/period (UP_TO_30K, OVER_500K,
+  #     DAYS_7, PCT_25_TO_50, DPD_1_30). Tenors (PRIBOR_3M) and protocol codes (PACS_008) are not.
+  #   cross_module_duplicates — the same value set (>= 80 % overlap, >= 3 values) in two modules,
+  #     ignoring overlaps made only of generic lifecycle/severity words unless the enum name is
+  #     identical (a verbatim copy).
+  # Fix by modelling the vocabulary as data or reusing the owning module's type. A ratchet: the
+  # 2026-10-20 estate is baselined per finding against a tracking issue; a new finding fails and a
+  # baseline entry that no longer matches is reported as stale.
+  numeric_encoded_values: forbidden
+  cross_module_duplicates: forbidden
+  baseline: .github/scripts/enum-reference-data-baseline.txt
+  baseline_is_checked_both_ways: true
+  ci_producer: .github/scripts/check-enum-reference-data.py
+
 kafka_topics:
   referenced_topics_must_be_declared: true
   # A Kafka consumer subscribed to a topic that does not exist does NOT error. It joins its
@@ -4281,6 +4320,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/billing/infrastructure/adapter/LegacyRevisionBridge.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/client/BillingRestClients.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"

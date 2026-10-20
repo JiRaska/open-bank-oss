@@ -22,7 +22,46 @@ enum class PostingEvent(val key: String) {
     REVERSED("reversed"),
 }
 
-data class PostingLine(val glCode: String, val side: Side, val amount: BigDecimal, val currency: String)
+/**
+ * Which of a product's ledger accounts a leg belongs to. Mirrors the ledger's `AccountingRole`
+ * (ADR-0341 D3) by name: the ledger, not the treasury, decides which GL account that is.
+ */
+enum class LedgerRole { PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE }
+
+/** The accounting classes treasury posts under (ADR-0341 D3); the ledger maps each to GL accounts. */
+object AccountingClasses {
+    const val NOSTRO = "NOSTRO_ACCOUNT"
+}
+
+/**
+ * One leg of a journal. It names its account by [accountingClass] + [role] (+ [currency]) and carries
+ * no GL code: the ledger resolves the account from its own map (ADR-0341 D3).
+ */
+data class PostingLine(
+    val accountingClass: String,
+    val role: LedgerRole,
+    val side: Side,
+    val amount: BigDecimal,
+    val currency: String,
+    /**
+     * Set ONLY on a reversal leg, to the account the reversed postings actually landed on
+     * ([ResolvedAccount]); a class split across accounts yields one leg per account ([PinnedReversal]). The ledger map may be re-pointed between a settlement
+     * and its reversal by a reviewed migration; a reversal that re-resolved the class would then
+     * offset a different account than the one it is reversing. Null on every other leg.
+     */
+    val glAccountId: UUID? = null,
+)
+
+/**
+ * What the ledger resolved one leg of a journal to when it was posted. Recorded with the deal's
+ * journal so a later reversal can offset exactly those accounts, whatever the map says by then.
+ */
+data class ResolvedAccount(
+    val accountingClass: String,
+    val role: LedgerRole,
+    val currency: String,
+    val glAccountId: UUID,
+)
 
 /**
  * A balanced journal for one deal event. [idempotencyKey] is `treasury:<dealId>:<event>` (ADR-0315
@@ -46,64 +85,6 @@ data class JournalSpec(
         }
         require(lines.all { it.amount.signum() > 0 }) { "every journal line amount must be positive" }
     }
-}
-
-/**
- * The treasury chart (ledger migration `V29__treasury_money_market_accounts.sql`), by currency.
- *
- * | purpose                          | CZK  | EUR  | type      |
- * |----------------------------------|------|------|-----------|
- * | Nostro                           | 1001 | 1002 | ASSET     |
- * | MM placements with banks         | 1500 | 1501 | ASSET     |
- * | Deposit facility at ČNB          | 1510 | —    | ASSET     |
- * | Accrued interest receivable (MM) | 1520 | 1521 | ASSET     |
- * | MM borrowings from banks         | 2300 | 2301 | LIABILITY |
- * | Borrowings from ČNB (lombard)    | 2320 | —    | LIABILITY |  (ledger V30)
- * | Accrued interest payable (MM)    | 2310 | 2311 | LIABILITY |
- * | MM interest income               | 4200 | 4201 | INCOME    |
- * | MM interest expense              | 5200 | 5201 | EXPENSE   |
- * | FX position (ledger V5)          | 1990 | 1991 | ASSET     |
- *
- * Interest is recognised daily into the accrued-interest accounts (ADR-0315 D5); maturity then
- * clears them rather than booking the whole interest to income in one amount.
- */
-object TreasuryChart {
-    private val byCurrency: Map<String, Map<String, String>> = mapOf(
-        Deal.CZK to mapOf(
-            "nostro" to "1001",
-            "placement" to "1500",
-            "cnb" to "1510",
-            "borrowing" to "2300",
-            "cnb-borrowing" to "2320",
-            "income" to "4200",
-            "expense" to "5200",
-            "accrued-receivable" to "1520",
-            "accrued-payable" to "2310",
-            "fx-position" to "1990",
-        ),
-        Deal.EUR to mapOf(
-            "nostro" to "1002",
-            "placement" to "1501",
-            "borrowing" to "2301",
-            "income" to "4201",
-            "expense" to "5201",
-            "accrued-receivable" to "1521",
-            "accrued-payable" to "2311",
-            "fx-position" to "1991",
-        ),
-    )
-
-    fun code(currency: String, purpose: String): String =
-        byCurrency[currency]?.get(purpose) ?: error("no treasury GL account for $purpose in $currency")
-
-    /** Fixed ids seeded by the ledger migration: `a0000000-0000-0000-0000-00000000<code>`. */
-    fun glAccountId(code: String): UUID = UUID.fromString("a0000000-0000-0000-0000-00000000$code")
-
-    /** The nostro GL of every currency — the only accounts a correspondent statement may reconcile. */
-    val nostroCodes: Set<String> get() = byCurrency.values.mapNotNull { it["nostro"] }.toSet()
-
-    /** Every code the treasury posts to — the ledger migration must seed each one. */
-    val postedCodes: Set<String> get() = byCurrency.values.flatMap { it.values }.toSet()
 }
 
 /**
@@ -136,19 +117,14 @@ object PostingRules {
     fun settlement(deal: Deal): JournalSpec {
         val p = deal.principal
         val ccy = deal.currency
-        val nostro = TreasuryChart.code(ccy, "nostro")
         val lines = when (deal.product) {
-            ProductType.MM_PLACEMENT -> listOf(
-                PostingLine(TreasuryChart.code(ccy, "placement"), Side.DEBIT, p, ccy),
-                PostingLine(nostro, Side.CREDIT, p, ccy),
-            )
-            ProductType.CNB_DEPOSIT_FACILITY -> listOf(
-                PostingLine(TreasuryChart.code(ccy, "cnb"), Side.DEBIT, p, ccy),
-                PostingLine(nostro, Side.CREDIT, p, ccy),
+            ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> listOf(
+                leg(deal, LedgerRole.PRINCIPAL, Side.DEBIT, p),
+                nostro(ccy, Side.CREDIT, p),
             )
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOf(
-                PostingLine(nostro, Side.DEBIT, p, ccy),
-                PostingLine(liabilityCode(deal), Side.CREDIT, p, ccy),
+                nostro(ccy, Side.DEBIT, p),
+                leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
             )
             ProductType.FX_SPOT -> fxSpotSettlement(deal)
         }
@@ -159,11 +135,12 @@ object PostingRules {
         val fx = checkNotNull(deal.fx) { "FX_SPOT deal ${deal.id} without FX terms" }
         val ccy = deal.currency
         val czk = Deal.CZK
+        val position = ProductType.FX_SPOT.accountingClass
         val buy = listOf(
-            PostingLine(TreasuryChart.code(ccy, "nostro"), Side.DEBIT, deal.principal, ccy),
-            PostingLine(TreasuryChart.code(ccy, "fx-position"), Side.CREDIT, deal.principal, ccy),
-            PostingLine(TreasuryChart.code(czk, "fx-position"), Side.DEBIT, fx.counterAmount, czk),
-            PostingLine(TreasuryChart.code(czk, "nostro"), Side.CREDIT, fx.counterAmount, czk),
+            nostro(ccy, Side.DEBIT, deal.principal),
+            PostingLine(position, LedgerRole.PRINCIPAL, Side.CREDIT, deal.principal, ccy),
+            PostingLine(position, LedgerRole.PRINCIPAL, Side.DEBIT, fx.counterAmount, czk),
+            nostro(czk, Side.CREDIT, fx.counterAmount),
         )
         return if (fx.side == FxSide.BUY) buy else buy.map { it.copy(side = it.side.flipped()) }
     }
@@ -186,16 +163,15 @@ object PostingRules {
         if (deal.product == ProductType.FX_SPOT) return null
         val amount = accruedThrough(deal, date) - accruedThrough(deal, date.minusDays(1))
         if (amount.signum() <= 0) return null
-        val ccy = deal.currency
         val lines = if (deal.product.isAsset) {
             listOf(
-                PostingLine(TreasuryChart.code(ccy, "accrued-receivable"), Side.DEBIT, amount, ccy),
-                PostingLine(TreasuryChart.code(ccy, "income"), Side.CREDIT, amount, ccy),
+                leg(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, amount),
+                leg(deal, LedgerRole.INTEREST_INCOME, Side.CREDIT, amount),
             )
         } else {
             listOf(
-                PostingLine(TreasuryChart.code(ccy, "expense"), Side.DEBIT, amount, ccy),
-                PostingLine(TreasuryChart.code(ccy, "accrued-payable"), Side.CREDIT, amount, ccy),
+                leg(deal, LedgerRole.INTEREST_EXPENSE, Side.DEBIT, amount),
+                leg(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, amount),
             )
         }
         return JournalSpec(deal.id, PostingEvent.ACCRUED, lines, suffix = date.toString())
@@ -208,32 +184,19 @@ object PostingRules {
         require(accrued.signum() >= 0 && accrued <= i) { "accrued $accrued outside 0..$i for ${deal.id}" }
         val rest = i - accrued
         val ccy = deal.currency
-        val nostro = TreasuryChart.code(ccy, "nostro")
         val lines = when (deal.product) {
-            ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> {
-                val asset = TreasuryChart.code(
-                    ccy,
-                    if (deal.product ==
-                        ProductType.MM_PLACEMENT
-                    ) {
-                        "placement"
-                    } else {
-                        "cnb"
-                    },
-                )
-                listOfNotNull(
-                    PostingLine(nostro, Side.DEBIT, p + i, ccy),
-                    PostingLine(asset, Side.CREDIT, p, ccy),
-                    line(TreasuryChart.code(ccy, "accrued-receivable"), Side.CREDIT, accrued, ccy),
-                    line(TreasuryChart.code(ccy, "income"), Side.CREDIT, rest, ccy),
-                )
-            }
+            ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> listOfNotNull(
+                nostro(ccy, Side.DEBIT, p + i),
+                leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, accrued),
+                optional(deal, LedgerRole.INTEREST_INCOME, Side.CREDIT, rest),
+            )
             ProductType.FX_SPOT -> error("unreachable: FX spot has no maturity")
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOfNotNull(
-                PostingLine(liabilityCode(deal), Side.DEBIT, p, ccy),
-                line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
-                line(TreasuryChart.code(ccy, "expense"), Side.DEBIT, rest, ccy),
-                PostingLine(nostro, Side.CREDIT, p + i, ccy),
+                leg(deal, LedgerRole.PRINCIPAL, Side.DEBIT, p),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, accrued),
+                optional(deal, LedgerRole.INTEREST_EXPENSE, Side.DEBIT, rest),
+                nostro(ccy, Side.CREDIT, p + i),
             )
         }
         return JournalSpec(deal.id, PostingEvent.MATURED, lines)
@@ -243,25 +206,118 @@ object PostingRules {
     fun reversal(deal: Deal, stateBeforeReversal: DealState, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec? {
         if (stateBeforeReversal != DealState.SETTLED) return null
         val flipped = settlement(deal).lines.map { it.copy(side = it.side.flipped()) }
-        val ccy = deal.currency
         val unwind = if (deal.product.isAsset) {
             listOfNotNull(
-                line(TreasuryChart.code(ccy, "income"), Side.DEBIT, accrued, ccy),
-                line(TreasuryChart.code(ccy, "accrued-receivable"), Side.CREDIT, accrued, ccy),
+                optional(deal, LedgerRole.INTEREST_INCOME, Side.DEBIT, accrued),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.CREDIT, accrued),
             )
         } else {
             listOfNotNull(
-                line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
-                line(TreasuryChart.code(ccy, "expense"), Side.CREDIT, accrued, ccy),
+                optional(deal, LedgerRole.ACCRUED_INTEREST, Side.DEBIT, accrued),
+                optional(deal, LedgerRole.INTEREST_EXPENSE, Side.CREDIT, accrued),
             )
         }
         return JournalSpec(deal.id, PostingEvent.REVERSED, flipped + unwind)
     }
 
-    /** The principal's liability account: interbank borrowings, or the ČNB lombard account. */
-    private fun liabilityCode(deal: Deal): String =
-        TreasuryChart.code(deal.currency, if (deal.product == ProductType.CNB_LOMBARD) "cnb-borrowing" else "borrowing")
+    private fun leg(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal) =
+        PostingLine(deal.product.accountingClass, role, side, amount, deal.currency)
 
-    private fun line(code: String, side: Side, amount: BigDecimal, ccy: String): PostingLine? =
-        if (amount.signum() > 0) PostingLine(code, side, amount, ccy) else null
+    private fun nostro(currency: String, side: Side, amount: BigDecimal) =
+        PostingLine(AccountingClasses.NOSTRO, LedgerRole.PRINCIPAL, side, amount, currency)
+
+    private fun optional(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal): PostingLine? =
+        if (amount.signum() > 0) leg(deal, role, side, amount) else null
+}
+
+/**
+ * A journal being reversed cannot be offset account by account: it carries no recorded accounts (posted
+ * before `deal_journals.resolved_accounts` existed, or the ledger's answer could not be paired with its
+ * legs), or the recorded accounts do not match the legs it posted. Refused rather than re-resolved
+ * against today's class map, which could offset a different account than the one that was posted to.
+ * Mapped to 409 `REVERSAL_ACCOUNTS_UNKNOWN`; the operator remedy is in the service docs (backfill the
+ * row from the ledger's own journal, then retry).
+ */
+class ReversalAccountsUnknownException(message: String) : IllegalStateException(message)
+
+/** One journal the deal posted, as the posting table regenerates it, with what the ledger recorded for it. */
+data class PostedJournalRecord(val journalId: UUID, val spec: JournalSpec, val accounts: List<ResolvedAccount>)
+
+/**
+ * Pins a reversal to what was actually posted (ADR-0341 D3, follow-up to #13205). The signed amounts
+ * of every reversed journal are netted per `(class, role, currency, glAccountId)` and each account is
+ * offset by exactly its own net, so accruals that landed on account A before a map re-point and on B
+ * after it are unwound as two lines, A and B, each by what it received. Never re-resolves: a journal
+ * without recorded accounts, or whose recorded accounts do not match its legs, fails the reversal.
+ *
+ * [rule] (the posting-table reversal) stays authoritative for WHAT is reversed: per class leg, the
+ * per-account lines must sum to the rule's amount, or the reversal is refused as inconsistent.
+ */
+object PinnedReversal {
+    private data class ClassKey(val accountingClass: String, val role: LedgerRole, val currency: String)
+
+    private fun PostingLine.classKey() = ClassKey(accountingClass, role, currency)
+    private fun PostingLine.signed() = if (side == Side.DEBIT) amount else amount.negate()
+
+    fun build(rule: JournalSpec, reversed: List<PostedJournalRecord>): JournalSpec {
+        val posted = netPerAccount(reversed)
+        val ruleNet = LinkedHashMap<ClassKey, BigDecimal>()
+        rule.lines.forEach { ruleNet.merge(it.classKey(), it.signed(), BigDecimal::add) }
+        val keys = ruleNet.keys + posted.keys.filter { k -> posted.getValue(k).values.any { it.signum() != 0 } }
+        keys.forEach { k -> requireOffsetsRule(rule.dealId, k, posted[k], ruleNet[k] ?: BigDecimal.ZERO) }
+        return rule.copy(lines = keys.flatMap { k -> offsetLines(k, posted[k].orEmpty()) })
+    }
+
+    /** Signed amounts posted, per class key and, inside it, per account in first-posted order. */
+    private fun netPerAccount(reversed: List<PostedJournalRecord>): Map<ClassKey, Map<UUID, BigDecimal>> {
+        val posted = LinkedHashMap<ClassKey, LinkedHashMap<UUID, BigDecimal>>()
+        reversed.forEach { journal ->
+            requireRecorded(journal)
+            journal.spec.lines.zip(journal.accounts).forEach { (line, account) ->
+                posted.getOrPut(line.classKey()) { LinkedHashMap() }
+                    .merge(account.glAccountId, line.signed(), BigDecimal::add)
+            }
+        }
+        return posted
+    }
+
+    private fun requireRecorded(journal: PostedJournalRecord) {
+        val what = "journal ${journal.journalId} (${journal.spec.idempotencyKey})"
+        if (journal.accounts.isEmpty()) {
+            throw ReversalAccountsUnknownException(
+                "$what has no recorded accounts; refusing to re-resolve it against today's ledger map",
+            )
+        }
+        val matches = journal.accounts.size == journal.spec.lines.size &&
+            journal.accounts.zip(journal.spec.lines).all { (a, l) ->
+                a.accountingClass == l.accountingClass && a.role == l.role && a.currency == l.currency
+            }
+        if (!matches) {
+            throw ReversalAccountsUnknownException(
+                "$what: recorded accounts do not match its ${journal.spec.lines.size} legs",
+            )
+        }
+    }
+
+    private fun requireOffsetsRule(dealId: UUID, k: ClassKey, posted: Map<UUID, BigDecimal>?, ruleNet: BigDecimal) {
+        val offset = posted?.values?.fold(BigDecimal.ZERO, BigDecimal::add)?.negate() ?: BigDecimal.ZERO
+        if (offset.compareTo(ruleNet) != 0) {
+            throw ReversalAccountsUnknownException(
+                "reversal of $dealId: ${k.accountingClass}/${k.role}/${k.currency} offsets $offset by the recorded " +
+                    "journals but $ruleNet by the posting table; the records do not match",
+            )
+        }
+    }
+
+    private fun offsetLines(k: ClassKey, perAccount: Map<UUID, BigDecimal>): List<PostingLine> =
+        perAccount.filterValues { it.signum() != 0 }.map { (account, net) ->
+            PostingLine(
+                k.accountingClass,
+                k.role,
+                if (net.signum() > 0) Side.CREDIT else Side.DEBIT,
+                net.abs(),
+                k.currency,
+                account,
+            )
+        }
 }

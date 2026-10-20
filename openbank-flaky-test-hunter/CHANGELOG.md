@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.1...flaky-test-hunter-v0.15.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** expose bounded operator workflow execution status ([#13389](https://github.com/JiRaska/open-bank-oss/issues/13389)) ([a363083](https://github.com/JiRaska/open-bank-oss/commit/a3630838df9d18eedbf091cbdd0f964eac8cd321))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.0...flaky-test-hunter-v0.15.1) (2026-10-18)
 
 

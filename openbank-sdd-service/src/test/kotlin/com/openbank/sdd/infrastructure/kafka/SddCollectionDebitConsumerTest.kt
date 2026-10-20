@@ -5,14 +5,18 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.libs.messaging.EventRetry
-import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -50,11 +54,14 @@ class SddCollectionDebitConsumerTest {
         ),
     )
 
+    private fun created(): Response =
+        Response.status(201).entity(TransactionResponse(id = UUID.randomUUID(), status = "COMPLETED")).build()
+
     @Test
     fun `books the debtor debit for a collection-authorised event and swallows a 2xx as success`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(created())
 
         consumer.consume(collectionAuthorisedEvent())
 
@@ -68,9 +75,33 @@ class SddCollectionDebitConsumerTest {
     }
 
     @Test
+    fun `unreadable booking payload is removed before retry logging without changing retry identity`(): Unit =
+        runBlocking {
+            val poison = "synthetic-private-booking-payload"
+            val response = mockk<Response>(relaxed = true)
+            every { response.status } returns 201
+            every { response.hasEntity() } returns true
+            every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException(poison)
+            val requests = mutableListOf<InitiateTransactionRequest>()
+            every { transactionClient.initiateTransaction(capture(requests)) } returns Uni.createFrom().item(response)
+
+            assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }
+                .isInstanceOfSatisfying(TransactionCompletionUncertainException::class.java) {
+                    assertThat(it.status).isEqualTo(201)
+                    assertThat(it.cause).isNull()
+                    assertThat(it.stackTraceToString()).doesNotContain(poison)
+                }
+
+            verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { response.readEntity(TransactionResponse::class.java) }
+            assertThat(requests).hasSize(EventRetry.DEFAULT_MAX_ATTEMPTS)
+            assertThat(requests.map { it.idempotencyKey })
+                .containsOnly("so-sdd-$mandateId-UMR-2026-001-2026-07-13")
+        }
+
+    @Test
     fun `a 409 from transaction-service is treated as an idempotent success, no error logged`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(409).build())
+            Uni.createFrom().failure(WebApplicationException(409))
 
         // Must not throw — the poison-pill boundary swallows nothing here because 409 is a
         // recognized, non-exceptional outcome.
@@ -80,14 +111,14 @@ class SddCollectionDebitConsumerTest {
     }
 
     @Test
-    fun `a non-2xx-non-409 response is retried and then rethrown so the connector dead-letters`(): Unit = runBlocking {
+    fun `a refusal (422) is retried and then rethrown so the connector dead-letters`(): Unit = runBlocking {
         // This test previously asserted the OPPOSITE — "handled without throwing (logged as a
         // failure)" — and passing was exactly the problem (#5698): returning normally ACKS the
         // message, so an authorised collection that never debited was indistinguishable from one
         // that did. R-transaction/return generation is not built (#1000), so the DLQ is the only
         // path by which a human learns the money did not move.
         every { transactionClient.initiateTransaction(any()) } returns
-            Uni.createFrom().item(Response.status(500).build())
+            Uni.createFrom().failure(WebApplicationException(422))
 
         assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }
             .isInstanceOf(SddDebitFailedException::class.java)
@@ -95,6 +126,36 @@ class SddCollectionDebitConsumerTest {
 
         // Bounded, not unbounded: a permanently refusing rail must not pin the partition forever.
         verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { transactionClient.initiateTransaction(any()) }
+    }
+
+    @Test
+    fun `a 503 proves nothing - it is retried and rethrown untouched, never reported as a failed debit`(): Unit =
+        runBlocking {
+            every { transactionClient.initiateTransaction(any()) } returns
+                Uni.createFrom().failure(WebApplicationException(503))
+
+            assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }
+                .isInstanceOfSatisfying(TransactionHttpException::class.java) {
+                    assertThat(it.status).isEqualTo(503)
+                }
+
+            verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { transactionClient.initiateTransaction(any()) }
+        }
+
+    @Test
+    fun `an unreadable 201 is completion-uncertain - thrown for retry, never debited`(): Unit = runBlocking {
+        val response = mockk<Response>(relaxed = true)
+        every { response.status } returns 201
+        every { response.hasEntity() } returns true
+        every { response.readEntity(TransactionResponse::class.java) } throws IllegalStateException("garbled")
+        every { transactionClient.initiateTransaction(any()) } returns Uni.createFrom().item(response)
+
+        assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }.satisfies({ failure ->
+            assertThat(
+                generateSequence<Throwable>(failure) { it.cause.takeIf { c -> c !== it } }
+                    .any { it is TransactionCompletionUncertainException },
+            ).isTrue()
+        })
     }
 
     @Test
@@ -115,7 +176,7 @@ class SddCollectionDebitConsumerTest {
     fun `amount scale is normalised to the currency's fraction digits`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(created())
 
         consumer.consume(collectionAuthorisedEvent(amount = "2200.000000"))
 
@@ -127,7 +188,7 @@ class SddCollectionDebitConsumerTest {
     fun `a tie in the dropped digits rounds half-up, never half-even`(): Unit = runBlocking {
         val req = slot<InitiateTransactionRequest>()
         every { transactionClient.initiateTransaction(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
+            Uni.createFrom().item(created())
 
         consumer.consume(collectionAuthorisedEvent(amount = "10.125"))
 

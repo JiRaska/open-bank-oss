@@ -25,6 +25,7 @@ the code under test.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -161,6 +162,28 @@ class CollectorScorerTest(unittest.TestCase):
         self.assertEqual(self.mod.money_path(), {"alpha"})
         self.write_rules(("openbank-beta-service",))
         self.assertEqual(self.mod.money_path(), {"beta"})
+
+    def test_snapshot_records_full_collection_provenance_and_exact_scope_without_rescoring(self):
+        result = self.mod.ServiceReadiness(service="widget", money_path=True)
+        result.scores = {code: 2 for code, _ in self.mod.DIMENSIONS}
+        result.evidence = {code: "fixture evidence" for code, _ in self.mod.DIMENSIONS}
+        result.gate = "NO-GO"
+        payload = self.mod.build_snapshot(
+            [result], "2026-10-19", "2026-10-19T12:34:56Z", "a" * 40,
+        )
+
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["generated_for"], "2026-10-19")
+        self.assertEqual(payload["collected_at"], "2026-10-19T12:34:56Z")
+        self.assertEqual(payload["source_sha"], "a" * 40)
+        self.assertEqual(payload["scope"], {
+            "kind": "service-module-matrix-v1",
+            "service_count": 1,
+            "money_path_count": 1,
+            "roster_sha256": hashlib.sha256(b"widget:true").hexdigest(),
+        })
+        self.assertEqual(payload["services"][0]["gate"], "NO-GO")
+        self.assertEqual(payload["services"][0]["scores"]["C1"], 2)
 
     def test_a_money_path_service_needs_three_on_the_critical_cells(self):
         """The stricter gate is what the six leniently-scored services were missing."""

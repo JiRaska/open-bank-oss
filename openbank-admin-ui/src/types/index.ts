@@ -106,6 +106,8 @@ export interface HealthCheck {
 
 export interface ServiceSnapshot {
   name: string
+  /** Kubernetes namespace when the snapshot comes from in-cluster discovery. */
+  namespace?: string
   port: number
   info: ServiceInfo | null
   health: ServiceHealth | null
