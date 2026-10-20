@@ -42,10 +42,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import gatelib  # noqa: E402  (path must be set before the import)
+import gatelib
 
 REPO = Path(__file__).resolve().parents[2]
 PY_COLLECTOR = REPO / "openbank-infra" / "scripts" / "prod-readiness-collector.py"
@@ -57,20 +58,22 @@ NODE_COLLECTOR = REPO / "openbank-admin-ui" / "scripts" / "collect-prod-readines
 FIXED_TODAY = "2026-01-15"
 
 
-def run_python(repo: Path, out: Path) -> list[dict]:
+def run_python(repo: Path, out: Path, source_sha: str | None = None) -> list[dict]:
     subprocess.run(
         [sys.executable, str(repo / "openbank-infra" / "scripts" / "prod-readiness-collector.py"),
-         "--all", "--today", FIXED_TODAY, "--json", str(out)],
+         "--all", "--today", FIXED_TODAY, "--json", str(out),
+         *(["--source-sha", source_sha] if source_sha else [])],
         cwd=repo, check=True, capture_output=True, text=True,
     )
     return json.loads(out.read_text())["services"]
 
 
-def run_node(repo: Path, out: Path) -> list[dict]:
+def run_node(repo: Path, out: Path, source_sha: str | None = None) -> list[dict]:
     env = dict(os.environ, READINESS_TODAY=FIXED_TODAY)
     subprocess.run(
         ["node", str(repo / "openbank-admin-ui" / "scripts" / "collect-prod-readiness.mjs"),
-         "--repo", str(repo), "--out", str(out)],
+         "--repo", str(repo), "--out", str(out),
+         *(["--source-sha", source_sha] if source_sha else [])],
         cwd=repo, check=True, capture_output=True, text=True, env=env,
     )
     return json.loads(out.read_text())["services"]
@@ -135,18 +138,33 @@ def self_test() -> int:
                 dst = work / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(src, dst)
-        # Enough of the fleet for both collectors to produce a non-empty, comparable population.
-        for svc in sorted(REPO.glob("openbank-*-service")):
-            if (svc / "governance.yaml").exists():
-                shutil.copytree(svc, work / svc.name,
-                                ignore=shutil.ignore_patterns("build", ".gradle", "node_modules"))
+        # Mirror the collectors' structural roster, including suffixless payment/agent apps.
+        inventory = subprocess.run(
+            ["node", str(REPO / "openbank-admin-ui/scripts/service-inventory.mjs"),
+             "--repo", str(REPO)], check=True, capture_output=True, text=True,
+        )
+        for module in json.loads(inventory.stdout):
+            svc = REPO / module["name"]
+            shutil.copytree(svc, work / svc.name,
+                            ignore=shutil.ignore_patterns("build", ".gradle", "node_modules"))
+        # The fixture omits .git; stamp its copied source explicitly, never infer another checkout.
+        fixture_source_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
         shutil.copytree(REPO / "openbank-infra" / "gitops", work / "openbank-infra" / "gitops")
 
         # Each collector run costs tens of seconds, so every result below is reused: two
         # runs establish agreement, two prove a build copy changes nothing, and one more
         # (Node only — Python is untouched) proves the comparison can fail.
-        before_py = run_python(work, Path(tmp) / "before-py.json")
-        before_node = run_node(work, Path(tmp) / "before-node.json")
+        def fixture_pair(prefix: str) -> tuple[list[dict], list[dict]]:
+            # Independent read-only collectors write distinct files; retain both observations.
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                py = workers.submit(run_python, work, Path(tmp) / f"{prefix}-py.json", fixture_source_sha)
+                node = workers.submit(run_node, work, Path(tmp) / f"{prefix}-node.json", fixture_source_sha)
+                return py.result(), node.result()
+
+        before_py, before_node = fixture_pair("before")
         clean = diff_results(before_py, before_node)
         if clean:
             print("SELF-TEST FAILED: the untouched copy already diverges:", file=sys.stderr)
@@ -161,8 +179,8 @@ def self_test() -> int:
         generated = work / service / "build/resources/main/db/migration" / migration.name
         generated.parent.mkdir(parents=True)
         shutil.copyfile(migration, generated)
-        after_py = run_python(work, Path(tmp) / "after-py.json")
-        if after_py != before_py or run_node(work, Path(tmp) / "after-node.json") != before_node:
+        after_py, after_node = fixture_pair("after")
+        if after_py != before_py or after_node != before_node:
             print("SELF-TEST FAILED: build outputs changed readiness scores or evidence", file=sys.stderr)
             return 1
 
@@ -173,7 +191,7 @@ def self_test() -> int:
         node.write_text(text.replace(
             marker, marker + "\n  return { score: 0, evidence: 'self-test perturbation' }", 1))
 
-        broken = diff_results(after_py, run_node(work, Path(tmp) / "broken-node.json"))
+        broken = diff_results(after_py, run_node(work, Path(tmp) / "broken-node.json", fixture_source_sha))
         if not broken:
             print("SELF-TEST FAILED: a deliberately broken C6 scorer produced NO divergence — "
                   "the comparison is not reaching the collectors", file=sys.stderr)
