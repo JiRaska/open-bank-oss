@@ -1228,9 +1228,11 @@ def strict_reservation(git, base: str, strict: list, now: float | None = None) -
             continue
         if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
             continue
+        # The committer date is author-supplied: a head stamped in the future would otherwise hold
+        # main for as long as its CI never reports. Unreadable or future -> treated as expired.
         stamp = git("log", "-1", "--format=%ct", head, check=False).stdout.strip()
-        age = now - int(stamp) if stamp.isdigit() else STRICT_RESERVE_SECONDS + 1
-        if age > STRICT_RESERVE_SECONDS:
+        age = now - int(stamp) if stamp.isdigit() else -1
+        if age < 0 or age > STRICT_RESERVE_SECONDS:
             log(f"::warning::#{n} strict: CI unconcluded {int(age) // 60} min after its head commit — "
                 f"reservation expired (cap {STRICT_RESERVE_SECONDS // 60} min), main is not held for it")
             continue
@@ -2279,6 +2281,19 @@ def self_test() -> int:
             finally:
                 globals()["clock"] = real_clock
             check("strict starvation: a reservation older than the cap lapses and main moves again",
+                  gh.merged == [36], f"{s} merged={gh.merged}")
+            gh.head_checks.clear()
+            reset()
+
+            # (f) the stamp is the author's: a head dated in the future cannot hold main either.
+            reserved_for_35(**{"gates (data)": None})
+            open_only("pW2")
+            globals()["clock"] = lambda: real_clock() - 3600
+            try:
+                s = settle_now()
+            finally:
+                globals()["clock"] = real_clock
+            check("strict starvation: a head committed in the future holds no reservation",
                   gh.merged == [36], f"{s} merged={gh.merged}")
             gh.head_checks.clear()
             reset()
