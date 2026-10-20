@@ -159,7 +159,7 @@ export default function ClusterDossierPage() {
   const [topo, setTopo] = useState<Topology | null>(null)
   const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeLayer, setActiveLayer] = useState<string | null>(null)
+  const [activeLayer, setActiveLayer] = useState<string | null | undefined>(undefined)
   const [openNs, setOpenNs] = useState<string | null>(null)
   const activeRequest = useRef<AbortController | null>(null)
 
@@ -179,7 +179,7 @@ export default function ClusterDossierPage() {
         || !Array.isArray(d.planVsReality)) throw new Error('Invalid cluster topology')
       setTopo(d)
       setContentSource(response.contentSource ?? null)
-      setActiveLayer(current => d.securityLayers.some(layer => layer.id === current)
+      setActiveLayer(current => current === null || d.securityLayers.some(layer => layer.id === current)
         ? current
         : d.securityLayers[0]?.id ?? null)
     } catch (error) {
@@ -315,7 +315,7 @@ export default function ClusterDossierPage() {
       <SectionTitle icon={Shield} title={t('2 · Obrana do hloubky — „vrstvy ochranky"', '2 · Defense in depth — "layers of security"')} />
       <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 24, alignItems: 'center', marginBottom: 32 }}>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer} onPick={setActiveLayer} lang={language} />}
+          {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer ?? null} onPick={setActiveLayer} lang={language} />}
         </div>
         <div style={{ display: 'grid', gap: 8 }}>
           {(topo?.securityLayers ?? []).map((l, i) => {
