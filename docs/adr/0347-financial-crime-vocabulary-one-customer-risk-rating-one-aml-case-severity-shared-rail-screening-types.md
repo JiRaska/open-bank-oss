@@ -85,7 +85,7 @@ never computed.
 
 **Positive**
 - The 0.85 block threshold and the fail-closed mappings exist once; a rail cannot drift.
-- 17 `enum-reference-data-ratchet` baseline entries for #13435/#13439 can be deleted.
+- 18 `enum-reference-data-ratchet` baseline entries for #13435/#13439 can be deleted.
 
 **Negative**
 - One more libs module; the four money-path rails gain a dependency (2 approvals each).
