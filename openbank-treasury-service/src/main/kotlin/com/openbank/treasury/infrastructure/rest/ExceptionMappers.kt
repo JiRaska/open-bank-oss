@@ -13,6 +13,7 @@ import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
+import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -47,6 +48,11 @@ class ExceptionMappers {
     @ServerExceptionMapper
     fun conflict(e: IllegalStateException): Response =
         error(Response.Status.CONFLICT.statusCode, "INVALID_STATE", e.message)
+
+    /** A reversal that cannot be pinned to the accounts actually posted to: refused, never re-resolved. */
+    @ServerExceptionMapper
+    fun reversalAccountsUnknown(e: ReversalAccountsUnknownException): Response =
+        error(Response.Status.CONFLICT.statusCode, "REVERSAL_ACCOUNTS_UNKNOWN", e.message)
 
     /** ADR-0315 D9: no quote can be priced (no curve set / curve, risk engine unreachable or refusing). */
     @ServerExceptionMapper

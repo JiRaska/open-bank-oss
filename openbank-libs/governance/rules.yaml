@@ -2481,6 +2481,24 @@ kafka_dotted_keys:
   baseline_is_checked_both_ways: true
   ci_producer: .github/scripts/check-kafka-dotted-keys.py
 
+enum_reference_data:
+  # Business vocabulary a bank changes by decision (turnover bands, notice periods, risk scales,
+  # rate indices) must not be a Kotlin `enum class` owned by more than one module, nor carry its
+  # numbers in value names. Two shapes are enforced because both are decidable without judgement:
+  #   numeric_encoded_values — a value name encoding a threshold/band/period (UP_TO_30K, OVER_500K,
+  #     DAYS_7, PCT_25_TO_50, DPD_1_30). Tenors (PRIBOR_3M) and protocol codes (PACS_008) are not.
+  #   cross_module_duplicates — the same value set (>= 80 % overlap, >= 3 values) in two modules,
+  #     ignoring overlaps made only of generic lifecycle/severity words unless the enum name is
+  #     identical (a verbatim copy).
+  # Fix by modelling the vocabulary as data or reusing the owning module's type. A ratchet: the
+  # 2026-10-20 estate is baselined per finding against a tracking issue; a new finding fails and a
+  # baseline entry that no longer matches is reported as stale.
+  numeric_encoded_values: forbidden
+  cross_module_duplicates: forbidden
+  baseline: .github/scripts/enum-reference-data-baseline.txt
+  baseline_is_checked_both_ways: true
+  ci_producer: .github/scripts/check-enum-reference-data.py
+
 kafka_topics:
   referenced_topics_must_be_declared: true
   # A Kafka consumer subscribed to a topic that does not exist does NOT error. It joins its
