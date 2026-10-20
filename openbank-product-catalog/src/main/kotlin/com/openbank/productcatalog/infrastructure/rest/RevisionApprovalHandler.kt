@@ -65,7 +65,15 @@ class RevisionApprovalHandler(
             ?: throw CatalogForbiddenException("token subject is required")
         val expected = ifMatch?.let { STRONG_ETAG.matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }
             ?: throw CatalogPreconditionRequiredException("a strong If-Match revision is required")
-        val approved = service.approveRevision(revisionId, expected, role, issuer, subject, approverName, request.reason)
+        val approved = service.approveRevision(
+            revisionId,
+            expected,
+            role,
+            issuer,
+            subject,
+            approverName,
+            request.reason,
+        )
         return Response.status(Response.Status.CREATED).entity(response(approved)).build()
     }
 
@@ -124,8 +132,10 @@ class RevisionApprovalHandler(
     private fun requireHumanApprover(token: JsonWebToken): String {
         val username = token.getClaim<String>("preferred_username").orEmpty()
         val approverName = token.name ?: username
-        if (username.isBlank() || approverName.isBlank() ||
-            isMachineIdentity(username) || isMachineIdentity(approverName) ||
+        if (username.isBlank() ||
+            approverName.isBlank() ||
+            isMachineIdentity(username) ||
+            isMachineIdentity(approverName) ||
             token.subject?.startsWith("agent:") == true
         ) {
             throw CatalogForbiddenException("a human approver is required")
@@ -135,12 +145,11 @@ class RevisionApprovalHandler(
 
     private fun isMachineIdentity(name: String) = name.startsWith("service-account-") || name.startsWith("agent:")
 
-    private suspend fun requireOwner(offeringId: UUID, revisionId: UUID) =
-        service.findRevision(revisionId).also {
-            if (it.offeringId != offeringId) {
-                throw CatalogNotFoundException("revision $revisionId not found for offering $offeringId")
-            }
+    private suspend fun requireOwner(offeringId: UUID, revisionId: UUID) = service.findRevision(revisionId).also {
+        if (it.offeringId != offeringId) {
+            throw CatalogNotFoundException("revision $revisionId not found for offering $offeringId")
         }
+    }
 
     private fun response(approval: RevisionApproval) =
         RevisionApprovalResponse(approval.role, approval.digest, approval.approvedAt)

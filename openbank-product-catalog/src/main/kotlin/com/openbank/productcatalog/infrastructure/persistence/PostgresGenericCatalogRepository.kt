@@ -319,23 +319,27 @@ class PostgresGenericCatalogRepository(
         }.awaitSuspending()
     }
 
-    override suspend fun revisionApprovals(revisionId: UUID): List<RevisionApproval> =
-        sessions.withSession { session ->
-            session.find(CatalogRevisionEntity::class.java, revisionId).flatMap { revision ->
-                val digest = when {
-                    revision == null -> null
-                    revision.state == RevisionState.DRAFT.name -> catalogJson.approvalDigest(revision.toDomain())
-                    else -> revision.approvalDigest
-                }
-                if (digest == null) Uni.createFrom().item(emptyList()) else currentApprovals(session, revisionId, digest)
+    override suspend fun revisionApprovals(revisionId: UUID): List<RevisionApproval> = sessions.withSession { session ->
+        session.find(CatalogRevisionEntity::class.java, revisionId).flatMap { revision ->
+            val digest = when {
+                revision == null -> null
+                revision.state == RevisionState.DRAFT.name -> catalogJson.approvalDigest(revision.toDomain())
+                else -> revision.approvalDigest
             }
-        }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+            if (digest ==
+                null
+            ) {
+                Uni.createFrom().item(emptyList())
+            } else {
+                currentApprovals(session, revisionId, digest)
+            }
+        }
+    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
-    private fun currentApprovals(session: Mutiny.Session, revisionId: UUID, digest: String) =
-        session.createQuery(
-            "FROM RevisionRoleApprovalEntity WHERE revisionId = :id AND digest = :digest ORDER BY approvedAt, role",
-            RevisionRoleApprovalEntity::class.java,
-        ).setParameter("id", revisionId).setParameter("digest", digest).resultList
+    private fun currentApprovals(session: Mutiny.Session, revisionId: UUID, digest: String) = session.createQuery(
+        "FROM RevisionRoleApprovalEntity WHERE revisionId = :id AND digest = :digest ORDER BY approvedAt, role",
+        RevisionRoleApprovalEntity::class.java,
+    ).setParameter("id", revisionId).setParameter("digest", digest).resultList
 
     private fun requireApprovable(draft: CatalogRevisionEntity, policy: RevisionApprovalPolicy) {
         if (policy.requireEffectiveFrom && draft.effectiveFrom == null) {
@@ -384,7 +388,6 @@ class PostgresGenericCatalogRepository(
         reason,
         approvedAt,
     )
-
 
     override suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision? =
         sessions.withSession { session ->

@@ -199,7 +199,9 @@ class GenericCatalogService(
         val draft = findRevision(revisionId)
         requireExpected(draft, expectedRevision)
         val policy = approvalPolicy(draft)
-            ?: throw CatalogConflictException("schema ${draft.schemaRef.id}:${draft.schemaRef.version} declares no approval policy")
+            ?: throw CatalogConflictException(
+                "schema ${draft.schemaRef.id}:${draft.schemaRef.version} declares no approval policy",
+            )
         if (draft.state != RevisionState.DRAFT) {
             throw CatalogConflictException("only draft revisions accept role approvals")
         }

@@ -47,7 +47,9 @@ class CatalogPackSeeder(
         val manifest = requireNotNull(javaClass.getResourceAsStream(resource)) {
             "catalog pack '$pack' is enabled but $resource is missing"
         }.use(mapper::readTree)
-        require(manifest.path("pack").asText() == pack) { "$resource declares pack '${manifest.path("pack").asText()}'" }
+        require(manifest.path("pack").asText() == pack) {
+            "$resource declares pack '${manifest.path("pack").asText()}'"
+        }
         return manifest.path("schemas").map { entry ->
             PackSchema(
                 pack = pack,
