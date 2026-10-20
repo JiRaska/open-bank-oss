@@ -21,6 +21,7 @@ import com.openbank.libs.finance.leg.RateBounds
 import com.openbank.libs.finance.leg.RateSpec
 import com.openbank.libs.finance.leg.ScheduleSpec
 import com.openbank.libs.finance.schedule.Frequency
+import com.openbank.libs.finance.schedule.RollDirection
 import com.openbank.libs.finance.schedule.StubType
 import io.quarkus.runtime.annotations.RegisterForReflection
 import java.math.BigDecimal
@@ -94,7 +95,35 @@ enum class LegBounds(val maxLegs: Int?, val maxSpanYears: Long?) {
 }
 
 /** Deal-level defaults a leg inherits (contract section 8.1 header: `calendars`, `businessDayConvention`). */
-data class LegDefaults(val calendars: List<String>? = null, val businessDayConvention: String? = null)
+data class LegDefaults(
+    val calendars: List<String>? = null,
+    val businessDayConvention: String? = null,
+    /** The deal's roll direction; places a leg that names no stub. Absent = treasury's default, FROM_END. */
+    val rollDirection: RollDirection = RollDirection.FROM_END,
+) {
+    companion object {
+        /** `null`, blank and `NONE` all mean "no stub"; any other text must name a [StubType]. */
+        fun parseStub(raw: String?, i: Int = 0): StubType? {
+            val text = raw?.trim()?.uppercase()
+            return if (text.isNullOrEmpty() || text == StubType.NO_STUB) null else stubNamed(i, text)
+        }
+
+        private fun stubNamed(i: Int, text: String): StubType {
+            val known = StubType.entries
+            return known.firstOrNull { it.name == text }
+                ?: throw IllegalArgumentException("legs[$i].stub '$text' is not one of ${known.joinToString()}")
+        }
+
+        /** The deal's roll direction as published; absent/blank = treasury's default, FROM_END. */
+        fun parseRollDirection(raw: String?): RollDirection {
+            val text = raw?.trim()?.uppercase()
+            if (text.isNullOrEmpty()) return RollDirection.FROM_END
+            val known = RollDirection.entries
+            return known.firstOrNull { it.name == text }
+                ?: throw IllegalArgumentException("rollDirection '$raw' is not one of ${known.joinToString()}")
+        }
+    }
+}
 
 /**
  * LegSpec JSON → libs-finance [LegSpec]. Every defect is an [IllegalArgumentException] naming the
@@ -140,7 +169,7 @@ object LegSpecJson {
                 end = end,
                 accrualFrequency = accrualFrequency,
                 paymentFrequency = d.paymentFrequency?.let { frequency(i, "paymentFrequency", it) } ?: accrualFrequency,
-                stub = d.stub?.let { enumOf<StubType>(i, "stub", it) } ?: StubType.SHORT_INITIAL,
+                stub = StubType.resolve(LegDefaults.parseStub(d.stub, i), defaults.rollDirection),
                 endOfMonth = d.endOfMonth ?: false,
             ),
             dates = DateRules(

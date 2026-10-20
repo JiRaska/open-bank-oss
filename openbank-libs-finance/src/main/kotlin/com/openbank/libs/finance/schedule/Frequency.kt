@@ -82,6 +82,21 @@ enum class StubType(val direction: RollDirection) {
     ;
 
     val isLong: Boolean get() = this == LONG_INITIAL || this == LONG_FINAL
+
+    companion object {
+        /** The wire spelling of "this leg names no stub" (a `null` stub in the domain). */
+        const val NO_STUB: String = "NONE"
+
+        /**
+         * The single rule for a leg that names no stub: an explicit [stub] always wins; otherwise the
+         * deal's roll [direction] places it — FROM_START generates forward, so the irregular period
+         * falls at the end ([SHORT_FINAL]); FROM_END anchors on the end date, so it falls at the
+         * start ([SHORT_INITIAL]). Every producer and consumer of deal legs must use this function so
+         * they derive the same schedule from the same terms.
+         */
+        fun resolve(stub: StubType?, direction: RollDirection): StubType =
+            stub ?: if (direction == RollDirection.FROM_START) SHORT_FINAL else SHORT_INITIAL
+    }
 }
 
 /** A half-open date interval `[start, end)`. */

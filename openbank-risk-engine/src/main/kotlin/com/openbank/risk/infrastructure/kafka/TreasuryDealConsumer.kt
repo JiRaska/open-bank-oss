@@ -8,6 +8,7 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.finance.schedule.ScheduleGenerator
+import com.openbank.libs.finance.schedule.StubType
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.risk.application.port.out.TreasuryCashFlowStore
@@ -179,7 +180,10 @@ class TreasuryDealConsumer {
             val dtos = objectMapper.convertValue(legs, object : TypeReference<List<LegDto>>() {})
             LegSpecJson.toLegs(dtos, header, LegBounds.BOOKED).forEach { ScheduleGenerator.generate(it) }
             val resolved = dtos.map {
+                // Bake the resolved stub: the stored legs are re-read without the deal header, so a
+                // FROM_START deal must not fall back to the FROM_END default later.
                 it.copy(
+                    stub = StubType.resolve(LegDefaults.parseStub(it.stub), header.rollDirection).name,
                     paymentCalendars = it.paymentCalendars ?: header.calendars,
                     businessDayConvention = it.businessDayConvention ?: header.businessDayConvention,
                 )
@@ -201,6 +205,7 @@ class TreasuryDealConsumer {
                 LegDefaults(
                     calendars = node.get("calendars")?.takeIf { it.isArray }?.map { it.asText() },
                     businessDayConvention = node.text("businessDayConvention"),
+                    rollDirection = LegDefaults.parseRollDirection(node.text("rollDirection")),
                 ),
             )
             TreasuryDealEvent(
