@@ -13,232 +13,304 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.clients.transaction.api.TransactionsApi
+import com.openbank.clients.transaction.model.TransactionPage
 import com.openbank.party.application.port.out.GdprAggregationAuthException
 import com.openbank.party.infrastructure.client.AccountPageBody
 import com.openbank.party.infrastructure.client.AccountServiceRestClient
 import com.openbank.party.infrastructure.client.AccountSummaryBody
 import com.openbank.party.infrastructure.client.CardServiceRestClient
-import com.openbank.party.infrastructure.client.TransactionPageResponse
 import com.openbank.party.infrastructure.client.TransactionServiceRestClient
 import com.openbank.party.infrastructure.gdpr.PortabilityAggregationAdapter
+import io.mockk.every
+import io.mockk.mockk
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Path
-import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.TestMethodOrder
 import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
 /**
- * Consumer contract: party-service -> transaction-service `GET /api/v1/transactions?accountId=`,
- * the per-account leg of the GDPR Art. 20 portability export (ADR-0204 D2).
+ * Consumer-driven contract for the GDPR Art. 20 portability export's transaction read
+ * (ADR-0204 D2): [com.openbank.party.infrastructure.gdpr.PortabilityAggregationAdapter] calling
+ * `GET /api/v1/transactions?accountId=&limit=` through the client GENERATED from
+ * transaction-service's own `openapi.yaml` (ADR-0319).
  *
- * What the contract pins: the page wrapper's rows arrive under `data` (a `CursorPage`, not
- * `items`); the row carries `id` / `referenceNumber` / `type` / `amount` / `currencyCode` /
- * `status` / `description` / `bookingDate` — the exact fields `TransactionItemResponse`
- * deserializes, because `@JsonIgnoreProperties(ignoreUnknown = true)` makes a renamed field a
- * SILENT null and the export would ship transactions with empty amounts rather than fail.
+ * Until ADR-0319 party-service had no pact for this route at all, so a wrong path would have been
+ * invisible to `check-pact-provider-replay.py`, which can only replay *committed* pacts.
  *
- * Failure semantics are half the contract: the aggregation adapter degrades every downstream
- * outage to an empty slice, but 401/403 fails the export hard (`GdprAggregationAuthException`) —
- * a refused read must never read as "the subject has no transactions". The 401 leg replays that.
+ * ## The asymmetry that makes this falsifiable at the consumer layer
  *
- * Replayed by transaction-service's `TransactionPactFolderProviderVerificationTest` (git pacts,
- * runs on every PR per #2338) and the broker twin, which must carry the same `@State` handlers.
+ * **The expected path and query names are LITERALS; only the outgoing request is reflected off the
+ * generated client** (CLAUDE.md "Contract tests"). [assertClientRouteMatchesContract] pins the
+ * generated annotations to the literals; the provider replay
+ * (`TransactionPactFolderProviderVerificationTest`) independently answers whether
+ * transaction-service serves the route.
  *
- * The account and card clients are local fakes: this pact's integration point is the transaction
- * list only, and the fakes keep the published pact free of interactions the contract does not
- * cover.
+ * The baseline empty-list replay pins the `data` envelope. Additional posted and empty-account
+ * states replay seeded provider rows, and the consumer passes their JSON through the generated
+ * model and real portability adapter to pin field mapping and empty-history behavior.
+ *
+ * The negative half is recorded in the same pact: a caller with no valid M2M identity is refused
+ * with 401 (ADR-0279 #3), served by `TransactionNegativeAuthPactVerificationTest`.
+ *
+ * IMPORTANT - regenerate on change: re-run this test
+ * (`./gradlew :openbank-party-service:test --tests "*PartyTransactionListPactConsumerTest*"`) and
+ * commit the updated pact JSON in the same PR; `.github/workflows/pact-drift-check.yml` fails the
+ * build if they diverge.
  */
 @ExtendWith(PactConsumerTestExt::class)
-@TestMethodOrder(MethodOrderer.MethodName::class)
-@PactTestFor(providerName = PartyTransactionListPactConsumerTest.PROVIDER, pactVersion = PactSpecVersion.V3)
+@PactTestFor(providerName = "openbank-transaction-service", pactVersion = PactSpecVersion.V3)
 class PartyTransactionListPactConsumerTest {
-
-    private val mapper = jacksonObjectMapper()
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun listTransactionsPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given(STATE)
-        .uponReceiving("GET transactions for the subject account during a portability export")
-        .path(EXPECTED_PATH)
+        .given("the transaction service is available")
+        .uponReceiving("GET the transactions of an account for the portability export")
+        .path(EXPECTED_TRANSACTIONS_PATH)
         .method("GET")
         .query("accountId=$ACCOUNT_ID&limit=$PAGE_SIZE")
         .willRespondWith()
-        .status(200)
+        .status(OK)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(newJsonBody { o -> o.array("data") { } }.build())
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "listTransactionsPact")
+    fun `the generated client's list route returns the data envelope`(mockServer: MockServer) {
+        assertClientRouteMatchesContract()
+
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            // Reflected off the generated client, NOT retyped: this is the path the real client issues.
+            .queryParam("accountId", ACCOUNT_ID)
+            .queryParam("limit", PAGE_SIZE)
+            .get(clientDerivedTransactionsPath())
+            .then()
+            .statusCode(OK)
+            .extract().jsonPath()
+
+        assertThat(body.getList<Any>("data")).isEmpty()
+    }
+
+    /**
+     * ADR-0279 #3: pins that transaction-service answers 401 - not an empty page that would read as
+     * "this subject has no transactions" - when party-service's M2M token is missing or expired.
+     * The adapter treats 401 as a hard failure for exactly that reason.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun rejectsWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the transactions of an account with a missing or expired token")
+        .path(EXPECTED_TRANSACTIONS_PATH)
+        .method("GET")
+        .query("accountId=$ACCOUNT_ID&limit=$PAGE_SIZE")
+        .willRespondWith()
+        .status(UNAUTHORIZED)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsWithMissingToken")
+    fun `rejects the list with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        assertClientRouteMatchesContract()
+
+        given()
+            .baseUri(mockServer.getUrl())
+            .queryParam("accountId", ACCOUNT_ID)
+            .queryParam("limit", PAGE_SIZE)
+            .get(clientDerivedTransactionsPath())
+            .then()
+            .statusCode(UNAUTHORIZED)
+    }
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun postedTransactionForPortability(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a posted transaction exists for the pact account")
+        .uponReceiving("GET transactions for the subject account during a portability export")
+        .path(EXPECTED_TRANSACTIONS_PATH)
+        .method("GET")
+        .query("accountId=$PORTABILITY_ACCOUNT_ID&limit=$PAGE_SIZE")
+        .willRespondWith()
+        .status(OK)
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
                 o.array("data") { arr ->
                     arr.`object` { tx ->
-                        tx.stringValue("id", TRANSACTION_ID)
-                        tx.stringValue("referenceNumber", REFERENCE_NUMBER)
+                        tx.stringValue("id", PORTABILITY_TRANSACTION_ID)
+                        tx.stringValue("referenceNumber", "TXN-PARTY-PACT-001")
                         tx.stringValue("type", "CREDIT")
                         tx.numberValue("amount", 100.0)
                         tx.stringValue("currencyCode", "CZK")
                         tx.stringValue("status", "COMPLETED")
-                        tx.stringValue("bookingDate", BOOKING_DATE)
-                        tx.stringValue("description", DESCRIPTION)
+                        tx.stringValue("bookingDate", "2026-01-15")
+                        tx.stringValue("description", "pact portability fixture")
                     }
                 }
-                o.`object`("pagination") { p ->
-                    p.booleanValue("hasNextPage", false)
-                }
+                o.`object`("pagination") { p -> p.booleanValue("hasNextPage", false) }
             }.build(),
         )
         .toPact()
 
+    @Test
+    @PactTestFor(pactMethod = "postedTransactionForPortability")
+    fun `the generated route returns a complete portability transaction`(mockServer: MockServer) {
+        assertClientRouteMatchesContract()
+        val accounts = runBlocking { adapterFor(mockServer).fetchAccountsWithTransactions(UUID.fromString(PARTY_ID)) }
+        assertThat(accounts).hasSize(1)
+        val transaction = accounts.single().transactions.single()
+        assertThat(transaction.transactionId).isEqualTo(PORTABILITY_TRANSACTION_ID)
+        assertThat(transaction.reference).isEqualTo("TXN-PARTY-PACT-001")
+        assertThat(transaction.amount).isEqualTo("100.0")
+        assertThat(transaction.currency).isEqualTo("CZK")
+        assertThat(transaction.status).isEqualTo("COMPLETED")
+        assertThat(transaction.bookingDate).isEqualTo("2026-01-15")
+        assertThat(transaction.remittanceInfo).isEqualTo("pact portability fixture")
+        assertThat(transaction.counterpartyName).isNull()
+        assertThat(transaction.counterpartyIbanRedacted).isNull()
+    }
+
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun listTransactionsEmptyPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given(NO_TRANSACTIONS_STATE)
+    fun emptyTransactionHistoryForPortability(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no transactions exist for the requested account")
         .uponReceiving("GET transactions for an account with no history")
-        .path(EXPECTED_PATH)
+        .path(EXPECTED_TRANSACTIONS_PATH)
         .method("GET")
         .query("accountId=$EMPTY_ACCOUNT_ID&limit=$PAGE_SIZE")
         .willRespondWith()
-        .status(200)
+        .status(OK)
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                o.array("data") { arr -> }
-                o.`object`("pagination") { p ->
-                    p.booleanValue("hasNextPage", false)
-                }
+                o.array("data") { }
+                o.`object`("pagination") { p -> p.booleanValue("hasNextPage", false) }
             }.build(),
         )
         .toPact()
 
+    @Test
+    @PactTestFor(pactMethod = "emptyTransactionHistoryForPortability")
+    fun `an account without history has an empty slice`(mockServer: MockServer) {
+        assertClientRouteMatchesContract()
+        val accounts = runBlocking {
+            adapterFor(mockServer, EMPTY_ACCOUNT_ID).fetchAccountsWithTransactions(UUID.fromString(PARTY_ID))
+        }
+        assertThat(accounts).hasSize(1)
+        assertThat(accounts.single().transactions).isEmpty()
+    }
+
     @Pact(consumer = CONSUMER, provider = PROVIDER)
-    fun listTransactionsUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given(NEGATIVE_AUTH_STATE)
+    fun portabilityReadWithoutMachineIdentity(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
         .uponReceiving("GET transactions with no M2M identity is refused")
-        .path(EXPECTED_PATH)
+        .path(EXPECTED_TRANSACTIONS_PATH)
         .method("GET")
-        .query("accountId=$ACCOUNT_ID&limit=$PAGE_SIZE")
+        .query("accountId=$PORTABILITY_ACCOUNT_ID&limit=$PAGE_SIZE")
         .willRespondWith()
-        .status(401)
+        .status(UNAUTHORIZED)
         .toPact()
 
     @Test
-    @PactTestFor(pactMethod = "listTransactionsPact")
-    fun `the export assembles the subject transaction history`(mockServer: MockServer) {
-        assertThat(clientPath()).isEqualTo(EXPECTED_PATH)
-        val result = runBlocking {
-            adapterFor(mockServer).fetchAccountsWithTransactions(UUID.fromString(PARTY_ID))
-        }
-        assertThat(result).hasSize(1)
-        val account = result.single()
-        assertThat(account.iban).isEqualTo(IBAN)
-        assertThat(account.transactions).hasSize(1)
-        val tx = account.transactions.single()
-        assertThat(tx.transactionId).isEqualTo(TRANSACTION_ID)
-        assertThat(tx.reference).isEqualTo(REFERENCE_NUMBER)
-        assertThat(tx.bookingDate).isEqualTo(BOOKING_DATE)
-        assertThat(tx.amount).isEqualTo(AMOUNT_TEXT)
-        assertThat(tx.currency).isEqualTo("CZK")
-        assertThat(tx.type).isEqualTo("CREDIT")
-        assertThat(tx.status).isEqualTo("COMPLETED")
-        assertThat(tx.remittanceInfo).isEqualTo(DESCRIPTION)
-    }
-
-    @Test
-    @PactTestFor(pactMethod = "listTransactionsEmptyPact")
-    fun `an account with no history exports as an empty slice`(mockServer: MockServer) {
-        val result = runBlocking {
-            adapterFor(mockServer, EMPTY_ACCOUNT_ID).fetchAccountsWithTransactions(UUID.fromString(PARTY_ID))
-        }
-        assertThat(result).hasSize(1)
-        assertThat(result.single().transactions).isEmpty()
-    }
-
-    @Test
-    @PactTestFor(pactMethod = "listTransactionsUnauthenticatedPact")
-    fun `a refused transaction read fails the export hard`(mockServer: MockServer) {
+    @PactTestFor(pactMethod = "portabilityReadWithoutMachineIdentity")
+    fun `a refused portability transaction read returns 401`(mockServer: MockServer) {
+        assertClientRouteMatchesContract()
         assertThatThrownBy {
             runBlocking { adapterFor(mockServer).fetchAccountsWithTransactions(UUID.fromString(PARTY_ID)) }
         }.isInstanceOf(GdprAggregationAuthException::class.java)
             .hasMessageContaining("HTTP 401")
     }
 
-    /**
-     * The real aggregation adapter: transaction client bound to the pact mock server; account
-     * and card clients are local fakes so the published pact covers only this integration point.
-     */
-    private fun adapterFor(mockServer: MockServer, accountId: String = ACCOUNT_ID): PortabilityAggregationAdapter =
-        PortabilityAggregationAdapter(fakeAccountClient(accountId), transactionClientFor(mockServer), fakeCardClient())
-
-    private fun fakeAccountClient(accountId: String): AccountServiceRestClient = object : AccountServiceRestClient {
-        override fun listByParty(partyId: UUID, limit: Int, cursor: String?): Uni<AccountPageBody> =
-            Uni.createFrom().item(
-                AccountPageBody(
-                    data = listOf(
-                        AccountSummaryBody(
-                            id = UUID.fromString(accountId),
-                            accountNumber = IBAN,
-                            status = "ACTIVE",
-                            currencyCode = "CZK",
-                        ),
+    private fun adapterFor(
+        mockServer: MockServer,
+        accountId: String = PORTABILITY_ACCOUNT_ID,
+    ): PortabilityAggregationAdapter {
+        val accountClient = mockk<AccountServiceRestClient>()
+        every { accountClient.listByParty(any(), any(), any()) } returns Uni.createFrom().item(
+            AccountPageBody(
+                data = listOf(
+                    AccountSummaryBody(
+                        id = UUID.fromString(accountId),
+                        accountNumber = "CZ6508000000192000145399",
+                        status = "ACTIVE",
+                        currencyCode = "CZK",
                     ),
-                    pagination = null,
                 ),
-            )
-    }
-
-    private fun fakeCardClient(): CardServiceRestClient = object : CardServiceRestClient {
-        override fun listByParty(partyId: UUID): Uni<List<Map<String, Any?>>> = Uni.createFrom().item(emptyList())
-    }
-
-    private fun transactionClientFor(mockServer: MockServer): TransactionServiceRestClient =
-        object : TransactionServiceRestClient {
-            override fun listByAccount(accountId: UUID, limit: Int): Uni<TransactionPageResponse> =
-                Uni.createFrom().item {
-                    val response = given().baseUri(mockServer.getUrl()).contentType("application/json")
-                        .queryParam("accountId", accountId.toString())
-                        .queryParam("limit", limit)
-                        .get(EXPECTED_PATH)
-                    if (response.statusCode !in 200..299) throw WebApplicationException(response.statusCode)
-                    mapper.readValue<TransactionPageResponse>(response.asString())
+            ),
+        )
+        val transactionClient = mockk<TransactionServiceRestClient>()
+        every { transactionClient.listTransactions(any(), any(), any()) } answers {
+            Uni.createFrom().item {
+                val wire = given()
+                    .baseUri(mockServer.getUrl())
+                    .queryParam("accountId", firstArg<UUID>().toString())
+                    .queryParam("limit", secondArg<Int>())
+                    .get(clientDerivedTransactionsPath())
+                mockk<Response>(relaxed = true).also { response ->
+                    every { response.status } returns wire.statusCode
+                    every { response.hasEntity() } returns (wire.body.asString().isNotBlank())
+                    if (wire.statusCode == OK) {
+                        val page = jacksonObjectMapper().findAndRegisterModules()
+                            .readValue(wire.body.asString(), TransactionPage::class.java)
+                        every { response.readEntity(TransactionPage::class.java) } returns page
+                    }
                 }
+            }
         }
+        return PortabilityAggregationAdapter(accountClient, transactionClient, mockk<CardServiceRestClient>())
+    }
 
-    companion object {
-        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+    private fun assertClientRouteMatchesContract() {
+        assertThat(clientDerivedTransactionsPath())
+            .describedAs(
+                "the generated client's @Path no longer produces the path this pact pins - either the " +
+                    "spec moved (re-verify against transaction-service) or EXPECTED_TRANSACTIONS_PATH is stale",
+            )
+            .isEqualTo(EXPECTED_TRANSACTIONS_PATH)
+        val queryNames = TransactionsApi::class.java.methods
+            .single { it.name == "listTransactions" }
+            .parameters
+            .mapNotNull { it.getAnnotation(QueryParam::class.java)?.value }
+        assertThat(queryNames).contains("accountId", "limit")
+    }
+
+    private companion object {
         const val CONSUMER = "openbank-party-service"
         const val PROVIDER = "openbank-transaction-service"
+        const val OK = 200
+        const val UNAUTHORIZED = 401
 
-        /** Must match the seeded row in TransactionPactFolderProviderVerificationTest. */
-        const val STATE = "a posted transaction exists for the pact account"
-        const val NO_TRANSACTIONS_STATE = "no transactions exist for the requested account"
-
-        const val TRANSACTION_ID = "88888888-9999-4aaa-bbbb-cccccccccccc"
-        const val ACCOUNT_ID = "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
+        const val ACCOUNT_ID = "0a3a1a2b-1111-4222-8333-444455556666"
+        const val PORTABILITY_ACCOUNT_ID = "77777777-8888-4999-aaaa-bbbbbbbbbbbb"
         const val EMPTY_ACCOUNT_ID = "77777777-8888-4999-aaaa-bbbbbbbbbbbe"
+        const val PORTABILITY_TRANSACTION_ID = "88888888-9999-4aaa-bbbb-cccccccccccc"
         const val PARTY_ID = "66666666-7777-4888-8999-aaaaaaaaaaaa"
-        const val IBAN = "CZ6508000000192000145399"
-        const val REFERENCE_NUMBER = "TXN-PARTY-PACT-001"
-        const val BOOKING_DATE = "2026-01-15"
-        const val DESCRIPTION = "pact portability fixture"
-        const val PAGE_SIZE = "200"
+        const val PAGE_SIZE = 200
+
+        /** LITERAL, retyped from transaction-service's `TransactionResource`. Never derive this. */
+        const val EXPECTED_TRANSACTIONS_PATH = "/api/v1/transactions"
 
         /**
-         * The pact mock answers the declared number 100.0, and Jackson's String coercion renders
-         * it "100.0" into the client's `amount: String?` — the assertion pins what the export
-         * actually carries, not the provider's BigDecimal scale.
+         * The route lives on the GENERATED interface [TransactionServiceRestClient] extends (ADR-0319);
+         * a `@Path` restated on the consumer sub-interface would win, so read that first.
          */
-        const val AMOUNT_TEXT = "100.0"
-
-        /** LITERAL, retyped from transaction-service's TransactionResource — never from the client. */
-        const val EXPECTED_PATH = "/api/v1/transactions"
-
-        fun clientPath(): String {
-            val base = TransactionServiceRestClient::class.java.getAnnotation(Path::class.java).value
-            return base
+        fun clientDerivedTransactionsPath(): String {
+            val base = (
+                TransactionServiceRestClient::class.java.getAnnotation(Path::class.java)
+                    ?: TransactionsApi::class.java.getAnnotation(Path::class.java)
+                )?.value.orEmpty()
+            val method = TransactionsApi::class.java.methods
+                .single { it.name == "listTransactions" }
+                .getAnnotation(Path::class.java)
+                ?.value
+                .orEmpty()
+            return base + method
         }
     }
 }

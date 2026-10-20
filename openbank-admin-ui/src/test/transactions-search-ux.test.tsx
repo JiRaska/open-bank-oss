@@ -46,7 +46,7 @@ describe('Transaction search UX', () => {
     expect(dateTo).toHaveAttribute('aria-describedby', 'transaction-date-range-error')
     expect(screen.getByRole('alert')).toHaveTextContent('The start date must be on or before the end date.')
     expect(screen.getByRole('button', { name: 'Search transactions' })).toBeDisabled()
-    fireEvent.keyDown(screen.getByLabelText('Search by account ID'), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByLabelText('Filter by IBAN'), { key: 'Enter' })
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/transactions/search'))).toBe(false)
 
     fireEvent.change(dateTo, { target: { value: '2026-09-30' } })
@@ -57,7 +57,7 @@ describe('Transaction search UX', () => {
     expect(amountMin).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByRole('alert')).toHaveTextContent('The minimum amount cannot exceed the maximum amount.')
     expect(screen.getByRole('button', { name: 'Search transactions' })).toBeDisabled()
-    fireEvent.keyDown(screen.getByLabelText('Search by account ID'), { key: 'Enter' })
+    fireEvent.keyDown(screen.getByLabelText('Filter by IBAN'), { key: 'Enter' })
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/transactions/search'))).toBe(false)
   })
 })

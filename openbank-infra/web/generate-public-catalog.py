@@ -18,7 +18,7 @@ SITE = pathlib.Path(__file__).resolve().parent / 'landing'
 REPO = 'https://github.com/JiRaska/open-bank-oss'
 AREAS = [
     ('core', 'Accounts & ledger', 'Account lifecycle, balances, bookkeeping and interest.',
-     ['account-service', 'balance-service', 'ledger-service', 'transaction-service', 'interest-service']),
+     ['account-service', 'balance-service', 'ledger-service', 'transaction-service', 'client-transaction', 'interest-service']),
     ('payments', 'Payments & settlement', 'Domestic and international rails, recurring payments and settlement.',
      ['sepa-payment', 'sepa-instant', 'domestic-payment', 'swift-service', 'sdd-service', 'standing-order-service', 'clearing-service', 'clearing-simulator', 'settlement-service', 'vop-service', 'ap2-service', 'fx-service']),
     ('identity', 'Identity & onboarding', 'People, companies, digital identity, delegated access and authentication.',

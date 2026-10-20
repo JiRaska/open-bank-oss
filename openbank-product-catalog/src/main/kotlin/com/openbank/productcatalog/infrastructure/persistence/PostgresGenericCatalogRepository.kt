@@ -389,6 +389,13 @@ class PostgresGenericCatalogRepository(
             ).setParameter("offeringId", offeringId).setParameter("at", effectiveAt).resultList
         }.map { it.firstOrNull()?.toDomain() }.awaitSuspending()
 
+    override suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision? {
+        val offeringId = sessions.withSession { session ->
+            session.find(BankV1ProductMappingEntity::class.java, productId)
+        }.awaitSuspending()?.defaultOfferingId ?: return null
+        return findPublished(offeringId, effectiveAt)
+    }
+
     private fun preparePublication(
         session: Mutiny.Session,
         draft: CatalogRevisionEntity,

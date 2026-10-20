@@ -3,6 +3,7 @@
 import { NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import path from 'path'
+import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,17 +45,14 @@ function governanceFile(): string {
 }
 
 export async function GET() {
-  let services: GovernanceService[] = []
-  let available = true
-  try {
-    const raw = await readFile(governanceFile(), 'utf-8')
-    const parsed = JSON.parse(raw) as { services?: GovernanceService[] }
-    if (Array.isArray(parsed?.services)) services = parsed.services
-    else available = false
-  } catch {
-    services = []
-    available = false
-  }
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.governance as { services?: GovernanceService[] },
+    async () => {
+      try { return JSON.parse(await readFile(governanceFile(), 'utf-8')) as { services?: GovernanceService[] } } catch { return null }
+    },
+  )
+  const services = Array.isArray(resolved.value?.services) ? resolved.value.services : []
+  const available = Array.isArray(resolved.value?.services)
 
   const items: ManifestItem[] = services.map(s => ({
     ...s,
@@ -66,7 +64,7 @@ export async function GET() {
   for (const m of items) byService[m.serviceName] = m
 
   return NextResponse.json(
-    { items, byService, available, timestamp: new Date().toISOString(), source: 'governance.json (ADR-0071)' },
+    { items, byService, available, timestamp: new Date().toISOString(), source: 'governance.json (ADR-0071)', contentSource: resolved.contentSource },
     { headers: { 'Cache-Control': 'no-store' } }
   )
 }

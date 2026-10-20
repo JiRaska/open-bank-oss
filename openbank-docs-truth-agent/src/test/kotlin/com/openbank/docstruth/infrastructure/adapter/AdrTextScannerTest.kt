@@ -166,7 +166,7 @@ class AdrTextScannerTest {
 
     /** Walks up from the test working directory to the monorepo root (the ancestor that has both
      * `settings.gradle.kts` and an `openbank-infra/` sibling directory), matching the idiom used
-     * by SchemeAcceptedMsgOverrideConfigMapTest in openbank-transaction-service. */
+     * by the gitops contract tests (e.g. DelegatedSpendActivationContractTest). */
     private fun repoRoot(): File {
         var dir = File(System.getProperty("user.dir")).absoluteFile
         while (!File(dir, "openbank-infra").isDirectory || !File(dir, "settings.gradle.kts").isFile) {

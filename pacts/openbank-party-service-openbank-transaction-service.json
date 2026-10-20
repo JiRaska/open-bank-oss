@@ -81,6 +81,29 @@
       }
     },
     {
+      "description": "GET the transactions of an account with a missing or expired token",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions",
+        "query": {
+          "accountId": [
+            "0a3a1a2b-1111-4222-8333-444455556666"
+          ],
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "GET transactions with no M2M identity is refused",
       "providerStates": [
         {
@@ -101,6 +124,37 @@
       },
       "response": {
         "status": 401
+      }
+    },
+    {
+      "description": "GET the transactions of an account for the portability export",
+      "providerStates": [
+        {
+          "name": "the transaction service is available"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions",
+        "query": {
+          "accountId": [
+            "0a3a1a2b-1111-4222-8333-444455556666"
+          ],
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
       }
     }
   ],

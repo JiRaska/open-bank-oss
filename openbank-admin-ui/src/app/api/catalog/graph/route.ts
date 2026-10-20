@@ -5,14 +5,14 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
 export const dynamic = 'force-dynamic'
 
-// Serves the code-derived inter-service dependency graph (ADR-0029 D1). The
-// build bakes service-graph.json via scripts/generate-service-graph.mjs; this
-// route hands it to the admin-ui service-map / blast-radius views as a static
-// snapshot — replacing the hand-curated lineage in manifest.ts. READ-ONLY
-// consumer (rule #3); degrades to available:false if the snapshot is absent.
+// Serves the code-derived inter-service dependency graph (ADR-0029 D1). Prefer
+// the validated independent reviewed-source snapshot, with service-graph.json
+// as an explicitly labeled stale image fallback. READ-ONLY consumer (rule #3);
+// degrades to available:false if neither source exists.
 
 interface Edge { from: string; to: string; via: string; type: 'rest' | 'kafka' }
 interface Node { name: string; short: string; dependsOn: number; dependedOnBy: number }
@@ -57,14 +57,16 @@ const UNAVAILABLE: ServiceGraph = {
 }
 
 export async function GET() {
-  try {
-    const raw = await fs.readFile(graphFile(), 'utf-8')
-    const parsed = JSON.parse(raw) as ServiceGraph
-    if (Array.isArray(parsed?.nodes) && Array.isArray(parsed?.edges)) {
-      return NextResponse.json({ ...parsed, available: true }, { headers: { 'Cache-Control': 'no-store' } })
-    }
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
-  } catch {
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
-  }
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.serviceGraph as unknown as ServiceGraph,
+    async () => {
+      try { return JSON.parse(await fs.readFile(graphFile(), 'utf-8')) as ServiceGraph } catch { return null }
+    },
+  )
+  const graph = resolved.value
+  const available = Boolean(graph && Array.isArray(graph.nodes) && Array.isArray(graph.edges))
+  return NextResponse.json(
+    { ...(available ? graph : UNAVAILABLE), available, contentSource: resolved.contentSource },
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
 }

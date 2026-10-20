@@ -100,6 +100,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the welcome-bonus credit keeps its request fields; the response is now the spec's `TransactionResponse` (only `id` and `status` are read elsewhere). **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-account`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `account_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
@@ -418,7 +419,7 @@ not change any existing request's outcome until explicitly flipped.
   (decision) + `AccountApiIT` (end-to-end header behaviour).
 - **2026-05-30** — Added `account_outbox_seq` (Hibernate sequence fix). Additive DDL only:
   no new data flow, external surface or trust boundary. Risk class = **availability** (a missing/
-  wrong sequence breaks INSERTs); mitigated by `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  wrong sequence breaks INSERTs); mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-01** — IBAN generation correctness (`IbanGenerator` + new `CzechAccountNumber` in
   openbank-libs). The previous generator emitted a padded `System.nanoTime()` tail under a hard-coded
   `0000` bank code: ISO 13616 mod-97-valid but with a **BBAN that no Czech bank could issue** (no ČNB
@@ -885,7 +886,7 @@ decision use first; the additive projection table may remain until its consumer 
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline

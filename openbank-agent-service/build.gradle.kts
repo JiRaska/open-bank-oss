@@ -8,23 +8,13 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     // Service-to-service auth: acquire a client-credentials token (openbank-services)
     // and attach it as a Bearer on the outbound MCP tool calls (ADR-0031 / ADR-0034).
     // Catalog alias maps to quarkus-rest-client-oidc-filter (the new REST client's OIDC filter).
     implementation(libs.quarkus.oidc.client.reactive.filter)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.smallrye.kafka)
@@ -47,14 +37,14 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
-    // Pact consumers cover account/transaction reads, FX quotes/board and AML case reads.
-    // They drive real read-adapter dispatch through handwritten mock-server clients, not OIDC.
-    // Catalog and Ledger read-tool contracts reuse this same Pact consumer dependency.
+    // Pact consumer: AgentBalanceHoldsPactConsumerTest pins the get_balance_holds read tool
+    // against balance-service — the contract test for the GET /{accountId}/holds endpoint this
+    // PR adds (ADR-0063).
+    // Pact consumers cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
     testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.

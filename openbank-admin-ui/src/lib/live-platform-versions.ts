@@ -17,6 +17,9 @@ import { platformVersions, type EksLifecycle } from '@/lib/platform-versions'
 
 export const PROM_TIMEOUT_MS = 3000
 export const LIVE_CACHE_MS = 60_000
+// A running-container image is accepted only when kube-state-metrics sampled it recently.
+// This bounds the window in which a disconnected/stale scrape could masquerade as current.
+export const IMAGE_SAMPLE_MAX_AGE_MS = 5 * 60_000
 export const EOL_CACHE_MS = 24 * 3600_000
 export const EOL_NEGATIVE_CACHE_MS = 5 * 60_000
 export const EOL_URL = 'https://endoflife.date/api/amazon-eks.json'
@@ -43,31 +46,104 @@ export const IMAGE_PATTERNS: Record<string, RegExp> = {
   // Strimzi publishes one image per Kafka version: quay.io/strimzi/kafka:<operator>-kafka-X.Y.Z
   kafka: /strimzi\/kafka:[^\s@]*-kafka-(\d+\.\d+\.\d+)/,
   strimziOperator: /strimzi\/operator:(\d+\.\d+\.\d+)/,
+  // The scanner registry identifies the component as schema-registry while Prometheus labels images.
   apicurio: /apicurio\/apicurio-registry[a-z-]*:(\d+\.\d+\.\d+)/,
+  'schema-registry': /apicurio\/apicurio-registry[a-z-]*:(\d+\.\d+\.\d+)/,
+  'kafka-ui': /kafbat\/kafka-ui:v?(\d+\.\d+\.\d+)/,
+  openbao: /openbao\/openbao:(\d+\.\d+\.\d+)/,
+  prometheus: /prometheus\/prometheus:v?(\d+\.\d+\.\d+)/,
+  tempo: /grafana\/tempo:(\d+\.\d+\.\d+)/,
+  alloy: /(?:^|\/)alloy:v?(\d+\.\d+\.\d+)/,
+  pyroscope: /grafana\/pyroscope:v?(\d+\.\d+\.\d+)/,
+  glitchtip: /glitchtip(?:\/glitchtip)?:v?(\d+\.\d+\.\d+)/,
+  alertmanager: /prometheus\/alertmanager:v?(\d+\.\d+\.\d+)/,
+  'otel-collector': /otel\/opentelemetry-collector-contrib:v?(\d+\.\d+\.\d+)/,
+  pyrra: /pyrra-dev\/pyrra:v?(\d+\.\d+\.\d+)/,
+  goalert: /goalert\/goalert:v?(\d+\.\d+\.\d+)/,
+  ntfy: /binwiederhier\/ntfy:v?(\d+\.\d+\.\d+)/,
+  temporal: /temporalio\/server:v?(\d+\.\d+\.\d+)/,
+  keda: /kedacore\/keda(?:-operator)?:v?(\d+\.\d+\.\d+)/,
+  argocd: /argoproj\/argocd:v?(\d+\.\d+\.\d+)/,
+  kyverno: /kyverno\/(?:kyverno|background-controller|cleanup-controller|reports-controller|admission-controller):v?(\d+\.\d+\.\d+)/,
+  'cert-manager': /jetstack\/cert-manager-(?:controller|webhook|cainjector|startupapicheck):v?(\d+\.\d+\.\d+)/,
+  karpenter: /karpenter\/controller:v?(\d+\.\d+\.\d+)/,
   loki: /(?:^|\/)grafana\/loki:(\d+\.\d+\.\d+)/,
   keycloak: /keycloak\/keycloak:(\d+\.\d+\.\d+)/,
   grafana: /(?:^|\/)grafana\/grafana:(\d+\.\d+\.\d+)/,
 }
 
-export function parseImageVersion(component: string, image: string): string | null {
-  const re = IMAGE_PATTERNS[component]
-  return re ? (re.exec(image)?.[1] ?? null) : null
+// Components already surfaced in the platform-version page. Lifecycle-only image
+// patterns are deliberately excluded from that page's declared-vs-live table.
+const PLATFORM_IMAGE_COMPONENTS = ['postgres', 'valkey', 'apicurio', 'kafka', 'strimziOperator', 'loki', 'keycloak', 'grafana'] as const
+
+// Repository identity fallbacks allow a digest-pinned ref to remain visible when
+// its tag does not encode a parseable release version. These entries come from
+// checked-in GitOps image refs/chart ownership, not display-name-only guesses.
+const IMAGE_REPOSITORIES: Record<string, RegExp> = {
+  postgres: /(?:^|\/)cloudnative-pg\/postgresql(?=[:@])/,
+  valkey: /(?:^|\/)valkey\/valkey(?=[:@])/,
+  kafka: /(?:^|\/)strimzi\/kafka(?=[:@])/,
+  strimziOperator: /(?:^|\/)strimzi\/operator(?=[:@])/,
+  apicurio: /(?:^|\/)apicurio\/apicurio-registry[a-z-]*(?=[:@])/,
+  'schema-registry': /(?:^|\/)apicurio\/apicurio-registry[a-z-]*(?=[:@])/,
+  'kafka-ui': /(?:^|\/)kafbat\/kafka-ui(?=[:@])/,
+  openbao: /(?:^|\/)openbao\/openbao(?=[:@])/,
+  prometheus: /(?:^|\/)prometheus\/prometheus(?=[:@])/,
+  tempo: /(?:^|\/)grafana\/tempo(?=[:@])/,
+  alloy: /(?:^|\/)alloy(?=[:@])/,
+  pyroscope: /(?:^|\/)grafana\/pyroscope(?=[:@])/,
+  glitchtip: /(?:^|\/)glitchtip(?:\/glitchtip)?(?=[:@])/,
+  alertmanager: /(?:^|\/)prometheus\/alertmanager(?=[:@])/,
+  'otel-collector': /(?:^|\/)otel\/opentelemetry-collector-contrib(?=[:@])/,
+  pyrra: /(?:^|\/)pyrra-dev\/pyrra(?=[:@])/,
+  goalert: /(?:^|\/)goalert\/goalert(?=[:@])/,
+  ntfy: /(?:^|\/)binwiederhier\/ntfy(?=[:@])/,
+  temporal: /(?:^|\/)temporalio\/server(?=[:@])/,
+  keda: /(?:^|\/)kedacore\/keda(?:-operator)?(?=[:@])/,
+  argocd: /(?:^|\/)argoproj\/argocd(?=[:@])/,
+  kyverno: /(?:^|\/)kyverno\/(?:kyverno|background-controller|cleanup-controller|reports-controller|admission-controller)(?=[:@])/,
+  'cert-manager': /(?:^|\/)jetstack\/cert-manager-(?:controller|webhook|cainjector|startupapicheck)(?=[:@])/,
+  karpenter: /(?:^|\/)karpenter\/controller(?=[:@])/,
+  loki: /(?:^|\/)grafana\/loki(?=[:@])/,
+  keycloak: /(?:^|\/)keycloak\/keycloak(?=[:@])/,
+  grafana: /(?:^|\/)grafana\/grafana(?=[:@])/,
 }
 
-/** Aggregate `count by (image)` rows into distinct running versions per component. */
-export function aggregateImages(rows: { image: string; count: number }[]): Record<string, LiveVersion[]> {
-  const out: Record<string, Map<string, number>> = {}
-  for (const { image, count } of rows) {
+export function parseImageVersion(component: string, image: string): string | null {
+  const re = IMAGE_PATTERNS[component]
+  const match = re?.exec(image)
+  if (match?.[1]) return match[1]
+  if (IMAGE_REPOSITORIES[component]?.test(image)) {
+    const digest = /@sha256:([a-f\d]{64})(?:$|\s)/i.exec(image)?.[1]
+    if (digest) return `sha256:${digest}`
+  }
+  return null
+}
+
+/** Aggregate running-container image rows into distinct running versions per component. */
+export interface LiveImageVersion extends LiveVersion { observedAt: string }
+
+export function aggregateImages(rows: { image: string; container?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
+  const out: Record<string, Map<string, { count: number; observedAt: string }>> = {}
+  for (const { image, container, count, observedAt } of rows) {
     for (const component of Object.keys(IMAGE_PATTERNS)) {
+      // Kafka's exporter is a separate Strimzi pod and can carry a Kafka-derived image tag.
+      // Only the broker container is evidence for the broker version; a missing or different
+      // container role must remain unknown rather than becoming a version observation.
+      if (component === 'kafka' && container !== 'kafka') continue
       const v = parseImageVersion(component, image)
       if (v) {
         const m = (out[component] ??= new Map())
-        m.set(v, (m.get(v) ?? 0) + count)
+        const previous = m.get(v)
+        m.set(v, {
+          count: (previous?.count ?? 0) + count,
+          observedAt: previous && previous.observedAt > observedAt ? previous.observedAt : observedAt,
+        })
       }
     }
   }
   return Object.fromEntries(
-    Object.entries(out).map(([k, m]) => [k, [...m].map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count)]),
+    Object.entries(out).map(([k, m]) => [k, [...m].map(([version, sample]) => ({ version, ...sample })).sort((a, b) => b.count - a.count)]),
   )
 }
 
@@ -104,7 +180,9 @@ export const QUERIES = {
   nodeTypes: 'count by (label_node_kubernetes_io_instance_type, label_karpenter_sh_capacity_type) (kube_node_labels)',
   nodesReady: 'count(kube_node_status_condition{condition="Ready",status="true"} == 1)',
   nodesTotal: 'count(kube_node_info)',
-  images: 'count by (image) (kube_pod_container_info)',
+  // One sample per container, with its scrape timestamp as the value. Restrict to the
+  // kube-state-metrics running condition; stopped/terminating pod specs are not runtime evidence.
+  images: 'timestamp(kube_pod_container_info and on (namespace, pod, container) (kube_pod_container_status_running == 1))',
   podsRunning: 'sum by (namespace) (kube_pod_status_phase{phase="Running"})',
   daemonSetsReady: 'sum by (namespace, daemonset) (kube_daemonset_status_number_ready)',
 } as const
@@ -120,7 +198,7 @@ export interface LiveSnapshot {
   podsRunningByNamespace: Record<string, number> | null
   daemonSetsReady: Record<string, number> | null
   nodes: NodeSummary | null
-  components: Record<string, LiveVersion[]>
+  components: Record<string, LiveImageVersion[]>
 }
 
 export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () => Date = () => new Date()): Promise<LiveSnapshot> {
@@ -146,8 +224,17 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
   const podsRunningByNamespace = toMap(pods, m => m.namespace)
   const daemonSetsReady = toMap(daemonSets, m => `${m.namespace}/${m.daemonset}`)
 
+  const fetchedAt = now()
   const imageRows = rows(images)
-  const components = aggregateImages((imageRows ?? []).filter(r => r.metric.image).map(r => ({ image: r.metric.image, count: r.value })))
+  const freshImageRows = (imageRows ?? [])
+    .filter(r => r.metric.image && Number.isFinite(r.value))
+    .map(r => ({ image: r.metric.image, container: r.metric.container, sampledAtMs: r.value * 1000 }))
+    .filter(r => {
+      const ageMs = fetchedAt.getTime() - r.sampledAtMs
+      return ageMs >= -30_000 && ageMs <= IMAGE_SAMPLE_MAX_AGE_MS
+    })
+    .map(r => ({ image: r.image, container: r.container, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
+  const components = aggregateImages(freshImageRows)
 
   const readyRows = rows(ready)
   const totalRows = rows(total)
@@ -168,10 +255,10 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
   // "Available" means Prometheus actually returned running workloads or a version; an empty
   // answer is a missing scrape target, which must read as unavailable, not as "nothing runs".
   if (errors.length > 0) console.error('[live-platform-versions] prometheus query failures:', errors.join('; '))
-  const available = (imageRows?.length ?? 0) > 0 || kubernetes !== null || kubelets !== null
+  const available = freshImageRows.length > 0 || kubernetes !== null || kubelets !== null
   return {
     available,
-    fetchedAt: now().toISOString(),
+    fetchedAt: fetchedAt.toISOString(),
     error: available ? null : 'prometheus_unavailable',
     kubernetes,
     kubelets,
@@ -255,7 +342,7 @@ export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecy
     declaredFor[key] = { v: c?.version ?? null, src: c?.source ?? null }
   }
   const items: Record<string, VersionItem> = {}
-  const keys = ['kubernetes', 'kubelet', ...Object.keys(IMAGE_PATTERNS)]
+  const keys = ['kubernetes', 'kubelet', ...PLATFORM_IMAGE_COMPONENTS]
   for (const key of keys) {
     if (key === 'kubelet') {
       // Kubelets are compared with the LIVE control plane when known (a skewed upgrade is drift),
@@ -272,7 +359,11 @@ export function buildView(live: LiveSnapshot, eksSource: PlatformView['eksLifecy
       }
       continue
     }
-    const liveVersions = live.available ? (key === 'kubernetes' ? live.kubernetes : (live.components[key] ?? null)) : null
+    const observed = live.available ? (key === 'kubernetes' ? live.kubernetes : (live.components[key] ?? null)) : null
+    // A digest is useful workload identity but cannot be compared with a declared semver tag.
+    // The lifecycle route exposes that digest directly; this declared-vs-version view must not
+    // turn an incomparable identity into a false drift warning.
+    const liveVersions = observed?.some(v => v.version.startsWith('sha256:')) ? null : observed
     const d = declaredFor[key] ?? { v: null, src: null }
     items[key] = {
       key,

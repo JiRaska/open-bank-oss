@@ -25,7 +25,7 @@ import {
 } from '@/components/pension/contracts'
 import { canApproveAnnuityProvider, canRequestAnnuityActivation, refusalText, statusLabel } from '@/components/pension/model'
 import { PensionQueue } from '@/components/pension/PensionQueue'
-import { principalNameFromToken } from '@/components/balance-sheet/model'
+import { principalNameFromToken } from '@/lib/auth/principal'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -292,32 +292,25 @@ function Annuity() {
           { key: 'coolingOffEndsOn', cs: 'Konec lhůty na rozmyšlenou', en: 'Cooling-off ends' },
           { key: 'failureReason', cs: 'Důvod selhání', en: 'Failure reason' },
         ]}
+        rowAction={canOperate ? (_row, id, reload) => (id ? <SyncButton id={id} onDone={setNotice} reload={reload} /> : null) : undefined}
       />
-      {canOperate && <PurchaseSync onDone={setNotice} />}
     </div>
   )
 }
 
 /** Ask the partner for the purchase's current state (application, premium, policy). */
-function PurchaseSync({ onDone }: { onDone: (n: Notice) => void }) {
+function SyncButton({ id, onDone, reload }: { id: string; onDone: (n: Notice) => void; reload: () => void }) {
   const { t } = useLanguage()
-  const [id, setId] = useState('')
   const [busy, setBusy] = useState(false)
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
+  const sync = async () => {
     const label = t('Synchronizace nákupu', 'Purchase sync')
-    if (!UUID.test(id.trim())) { onDone({ tone: 'danger', text: t('ID nákupu (výplaty) musí být UUID.', 'The purchase (payout) id must be a UUID.') }); return }
     setBusy(true)
-    const res = await sendJson('POST', pensionUrl(`/operator/annuity-purchases/${encodeURIComponent(id.trim())}/sync`), undefined, queueRowSchema)
+    const res = await sendJson('POST', pensionUrl(`/operator/annuity-purchases/${encodeURIComponent(id)}/sync`), undefined, queueRowSchema)
     setBusy(false)
     onDone(res.ok
       ? { tone: 'success', text: t(`Nákup je ve stavu ${String(res.data.status ?? '—')}.`, `The purchase is now ${String(res.data.status ?? '—')}.`) }
       : { tone: 'danger', text: refusalText(res, label, t) })
+    if (res.ok) reload()
   }
-  return (
-    <form className="card" onSubmit={submit} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-      <input className="input" value={id} onChange={e => setId(e.target.value)} placeholder={t('ID výplaty (UUID)', 'Payout id (UUID)')} aria-label={t('ID výplaty', 'Payout id')} style={{ flex: '1 1 320px' }} />
-      <button type="submit" className="btn btn-secondary btn-sm" disabled={busy}>{t('Synchronizovat s partnerem', 'Sync with partner')}</button>
-    </form>
-  )
+  return <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void sync()}>{t('Synchronizovat s partnerem', 'Sync with partner')}</button>
 }

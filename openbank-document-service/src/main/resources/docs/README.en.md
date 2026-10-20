@@ -39,3 +39,7 @@ The test-only `pact.consumer` dependency uses the existing catalog version. A de
 
 
 The fourth consumer contract covers `POST /api/v1/sca/challenges/{id}/consume`: matching document hash/ceremony returns 200, a different document hash returns 409, an unknown challenge returns 404, and missing identity returns 401. It drives the real `ScaVerificationAdapter` through an anonymous client bound to the Pact mock server, checking success versus rejected verification. Folder and broker provider tests share the same synthetic COMPLETED, unconsumed DOCUMENT_SIGNING state; the separate unauthenticated provider class replays the 401 interaction. The fixture resets challenge state for each interaction: it does not independently prove that a refused consume left persisted state unburnt. These tests do not verify device signatures, production OIDC client filters, valid JWT signatures, enforced OPA or cross-party ownership denial. All four SCA interactions require actual execution counts; an absent Pact or skipped broker test is not compatibility proof.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

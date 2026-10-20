@@ -133,16 +133,8 @@ class ProductCatalogPactProviderVerificationTest {
             .then().statusCode(404)
     }
 
-    /**
-     * No seeding: `CURRENT_PERSONAL` (prod-003) carries four seeded fees in `ProductSeed` on
-     * every boot (`ProductCatalogFeesPactConsumerTest`, ADR-0264 Phase A). Same rationale as
-     * [cardEnabledProductIsSeeded] above — seeding again here would fork a second source of truth
-     * for a product the service already owns.
-     */
-    @State("a product with fees exists for code CURRENT_PERSONAL")
-    fun feeBearingProductIsSeeded() {
-        // Intentionally empty — see the KDoc above.
-    }
+    @State("a published v1-projected deposit revision exists for billing")
+    fun publishedLegacyDepositRevisionExists() = catalogFixtures.publishedLegacyDepositRevisionExists()
 
     /**
      * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.1...flaky-test-hunter-v0.15.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** expose bounded operator workflow execution status ([#13389](https://github.com/JiRaska/open-bank-oss/issues/13389)) ([a363083](https://github.com/JiRaska/open-bank-oss/commit/a3630838df9d18eedbf091cbdd0f964eac8cd321))
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.0...flaky-test-hunter-v0.15.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** drop the inputless weekly sweep and open real tracking issues ([#13155](https://github.com/JiRaska/open-bank-oss/issues/13155)) ([5fd2d53](https://github.com/JiRaska/open-bank-oss/commit/5fd2d5368e48e2f225b0bde1518b52d2b354a209))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.14.8...flaky-test-hunter-v0.15.0) (2026-10-16)
 
 

@@ -17,7 +17,7 @@ import com.openbank.cardprocessing.application.port.out.DuplicateClearingExcepti
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
 import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
-import com.openbank.cardprocessing.application.port.out.PostingOutcome
+import com.openbank.cardprocessing.application.port.out.PostingStatus
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.domain.event.CardAuthorised
@@ -83,7 +83,7 @@ class CardProcessingService(
     private val repository: CardAuthorizationRepository,
     private val cards: CardLookupPort,
     private val issuerPolicy: CardIssuancePolicyPort,
-    private val ledger: LedgerPostingPort,
+    private val poster: ClearingLedgerPoster,
     private val fraud: FraudScoringPort,
     private val merchants: MerchantDataPort,
     private val metrics: CardProcessingMetricsPort,
@@ -300,20 +300,27 @@ class CardProcessingService(
             category = cleared.category,
             occurredAt = Instant.now(clock),
         )
+        val appliedAt = Instant.now(clock)
+        val claimToken = Ids.randomId()
+        // Written PENDING in the SAME transaction as the clearing: a crash between the commit and the
+        // first posting attempt leaves a row the re-driver finds (V5, #13228). The first backoff gives
+        // the inline attempt below room to finish before the re-driver can claim the row.
+        val clearing = RecordedClearing(
+            id = Ids.newId(),
+            authorizationId = cleared.id,
+            idempotencyKey = command.idempotencyKey,
+            requestFingerprint = fingerprint,
+            amountMinorUnits = command.amountMinorUnits,
+            currencyCode = command.currencyCode.uppercase(),
+            appliedAt = appliedAt,
+            postingStatus = PostingStatus.PENDING,
+            postingNextAttemptAt = poster.firstAttemptAt(appliedAt),
+            // The inline attempt below owns this claim; a re-driver claim replaces it, which is what makes
+            // a slow inline attempt unable to overwrite the newer result.
+            postingClaimToken = claimToken,
+        )
         val saved = try {
-            repository.saveClearing(
-                cleared,
-                outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event),
-                RecordedClearing(
-                    id = Ids.newId(),
-                    authorizationId = cleared.id,
-                    idempotencyKey = command.idempotencyKey,
-                    requestFingerprint = fingerprint,
-                    amountMinorUnits = command.amountMinorUnits,
-                    currencyCode = command.currencyCode.uppercase(),
-                    appliedAt = Instant.now(clock),
-                ),
-            )
+            repository.saveClearing(cleared, outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event), clearing)
         } catch (e: DuplicateClearingException) {
             // Lost the race to a concurrent duplicate: our transaction rolled back whole, so the
             // winner's row is the only one, and it is what this caller gets.
@@ -324,18 +331,10 @@ class CardProcessingService(
 
         // Deliberately AFTER the commit, and not rolled back on failure: the clearing is a fact the
         // acquirer has already asserted, and refusing to record it because the ledger is briefly
-        // unreachable would lose it. A FAILED posting is a finding, not a silent success — which is
-        // what the three-valued outcome is for.
-        val posting = ledger.postClearedSpend(saved, command.amountMinorUnits, command.idempotencyKey)
-        metrics.ledgerPosting(posting.outcome)
-        if (posting.outcome == PostingOutcome.FAILED) {
-            log.errorf(
-                "ledger posting FAILED for authorization %s (%s) — the clearing is recorded, the books are not: %s",
-                saved.id,
-                command.idempotencyKey.forLog(),
-                posting.detail?.forLog(),
-            )
-        }
+        // unreachable would lose it. A FAILED or UNKNOWN posting is a finding, not a silent success,
+        // and it is RE-DRIVEN (LedgerPostingRedriver) from the state recorded on the clearing row.
+        // A replay of this clearing deliberately posts nothing; the re-driver is separate.
+        poster.post(saved, clearing, claimToken)
         return PresentmentOutcome.Accepted(saved)
     }
 
@@ -481,4 +480,4 @@ class CardNotFoundException(val cardId: UUID) : RuntimeException("card $cardId i
 
 // Caller-supplied text (the acquirer's idempotency key, a downstream error detail) must not be able to
 // forge log lines: CR/LF are replaced before it reaches the formatter.
-private fun String.forLog(): String = replace('\r', '_').replace('\n', '_')
+internal fun String.forLog(): String = replace('\r', '_').replace('\n', '_')

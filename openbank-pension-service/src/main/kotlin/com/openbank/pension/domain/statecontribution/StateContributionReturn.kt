@@ -4,6 +4,8 @@
 
 package com.openbank.pension.domain.statecontribution
 
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -56,6 +58,9 @@ data class StateContributionReturn(
 ) {
     init {
         require(amount.signum() > 0) { "a return is for a positive amount" }
+        // The boundary for the currency: ISO 4217 with a minor unit, upper case. A return in any
+        // such currency is reportable (its own per-currency report); anything else is refused here.
+        require(CurrencyCode.of(currency).code == currency) { "a return carries an ISO 4217 currency code" }
         require(sourceKey.isNotBlank()) { "a return carries the key of what triggered it" }
         require(status == ReturnStatus.DUE || reportId != null) { "a reported return belongs to a report" }
     }
@@ -80,6 +85,9 @@ data class StateContributionReturn(
         check(status == ReturnStatus.CONFIRMED) { "return $id is $status, only CONFIRMED can be settled" }
         return copy(status = ReturnStatus.SETTLED, updatedAt = at)
     }
+
+    /** The amount owed as [Money]: the currency travels with it, so no sum can mix currencies. */
+    fun money(): Money = Money.of(amount, currency)
 
     fun overdue(today: LocalDate): Boolean = status != ReturnStatus.SETTLED && today.isAfter(dueBy)
 }
@@ -114,11 +122,11 @@ sealed interface ReturnResultLine {
     data class Refused(override val returnId: UUID, val reason: CzClaimReasonCode) : ReturnResultLine
 }
 
-/** What a return report line carries, before rendering into a wire format. */
+/** What a return report line carries, before rendering into a wire format. The amount keeps its currency. */
 data class ReturnReportLine(
     val returnId: UUID,
     val contractReference: String,
     val cause: ReturnCause,
-    val amount: BigDecimal,
+    val amount: Money,
     val claimMonth: java.time.YearMonth?,
 )
