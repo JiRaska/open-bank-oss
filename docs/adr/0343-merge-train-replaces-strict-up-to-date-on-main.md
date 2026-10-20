@@ -278,6 +278,40 @@ green on main at its base) is never refreshed at all. Like the strict lane it us
 git queries and the API only, and executes no PR code; it adds no merge, only the update a human
 would otherwise click.
 
+**Main-red awareness.** The strict lane served manual-lane PRs oldest-first and updated the oldest
+green-but-behind one onto live main whatever main's state. With main red on a required context,
+that update could only manufacture main-caused red: the old PR went red on main's gate, the next
+oldest was updated onto the same red tip, and the PR carrying the fix — newer, so last in line —
+was never served (2026-10-20: `gates (gitops-api)` red on main, the fix waited while settle reported
+`updated: [<older PR>]` and then nothing). So at the start of settle, `main_red` is the set of
+required contexts (merge-train aside) that are FAILURE in main's latest completed CI at the live
+tip (the tip, or its nearest first-parent ancestor with a completed result — a fix that has merged
+keeps main red until its own push run reports). Then, in the strict lane only:
+1. a PR whose failing required contexts are all in `main_red` is **waiting**
+   (`strict: waiting for main (<ctx> red on main <sha12>)`, reported under `waiting`): it cannot
+   go green until main is fixed, so it is never served and never reserves main;
+2. **no update-branch is issued onto a red main** to any PR: a behind PR simply waits, and the
+   stale-red refresh (which already requires the context green on the tip) updates it once main
+   is green;
+3. **the fix is preferred**: a strict-lane PR green on every required context, whose merge-base
+   (or nearest ancestor with a result) was red on a `main_red` context, demonstrably carries the
+   fix. It is ranked first and merges **without being up to date**
+   (`strict lane: fix for <ctx> red on main <sha12>, green over its red base`). Every other
+   condition still applies — armed, not draft, same repo, no excluded prefix, `agent-pr-guard` not
+   refusing, no symlink/gitlink or control-character path, no train in flight, never in shadow —
+   and live main is re-read immediately before the merge.
+
+*Trade-off of (3).* The fix is merged over a main it has not been tested against: commits that
+landed between its base and the tip are unverified in combination with it. That is accepted
+because (a) main is already red, so the strict guarantee it gives up is one main has already
+lost; (b) the PR's own CI ran the failing gate green over a base on which main's CI had it red,
+which is the strongest available evidence that it is the remedy; (c) the alternative — updating
+it onto the red tip and waiting a CI cycle — is exactly what deadlocked, since any older PR takes
+the lane first. Being red-based is required, not merely green: a PR whose CI ran over a still-
+green base proves nothing about the breakage and is not treated as a fix. A fix that is wrong in
+combination shows up on main's own next push run, as any red main does. When main is green none
+of this applies and the strict lane behaves exactly as before.
+
 ### What the train is NOT
 
 It is not a replacement for a PR's own CI: a PR that is red on its own head never qualifies. It is

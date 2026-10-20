@@ -292,12 +292,16 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
 
 
 def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | None],
-                      app: dict[str, tuple[str, str]] | None, untrainable, modes: list[str]) -> tuple[str | None, str]:
+                      app: dict[str, tuple[str, str]] | None, untrainable, modes: list[str],
+                      main_red: dict[str, str] | None = None) -> tuple[str | None, str]:
     """The strict lane (ADR-0343): a PR the train refuses ONLY because it is manual-lane (an executable
     `.github/` path, a generator, gates.yaml, the inventory) is judged exactly as strict up-to-date used
     to judge every PR. Returns ("green" | "pending" | None, why). Every other refusal in `qualifies` —
     closed, draft, disarmed, fork, excluded prefix, a merge-train failure, agent-pr-guard, red — still
-    applies, and a control-character path or a symlink/gitlink never enters this lane at all."""
+    applies, and a control-character path or a symlink/gitlink never enters this lane at all.
+    "waiting": every required context it has failed is red on main's tip too (`main_red`, context ->
+    the main commit that verdict came from) — it cannot go green until main is fixed, so it must
+    neither hold the lane nor be served."""
     files = pr.get("files") or []
     if any(unsafe_path(f) for f in files):
         return None, "a path contains a control character — never the strict lane"
@@ -310,10 +314,30 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     if ok:
         return "green", why
     member = [c for c in required if c != STATUS_CONTEXT]
+    failed = [c for c in member if checks.get(c) is not None and checks.get(c) not in OK_STATES]
+    if main_red and failed and why.startswith("required context") and set(failed) <= set(main_red):
+        return "waiting", main_red_reason(failed, main_red)
     if why.startswith("required context pending") and not any(
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
+
+
+def main_red_reason(ctxs, main_red: dict[str, str]) -> str:
+    ctxs = sorted(ctxs)
+    return f"waiting for main ({', '.join(ctxs)} red on main {main_red[ctxs[0]][:12]})"
+
+
+def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | None = None) -> dict[str, str]:
+    """Required contexts (merge-train aside) that are FAILURE in main's latest completed CI at `base`:
+    context -> the main commit carrying that verdict. A still-running main run reads as its nearest
+    first-parent ancestor's verdict, so a fix that just merged keeps main red until its own CI says so."""
+    out: dict[str, str] = {}
+    for ctx in (c for c in required if c != STATUS_CONTEXT):
+        res = main_ci_result(gh, git, ctx, base, cache)
+        if res and res[1] == "failure":
+            out[ctx] = res[0]
+    return out
 
 
 def order_candidates(prs: list[dict]) -> list[dict]:
@@ -843,7 +867,7 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
-                    red: list | None = None) -> tuple[list[Member], dict[int, dict]]:
+                    red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
@@ -877,8 +901,9 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
         if not ok and strict is not None:
             modes = [m for c in changed_entries(git, f"{base}...{fetched}") for m in (c.old_mode, c.new_mode)]
-            state, swhy = strict_lane_state(view, member_required, checks, app, untrainable, modes)
+            state, swhy = strict_lane_state(view, member_required, checks, app, untrainable, modes, main_red)
             if state:
+                view["strict_why"] = swhy
                 log(f"#{n:>6} strict    {state}: {swhy}")
                 strict.append((state, view))
         if not ok and red is not None:
@@ -1114,14 +1139,20 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     regen_text = main_regen_text(git, base)
     strict: list = []
     red: list = []
-    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red)
+    main_cache: dict = {}
+    main_red = main_red_contexts(gh, git, required, base, main_cache)
+    if main_red:
+        log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
+    summary["main_red"] = sorted(main_red)
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red,
+                                  main_red=main_red)
     fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
     for m in fast:
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
         summary["fast"].append(m.number)
-    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary)
+    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache)
     stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
 
@@ -1196,19 +1227,57 @@ def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict
             summary["refreshed"].append(n)
 
 
-def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict) -> None:
+def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None) -> list[str]:
+    """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
+    merge-base (or nearest ancestor with a verdict), green on the PR head. A PR that went green over a
+    base that was still green proves nothing about the breakage and is NOT a fix."""
+    mb = git("merge-base", view["head_sha"], base, check=False).stdout.strip()
+    if not mb:
+        return []
+    out = []
+    for ctx in sorted(main_red):
+        at_base = main_ci_result(gh, git, ctx, mb, cache)
+        if at_base and at_base[1] == "failure":
+            out.append(ctx)
+    return out
+
+
+def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict,
+                main_red: dict[str, str] | None = None, cache: dict | None = None) -> None:
     """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
     contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
     date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
     behind -> update-branch for the oldest one only, and none while another is reserved, so CI is never
-    flooded. Nothing here executes PR
-    code: ancestry is a git query, the rest is the API."""
+    flooded. Nothing here executes PR code: ancestry is a git query, the rest is the API.
+
+    Main red (ADR-0343, main-red awareness): a PR whose only failures are red on main too is
+    "waiting" — skipped, never reserving. No update-branch is issued onto a red main: it could only
+    manufacture main-caused red. A green PR that was red-based on a main-red context is the FIX: it
+    is ranked first and merges without being up to date (its own CI already ran that gate green
+    over a red base), with every other condition and the live-main re-check still applied."""
     summary.setdefault("strict", [])
     summary.setdefault("updated", [])
+    summary.setdefault("waiting", [])
+    main_red = main_red or {}
+    fixes: dict[int, list[str]] = {}
+    for state, view in strict:
+        if state == "waiting":  # never served, never reserving: logged before any merge can end the loop
+            log(f"#{view['number']:>6} strict    {view.get('strict_why') or main_red_reason(list(main_red), main_red)}")
+            summary["waiting"].append(view["number"])
+    if main_red:
+        for state, view in strict:
+            if state == "green":
+                fixed = fix_contexts(gh, git, base, view, main_red, cache)
+                if fixed:
+                    fixes[view["number"]] = fixed
+        strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
     updated = False
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
+        if state == "waiting":
+            continue
         current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
+        fix = fixes.get(n)
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
@@ -1216,7 +1285,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             continue
         if state != "green":
             continue
-        if not current:
+        if not current and not fix:
+            if main_red:
+                ctxs = sorted(main_red)
+                log(f"#{n:>6} strict    behind main, not updated: {main_red_reason(ctxs, main_red)}")
+                continue
             if updated or shadow:
                 continue
             ok = gh.update_branch(n, head)
@@ -1226,15 +1299,20 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
                 summary["updated"].append(n)
             continue
         if carrier_in_flight:
-            log(f"#{n:>6} strict    green and up to date, but a train is in flight over main — next tick")
+            log(f"#{n:>6} strict    green{'' if current else ' fix'}, but a train is in flight over main — next tick")
             continue
         if shadow:
-            log(f"#{n:>6} strict    green and up to date (shadow: no status, no merge)")
+            log(f"#{n:>6} strict    green {'and up to date' if current else 'fix for ' + ', '.join(fix)} (shadow: no status, no merge)")
             continue
         if gh.main_sha() != base:
             log(f"#{n:>6} strict    main moved since it was read — next tick")
             break
-        gh.post_status(head, "success", f"strict lane: green on an up-to-date head over main {base[:12]}")
+        if current:
+            desc = f"strict lane: green on an up-to-date head over main {base[:12]}"
+        else:
+            desc = f"strict lane: fix for {', '.join(fix)} red on main {base[:12]}, green over its red base"
+            log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: merging without update")
+        gh.post_status(head, "success", desc)
         merged = gh.merge(n, head)
         if not merged:
             log(f"#{n:>6} strict    did not merge; stopping")
@@ -2157,10 +2235,11 @@ def self_test() -> int:
             gh.prs[1]["auto_merge"] = None
             gh.merge(1, gh.prs[1]["head"]["sha"])          # main advances: pW and pW2 are now behind
             gh.merged.clear()
-            settle_now()
+            s = settle_now()
             check("strict lane: green but behind gets update-branch, is not merged, one PR per tick (oldest)",
-                  gh.merged == [] and gh.updates == [35] and not strict_desc(35)[0] and not strict_desc(36)[0],
-                  f"merged={gh.merged} updates={gh.updates}")
+                  gh.merged == [] and gh.updates == [35] and not strict_desc(35)[0] and not strict_desc(36)[0]
+                  and s.get("main_red", []) == [] and s.get("waiting", []) == [],
+                  f"merged={gh.merged} updates={gh.updates} {s}")
             # The updated head runs its CI; while it does, settle reserves main (no train builds).
             gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
             s = settle_now()
@@ -2224,6 +2303,70 @@ def self_test() -> int:
             check("strict lane: main re-checked right before the merge; a moved main means no merge",
                   gh.merged == [], f"merged={gh.merged}")
             reset()
+
+            # ---- main-red awareness: the strict lane never deadlocks behind a PR red only because main is ----
+            MR = "Validate manifests"
+
+            def main_breaks(base_red=False):
+                """Advance main by one commit whose own CI is red on MR (and base0 too, if base_red), so
+                every fixture PR is behind a red main tip."""
+                if base_red:
+                    gh.head_checks[base0] = {MR: "failure"}
+                pathlib.Path(origin, "svc", "break.txt").parent.mkdir(parents=True, exist_ok=True)
+                pathlib.Path(origin, "svc", "break.txt").write_text("break\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "break main")
+                gh.head_checks[gh.main_sha()] = {MR: "failure"}
+
+            def main_red_done():
+                gh.head_checks.clear()
+                gh.updates.clear()
+                reset()
+
+            # The production deadlock: an older manual-lane PR red only on the main-red context (one
+            # context still running), a newer green PR cut from the red main that fixes it. The fix
+            # merges first; the old PR is skipped and reserves nothing.
+            open_only("pW", "pW2")
+            main_breaks(base_red=True)
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            s = settle_now()
+            check("main red: deadlock — the green fix merges first, the old main-red PR waits unreserved",
+                  gh.merged == [36] and gh.updates == [] and s.get("waiting", []) == [35] and not s["in_flight"]
+                  and s.get("main_red", []) == [MR] and strict_desc(36)[1].startswith("strict lane: fix for Validate manifests"),
+                  f"merged={gh.merged} updates={gh.updates} {s} status={strict_desc(36)}")
+            main_red_done()
+
+            # Main red: a green PR whose CI ran over a GREEN base is not a fix — no update-branch onto
+            # the red tip (it would only manufacture main-caused red), and no merge.
+            open_only("pW", "pW2")
+            main_breaks()
+            s = settle_now()
+            check("main red: no update-branch and no merge for a green PR that is not the fix",
+                  gh.updates == [] and gh.merged == [] and s["updated"] == [] and s.get("main_red", []) == [MR],
+                  f"merged={gh.merged} updates={gh.updates} {s}")
+            main_red_done()
+
+            # A PR red on its OWN context (not red on main) is judged as before: no lane, no wait.
+            open_only("pW")
+            main_breaks()
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": "failure", MR: "failure"}
+            s = settle_now()
+            check("main red: a PR also red on a context main is green on is not 'waiting' and gets nothing",
+                  gh.updates == [] and gh.merged == [] and s.get("waiting", []) == [] and not strict_desc(35)[0],
+                  f"merged={gh.merged} updates={gh.updates} {s}")
+            main_red_done()
+            open_only("pW")
+            main_breaks()
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            gh.g("checkout", "-q", "-f", "-B", "pW-cur", "pW")
+            gh.g("merge", "-q", "--no-edit", "main")
+            gh.g("checkout", "-q", "-f", "main")
+            gh.prs[35]["head"].update(ref="pW-cur", sha=gh.g("rev-parse", "pW-cur").stdout.strip())
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            s = settle_now()
+            check("main red: an up-to-date PR with CI still running and no failure still reserves main",
+                  s["in_flight"] and gh.merged == [] and s.get("waiting", []) == [], f"{s} merged={gh.merged}")
+            main_red_done()
 
             # ---- stale-red refresh: PRs left red by a red MAIN get one update-branch once main is green ----
             VM = "Validate manifests"
