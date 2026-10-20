@@ -448,6 +448,9 @@ jobs:
       # commit (the sha an image tag names) through the contents API, because CI checks out
       # at fetch-depth: 1 and GitHub will not serve an arbitrary sha to `git fetch`.
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # An id, not a credential: check-deploy-holds.py (gate deploy-hold-image-pins) accepts a
+      # `merge-train` context pinned to this App in place of strict up-to-date (ADR-0343).
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
