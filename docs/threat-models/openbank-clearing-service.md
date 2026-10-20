@@ -139,7 +139,7 @@ not change any existing request's outcome until explicitly flipped.
   the `ClearingResource` KDoc in this change. No DB, schema, endpoint or policy change.
 
 - **2026-05-30** — Added `clearing_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
-  surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  surface/boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
   sepa-payment pilot. New endpoint `PATCH /api/v1/clearing/approvals/{id}` +

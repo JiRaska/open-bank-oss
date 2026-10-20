@@ -354,7 +354,7 @@ also be deleted (nothing else in balance-service depends on it).
 - **2026-05-30** — Added `balances_seq`, `balance_holds_seq`, `balance_outbox_seq` (Hibernate fix);
   added `assertj` test dep for the guard. Additive DDL only — no new flow/surface/boundary.
   Risk class = **availability** (missing sequence breaks all balance writes), mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-09-05** — Input validation hardened on the reconciliation trigger
   (`POST /api/v1/balances/reconciliation`): a blank `asOf` now means "omitted" and a malformed one
   is rejected as 400 (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a

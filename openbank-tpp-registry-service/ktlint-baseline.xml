@@ -163,10 +163,6 @@
         <error line="89" column="64" source="standard:trailing-comma-on-declaration-site" />
         <error line="129" column="43" source="standard:function-signature" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
     <file name="src/test/kotlin/com/openbank/tpp/infrastructure/outbox/TppOutboxBacklogGaugeTest.kt">
         <error line="6" column="1" source="standard:import-ordering" />
     </file>
