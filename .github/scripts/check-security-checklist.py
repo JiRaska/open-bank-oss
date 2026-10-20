@@ -463,10 +463,21 @@ def declarations_from_text(text: str) -> dict[str, dict[str, list[str]]] | None:
     return out
 
 
-def load_declarations(root: Path) -> dict[str, dict[str, list[str]]]:
-    d = declarations_from_text((root / RULES).read_text())
+def rules_text(root: Path, ref: str = "HEAD") -> str | None:
+    """Read governance at the assessed tree; a carrier's later member must not classify an earlier one."""
+    if ref == "HEAD":
+        path = root / RULES
+        return path.read_text() if path.is_file() else None
+    shown = subprocess.run(["git", "show", f"{ref}:{RULES}"], cwd=root,
+                           capture_output=True, text=True, check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def load_declarations(root: Path, ref: str = "HEAD") -> dict[str, dict[str, list[str]]]:
+    text = rules_text(root, ref)
+    d = declarations_from_text(text) if text is not None else None
     if d is None:
-        print(f"::warning::{DECL_KEY} unreadable — every money-path service treated as undeclared (fail closed)")
+        print(f"::warning::{DECL_KEY} unreadable at {ref} — every money-path service treated as undeclared (fail closed)")
         return {}
     return d
 
@@ -512,12 +523,15 @@ def coverage_findings(root: Path, decls: dict[str, dict[str, list[str]]]) -> lis
     return bad
 
 
-def money_path_dirs(root: Path) -> list[str]:
-    """The one list from rules.yaml; a bare `- openbank-foo-service` under
-    `money_path_services:` — no YAML dependency for a 20-line block."""
+def money_path_dirs(root: Path, ref: str = "HEAD") -> list[str]:
+    """The one list from rules.yaml at the assessed tree; no YAML dependency for this 20-line block."""
+    text = rules_text(root, ref)
+    if text is None:
+        print(f"::error::money_path_services unreadable at {ref} — fail closed")
+        sys.exit(1)
     names: list[str] = []
     in_block = False
-    for line in (root / RULES).read_text().splitlines():
+    for line in text.splitlines():
         if line.startswith("money_path_services:"):
             in_block = True
             continue
@@ -555,7 +569,7 @@ def unticked(body: str) -> tuple[str, list[str]] | None:
 
 def run(root: Path, body: str, base: str, enforce: bool,
         live_body: Callable[[], str | None] | None = None, head: str = "HEAD") -> int:
-    dirs = money_path_dirs(root)
+    dirs = money_path_dirs(root, head)
     files = changed_files(base, head)
     in_money_path = [f for f in files if any(f == d or f.startswith(d + "/") for d in dirs)]
     touched = [f for f in in_money_path if not is_release_derived(f)]
@@ -579,7 +593,7 @@ def run(root: Path, body: str, base: str, enforce: bool,
     print(f"security-checklist: {len(touched)} money-path file(s) touched "
           f"({', '.join(sorted({t.split('/')[0] for t in touched}))})")
 
-    decls = load_declarations(root)
+    decls = load_declarations(root, head)
     for svc in sorted({t.split("/")[0] for t in touched if not is_inert(t)}):
         print(f"security-checklist: {svc}: " + (f"declared in {DECL_KEY}" if svc in decls
               else f"NOT declared in {DECL_KEY} — judgement items fail closed"))
@@ -1194,7 +1208,8 @@ def self_test() -> int:
         return pr
 
     def carrier_fixture(member_paths: dict[int, list[str]], bodies: dict[int, str], pr: dict,
-                        extra_commit: bool = False, inner: Callable[[], int] | None = None) -> tuple[int, str, list[int]]:
+                        extra_commit: bool = False, inner: Callable[[], int] | None = None,
+                        rules_by_member: dict[int, str] | None = None) -> tuple[int, str, list[int]]:
         """A real git repo: base, then one train member commit per PR (merge-train.py's exact
         message), optionally a foreign commit; judged through judge() exactly as main() does."""
         import contextlib
@@ -1218,6 +1233,9 @@ def self_test() -> int:
                     f = root / rel
                     f.parent.mkdir(parents=True, exist_ok=True)
                     f.write_text(f"member {n}\n", encoding="utf-8")
+                if rules_by_member and n in rules_by_member:
+                    (root / "openbank-libs" / "governance" / "rules.yaml").write_text(
+                        rules_by_member[n], encoding="utf-8")
                 git("add", "-A")
                 git("commit", "-q", "-m", f"merge-train: member #{n}\n\nPR-Number: #{n}\nPR-Head: {'a' * 40}\n")
             if extra_commit:
@@ -1258,6 +1276,21 @@ def self_test() -> int:
     rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr())
     if rc != 0:
         print("self-test FAIL (carrier-all-ticked): carrier whose members are all ticked failed:\n" + out[-800:]); bad += 1
+    later_declaration = (
+        f"money_path_services:\n  - {svc}\n"
+        f"security_sensitive_paths:\n  {svc}:\n"
+        "    auth_crypto_payment: []\n"
+        "    pii: [src/main/kotlin/Excluded.kt]\n"
+        "    cardholder: []\n"
+    )
+    rc, out, _ = carrier_fixture(
+        {1: [f"{svc}/src/main/kotlin/Business.kt"], 2: []},
+        {1: "", 2: ticked}, carrier_pr(),
+        rules_by_member={2: later_declaration})
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#1" not in named[0]:
+        print("self-test FAIL (carrier-member-governance-snapshot): a later member's new declaration "
+              "classified an earlier production-code member:\n" + out[-1000:]); bad += 1
     rc, out, reads = carrier_fixture({1: ["docs/readme.txt"], 2: ["other-service/src/main/kotlin/X.kt"]}, {}, carrier_pr())
     if rc != 0:
         print("self-test FAIL (carrier-non-money-path): non-money-path carrier failed:\n" + out[-800:]); bad += 1
