@@ -133,7 +133,9 @@ export function parseConfiguredTcpTarget(urlEnv: string): { host: string; port: 
     if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) return null
     const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
     if (!Number.isInteger(port) || port < 1 || port > 65535) return null
-    return { host: url.hostname, port }
+    // WHATWG URL retains brackets for IPv6; net.connect expects the bare IP literal.
+    const host = url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname
+    return { host, port }
   } catch {
     return null
   }

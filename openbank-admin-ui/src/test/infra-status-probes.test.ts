@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { Socket } from 'node:net'
 import { CLUSTER_INFRA, LOCAL_INFRA, parseConfiguredTcpTarget, probeInfra } from '@/lib/infra/probes'
 import { IMAGE_PATTERNS } from '@/lib/live-platform-versions'
 
@@ -55,6 +56,35 @@ describe('infra-status probe definitions', () => {
       expect(parseConfiguredTcpTarget('CLICKHOUSE_URL')).toBeNull()
       await expect(probeInfra(clickhouse!)).resolves.toMatchObject({ status: 'UNKNOWN', latencyMs: null })
     } finally {
+      if (original === undefined) delete process.env.CLICKHOUSE_URL
+      else process.env.CLICKHOUSE_URL = original
+    }
+  })
+
+  it.each([
+    ['http://[::1]:8123', '::1', 8123],
+    ['https://clickhouse', 'clickhouse', 443],
+    ['http://127.0.0.1:8123', '127.0.0.1', 8123],
+  ] as const)('passes configured %s to the TCP connector as a host literal', async (url, host, port) => {
+    const original = process.env.CLICKHOUSE_URL
+    const connect = vi.spyOn(Socket.prototype, 'connect').mockImplementation(function (this: Socket, ...args: unknown[]) {
+      const connected = args[2] as () => void
+      connected()
+      return this
+    })
+    const timeout = vi.spyOn(Socket.prototype, 'setTimeout')
+    const destroy = vi.spyOn(Socket.prototype, 'destroy')
+    try {
+      process.env.CLICKHOUSE_URL = url
+      const clickhouse = CLUSTER_INFRA.find(d => d.id === 'clickhouse')!
+      await expect(probeInfra(clickhouse)).resolves.toMatchObject({ status: 'UP', latencyMs: expect.any(Number) })
+      expect(connect).toHaveBeenCalledExactlyOnceWith(port, host, expect.any(Function))
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(3000)
+      expect(destroy).toHaveBeenCalledOnce()
+    } finally {
+      connect.mockRestore()
+      timeout.mockRestore()
+      destroy.mockRestore()
       if (original === undefined) delete process.env.CLICKHOUSE_URL
       else process.env.CLICKHOUSE_URL = original
     }
