@@ -289,6 +289,31 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     return True, "armed + all required green"
 
 
+def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | None],
+                      app: dict[str, tuple[str, str]] | None, untrainable, modes: list[str]) -> tuple[str | None, str]:
+    """The strict lane (ADR-0343): a PR the train refuses ONLY because it is manual-lane (an executable
+    `.github/` path, a generator, gates.yaml, the inventory) is judged exactly as strict up-to-date used
+    to judge every PR. Returns ("green" | "pending" | None, why). Every other refusal in `qualifies` —
+    closed, draft, disarmed, fork, excluded prefix, a merge-train failure, agent-pr-guard, red — still
+    applies, and a control-character path or a symlink/gitlink never enters this lane at all."""
+    files = pr.get("files") or []
+    if any(unsafe_path(f) for f in files):
+        return None, "a path contains a control character — never the strict lane"
+    if any(m in SPECIAL_MODES for m in modes):
+        return None, "adds a symlink or gitlink — never the strict lane"
+    untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
+    if not any(untrainable(f) for f in files):
+        return None, "not manual-lane"
+    ok, why = qualifies(pr, required, checks, app, untrainable=lambda _f: False)
+    if ok:
+        return "green", why
+    member = [c for c in required if c != STATUS_CONTEXT]
+    if why.startswith("required context pending") and not any(
+            checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
+        return "pending", why
+    return None, why
+
+
 def order_candidates(prs: list[dict]) -> list[dict]:
     return sorted(prs, key=lambda p: (p.get("created_at") or "", p["number"]))
 
@@ -781,6 +806,11 @@ class GitHub:
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
+    def update_branch(self, n: int, head: str) -> bool:
+        """Merge main into the PR branch, pinned to the head the strict lane judged."""
+        code, _ = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head})
+        return code == 202
+
     def create_carrier(self, branch: str) -> int | None:
         assert_train_branch(branch)
         code, data = api("POST", f"/repos/{self.repo}/pulls", {
@@ -810,7 +840,7 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
 
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
-                    limit: int = 64) -> tuple[list[Member], dict[int, dict]]:
+                    limit: int = 64, strict: list | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
@@ -830,8 +860,15 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
-        ok, why = qualifies(view, member_required, gh.checks(fetched), app, untrainable)
+        checks = gh.checks(fetched)
+        ok, why = qualifies(view, member_required, checks, app, untrainable)
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
+        if not ok and strict is not None:
+            modes = [m for c in changed_entries(git, f"{base}...{fetched}") for m in (c.old_mode, c.new_mode)]
+            state, swhy = strict_lane_state(view, member_required, checks, app, untrainable, modes)
+            if state:
+                log(f"#{n:>6} strict    {state}: {swhy}")
+                strict.append((state, view))
         if ok:
             out.append(Member(n, view["title"], view["body"], fetched, view["head_ref"], view["created_at"],
                               ref=fetched, files=files))
@@ -999,12 +1036,14 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             shadow = True
     required = gh.required()
     train_required = [c for c in required if c != STATUS_CONTEXT and c not in TREE_INDEPENDENT_CONTEXTS]
+    carrier_in_flight = False
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
         checks = gh.checks(sha)
         failing = [c for c in train_required if checks.get(c) not in (None, *OK_STATES)]
         if not failing and any(checks.get(c) is None for c in train_required):
             summary["in_flight"] = True
+            carrier_in_flight = True
             continue
         got = git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode == 0
         fetched = git("rev-parse", "refs/merge-train/settle").stdout.strip() if got else ""
@@ -1057,14 +1096,64 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # Fast lane, from live data only — nothing here reads a stored classification.
     base = live_base(gh, git)
     regen_text = main_regen_text(git, base)
-    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
+    strict: list = []
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict)
     fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
     for m in fast:
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
         summary["fast"].append(m.number)
+    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary)
     return summary
+
+
+def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict) -> None:
+    """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
+    contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
+    date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
+    behind -> update-branch for the oldest one only, and none while another is reserved, so CI is never
+    flooded. Nothing here executes PR
+    code: ancestry is a git query, the rest is the API."""
+    summary.setdefault("strict", [])
+    summary.setdefault("updated", [])
+    updated = False
+    for state, view in strict:
+        n, head = view["number"], view["head_sha"]
+        current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
+        if current and state == "pending":
+            log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
+            summary["in_flight"] = True
+            updated = True  # one strict-lane PR in progress at a time: no other update while it runs
+            continue
+        if state != "green":
+            continue
+        if not current:
+            if updated or shadow:
+                continue
+            ok = gh.update_branch(n, head)
+            log(f"#{n:>6} strict    behind main {base[:12]}: update-branch {'requested' if ok else 'refused'}")
+            if ok:
+                updated = True
+                summary["updated"].append(n)
+            continue
+        if carrier_in_flight:
+            log(f"#{n:>6} strict    green and up to date, but a train is in flight over main — next tick")
+            continue
+        if shadow:
+            log(f"#{n:>6} strict    green and up to date (shadow: no status, no merge)")
+            continue
+        if gh.main_sha() != base:
+            log(f"#{n:>6} strict    main moved since it was read — next tick")
+            break
+        gh.post_status(head, "success", f"strict lane: green on an up-to-date head over main {base[:12]}")
+        merged = gh.merge(n, head)
+        if not merged:
+            log(f"#{n:>6} strict    did not merge; stopping")
+            break
+        summary["strict"].append(n)
+        summary["merged"].append(n)
+        break  # main moved: every other strict-lane head is now behind it
 
 
 def write_output(key: str, value: str) -> None:
@@ -1183,6 +1272,9 @@ class FakeGitHub:
         self.carriers: dict[int, dict] = {}
         self._ci: dict[str, dict] = {}
         self.foreign_after_merge: str | None = None
+        self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
+        self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
+        self.updates: list[int] = []             # update-branch calls, in order
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
         self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
 
@@ -1205,8 +1297,10 @@ class FakeGitHub:
     def pr(self, n): return self.prs[n]
 
     def checks(self, sha):
-        if any(p["head"]["sha"] == sha for p in self.prs.values()):
-            out = {c: "success" for c in SYN_REQUIRED[:4]}
+        if sha in self.pending_shas:
+            out = {c: None for c in SYN_REQUIRED[:4]}
+        elif any(p["head"]["sha"] == sha for p in self.prs.values()):
+            out = {**{c: "success" for c in SYN_REQUIRED[:4]}, **self.head_checks.get(sha, {})}
         else:
             if sha not in self._ci:
                 wt = tempfile.mkdtemp(dir=self.scratch)
@@ -1252,6 +1346,19 @@ class FakeGitHub:
             self.g("commit", "-q", "-m", "foreign")
             self.foreign_after_merge = None
         return sha
+
+    def update_branch(self, n, head):
+        p = self.prs[n]
+        if p["head"]["sha"] != head:
+            return False
+        # A fresh branch, so the fixture branch itself stays as cut for later cases.
+        br = f"{p['head']['ref']}-upd{len(self.updates)}"
+        self.g("checkout", "-q", "-f", "-B", br, head)
+        self.g("merge", "-q", "--no-edit", "main")
+        self.g("checkout", "-q", "-f", "main")
+        p["head"]["ref"], p["head"]["sha"] = br, self.g("rev-parse", br).stdout.strip()
+        self.updates.append(n)
+        return True
 
     def create_carrier(self, branch):
         n = 9000 + len(self.carriers)
@@ -1317,6 +1424,8 @@ def _synthetic_origin(root: str) -> None:
     pr("pL", {"docs/l.md": "l\n"}, link=("docs-link", "/etc/passwd"))
     pr("pG", {SYN_GENERATOR: "import os,pathlib\npathlib.Path('leaked.txt').write_text(os.environ.get('GH_TOKEN','none'))\n"})
     pr("pW", {".github/gates/gates.yaml": "gates: []\n"})
+    pr("pW2", {".github/scripts/check-two.py": "print(2)\n"})
+    pr("pS", {".github/scripts/check-s.py": "print(1)\n"}, link=("docs-s-link", "/etc/passwd"))
     pr("pX", {"docs/adr/0001-x.md": "x\n"})
     pr("pF", {"svc/fast.txt": "f\n"})
     pr("pT", {SYN_BASELINE: "loosened\n"})
@@ -1471,7 +1580,7 @@ def self_test() -> int:
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
-                       "pX": 33, "pF": 34, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62}
+                       "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -1614,18 +1723,24 @@ def self_test() -> int:
 
             # NEGATIVE: members touching a generator or a gate file never qualify.
             open_only("pG", "pW")
+            carriers_before = len(gh.carriers)
             drain()
-            check("gate-file members: never qualify, never merge, nothing leaks",
-                  gh.merged == [] and not gh.carriers.get(max(gh.carriers, default=0), {}).get("state") == "open"
+            # They may merge, but only through the strict lane (no train, nothing executed).
+            check("gate-file members: never ride a train, merge only via the strict lane, nothing leaks",
+                  len(gh.carriers) == carriers_before and all(gh.app_statuses(gh.g("rev-parse", b).stdout.strip()).get(STATUS_CONTEXT, ("", ""))[1]
+                                          .startswith("strict lane: ") for b, n in (("pG", 32), ("pW", 35)) if n in gh.merged)
                   and not os.path.exists(os.path.join(origin, "leaked.txt")) and not gh.comments, f"{gh.merged} {gh.comments}")
             reset()
 
             # NEGATIVE (review 5): a bundle generator deeper than any fixed glob.
             marker = os.path.join(root, "deep-generator-ran")
             open_only("pD")
+            carriers_before = len(gh.carriers)
             drain()
-            check("deep generator: the PR never qualifies, never merges, and its generator never ran",
-                  gh.merged == [] and not os.path.exists(marker), f"{gh.merged} ran={os.path.exists(marker)}")
+            check("deep generator: the PR never rides a train, merges only via the strict lane, its generator never ran",
+                  len(gh.carriers) == carriers_before and not os.path.exists(marker)
+                  and (gh.merged == [] or gh.app_statuses(gh.g("rev-parse", "pD").stdout.strip())
+                       .get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane: ")), f"{gh.merged} ran={os.path.exists(marker)}")
             bdir = clone("build")
             b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} {SYN_GENERATOR}",), overlay_roots=(".github/scripts",),
                              untrainable=Untrainable(SYN_INVENTORY))
@@ -1928,6 +2043,95 @@ def self_test() -> int:
             gh.foreign_after_merge = "svc/foreign.txt"
             mode_settle(gh, Git(clone("settle")), "o/r", False)
             check("foreign merge mid-settle: merging stops, the rest waits for the next tick", gh.merged == [1], str(gh.merged))
+            reset()
+
+            # ---- strict lane (manual-lane PRs: executable .github/, generators, gates, inventory) ----
+            def settle_now():
+                return mode_settle(gh, Git(clone("settle")), "o/r", False)
+
+            def strict_desc(n):
+                return gh.app_statuses(gh.prs[n]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))
+
+            # green + up to date with live main: the App posts the strict-lane status and merges it.
+            open_only("pW")
+            settle_now()
+            st, desc = strict_desc(35)
+            check("strict lane: manual-lane PR green on an up-to-date head merges with the strict-lane status",
+                  gh.merged == [35] and st == "success" and desc.startswith("strict lane: green on an up-to-date head over main "),
+                  f"merged={gh.merged} status={st} {desc!r}")
+            reset()
+
+            # green but BEHIND: update-branch, no merge, and only ONE manual-lane PR (the oldest) per tick.
+            open_only("pW", "pW2", "p1")
+            gh.prs[1]["auto_merge"] = None
+            gh.merge(1, gh.prs[1]["head"]["sha"])          # main advances: pW and pW2 are now behind
+            gh.merged.clear()
+            settle_now()
+            check("strict lane: green but behind gets update-branch, is not merged, one PR per tick (oldest)",
+                  gh.merged == [] and gh.updates == [35] and not strict_desc(35)[0] and not strict_desc(36)[0],
+                  f"merged={gh.merged} updates={gh.updates}")
+            # The updated head runs its CI; while it does, settle reserves main (no train builds).
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            s = settle_now()
+            check("strict lane: an updated head whose CI is running reserves main and is not merged",
+                  s["in_flight"] and gh.merged == [] and gh.updates == [35], f"{s} merged={gh.merged} updates={gh.updates}")
+            gh.head_checks.clear()
+            settle_now()
+            check("strict lane: once green on the updated head a later tick merges it", gh.merged == [35], str(gh.merged))
+            gh.updates.clear()
+            reset()
+
+            # red manual-lane PR: nothing at all.
+            open_only("pW")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"Validate manifests": "failure"}
+            settle_now()
+            check("strict lane: a red manual-lane PR gets no status, no update, no merge",
+                  gh.merged == [] and gh.updates == [] and not strict_desc(35)[0], f"{gh.merged} {gh.updates} {strict_desc(35)}")
+            gh.head_checks.clear()
+            reset()
+
+            # red ordinary PR: no strict lane (it is the train's, and red).
+            open_only("p1")
+            gh.head_checks[gh.prs[1]["head"]["sha"]] = {"Validate manifests": "failure"}
+            settle_now()
+            check("strict lane: a red non-manual-lane PR never takes the strict lane",
+                  gh.merged == [] and gh.updates == [] and not strict_desc(1)[0], f"{gh.merged} {strict_desc(1)}")
+            gh.head_checks.clear()
+            reset()
+
+            # agent-pr-guard refusal and a symlink: never the strict lane, even green and up to date.
+            open_only("pW")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates / agent-pr-guard": "failure"}
+            settle_now()
+            check("strict lane: a PR refused by agent-pr-guard never takes the strict lane",
+                  gh.merged == [] and gh.updates == [] and not strict_desc(35)[0], f"{gh.merged} {strict_desc(35)}")
+            gh.head_checks.clear()
+            reset()
+            open_only("pS")
+            settle_now()
+            check("strict lane: a manual-lane PR adding a symlink never takes the strict lane",
+                  gh.merged == [] and gh.updates == [] and not strict_desc(37)[0], f"{gh.merged} {strict_desc(37)}")
+            reset()
+
+            # A train in flight: the strict lane does not merge (the carrier's base must stay main).
+            open_only("p1")
+            tick()
+            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+            open_only("pW")
+            s = settle_now()
+            check("strict lane: no strict-lane merge while a train is in flight",
+                  s["in_flight"] and gh.merged == [] and not strict_desc(35)[0], f"{s} merged={gh.merged}")
+            gh.pending_shas.clear()
+            reset()
+
+            # main moves between reading it and merging: re-checked, no merge.
+            open_only("pW")
+            real_main = gh.main_sha
+            gh.main_sha = lambda: "f" * 40
+            settle_now()
+            gh.main_sha = real_main
+            check("strict lane: main re-checked right before the merge; a moved main means no merge",
+                  gh.merged == [], f"merged={gh.merged}")
             reset()
     finally:
         for k, v in saved.items():
