@@ -5,6 +5,7 @@
 package com.openbank.risk.integration
 
 import com.openbank.risk.application.port.out.TreasuryDealBook
+import com.openbank.risk.infrastructure.kafka.TreasuryDealConsumer
 import com.openbank.risk.it.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
@@ -20,6 +21,9 @@ import org.eclipse.microprofile.reactive.messaging.Message
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 
 /**
  * ADR-0315 D6: treasury's deal events through the in-memory connector into a real Postgres. The
@@ -263,6 +267,41 @@ class TreasuryDealConsumerIT {
         val malformedBefore = outcome("malformed")
         source.send(record("treasury.cashflow.generated.v1", """{"dealId":"$irs","flows":[]}"""))
         await { outcome("malformed") >= malformedBefore + 1.0 }
+    }
+
+    @Test
+    fun `malformed treasury cash-flow logs do not expose event contents`() {
+        val logger = Logger.getLogger(TreasuryDealConsumer::class.java.name)
+        val records = mutableListOf<LogRecord>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                records += record
+            }
+
+            override fun flush() = Unit
+
+            override fun close() = Unit
+        }
+        logger.addHandler(handler)
+        try {
+            val consumer = TreasuryDealConsumer().apply { objectMapper = com.fasterxml.jackson.databind.ObjectMapper() }
+            val secret = "SENTINEL-FINANCIAL-PAYLOAD-77441"
+            assertThat(consumer.parseCashFlows("""{"dealId":"$secret","flows":[]}""")).isNull()
+            val firstLogCount = records.size
+            assertThat(firstLogCount).isPositive()
+            assertThat(
+                consumer.parseCashFlows(
+                    """{"dealId":"${UUID.randomUUID()}","dealVersion":1,"scheduleHash":"h","flows":["$secret"]}""",
+                ),
+            ).isNull()
+            assertThat(records.size).isGreaterThan(firstLogCount)
+            val logged = records.joinToString { record ->
+                listOf(record.message, record.parameters?.joinToString(), record.thrown?.toString()).joinToString()
+            }
+            assertThat(logged).doesNotContain(secret)
+        } finally {
+            logger.removeHandler(handler)
+        }
     }
 
     @org.junit.jupiter.api.AfterEach

@@ -38,6 +38,7 @@ import com.openbank.risk.domain.model.TreasuryDeal
 import com.openbank.risk.domain.valuation.BucketSet
 import com.openbank.risk.domain.valuation.ComputationTimeoutException
 import com.openbank.risk.domain.valuation.DealKind
+import com.openbank.risk.domain.valuation.FlowSource
 import com.openbank.risk.domain.valuation.StoredFlowSet
 import com.openbank.risk.infrastructure.rest.toResponse
 import io.mockk.coEvery
@@ -132,6 +133,8 @@ class TreasuryValuationServiceTest {
         historyDays: Int,
         minimum: Int,
         timeouts: ValuationTimeouts = generous,
+        stored: Map<UUID, StoredFlowSet> = emptyMap(),
+        czkOnlyHistory: Boolean = false,
     ): TreasuryValuationService {
         val sets = history(historyDays)
         val snapshots = mockk<SnapshotUseCase>()
@@ -141,12 +144,18 @@ class TreasuryValuationServiceTest {
         val today = sets.last()
         coEvery { curves.latestIdFor(asOf) } returns today.id
         coEvery { curves.findById(today.id) } returns today
-        coEvery { curves.latestPerDayBetween(any(), any()) } returns sets
+        coEvery { curves.latestPerDayBetween(any(), any()) } returns if (czkOnlyHistory) {
+            sets.mapIndexed { index, set ->
+                if (index == sets.lastIndex) set else set.copy(curves = set.curves.filterKeys { it.currency == "CZK" })
+            }
+        } else {
+            sets
+        }
         return TreasuryValuationService(
             snapshots,
             curves,
             Book(deals),
-            Store(),
+            Store(stored),
             ReportingFixings(NoFixings),
             VarSettings(minimum, 30),
             timeouts,
@@ -204,6 +213,18 @@ class TreasuryValuationServiceTest {
     }
 
     @Test
+    fun `CZK-only book keeps historical scenarios when unrelated EUR curves are missing`() {
+        val deal = irs(UUID.randomUUID(), DealKind.ACTUAL)
+        val analysis = runBlocking {
+            service(mutableListOf(deal), 5, 3, czkOnlyHistory = true)
+                .valueAtRisk(runId, null, BigDecimal("0.99"), 1)
+        }
+        assertThat(analysis.figures).isNotNull
+        assertThat(analysis.scenarioCount).isEqualTo(5)
+        assertThat(analysis.skippedScenarios).isZero()
+    }
+
+    @Test
     fun `a deal that cannot be valued leaves the book figures unstated, never computed over the rest`() {
         val deals =
             mutableListOf(irs(UUID.randomUUID(), DealKind.ACTUAL), irs(UUID.randomUUID(), DealKind.ACTUAL, ccy = "EUR"))
@@ -214,6 +235,23 @@ class TreasuryValuationServiceTest {
         assertThat(v.deals.count { it.unpriced != null }).isEqualTo(1)
         assertThat(runBlocking { svc.sensitivity(runId, null, null, BucketSet.IRRBB_STANDARD) }.result).isNull()
         assertThat(runBlocking { svc.valueAtRisk(runId, null, BigDecimal("0.99"), 1) }.figures).isNull()
+    }
+
+    @Test
+    fun `an empty stored flow set cannot turn a booked deal without legs into zero book PV`() {
+        val id = UUID.randomUUID()
+        val deal = irs(id, DealKind.ACTUAL).copy(legs = null)
+        val svc = service(
+            mutableListOf(deal),
+            5,
+            3,
+            stored = mapOf(id to StoredFlowSet(id, 1, "h", emptyList())),
+        )
+        val value = runBlocking { svc.valuation(runId, null, null) }
+        assertThat(value.book).isNull()
+        assertThat(value.deals.single().unpriced).isNotNull()
+        assertThat(value.deals.single().flowSource).isEqualTo(FlowSource.STORED)
+        assertThat(value.dataGap).contains("cannot be valued")
     }
 
     @Test

@@ -47,6 +47,9 @@ class TreasuryDealConsumerStubTest {
     fun `an explicit stub is kept and an unknown stub is unvaluable`() {
         assertThat(stored("LONG_FINAL", "FROM_END")).isEqualTo("LONG_FINAL")
         val bad = consumer.parse("treasury.deal.booked.v1", payload("SIDEWAYS", "FROM_END"))!!
-        assertThat(bad.legsError).contains("stub")
+        assertThat(bad.legsError).contains("invalid published leg specification").doesNotContain("SIDEWAYS")
+        val badRoll = consumer.parse("treasury.deal.booked.v1", payload(null, "PRIVATE-ROLL-VALUE"))!!
+        assertThat(badRoll.legsError).contains("invalid published leg specification")
+            .doesNotContain("PRIVATE-ROLL-VALUE")
     }
 }

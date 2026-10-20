@@ -122,11 +122,15 @@ class TreasuryValuator(private val market: MarketState, private val deadline: De
     fun prepare(deal: ValuableDeal): Preparation {
         val stored = deal.stored?.flows.orEmpty().groupBy { it.legIndex }
         val legIndices = (deal.legs.indices.toSet() + stored.keys).sorted()
+        if (legIndices.isEmpty()) return Preparation.Unpriced("no legs or stored cash flows")
         val slots = mutableListOf<Slot>()
         for (i in legIndices) {
             val leg = deal.legs.getOrNull(i)
             val rows = stored[i].orEmpty()
             val currency = leg?.currency?.code ?: rows.first().currency
+            if (rows.any { it.currency != currency }) {
+                return Preparation.Unpriced("stored cash-flow currency differs from leg $i currency $currency")
+            }
             if (market.discount(currency) == null) return Preparation.Unpriced("no discounting curve for $currency")
             if (market.fx(currency) == null) {
                 return Preparation.Unpriced("no FX fixing in effect for $currency against ${market.reportingCurrency}")
