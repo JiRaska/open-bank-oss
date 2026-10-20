@@ -63,6 +63,14 @@ cached projections; browsers receive neither infrastructure credentials nor
 direct store access. Evidence updates cannot change executable code or grant
 permissions. Rollback selects a compatible earlier snapshot without rebuilding.
 
+Refresh only datasets that consume the completed producer: CI refreshes gate
+health, readiness, Test Intelligence and content; Services CI refreshes Test
+Intelligence; Security KPI snapshot refreshes security KPIs. Test Intelligence
+needs both CI and Services CI artifacts. Pact completion is not a refresh source:
+the collector reads its retained quality report/seed, not broker verification
+freshness. Scheduled and manual `all` runs still refresh every dataset, and a
+manual dataset selection or rollback remains scoped to that dataset.
+
 **Runtime health:** collect inventory and readiness independently of slow version
 or governance enrichment. Cache and coalesce concurrent read requests with a
 bounded TTL and explicit observation time. Discovery must distinguish partial
