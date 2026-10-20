@@ -131,6 +131,19 @@ class SourceValidationTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             validation.validation_ready(self.api, REPO, SHA)
 
+    def test_completed_workflow_with_missing_or_unfinished_required_job_is_pending(self):
+        # Actions may expose a successful workflow run before the jobs endpoint
+        # has indexed all jobs or their final states. Neither state authorizes a
+        # build; a later workflow_run completion retries the check.
+        self.api.jobs[3] = [job("Detect changed services")]
+        self.assertFalse(validation.validation_ready(self.api, REPO, SHA))
+
+        self.api.jobs[3] = [
+            job("Detect changed services"),
+            job("all-green", status="in_progress", conclusion=None),
+        ]
+        self.assertFalse(validation.validation_ready(self.api, REPO, SHA))
+
     def test_services_ci_aggregate_is_found_after_first_jobs_api_page(self):
         self.api.jobs[3] = [job("Detect changed services")]
         self.api.jobs[3].extend(job(f"build (module-{index})") for index in range(100))

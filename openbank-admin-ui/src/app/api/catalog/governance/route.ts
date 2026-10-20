@@ -5,17 +5,15 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
 export const dynamic = 'force-dynamic'
 
-// Serves the code-derived governance manifest (ADR-0071). The build bakes
-// governance.json via scripts/generate-governance.mjs (joins per-service
-// governance.yaml with derived Flyway versions); this route hands it to the
-// admin-ui as a static, point-in-time snapshot — replacing the hand-maintained
-// src/lib/governance/manifest.ts data (rule #7: derived, never hand-edited).
-// READ-ONLY consumer: never recomputed at runtime. Runtime drift (live-DB Flyway
-// current/drift) is merged in by the page from /api/services/governance.
-// If the snapshot is absent the route 200s with an empty, honest envelope.
+// Serves the code-derived governance manifest (ADR-0071), preferring the
+// validated independent reviewed-source snapshot and explicitly labeling the
+// image-baked governance.json fallback as stale. Runtime drift (live-DB Flyway
+// current/drift) remains separate and unknown in /api/services/governance.
+// READ-ONLY consumer: never recomputed at runtime.
 
 interface GovernanceService {
   serviceName: string
@@ -55,14 +53,16 @@ const UNAVAILABLE: GovernanceManifest = {
 }
 
 export async function GET() {
-  try {
-    const raw = await fs.readFile(governanceFile(), 'utf-8')
-    const parsed = JSON.parse(raw) as GovernanceManifest
-    if (Array.isArray(parsed?.services)) {
-      return NextResponse.json({ ...parsed, available: true }, { headers: { 'Cache-Control': 'no-store' } })
-    }
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
-  } catch {
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
-  }
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.governance as unknown as GovernanceManifest,
+    async () => {
+      try { return JSON.parse(await fs.readFile(governanceFile(), 'utf-8')) as GovernanceManifest } catch { return null }
+    },
+  )
+  const manifest = resolved.value
+  const available = Boolean(manifest && Array.isArray(manifest.services))
+  return NextResponse.json(
+    { ...(available ? manifest : UNAVAILABLE), available, contentSource: resolved.contentSource },
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
 }

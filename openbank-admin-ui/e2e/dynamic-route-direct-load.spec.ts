@@ -25,6 +25,14 @@ const expectedTerminalText: Record<string, RegExp> = {
   '/lending/applications/[id]': /lending-service is unreachable/i,
 }
 
+function isLocalTelemetryPost(request: import('@playwright/test').Request, expectedOrigin: string): boolean {
+  const url = new URL(request.url())
+  return url.origin === expectedOrigin
+    && url.pathname === '/api/telemetry/traces'
+    && url.search === ''
+    && request.method() === 'POST'
+}
+
 function routeTemplatePattern(template: string): RegExp {
   const segments = template.split('/').filter(Boolean)
   const pattern = segments.map(segment => {
@@ -61,9 +69,10 @@ test.describe('read-only direct loads for dynamic pages', () => {
       const pageErrors: string[] = []
       const writeRequests: string[] = []
       page.on('pageerror', error => pageErrors.push(error.message))
+      const expectedOrigin = new URL(baseURL!).origin
       page.on('request', request => {
         const url = new URL(request.url())
-        if (url.origin === new URL(baseURL!).origin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
+        if (url.origin === expectedOrigin && !['GET', 'HEAD', 'OPTIONS'].includes(request.method()) && !isLocalTelemetryPost(request, expectedOrigin)) {
           writeRequests.push(`${request.method()} ${url.pathname}`)
         }
       })
@@ -73,8 +82,13 @@ test.describe('read-only direct loads for dynamic pages', () => {
       // that a backend record is absent. Populated-state behavior is covered only by
       // the existing specs explicitly marked in the fixture inventory.
       await page.route('**/api/**', route => {
-        if (new URL(route.request().url()).pathname.startsWith('/api/auth/')) return route.continue()
-        if (!['GET', 'HEAD', 'OPTIONS'].includes(route.request().method())) {
+        const request = route.request()
+        const url = new URL(request.url())
+        if (url.pathname.startsWith('/api/auth/')) return route.continue()
+        // The app's same-origin RUM POST is expected background telemetry. Fulfill it locally;
+        // this exact endpoint is the only write exception, and no telemetry leaves the test.
+        if (isLocalTelemetryPost(request, expectedOrigin)) return route.fulfill({ status: 204 })
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
           return route.fulfill({ status: 405, contentType: 'application/json', body: '{"error":"read_only_smoke"}' })
         }
         return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"fixture_not_found"}' })

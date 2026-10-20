@@ -94,6 +94,9 @@
 #   RECONCILE_SERVICES (env): space-separated buildable allowlist (auto-deploy's
 #     ALL_SERVICES). When set, only these services are considered. When empty, no
 #     allowlist filter is applied.
+#   RECONCILE_TARGETS (env): optional, at most three exact service names to re-drive.
+#     Targets must be in RECONCILE_SERVICES and have a sandbox image pin in GitOps.
+#     This narrows candidates; it does not bypass stale-tree, hold, Pact, or freshness checks.
 #   RECONCILE_HOLDS (env): space-separated services held by live main governance.
 #     Excluded before the oldest-first cap, so a held service cannot consume a slot.
 # Must run inside a full-history checkout (fetch-depth: 0) with main checked out. Any CWD
@@ -123,6 +126,40 @@ cd "$REPO_ROOT"
 HEAD_SHA="$(git rev-parse HEAD)"
 # Newline-delimited allowlist for O(1) membership tests; empty => no filter.
 ALLOWLIST="$(tr -s ' \t' '\n' <<< "${RECONCILE_SERVICES:-}" | sed '/^$/d' | sort -u)"
+TARGET_LIST="$(tr ' \t' '\n' <<< "${RECONCILE_TARGETS:-}" | sed '/^$/d')"
+TARGET_COUNT="$(printf '%s\n' "$TARGET_LIST" | grep -c . || true)"
+SEEN_TARGET_PINS=""
+if [ -n "${RECONCILE_TARGETS:-}" ] && [ "$TARGET_COUNT" -eq 0 ]; then
+  echo "::error::targeted reconcile requires at least one service name" >&2
+  exit 2
+fi
+if [ "$TARGET_COUNT" -gt 0 ]; then
+  if [ "$TARGET_COUNT" -gt 3 ]; then
+    echo "::error::targeted reconcile accepts at most three services" >&2
+    exit 2
+  fi
+  if [ -z "$ALLOWLIST" ]; then
+    echo "::error::targeted reconcile requires the buildable-service allowlist" >&2
+    exit 2
+  fi
+  while IFS= read -r target; do
+    [ -n "$target" ] || continue
+    if [[ ! "$target" =~ ^openbank-[a-z0-9-]+$ ]]; then
+      echo "::error::invalid targeted reconcile service name: ${target}" >&2
+      exit 2
+    fi
+    if grep -qxF "$target" <<< "$SEEN_TARGET_PINS"; then
+      echo "::error::duplicate targeted reconcile service: ${target}" >&2
+      exit 2
+    fi
+    if ! grep -qxF "$target" <<< "$ALLOWLIST"; then
+      echo "::error::targeted reconcile service is not in the buildable allowlist: ${target}" >&2
+      exit 2
+    fi
+    SEEN_TARGET_PINS="${SEEN_TARGET_PINS}${target}"$'\n'
+  done <<< "$TARGET_LIST"
+  SEEN_TARGET_PINS=""
+fi
 # Cap how many stranded services one tick re-drives, oldest-deployed first, so the first
 # reconcile after this lands does not fan out a whole backlog (23 services today) into a
 # single build fan-out + one giant gitops PR. The remainder drain on later ticks and are
@@ -155,6 +192,12 @@ while IFS= read -r pin; do
   svc="${pin%%:sandbox-*}"
   tag="${pin##*:sandbox-}"
   [ -n "$svc" ] && [ -n "$tag" ] || continue
+
+  if [ "$TARGET_COUNT" -gt 0 ] && grep -qxF "$svc" <<< "$TARGET_LIST"; then
+    SEEN_TARGET_PINS="${SEEN_TARGET_PINS}${svc}"$'\n'
+  elif [ "$TARGET_COUNT" -gt 0 ]; then
+    continue
+  fi
 
   # Manual evidence refreshes rebuild an already-tested commit under ECR's immutable
   # tag policy, carrying a provenance-only `-run<GitHub run id>` suffix. Resolve the
@@ -211,6 +254,14 @@ done < <(
     | grep -oE 'openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' \
     | sort -u
 )
+
+while IFS= read -r target; do
+  [ -n "$target" ] || continue
+  if ! grep -qxF "$target" <<< "$SEEN_TARGET_PINS"; then
+    echo "::error::targeted reconcile service has no sandbox image pin in GitOps: ${target}" >&2
+    exit 2
+  fi
+done <<< "$TARGET_LIST"
 
 # Class first (0 before 1), then oldest-deployed, de-duplicated by service.
 ranked="$(printf '%s\n' "${lagging[@]:-}" \
