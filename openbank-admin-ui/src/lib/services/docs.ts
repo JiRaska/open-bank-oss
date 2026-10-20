@@ -161,12 +161,10 @@ async function indexFromBundle(serviceDir: string, requestedLang: string): Promi
       .sort()
     return {
       service: serviceDir,
-      // The bundle is copied into this exact Admin UI image at build time.
-      // Expose its provenance just as live services expose their own commit.
-      gitCommit: process.env.BUILD_GIT_SHA,
-      buildTime: process.env.BUILD_DATE,
       source: 'bundle',
       contentSource: resolved.contentSource,
+      // The bundle is copied into this exact Admin UI image at build time.
+      // Expose its provenance just as live services expose their own commit.
       version: process.env.BUILD_VERSION ?? process.env.NEXT_PUBLIC_BUILD_VERSION,
       gitCommit: process.env.BUILD_GIT_SHA ?? process.env.NEXT_PUBLIC_BUILD_GIT_SHA,
       buildTime: process.env.BUILD_DATE ?? process.env.NEXT_PUBLIC_BUILD_DATE,
