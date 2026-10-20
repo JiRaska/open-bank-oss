@@ -9,8 +9,13 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.9.0
+  version: 1.10.0
   description: |
+    1.10.0 (additive): `DealBooked.rollDirection` (FROM_START | FROM_END) — the deal's roll
+    direction. A leg whose `stub` is `NONE` has no stub of its own: the roll direction places it
+    (FROM_START -> SHORT_FINAL, FROM_END -> SHORT_INITIAL), the rule `StubType.resolve` in
+    libs-finance owns. Absent on older events = FROM_END, the deal default.
+
     1.9.0 (additive, ADR-0344 contract 9): the bank-own payment rail. Release is ASYNC and ATOMIC:
     `treasury.payment.released.v1` is written on the NEW channel `openbank.treasury.payments` in
     the same transaction that moves the payment to RELEASED (rail from the SSI: CZK CERTIS, EUR
@@ -270,6 +275,7 @@ components:
           items: { type: object, additionalProperties: true }
         scheduleVersion: { type: integer }
         scheduleHash: { type: [string, 'null'] }
+        rollDirection: { type: string, enum: [FROM_START, FROM_END], description: 'Absent = FROM_END. Places a leg whose stub is NONE.' }
 
     DealConfirmed:
       type: object

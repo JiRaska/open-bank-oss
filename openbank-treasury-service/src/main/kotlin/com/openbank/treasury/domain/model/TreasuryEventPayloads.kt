@@ -49,6 +49,12 @@ data class DealBooked(
     val legs: List<LegSpec> = emptyList(),
     val scheduleVersion: Int = 0,
     val scheduleHash: String? = null,
+    /**
+     * The deal's roll direction (additive, asyncapi 1.10.0). A leg published with stub `NONE` is
+     * placed by it (`StubType.resolve`), so a consumer derives the schedule treasury stored. Absent
+     * on older events = FROM_END, the deal default.
+     */
+    val rollDirection: RollDirection = RollDirection.FROM_END,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.booked.v1"

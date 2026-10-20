@@ -192,7 +192,7 @@ object ScheduleAdapter {
                 end = leg.accrualEnd,
                 accrualFrequency = leg.accrualFrequency,
                 paymentFrequency = leg.paymentFrequency,
-                stub = stub(leg.stub, ctx.rollDirection),
+                stub = StubType.resolve(leg.stub, ctx.rollDirection),
                 endOfMonth = leg.endOfMonth,
             ),
             dates = DateRules(
@@ -244,12 +244,4 @@ object ScheduleAdapter {
     }
 
     private fun pct(p: BigDecimal): BigDecimal = p.divide(HUNDRED, MathContext.DECIMAL128)
-
-    /** The deal's roll direction decides where an unspecified stub goes (FROM_START = stub at the end). */
-    private fun stub(s: StubType?, direction: RollDirection): StubType =
-        s ?: if (direction == RollDirection.FROM_START) {
-            StubType.SHORT_FINAL
-        } else {
-            StubType.SHORT_INITIAL
-        }
 }

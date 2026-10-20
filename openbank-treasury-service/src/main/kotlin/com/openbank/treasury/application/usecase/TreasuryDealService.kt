@@ -278,6 +278,7 @@ class TreasuryDealService(
                     legs = booked.legs,
                     scheduleVersion = booked.scheduleVersion,
                     scheduleHash = booked.scheduleHash,
+                    rollDirection = booked.header.rollDirection,
                 ),
             ),
         )
