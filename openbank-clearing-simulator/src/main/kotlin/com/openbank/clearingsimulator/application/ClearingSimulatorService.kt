@@ -9,6 +9,7 @@ import com.openbank.clearingsimulator.domain.ClearingRoute
 import com.openbank.clearingsimulator.domain.RejectReason
 import com.openbank.clearingsimulator.domain.SchemeDecision
 import com.openbank.clearingsimulator.domain.SchemeDecisionEngine
+import com.openbank.clearingsimulator.domain.accepts
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.iso20022.Camt054Builder
 import com.openbank.libs.iso20022.CreditDebitIndicator

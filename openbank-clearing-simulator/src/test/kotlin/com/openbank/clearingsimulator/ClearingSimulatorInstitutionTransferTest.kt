@@ -7,6 +7,7 @@ package com.openbank.clearingsimulator
 import com.openbank.clearingsimulator.application.ClearingSimulatorService
 import com.openbank.clearingsimulator.application.InstitutionTransferRegistry
 import com.openbank.clearingsimulator.domain.ClearingRoute
+import com.openbank.clearingsimulator.domain.ClearingRoutes
 import com.openbank.libs.iso20022.Iso20022ValidationResult
 import com.openbank.libs.iso20022.Iso20022Validator
 import com.openbank.libs.iso20022.Pacs002Builder
@@ -78,9 +79,9 @@ class ClearingSimulatorInstitutionTransferTest {
 
     @Test
     fun `route names resolve case-insensitively and unknown ones do not`() {
-        assertThat(ClearingRoute.fromPath("target2")).isEqualTo(ClearingRoute.TARGET2)
-        assertThat(ClearingRoute.fromPath("Certis")).isEqualTo(ClearingRoute.CERTIS)
-        assertThat(ClearingRoute.fromPath("sepa")).isNull()
+        assertThat(ClearingRoutes.fromPath("target2")).isEqualTo(ClearingRoute.TARGET2)
+        assertThat(ClearingRoutes.fromPath("Certis")).isEqualTo(ClearingRoute.CERTIS)
+        assertThat(ClearingRoutes.fromPath("sepa")).isNull()
     }
 
     @Test

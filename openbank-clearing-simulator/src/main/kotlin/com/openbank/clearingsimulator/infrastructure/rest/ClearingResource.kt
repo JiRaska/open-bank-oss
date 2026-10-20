@@ -6,7 +6,7 @@ package com.openbank.clearingsimulator.infrastructure.rest
 
 import com.openbank.clearingsimulator.application.ClearingSimulatorService
 import com.openbank.clearingsimulator.application.dto.ReturnRequest
-import com.openbank.clearingsimulator.domain.ClearingRoute
+import com.openbank.clearingsimulator.domain.ClearingRoutes
 import com.openbank.clearingsimulator.infrastructure.client.SepaPaymentClient
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -68,7 +68,7 @@ class ClearingResource {
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Operation(summary = "Submit a pacs.009 on a clearing route; receive a pacs.002 status report")
     fun submitInstitutionCreditTransfer(@PathParam("route") route: String, pacs009Xml: String): Response {
-        val clearingRoute = ClearingRoute.fromPath(route) ?: throw NotFoundException("unknown clearing route")
+        val clearingRoute = ClearingRoutes.fromPath(route) ?: throw NotFoundException("unknown clearing route")
         return Response.ok(simulator.clearInstitutionTransfer(clearingRoute, pacs009Xml).statusReportXml).build()
     }
 
