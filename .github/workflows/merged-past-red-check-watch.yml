@@ -51,6 +51,7 @@ on:
     paths:
       - ".github/workflows/merged-past-red-check-watch.yml"
       - ".github/scripts/check-merged-past-red-check.py"
+      - ".github/scripts/test-merged-red-publisher.cjs"
       - ".github/gates/gates.yaml"
   workflow_dispatch:
     inputs:
@@ -79,7 +80,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Self-test the classifier
-        run: python3 .github/scripts/check-merged-past-red-check.py --self-test
+        run: |
+          python3 .github/scripts/check-merged-past-red-check.py --self-test
+          node .github/scripts/test-merged-red-publisher.cjs
 
       - name: The watch still satisfies D1-D7
         run: python3 .github/scripts/check-merged-past-red-check.py --check-declaration
@@ -117,7 +120,9 @@ jobs:
       # A verdict that has only ever said "clean" is indistinguishable from a
       # classifier that finds nothing. This step failing voids the run.
       - name: Self-test the classifier
-        run: python3 .github/scripts/check-merged-past-red-check.py --self-test
+        run: |
+          python3 .github/scripts/check-merged-past-red-check.py --self-test
+          node .github/scripts/test-merged-red-publisher.cjs
 
       - name: Scan the ruleset bypass log
         id: verdict
@@ -198,8 +203,13 @@ jobs:
               /\n?_Automated(?::| by) `[^`]+`(?: run \d+)? \(issue #\d+\)\._\s*$/,
               '',
             )
+            // Older bodies included a count of benign suites. Ignore that diagnostic count
+            // during migration too; only the offending merges change the issue verdict.
+            const stableBody = body => withoutAutomationFooter(body).replace(
+              /(Window `(?:day|week|month)`), \d+ bypass suites examined\./g, '$1.',
+            )
             const matchesRenderedIssue = (issue, title, body) =>
-              issue.title === title && withoutAutomationFooter(issue.body) === withoutAutomationFooter(body)
+              issue.title === title && stableBody(issue.body) === stableBody(body)
 
             // ── the watch could not answer (#4791) ────────────────────────────────────────
             // Escalated, not merely logged. "Could not answer" is NOT "nothing was bypassed",
@@ -284,6 +294,7 @@ jobs:
               return
             }
 
+            core.info(`Examined ${v.suites_examined} bypass suites in ${v.period}`)
             const n = v.offenders.length
             const title = `${n} merge${n === 1 ? '' : 's'} past an actively failing required check (last ${v.period})`
             const body = [
@@ -299,7 +310,7 @@ jobs:
               ...v.offenders.map(o =>
                 `| \`${o.pushed_at}\` | ${o.pr ? '#' + o.pr : '_none_'} | \`${String(o.head_sha).slice(0, 9)}\` | ${o.details.map(d => d.replace(/\|/g, '\\|')).join('<br>')} |`),
               '',
-              `Window \`${v.period}\`, ${v.suites_examined} bypass suites examined. The window is`,
+              `Window \`${v.period}\`. The window is`,
               'explicit on purpose: `rule-suites` defaults to `time_period=day`, which returns one',
               'row and reads exactly like confirmation that an incident was isolated.',
               '',
