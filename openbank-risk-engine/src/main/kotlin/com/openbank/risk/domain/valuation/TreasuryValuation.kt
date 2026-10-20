@@ -122,7 +122,7 @@ class TreasuryValuator(private val market: MarketState, private val deadline: De
     fun prepare(deal: ValuableDeal): Preparation {
         val stored = deal.stored?.flows.orEmpty().groupBy { it.legIndex }
         val legIndices = (deal.legs.indices.toSet() + stored.keys).sorted()
-        if (legIndices.isEmpty()) return Preparation.Unpriced("no legs or stored cash flows")
+            .ifEmpty { return Preparation.Unpriced("no legs or stored cash flows") }
         val slots = mutableListOf<Slot>()
         for (i in legIndices) {
             val leg = deal.legs.getOrNull(i)
