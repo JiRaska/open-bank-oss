@@ -3,10 +3,10 @@ name: Admin UI evidence
 
 on:
   # Rebuild evidence after the source's CI producers complete. This avoids holding a
-  # runner while the main CI, Services CI and Pact workflows are still running.
+  # runner while the main CI producers are still running.
   workflow_run:
     branches: [main]
-    workflows: ["CI", "Services CI", "Pact drift check", "Security KPI snapshot"]
+    workflows: ["CI", "Services CI", "Security KPI snapshot"]
     types: [completed]
   schedule:
     - cron: "17,47 * * * *"
@@ -35,7 +35,12 @@ jobs:
       contents: read
     outputs:
       sha: ${{ steps.source.outputs.sha }}
+      datasets: ${{ steps.source.outputs.datasets }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - name: Resolve the trusted source commit
         id: source
         env:
@@ -67,7 +72,12 @@ jobs:
             echo '::error::A rollback must select exactly one dataset.'
             exit 1
           fi
+          datasets="$(python3 .github/scripts/select_admin_ui_evidence_datasets.py \
+            --event "$EVENT_NAME" \
+            --workflow-name "$WORKFLOW_RUN_NAME" \
+            --dataset "$SELECTED_DATASET")"
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "datasets=$datasets" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: authorize-source
@@ -77,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dataset: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Security KPI snapshot' && fromJSON('["security-kpis"]') || github.event_name == 'workflow_run' && fromJSON('["gate-health","readiness","test-intelligence","content"]') || github.event_name == 'workflow_dispatch' && inputs.dataset != 'all' && fromJSON(format('["{0}"]', inputs.dataset)) || github.event_name == 'workflow_dispatch' && fromJSON('["gate-health","readiness","test-intelligence","security-kpis","content"]') || fromJSON('["gate-health","readiness","test-intelligence","security-kpis","content"]') }}
+        dataset: ${{ fromJSON(needs.authorize-source.outputs.datasets) }}
     # Each dataset has an independent current pointer. Serialize only writers for
     # the same pointer; never cancel an in-flight immutable snapshot/pointer update.
     concurrency:
