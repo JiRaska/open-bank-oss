@@ -1,0 +1,101 @@
+# Baseline for .github/scripts/check-enum-reference-data.py (rules.yaml: enum_reference_data).
+# One finding per line: `<finding key>  # #<tracking issue>`. Measured on origin/main 2026-10-20.
+# Remove an entry in the PR that fixes it; a stale entry fails the gate. Never add one without an issue.
+
+duplicate openbank-agent-service ChatRole  # #13441
+duplicate openbank-agent-service ProposalState  # #13441
+duplicate openbank-agent-service StopReason  # #13441
+duplicate openbank-authz-policy-auditor FindingStatus  # #13441
+duplicate openbank-campaign-service CampaignEngagementEventType  # #13441
+duplicate openbank-campaign-service CampaignProductKind  # #13441
+duplicate openbank-card-issuance-service AuthorizationChannel  # #13438
+duplicate openbank-card-issuance-service CardNetwork  # #13438
+duplicate openbank-card-processing-service PresentmentChannel  # #13438
+duplicate openbank-consent-service SuppressionReason  # #13441
+duplicate openbank-consent-service SuppressionScope  # #13441
+duplicate openbank-control-liveness-sentinel FindingStatus  # #13441
+duplicate openbank-control-liveness-sentinel RunTrigger  # #13441
+duplicate openbank-copilot-service ChatRole  # #13441
+duplicate openbank-copilot-service StopReason  # #13441
+duplicate openbank-devops-agent FindingStatus  # #13441
+duplicate openbank-devops-agent RunTrigger  # #13441
+duplicate openbank-docs-truth-agent FindingStatus  # #13441
+duplicate openbank-document-service CeremonyStatus  # #13441
+duplicate openbank-domestic-payment AmlCaseRiskLevel  # #13435
+duplicate openbank-domestic-payment FraudVerdict  # #13439
+duplicate openbank-domestic-payment ScreeningDecision  # #13439
+duplicate openbank-domestic-payment ScreeningMatchStatus  # #13439
+duplicate openbank-engagement-service EngagementEventType  # #13441
+duplicate openbank-finops-agent RunTrigger  # #13441
+duplicate openbank-flaky-test-hunter FindingStatus  # #13441
+duplicate openbank-fraud-service FraudVerdict  # #13439
+duplicate openbank-fx-service AmlCaseRiskLevel  # #13435
+duplicate openbank-fx-service FraudVerdict  # #13439
+duplicate openbank-fx-service ScreeningDecision  # #13439
+duplicate openbank-fx-service ScreeningMatchStatus  # #13439
+duplicate openbank-governance-auditor FindingStatus  # #13441
+duplicate openbank-interest-service PartyType  # #13441
+duplicate openbank-interest-service RateIndex  # #13434
+duplicate openbank-kyb-service CaseStatus  # #13441
+duplicate openbank-kyb-service CeremonyStatus  # #13441
+duplicate openbank-kyc-service KycCaseStatus  # #13441
+duplicate openbank-ledger-service AccountingRole  # #13441
+duplicate openbank-lending-service LoanRateIndex  # #13434
+duplicate openbank-libs-domain ProposalState  # #13441
+duplicate openbank-libs-domain WaiveOperator  # #13441
+duplicate openbank-libs-lending CreditProductKind  # #13441
+duplicate openbank-libs-lending PolicyOperator  # #13441
+duplicate openbank-libs-runtime SuppressionReason  # #13441
+duplicate openbank-libs-runtime SuppressionScope  # #13441
+duplicate openbank-onboarding-service BusinessCaseStage  # #13441
+duplicate openbank-onboarding-service KycStage  # #13441
+duplicate openbank-onboarding-service PartyStage  # #13441
+duplicate openbank-party-service PartyStatus  # #13441
+duplicate openbank-party-service PartyType  # #13441
+duplicate openbank-product-catalog CardNetwork  # #13438
+duplicate openbank-release-steward FindingStatus  # #13441
+duplicate openbank-risk-engine CurveIndex  # #13434
+duplicate openbank-sanctions-service SanctionsCheckStatus  # #13439
+duplicate openbank-sepa-instant AmlCaseRiskLevel  # #13435
+duplicate openbank-sepa-instant FraudVerdict  # #13439
+duplicate openbank-sepa-instant ScreeningDecision  # #13439
+duplicate openbank-sepa-instant ScreeningMatchStatus  # #13439
+duplicate openbank-sepa-payment AmlCaseRiskLevel  # #13435
+duplicate openbank-sepa-payment FraudVerdict  # #13439
+duplicate openbank-sepa-payment ScreeningDecision  # #13439
+duplicate openbank-sepa-payment ScreeningMatchStatus  # #13439
+duplicate openbank-treasury-service LedgerRole  # #13441
+numeric openbank-kyb-service ExpectedTurnover OVER_10M  # #13436
+numeric openbank-kyb-service ExpectedTurnover UP_TO_100K  # #13436
+numeric openbank-kyb-service ExpectedTurnover UP_TO_10M  # #13436
+numeric openbank-kyb-service ExpectedTurnover UP_TO_1M  # #13436
+numeric openbank-kyb-service OwnershipBand PCT_25_TO_50  # #13440
+numeric openbank-kyb-service OwnershipBand PCT_50_TO_75  # #13440
+numeric openbank-kyb-service OwnershipBand PCT_75_TO_100  # #13440
+numeric openbank-libs-lending DelinquencyBucket DPD_1_30  # #13440
+numeric openbank-libs-lending DelinquencyBucket DPD_31_60  # #13440
+numeric openbank-libs-lending DelinquencyBucket DPD_61_90  # #13440
+numeric openbank-libs-lending DelinquencyBucket DPD_90_PLUS  # #13440
+numeric openbank-party-service ExpectedMonthlyTurnover OVER_500K  # #13436
+numeric openbank-party-service ExpectedMonthlyTurnover UP_TO_100K  # #13436
+numeric openbank-party-service ExpectedMonthlyTurnover UP_TO_30K  # #13436
+numeric openbank-party-service ExpectedMonthlyTurnover UP_TO_500K  # #13436
+numeric openbank-pension-service AgeBand FROM_18_TO_34  # #13440
+numeric openbank-pension-service AgeBand FROM_35_TO_49  # #13440
+numeric openbank-pension-service AgeBand FROM_50_TO_59  # #13440
+numeric openbank-pension-service AgeBand FROM_60_TO_64  # #13440
+numeric openbank-pension-service AgeBand UNDER_18  # #13440
+numeric openbank-product-catalog WithdrawalNotice DAYS_14  # #13440
+numeric openbank-product-catalog WithdrawalNotice DAYS_30  # #13440
+numeric openbank-product-catalog WithdrawalNotice DAYS_60  # #13440
+numeric openbank-product-catalog WithdrawalNotice DAYS_7  # #13440
+numeric openbank-product-catalog WithdrawalNotice DAYS_90  # #13440
+numeric openbank-risk-engine TimeBucket M1_TO_3M  # #13440
+numeric openbank-risk-engine TimeBucket M3_TO_6M  # #13440
+numeric openbank-risk-engine TimeBucket M6_TO_12M  # #13440
+numeric openbank-risk-engine TimeBucket OVER_10Y  # #13440
+numeric openbank-risk-engine TimeBucket UP_TO_1M  # #13440
+numeric openbank-risk-engine TimeBucket Y1_TO_2Y  # #13440
+numeric openbank-risk-engine TimeBucket Y2_TO_3Y  # #13440
+numeric openbank-risk-engine TimeBucket Y3_TO_5Y  # #13440
+numeric openbank-risk-engine TimeBucket Y5_TO_10Y  # #13440
