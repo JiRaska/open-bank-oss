@@ -414,12 +414,12 @@ object FullUnwindPinning {
         prior: List<JournalSpec>,
         record: (JournalSpec) -> PostedJournalRecord,
     ): PostedJournalRecord {
-        val now = posted.singleOrNull() ?: throw ReversalAccountsUnknownException(
+        val now = posted.singleOrNull() ?: unknown(
             "a corrected slot posted as ${posted.size} journals cannot be attributed to its accounts",
         )
         val recordedNow = record(now)
         if (recordedNow.accounts.isEmpty()) {
-            throw ReversalAccountsUnknownException(
+            unknown(
                 "journal ${now.idempotencyKey} has no recorded accounts; refusing to re-resolve the unwind",
             )
         }
@@ -433,17 +433,19 @@ object FullUnwindPinning {
         val lines = recordedNow.accounts.map { a ->
             val v = net.remove(Triple(a.accountingClass, a.role, a.currency))
             if (v == null || v.signum() == 0) {
-                throw ReversalAccountsUnknownException(
+                unknown(
                     "journal ${now.idempotencyKey}: its recorded accounts do not match what the slot posted",
                 )
             }
             PostingLine(a.accountingClass, a.role, if (v.signum() > 0) Side.DEBIT else Side.CREDIT, v.abs(), a.currency)
         }
         if (net.values.any { it.signum() != 0 }) {
-            throw ReversalAccountsUnknownException(
+            unknown(
                 "journal ${now.idempotencyKey}: the slot's earlier corrections do not reconcile with its posting",
             )
         }
         return PostedJournalRecord(recordedNow.journalId, now.copy(lines = lines), recordedNow.accounts)
     }
+
+    private fun unknown(message: String): Nothing = throw ReversalAccountsUnknownException(message)
 }

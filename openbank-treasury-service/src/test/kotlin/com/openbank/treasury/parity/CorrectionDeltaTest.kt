@@ -22,6 +22,7 @@ import com.openbank.treasury.domain.model.FullUnwindPinning
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.MatrixPostings
 import com.openbank.treasury.domain.model.PostingEvent
+import com.openbank.treasury.domain.model.PostingLine
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.RecordedJournal
 import com.openbank.treasury.domain.model.ResolvedAccount
@@ -227,29 +228,12 @@ class CorrectionDeltaTest {
             )
         }
 
-        val perAccount = HashMap<UUID, BigDecimal>()
-        posted.forEach { (slot, specs) ->
-            specs.forEach { spec ->
-                spec.lines.zip(account(spec, slot.third)).forEach { (l, a) ->
-                    perAccount.merge(
-                        a.glAccountId,
-                        if (l.side ==
-                            Side.DEBIT
-                        ) {
-                            l.amount
-                        } else {
-                            l.amount.negate()
-                        },
-                        BigDecimal::add,
-                    )
-                }
+        val postedLegs = posted.flatMap { (slot, specs) ->
+            specs.flatMap { spec ->
+                spec.lines.zip(account(spec, slot.third)).map { (l, a) -> l.copy(glAccountId = a.glAccountId) }
             }
         }
-        pinned.flatMap { it.lines }.forEach { l ->
-            val gl = checkNotNull(l.glAccountId) { "every unwind leg is pinned to a recorded account" }
-            perAccount.merge(gl, if (l.side == Side.DEBIT) l.amount else l.amount.negate(), BigDecimal::add)
-        }
-        assertThat(perAccount.filterValues { it.signum() != 0 }).isEmpty()
+        assertThat(netPerAccount(postedLegs + pinned.flatMap { it.lines }).filterValues { it.signum() != 0 }).isEmpty()
         val accountsPerClass = pinned.flatMap { it.lines }
             .groupBy { Triple(it.accountingClass, it.role, it.currency) }
             .mapValues { (_, ls) -> ls.mapNotNull { it.glAccountId }.toSet() }
@@ -269,6 +253,12 @@ class CorrectionDeltaTest {
             )
         }.isInstanceOf(ReversalAccountsUnknownException::class.java)
     }
+
+    private fun netPerAccount(legs: List<PostingLine>): Map<UUID, BigDecimal> =
+        legs.groupBy { checkNotNull(it.glAccountId) { "every leg is pinned to a recorded account" } }
+            .mapValues { (_, ls) ->
+                ls.fold(BigDecimal.ZERO) { acc, l -> if (l.side == Side.DEBIT) acc + l.amount else acc - l.amount }
+            }
 
     @Test
     fun `the changed slots are exactly those whose economics differ`() {
