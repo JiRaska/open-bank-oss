@@ -114,7 +114,7 @@ class ArchiveTests(unittest.TestCase):
         for metadata in forged:
             with self.subTest(metadata=metadata):
                 with self.assertRaisesRegex(COLLECTOR.CollectionError, "run identity"):
-                    self.payload(content, resolve_attempt=lambda _run_id, _attempt: metadata,
+                    self.payload(content, resolve_attempt=lambda _run_id, _attempt, metadata=metadata: metadata,
                                  artifact_created_at="2026-10-19T12:10:00Z")
 
     def test_rejects_future_attempt_and_unverified_previous_attempt(self):
@@ -140,7 +140,6 @@ class ArchiveTests(unittest.TestCase):
                           "run_started_at": "2026-10-19T11:00:00Z",
                           "updated_at": "2026-10-19T12:30:00Z"}
         old_envelope = ENVELOPE | {"run": ENVELOPE["run"] | {"attempt": 1}}
-        content = archive({"run.json": json.dumps(old_envelope).encode()})
         valid_created_at = "2026-10-19T12:10:00Z"
         fields = ("run_started_at", "updated_at", "observedAt", "artifact_created_at")
         for field in fields:
@@ -165,7 +164,7 @@ class ArchiveTests(unittest.TestCase):
                         created_at = invalid_value
                     body = archive({"run.json": json.dumps(evidence).encode()})
                     with self.assertRaises(COLLECTOR.CollectionError):
-                        self.payload(body, resolve_attempt=lambda _run_id, _attempt: attempt_metadata,
+                        self.payload(body, resolve_attempt=lambda _run_id, _attempt, attempt_metadata=attempt_metadata: attempt_metadata,
                                      artifact_created_at=created_at)
 
     def test_current_attempt_timestamps_remain_optional(self):
