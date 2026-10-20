@@ -104,3 +104,12 @@ Risk engine odebírá `openbank.fx.cnb-policy-rate.published` do vlastní tabulk
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Ocenění treasury knihy (ADR-0344 D8)
+
+Engine oceňuje vlastní treasury knihu banky ze snímku: `GET /snapshots/{id}/valuation`,
+`/sensitivity`, `/var` a `/fx-position`, a `POST /pricing` pro jednu kotaci. Oceňují se jen
+zaúčtované ACTUAL obchody; plánované a hypotetické se ignorují. Zaúčtovaný obchod, jehož nohy nelze
+sestavit, se vykáže jako mezera v datech, nikdy se tiše nevynechá. Požadavky na ocenění, citlivost a
+VaR mají omezenou velikost. Treasury čte seznam snímků a ocenění pod vlastní strojovou identitou;
+žádný jiný service-account tato čtení nemá.

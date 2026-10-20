@@ -112,3 +112,14 @@ Opakovaný submit se stejným `idempotencyKey` vrátí stávající zprávu. `40
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Vlastní převody banky uvolněné treasury
+
+Událost treasury `treasury.payment.released.v1` (kanál `treasury-payments-in`) se stane jedním
+vlastním převodem banky na platbu, odeslaným jako pacs.009 po trase, kterou uvolnění určuje; stav se
+publikuje na `openbank.swift.institution-transfers`. Uvolnění s datem valuty starším než
+`institution-transfer.value-date-past-tolerance-days` je odmítnuto (DT01). Převod se nikdy neposílá
+naslepo znovu a známý převod se nikdy neodmítne: nejasné odeslání se řeší dotazem na schéma podle
+UETR. Sweeper (`institution-transfer.resolution.*`: `every`, `initial-delay`, `min-age`,
+`batch-size`) se ptá na neznámá odeslání a SENT převody starší než `min-age`. Záznam, který konzument
+nezpracuje, jde do dead-letter podle konfigurace kanálu.

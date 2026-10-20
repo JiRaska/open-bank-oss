@@ -84,6 +84,13 @@ The audit consumer subscribes to `openbank.fx.cnb-policy-rate.published` alongsi
 
 The audit API uses bearer authentication on both HTTP and mTLS listeners in production. A trusted client certificate is required for the TLS handshake but cannot replace the caller's bearer token. Missing bearer credentials return HTTP 401; route roles and OPA still decide what an authenticated caller may read. The listener parity test reads the production listener configuration and verifies no-certificate, certificate-only and valid-bearer requests over real HTTP.
 
+## Treasury payments and bank-own transfers in the audit stream
+
+The consumer also subscribes to `openbank.treasury.payments` (bank-own payment releases, attributed
+to treasury-service) and `openbank.swift.institution-transfers` (bank-own transfer status:
+ACCEPTED, SENT, SETTLED, REJECTED, attributed to swift-service). Both are money-path topics. A new
+topic has no committed offset, so the first subscription reads it from its retention start.
+
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

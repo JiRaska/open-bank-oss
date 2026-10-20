@@ -91,3 +91,10 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Přepsání consumer group pro Kafka
 
 Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Platby treasury a vlastní převody banky v auditním proudu
+
+Konzument odebírá také `openbank.treasury.payments` (uvolnění vlastních plateb banky, připsané
+treasury-service) a `openbank.swift.institution-transfers` (stav vlastních převodů: ACCEPTED, SENT,
+SETTLED, REJECTED, připsané swift-service). Obě témata jsou na peněžní cestě. Nové téma nemá
+potvrzený offset, první odběr ho proto čte od začátku retence.
