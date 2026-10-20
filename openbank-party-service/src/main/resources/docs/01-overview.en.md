@@ -12,7 +12,7 @@
 
 - ❌ Does not run KYC reviews — `kyc-service` owns the case engine; party-service only records the terminal outcome (via REST or the `openbank.kyc.events` stream).
 - ❌ Does not run AML / sanctions screening — `aml-service` / `sanctions-service` do; party-service records the outcome from `openbank.aml.events`.
-- ❌ Does not store the encrypted birth number (rodné číslo) — that lives in `pid-service`. The birth number is never searchable here (GDPR data-minimisation).
+- ❌ Does not store the encrypted birth number (rodné číslo) — that lives in `pid-service`. A birth number is only ever resolved exactly, through the RČ blind index — never by substring or prefix (GDPR data-minimisation).
 - ❌ Does not open or hold accounts — `account-service` does, keyed by `ownerPartyId`.
 - ❌ Does not move money — party-service is not a money-path service.
 
@@ -46,7 +46,7 @@
 | Record terminal KYC outcome (event) | consumes `openbank.kyc.events` | `KYC_STATUS_CHANGED` |
 | Record terminal AML outcome (event) | consumes `openbank.aml.events` | `KYC_STATUS_CHANGED` |
 | List parties (paginated, optional status filter) | `GET /api/v1/parties?status=…` | — |
-| Search parties by name (trigram) | `GET /api/v1/parties/search?q=…` | — |
+| Search parties by name, national ID or name + date of birth | `GET /api/v1/parties/search?q=…` | — |
 | Erase a party (GDPR Art. 17) | `DELETE /api/v1/parties/{id}` | `PARTY_ERASED` |
 
 ## Callers

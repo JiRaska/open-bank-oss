@@ -107,3 +107,7 @@ erasure dimension because there is no personal data (see [06 — Compliance](./0
 ## Catalog object conversion
 
 Nested catalog objects retain their existing serialized field representation. The specialized object conversion keeps the same output contract; no catalog data migration or API version change is required.
+
+## Reference offerings and classification schemas (ADR-0341)
+
+The banking pack gains `deposit-v3`, `loan-v3` and `treasury-instrument-v1` schemas and the retirement pack gains `pension-savings-v3`, which carry the accounting and regulatory classification of an offering. A scheduled seeder, `CatalogReferenceOfferingSeeder`, creates the treasury own-dealing instrument offering (banking pack) and the CZ DPS and DIP pension offerings (from `catalog-seeds/retirement/cz-illustrative-offerings.json`, retirement pack), each only when its pack is enabled. Every offering is seeded with an open DRAFT revision under a system maker. A different human checker must publish it, so seeding never makes a revision pinnable by itself, and the pension values stay illustrative until legal and commercial review. The seeder is idempotent: an offering that already exists is left alone whatever the state of its revisions. It is controlled by `openbank.catalog.reference-offerings-enabled`, which is on by default and off in the standalone profile.

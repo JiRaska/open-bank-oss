@@ -296,6 +296,12 @@ export const PERMISSIONS = {
   // ROLE_COMMS_APPROVER of D6 arrive with the write path in phase 2; granting them now would
   // put two role vocabularies in the console for a surface that cannot yet be written to.
   "communication:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
+  // ADR-0333 D6: operators draft notification copy, ROLE_COMMS_APPROVER publishes it (same
+  // maker/checker role split as communication:style:*). Mirrors ManagedTemplateResource's
+  // per-method @RolesAllowed; the service also refuses a revision's own maker.
+  "communication:templates:view":    [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMMS_APPROVER],
+  "communication:templates:manage":  [ROLES.ADMIN, ROLES.OPERATOR],
+  "communication:templates:publish": [ROLES.ADMIN, ROLES.COMMS_APPROVER],
   // Phase 2 write path (ADR-0285 D6). Maker drafts/submits; ADMIN can do both for break-glass,
   // matching the server-side @RolesAllowed("ROLE_COMMS_EDITOR"/"ROLE_COMMS_APPROVER", "ROLE_ADMIN").
   "communication:style:propose": [ROLES.ADMIN, ROLES.COMMS_EDITOR],
@@ -342,10 +348,11 @@ export function hasPermission(roles: string[], permission: Permission): boolean 
  * enforcement authority for data and mutations. Longest prefixes win, so `/system/config` can
  * be stricter than `/system` without an exception in a page component.
  *
- * A prefix maps to one permission, or to an OR-set admitting the route with ANY member:
- * /communication/edit hosts two permission-gated sections (ADR-0285 D6 — the maker drafts,
- * the checker publishes from the SAME page), so requiring only communication:style:propose
- * would wall the checker out of the publish controls this page exists to give them.
+ * A prefix maps to one permission, or to an OR-set admitting the route with ANY member.
+ * Two OR-sets exist today, both ADR-0285 D6: /communication/edit hosts the maker AND
+ * checker sections of the style editor, and /approvals/communication is the checker's
+ * four-eyes workbench — in both, requiring the queue/view permission alone would wall
+ * ROLE_COMMS_APPROVER out of the only pages their publish decision lives on.
  */
 const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[], readonly string[]]> = [
   ['dashboard:view', ['/dashboard']],
@@ -396,6 +403,11 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],
+  // ADR-0285 D6: the four-eyes workbench for communication style publishes. The checker
+  // (ROLE_COMMS_APPROVER) holds communication:style:decide but not approvals:view, so the
+  // bare '/approvals' guard below would wall them out of the very queue their publish
+  // pauses land in. Longest-prefix wins: this OR-set only loosens /approvals/communication.
+  [['approvals:view', 'communication:style:decide'], ['/approvals/communication']],
   ['operator-approvals:decide', ['/approvals/sca', '/approvals/settlement']],
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],
@@ -412,6 +424,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   // when it comes AFTER the differentiating literal, which is why the editor lives at
   // /communication/edit/[personaKey], not /communication/[personaId]/edit.
   [['communication:style:propose', 'communication:style:decide'], ['/communication/edit']],
+  ['communication:templates:view', ['/communication/notification-templates']],
   ['communication:view', ['/communication']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],

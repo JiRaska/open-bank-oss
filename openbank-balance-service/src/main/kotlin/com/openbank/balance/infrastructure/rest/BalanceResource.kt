@@ -98,11 +98,18 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
         return Response.ok(svc.getBalance(GetBalanceQuery(accountId, currency, asOf))).build()
     }
 
+    /**
+     * Active holds against the account. This GET is what agent-service's `get_balance_holds`
+     * MCP read tool has called since it was registered — the dispatch pointed at a path only
+     * POST (placeHold) served, so every assistant read of holds was refused; the endpoint and
+     * the tool are one contract and ship together. Released and expired holds are omitted —
+     * a caller auditing history reads the ledger projection, not the reservation table.
+     */
     @GET
     @Path("/{accountId}/holds")
     @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "balance.read", resource = "#accountId")
-    suspend fun getHolds(
+    suspend fun listHolds(
         @PathParam("accountId") accountId: UUID,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
     ): Response {
@@ -110,7 +117,7 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
             val ownerPartyId = accountClient.getPartyId(accountId)
             if (ownerPartyId == null || ownerPartyId != customerPartyId) return NOT_FOUND
         }
-        return Response.ok(mapOf("holds" to svc.getHolds(accountId))).build()
+        return Response.ok(mapOf("holds" to svc.listHolds(accountId))).build()
     }
 
     @POST

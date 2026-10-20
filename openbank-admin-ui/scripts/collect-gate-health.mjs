@@ -35,6 +35,7 @@
 
 import { execFileSync } from 'child_process'
 import { writeFileSync } from 'fs'
+import { createRequestSendTrace } from './request-send-trace.mjs'
 
 const args = process.argv.slice(2)
 const getArg = (flag, dflt) => {
@@ -54,6 +55,8 @@ const now = new Date()
 const TOKEN = process.env.GITHUB_TOKEN || ''
 const REPO = process.env.GITHUB_REPOSITORY || 'JiRaska/open-bank-oss'
 const API = 'https://api.github.com'
+const requestTrace = createRequestSendTrace('gate_health', 'github', process.env.ADMIN_UI_TRACE_DIR || '')
+await requestTrace.ready()
 
 async function gh(pathname, opts = {}) {
   const res = await fetch(`${API}${pathname}`, {
@@ -244,3 +247,7 @@ try {
 }
 
 writeFileSync(OUT, JSON.stringify(report, null, 2) + '\n')
+await requestTrace.write({
+  configured: Boolean(TOKEN),
+  collectorSucceeded: report.available === true,
+})

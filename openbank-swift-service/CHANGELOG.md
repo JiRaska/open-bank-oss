@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.13.0...swift-service-v0.13.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **swift:** send valueDate as ISO so MT103 settlement can book ([#13232](https://github.com/JiRaska/open-bank-oss/issues/13232)) ([220e2b5](https://github.com/JiRaska/open-bank-oss/commit/220e2b536fd890a406ef4f93086d1eabf6aa9c11))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.12.3...swift-service-v0.13.0) (2026-10-16)
 
 

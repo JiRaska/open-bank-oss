@@ -3,8 +3,9 @@
 #
 # Admin-UI CI build and deploy (ADR-0029 Layer B).
 #
-# Triggered by any push to main that touches admin-ui source, governance bundles,
-# or the release-please CHANGELOG.md / version.txt (= a new release cut). This
+# Triggered by successful main-branch CI, Services CI, and Pact workflow completions
+# after a one-shot exact-source readiness check; manual and scheduled runs remain
+# available for recovery. This
 # mirrors openbank-infra/scripts/build-push-admin-ui.sh: runs all repo-derived
 # collectors, builds the Next.js image, pushes to ECR, then opens a GitOps PR
 # (auto-merged once CI is green) so ArgoCD syncs the new tag automatically.
@@ -35,52 +36,21 @@
 name: Admin-UI deploy
 
 on:
-  # CI evidence changes far more frequently than the Admin UI source. A successful
-  # main Services CI and CI immediately rebuild the read-only evidence projection; the
-  # daily run is its recovery path when GitHub suppresses or delays an event. Both
-  # use the same signed image and GitOps-PR path as source-triggered deploys.
+  # Every main push starts both Services CI and CI. Their successful completions
+  # trigger a one-shot exact-source readiness check; the check admits only after
+  # both are green and Pact is green when this source triggered Pact. The daily
+  # run is recovery when GitHub suppresses or delays an event.
   workflow_run:
     # Reject PR-branch completions before allocating a workflow run (Refs #9031).
     branches: [main]
-    # Services CI produces fleet envelopes; CI produces the Admin UI envelope.  Subscribe
-    # to both: refreshing after Services CI alone can snapshot a stale Admin UI verdict
-    # before the same main commit's UI test artifact is available.
-    workflows: ["Services CI", "CI"]
+    # Services CI produces fleet envelopes; CI produces the Admin UI envelope; Pact
+    # publishes verified contracts. Each completion rechecks all exact-source gates.
+    workflows: ["Services CI", "CI", "Pact drift check"]
     types: [completed]
   schedule:
     - cron: '17 3 * * *'
-  push:
-    branches: [main]
-    paths:
-      # Admin-UI source — includes CHANGELOG.md + version.txt (release-please merge)
-      - "openbank-admin-ui/**"
-      # Governance bundles baked into the image (ADRs, threat models, agent charters, flags, compliance)
-      - "docs/adr/**"
-      - "docs/threat-models/**"
-      - "docs/agents/**"
-      - "openbank-infra/gitops/components/*/feature-flags.yaml"
-      - "openbank-libs/governance/agents.yaml"
-      - "openbank-libs/governance/compliance-controls.yaml"
-      # Test Intelligence's governed performance plans are baked into
-      # test-intelligence.json. Without these inputs a GitOps manifest can be Synced
-      # while the running UI still presents the prior plan/blocker snapshot.
-      - "perf/scenarios.yaml"
-      - "perf/k6/**"
-      - "openbank-libs/governance/rules.yaml"
-      # Test Intelligence snapshot inputs. A journey catalog/manifest change must rebuild
-      # the image: the sandbox CronJob alone proves runtime, but the operator's bundled
-      # inventory and blockers would otherwise remain stale until an unrelated UI edit.
-      - "openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"
-      - "openbank-libs/governance/journeys.yaml"
-      # openbank-libs/docs is the ONLY docs tree baked into the image: the Dockerfile's
-      # docs-collector copies /repo/openbank-*/docs, and src/lib/services/docs.ts serves the
-      # `libs` service from /app/docs-bundle rather than from a running pod. Every other
-      # service's docs are read live off its JAR, so they ride auto-deploy.yml's
-      # openbank-*/src/main/** trigger — this tree has no such path and would otherwise merge
-      # and never reach the page (landed is not live).
-      - "openbank-libs/docs/**"
-      # The deploy workflow itself — changes here should immediately trigger a rebuild
-      - ".github/workflows/admin-ui-deploy.yml"
+  # CI and Services CI already start on every main push. Their completion events
+  # provide the source-change liveness path without holding a runner during validation.
   workflow_dispatch:
     inputs:
       reason:
@@ -134,11 +104,9 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Coalesce evidence completions across successive main SHAs before the
-    # privileged build. Keep the running source job: repeated CI completions
-    # otherwise restart its ten-minute wait forever and starve the build.
-    # GitHub retains the newest pending source in this group.
-    # Direct source pushes and manual refreshes get unique groups without this delay.
+    # Readiness runs are serialized so overlapping CI/Pact/Services-CI completions
+    # cannot race duplicate-PR admission. A later event retries if another validator
+    # was pending. No polling runner is held open for an upstream completion.
     concurrency:
       group: ${{ github.event_name == 'workflow_run' && 'admin-ui-evidence-source' || format('admin-ui-source-{0}', github.run_id) }}
       cancel-in-progress: false
@@ -147,17 +115,9 @@ jobs:
       pull-requests: read
       actions: read
     outputs:
-      proceed: ${{ steps.source.outputs.proceed }}
+      proceed: ${{ steps.post_validation.outputs.proceed }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
-      # Evidence-only workflow_run bursts can otherwise start a full API-heavy image
-      # build for every successive main SHA. Admit one source after the wait and
-      # retain only the newest pending source; the existing ancestry guard rejects
-      # a source superseded by a later build-relevant commit. Source
-      # pushes and explicit operator refreshes remain immediate. Never cancel an
-      # in-flight build: it must finish signing and attesting the image it pushed.
-      - name: Coalesce evidence-only merge bursts
-        if: github.event_name == 'workflow_run'
-        run: sleep 600
       # Always checkout the event's trusted default-branch revision. In particular, a
       # workflow_run must never feed its payload SHA into checkout: that trigger carries
       # repository secrets and a write-capable downstream job, so coupling it to a payload
@@ -166,51 +126,44 @@ jobs:
       # executed. deploy-source proves the checked-out revision against origin/main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/heads/main
           fetch-depth: 1
       - id: source
         name: Reject stale or self-generated deploy source
         env:
           EVENT_NAME: ${{ github.event_name }}
-          # `gh pr list` below runs only on the recovery path (a deploy branch for this SHA
-          # already exists). Without a token gh exits non-zero under `set -e`, so that path —
-          # the one that exists to re-admit a stuck build — was the one that could not run.
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"
-          main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
-          if [ -z "$main_sha" ]; then
-            echo "::error::could not resolve origin/main; refusing a privileged build from an unverified source"
-            exit 1
-          fi
-          if ! git cat-file -e "${main_sha}^{commit}" 2>/dev/null; then
-            # A waiting run checked out its own (now older) SHA. Fetch a bounded current-main
-            # ancestry window for the image-pin-only proof; a longer gap safely remains stale.
-            git fetch --no-tags --depth=64 origin "$main_sha"
-          fi
-          # Automatic triggers for one SHA share the concurrency group above. Once the first
-          # admitted run has opened its deterministic deploy branch, every later automatic source
-          # is a duplicate and must stop before OIDC, ECR and the expensive image build. Manual
-          # dispatch is an explicit operator refresh and intentionally remains an override.
-          deploy_branch="chore/admin-ui-deploy-${source_sha}"
-          open_deploy_pr_exists=false
-          if git ls-remote --exit-code --heads origin "refs/heads/${deploy_branch}" >/dev/null 2>&1; then
-            # A closed-unmerged PR can leave its branch behind. Only an OPEN PR proves that an
-            # automatic build for this SHA is already on its way; a stale branch must not suppress
-            # recovery. `set -e` makes an API/rate-limit failure fail closed before privileged work.
-            open_deploy_pr_exists="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-              --head "$deploy_branch" --json number --jq 'length > 0')"
-          fi
-          proceed="$(bash .github/scripts/authorize-admin-ui-deploy-source.sh \
-            "$source_sha" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists")"
-          echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-      - name: Require exact-source Admin UI validation
+          bash .github/scripts/check-admin-ui-deploy-admission.sh "$source_sha" "$EVENT_NAME"
+      - id: validation
+        name: Require exact-source Admin UI validation
         if: steps.source.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
-        run: python3 .github/scripts/await-admin-ui-source-validation.py
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            # Pending counterpart workflows emit their own completion event and retry.
+            python3 .github/scripts/await-admin-ui-source-validation.py --check | tee -a "$GITHUB_OUTPUT"
+          else
+            # Operator and recovery runs retain bounded waiting semantics.
+            python3 .github/scripts/await-admin-ui-source-validation.py
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+          fi
+      # Recheck eligibility after the readiness check or manual/scheduled wait. Main may
+      # have advanced while waiting or while queued for serialized build admission.
+      - id: post_validation
+        name: Recheck deploy source after validation
+        if: steps.validation.outputs.proceed == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ steps.source.outputs.source_sha }}" "$EVENT_NAME"
 
   build-push:
     name: Build + push admin-ui
@@ -259,13 +212,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Build the exact SHA validated by deploy-source, never a workflow_run payload ref.
+          ref: ${{ needs.deploy-source.outputs.source_sha }}
           # Full history — collect-dora.mjs walks git log for deployment frequency.
           fetch-depth: 0
           # persist-credentials: true (default) — needed so git in the collectors
           # can read the repo; the gitops step uses a separate checkout.
 
+      # This job is serialized behind other image pushes. Recheck after acquiring that
+      # slot: a validated source can become stale while queued. A false result skips every
+      # later step, including OIDC, registry login, image publication and GitOps writes.
+      - id: build_admission
+        name: Recheck source at serialized build entry
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ needs.deploy-source.outputs.source_sha }}" "$EVENT_NAME"
+
       - name: Checkout mobile RUM capability metadata
-        if: env.APP_RO_TOKEN != ''
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && env.APP_RO_TOKEN != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: JiRaska/openbank-app
@@ -275,6 +240,7 @@ jobs:
           fetch-depth: 1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.build_admission.outputs.proceed == 'true'
         with:
           # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
           # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
@@ -287,12 +253,14 @@ jobs:
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
       - name: Install admin-ui dependencies
+        if: steps.build_admission.outputs.proceed == 'true'
         # Needed by the collector scripts (generate-governance.mjs, etc.) which
         # import `yaml` and other packages from openbank-admin-ui/node_modules.
         run: npm ci --legacy-peer-deps --no-audit --no-fund
         working-directory: openbank-admin-ui
 
       - name: Configure AWS credentials (GitHub OIDC)
+        if: steps.build_admission.outputs.proceed == 'true'
         # Sets AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN in env.
         # The role has ECR push + KMS sign permissions.
         # See "Stub AWS profile" step below for why a stub ~/.aws/config entry is also needed.
@@ -302,6 +270,7 @@ jobs:
           aws-region: eu-north-1
 
       - name: Stub AWS profile for build script
+        if: steps.build_admission.outputs.proceed == 'true'
         # build-push-admin-ui.sh hard-codes `export AWS_PROFILE="${AWS_PROFILE:-openbank}"`
         # for local SSO use. In CI, the OIDC env vars are the real credentials, but the
         # AWS CLI throws "config profile not found" before reaching the env-var provider
@@ -319,7 +288,7 @@ jobs:
             || printf '[profile openbank]\nregion = eu-north-1\n' >> ~/.aws/config
 
       - name: Clear stale ECR credentials (macOS keychain)
-        if: runner.os == 'macOS'
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && runner.os == 'macOS' }}
         run: |
           docker logout "$ECR_REGISTRY" 2>/dev/null || true
           # docker logout clears ~/.docker/config.json but leaves the osxkeychain entry;
@@ -333,9 +302,11 @@ jobs:
           python3 -c "import json,pathlib; p=pathlib.Path.home()/'.docker'/'config.json'; d=json.loads(p.read_text()) if p.exists() else {}; d.pop('credsStore',None); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(d))"
 
       - name: ECR login
+        if: steps.build_admission.outputs.proceed == 'true'
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       - name: Rebuild ob-deploy-builder with native arm64 image
+        if: steps.build_admission.outputs.proceed == 'true'
         # ob-deploy-builder's BuildKit container was created from an amd64 moby/buildkit
         # image. On OrbStack arm64, the amd64 container runs via QEMU x86 emulation.
         # QEMU crashes with SIGILL when Node.js npm ci hits ARM instructions the bundled
@@ -357,7 +328,30 @@ jobs:
             --bootstrap \
             --use
           docker buildx inspect ob-deploy-builder
+
+      - name: Initialize collector request trace directory
+        if: steps.build_admission.outputs.proceed == 'true'
+        run: |
+          trace_dir="$(mktemp -d "${RUNNER_TEMP}/admin-ui-http-trace-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.XXXXXX" 2>/dev/null || true)"
+          if [ -n "${trace_dir}" ]; then
+            printf 'ADMIN_UI_TRACE_DIR=%s\n' "${trace_dir}" >> "${GITHUB_ENV}"
+          else
+            echo "::warning::collector request trace directory unavailable; final trace will be incomplete"
+            printf 'ADMIN_UI_TRACE_DIR=\n' >> "${GITHUB_ENV}"
+          fi
+      - name: Validate collector request-send tracing
+        if: steps.build_admission.outputs.proceed == 'true'
+        run: |
+          if python3 .github/scripts/test-admin-ui-request-trace.py \
+            && (cd openbank-admin-ui && node --test scripts/request-send-trace.test.mjs); then
+            printf 'ADMIN_UI_TRACE_TESTS=passed\n' >> "${GITHUB_ENV}"
+          else
+            printf 'ADMIN_UI_TRACE_TESTS=failed\n' >> "${GITHUB_ENV}"
+            echo "::warning::request-send trace fixture failed; collector report will be incomplete"
+          fi
       - name: Stage per-service SBOMs from latest security run
+        if: steps.build_admission.outputs.proceed == 'true'
+        id: stage_sbom
         # security.yml uploads `per-service-sboms` (openbank-*-sbom.cdx.json). We download
         # and stage them as openbank-*/build/reports/bom.json so the Dockerfile
         # sbom-collector stage bundles them — without running Gradle here.
@@ -390,7 +384,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage sbom)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage sbom --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           staged=false
           # Sort by created_at ourselves: the API's ordering is not contractual.
@@ -424,6 +419,8 @@ jobs:
           echo "SBOM staging complete."
 
       - name: Stage Test Intelligence evidence (per-service latest artifact)
+        if: steps.build_admission.outputs.proceed == 'true'
+        id: stage_service_ti
         # services-ci.yml uploads one artifact per service: test-reports-{service}
         # (7-day retention). The old approach (download from ONE run) fails with
         # path-scoped CI: only recently-changed services have artifacts in any single
@@ -444,7 +441,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage service_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage service_ti --auth github -- curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
           # Released components come from version.txt. The deterministic-simulation
@@ -537,15 +535,17 @@ jobs:
           echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
 
       - name: Stage customer-app Test Intelligence evidence
+        id: stage_customer_ti
         # Cross-repository evidence is read-only and best-effort. The compact JSON artifact
         # contains counts and provenance only; it never imports private source or test output.
-        if: env.APP_RO_TOKEN != ''
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && env.APP_RO_TOKEN != '' }}
         env:
           GH_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
           APP_REPO: JiRaska/openbank-app
         run: |
           set -u
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage customer_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage customer_ti --auth app_ro -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/client-test-evidence
           # Only reviewed default-branch evidence may enter a deployed control plane. A newer
           # PR artifact remains visible in GitHub but cannot replace the sandbox verdict.
@@ -564,6 +564,7 @@ jobs:
           echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 
       - name: Restore staged test-run history (diff-forward, #8690 option B1)
+        if: steps.build_admission.outputs.proceed == 'true'
         # This step cost ~105 installation-API requests per build (5 inventory pages + up to
         # 100 zip downloads) and re-downloaded the whole envelope set every time, for a set
         # that is almost entirely identical to the previous build's. The staged history is
@@ -580,13 +581,16 @@ jobs:
           restore-keys: test-run-history-
 
       - name: Stage immutable per-attempt Test Intelligence history
+        if: steps.build_admission.outputs.proceed == 'true'
+        id: stage_immutable_ti
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -u
           python3 .github/scripts/extract-test-intelligence-envelope.py --self-test
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage immutable_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage immutable_ti --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           touch openbank-admin-ui/test-run-history/.staged-ids
           # The restored cache can predate ZIP validation. Remove non-main or malformed
@@ -655,12 +659,15 @@ jobs:
           echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes, $(($(wc -l < openbank-admin-ui/test-run-history/.staged-ids | tr -d ' ') - KNOWN_BEFORE)) new artifact IDs recorded this build."
 
       - name: Save staged test-run history
+        if: steps.build_admission.outputs.proceed == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: openbank-admin-ui/test-run-history
           key: test-run-history-${{ github.run_id }}
 
       - name: Stage pitest mutation results from latest completed weekly run
+        if: steps.build_admission.outputs.proceed == 'true'
+        id: stage_pit
         # pitest.yml uploads one artifact per governed lane (30-day retention).
         # collect-test-intelligence.mjs reads openbank-*/build/reports/pitest/mutations.xml.
         # Uses curl + python3 (not gh CLI) — see SBOM staging step comment.
@@ -671,7 +678,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage pit)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage pit --auth github -- curl -fsS --retry 3 --retry-all-errors --retry-delay 2 -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           # A single completed-runs response has omitted a newer retained main PIT
           # run and silently projected an older failed report. Cross-check the
@@ -728,6 +736,8 @@ jobs:
           echo "Staged ${COUNT} mutations.xml files from ${DOWNLOADED} artifacts."
 
       - name: Stage performance evidence from latest complete k6 run
+        if: steps.build_admission.outputs.proceed == 'true'
+        id: stage_performance
         # The Test Intelligence collector reads k6 summaries only from the deployment-local
         # perf-artifacts directory.  A declared scenario is deliberately not promoted to a
         # result, so bring in the newest authoritative completed main-run evidence even when
@@ -751,7 +761,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage performance)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage performance --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
           SELECTOR=.github/scripts/select-performance-evidence.py
           SELECTOR_DIR="$(mktemp -d)"
@@ -918,6 +929,7 @@ jobs:
           fi
 
       - name: Collect production-readiness scorecard
+        if: steps.build_admission.outputs.proceed == 'true'
         # Derives C1–C9 maturity scores from the repo and writes
         # openbank-admin-ui/prod-readiness.json so the Dockerfile bakes it into
         # the image. build-push-admin-ui.sh also calls the Python version as a
@@ -931,6 +943,9 @@ jobs:
           fi
 
       - name: Collect CI gate-estate health snapshot (ADR-0255)
+        id: stage_gate_health
+        # During migration only: configured installations publish this dataset independently.
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && vars.ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN == '' }}
         # Derives gate-health.json from the GitHub Actions API — same read-only,
         # baked-at-build-time shape as prod-readiness above and DORA (ADR-0061):
         # the token this step holds (actions: read, job-scoped) never reaches the
@@ -941,22 +956,27 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          eval "$(python3 ../.github/scripts/admin_ui_trace_ipc.py begin --stage gate_health)" || true
           if ! node scripts/collect-gate-health.mjs 2>&1; then
             echo "::warning::gate-health collector failed — QG panel will show no data"
           fi
 
       - name: Install Trivy
+        if: steps.build_admission.outputs.proceed == 'true'
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.72.0
 
       - name: Stage Test Intelligence deployment history
+        if: steps.build_admission.outputs.proceed == 'true'
+        id: stage_deploy_ti
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -u
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage deploy_ti)" || true
+          api() { python3 .github/scripts/trace-admin-ui-curl.py --stage deploy_ti --auth github -- curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-intelligence-history
           # Query the owning workflow's successful main runs, not the repository-wide artifact
           # stream. Every services-ci run contributes many artifacts and previously pushed a
@@ -985,9 +1005,24 @@ jobs:
                 unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
               done
 
+      - name: Expose short-lived BuildKit cache credentials
+        if: steps.build_admission.outputs.proceed == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_RESULTS_URL']) {
+              const value = process.env[name];
+              if (!value) throw new Error(`Missing ${name} for cache v2`);
+              core.setSecret(value);
+              core.exportVariable(name, value);
+            }
+
       - name: Build, collect, push
+        if: steps.build_admission.outputs.proceed == 'true'
         id: build
         env:
+          ADMIN_UI_BUILDKIT_CACHE: gha
+          ADMIN_UI_BUILD_METADATA_FILE: ${{ runner.temp }}/admin-ui-build-metadata.json
           # The build script's quality collector reads these only to fetch the
           # Pact Broker's per-Pact provider-verification verdict before the
           # immutable Test Intelligence snapshot is baked. Docker receives no
@@ -1022,9 +1057,58 @@ jobs:
           TAG="${PUSHED##*:}"
           [ -n "${TAG}" ] || { echo "ERROR: could not extract pushed image tag"; exit 1; }
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          DIGEST="$(node -e 'const fs=require("node:fs"); const d=JSON.parse(fs.readFileSync(process.env.ADMIN_UI_BUILD_METADATA_FILE,"utf8"))["containerimage.digest"]; if(!/^sha256:[0-9a-f]{64}$/.test(d)) process.exit(1); process.stdout.write(d)')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
           echo "Pushed tag: ${TAG}"
 
+      - name: Remove BuildKit cache credentials from later steps
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && always() }}
+        run: |
+          echo 'ACTIONS_RUNTIME_TOKEN=' >> "$GITHUB_ENV"
+          echo 'ACTIONS_RESULTS_URL=' >> "$GITHUB_ENV"
+
+      - name: Install image browser probe
+        if: steps.build_admission.outputs.proceed == 'true'
+        working-directory: openbank-admin-ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Test the signed image by digest before GitOps promotion
+        if: steps.build_admission.outputs.proceed == 'true'
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          bash openbank-infra/scripts/test-admin-ui-image.sh \
+            "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}@${IMAGE_DIGEST}" "$(git rev-parse --short HEAD)"
+
+      - name: Retain image identity and browser proof
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && always() && steps.build.outputs.digest != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-ui-image-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/admin-ui-build-metadata.json
+            openbank-admin-ui/test-results/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summarize collector request-send trace
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && always() }}
+        env:
+          TRACE_STATUS_SBOM: ${{ steps.stage_sbom.outcome || 'not_run' }}
+          TRACE_STATUS_SERVICE_TI: ${{ steps.stage_service_ti.outcome || 'not_run' }}
+          TRACE_STATUS_CUSTOMER_TI: ${{ steps.stage_customer_ti.outcome || 'not_run' }}
+          TRACE_STATUS_IMMUTABLE_TI: ${{ steps.stage_immutable_ti.outcome || 'not_run' }}
+          TRACE_STATUS_PIT: ${{ steps.stage_pit.outcome || 'not_run' }}
+          TRACE_STATUS_PERFORMANCE: ${{ steps.stage_performance.outcome || 'not_run' }}
+          TRACE_STATUS_GATE_HEALTH: ${{ steps.stage_gate_health.outcome || 'not_run' }}
+          TRACE_STATUS_DEPLOY_TI: ${{ steps.stage_deploy_ti.outcome || 'not_run' }}
+          TRACE_APP_RO_CONFIGURED: ${{ env.APP_RO_TOKEN != '' }}
+          TRACE_PACT_BROKER_CONFIGURED: ${{ vars.PACT_BROKER_URL != '' }}
+        run: python3 .github/scripts/aggregate-admin-ui-http-trace.py
+
       - name: Retain immutable Test Intelligence snapshot
+        if: steps.build_admission.outputs.proceed == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-intelligence-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1033,6 +1117,7 @@ jobs:
           retention-days: 30
 
       - name: Rewrite GitOps image tag
+        if: steps.build_admission.outputs.proceed == 'true'
         id: rewrite
         run: |
           set -euo pipefail
@@ -1074,7 +1159,7 @@ jobs:
       # (GITHUB_TOKEN does not) AND its commits get signed (a PAT's do not).
       - name: Mint a GitHub App installation token
         id: app_token
-        if: ${{ steps.rewrite.outputs.changed == 'true' && env.GITOPS_APP_ID != '' }}
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' && env.GITOPS_APP_ID != '' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
@@ -1082,9 +1167,13 @@ jobs:
 
       - name: Open GitOps PR (auto-merge)
         id: gitops_pr
-        if: steps.rewrite.outputs.changed == 'true'
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' }}
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
+          # The source-validation job checks out the admitted immutable SHA, which leaves
+          # the worktree detached. Explicitly set the PR base so the action can create the
+          # GitOps branch against the current main branch.
+          base: main
           # Preference order, and why each rung exists:
           #   1. App installation token — triggers required checks AND gets its commit signed.
           #      The only rung that actually works end-to-end (issue #1269). Proven on both
@@ -1126,6 +1215,9 @@ jobs:
 
             Triggered by commit ${{ github.sha }} on `main`.
 
+            Browser-tested image digest: `${{ steps.build.outputs.digest }}`.
+            Image identity and browser proof are retained on the linked workflow run.
+
             ## Linked issues
 
             N/A — automated admin-ui GitOps update (ADR-0029 Layer B).
@@ -1148,18 +1240,26 @@ jobs:
       # than a red run. The rewrite step already told us a change was needed; if no PR carries it,
       # that is a hard failure.
       - name: Fail if a needed deploy produced no PR
-        if: steps.rewrite.outputs.changed == 'true' && steps.gitops_pr.outputs.pull-request-number == ''
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' && steps.gitops_pr.outputs.pull-request-number == '' }}
         run: |
           echo "::error::Rewrite step updated ${MANIFEST} to ${{ steps.build.outputs.tag }}, but no" \
                "GitOps PR was opened — so the pushed image will never be pinned. Most likely the" \
                "create-pull-request 'add-paths' pathspec matched nothing (check MANIFEST=${MANIFEST})."
           exit 1
 
+      - name: Install deploy-hold parser
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.gitops_pr.outputs.pull-request-number != '' }}
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
+          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+
       - name: Close superseded deploy PRs
-        if: steps.gitops_pr.outputs.pull-request-number != ''
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.gitops_pr.outputs.pull-request-number != '' }}
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
             'chore/admin-ui-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
@@ -1177,7 +1277,7 @@ jobs:
       # step that is not always(), so any step appended after this one would be silently
       # starved on exactly the runs where it matters most.
       - name: Verify the deploy commit is signed
-        if: ${{ always() && steps.gitops_pr.outputs.pull-request-number != '' }}
+        if: ${{ steps.build_admission.outputs.proceed == 'true' && always() && steps.gitops_pr.outputs.pull-request-number != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}

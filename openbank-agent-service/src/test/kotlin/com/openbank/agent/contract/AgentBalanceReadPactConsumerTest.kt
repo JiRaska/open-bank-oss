@@ -12,17 +12,22 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.infrastructure.client.BalanceServiceClient
+import com.openbank.agent.infrastructure.client.RestDownstreamReadAdapter
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.util.UUID
 
 /**
  * Consumer-driven contract for hops 2 and 4 of the agent's MCP read surface against
- * balance-service, both merged into the ONE pact file
+ * balance-service, all merged into the ONE pact file
  * `pacts/openbank-agent-service-openbank-balance-service.json` (PactConsumerTestExt merges all
  * `@Pact` methods of a class per provider — a second class would overwrite the file, measured
  * during this PR):
@@ -46,6 +51,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  *    about the element shape. Pinned keys are the load-bearing ones (a renamed `reason` or
  *    `referenceId` changes what the operator sees; a retyped `amount` breaks consumers);
  *    `expiresAt`/`releasedAt` stay unpinned because they are legitimately null on an active hold.
+ *
+ * Additional main-branch contracts cover a second active hold, an empty holds list, and a 401
+ * without identity. They use the production read adapter, so tool dispatch and pass-through are
+ * exercised rather than merely mocking the provider route.
  *
  * **The expected paths are LITERALS; only the outgoing requests are reflected off the client's
  * `@Path`** (CLAUDE.md "Contract tests", measured on #2290).
@@ -168,6 +177,114 @@ class AgentBalanceReadPactConsumerTest {
         }
     }
 
+    // Main contributed the empty, authenticated, and missing-identity interactions. Keep all
+    // five interactions in this class; separate PactConsumerTestExt classes overwrite one file.
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-balance-service")
+    fun listHoldsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a CZK hold exists for the holds account")
+        .uponReceiving("GET the active holds behind the get_balance_holds tool")
+        .path("/api/v1/balances/$HOLDS_ACCOUNT_ID/holds")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.array("holds") { holds ->
+                    holds.`object` { h ->
+                        h.uuid("id", UUID.fromString(HOLD_ID))
+                        h.uuid("accountId", UUID.fromString(HOLDS_ACCOUNT_ID))
+                        h.decimalType("amount")
+                        h.stringValue("currency", "CZK")
+                        h.stringValue("reason", "payment-cover")
+                        h.stringValue("referenceId", "pact-tx-00000001")
+                    }
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-balance-service")
+    fun listHoldsEmptyPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("balance-service is reachable and holds no balances for the pact account")
+        .uponReceiving("GET the holds of an account that has none, via the get_balance_holds tool")
+        .path("/api/v1/balances/$EMPTY_ACCOUNT_ID/holds")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.array("holds") { }
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-agent-service", provider = "openbank-balance-service")
+    fun listHoldsMissingIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET active holds without an authenticated identity")
+        .path("/api/v1/balances/$HOLDS_ACCOUNT_ID/holds")
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "listHoldsMissingIdentityPact")
+    fun `get_balance_holds propagates 401 without identity`(mockServer: MockServer) {
+        assertThatThrownBy {
+            adapterWith(mockServer).read("get_balance_holds", args("""{"accountId": "$HOLDS_ACCOUNT_ID"}"""))
+        }.isInstanceOfSatisfying(WebApplicationException::class.java) {
+            assertThat(it.response.status).isEqualTo(401)
+        }
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "listHoldsPact")
+    fun `get_balance_holds returns the seeded active hold verbatim`(mockServer: MockServer) {
+        val result = adapterWith(mockServer).read(
+            "get_balance_holds",
+            args("""{"accountId": "$HOLDS_ACCOUNT_ID"}"""),
+        )
+        assertThat(result.get("holds")).hasSize(1)
+        assertThat(result.get("holds")[0].get("id").asText()).isEqualTo(HOLD_ID)
+        assertThat(result.get("holds")[0].get("referenceId").asText()).isEqualTo("pact-tx-00000001")
+        // Untouched fields survive the pass-through to the model.
+        assertThat(result.get("holds")[0].get("currency").asText()).isEqualTo("CZK")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "listHoldsEmptyPact")
+    fun `an account without holds reads as an empty array, not an error`(mockServer: MockServer) {
+        val result = adapterWith(mockServer).read(
+            "get_balance_holds",
+            args("""{"accountId": "$EMPTY_ACCOUNT_ID"}"""),
+        )
+        assertThat(result.get("holds")).isEmpty()
+    }
+
+    /**
+     * The real [RestDownstreamReadAdapter] with only its balance client bound to the pact mock —
+     * the tool-name dispatch and verbatim pass-through under test are production code.
+     */
+    private fun adapterWith(mockServer: MockServer): RestDownstreamReadAdapter =
+        RestDownstreamReadAdapter().apply { balanceClient = balanceClientFor(mockServer) }
+
+    private fun balanceClientFor(mockServer: MockServer): BalanceServiceClient = object : BalanceServiceClient {
+        override fun getBalance(accountId: String): JsonNode = throw UnsupportedOperationException("not under pact")
+
+        override fun getHolds(accountId: String): JsonNode = get(mockServer, "/api/v1/balances/$accountId/holds")
+
+        private fun get(mockServer: MockServer, path: String): JsonNode {
+            val response = given().baseUri(mockServer.getUrl()).contentType("application/json").get(path)
+            if (response.statusCode !in 200..299) throw WebApplicationException(response.statusCode)
+            return mapper.readTree(response.asString())
+        }
+    }
+
+    private fun args(json: String): JsonNode = mapper.readTree(json)
+
     private fun assertClientPathMatchesContract() {
         assertThat(clientDerivedBalancesPath())
             .describedAs(
@@ -193,6 +310,11 @@ class AgentBalanceReadPactConsumerTest {
         /** Seeded by balance-service's `an active CZK hold exists for the agent holds account` state. */
         const val PACT_ACCOUNT_ID_FOR_HOLDS = "d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2"
         const val PACT_HOLD_ID = "e2e2e2e2-e2e2-42e2-82e2-e2e2e2e2e2e2"
+
+        /** Separate provider fixtures retained from main for a second nonempty and empty holds case. */
+        const val HOLDS_ACCOUNT_ID = "c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3"
+        const val HOLD_ID = "b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2"
+        const val EMPTY_ACCOUNT_ID = "e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4"
 
         /**
          * LITERAL, deliberately retyped from balance-service's `BalanceResource`

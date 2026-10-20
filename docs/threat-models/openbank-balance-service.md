@@ -354,7 +354,7 @@ also be deleted (nothing else in balance-service depends on it).
 - **2026-05-30** — Added `balances_seq`, `balance_holds_seq`, `balance_outbox_seq` (Hibernate fix);
   added `assertj` test dep for the guard. Additive DDL only — no new flow/surface/boundary.
   Risk class = **availability** (missing sequence breaks all balance writes), mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-09-05** — Input validation hardened on the reconciliation trigger
   (`POST /api/v1/balances/reconciliation`): a blank `asOf` now means "omitted" and a malformed one
   is rejected as 400 (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a
@@ -370,7 +370,7 @@ also be deleted (nothing else in balance-service depends on it).
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
@@ -461,3 +461,48 @@ columns), so a stored row cannot fail to load; a sandbox read-only check on 2026
 off-scale amount or non-ISO currency in `balances`, `balance_holds`, `balance_movement` or
 `ledger_projection_event`. The `Balance` aggregate itself still holds `BigDecimal` fields.
 No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+### 2026-10-06 — Customer opt-in low-balance alerts (ADR-0333)
+
+The customer-edge checks direct account ownership before reading or writing one pocket's alert
+threshold; a delegated balance reader cannot opt in the owner. Balance-service independently checks
+account-service ownership against the JWT-derived party header. OPA grants the new alert actions
+only to the edge service identity, with a deny rule for every other identity. Threshold and rearm
+margin pass the kernel `Money` parser before persistence. The setting is absent by default, and the
+event evaluator is separately disabled by default during rollout.
+
+`BALANCE_UPDATED` is only a wake-up. The evaluator first finds an enabled setting, checks current
+ownership, then locks the current pocket and setting in a fixed order. It computes effective
+available funds after future-dated credits, applies downward crossing, hysteresis and cooldown,
+and commits the state transition with a stable-key inbox request in the same balance outbox
+transaction. Late or replayed balance events therefore do not reuse their stale amount or create a
+second alert. The inbox copy includes no amount, account number or link; the customer reads current
+balance through the authenticated account route. An ownership mismatch produces no alert. Broker
+or notification-service failure leaves the outbox retryable; the notification consumer deduplicates
+the stable request key.
+
+Residual risk: account ownership is checked immediately before the balance transaction but is not
+locked across services, so a transfer in that interval can race the decision. The customer-facing
+inbox still enforces party-scoped reads. The first rollout uses inbox only; a generic push and
+verified account deep link require a separate app-route contract and provider capacity proof.
+Rollback: disable `openbank.balance.low-alerts-enabled`, let pending outbox requests drain or
+reconcile them, then revert code. The preference table can be retained for later restoration; the
+V16 migration contains its explicit drop sequence.
+
+## Active-holds read boundary
+
+`GET /api/v1/balances/{accountId}/holds` adds a read of hold ids, amounts, currencies,
+reasons, references and lifecycle timestamps for agent-service's `get_balance_holds` tool.
+Cross-account disclosure reveals financial metadata even though this endpoint moves no money.
+The handler retains the sibling read role gate (API/viewer/operator/admin) and `balance.read`
+OPA check. With `X-Customer-Party-Id` from trusted customer-edge, the account-service owner must
+match; unknown accounts and mismatches receive the same 404. Without that header this is the
+existing service-reader path: header absence is not proof of retail ownership. Do not treat
+coarse ROLE_API admission or test identities as evidence of a verified production caller.
+
+The repository excludes released holds and expiry at/before the injected service clock.
+It does not release the expired reservation or change available/reserved balances, and emits no
+outbox event. Consumers must not infer released funds from an absent row. Tests cover real
+HTTP/DB filtering and unchanged rows, anonymous/wrong-role rejection, and owner-guard delegation;
+consumer/provider Pact replay pins the response and the missing-identity refusal. These checks
+do not replace review of trusted header provenance, live OPA policy or production credentials.

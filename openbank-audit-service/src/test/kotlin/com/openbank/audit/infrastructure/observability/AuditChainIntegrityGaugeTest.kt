@@ -5,9 +5,14 @@ package com.openbank.audit.infrastructure.observability
 
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.ChainVerification
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessMetrics
+import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -24,11 +29,25 @@ import java.util.UUID
  */
 class AuditChainIntegrityGaugeTest {
 
+    private fun metricsOver(registry: MeterRegistry): DomainMetrics {
+        val instance = mockk<Instance<MeterRegistry>>()
+        every { instance.isResolvable } returns true
+        every { instance.get() } returns registry
+        return DomainMetrics().apply { registryInstance = instance }
+    }
+
+    private fun successRecorded(registry: SimpleMeterRegistry): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "audit-chain-verify")
+        .gauge()
+        ?.value()
+
     private fun gauge(repo: AuditRepository): Pair<AuditChainIntegrityGauge, SimpleMeterRegistry> {
         val registry = SimpleMeterRegistry()
         val g = AuditChainIntegrityGauge()
         g.registry = registry
         g.auditRepository = repo
+        g.domainMetrics = metricsOver(registry)
         g.enabled = true
         g.register()
         return g to registry
@@ -153,5 +172,30 @@ class AuditChainIntegrityGaugeTest {
         // reporting a confident, permanent "intact".
         assertThat(registry.gaugeValue("openbank.audit.chain.last.verified.timestamp.seconds"))
             .isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a completed verification records the heartbeat, even when it finds a broken chain`() {
+        val repo = mockk<AuditRepository>()
+        coEvery { repo.verifyChain(any()) } returns
+            ChainVerification(intact = false, checked = 3, unchained = 0, firstBrokenEntryId = UUID.randomUUID())
+        val (g, registry) = gauge(repo)
+        assertThat(successRecorded(registry)).isEqualTo(0.0)
+
+        runBlocking { g.verify() }
+
+        // The heartbeat answers "did the control RUN", not "was the chain intact".
+        assertThat(successRecorded(registry)).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a verification that throws does not record the heartbeat`() {
+        val repo = mockk<AuditRepository>()
+        coEvery { repo.verifyChain(any()) } throws IllegalStateException("db down")
+        val (g, registry) = gauge(repo)
+
+        runBlocking { g.verify() }
+
+        assertThat(successRecorded(registry)).isEqualTo(0.0)
     }
 }

@@ -2,6 +2,7 @@
 // array; we extend its core-web-vitals preset (which already includes the
 // TypeScript + react-hooks rules) and add project-local ignores.
 import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
+import { domainBoundariesPlugin } from './scripts/domain-boundaries.mjs'
 
 const eslintConfig = [
   {
@@ -19,6 +20,11 @@ const eslintConfig = [
     ],
   },
   ...nextCoreWebVitals,
+  {
+    files: ['src/**/*.{js,jsx,ts,tsx}'],
+    plugins: { 'domain-boundaries': domainBoundariesPlugin },
+    rules: { 'domain-boundaries/no-private-cross-import': 'error' },
+  },
   {
     // Scoped to the file types eslint-config-next defines the react-hooks plugin for. Without
     // `files` this block applies to EVERY linted file, including plain CommonJS at the package

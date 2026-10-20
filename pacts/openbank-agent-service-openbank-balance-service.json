@@ -4,6 +4,74 @@
   },
   "interactions": [
     {
+      "description": "GET the active holds behind the get_balance_holds tool",
+      "providerStates": [
+        {
+          "name": "a CZK hold exists for the holds account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/balances/c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3/holds"
+      },
+      "response": {
+        "body": {
+          "holds": [
+            {
+              "accountId": "c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3",
+              "amount": 100.0,
+              "currency": "CZK",
+              "id": "b2b2b2b2-b2b2-b2b2-b2b2-b2b2b2b2b2b2",
+              "reason": "payment-cover",
+              "referenceId": "pact-tx-00000001"
+            }
+          ]
+        },
+        "generators": {
+          "body": {
+            "$.holds[0].amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.holds[0].accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holds[0].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.holds[0].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET the holds the agent's get_balance_holds tool returns verbatim",
       "providerStates": [
         {
@@ -153,6 +221,44 @@
           }
         },
         "status": 200
+      }
+    },
+    {
+      "description": "GET the holds of an account that has none, via the get_balance_holds tool",
+      "providerStates": [
+        {
+          "name": "balance-service is reachable and holds no balances for the pact account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/balances/e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4/holds"
+      },
+      "response": {
+        "body": {
+          "holds": [
+
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET active holds without an authenticated identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/balances/c3c3c3c3-c3c3-c3c3-c3c3-c3c3c3c3c3c3/holds"
+      },
+      "response": {
+        "status": 401
       }
     }
   ],

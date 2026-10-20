@@ -24,8 +24,11 @@ class HoldNotFoundException(msg: String) : RuntimeException(msg)
 private const val SQLSTATE_UNIQUE_VIOLATION = "23505"
 private const val HOLD_REFERENCE_CONSTRAINT = "uq_balance_holds_reference"
 
+// The use-case facade necessarily mirrors the BalanceUseCase surface — one function per inbound
+// port operation. Splitting it to satisfy a function-count threshold would only scatter the
+// transaction-boundary knowledge that keeps these operations consistent.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
-@Suppress("TooManyFunctions") // 1:1 impl of BalanceUseCase — each function is one port operation
 class BalanceService(
     private val balanceRepo: BalanceRepository,
     private val holdRepo: HoldRepository,
@@ -109,9 +112,13 @@ class BalanceService(
     override suspend fun getBalances(accountId: UUID): List<Balance> =
         balanceRepo.findAllByAccountId(accountId).map { withValueDateBasis(it) }
 
-    // Active holds only: released or expired reservations are history, not a reservation. The
-    // agent's get_balance_holds read tool (ADR-0195-style read surface) is the first caller.
-    override suspend fun getHolds(accountId: UUID): List<BalanceHold> = holdRepo.findActiveByAccountId(accountId)
+    /**
+     * Active (not yet released, not expired) holds against the account — the read behind the
+     * assistant's `get_balance_holds` MCP tool, which agent-service's dispatch had been calling
+     * against an endpoint that did not exist. Pure delegation: no projection hydration, no cover
+     * logic — a hold is a fact about the reservation table, not about the value-date basis.
+     */
+    override suspend fun listHolds(accountId: UUID): List<BalanceHold> = holdRepo.findActiveByAccountId(accountId)
 
     override suspend fun placeHold(cmd: PlaceHoldCommand): BalanceHold {
         // Idempotent replay (ADR-0287, #8351): the referenceId names one durable business fact, so a

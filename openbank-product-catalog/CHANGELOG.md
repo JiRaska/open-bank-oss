@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.0.1...product-catalog-v1.1.0) (2026-10-18)
+
+
+### Features
+
+* **product-catalog:** closed accounting and regulatory class, treasury and DPS/DIP offerings (ADR-0341) ([#13206](https://github.com/JiRaska/open-bank-oss/issues/13206)) ([f401ccb](https://github.com/JiRaska/open-bank-oss/commit/f401ccb476003668645a4ddb867f534c44f00f02))
+
 ## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.0.0...product-catalog-v1.0.1) (2026-10-14)
 
 

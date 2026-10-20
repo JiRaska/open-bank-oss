@@ -124,8 +124,22 @@ describe('state contribution', () => {
     }
     await renderPage(<PensionIncentiveBatchesPage />)
     expect(screen.getByText('Claims past the filing deadline')).toBeTruthy()
-    expect(screen.getByText('ret-1')).toBeTruthy()
-    expect(calls.some(c => c.url.includes('/state-contribution/returns') && c.url.includes('status=DUE'))).toBe(true)
+    expect(screen.getByText(CONTRACT_ID)).toBeTruthy()
+    expect(calls.some(c => c.url.includes('/state-contribution/returns') && c.url.includes('status=CONFIRMED'))).toBe(true)
+  })
+
+  it('settles a CONFIRMED return from its row, without asking for an id', async () => {
+    router = (url, init) => {
+      if (init?.method === 'POST') return json({ id: 'ret-9', status: 'SETTLED' })
+      if (url.includes('/state-contribution/returns')) return json([{ id: 'ret-9', contractId: CONTRACT_ID, cause: 'INELIGIBLE', amount: 100, currency: 'CZK', status: 'CONFIRMED', dueBy: '2026-11-30' }])
+      if (url.includes('/deadlines')) return json({ claimsPastFilingDeadline: 0, claimsPastExpectedPayment: 0, returnsOverdue: 0 })
+      return json([])
+    }
+    await renderPage(<PensionIncentiveBatchesPage />)
+    expect(screen.queryByLabelText('Return id')).toBeNull()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Settle' })) })
+    const post = calls.find(c => c.init?.method === 'POST')
+    expect(post?.url).toContain('/state-contribution/returns/ret-9/settle')
   })
 })
 

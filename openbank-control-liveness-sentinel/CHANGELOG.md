@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.8.0...control-liveness-sentinel-v0.9.0) (2026-10-18)
+
+
+### Features
+
+* **control-liveness-sentinel:** carry the caller's trace into Temporal activities ([#13163](https://github.com/JiRaska/open-bank-oss/issues/13163)) ([3892d17](https://github.com/JiRaska/open-bank-oss/commit/3892d1738e89506f18ae3e86d29f3d44490e7c9a))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.7...control-liveness-sentinel-v0.8.0) (2026-10-18)
+
+
+### Features
+
+* **sanctions:** workflow-liveness heartbeats for five scheduled jobs ([#13153](https://github.com/JiRaska/open-bank-oss/issues/13153)) ([c352a0e](https://github.com/JiRaska/open-bank-oss/commit/c352a0ec0d75d439a85132070a1e77aa4e8052b4))
+
 ## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/control-liveness-sentinel-v0.7.6...control-liveness-sentinel-v0.7.7) (2026-10-14)
 
 

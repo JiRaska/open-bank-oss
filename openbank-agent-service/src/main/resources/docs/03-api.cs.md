@@ -11,6 +11,7 @@ Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) 
 | MCP server | `POST /mcp` | JSON-RPC 2.0 přes HTTP | identita `X-Agent-Id` (deny-by-default při absenci) |
 | Admin asistent | `POST /agent/chat` | JSON | Keycloak OIDC; běží jako `ui-assistant` |
 | Registr modelů | `GET /agent/models` | JSON | Keycloak OIDC |
+| Capability / kontrola katalogu | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
 | Důkazní záznamy merge | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (role viz níže) |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | žádné (management port 8085) |
 
@@ -75,6 +76,17 @@ Smyčka vynucuje charter `ui-assistant`: pre-flight kontrolu runs-per-day (přes
 
 Vrací default id modelu a každý povolený model v registru gateway: `{ default, models: [{ id, provider, sensitivity }] }` kde `sensitivity ∈ {HOSTED, SELF_HOSTED}`.
 
+## Catalog Intelligence — `/agent/catalog-reviews`
+
+Obě operace vyžadují roli `ROLE_OPERATOR`, `ROLE_ADMIN` nebo `ROLE_COMPLIANCE`.
+
+- **`GET /agent/catalog-reviews`** vrací capability kontroly katalogu: zda je nakonfigurovaná trasa způsobilá, její režim, nakonfigurované výchozí id modelu a povolené popisy modelů. Seznam vychází z registru modelů služby a zásad nasazení; endpoint neověřuje dostupnost poskytovatele ani nezaručuje, že upstream model právě odpovídá. UI přebírá modely z této odpovědi a id modelů nezakóduje napevno.
+- **`POST /agent/catalog-reviews`** přijímá UUID `offeringId` a `revisionId` a volitelné `model` z allow-listu capability. Pokud chybí, služba použije nakonfigurovaný výchozí model. Načte přesně určenou revizi katalogu, ověří, že je stále ve stavu `DRAFT`, a odmítne snapshot delší než 64 000 znaků. Model dostane připnutý snapshot bez nástrojů. Jediným uloženým výsledkem je položka `PROPOSED` ve frontě human-in-the-loop; operace nemění, nepublikuje ani neruší obsah katalogu.
+
+Hostovaná kontrola je výjimkou pouze pro katalog a sandbox. `catalog-review.allow-hosted-models` má výchozí hodnotu `false`; sandbox deployment ji zapíná výslovně. Při zapnutí server povolí pouze registrované modely `openai-compat`, jejichž nakonfigurovaný endpoint odpovídá in-cluster gateway LiteLLM. Použije již nakonfigurovaný výchozí model a existující rozpočtové limity LiteLLM; nepřidává přihlašovací údaje poskytovatele ani přímou trasu k poskytovateli. V nasazeních bez tohoto opt-inu zůstává pro kontrolu katalogu zachován požadavek na self-hosted model pro citlivý kontext. Výjimka nemění směrování ostatních agentních workflow.
+
+Neplatné identifikátory, revize mimo stav `DRAFT`, příliš velký snapshot nebo model mimo allow-list vracejí `400`; chybějící způsobilá nakonfigurovaná trasa nebo nedostupný model vrací `503`. Úspěšná odpověď obsahuje id/stav návrhu, hash kontextu, omezené nálezy a použité id modelu.
+
 ## Zaznamenané lidské merge — `/api/v1/agent-merge-records`
 
 Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kdo mergoval PR autora agentem** (tabulka viz [04 — Data](./04-data.md)). Záznamy vstupují **mimo pásmo** — GitHub Actions workflow `record-agent-merge` postuje každý mergovaný PR agenta se servisním credential pipeline `ROLE_MERGE_RECORDER`. Agent své merge **nikdy nenahlašuje sám**.
@@ -92,3 +104,11 @@ Důkaz „zaznamenaného lidského merge" fáze 3 ADR-0031: trvalý záznam **kd
 ## Verzování
 
 Hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `openbank-libs`. Verze MCP protokolu (`2024-11-05`) se vyjednává zvlášť při `initialize` a je nezávislá na verzi HTTP API.
+
+## Navazující kontrakt rezervací zůstatku
+
+`get_balance_holds` volá `GET /api/v1/balances/{accountId}/holds` a předává pole `holds` beze změny,
+včetně citlivých důvodů a referencí. Poskytovatel filtruje uvolněné/expirované řádky, ale neuvolňuje
+prostředky. Spotřebitelský Pact pokrývá aktivní rezervaci, prázdný výsledek a předání 401 bez identity;
+kanonický kontraktní test objevuje Pact drift CI. Fixture neprokazují živý token, předání hlavičky
+customer-edge ani produkční rozhodnutí OPA. Poskytovatel zachovává RBAC/OPA i volitelnou kontrolu vlastníka.

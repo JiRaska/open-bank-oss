@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { loadDocsDocument } from '@/lib/services/docs'
+import { DocsDiscoveryIncompleteError, loadDocsDocument } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
 
 // Per-slug docs fetch. Language resolution: ?lang → cookie → 'en'.
@@ -22,7 +22,15 @@ export async function GET(
   const langCookie = (await cookies()).get(LANG_COOKIE)?.value
   const lang = langQuery ?? langCookie ?? 'en'
 
-  const doc = await loadDocsDocument(name, slug, lang)
+  let doc
+  try {
+    doc = await loadDocsDocument(name, slug, lang)
+  } catch (error) {
+    if (error instanceof DocsDiscoveryIncompleteError) {
+      return NextResponse.json({ error: 'service discovery incomplete', service: name, slug }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
+    throw error
+  }
   if (!doc) {
     return NextResponse.json(
       { error: 'doc not available', service: name, slug, lang },

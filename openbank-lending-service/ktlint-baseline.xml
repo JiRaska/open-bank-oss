@@ -463,10 +463,6 @@
         <error line="44" column="123" source="standard:argument-list-wrapping" />
         <error line="44" column="135" source="standard:argument-list-wrapping" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
     <file name="src/test/kotlin/com/openbank/lending/application/usecase/LendingServiceTest.kt">
         <error line="58" column="23" source="standard:argument-list-wrapping" />
         <error line="58" column="30" source="standard:argument-list-wrapping" />
