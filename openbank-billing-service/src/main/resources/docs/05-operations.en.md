@@ -1,5 +1,14 @@
 # 05 — Operations
 
+## Fee-assessment warnings
+
+Warnings for unavailable revision terms, failed pin-store operations, failed catalog lookup, and
+dropped fee components contain fixed text. They do not include account, product, cycle, revision,
+exception details, or component counts. Use the bounded `billing.assessment.skipped` counter's
+`reason` label to distinguish skipped assessments and `billing.assessment.dropped_components` to
+detect dropped components. These aggregate counters do not identify an individual assessment;
+investigate affected records through authorized business data access, not operational logs.
+
 ## Ledger accounting-class rollout (ADR-0341 D3)
 
 Billing can post by accounting class (the ledger resolves the GL account) or with explicit GL accounts.

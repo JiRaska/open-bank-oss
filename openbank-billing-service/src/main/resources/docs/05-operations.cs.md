@@ -1,5 +1,14 @@
 # 05 — Provoz
 
+## Varování při vyhodnocení poplatků
+
+Varování o nedostupných podmínkách revize, selhání úložiště pinů, vyhledání v katalogu a
+vynechaných složkách poplatků mají pevný text. Neobsahují účet, produkt, cyklus, revizi,
+podrobnosti výjimky ani počty složek. Důvod přeskočení rozlišuje omezený štítek `reason`
+čítače `billing.assessment.skipped`; vynechané složky signalizuje
+`billing.assessment.dropped_components`. Tyto souhrnné čítače neurčují konkrétní vyhodnocení;
+dotčené záznamy vyšetřujte přes oprávněný přístup k obchodním datům, nikoli provozní logy.
+
 ## Nasazení účetních tříd v ledgeru (ADR-0341 D3)
 
 Billing umí účtovat podle účetní třídy (GL účet určí ledger) nebo s explicitními GL účty.
