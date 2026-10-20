@@ -100,3 +100,25 @@ def gh_pr(repo: str, number: int | str) -> dict | None:
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def pr_body_with_members(body: str, base: str, env: dict | None = None, fetch_pr=gh_pr) -> str:
+    """`body`, plus — only for a VERIFIED carrier, read live from PR_NUMBER/GITHUB_REPOSITORY — each
+    member's live body. For gates whose required text is per-member and self-identifying (a trailer
+    naming an issue, a section naming a service), so the union is exactly what the members declared.
+    Anything that is not a verified carrier, or whose members cannot be derived, gets `body` alone."""
+    import os
+    env = os.environ if env is None else env
+    repo, number = env.get("GITHUB_REPOSITORY", ""), env.get("PR_NUMBER", "")
+    if not (repo and number.isdigit()):
+        return body
+    pr = fetch_pr(repo, number)
+    if not is_verified_carrier(pr, repo):
+        return body
+    try:
+        members = carrier_members(base)
+    except CarrierError as exc:
+        print(f"::warning::merge-train carrier members not derivable ({exc}) — carrier body only")
+        return body
+    print(f"merge-train carrier — reading member bodies {', '.join(f'#{n}' for n, _ in members)}")
+    return "\n\n".join([body] + [((fetch_pr(repo, n) or {}).get("body") or "") for n, _ in members])

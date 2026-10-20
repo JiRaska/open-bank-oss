@@ -1194,7 +1194,7 @@ def self_test() -> int:
         return pr
 
     def carrier_fixture(member_paths: dict[int, list[str]], bodies: dict[int, str], pr: dict,
-                        extra_commit: bool = False) -> tuple[int, str, list[int]]:
+                        extra_commit: bool = False, inner: Callable[[], int] | None = None) -> tuple[int, str, list[int]]:
         """A real git repo: base, then one train member commit per PR (merge-train.py's exact
         message), optionally a foreign commit; judged through judge() exactly as main() does."""
         import contextlib
@@ -1228,7 +1228,7 @@ def self_test() -> int:
             try:
                 os.chdir(root)
                 with contextlib.redirect_stdout(out):
-                    rc = judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo,
+                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo,
                                lambda n: (reads.append(n), bodies.get(n))[1])
             finally:
                 os.chdir(cwd)
@@ -1261,6 +1261,17 @@ def self_test() -> int:
     rc, out, reads = carrier_fixture({1: ["docs/readme.txt"], 2: ["other-service/src/main/kotlin/X.kt"]}, {}, carrier_pr())
     if rc != 0:
         print("self-test FAIL (carrier-non-money-path): non-money-path carrier failed:\n" + out[-800:]); bad += 1
+    # pr_body_with_members (api-contract's per-service section): union only for a verified carrier.
+    got: dict[str, str] = {}
+
+    def fake_pr(pr: dict | None):
+        return lambda _repo, n: pr if str(n) == "500" else {"body": f"member {n} body"}
+    for label, pr in [("carrier", carrier_pr()), ("spoof", carrier_pr(labels=[]))]:
+        carrier_fixture(money, {}, pr, inner=lambda pr=pr, label=label: got.__setitem__(label, carrier_lib.pr_body_with_members(
+            "carrier", "base", env={"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500"}, fetch_pr=fake_pr(pr))) or 0)
+    if got.get("carrier") != "carrier\n\nmember 1 body\n\nmember 2 body" or got.get("spoof") != "carrier":
+        print(f"self-test FAIL: pr_body_with_members union wrong: {got}"); bad += 1
+
     # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
     mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
     for name, val in [("BOT_LOGIN", carrier_lib.BOT_LOGIN), ("CARRIER_LABEL", carrier_lib.CARRIER_LABEL)]:
