@@ -91,6 +91,8 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 waiveReason = fee.reason.name
                 idempotencyKey = fee.idempotencyKey
                 postingStatus = if (chargeable) PostingStatus.PENDING else PostingStatus.NOT_APPLICABLE
+                productRevisionId = fee.productRevisionId?.let(UUID::fromString)
+                accountingClass = fee.accountingClass
                 createdAt = now
                 updatedAt = now
             }
@@ -359,4 +361,6 @@ private fun AssessedFeeEntity.toDomain(): AssessedFee = AssessedFee(
     reversalJournalId = reversalJournalId,
     reversalReason = reversalReason,
     postedAt = postedAt,
+    productRevisionId = productRevisionId?.toString(),
+    accountingClass = accountingClass,
 )
