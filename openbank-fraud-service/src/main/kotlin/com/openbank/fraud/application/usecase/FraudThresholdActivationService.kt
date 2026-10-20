@@ -66,7 +66,8 @@ class FraudThresholdActivationService(private val repository: FraudThresholdRepo
             proposedAt = now,
         )
         repository.insert(proposal)
-        log.infof("fraud threshold set v%d proposed by %s (hash %s)", set.version, maker, hash)
+        // Operator identities are retained in the access-controlled audit row, not operational logs.
+        log.infof("fraud threshold set v%d proposed (hash %s)", set.version, hash)
         return proposal
     }
 
@@ -95,11 +96,9 @@ class FraudThresholdActivationService(private val repository: FraudThresholdRepo
             "threshold set proposal $id was decided concurrently and is no longer decidable"
         }
         log.infof(
-            "fraud threshold set v%d %s by %s (proposed by %s)%s",
+            "fraud threshold set v%d %s%s",
             stored.set.version,
             result.state,
-            checker,
-            stored.proposedBy,
             result.activeFrom?.let { ", in force from $it" } ?: "",
         )
         return result
