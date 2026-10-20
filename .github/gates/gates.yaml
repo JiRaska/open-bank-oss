@@ -558,7 +558,7 @@ gates:
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
   - id: deploy-window-decision
-    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    selftest_exempt: "is-a-test-suite — the run: exercises deploy-window decisions and producer isolation"
     name: "deploy window batches bot deploy commits without losing a deploy"
     group: gitops
     mode: enforced
@@ -574,7 +574,9 @@ gates:
     review_after: "2027-03-30"
     budget_seconds: 15
     run: |
+      set -e
       python3 .github/scripts/deploy-window.py --self-test
+      python3 .github/scripts/test-deploy-producer-isolation.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
