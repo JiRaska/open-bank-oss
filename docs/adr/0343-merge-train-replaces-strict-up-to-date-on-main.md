@@ -230,12 +230,32 @@ governance PRs without his own review — together with `agent-pr-guard`, which 
 the member's head and treats as a refusal. Adding an approval requirement would require the sole
 human to approve his own PRs, which GitHub forbids, and would stall the train entirely.
 
-**Manual lane.** PRs touching an executable or execution-deciding path under `.github/`, or a generator, PRs adding a symlink, and trains whose
-regeneration leaves the inventory cannot ride a train. In phase 0 that costs nothing (strict is
-still on). In phase 1 such a PR needs the `merge-train` status from a human: the owner reviews it
-and posts the status by hand with the App pin in mind (an owner-token status does not satisfy a
-context pinned to the App), or merges with the ruleset bypass he already holds. Both leave an
-audit trail naming the human. Its volume is a phase-0 measurement.
+**Manual lane = the strict lane.** PRs touching an executable or execution-deciding path under
+`.github/`, a generator, `gates.yaml` or the derived-output inventory never ride a train: the build
+job would execute them. In phase 1 they are not stranded either — the first phase-1 run showed why
+they would be: an owner-token status cannot satisfy a context pinned to the App, and the ruleset has
+no bypass actors. So `settle` gives them a *strict lane*, which restores per PR exactly the
+guarantee strict up-to-date gave every PR: CI green on a tree that already contains main.
+For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane reason, settle
+(App token, git and the API only, executing no PR code):
+1. if `git merge-base --is-ancestor <live main> <head>` holds and every required context other
+   than `merge-train` is green on that head, posts `merge-train` success
+   (`strict lane: green on an up-to-date head over main <sha12>`) and squash-merges pinned to that
+   head — after re-reading live main, and never while a train carrier is in flight (a strict-lane
+   merge would move the carrier's base; the carrier's own "main moved since publish" check also
+   rejects it if one ever does), and at most one per tick, since a merge makes every other
+   strict-lane head behind;
+2. if the head is up to date and its required CI is still running, *reserves* main: settle reports
+   in-flight, so no train is built under it, and no other strict-lane PR is updated;
+3. if it is green but behind, calls update-branch (pinned to the judged head) for the oldest such PR
+   only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
+   and a later tick merges it. With strict off `auto-update-armed-prs.yml` exits before enumerating
+   PRs, so the train owns this update.
+Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
+fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
+symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming
+money-path, governance and workflow PRs is already human-only through the owner's local hook — the
+strict lane adds no new way for an unarmed or agent-armed workflow change to reach main.
 
 ### What the train is NOT
 
@@ -259,7 +279,10 @@ any merge the shadow train would have made disagrees with what strict mode event
 **Phase 1 — flip.** Requires: (a) shadow has shown the status landing on every armed green PR,
 (b) `ruleset-context-parity` is green with `merge-train` present in the required set,
 (c) the owner runs the commands below, (d) the workflow `env` is set to
-`MERGE_TRAIN_SHADOW=false` in a follow-up PR. `auto-update-armed-prs.yml` then exits before PR
+`MERGE_TRAIN_SHADOW=false` in a follow-up PR. Phase 1 is gated at runtime on the ruleset: with the flag
+off, `settle` still merges nothing (it behaves as shadow and logs why) until the live ruleset requires
+`merge-train` pinned to the App (`GITOPS_APP_ID`) and strict is off, so the order of (c) and (d) does
+not matter. `auto-update-armed-prs.yml` then exits before PR
 enumeration on its own (it already does when strict is off) and can be retired in a later ADR.
 
 ```sh
@@ -286,8 +309,9 @@ gh api repos/JiRaska/open-bank-oss/rules/branches/main \
   --jq '.[] | select(.type=="required_status_checks") | .parameters | {strict: .strict_required_status_checks_policy, ctx: [.required_status_checks[] | {context, integration_id}]}'
 ```
 
-**Rollback.** Re-enable strict and remove the context, in that order (removing the context
-first, with strict still off, is the one state with no protection at all); then set
+**Rollback.** The ruleset revert alone stops all merging by the train (the runtime guard sees the pin
+or strict change on the next tick); the env flag need not change. Re-enable strict and remove the context, in that order (removing the context
+first, with strict still off, is the one state with no protection at all); optionally set
 `MERGE_TRAIN_SHADOW=true` or disable the workflow. Same PUT with
 `strict_required_status_checks_policy: true` and the `merge-train` entry filtered out. Every PR
 that merged through the train is an ordinary squash merge with its own CI history; nothing to
@@ -340,7 +364,8 @@ undo in git.
   1) to isolate one culprit, each a tick or more apart. That is slower than bisecting within one
   run, and is the price of `settle` never consuming state a build produced.
 - PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
-  routinely) take the manual lane in phase 1. The volume of that lane is a phase-0 measurement.
+  routinely) take the strict lane in phase 1: serial, one update-and-CI cycle per PR, with main
+  reserved while it runs — strict mode's throughput for roughly a third of PRs, the train's for the rest.
 - Carrier PRs: up to one every 10 minutes, closed on completion. They carry the `merge-train`
   label so every PR-list query can filter them out.
 
@@ -349,7 +374,8 @@ undo in git.
   `STATUS_CONTEXT` in a tracked script). That is a widening of the gate and is derived from the
   script, not from a list in the checker.
 - `auto-update-armed-prs.yml` becomes inert at phase 1 (it already exits when strict is off) and
-  is retired separately.
+  is retired separately; the strict lane in `settle` takes over the one update it still owed
+  (manual-lane PRs).
 
 ## Compliance impact
 

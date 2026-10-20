@@ -51,6 +51,27 @@ describe('route permission projection (ADR-0229 D3)', () => {
     expect(permissionForPath('/system/config')).toBe('system:config')
   })
 
+  it('admits the communication approvals workbench to the queue viewers OR the style checker (ADR-0285 D6)', () => {
+    // ROLE_COMMS_APPROVER holds communication:style:decide but not approvals:view; the
+    // OR-set keeps the bare '/approvals' guard from walling the checker out of the
+    // four-eyes queue their publish pauses land in. The page itself still requires
+    // communication:style:decide via its AuthGuard.
+    expect(permissionForPath('/approvals/communication')).toEqual(['approvals:view', 'communication:style:decide'])
+    expect(permissionForPath('/approvals/communication/x')).toEqual(['approvals:view', 'communication:style:decide'])
+    // The general queue stays viewer-only: the OR-set must not loosen /approvals itself.
+    expect(permissionForPath('/approvals')).toBe('approvals:view')
+    expect(permissionForPath('/approvals/sca/x')).toBe('operator-approvals:decide')
+    for (const role of ['ROLE_COMMS_APPROVER', 'ROLE_ADMIN']) {
+      expect(pathAllowedByRoles('/approvals/communication', [role])).toBe(true)
+    }
+    // Operator/compliance pass the edge gate on the approvals:view half; the page's own
+    // AuthGuard then names the missing communication:style:decide (pinned by the e2e spec).
+    expect(pathAllowedByRoles('/approvals/communication', ['ROLE_OPERATOR'])).toBe(true)
+    expect(pathAllowedByRoles('/approvals/communication', ['ROLE_COMPLIANCE'])).toBe(true)
+    // Viewer lacks both halves of the OR-set: the edge gate refuses before any page render.
+    expect(pathAllowedByRoles('/approvals/communication', ['ROLE_VIEWER'])).toBe(false)
+  })
+
   it('admits the communication style editor to the maker OR the checker role (ADR-0285 D6)', () => {
     // The editor hosts both permission-gated sections, so the route guard is an OR-set,
     // not the maker permission alone — otherwise the checker could never reach the

@@ -296,7 +296,7 @@ jobs:
             # The version bump is not unchecked: check-app-version-override.sh holds the
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
-            FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
+            FILES_CODE=$(grep -vE '^openbank-libs/governance/|^openbank-libs/docs/[^/]+\.md$|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
             FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
             # Match the push selector: an exact raised-floor-only diff stays local.
             if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
@@ -564,10 +564,16 @@ jobs:
     needs: [changes, publication-ready, build, verification-metadata]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 20
     permissions:
       actions: read
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify roster retry offline fixtures
+        run: python3 .github/scripts/test-service-ci-roster-retry.py
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then
@@ -599,9 +605,23 @@ jobs:
           JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
         run: |
           set -euo pipefail
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
-            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          source .github/scripts/gh-retry.sh
+          export GH_RETRY_MAX_WAIT_SECONDS=900 GH_RETRY_DEAD_LETTER=0
+          rm -f -- "$JOB_FILE" "${JOB_FILE}.candidate"
+          trap 'rm -f -- "${JOB_FILE}.candidate"' EXIT
+          read_roster() {
+            local rc
+            if gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+              --jq '.jobs[] | {name,conclusion}' > "${JOB_FILE}.candidate"; then
+              mv -- "${JOB_FILE}.candidate" "$JOB_FILE"
+            else
+              rc=$?
+              rm -f -- "${JOB_FILE}.candidate"
+              return "$rc"
+            fi
+          }
+          validate_roster() {
           python3 - <<'PY'
           import json
           import os
@@ -617,15 +637,31 @@ jobs:
               name = job["name"]
               if name.startswith("build (") and name.endswith(" (build)"):
                   observed.setdefault(name, []).append(job["conclusion"])
-          if set(observed) != expected:
-              missing = sorted(expected - set(observed))
-              extra = sorted(set(observed) - expected)
+          missing = sorted(expected - set(observed))
+          extra = sorted(set(observed) - expected)
+          if extra:
               raise SystemExit(f"Service build roster mismatch: missing={missing}, extra={extra}")
           bad = {name: verdicts for name, verdicts in observed.items() if verdicts != ["success"]}
           if bad:
               raise SystemExit(f"Service builds without one successful verdict: {bad}")
+          if missing:
+              print(f"Service build roster incomplete: missing={missing}")
+              raise SystemExit(78)
           print(f"Verified {len(expected)} selected service builds in this workflow attempt")
           PY
+          }
+          gh_retry 2 -- read_roster
+          if validate_roster; then
+            exit 0
+          else
+            rc=$?
+            if [[ "$rc" -ne 78 ]]; then exit "$rc"; fi
+          fi
+          # Rerun carry-forward jobs can appear after the aggregate starts. Re-read once,
+          # preserving exact roster/verdict checks and allowing no second quota-reset wait.
+          sleep 15
+          gh_retry 1 -- read_roster
+          validate_roster
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)

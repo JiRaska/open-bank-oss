@@ -4,28 +4,35 @@
 
 'use client'
 
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { ClipboardCheck, RefreshCw, Star, CheckCircle2, XCircle, CircleSlash } from 'lucide-react'
 import { LoadingState, PageHeader, StatCard, StatusBadge, SWATCH_CLASS, type Tone } from '@/components/ui'
+import type { EvidenceProvenance } from '@/lib/evidence/publishedSnapshot'
+import type { ReadinessSnapshotReport } from '@/lib/evidence/readinessSnapshot'
 
-interface ReadinessService {
-  service: string
-  money_path: boolean
-  scores: Record<string, number>
-  evidence: Record<string, string>
-  gate: 'GO' | 'NO-GO' | 'NOT-DEPLOYED'
-}
-interface ReadinessReport {
-  generated_for: string
-  dimensions: { code: string; name: string }[]
-  services: ReadinessService[]
+interface ReadinessApiResponse {
+  status: 'ready' | 'stale' | 'image-baked'
+  source: 'runtime' | 'image-baked'
+  report: ReadinessSnapshotReport
+  provenance: EvidenceProvenance | null
+  error?: string
 }
 
-async function fetchReadinessReport(): Promise<ReadinessReport> {
+async function fetchReadinessReport(): Promise<ReadinessApiResponse> {
   const response = await fetch('/api/prod-readiness', { cache: 'no-store' })
   if (!response.ok) throw new Error(`Production readiness HTTP ${response.status}`)
-  return response.json() as Promise<ReadinessReport>
+  return response.json() as Promise<ReadinessApiResponse>
+}
+
+const REFRESH_MS = 60_000
+
+function ageLabel(collectedAt: string, now = Date.now()): string {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(collectedAt)) / 60_000))
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `${hours}h ${minutes % 60}m`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
 // 0 Absent · 1 Declared · 2 Verified · 3 Bank-grade.
@@ -44,34 +51,53 @@ const lvl = (s: number) => LEVELS[Math.max(0, Math.min(3, s))]
 
 export default function ReadinessPage() {
   const { t } = useLanguage()
-  const [data, setData] = useState<ReadinessReport | null>(null)
+  const [data, setData] = useState<ReadinessApiResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState(false)
+  const generation = useRef(0)
+  const inFlight = useRef(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setUnavailable(false)
+  const load = useCallback(async (background = false) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    const current = ++generation.current
+    if (!background) {
+      setLoading(true)
+      setUnavailable(false)
+    }
     try {
-      setData(await fetchReadinessReport())
+      const response = await fetchReadinessReport()
+      if (current === generation.current) {
+        setData(response)
+        setUnavailable(false)
+      }
     } catch {
       // A transport failure is not an empty collector result. Keep the last verified report on
       // screen and label it stale; on first load render a recoverable unavailable state instead.
-      setUnavailable(true)
+      if (current === generation.current) setUnavailable(true)
     } finally {
-      setLoading(false)
+      if (current === generation.current) setLoading(false)
+      inFlight.current = false
     }
   }, [])
   useEffect(() => {
-    let active = true
-    void fetchReadinessReport()
-      .then(report => { if (active) setData(report) })
-      .catch(() => { if (active) setUnavailable(true) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [])
+    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    const poll = () => {
+      if (document.visibilityState === 'visible') void load(true)
+    }
+    const interval = window.setInterval(poll, REFRESH_MS)
+    document.addEventListener('visibilitychange', poll)
+    return () => {
+      generation.current += 1
+      window.clearTimeout(initialLoad)
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', poll)
+    }
+  }, [load])
 
-  const services = data?.services ?? []
-  const dims = data?.dimensions ?? []
+  const report = data?.report ?? null
+  const services = report?.services ?? []
+  const dims = report?.dimensions ?? []
   const go = services.filter(s => s.gate === 'GO').length
   // Counted, not derived as `length - go`: NOT-DEPLOYED is a third verdict (#5760), and folding it
   // into NO-GO is exactly the conflation the collectors stopped making — "not production ready"
@@ -86,13 +112,13 @@ export default function ReadinessPage() {
         icon={<ClipboardCheck size={28} className="tone-text-accent" />}
         title={t('Připravenost na produkci', 'Production Readiness')}
         subtitle={t(
-          'Odvozená matice zralosti per služba × 9 technicko-provozních dimenzí (C1–C9). Generuje ji v CI prod-readiness-collector.py z repu + atestace s TTL — nikdy needitováno ručně. Gate: money-path musí mít vše ≥ Verified, kritické (Kód/Zálohy/Security) = Bank-grade.',
-          'Derived maturity matrix per service × 9 technical/operational dimensions (C1–C9). Generated in CI by prod-readiness-collector.py from the repo + TTL attestations — never hand-edited. Gate: money-path needs all ≥ Verified, critical (Code/Backup/Security) = Bank-grade.',
+          'Odvozená matice zralosti modulů služeb × 9 dimenzí z repozitáře, GitOps deklarací a časově omezených atestací; nejde o živý stav podů. Money-path vyžaduje vše ≥ Verified a kritické dimenze = Bank-grade.',
+          'Derived maturity matrix for service modules across 9 dimensions, based on repository code, GitOps declarations, and time-limited attestations; it is not live pod health. Money-path requires all ≥ Verified and critical dimensions = Bank-grade.',
         )}
         actions={
           <button
             type="button"
-            onClick={load}
+            onClick={() => void load()}
             disabled={loading}
             aria-busy={loading}
             aria-label={t('Obnovit připravenost na produkci', 'Refresh production readiness')}
@@ -141,8 +167,19 @@ export default function ReadinessPage() {
         </div>
       )}
 
+      {data?.status === 'image-baked' && (
+        <div role="status" aria-live="polite" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid var(--warning-border)', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--text-primary)' }}>
+          {t('Zobrazen je snímek z image, nikoli živý report.', 'Showing the image-baked snapshot, not live evidence.')}
+        </div>
+      )}
+      {data?.status === 'stale' && (
+        <div role="status" aria-live="polite" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid var(--warning-border)', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--text-primary)' }}>
+          {t('Živý snapshot je zastaralý; zobrazena jsou poslední ověřená data.', 'The live snapshot is stale; showing the last verified data.')}
+        </div>
+      )}
+
       {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+      {report && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         <StatCard label={t('Služeb', 'Services')} value={services.length} />
         <StatCard label="GO" value={go} tone="success" icon={<CheckCircle2 size={16} />} />
         <StatCard label="NO-GO" value={nogo} tone="danger" icon={<XCircle size={16} />} />
@@ -160,19 +197,13 @@ export default function ReadinessPage() {
           tone="warning"
           icon={<Star size={16} />}
         />
-      </div>
+      </div>}
 
       {loading && (
         <LoadingState
           label={t('Načítám připravenost služeb…', 'Loading service readiness…')}
-          description={t('Sestavuji důkazy napříč všemi dimenzemi produkční připravenosti.', 'Assembling evidence across every production-readiness dimension.')}
+          description={t('Načítám publikovaný snapshot důkazů.', 'Loading the published evidence snapshot.')}
         />
-      )}
-
-      {!loading && !unavailable && services.length === 0 && (
-        <div style={{ padding: '40px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '12px', color: 'var(--text-secondary)' }}>
-          {t('Žádná data — spusť prod-readiness-collector.py --all --json.', 'No data — run prod-readiness-collector.py --all --json.')}
-        </div>
       )}
 
       {/* Matrix */}
@@ -233,8 +264,13 @@ export default function ReadinessPage() {
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <Star size={12} className="tone-text-warning" style={{ fill: 'currentColor' }} /> money-path
           </span>
-          {data?.generated_for && (
-            <span style={{ marginLeft: 'auto' }}>{t('Generováno', 'Generated')}: {data.generated_for}</span>
+          {report && (
+            <span style={{ marginLeft: 'auto' }}>
+              {data?.source === 'runtime' ? t('Živý snapshot', 'Live snapshot') : t('Snapshot z image', 'Image snapshot')} ·
+              {' '}{t('nasbíráno', 'collected')} {new Date(report.collected_at).toLocaleString()} ({ageLabel(report.collected_at)}) ·
+              {' '}{t('zdrojový commit', 'source commit')} {report.source_sha.slice(0, 12)} ·
+              {' '}{t('rozsah', 'scope')} {report.scope.service_count} {t('modulů služby', 'service modules')}, {report.scope.money_path_count} money-path
+            </span>
           )}
         </div>
       )}
