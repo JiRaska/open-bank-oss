@@ -123,3 +123,7 @@ GitOps (ArgoCD) per the platform pattern. For image-tag merge conflicts take `--
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Origination journey evidence
+
+`LendingOriginationE2E` exercises the existing desk lifecycle over HTTP through disbursement, including idempotent submission, maker/checker separation, and schedule and posting read-back. Its customer-intake profile explicitly enables the otherwise default-off intake and supplies synthetic claims for the named edge service account; a plain operator and an anonymous caller remain rejected. The new OIDC test dependency supports those fixtures, not proof of a real issuer signature, realm configuration, live disbursement, or deployment. Runtime dependencies and production feature defaults are unchanged.

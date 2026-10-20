@@ -108,3 +108,7 @@ Cause: an applied migration was edited. Temporary fix: set `QUARKUS_FLYWAY_REPAI
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Mixed-scope consent response
+
+A grant combining a GDPR-only scope with an SCA-required scope returns HTTP 422 `VALIDATION_ERROR`. Submit separate grants with their applicable SCA requirements; the mixed request must not be treated as an SCA-free marketing grant or a server failure. The lifecycle HTTP/DB test also covers a valid GDPR-only grant, born ACTIVE without SCA. This response mapping changes no role, token validation, or existing consent record.

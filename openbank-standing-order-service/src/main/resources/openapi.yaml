@@ -5,10 +5,10 @@ info:
   title: Standing Order Service API
   # 1.7 -> 1.8 (#11938): additive — create documents 400 CURRENCY_NOT_ALLOWED (a SEPA_CREDIT
   # order executes as an SCT, which is euro-only).
-  # 1.8 -> 1.8.1: fix — GET /{id} returned the raw domain entity (leaking idempotencyKey and
+  # 1.8 -> 1.9: additive contract — GET /{id} returned the raw domain entity (leaking idempotencyKey and
   # failureCount, omitting the computed amount/description); it now returns StandingOrderResponse
   # like every sibling endpoint, and the response schema is declared for the first time.
-  version: 1.8.1
+  version: 1.9.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0

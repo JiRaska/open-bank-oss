@@ -134,3 +134,7 @@ re-picked it on every daily sweep — `executionCount` inflating and a duplicate
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Standing-order detail response (API 1.9.0)
+
+`GET /api/v1/standing-orders/{id}` now returns `StandingOrderResponse`, as the other standing-order endpoints do. It includes computed `amount` and `description` alongside `amountMinorUnits` and `remittanceInfo`; internal `idempotencyKey` and `failureCount` are no longer serialized from the domain entity. OpenAPI 1.9.0 declares this DTO for list, create, detail, and transition responses. Clients using the old raw detail shape need the documented DTO; the lifecycle HTTP test checks read-back. This changes response representation, not the order state machine, authorization, or execution schedule.

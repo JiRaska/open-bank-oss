@@ -97,3 +97,7 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Kafka consumer group override
 
 The consumer group id and offset reset for this service's Kafka channels are not set as YAML keys in `application.yaml`, because SmallRye Config quotes dotted leaf keys and the connector never reads them. They are supplied by a properties-file override ConfigMap loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern for this is card-issuance-service's `party-events-in` channel; the `application.yaml` comments point at it. This is a documentation and comment change only. No configuration value or runtime behaviour changes.
+
+## Agent read-contract coverage
+
+The `get_account_balance` and `get_balance_holds` tools share one consumer Pact for balance-service. Its five interactions cover a balance response, two seeded active-hold responses, an empty hold list, and a 401 without identity. Generate this Pact from `AgentBalanceReadPactConsumerTest`; a second consumer class for the same pair can overwrite the shared JSON and silently drop interactions. Balance-service verifies the unauthenticated case separately. This adds contract and smoke-test evidence; it does not change tool authorization or prove a live deployment.

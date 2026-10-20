@@ -97,3 +97,7 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Přepsání consumer group pro Kafka
 
 Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Pokrytí kontraktu čtecích nástrojů agenta
+
+Nástroje `get_account_balance` a `get_balance_holds` sdílejí jeden spotřebitelský Pact pro balance-service. Jeho pět interakcí pokrývá odpověď zůstatku, dva výpisy s aktivní rezervací, prázdný seznam a 401 bez identity. Pact generujte z `AgentBalanceReadPactConsumerTest`; druhá testovací třída pro stejnou dvojici může přepsat společný JSON a tiše ztratit interakce. Poskytovatel ověřuje neautentizovaný případ samostatně. Přibývají kontraktové a smoke důkazy; oprávnění nástroje ani živé nasazení se tím nemění.

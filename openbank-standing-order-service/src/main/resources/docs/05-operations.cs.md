@@ -122,3 +122,7 @@ Verze se řeší ze sdíleného `libs.versions.toml` / konvenčního pluginu `op
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Detail trvalého příkazu (API 1.9.0)
+
+`GET /api/v1/standing-orders/{id}` nyní vrací `StandingOrderResponse` stejně jako ostatní endpointy trvalých příkazů. Odpověď obsahuje vypočtené `amount` a `description` vedle `amountMinorUnits` a `remittanceInfo`; interní `idempotencyKey` a `failureCount` se už neserializují z doménové entity. OpenAPI 1.9.0 deklaruje toto DTO pro seznam, vytvoření, detail i přechody stavů. Klienti používající původní syrovou podobu detailu musí přejít na zdokumentované DTO; načtení ověřuje HTTP test. Mění se reprezentace odpovědi, nikoli stavový automat, oprávnění ani plán provádění.

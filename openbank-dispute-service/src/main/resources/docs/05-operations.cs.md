@@ -75,3 +75,7 @@ Per-service SemVer přes release-please (commit message je changelog). Needituj 
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Časové značky řetězce důkazů
+
+Nový důkaz ve sporu dostane před výpočtem `recordHash` čas v UTC s přesností na mikrosekundy. To odpovídá přesnosti PostgreSQL `timestamptz` i načtení v UTC reaktivním ovladačem, takže nově zapsaný nezměněný řetězec projde ověřením po uložení. HTTP/DB test ověřuje vložení a kontrolu řetězce. Změna nepřepisuje staré důkazy ani neopravuje řetězce, jejichž hash vznikl z jiné reprezentace času; takové záznamy prověřte zvlášť, než výsledek BROKEN vyložíte jako manipulaci.
