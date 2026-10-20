@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.7...admin-ui-v3.8.8) (2026-10-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** publish bounded evidence and report truthful health freshness ([#13458](https://github.com/JiRaska/open-bank-oss/issues/13458)) ([a911f62](https://github.com/JiRaska/open-bank-oss/commit/a911f62c386791c09b79fc35ceb758764445bdd7))
+
 ## [3.8.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.6...admin-ui-v3.8.7) (2026-10-19)
 
 

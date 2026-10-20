@@ -305,6 +305,18 @@ def merge_ancillary(core: dict, seed: dict | None) -> dict:
     core.setdefault("warnings", []).append(
         f"Cross-workflow history and observations were reused from trusted aggregate collected at {seed['collectedAt']}; current repository catalogues and service component posture were recollected."
     )
+    # Keep the JS collector's existing detail window after merging historical
+    # rows: otherwise every publication can grow beyond that bounded window.
+    # Aggregate execution totals remain complete and independent of these rows.
+    cases = core.get("testCases")
+    if isinstance(cases, list) and len(cases) > 2000:
+        priority = {"flaky": 0, "failing": 1, "skipped": 2, "stable": 3}
+        core["testCases"] = sorted(cases, key=lambda row: (
+            priority.get(row.get("state"), 4), -row.get("wastedDurationMs", 0), row.get("name", ""),
+        ))[:2000]
+        core["warnings"].append(
+            f"Test-case detail is limited to 2000 prioritized rows; {len(cases) - 2000} historical detail rows omitted. Component execution totals are unchanged."
+        )
     return core
 
 
@@ -479,7 +491,10 @@ def collect(repo: Path, output: Path, repo_slug: str, token: str, *,
         report = merge_ancillary(core, seed_report)
         report.setdefault("warnings", []).extend(warnings)
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        # This is a transport snapshot, not a reviewed source document. Preserve
+        # every observation while avoiding whitespace consuming the shared 2 MiB
+        # publisher/reader budget. Both boundaries still reject oversized data.
+        output.write_text(json.dumps(report, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
         return {"components": components, "staged": [component for component, aid in planned if aid is not None],
                 "missing": absent, "seededAncillary": seed_report is not None, "output": str(output)}
     finally:
