@@ -18,9 +18,14 @@ import com.openbank.treasury.domain.model.DealCorrection
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.DealTransition
 import com.openbank.treasury.domain.model.FourEyesViolationException
+import com.openbank.treasury.domain.model.FullUnwindPinning
+import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.MatrixPostings
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.RecordedJournal
+import com.openbank.treasury.domain.model.ResolvedAccount
+import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import com.openbank.treasury.domain.model.Side
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import kotlinx.coroutines.runBlocking
@@ -184,6 +189,85 @@ class CorrectionDeltaTest {
         val unwound = deal.correct(CorrectionTerms(), true, approver, "booked in error", at)
         assertThat(unwound.state).isEqualTo(DealState.REVERSED)
         assertThat(unwound.version).isEqualTo(deal.version + 1)
+    }
+
+    @Test
+    fun `a full unwind clears each historical GL account by what it received, when the map moved mid-life`() {
+        val deal = booked()
+        val base = flows(deal)
+        val reached = CorrectionDelta.Reached(true, true, MatrixPostings.lastPaymentDate(deal, base), false)
+        val category = Ifrs9Category.AMORTISED_COST
+        val posted = CorrectionDelta.postedSpecs(deal, base, category, reached)
+        val accruals = posted.filterKeys { it.first == PostingEvent.ACCRUAL }.keys.map { it.third }.sorted()
+        assertThat(accruals.size).isGreaterThan(1)
+        val repointed = accruals[accruals.size / 2]
+
+        // Accruals before the re-point landed on account A of their class, the later ones on B.
+        fun account(spec: JournalSpec, date: java.time.LocalDate) = spec.lines.map { l ->
+            val moved = spec.event == PostingEvent.ACCRUAL && !date.isBefore(repointed)
+            ResolvedAccount(
+                l.accountingClass,
+                l.role,
+                l.currency,
+                UUID.nameUUIDFromBytes(
+                    "${l.accountingClass}/${l.role}/${l.currency}/${if (moved) "B" else "A"}".toByteArray(),
+                ),
+            )
+        }
+        val recorded = posted.flatMap { (slot, specs) ->
+            specs.map { it.idempotencyKey to RecordedJournal(UUID.randomUUID(), account(it, slot.third)) }
+        }.toMap()
+        val deltas = CorrectionDelta.compute(UUID.randomUUID(), deal, base, null, emptyList(), category, reached)
+        val pinned = deltas.map { d ->
+            FullUnwindPinning.pin(
+                d.spec,
+                posted[Triple(d.sourceEvent, d.key, d.valueDate)].orEmpty(),
+                emptyList(),
+                recorded,
+            )
+        }
+
+        val perAccount = HashMap<UUID, BigDecimal>()
+        posted.forEach { (slot, specs) ->
+            specs.forEach { spec ->
+                spec.lines.zip(account(spec, slot.third)).forEach { (l, a) ->
+                    perAccount.merge(
+                        a.glAccountId,
+                        if (l.side ==
+                            Side.DEBIT
+                        ) {
+                            l.amount
+                        } else {
+                            l.amount.negate()
+                        },
+                        BigDecimal::add,
+                    )
+                }
+            }
+        }
+        pinned.flatMap { it.lines }.forEach { l ->
+            val gl = checkNotNull(l.glAccountId) { "every unwind leg is pinned to a recorded account" }
+            perAccount.merge(gl, if (l.side == Side.DEBIT) l.amount else l.amount.negate(), BigDecimal::add)
+        }
+        assertThat(perAccount.filterValues { it.signum() != 0 }).isEmpty()
+        val accountsPerClass = pinned.flatMap { it.lines }
+            .groupBy { Triple(it.accountingClass, it.role, it.currency) }
+            .mapValues { (_, ls) -> ls.mapNotNull { it.glAccountId }.toSet() }
+        assertThat(accountsPerClass.values.any { it.size == 2 })
+            .describedAs("an accrual class unwound on both its historical accounts")
+            .isTrue()
+
+        val withoutOne = recorded - posted.getValue(Triple(PostingEvent.ACCRUAL, repointed.toString(), repointed))
+            .first().idempotencyKey
+        val slot = deltas.first { it.sourceEvent == PostingEvent.ACCRUAL && it.valueDate == repointed }
+        assertThatThrownBy {
+            FullUnwindPinning.pin(
+                slot.spec,
+                posted[Triple(slot.sourceEvent, slot.key, slot.valueDate)].orEmpty(),
+                emptyList(),
+                withoutOne,
+            )
+        }.isInstanceOf(ReversalAccountsUnknownException::class.java)
     }
 
     @Test

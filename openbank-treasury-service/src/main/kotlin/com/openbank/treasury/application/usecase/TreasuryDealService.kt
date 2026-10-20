@@ -42,15 +42,17 @@ import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
-import com.openbank.treasury.domain.model.LedgerRole
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.MatrixPostings
 import com.openbank.treasury.domain.model.NoPostingRuleException
+import com.openbank.treasury.domain.model.PinnedReversal
+import com.openbank.treasury.domain.model.PostedJournalRecord
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingRules
 import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import java.math.BigDecimal
 import java.time.Clock
@@ -408,7 +410,7 @@ class TreasuryDealService(
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
             ?.let {
                 post(
-                    pinToOriginalAccounts(it, deals.journals(deal.id)),
+                    pinToPostedAccounts(deal, it, deals.journals(deal.id)),
                     bankToday(),
                     "treasury ${deal.product} reversal",
                 )
@@ -641,22 +643,34 @@ class TreasuryDealService(
         .map { UUID.fromString(it.idempotencyKey.substringAfterLast(':')) }.toSet()
 
     /**
-     * A reversal offsets the accounts the deal's own journals actually landed on, NOT whatever the
-     * ledger's class map says today: the map can be re-pointed by a reviewed migration between a
-     * settlement and its reversal, and a reversal that re-resolved would then leave the original
-     * account uncleared. A leg with no recorded account (a deal posted before accounts were recorded)
-     * stays a class leg and resolves now; the first recorded posting of a class/role/currency wins.
+     * A reversal offsets, per GL account, exactly what the deal's own journals posted to that account,
+     * NOT whatever the ledger's class map says today: the map can be re-pointed by a reviewed migration
+     * during the deal's life, so accruals may have landed on two accounts, and the unwind must clear
+     * each by its own amount ([PinnedReversal]). Each reversed journal is regenerated from the posting
+     * table and paired with the accounts the ledger recorded for it; a journal with no recorded
+     * accounts or a mismatched record fails the reversal (409) and nothing is posted — it is never
+     * re-resolved against today's map.
      */
-    private fun pinToOriginalAccounts(spec: JournalSpec, journals: List<LedgerJournalRef>): JournalSpec {
-        val original = LinkedHashMap<Triple<String, LedgerRole, String>, java.util.UUID>()
-        journals.sortedBy { it.postedAt }.flatMap { it.accounts }.forEach {
-            original.putIfAbsent(Triple(it.accountingClass, it.role, it.currency), it.glAccountId)
+    private fun pinToPostedAccounts(deal: Deal, rule: JournalSpec, journals: List<LedgerJournalRef>): JournalSpec {
+        val reversed = journals.sortedBy { it.postedAt }.mapNotNull { ref ->
+            val spec = when (ref.event) {
+                PostingEvent.SETTLED -> PostingRules.settlement(deal)
+                PostingEvent.ACCRUED -> PostingRules.accrual(
+                    deal,
+                    LocalDate.parse(ref.idempotencyKey.substringAfterLast(':')),
+                )
+                else -> return@mapNotNull null
+            } ?: throw ReversalAccountsUnknownException(
+                "journal ${ref.journalId} (${ref.idempotencyKey}) does not match the posting table for deal ${deal.id}",
+            )
+            if (spec.idempotencyKey != ref.idempotencyKey) {
+                throw ReversalAccountsUnknownException(
+                    "journal ${ref.journalId} is keyed ${ref.idempotencyKey}, the posting table says ${spec.idempotencyKey}",
+                )
+            }
+            PostedJournalRecord(ref.journalId, spec, ref.accounts)
         }
-        return spec.copy(
-            lines = spec.lines.map {
-                it.copy(glAccountId = original[Triple(it.accountingClass, it.role, it.currency)])
-            },
-        )
+        return PinnedReversal.build(rule, reversed)
     }
 
     private suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): LedgerJournalRef {

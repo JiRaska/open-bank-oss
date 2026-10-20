@@ -35,6 +35,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealCorrected
 import com.openbank.treasury.domain.model.DealCorrection
 import com.openbank.treasury.domain.model.DeltaJournal
+import com.openbank.treasury.domain.model.FullUnwindPinning
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LedgerFlowItem
 import com.openbank.treasury.domain.model.LimitBreachedException
@@ -43,6 +44,7 @@ import com.openbank.treasury.domain.model.LimitOverride
 import com.openbank.treasury.domain.model.PostedDelta
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingLine
+import com.openbank.treasury.domain.model.RecordedJournal
 import com.openbank.treasury.domain.reference.Ifrs9Category
 import java.time.Clock
 import java.time.LocalDate
@@ -163,7 +165,16 @@ class CorrectionService(
         // The line is the deal's LIMIT currency (CZK for FX), measured by its limit amount: the same
         // figures LimitCheck used, the same key and query every booking takes.
         val guard = check?.let { ExposureGuard.of(it, c.limitOverride?.coversExposureUpTo) }
-        val deltas = plan.preview.deltaJournals.map {
+        // A full unwind is a reversal (#13411): pinned per GL account to what was posted, never re-resolved.
+        val journalsToPost = if (c.fullUnwind) {
+            pinnedUnwind(
+                deal,
+                plan.preview.deltaJournals,
+            )
+        } else {
+            plan.preview.deltaJournals
+        }
+        val deltas = journalsToPost.map {
             StoredDelta(it.sourceEvent, it.key, it.valueDate, checkNotNull(it.spec.suffix), it.spec.lines)
         }
         corrections.approve(
@@ -277,6 +288,31 @@ class CorrectionService(
         val done = c.posted(landed)
         corrections.markPosted(done, refs)
         return done
+    }
+
+    /**
+     * The full unwind's delta journals, each offsetting per GL account exactly what its slot posted
+     * ([FullUnwindPinning]): the original journal the daily run posted plus any earlier correction
+     * journals of the slot that reached the ledger. Refused (409) when a journal's accounts are unknown.
+     */
+    private suspend fun pinnedUnwind(deal: Deal, deltas: List<DeltaJournal>): List<DeltaJournal> {
+        val base = cashFlows.flows(deal.id, deal.scheduleVersion)
+        val posted = CorrectionDelta.postedSpecs(deal, base, bookCategory(deal.bookId), reached(deal, base))
+        val recorded = deals.journals(deal.id).associate {
+            it.idempotencyKey to
+                RecordedJournal(it.journalId, it.accounts)
+        }
+        val prior = corrections.forDeal(deal.id).flatMap { p ->
+            corrections.deltas(p.correctionId)?.let { objectMapper.readValue<List<StoredDelta>>(it) }.orEmpty()
+                .map { d -> d to JournalSpec(deal.id, PostingEvent.CORRECTION, d.lines, suffix = d.suffix) }
+        }.filter { (_, spec) -> spec.idempotencyKey in recorded }
+        return deltas.map { d ->
+            val slot = Triple(d.sourceEvent, d.key, d.valueDate)
+            val priorSpecs = prior.filter { (s, _) ->
+                Triple(s.sourceEvent, s.key, s.valueDate) == slot
+            }.map { it.second }
+            d.copy(spec = FullUnwindPinning.pin(d.spec, posted[slot].orEmpty(), priorSpecs, recorded))
+        }
     }
 
     private suspend fun plan(deal: Deal, c: DealCorrection): Plan {
