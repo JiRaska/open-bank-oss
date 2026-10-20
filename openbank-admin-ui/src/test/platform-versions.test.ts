@@ -157,3 +157,21 @@ it('rejects stray or unclosed Terraform braces instead of silently omitting decl
     })
   }
 })
+
+
+it('ignores quoted comments between resource declaration tokens', () => {
+  inventoryFixture((root, write) => {
+    write('openbank-infra/aws/envs/sandbox/main.tf', 'resource /* "comment_label" */ "helm_release" "actual" {}\n')
+    expect(deriveIac(root).helmReleaseDeclarations.map((item: { address: string }) => item.address))
+      .toEqual(['helm_release.actual'])
+  })
+})
+
+it('preserves module identity when a quoted comment precedes its label', () => {
+  inventoryFixture((root, write) => {
+    write('openbank-infra/aws/envs/sandbox/main.tf', 'module /* "comment_label" */ "actual" { source = "../../modules/shared" }\n')
+    write('openbank-infra/aws/modules/shared/main.tf', 'resource "helm_release" "operator" {}\n')
+    expect(deriveIac(root).helmReleaseDeclarations.map((item: { address: string }) => item.address))
+      .toEqual(['module.actual.helm_release.operator'])
+  })
+})

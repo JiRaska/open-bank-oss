@@ -180,7 +180,9 @@ function declarationBlocks(text) {
       end++
     }
     if (depth) throw new Error('Unclosed Terraform declaration block')
-    const labels = [...text.slice(match.index, start).matchAll(/"([^"\n]*)"/g)].map(item => item[1])
+    const header = masked.slice(match.index, start)
+    const labels = [...header.matchAll(/"[^"\n]*"/g)].map(item =>
+      text.slice(match.index + item.index + 1, match.index + item.index + item[0].length - 1))
     blocks.push({ kind: match[1], labels, body: text.slice(start, end - 1) })
   }
   return blocks
