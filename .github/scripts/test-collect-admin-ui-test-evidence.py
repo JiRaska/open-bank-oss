@@ -43,6 +43,18 @@ def archive(files: dict[str, bytes]) -> bytes:
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_merged_case_details_keep_existing_window_and_prioritize_failures(self):
+        rows = [{"fingerprint": str(index), "state": "stable", "name": str(index),
+                 "wastedDurationMs": 0, "lastObservedAt": "2026-10-18T00:00:00Z"} for index in range(2000)]
+        failure = {"fingerprint": "failed", "state": "failing", "name": "failure", "wastedDurationMs": 10}
+        core = {"testCases": [failure], "totals": {"passed": 12345}}
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-18T00:00:00Z", "testCases": rows}
+        result = COLLECTOR.merge_ancillary(core, seed)
+        self.assertEqual(len(result["testCases"]), 2000)
+        self.assertEqual(result["testCases"][0], failure)
+        self.assertEqual(result["totals"], {"passed": 12345})
+        self.assertTrue(any("1 historical detail rows omitted" in warning for warning in result["warnings"]))
+
     def test_stages_only_run_junit_and_kover_with_verified_identity(self):
         payloads = COLLECTOR.artifact_payload(archive({
             "run.json": json.dumps(ENVELOPE).encode(),
@@ -139,6 +151,7 @@ class CollectionTests(unittest.TestCase):
                 }), seed=seed, run_collector=self.fake_collector(seed),
             )
             report = json.loads(output.read_text())
+            self.assertEqual(output.read_text(), json.dumps(report, separators=(",", ":"), ensure_ascii=False) + "\n")
         self.assertEqual(result["staged"], [COMPONENT])
         self.assertEqual(report["components"], [])
         self.assertEqual(report["contracts"][0]["state"], "failed")
