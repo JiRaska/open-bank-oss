@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.6...admin-ui-v3.8.7) (2026-10-19)
+
+
+### Bug Fixes
+
+* **admin-ui:** let the comms checker reach the four-eyes workbench ([#12884](https://github.com/JiRaska/open-bank-oss/issues/12884)) ([e1b898f](https://github.com/JiRaska/open-bank-oss/commit/e1b898ffbf0ff7c4fa4efb9172eeba1f8cbe4bed))
+
 ## [3.8.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.5...admin-ui-v3.8.6) (2026-10-19)
 
 

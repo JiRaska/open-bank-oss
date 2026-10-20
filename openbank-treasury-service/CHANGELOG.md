@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.14.0...treasury-service-v0.15.0) (2026-10-19)
+
+
+### Features
+
+* **billing:** price fees from the pinned catalog revision, post by accounting class (ADR-0341) ([#13209](https://github.com/JiRaska/open-bank-oss/issues/13209)) ([dcd911c](https://github.com/JiRaska/open-bank-oss/commit/dcd911cea88eaa7b38cb7192ab89de830400b5a9))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.13.1...treasury-service-v0.14.0) (2026-10-19)
 
 
