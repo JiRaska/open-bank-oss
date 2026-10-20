@@ -89,6 +89,12 @@ class SourceValidationTest(unittest.TestCase):
         patterns = validation.pact_push_path_patterns(
             SCRIPT.parents[1] / "workflows" / "pact-drift-check.yml")
         self.assertIn("!openbank-libs/governance/**", patterns)
+        for path in (
+            "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt",
+            "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml",
+            "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml",
+        ):
+            self.assertTrue(validation.path_matches_pact_push([path], patterns))
         self.assertTrue(validation.path_matches_pact_push(
             ["openbank-admin-ui/src/page.tsx"], patterns))
         self.assertFalse(validation.path_matches_pact_push(
