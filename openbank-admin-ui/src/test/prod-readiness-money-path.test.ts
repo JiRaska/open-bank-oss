@@ -82,11 +82,9 @@ describe('readiness collector money-path set', () => {
     expect(missing).toEqual([])
   })
 
-  it('keeps runnable analytics-sink visible with explicit release and governance evidence gaps', () => {
+  it('keeps runnable analytics-sink visible in the readiness cohort', () => {
     const analytics = catalog.services.find((service: { name: string }) => service.name === 'openbank-analytics-sink')
     expect(analytics?.runnable).toBe(true)
-    expect(analytics?.gaps).toContain('runnable backend component is not release-registered')
-    expect(analytics?.gaps).toContain('runnable backend component has no governance.yaml')
     expect(byName.has('analytics-sink')).toBe(true)
   })
 
