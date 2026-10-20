@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [libs, architecture, testing, resilience]
 summary: "Keep critical shared code in-process; ship immutable consumer images from a conservative dependency graph. Version dynamic rules separately and require compatibility, failure, mutation and performance evidence for library changes."
-followup: "#13448 — shared graph implemented; compatibility baselines, content inventory, revision-aware reconciliation and broader quality evidence remain"
+followup: "#13448 — graph, ABI baselines and parser recovery implemented; content inventory, revision-aware reconciliation and fleet recovery evidence remain"
 ---
 
 # ADR-0346 — Shared library delivery and quality evidence
@@ -80,9 +80,9 @@ not-applicable are distinct states. A skipped external contract is not a passed 
 |---|---|---|
 | Unit and property | Monetary conservation, valid-state transitions, rounding/calendar boundaries and rejection of invalid inputs | Module tests and property tests exist; extend invariants with each changed capability. |
 | Integration | Actual database/Redis behavior, transactions, serialization and Quarkus/CDI wiring | Runtime container tests and consumer builds exist; mocks do not substitute for these boundaries. |
-| Contract and compatibility | Consumer behavior, wire compatibility and old/new library API linkage | Consumer conformance/Pact exist; module-wide JVM ABI baselines remain to be established. |
-| Concurrency and failure | Atomicity, bounded work, cancellation, outages and recovery without false success | Add targeted failure injection to each affected boundary, then exercise recovery through a consumer. |
-| Fuzz | Parser robustness and bounded resource use across malformed inputs | ClusterFuzzLite exists for domain/ISO parsers; corpus and target coverage must follow module moves. |
+| Contract and compatibility | Consumer behavior, wire compatibility and old/new library API linkage | All six code-bearing library modules use Kotlin ABI snapshots in check/build; an old compiled quote consumer executes against the current library. Consumer conformance/Pact remain independent proofs. |
+| Concurrency and failure | Atomicity, bounded work, cancellation, outages and recovery without false success | XML output isolation and invalid-to-valid parser recovery are tested. Provider outage/cancellation recovery belongs to the affected runtime guard change. Fleet recovery still needs consumer evidence. |
+| Fuzz | Parser robustness and bounded resource use across malformed inputs | ClusterFuzzLite covers domain/ISO parsers. The pacs.008 oracle validates arbitrary input, then requires exact recovery through fresh construction, XSD validation and reading. Deterministic corpus mutations also run in CI. |
 | Mutation | Tests reject meaningful control-flow and arithmetic changes | PIT lanes exist; moved production code must remain in their target sets. Surviving critical mutations require review. |
 | Performance | Allocation, latency and throughput at declared workloads | JMH exists for selected kernels. Allocation comparison is advisory; wall-clock results require comparable runners. Lending and dispatch workload baselines remain to be measured. |
 | End-to-end and recovery | The shipped consumer revision completes a business flow and survives rollback/provider failure | Reuse simulation, synthetic journeys and progressive-delivery evidence; library unit results alone are insufficient. |
@@ -102,6 +102,17 @@ are selected, unrelated services are excluded and empty results exit successfull
 Run `bash .github/scripts/libs-change-dependents.sh --selftest` and
 `python3 .github/scripts/service-ci-library-dependents.py --self-test`. The existing
 `libs-change-dependents` governance gate executes these checks.
+
+`libs-quality.yml` checks the ABI snapshots of domain/runtime/lending/ISO/Temporal/testing,
+executes an unchanged old consumer binary and runs XML concurrency, mutation and recovery tests.
+The standalone fuzz build runs its corpus tests before packaging the Jazzer targets.
+Update snapshots with `:<module>:updateKotlinAbi` only after reviewing compatibility; changing
+a snapshot is not evidence that an incompatible change became safe.
+
+Output DOM construction reuses a private hardened builder only under a short lock for
+`newDocument()`. Each DOM remains independent. Input parsers and transformers retain separate
+instances. Allocation improvements are measured with the existing JMH workload, without
+relaxing XML rejection tests or raising the allocation baseline.
 
 The remaining work is tracked by #13448. Independent binary publication is still deferred until
 API compatibility, content inventory and consumer evidence support it. No claim of complete
