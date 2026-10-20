@@ -66,10 +66,13 @@ the gitops App**, and the strict up-to-date policy is turned off. Concretely:
 2. **Candidates.** Open, non-draft, same-repository PRs with auto-merge armed, every required
    context of `main-protection` (other than `merge-train` itself) `success` at the head, no
    `agent-pr-guard` refusal, and no App-posted `merge-train` failure on that head (a culprit waits
-   for a push). `codex/` branches are excluded. A PR touching **anything under `.github/`** —
-   workflows, gate scripts, `gates.yaml`, generators, the regen inventory — or **any file the
-   generator runner would execute** never qualifies; it takes the owner's manual lane (see
-   *Security* for why the boundary is the whole directory). "Would execute" is derived from
+   for a push). `codex/` branches are excluded. A PR touching **anything under `.github/` that
+   can change what executes** — every workflow and action file, every script of any extension
+   (and any extension-less file), `gates.yaml` (its run commands), pip requirement pins, agent
+   prompts, the regen inventory — or **any file the generator runner would execute** never
+   qualifies; it takes the owner's manual lane. Under `.github/` only `*.md` and `*.txt` outside
+   those places ride a train: prose, and gate-input data such as `*-baseline.txt` (see
+   *Security — gate inputs* for why that adds no exposure). "Would execute" is derived from
    `origin/main`'s `regen-derived.sh` itself — its `find <root> -name '<pattern>'` enumeration at
    any depth, the programs its inventory invokes, and the libraries `gen-index.sh` sources — never
    from a fixed-depth glob, which a deeper file walks past. A PR's file list is
@@ -83,10 +86,16 @@ the gitops App**, and the strict up-to-date policy is turned off. Concretely:
    the only question a train could ask. Nothing about the fast lane is stored between jobs.
 4. **Train (`build`).** Over live `origin/main`: `git merge --squash` of each member's verified
    head sha in order; a member that conflicts or is empty is dropped. The generator paths are
-   overlaid from `origin/main`, then `regen-derived.sh --all` and `gen-index.sh` run under an
+   overlaid from `origin/main` — the generators only: a trainable data file under an overlay root
+   (a baseline, an ADR) keeps the member's content — then `regen-derived.sh --all` and `gen-index.sh` run under an
    allowlisted environment and any diff becomes one regeneration commit. The train goes to
    `publish` as one git bundle; it is untrusted.
-5. **Verification (`publish`).** The batch is recomputed live. Every member squash is rebuilt with
+5. **Verification (`publish`).** `build` hands over its declared batch (`members.txt`: number and
+   head sha per member) with the bundle; publish admits it only if every entry is a live train
+   candidate at exactly its live head and the batch respects the size cap, so the manifest can
+   only select among PRs that already qualify. (Re-planning the batch live instead rejected a
+   legitimate bundle whenever any candidate changed state between the two jobs — shadow run
+   39139647341, where one PR went green mid-build and shifted the batch.) Every member squash is rebuilt with
    `git merge-tree --write-tree` onto publish's **own** chain and must equal the bundle's commit
    tree for that step; publish's own drop list must match. The bundle's single extra commit, if
    any, may touch only the `DERIVED_OUTPUTS` declared in `origin/main`'s `regen-derived.sh`, and
@@ -174,7 +183,8 @@ manual-lane comment) until that member's author pushes again.
   `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null` and `core.hooksPath=/dev/null` on every
   git call, and never check out, install or execute anything from a train. The
   `merge-train-declaration` gate holds this per job.
-- *Re-derived trees only.* `publish` treats the bundle as a claim: it recomputes the batch live,
+- *Re-derived trees only.* `publish` treats the bundle as a claim: it admits build's declared batch
+  only entry by entry against live candidacy,
   rebuilds each member squash with `git merge-tree --write-tree` (which writes objects, not files)
   over its own commits, and accepts the bundle only where the trees are identical; it then pushes
   **its own** commits, never the bundle's, to a branch name derived from the run
@@ -192,11 +202,25 @@ manual-lane comment) until that member's author pushes again.
   `slo-dashboard-drift` and `release-registration-consistency` (the `gates (…)` shards), and
   `opa-policy.yml`, which runs the three OPA data generators with `--check` and regenerates every
   bundle ConfigMap to diff it against the committed one. Those gates, `run-gates.py` and the
-  workflows that run them are `main`'s in every train, **because no member may touch
-  `.github/`** — which is why the disqualification covers the whole directory, not just the
-  generators. A Rollout manifest that a bundle script restamps in place is deliberately *not* a
+  workflows that run them are `main`'s in every train, **because no member may touch anything
+  under `.github/` that executes or decides what executes** — workflows, actions, scripts,
+  `gates.yaml`, requirement pins, agent prompts. A Rollout manifest that a bundle script restamps in place is deliberately *not* a
   derived output: the rest of that file is not derived and no gate re-derives it, so a train
   whose regeneration touches one is refused and takes the manual lane.
+
+**Security — gate inputs (baselines, allowlists) may ride a train.** A `*-baseline.txt` or an
+allowlist under `.github/` is data that main's gate scripts read; it executes nothing. A PR that
+loosens one gets no new exposure from a train: (1) the owner reviews it at arm time behind the
+same local hook as today, and arming is the human gate the train relies on; (2) the train's CI
+runs `main`'s gate scripts over that baseline exactly as the PR's own CI already did, and the
+member only qualifies because that CI was green; (3) in `build` the generators are `main`'s, run
+over the baseline as data in an environment with no secret, exactly as they run over
+`rules.yaml`. What stays out is anything under `.github/` whose content is *interpreted as
+instructions*: requirement pins (they choose what pip installs), agent prompts (they instruct an
+agent that holds tools), and every non-`.md`/`.txt` file, extension-less ones included, because a
+path rule cannot tell data from code there. Measured on the shadow run 39145205203: 8 of 25
+listed PRs were in the manual lane under the whole-directory rule; under this rule 7 are, because
+the other seven each also touch a gate script, `gates.yaml` or a workflow.
 
 **What is deliberately NOT required: a review decision.** The train does not check
 `reviewDecision == APPROVED`. `main-protection` has no review rule, and the repository has a single
@@ -206,12 +230,53 @@ governance PRs without his own review — together with `agent-pr-guard`, which 
 the member's head and treats as a refusal. Adding an approval requirement would require the sole
 human to approve his own PRs, which GitHub forbids, and would stall the train entirely.
 
-**Manual lane.** PRs touching `.github/` or a generator, PRs adding a symlink, and trains whose
-regeneration leaves the inventory cannot ride a train. In phase 0 that costs nothing (strict is
-still on). In phase 1 such a PR needs the `merge-train` status from a human: the owner reviews it
-and posts the status by hand with the App pin in mind (an owner-token status does not satisfy a
-context pinned to the App), or merges with the ruleset bypass he already holds. Both leave an
-audit trail naming the human. Its volume is a phase-0 measurement.
+**Manual lane = the strict lane.** PRs touching an executable or execution-deciding path under
+`.github/`, a generator, `gates.yaml` or the derived-output inventory never ride a train: the build
+job would execute them. In phase 1 they are not stranded either — the first phase-1 run showed why
+they would be: an owner-token status cannot satisfy a context pinned to the App, and the ruleset has
+no bypass actors. So `settle` gives them a *strict lane*, which restores per PR exactly the
+guarantee strict up-to-date gave every PR: CI green on a tree that already contains main.
+For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane reason, settle
+(App token, git and the API only, executing no PR code):
+1. if `git merge-base --is-ancestor <live main> <head>` holds and every required context other
+   than `merge-train` is green on that head, posts `merge-train` success
+   (`strict lane: green on an up-to-date head over main <sha12>`) and squash-merges pinned to that
+   head — after re-reading live main, and never while a train carrier is in flight (a strict-lane
+   merge would move the carrier's base; the carrier's own "main moved since publish" check also
+   rejects it if one ever does), and at most one per tick, since a merge makes every other
+   strict-lane head behind;
+2. if the head is up to date and its required CI is still running, *reserves* main: settle reports
+   in-flight, so no train is built under it, and no other strict-lane PR is updated;
+3. if it is green but behind, calls update-branch (pinned to the judged head) for the oldest such PR
+   only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
+   and a later tick merges it. With strict off `auto-update-armed-prs.yml` exits before enumerating
+   PRs, so the train owns this update.
+Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
+fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
+symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming
+money-path, governance and workflow PRs is already human-only through the owner's local hook — the
+strict lane adds no new way for an unarmed or agent-armed workflow change to reach main.
+
+**Stale-red refresh.** When `main` itself breaks, every armed PR whose CI runs meanwhile goes red on
+that context — and stays red after main is fixed, because neither the train nor the strict lane
+touches a red PR (on the first day of phase 1 a broken deploy-hold gate left seven PRs to be
+updated by hand). So `settle` refreshes a red PR whose red is *main's*, not its own. An armed,
+non-draft, same-repo PR that `agent-pr-guard` did not refuse is refreshed only when all hold:
+1. a required context other than `merge-train` is FAILURE on its head;
+2. its head is behind live main (`merge-base --is-ancestor` fails);
+3. every such failing context is attributable to main: at `mb = merge-base(head, live main)` — or
+   the nearest first-parent ancestor of `mb` with a completed result — main's own CI reported that
+   same context as FAILURE, and on the live tip (or its nearest ancestor with a completed result,
+   i.e. the latest completed main run) it is now green.
+
+Then settle calls update-branch for it (`stale-red refresh: <context> was red on main <mb12>, green
+on <tip12>`, reported under `refreshed`), oldest first, at most two per tick, never in shadow.
+**It cannot loop.** After the refresh the PR's merge-base *is* the fixed main, on which the context is
+green, so if the PR is still red, condition 3 fails — the red is now its own and it is left alone;
+and a PR that is not behind fails condition 2 outright. A PR red on its own merits (the context was
+green on main at its base) is never refreshed at all. Like the strict lane it uses the App token,
+git queries and the API only, and executes no PR code; it adds no merge, only the update a human
+would otherwise click.
 
 ### What the train is NOT
 
@@ -235,7 +300,10 @@ any merge the shadow train would have made disagrees with what strict mode event
 **Phase 1 — flip.** Requires: (a) shadow has shown the status landing on every armed green PR,
 (b) `ruleset-context-parity` is green with `merge-train` present in the required set,
 (c) the owner runs the commands below, (d) the workflow `env` is set to
-`MERGE_TRAIN_SHADOW=false` in a follow-up PR. `auto-update-armed-prs.yml` then exits before PR
+`MERGE_TRAIN_SHADOW=false` in a follow-up PR. Phase 1 is gated at runtime on the ruleset: with the flag
+off, `settle` still merges nothing (it behaves as shadow and logs why) until the live ruleset requires
+`merge-train` pinned to the App (`GITOPS_APP_ID`) and strict is off, so the order of (c) and (d) does
+not matter. `auto-update-armed-prs.yml` then exits before PR
 enumeration on its own (it already does when strict is off) and can be retired in a later ADR.
 
 ```sh
@@ -262,8 +330,9 @@ gh api repos/JiRaska/open-bank-oss/rules/branches/main \
   --jq '.[] | select(.type=="required_status_checks") | .parameters | {strict: .strict_required_status_checks_policy, ctx: [.required_status_checks[] | {context, integration_id}]}'
 ```
 
-**Rollback.** Re-enable strict and remove the context, in that order (removing the context
-first, with strict still off, is the one state with no protection at all); then set
+**Rollback.** The ruleset revert alone stops all merging by the train (the runtime guard sees the pin
+or strict change on the next tick); the env flag need not change. Re-enable strict and remove the context, in that order (removing the context
+first, with strict still off, is the one state with no protection at all); optionally set
 `MERGE_TRAIN_SHADOW=true` or disable the workflow. Same PUT with
 `strict_required_status_checks_policy: true` and the `merge-train` entry filtered out. Every PR
 that merged through the train is an ordinary squash merge with its own CI history; nothing to
@@ -316,7 +385,8 @@ undo in git.
   1) to isolate one culprit, each a tick or more apart. That is slower than bisecting within one
   run, and is the price of `settle` never consuming state a build produced.
 - PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
-  routinely) take the manual lane in phase 1. The volume of that lane is a phase-0 measurement.
+  routinely) take the strict lane in phase 1: serial, one update-and-CI cycle per PR, with main
+  reserved while it runs — strict mode's throughput for roughly a third of PRs, the train's for the rest.
 - Carrier PRs: up to one every 10 minutes, closed on completion. They carry the `merge-train`
   label so every PR-list query can filter them out.
 
@@ -325,7 +395,8 @@ undo in git.
   `STATUS_CONTEXT` in a tracked script). That is a widening of the gate and is derived from the
   script, not from a list in the checker.
 - `auto-update-armed-prs.yml` becomes inert at phase 1 (it already exits when strict is off) and
-  is retired separately.
+  is retired separately; the strict lane in `settle` takes over the one update it still owed
+  (manual-lane PRs).
 
 ## Compliance impact
 

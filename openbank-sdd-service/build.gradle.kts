@@ -30,6 +30,8 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     testImplementation(project(":openbank-libs-testing"))
     // @TestSecurity: SddOutboxAtomicityIT (#8353) drives POST /mandates and POST /mandates/{id}/suspend,
     // both behind @RolesAllowed on SddResource. The module's existing ITs only hit unsecured routes

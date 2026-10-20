@@ -4,11 +4,11 @@
 
 package com.openbank.treasury.infrastructure.portfolio
 
+import com.openbank.libs.iso20022.HoldingQuantityType
 import com.openbank.treasury.application.port.out.DuplicatePortfolioStatementException
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
 import com.openbank.treasury.application.port.out.StoredPortfolioStatement
 import com.openbank.treasury.domain.model.PortfolioPosition
-import com.openbank.treasury.domain.model.PortfolioQuantityBasis
 import com.openbank.treasury.domain.model.PortfolioSnapshot
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -179,7 +179,7 @@ open class PortfolioStatementRepositoryImpl(private val holdingRepo: PortfolioHo
                         cfi = it.cfi,
                         instrumentClass = it.instrumentClass,
                         quantity = it.quantity,
-                        quantityBasis = it.quantityBasis?.let(PortfolioQuantityBasis::valueOf),
+                        quantityBasis = it.quantityBasis?.let(HoldingQuantityType::valueOf),
                         valuation = it.valuation,
                         valuationCurrency = it.valuationCurrency,
                     )

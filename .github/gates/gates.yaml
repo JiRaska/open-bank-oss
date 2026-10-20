@@ -492,9 +492,12 @@ gates:
     budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
     rationale: "A held service keeps its GitOps image pin until release; live strict required checks prevent older green deploy PRs from merging after the hold changes main."
     review_after: "2027-03-30"
-    selftest: python3 .github/scripts/check-deploy-holds.py --self-test
+    selftest: |
+      set -e
+      python3 .github/scripts/check-deploy-holds.py --self-test
+      python3 .github/scripts/test-conjunctive-holds.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts/check-deploy-holds.py", ".github/scripts/merge-deploy-holds.py", ".github/scripts/test-conjunctive-holds.py", "openbank-libs/governance/rules.yaml"]
     run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
 
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
@@ -548,12 +551,14 @@ gates:
       auto-deploy against live PRs, never in ordinary CI.
     review_after: "2027-02-19"
     run: |
+      set -e
       bash .github/scripts/supersede-deploy-prs.sh --self-test
+      python3 .github/scripts/test-supersede-hold-union.py
 
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
   - id: deploy-window-decision
-    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    selftest_exempt: "is-a-test-suite — the run: exercises deploy-window decisions and producer isolation"
     name: "deploy window batches bot deploy commits without losing a deploy"
     group: gitops
     mode: enforced
@@ -569,7 +574,9 @@ gates:
     review_after: "2027-03-30"
     budget_seconds: 15
     run: |
+      set -e
       python3 .github/scripts/deploy-window.py --self-test
+      python3 .github/scripts/test-deploy-producer-isolation.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -1793,11 +1800,18 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
-    budget_seconds: 120   # a real test suite
+    budget_seconds: 180   # a real test suite
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+      bash .github/scripts/tests/test-resolve-historical-service-ref.sh
+      python3 .github/scripts/test-admin-ui-delivery-baseline.py
+      python3 .github/scripts/test-admin-ui-evidence-plan.py
+      node --test .github/scripts/test-publish-admin-ui-evidence-import-boundary.mjs
+      node --test .github/scripts/test-publish-admin-ui-gate-health.mjs .github/scripts/test-publish-admin-ui-evidence.mjs
+      python3 .github/scripts/test-collect-admin-ui-test-evidence.py
+      python3 .github/scripts/test-collect-admin-ui-security-kpis.py
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
   # a version.txt, and must be registered in release-please-config.json AND
@@ -5413,6 +5427,25 @@ gates:
     run: |
       python3 .github/scripts/check-threat-model-claims.py --enforce
 
+  # Evidence half of threat-model-claims-resolve (#13171): the cited test must have RUN GREEN in the
+  # latest scheduled main envelope. Advisory first (ADR-0144; rules.yaml: threat_model_test_evidence).
+  # `--fetch-evidence` is best effort: any gh failure prints UNRESOLVED and exits 0, so a rate limit
+  # never becomes a red PR. The finding output, not the exit code, is the signal (advisory exits 0).
+  - id: threat-model-test-evidence
+    name: "threat-model cited tests ran green in the latest run (ADR-0144, advisory)"
+    group: security
+    mode: advisory
+    verified: "2026-10-17 — self-test pins red, absent, skipped, stale-green-masking and no-envelope cases"
+    min_subjects: 23
+    budget_seconds: 180
+    rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."
+    review_after: "2027-03-31"
+    selftest: python3 .github/scripts/check-threat-model-test-evidence.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py"]
+    run: |
+      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence
+
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
     group: security
@@ -6652,6 +6685,34 @@ gates:
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
+  - id: admin-ui-request-trace-fixtures
+    name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
+    group: supplychain
+    mode: enforced
+    rationale: "Trace instrumentation must be falsified before merge; deploy-only advisory fixtures cannot protect PR changes to collectors or their wrappers."
+    # Review temporary measurement protection after the ordinary-build receipt/comparison window.
+    review_after: "2026-11-17"
+    min_subjects: 3  # successful executed Node fixtures, read from the real TAP summary
+    budget_seconds: 90
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/run-admin-ui-node-trace-fixtures.py"
+      - ".github/scripts/admin_ui_trace_ipc.py"
+      - ".github/scripts/aggregate-admin-ui-http-trace.py"
+      - ".github/scripts/find-latest-main-artifacts.py"
+      - ".github/scripts/test-admin-ui-request-trace.py"
+      - ".github/scripts/trace-admin-ui-curl.py"
+      - ".github/scripts/trace-admin-ui-stage.py"
+      - ".github/workflows/admin-ui-deploy.yml"
+      - "openbank-admin-ui/scripts/collect-gate-health.mjs"
+      - "openbank-admin-ui/scripts/collect-quality-report.mjs"
+      - "openbank-admin-ui/scripts/generate-infra-lifecycle.mjs"
+      - "openbank-admin-ui/scripts/request-send-trace.mjs"
+      - "openbank-admin-ui/scripts/request-send-trace.test.mjs"
+      - "openbank-infra/scripts/build-push-admin-ui.sh"
+    selftest: python3 .github/scripts/test-admin-ui-request-trace.py
+    run: python3 .github/scripts/run-admin-ui-node-trace-fixtures.py
+
   - id: workflow-supply-chain
     name: "workflow action pins, bounded agent and image admission, and fail-closed service CI"
     group: supplychain
@@ -6800,13 +6861,38 @@ gates:
       fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
       from history, and counts an unresolvable pin as lagging. It is monotonic once green.
     review_after: "2027-04-11"
-    budget_seconds: 120                  # ~60 compare-API calls in a shallow checkout
+    budget_seconds: 180                  # ~60 compare-API calls in a shallow checkout
     min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
     run: |
       bash .github/scripts/check-pdp-flag-rollout.sh
     selftest: bash .github/scripts/check-pdp-flag-rollout.sh --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]
+
+  # Hibernate Reactive + Kotlin PanacheEntity draw ids from `<table>_seq`; a migration that makes
+  # the table with BIGSERIAL (only `<table>_id_seq`) or a QUOTED "X_SEQ" leaves the sequence
+  # missing, and every INSERT answers `relation "<table>_seq" does not exist` at runtime. This
+  # replaces 25 per-service HibernateSequenceGuardTest copies (three byte variants) with one source
+  # gate, and also covers services that never carried the copy. Match real annotated classes,
+  # following same-module superclasses to PanacheEntity; a sibling module's sequence does not
+  # count. Comments and string examples cannot invent entities.
+  - id: hibernate-sequence-guard
+    name: "PanacheEntity tables have their <table>_seq sequence (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      A missing or wrongly-cased hibernate sequence passes every mocked unit test and the pod
+      stays Ready; the INSERT fails only at runtime. Shipped repeatedly (party V5/V6,
+      notification V4/V5) before a per-service test existed.
+    review_after: "2027-04-17"
+    verified: "2026-10-17 — self-test has a PanacheEntity missing its _seq (flagged), a correct one (clean), quoted/_id_seq/cross-module negatives; run on origin/main: 55 tables, 0 findings; dropping one CREATE SEQUENCE from a real migration made it exit 1"
+    budget_seconds: 30
+    min_subjects: 27   # 55 PanacheEntity tables measured 2026-10-17; half
+    selftest: python3 .github/scripts/check-hibernate-sequence-guard.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-hibernate-sequence-guard.py", ".github/scripts/collect-test-run-evidence.py"]
+    run: |
+      python3 .github/scripts/check-hibernate-sequence-guard.py --root .
 
   # #13172: an ExternalSecret reading `creds/<role>` for a role the openbao-config CronJob never
   # creates fails every reconcile with `unknown role` and nothing pages (the service keeps its
@@ -6828,3 +6914,25 @@ gates:
     selftest_inputs: [".github/scripts/check-dynamic-db-roles-declared.py"]
     run: |
       python3 .github/scripts/check-dynamic-db-roles-declared.py --root .
+
+  # rules.yaml enum_reference_data: business vocabulary hard-coded as a Kotlin enum. Ratchet over
+  # two mechanically decidable shapes (numeric-encoded values, cross-module value-set copies);
+  # today's 99 findings are baselined against #13434-#13441, a new one or a stale entry fails.
+  - id: enum-reference-data-ratchet
+    name: "enum reference-data ratchet (rules.yaml enum_reference_data, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # ~1s measured locally 2026-10-20
+    rationale: >-
+      An enum value naming a threshold (UP_TO_30K, DAYS_7) or an enum re-declaring another
+      module's value set (three benchmark-index enums, seven AML risk enums on three scales) is
+      reference data in code: changing it is a release in every copy, and the copies drift.
+      Ratchet so the 2026-10-20 estate is tracked and no new copy lands unnoticed.
+    review_after: '2027-04-20'
+    verified: "2026-10-20 — origin/main b99d45e14b: correcting Kotlin string/comment masking revealed 3 enum classes missed by the initial scan; 674 enum classes, 34 numeric + 65 duplicate findings (97 initial + 2 newly tracked #13441), with both newly revealed declarations manually checked; generic lifecycle-only overlaps excluded after a first pass reported 146 pairs, ~60% unrelated status machines; injected enum exits 1; disabling either half fails self-test"
+    min_subjects: 337   # 674 enum classes measured 2026-10-20; half
+    selftest: python3 .github/scripts/check-enum-reference-data.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-enum-reference-data.py --root .

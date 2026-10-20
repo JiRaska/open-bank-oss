@@ -111,6 +111,40 @@ describe('AIOps agent card interactions', () => {
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }))
   })
 
+  it('renders unknown period costs without hiding a valid 24h cost', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/iaops/governance')) return response(GOVERNANCE)
+      if (url.includes('/api/finops/ai-costs')) {
+        return response({ available: true, agents: [{ agentId: 'finops-agent', costLast24hUsd: 2.5, costLast7dUsd: null, budgetMonthlyUsd: null, budgetUsedPct: null, burnRate: 'normal' }] })
+      }
+      return response({ anomalies: [] })
+    }))
+
+    render(<IAOpsPage />)
+
+    expect(await screen.findByText('$2.50')).toBeVisible()
+    expect(screen.getByText('No data')).toBeVisible()
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
+  })
+
+  it('renders unknown 24h cost without hiding a valid 7d cost', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/iaops/governance')) return response(GOVERNANCE)
+      if (url.includes('/api/finops/ai-costs')) {
+        return response({ available: true, agents: [{ agentId: 'finops-agent', costLast24hUsd: null, costLast7dUsd: 7, budgetMonthlyUsd: null, budgetUsedPct: null, burnRate: null }] })
+      }
+      return response({ anomalies: [] })
+    }))
+
+    render(<IAOpsPage />)
+
+    expect(await screen.findByText('$7.00')).toBeVisible()
+    expect(screen.getByText('No data')).toBeVisible()
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
+  })
+
   it('keeps profile navigation separate from nested keyboard controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

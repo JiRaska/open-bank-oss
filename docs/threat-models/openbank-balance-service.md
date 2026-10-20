@@ -354,7 +354,7 @@ also be deleted (nothing else in balance-service depends on it).
 - **2026-05-30** — Added `balances_seq`, `balance_holds_seq`, `balance_outbox_seq` (Hibernate fix);
   added `assertj` test dep for the guard. Additive DDL only — no new flow/surface/boundary.
   Risk class = **availability** (missing sequence breaks all balance writes), mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-09-05** — Input validation hardened on the reconciliation trigger
   (`POST /api/v1/balances/reconciliation`): a blank `asOf` now means "omitted" and a malformed one
   is rejected as 400 (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a
@@ -488,3 +488,21 @@ verified account deep link require a separate app-route contract and provider ca
 Rollback: disable `openbank.balance.low-alerts-enabled`, let pending outbox requests drain or
 reconcile them, then revert code. The preference table can be retained for later restoration; the
 V16 migration contains its explicit drop sequence.
+
+## Active-holds read boundary
+
+`GET /api/v1/balances/{accountId}/holds` adds a read of hold ids, amounts, currencies,
+reasons, references and lifecycle timestamps for agent-service's `get_balance_holds` tool.
+Cross-account disclosure reveals financial metadata even though this endpoint moves no money.
+The handler retains the sibling read role gate (API/viewer/operator/admin) and `balance.read`
+OPA check. With `X-Customer-Party-Id` from trusted customer-edge, the account-service owner must
+match; unknown accounts and mismatches receive the same 404. Without that header this is the
+existing service-reader path: header absence is not proof of retail ownership. Do not treat
+coarse ROLE_API admission or test identities as evidence of a verified production caller.
+
+The repository excludes released holds and expiry at/before the injected service clock.
+It does not release the expired reservation or change available/reserved balances, and emits no
+outbox event. Consumers must not infer released funds from an absent row. Tests cover real
+HTTP/DB filtering and unchanged rows, anonymous/wrong-role rejection, and owner-guard delegation;
+consumer/provider Pact replay pins the response and the missing-identity refusal. These checks
+do not replace review of trusted header provenance, live OPA policy or production credentials.

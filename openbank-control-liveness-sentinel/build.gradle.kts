@@ -33,6 +33,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
+    // OpenTelemetryContextPropagator trace-continuity test (TemporalTracePropagationTest).
+    testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(project(":openbank-libs-testing"))

@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Real HTTP, real Postgres (ADR-0337 amendment). What only this test shows: the routes are
- * registered (#3371), V15 creates the tables and columns the entities name, a correction retires
+ * registered (#3371), V16 creates the tables and columns the entities name, a correction retires
  * the current version and inserts the next in ONE transaction against the partial unique index,
  * and the 409-not-empty-list rule holds on the wire.
  */

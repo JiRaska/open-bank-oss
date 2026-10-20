@@ -16,9 +16,10 @@
 # settle and publish run this script as it exists on origin/main, under `python3 -I -S`, with no
 # system or global git config, and never check out, install or execute anything from a PR.
 #
-# PHASE 0 (now): MERGE_TRAIN_SHADOW=true — settle posts statuses and comments, merges nothing;
-# strict up-to-date stays on. PHASE 1: the owner adds `merge-train` (pinned to the App) to the
-# required contexts, turns strict off (commands in the ADR), and a follow-up PR flips the env.
+# PHASE 1: MERGE_TRAIN_SHADOW=false, but settle merges only once the LIVE ruleset says so: `merge-train`
+# is a required context pinned to this App (GITOPS_APP_ID) AND strict up-to-date is off. Until then it
+# behaves as shadow (statuses and comments, no merge) and logs why, so the order of this flag and the
+# owner's ruleset change (commands in ADR-0343) is irrelevant. Rollback is the ruleset revert alone.
 name: Merge train
 
 on:
@@ -42,7 +43,7 @@ concurrency:
 env:
   # Shadow mode is the default (ADR-0343 phase 0). Flip to "false" only after the ruleset
   # requires `merge-train` and strict is off.
-  MERGE_TRAIN_SHADOW: "true"
+  MERGE_TRAIN_SHADOW: "false"
 
 jobs:
   settle:
@@ -53,9 +54,6 @@ jobs:
       contents: read
     outputs:
       in_flight: ${{ steps.settle.outputs.in_flight }}
-    env:
-      GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_GLOBAL: /dev/null
     steps:
       - name: Mint the GitHub App installation token
         id: app_token
@@ -74,8 +72,13 @@ jobs:
         id: settle
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}  # an id, not a credential; the guard pins the ruleset to it
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}
+          # Isolated git config for THIS step only. At job level it also reached actions/checkout,
+          # whose safe.directory write then failed: "could not lock config file /dev/null".
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
@@ -141,7 +144,11 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: merge-train-bundle
-          path: ${{ runner.temp }}/merge-train-bundle/train.bundle
+          # The bundle and build's declared member list (number + head sha), which publish admits
+          # only entry by entry against live data.
+          path: |
+            ${{ runner.temp }}/merge-train-bundle/train.bundle
+            ${{ runner.temp }}/merge-train-bundle/members.txt
           retention-days: 1
           if-no-files-found: error
 
@@ -153,9 +160,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    env:
-      GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_GLOBAL: /dev/null
     steps:
       - name: Mint the GitHub App installation token
         id: app_token
@@ -180,6 +184,9 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+          # Isolated git config for THIS step only (see settle).
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"

@@ -31,6 +31,8 @@ dependencies {
     implementation(libs.quarkus.scheduler)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
 
     // TraceContract: assert the observable distributed shape of a real operation (Test Intelligence
     // `trace` evidence) without exporting trace ids, attribute values or payloads.

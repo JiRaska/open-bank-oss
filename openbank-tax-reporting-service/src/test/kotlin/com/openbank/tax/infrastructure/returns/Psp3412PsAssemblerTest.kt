@@ -5,9 +5,9 @@
 package com.openbank.tax.infrastructure.returns
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.iso20022.HoldingQuantityType
 import com.openbank.tax.application.port.out.CompanyPortfolio
 import com.openbank.tax.application.port.out.CompanyPortfolioPosition
-import com.openbank.tax.application.port.out.PortfolioQuantityBasis
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.infrastructure.returns.pension.Psp3412PsAssembler
 import com.openbank.tax.infrastructure.returns.pension.Psp3412PsRow
@@ -36,10 +36,10 @@ class Psp3412PsAssemblerTest {
         qty: String,
         value: String,
         ccy: String = "CZK",
-        quantityBasis: PortfolioQuantityBasis = if (cls == "GOVERNMENT_BOND" || cls == "CORPORATE_BOND") {
-            PortfolioQuantityBasis.FACE_AMOUNT
+        quantityBasis: HoldingQuantityType = if (cls == "GOVERNMENT_BOND" || cls == "CORPORATE_BOND") {
+            HoldingQuantityType.FACE_AMOUNT
         } else {
-            PortfolioQuantityBasis.UNIT
+            HoldingQuantityType.UNIT
         },
     ) = CompanyPortfolioPosition(cls, isin, BigDecimal(qty), BigDecimal(value), ccy, quantityBasis)
 
@@ -64,28 +64,28 @@ class Psp3412PsAssemblerTest {
                 "CZ0001004600",
                 BigDecimal("500"),
                 BigDecimal("498765.43"),
-                PortfolioQuantityBasis.FACE_AMOUNT,
+                HoldingQuantityType.FACE_AMOUNT,
             ),
             Psp3412PsRow(
                 "GOVERNMENT_BOND",
                 "CZ0001005037",
                 BigDecimal("1000"),
                 BigDecimal("1012345.67"),
-                PortfolioQuantityBasis.FACE_AMOUNT,
+                HoldingQuantityType.FACE_AMOUNT,
             ),
             Psp3412PsRow(
                 "EQUITY",
                 "CZ0008019106",
                 BigDecimal("2500"),
                 BigDecimal("2412500.00"),
-                PortfolioQuantityBasis.UNIT,
+                HoldingQuantityType.UNIT,
             ),
             Psp3412PsRow(
                 "FUND_UNITS",
                 "CZ0008474053",
                 BigDecimal("12000.5"),
                 BigDecimal("15000625.00"),
-                PortfolioQuantityBasis.UNIT,
+                HoldingQuantityType.UNIT,
             ),
         )
         val d = report.datapoints
@@ -130,7 +130,7 @@ class Psp3412PsAssemblerTest {
                     "US0378331005",
                     "1",
                     "1",
-                    quantityBasis = PortfolioQuantityBasis.UNIT,
+                    quantityBasis = HoldingQuantityType.UNIT,
                 ),
             ),
             "mix quantity bases",

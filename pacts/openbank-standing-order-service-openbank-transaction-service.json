@@ -13,9 +13,17 @@
       "request": {
         "body": {
           "amount": 1500.00,
+          "baseAmount": null,
+          "baseCurrencyCode": null,
+          "bookingDate": null,
           "currencyCode": "CZK",
           "description": "Standing order \u2014 monthly savings",
           "idempotencyKey": "standing-order-exec-pact-001",
+          "initiatedByPartyId": null,
+          "instructionType": null,
+          "rail": null,
+          "scaChallengeId": null,
+          "scaExemption": null,
           "sourceAccountId": "aaaaaaaa-1111-4222-8333-444444444444",
           "targetAccountId": "bbbbbbbb-1111-4222-8333-444444444444",
           "type": "TRANSFER",

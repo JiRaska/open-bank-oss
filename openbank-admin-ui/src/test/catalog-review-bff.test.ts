@@ -25,6 +25,22 @@ describe('catalog review BFF', () => {
   })
   afterEach(() => { vi.restoreAllMocks() })
 
+  it('relays the authenticated capability lookup without exposing the agent service', async () => {
+    const capability = { available: true, mode: 'sandbox-hosted', defaultModel: 'configured-default', models: [] }
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(capability), { status: 200 }))
+    vi.stubGlobal('fetch', fetcher)
+    const { GET } = await import('@/app/api/agent/catalog-reviews/route')
+
+    const response = await GET()
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual(capability)
+    expect(fetcher).toHaveBeenCalledWith('http://localhost:8109/agent/catalog-reviews', expect.objectContaining({
+      headers: { Authorization: 'Bearer operator-token' },
+      cache: 'no-store',
+    }))
+  })
+
   it('relays only exact aggregate identifiers and the operator bearer to the governed review endpoint', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ proposalId: 'p-1', state: 'PROPOSED' }), { status: 201 }))
     vi.stubGlobal('fetch', fetcher)
