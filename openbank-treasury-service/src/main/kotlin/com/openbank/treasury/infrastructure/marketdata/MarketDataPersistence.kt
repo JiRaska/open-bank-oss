@@ -308,9 +308,10 @@ class MarketDataRepositoryImpl(
     override suspend fun cases(fixingDate: LocalDate?, status: FixingCaseStatus?, limit: Int): List<FixingCase> =
         Panache.withSession {
             val clauses = listOfNotNull(fixingDate?.let { "fixingDate = :d" }, status?.let { "status = :s" })
-            val params = io.quarkus.panache.common.Parameters()
-            fixingDate?.let { params.and("d", it) }
-            status?.let { params.and("s", it.name) }
+            val params = buildMap<String, Any> {
+                fixingDate?.let { put("d", it) }
+                status?.let { put("s", it.name) }
+            }
             val where = if (clauses.isEmpty()) "" else clauses.joinToString(" and ") + " "
             caseRepo.find("${where}order by fixingDate desc, indexCode asc", params).page(0, limit).list()
         }.awaitSuspending().map {

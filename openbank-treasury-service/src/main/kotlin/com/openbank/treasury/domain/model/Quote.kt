@@ -99,8 +99,11 @@ object QuotePricer {
         val end = asOf.plusDays(tenorDays.toLong())
         val z = zeroAt(curve.pillars.sortedBy { it.date }, end)
         // Year fractions from the kernel day counts (ADR-0344 D1), never a local 360/365.
-        val df = exp(-z * KernelDayCount.ACT_365_FIXED.yearFraction(asOf, end).toDouble())
-        val simple = (1.0 / df - 1.0) / KernelDayCount.ACT_360.yearFraction(asOf, end).toDouble() * PERCENT
+        val zeroYears = KernelDayCount.ACT_365_FIXED.yearFraction(asOf, end).toDouble()
+        val simpleYears = KernelDayCount.ACT_360.yearFraction(asOf, end).toDouble()
+        val df = exp(-(z * zeroYears))
+        val growth = (1.0 / df) - 1.0
+        val simple = (growth / simpleYears) * PERCENT
         return RoundingPolicy.RATE_PERCENT.round(BigDecimal.valueOf(simple))
     }
 
