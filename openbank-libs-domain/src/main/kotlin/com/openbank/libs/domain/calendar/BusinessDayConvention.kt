@@ -14,10 +14,12 @@ package com.openbank.libs.domain.calendar
  * - [PRECEDING]: roll backward to the previous business day.
  * - [MODIFIED_PRECEDING]: roll backward, but if that crosses into the previous month,
  *   roll forward instead.
+ * - [UNADJUSTED]: leave the original date unchanged, even when it is not a business day.
  */
 enum class BusinessDayConvention {
     FOLLOWING,
     MODIFIED_FOLLOWING,
     PRECEDING,
     MODIFIED_PRECEDING,
+    UNADJUSTED,
 }

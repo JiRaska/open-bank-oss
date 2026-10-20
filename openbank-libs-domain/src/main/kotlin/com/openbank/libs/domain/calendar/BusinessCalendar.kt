@@ -51,8 +51,10 @@ class BusinessCalendar internal constructor(
 
     /** Roll [date] onto a business day according to [convention] (no-op if already a business day). */
     fun roll(date: LocalDate, convention: BusinessDayConvention): LocalDate {
+        if (convention == BusinessDayConvention.UNADJUSTED) return date
         if (isBusinessDay(date)) return date
         return when (convention) {
+            BusinessDayConvention.UNADJUSTED -> date
             BusinessDayConvention.FOLLOWING -> nextBusinessDay(date)
             BusinessDayConvention.PRECEDING -> previousBusinessDay(date)
             BusinessDayConvention.MODIFIED_FOLLOWING -> {

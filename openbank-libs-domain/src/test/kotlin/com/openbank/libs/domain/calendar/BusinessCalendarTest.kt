@@ -110,6 +110,12 @@ class BusinessCalendarTest {
     @Nested
     inner class Rolling {
         @Test
+        fun `UNADJUSTED preserves a non-business day`() {
+            val sunday = LocalDate.of(2026, 5, 31)
+            assertThat(certis.roll(sunday, BusinessDayConvention.UNADJUSTED)).isEqualTo(sunday)
+        }
+
+        @Test
         fun `FOLLOWING and PRECEDING roll off a weekend`() {
             val sunday = LocalDate.of(2026, 5, 31)
             assertThat(certis.roll(sunday, BusinessDayConvention.FOLLOWING)).isEqualTo(LocalDate.of(2026, 6, 1))
