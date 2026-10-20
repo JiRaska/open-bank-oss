@@ -17,9 +17,9 @@ package com.openbank.libs.domain.calendar
  *   roll forward instead.
  */
 enum class BusinessDayConvention {
-    UNADJUSTED,
     FOLLOWING,
     MODIFIED_FOLLOWING,
     PRECEDING,
     MODIFIED_PRECEDING,
+    UNADJUSTED,
 }
