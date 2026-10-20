@@ -9,18 +9,6 @@ import com.openbank.libs.domain.calendar.BusinessDayConvention
 import java.time.LocalDate
 
 /**
- * How a date that is not a business day is moved onto one. [UNADJUSTED] leaves the date as it is
- * (ISDA "No Adjustment"); every other value names the kernel [BusinessDayConvention] it applies.
- */
-enum class DateRoll(val kernel: BusinessDayConvention?) {
-    UNADJUSTED(null),
-    FOLLOWING(BusinessDayConvention.FOLLOWING),
-    MODIFIED_FOLLOWING(BusinessDayConvention.MODIFIED_FOLLOWING),
-    PRECEDING(BusinessDayConvention.PRECEDING),
-    MODIFIED_PRECEDING(BusinessDayConvention.MODIFIED_PRECEDING),
-}
-
-/**
  * A business-day calendar as the schedule engine consumes it. Implementations are built from the
  * kernel [BusinessCalendar]s through [Calendars]; the engine never carries a holiday list of its
  * own. Implementations must be deterministic: [fingerprint] is hashed into a schedule's version.
@@ -47,13 +35,13 @@ interface FinanceCalendar {
 
     /**
      * Moves [date] onto a business day under [roll]. A business day, and any date under
-     * [DateRoll.UNADJUSTED], is returned unchanged. The modified conventions keep the date in its
+     * [BusinessDayConvention.UNADJUSTED], is returned unchanged. The modified conventions keep the date in its
      * calendar month (ISDA 4.12).
      */
-    fun roll(date: LocalDate, roll: DateRoll): LocalDate {
-        val convention = roll.kernel ?: return date
-        if (isBusinessDay(date)) return date
+    fun roll(date: LocalDate, convention: BusinessDayConvention): LocalDate {
+        if (convention == BusinessDayConvention.UNADJUSTED || isBusinessDay(date)) return date
         return when (convention) {
+            BusinessDayConvention.UNADJUSTED -> date
             BusinessDayConvention.FOLLOWING -> nextBusinessDay(date)
             BusinessDayConvention.PRECEDING -> previousBusinessDay(date)
             BusinessDayConvention.MODIFIED_FOLLOWING ->

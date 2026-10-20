@@ -76,7 +76,7 @@ class CashFlowProjectorTest {
             ),
             dates = com.openbank.libs.finance.leg.DateRules(
                 TARGET2,
-                com.openbank.libs.finance.calendar.DateRoll.UNADJUSTED,
+                com.openbank.libs.domain.calendar.BusinessDayConvention.UNADJUSTED,
             ),
         )
         assertThat(ScheduleGenerator.generate(leg).periods[0].fixingDate).isEqualTo(d("2026-04-02"))

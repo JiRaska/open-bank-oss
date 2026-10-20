@@ -5,6 +5,7 @@
 package com.openbank.libs.finance.calendar
 
 import com.openbank.libs.domain.calendar.BusinessCalendar
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.finance.CERTIS
 import com.openbank.libs.finance.TARGET2
 import com.openbank.libs.finance.WEEKENDS
@@ -44,7 +45,7 @@ class FinanceCalendarTest {
     fun `bank-maintained extra holiday closes an otherwise open day`() {
         val cal = Calendars.joint(listOf(BusinessCalendar.target2()), setOf(d("2026-06-17")))
         assertThat(cal.isBusinessDay(d("2026-06-17"))).isFalse()
-        assertThat(cal.roll(d("2026-06-17"), DateRoll.FOLLOWING)).isEqualTo(d("2026-06-18"))
+        assertThat(cal.roll(d("2026-06-17"), BusinessDayConvention.FOLLOWING)).isEqualTo(d("2026-06-18"))
         assertThat(cal.name).isEqualTo("TARGET2+EXTRA(2026-06-17)")
     }
 
@@ -68,7 +69,7 @@ class FinanceCalendarTest {
         "2026-11-01, UNADJUSTED, WEEKENDS, 2026-11-01",
         "2026-11-03, MODIFIED_PRECEDING, WEEKENDS, 2026-11-03",
     )
-    fun `rolls per convention`(date: String, roll: DateRoll, cal: String, expected: String) {
+    fun `rolls per convention`(date: String, roll: BusinessDayConvention, cal: String, expected: String) {
         val calendar = when (cal) {
             "CERTIS" -> CERTIS
             "TARGET2" -> TARGET2

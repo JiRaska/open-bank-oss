@@ -4,10 +4,10 @@
 
 package com.openbank.libs.finance.leg
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.RoundingPolicy
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.libs.finance.schedule.StubType
@@ -80,7 +80,7 @@ data class ScheduleSpec(
  */
 data class DateRules(
     val calendar: FinanceCalendar,
-    val roll: DateRoll = DateRoll.MODIFIED_FOLLOWING,
+    val roll: BusinessDayConvention = BusinessDayConvention.MODIFIED_FOLLOWING,
     val adjustAccrualPeriod: Boolean = true,
     val adjustPaymentDate: Boolean = true,
     val paymentLagBusinessDays: Int = 0,

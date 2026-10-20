@@ -4,11 +4,11 @@
 
 package com.openbank.risk.domain.curve
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.finance.calendar.Calendars
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.calendar.FinanceCalendar
 import com.openbank.libs.finance.cashflow.CashFlowProjector
 import com.openbank.libs.finance.leg.LegSpec
@@ -134,7 +134,7 @@ data class CurveConventions(
     val moneyMarketDayCount: DayCount,
     val fixedFrequency: Frequency,
     val fixedDayCount: DayCount,
-    val roll: DateRoll = DateRoll.MODIFIED_FOLLOWING,
+    val roll: BusinessDayConvention = BusinessDayConvention.MODIFIED_FOLLOWING,
 ) {
     companion object {
         fun forCurrency(currency: String): CurveConventions = when (currency) {
@@ -238,7 +238,7 @@ object CurveBootstrap {
         val ccy = CurrencyCode.of(index.currency)
         // Spot is as-of itself on a business day, else the next one — never rolled BACK before as-of,
         // where its initial exchange would be a settled flow the par condition cannot see.
-        val spot = c.calendar.roll(asOf, DateRoll.FOLLOWING)
+        val spot = c.calendar.roll(asOf, BusinessDayConvention.FOLLOWING)
         fun terms(start: LocalDate, end: LocalDate) =
             DealTerms(ccy, UNIT, start, end, c.calendar, c.roll, RoundingPolicy.TREASURY_INTEREST_WORK)
         return when (quote) {
@@ -286,7 +286,7 @@ object CurveBootstrap {
      * its rolled start — the overnight convention — rather than collapsing.
      */
     private fun depositEnd(asOf: LocalDate, end: LocalDate, c: CurveConventions): LocalDate {
-        val start = c.calendar.roll(asOf, DateRoll.FOLLOWING)
+        val start = c.calendar.roll(asOf, BusinessDayConvention.FOLLOWING)
         return if (c.calendar.roll(end, c.roll).isAfter(start)) end else c.calendar.nextBusinessDay(start)
     }
 

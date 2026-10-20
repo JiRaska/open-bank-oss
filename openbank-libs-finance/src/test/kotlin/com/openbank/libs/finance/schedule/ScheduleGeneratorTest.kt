@@ -4,11 +4,11 @@
 
 package com.openbank.libs.finance.schedule
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.calendar.YearFraction
 import com.openbank.libs.finance.TARGET2
 import com.openbank.libs.finance.WEEKENDS
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.cashflow.CashFlowKind
 import com.openbank.libs.finance.cashflow.CashFlowProjector
 import com.openbank.libs.finance.d
@@ -90,7 +90,7 @@ class ScheduleGeneratorTest {
                 "2026-01-15",
                 "2026-03-15",
                 Frequency.MONTHLY,
-                dates = DateRules(TARGET2, DateRoll.FOLLOWING, adjustAccrualPeriod = false),
+                dates = DateRules(TARGET2, BusinessDayConvention.FOLLOWING, adjustAccrualPeriod = false),
             ),
         )
         val adjusted = ScheduleGenerator.generate(
@@ -98,7 +98,7 @@ class ScheduleGeneratorTest {
                 "2026-01-15",
                 "2026-03-15",
                 Frequency.MONTHLY,
-                dates = DateRules(TARGET2, DateRoll.FOLLOWING, adjustAccrualPeriod = true),
+                dates = DateRules(TARGET2, BusinessDayConvention.FOLLOWING, adjustAccrualPeriod = true),
             ),
         )
         val u0 = unadjusted.periods[0]
@@ -124,7 +124,12 @@ class ScheduleGeneratorTest {
                 "2026-01-15",
                 "2026-03-15",
                 Frequency.MONTHLY,
-                dates = DateRules(TARGET2, DateRoll.FOLLOWING, adjustAccrualPeriod = false, adjustPaymentDate = false),
+                dates = DateRules(
+                    TARGET2,
+                    BusinessDayConvention.FOLLOWING,
+                    adjustAccrualPeriod = false,
+                    adjustPaymentDate = false,
+                ),
             ),
         )
         assertThat(noAdj.periods[0].paymentDate).isEqualTo(d("2026-02-15"))
@@ -133,7 +138,7 @@ class ScheduleGeneratorTest {
                 "2026-01-15",
                 "2026-03-15",
                 Frequency.MONTHLY,
-                dates = DateRules(TARGET2, DateRoll.FOLLOWING, paymentLagBusinessDays = 2),
+                dates = DateRules(TARGET2, BusinessDayConvention.FOLLOWING, paymentLagBusinessDays = 2),
             ),
         )
         // Sun 15 Feb -> Mon 16 Feb, + 2 business days -> Wed 18 Feb.
@@ -174,7 +179,12 @@ class ScheduleGeneratorTest {
     fun `a period that rolls to zero length merges into its neighbour`() {
         // Daily accrual Fri 6 -> Tue 10 Mar 2026: Sat 7, Sun 8 and Mon 9 all adjust to Mon 9.
         val periods = ScheduleGenerator.generate(
-            fixedLeg("2026-03-06", "2026-03-10", Frequency.Days(1), dates = DateRules(WEEKENDS, DateRoll.FOLLOWING)),
+            fixedLeg(
+                "2026-03-06",
+                "2026-03-10",
+                Frequency.Days(1),
+                dates = DateRules(WEEKENDS, BusinessDayConvention.FOLLOWING),
+            ),
         ).periods
         assertThat(periods.map { it.accrual }).containsExactly(
             DateRange(d("2026-03-06"), d("2026-03-09")),
@@ -187,7 +197,7 @@ class ScheduleGeneratorTest {
                 "2026-03-08",
                 Frequency.Days(5),
                 stub = StubType.SHORT_FINAL,
-                dates = DateRules(WEEKENDS, DateRoll.FOLLOWING),
+                dates = DateRules(WEEKENDS, BusinessDayConvention.FOLLOWING),
             ),
         ).periods
         assertThat(atEnd.map { it.unadjusted }).containsExactly(DateRange(d("2026-03-02"), d("2026-03-08")))
@@ -195,7 +205,12 @@ class ScheduleGeneratorTest {
         // A whole Saturday -> Sunday deal cannot be adjusted at all.
         assertThatThrownBy {
             ScheduleGenerator.generate(
-                fixedLeg("2026-03-07", "2026-03-08", Frequency.Zero, dates = DateRules(WEEKENDS, DateRoll.FOLLOWING)),
+                fixedLeg(
+                    "2026-03-07",
+                    "2026-03-08",
+                    Frequency.Zero,
+                    dates = DateRules(WEEKENDS, BusinessDayConvention.FOLLOWING),
+                ),
             )
         }.hasMessageContaining("collapsed the whole schedule")
     }
@@ -236,7 +251,14 @@ class ScheduleGeneratorTest {
         num: Long,
         den: Long,
     ) {
-        val leg = fixedLeg(start, end, Frequency.Zero, dates = DateRules(WEEKENDS, DateRoll.UNADJUSTED), dayCount = dc)
+        val leg =
+            fixedLeg(
+                start,
+                end,
+                Frequency.Zero,
+                dates = DateRules(WEEKENDS, BusinessDayConvention.UNADJUSTED),
+                dayCount = dc,
+            )
         assertThat(ScheduleGenerator.generate(leg).periods.single().yearFraction).isEqualTo(YearFraction.of(num, den))
     }
 }

@@ -4,12 +4,12 @@
 
 package com.openbank.libs.finance.schedule
 
+import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.domain.calendar.DayCount
 import com.openbank.libs.domain.calendar.YearFraction
 import com.openbank.libs.finance.TARGET2
 import com.openbank.libs.finance.WEEKENDS
 import com.openbank.libs.finance.bd
-import com.openbank.libs.finance.calendar.DateRoll
 import com.openbank.libs.finance.cashflow.CashFlowKind
 import com.openbank.libs.finance.cashflow.CashFlowProjector
 import com.openbank.libs.finance.fixedLeg
@@ -63,7 +63,7 @@ class SchedulePropertyTest {
                 end.toString(),
                 frequency,
                 stub = stub,
-                dates = DateRules(TARGET2, DateRoll.MODIFIED_FOLLOWING, adjustAccrualPeriod = adjust),
+                dates = DateRules(TARGET2, BusinessDayConvention.MODIFIED_FOLLOWING, adjustAccrualPeriod = adjust),
             )
                 .let { it.copy(schedule = it.schedule.copy(endOfMonth = eom)) }
             val periods = ScheduleGenerator.generate(leg).periods
@@ -99,7 +99,7 @@ class SchedulePropertyTest {
                     end.toString(),
                     f,
                     stub = stub,
-                    dates = DateRules(WEEKENDS, DateRoll.UNADJUSTED),
+                    dates = DateRules(WEEKENDS, BusinessDayConvention.UNADJUSTED),
                 )
             val sum = ScheduleGenerator.generate(leg).periods.fold(YearFraction.ZERO) { acc, p -> acc + p.yearFraction }
             assertThat(sum).isEqualTo(DayCount.ACT_360.yearFraction(start, end))
@@ -149,7 +149,12 @@ class SchedulePropertyTest {
                 Frequency.ANNUAL,
                 rate = RateSpec.Fixed(y),
                 notional = NotionalSpec(bd("1000000")),
-                dates = DateRules(WEEKENDS, DateRoll.FOLLOWING, adjustAccrualPeriod = false, adjustPaymentDate = false),
+                dates = DateRules(
+                    WEEKENDS,
+                    BusinessDayConvention.FOLLOWING,
+                    adjustAccrualPeriod = false,
+                    adjustPaymentDate = false,
+                ),
                 dayCount = DayCount.THIRTY_E_360,
             )
             val curve = object : DiscountCurve {
