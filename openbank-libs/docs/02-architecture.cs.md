@@ -6,6 +6,7 @@
 flowchart LR
   Service[Quarkus služba] --> Runtime[openbank-libs-runtime]
   Runtime --> Domain[openbank-libs-domain]
+  Finance[openbank-libs-finance] --> Domain
   Legacy[openbank-libs kompatibilitní zastřešení] --> Runtime
   Legacy --> Domain
   Runtime --> DocsResource[DocsResource /q/openbank/docs]
@@ -14,6 +15,8 @@ flowchart LR
 ```
 
 `openbank-libs-domain` obsahuje sdílené doménové primitivy a porty. Jeho build definuje hranici bez frameworku; modul nesmí importovat Quarkus ani CDI. `openbank-libs-runtime` obsahuje frameworkové adaptéry, HTTP resource a CDI zapojení. Konzumentům exportuje doménové typy. Kořenový `openbank-libs` zůstává kompatibilitním zastřešením starších závislostí; zdrojové kódy knihovny již nevlastní.
+
+`openbank-libs-finance` používá z doménového jádra `BusinessCalendar` a `BusinessDayConvention` pro finanční harmonogramy. Název `DateRoll` je v Kotlinu typový alias sdílené konvence, nikoli druhý enum. `UNADJUSTED` ponechá datum beze změny i o svátku; pořadí a chování čtyř dosavadních konvencí zůstává stejné. Zavírací dny kalendáře a případné mimořádné svátky vstupují do otisku harmonogramu, takže jejich změna může změnit jeho verzi.
 
 Služba vlastní dokumenty v `src/main/resources/docs/`. Společná Gradle konvence při `processResources` vytvoří `00-build.md` a zabalí jej vedle ručně psaných Markdown souborů. `ClasspathMarkdownLoader` čte tyto zdroje z classpath, `DocsCatalog` vybírá jazykové varianty a počítá otisky, `DocsResource` publikuje index, metadata a dokumenty z běžícího buildu. Admin UI čte běžící endpoint přes Kubernetes discovery. Zobrazená dokumentace služby tak odpovídá nasazenému image.
 
