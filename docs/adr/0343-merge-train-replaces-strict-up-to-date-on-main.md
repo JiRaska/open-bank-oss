@@ -257,6 +257,27 @@ symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are consider
 money-path, governance and workflow PRs is already human-only through the owner's local hook — the
 strict lane adds no new way for an unarmed or agent-armed workflow change to reach main.
 
+**Stale-red refresh.** When `main` itself breaks, every armed PR whose CI runs meanwhile goes red on
+that context — and stays red after main is fixed, because neither the train nor the strict lane
+touches a red PR (on the first day of phase 1 a broken deploy-hold gate left seven PRs to be
+updated by hand). So `settle` refreshes a red PR whose red is *main's*, not its own. An armed,
+non-draft, same-repo PR that `agent-pr-guard` did not refuse is refreshed only when all hold:
+1. a required context other than `merge-train` is FAILURE on its head;
+2. its head is behind live main (`merge-base --is-ancestor` fails);
+3. every such failing context is attributable to main: at `mb = merge-base(head, live main)` — or
+   the nearest first-parent ancestor of `mb` with a completed result — main's own CI reported that
+   same context as FAILURE, and on the live tip (or its nearest ancestor with a completed result,
+   i.e. the latest completed main run) it is now green.
+
+Then settle calls update-branch for it (`stale-red refresh: <context> was red on main <mb12>, green
+on <tip12>`, reported under `refreshed`), oldest first, at most two per tick, never in shadow.
+**It cannot loop.** After the refresh the PR's merge-base *is* the fixed main, on which the context is
+green, so if the PR is still red, condition 3 fails — the red is now its own and it is left alone;
+and a PR that is not behind fails condition 2 outright. A PR red on its own merits (the context was
+green on main at its base) is never refreshed at all. Like the strict lane it uses the App token,
+git queries and the API only, and executes no PR code; it adds no merge, only the update a human
+would otherwise click.
+
 ### What the train is NOT
 
 It is not a replacement for a PR's own CI: a PR that is red on its own head never qualifies. It is
