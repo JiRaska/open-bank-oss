@@ -44,10 +44,35 @@ interface ServiceHealth {
 }
 
 const EVIDENCE_FETCH_TIMEOUT_MS = 8_000
+const HEALTH_VALUES = new Set(['UP', 'DOWN', 'UNKNOWN'])
+
+type ServiceHealthPayload = {
+  services?: { name: string; status: 'UP' | 'DOWN' | 'UNKNOWN' }[]
+  byContainer?: Record<string, { status: 'UP' | 'DOWN' | 'UNKNOWN' }>
+}
+
+function isServiceHealthPayload(value: unknown): value is ServiceHealthPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const payload = value as Record<string, unknown>
+  if ('services' in payload) {
+    return Array.isArray(payload.services) && payload.services.length > 0
+      && payload.services.every(service => service !== null && typeof service === 'object'
+        && typeof (service as { name?: unknown }).name === 'string'
+        && (service as { name: string }).name.trim().length > 0
+        && typeof (service as { status?: unknown }).status === 'string'
+        && HEALTH_VALUES.has((service as { status: string }).status))
+  }
+  const byContainer = payload.byContainer
+  return byContainer !== null && typeof byContainer === 'object' && !Array.isArray(byContainer)
+    && Object.keys(byContainer).length > 0
+    && Object.entries(byContainer as Record<string, unknown>).every(([container, entry]) => container.trim().length > 0
+      && entry !== null && typeof entry === 'object'
+      && typeof (entry as { status?: unknown }).status === 'string'
+      && HEALTH_VALUES.has((entry as { status: string }).status))
+}
 
 export default function BcpPage() {
   const { t, language } = useLanguage()
-  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [health, setHealth] = useState<ServiceHealth>({})
   const [tiers, setTiers] = useState<BcpTier[]>([])
   const [catalogServiceNames, setCatalogServiceNames] = useState<string[]>([])
@@ -60,7 +85,8 @@ export default function BcpPage() {
   const [graphAvailable, setGraphAvailable] = useState(false)
   const [infraAssets, setInfraAssets] = useState<{ id: string; label: string }[]>([])
   const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<Date | null>(null)
+  const [healthRefreshState, setHealthRefreshState] = useState<'current' | 'partial' | 'unavailable'>('current')
   const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [expandedTiers, setExpandedTiers] = useState<Set<number>>(new Set([0, 1, 2]))
   const refreshGeneration = useRef(0)
@@ -89,11 +115,9 @@ export default function BcpPage() {
       // `services[]` array (the shape the Dashboard consumes); fall back to the
       // legacy `byContainer` map so a future endpoint that drops one shape can't
       // silently blank every tier to UNKNOWN.
-      if (svcRes.status === 'fulfilled' && svcRes.value) {
-        const data = svcRes.value as {
-          services?: { name: string; status: string }[]
-          byContainer?: Record<string, { status: string }>
-        }
+      const serviceHealthAvailable = svcRes.status === 'fulfilled' && isServiceHealthPayload(svcRes.value)
+      if (serviceHealthAvailable) {
+        const data = svcRes.value as ServiceHealthPayload
         if (Array.isArray(data.services)) {
           const statusesByName = new Map<string, ('UP' | 'DOWN' | 'UNKNOWN')[]>()
           for (const service of data.services) {
@@ -150,22 +174,37 @@ export default function BcpPage() {
       }
       // Infra: /api/infra/status is already keyed by the stable infra id
       // (postgres, kafka, keycloak, …) — the same ids the Tier 0/5 entries use.
-      if (infraRes.status === 'fulfilled' && infraRes.value) {
+      const infraHealthAvailable = infraRes.status === 'fulfilled' && infraRes.value !== null
+        && typeof infraRes.value === 'object' && !Array.isArray(infraRes.value)
+        && Object.keys(infraRes.value as Record<string, unknown>).length > 0
+        && Object.values(infraRes.value as Record<string, unknown>).every(entry => entry !== null
+          && typeof entry === 'object' && typeof (entry as { status?: unknown }).status === 'string'
+          && HEALTH_VALUES.has((entry as { status: string }).status))
+      if (infraHealthAvailable) {
         const data = infraRes.value as Record<string, { status: string }>
         for (const [id, entry] of Object.entries(data)) {
           mapped[id] = toStatus(entry.status)
         }
       }
-      if (generation === refreshGeneration.current) setHealth(mapped)
+      if (generation === refreshGeneration.current) {
+        setHealth(mapped)
+        const discoveryComplete = serviceHealthAvailable
+          && (svcRes.value as ServiceHealthPayload & { discoveryStatus?: unknown }).discoveryStatus === 'complete'
+        const complete = discoveryComplete && infraHealthAvailable
+        setHealthRefreshState(complete ? 'current' : serviceHealthAvailable || infraHealthAvailable ? 'partial' : 'unavailable')
+        if (complete) setLastSuccessfulRefresh(new Date())
+      }
     } catch {
       // A failed refresh must not relabel the previous observation as current.
-      if (generation === refreshGeneration.current) setHealth({})
+      if (generation === refreshGeneration.current) {
+        setHealth({})
+        setHealthRefreshState('unavailable')
+      }
     } finally {
       clearTimeout(timeout)
       if (generation === refreshGeneration.current) {
         refreshController.current = null
         setLoading(false)
-        setLastRefresh(new Date())
       }
     }
   }
@@ -274,9 +313,9 @@ export default function BcpPage() {
         subtitle={t('Prioritizovaný plán obnovy dle DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines', 'Prioritized recovery plan per DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines')}
         icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: 'var(--danger)' }} />}
         actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {lastRefresh && (
+          {lastSuccessfulRefresh && (
             <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-              {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString(dateLocale)}
+              {t('Poslední úspěšné načtení:', 'Last successful refresh:')} {lastSuccessfulRefresh.toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-GB')}
             </span>
           )}
           <PrintDocumentButton />
@@ -301,6 +340,16 @@ export default function BcpPage() {
       />
 
       <ContentSourceNote source={contentSource} />
+
+      {healthRefreshState !== 'current' && (
+        <div role="status" aria-live="polite" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid var(--warning-border)', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--text-primary)' }}>
+          {healthRefreshState === 'partial'
+            ? t('Některé údaje o provozním stavu jsou neúplné nebo nedostupné; neověřené stavy jsou označené.', 'Some health sources are incomplete or unavailable; unverified statuses are marked as such.')
+            : lastSuccessfulRefresh
+              ? t('Health zdroje nejsou dostupné; poslední úplné načtení zůstává uvedené výše.', 'Health sources are unavailable; the last complete refresh remains shown above.')
+              : t('Health zdroje nejsou dostupné a zatím není k dispozici úplné načtení.', 'Health sources are unavailable and no complete refresh is available yet.')}
+        </div>
+      )}
 
       {/* Summary stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
