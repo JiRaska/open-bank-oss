@@ -421,8 +421,9 @@ def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, l
         fails.append("D8: issue discovery does not use the bounded body-marker search endpoint.")
     if "return issues.find(i => (i.body || '').includes(m))" not in body:
         fails.append("D8: search results are not checked for the exact issue marker.")
-    if "openBlind.title !== bTitle || openBlind.body !== bBody" not in body or \
-        "open.title !== title || open.body !== body" not in body:
+    if "matchesRenderedIssue(openBlind, bTitle, bBody)" not in body or \
+        "matchesRenderedIssue(open, title, body)" not in body or \
+        "withoutAutomationFooter" not in body:
         fails.append("D8: identical blind/findings issue bodies are still written on every run.")
     if "_Automated: \\`${context.workflow}\\` run ${context.runId}" in body:
         fails.append("D8: the stable issue body still embeds a volatile run id.")
