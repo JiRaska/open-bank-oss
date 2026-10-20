@@ -425,6 +425,8 @@ def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, l
         "per_page: 100, page" not in body or \
         "for (let page = 1; page <= 10; page += 1)" not in body or \
         "if (match) return match" not in body or \
+        "if (data.incomplete_results)" not in body or \
+        "Issue marker search returned incomplete results" not in body or \
         "throw new Error(`Issue marker search exceeded the 1,000-result cap" not in body:
         fails.append(
             "D8: marker search must stop on the first exact match and fail closed at the Search API cap."
@@ -583,6 +585,15 @@ def self_test() -> int:
         if not any(f.startswith("D8") for f in fails):
             bad.append("D8 accepted marker search that does not return immediately on a match")
 
+        # 8g. Incomplete Search API results are not proof that the marker is absent.
+        incomplete_search = valid_workflow.replace(
+            "if (data.incomplete_results)", "if (false)", 1,
+        )
+        p.write_text(incomplete_search)
+        _, fails = check_declaration(Path(td))
+        if not any(f.startswith("D8") for f in fails):
+            bad.append("D8 accepted incomplete marker search results as proof of absence")
+
         # 8d. D7, falsified on its own rather than only inside the everything-broken file.
         #     Each half must fire alone, because each alone rebuilds the blind spot: gating the
         #     escalation on the scan succeeding skips it when blind, and a shared marker lets a
@@ -632,7 +643,7 @@ def self_test() -> int:
         return 1
     print(
         f"self-test: {len(SIGNAL_DETAILS)} signal + {len(BENIGN_DETAILS)} benign detail strings, "
-        "dedup, rule-type scoping, suite-result scoping and 6 declaration falsifications all "
+        "dedup, rule-type scoping, suite-result scoping and 7 declaration falsifications all "
         "behaved as required"
     )
     return 0

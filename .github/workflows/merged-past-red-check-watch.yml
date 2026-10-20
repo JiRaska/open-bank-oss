@@ -187,6 +187,9 @@ jobs:
                 })
                 const match = data.items.find(i => (i.body || '').includes(m))
                 if (match) return match
+                if (data.incomplete_results) {
+                  throw new Error(`Issue marker search returned incomplete results for ${m}; refusing to create a duplicate`)
+                }
                 if (data.items.length < 100 || page * 100 >= data.total_count) return undefined
               }
               throw new Error(`Issue marker search exceeded the 1,000-result cap for ${m}; refusing to create a duplicate`)
