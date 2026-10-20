@@ -133,6 +133,7 @@ export default function CardsPage() {
                 idle: t('card-issuance spí (scale-to-zero), probouzí se…', 'card-issuance idle (scaled to zero), waking…'),
                 down: t('card-issuance neodpovídá', 'card-issuance is not responding'),
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
               }}
             />
             {canIssue && (

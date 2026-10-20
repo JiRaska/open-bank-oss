@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { workloadHealthIdentity } from '@/lib/health/workloadHealth'
+
 export const FLEET_GROUPS = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform'] as const
 export type FleetGroup = typeof FLEET_GROUPS[number]
 
 export type GovernanceFleetMember = { name: string; group: FleetGroup }
 export type DashboardHealthEntry = {
   name: string
+  namespace?: string
+  port?: number
   label: string
   group: FleetGroup
   status: 'UP' | 'DOWN' | 'UNKNOWN'
@@ -66,12 +70,19 @@ export function parseDashboardHealth(value: unknown): DashboardHealthEntry[] {
     if (latencyMs !== null && (typeof latencyMs !== 'number' || !Number.isFinite(latencyMs) || latencyMs < 0)) {
       throw new Error('Invalid health latency')
     }
+    const namespace = item.namespace === undefined ? undefined : text(item.namespace, 63)
+    const port = item.port === undefined ? undefined : item.port
+    if (port !== undefined && (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65_535)) {
+      throw new Error('Invalid health port')
+    }
     return {
       name: identifier(item.name),
+      ...(namespace ? { namespace } : {}),
+      ...(port !== undefined ? { port } : {}),
       label: text(item.label),
       group: group(item.group),
       status,
       latencyMs,
     }
-  }), item => item.name)
+  }), workloadHealthIdentity)
 }

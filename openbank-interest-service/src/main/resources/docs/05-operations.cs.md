@@ -52,6 +52,8 @@ Naplánované úlohy (konfigurační klíče pod `openbank.interest`):
 
 Placeholder tajemství jsou jen pro dev; produkce musí injektovat reálné hodnoty přes Vault (ADR-0017).
 
+Všechna odchozí volání mezi službami (ledger, transaction-service, account-service, party-service a od #8481 i čtení produktového katalogu) se autentizují pojmenovaným oidc-clientem `ledger`: Keycloak klient `openbank-interest` s vlastním secretem `OIDC_LEDGER_CLIENT_SECRET`, nikdy sdílený principal `openbank-services`. Čtení produktového katalogu má pro `service-account-openbank-interest` v `account_rest_ext.rego` oprávnění `catalog.read` (pouze publikovaná verze); sdílený klient s `OIDC_CLIENT_SECRET` zůstává nakonfigurovaný jako výchozí, ale žádný rest-client jej nevybírá.
+
 ## Health checky
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC běží.
@@ -128,3 +130,9 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Zaúčtování odvodu srážkové daně
+
+Konzument odvodu srážkové daně zaúčtovává debet přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319). Dávku vypořádá jen čitelná transakce ve stavu COMPLETED; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 je idempotentní úspěch. Odmítnutí 400/422 vyhodí `WithholdingRemittanceBookingFailedException`, takže konektor událost přesměruje do DLQ. Jakákoli jiná odpověď nebo ztracené spojení se vyhodí a zopakuje se se stejným idempotentním klíčem. Datum splatnosti, které není ISO datum, se odmítne jednorázově před opakováním a skončí v DLQ. Konfigurace se nezměnila.
+
+Před logováním opakovaných pokusů se u výjimek nejistého dokončení zachová pouze řízený stav a odstraní se příčiny dekódování těla, které mohou obsahovat odpověď poskytovatele. Počty pokusů a původní idempotentní klíče se nemění. Ostatní logování výjimek a sdílený logger zavírání odpovědi nejsou součástí této omezené záruky.

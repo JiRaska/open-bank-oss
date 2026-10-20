@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { parseSecurityKpis } from '@/lib/security/kpiContract'
+import { SECURITY_KPI_MAX_AGE_MS, securityKpiCollectedAt, securityKpiSnapshotBaseUrl, validateSecurityKpiSnapshot } from '@/lib/security/kpiSnapshot'
 
 const snapshot = {
   generatedAt: '2026-09-10T02:00:00Z',
@@ -40,5 +41,21 @@ describe('security KPI evidence contract', () => {
   it('preserves a degraded collector without inventing zero values', () => {
     const result = parseSecurityKpis({ ...snapshot, mttr: { available: false, reason: 'source unavailable' } })
     expect(result.mttr).toEqual({ available: false, reason: 'source unavailable' })
+  })
+
+  it('uses the original generatedAt as the published evidence timestamp', () => {
+    expect(validateSecurityKpiSnapshot(snapshot, Date.parse('2026-09-10T02:01:00Z'))).toBe(true)
+    expect(securityKpiCollectedAt(parseSecurityKpis(snapshot))).toBe(snapshot.generatedAt)
+    expect(SECURITY_KPI_MAX_AGE_MS).toBe(8 * 24 * 60 * 60 * 1000)
+    expect(validateSecurityKpiSnapshot(snapshot, Date.parse('2026-09-10T01:54:59Z'))).toBe(false)
+  })
+
+  it('derives the independent dataset URL from the shared evidence store', () => {
+    process.env.OPENBANK_EVIDENCE_STORE_URL = 'https://evidence.example/store/'
+    expect(securityKpiSnapshotBaseUrl()).toBe('https://evidence.example/store/admin-ui/security-kpis')
+    process.env.OPENBANK_SECURITY_KPIS_SNAPSHOT_URL = 'https://override.example/kpis'
+    expect(securityKpiSnapshotBaseUrl()).toBe('https://override.example/kpis')
+    delete process.env.OPENBANK_EVIDENCE_STORE_URL
+    delete process.env.OPENBANK_SECURITY_KPIS_SNAPSHOT_URL
   })
 })

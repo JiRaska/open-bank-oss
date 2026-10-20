@@ -137,6 +137,26 @@ data class PartyCaseLifecycleResponse(
 
 data class ExternalIdResponse(val type: ExternalIdType, val value: String, val verifiedAt: OffsetDateTime?)
 
+/** Exact external-id lookup input; nullable fields let the REST boundary return 400 for omissions. */
+/** Identifier types intentionally accepted by the browser-safe, exact lookup endpoint. */
+enum class ExternalIdLookupType {
+    BANKID_SUB,
+    ROB_AIFO,
+    ICO,
+    PASSPORT_NUMBER,
+    ID_CARD_NUMBER,
+}
+
+data class ExternalIdLookupRequest(val type: ExternalIdLookupType?, val value: String?)
+
+/** PII-minimised response for the Admin UI's exact identifier lookup. */
+data class ExternalIdLookupResponse(
+    val partyId: UUID,
+    val status: PartyStatus,
+    val createdAt: OffsetDateTime,
+    val externalId: ExternalIdResponse,
+)
+
 data class CoreAttributesResponse(
     val givenName: String,
     val familyName: String,
