@@ -87,9 +87,15 @@ IDENT = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 def strip_comments(src: str) -> str:
-    src = re.sub(r"/\*.*?\*/", " ", src, flags=re.S)
-    src = re.sub(r"//[^\n]*", " ", src)
-    return re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
+    """Mask Kotlin strings and comments while preserving newlines and source positions."""
+    token = re.compile(
+        r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|/\*[\s\S]*?\*/|//[^\n]*'
+    )
+
+    def mask(match):
+        return "".join("\n" if c == "\n" else " " for c in match.group())
+
+    return token.sub(mask, src)
 
 
 def enum_entries(src: str, start: int) -> list[str]:
@@ -261,6 +267,21 @@ def self_test() -> int:
     def check(label, cond):
         if not cond:
             failures.append(label)
+
+    # Comment delimiters inside quoted strings must not hide real source declarations.
+    ordinary_string = 'val note = "contains // marker"; enum class Notice { DAYS_7, DAYS_30, NONE }'
+    ordinary = scan_sources([("svc-a", "a.kt", ordinary_string)])
+    check("ordinary string comment marker hid enum", len(ordinary) == 1 and ordinary[0][2] == "Notice")
+    # A declaration-looking sequence inside a raw string is data, not Kotlin code.
+    raw_string = (
+        'val note = """\n'
+        'enum class Fake { UP_TO_1K, UP_TO_2K, UP_TO_3K }\n'
+        '// enum class AlsoFake { DAYS_1, DAYS_2, DAYS_3 }\n'
+        '"""\n'
+        'enum class RealRaw { OPEN, CLOSED }\n'
+    )
+    raw = scan_sources([("svc-a", "b.kt", raw_string)])
+    check("raw string fake enum leaked", len(raw) == 1 and raw[0][2] == "RealRaw")
 
     # known-negative: closed vocabulary, tenors, protocol codes, same-module duplicates
     neg = findings(scan_sources([("svc-a", "a.kt", good), ("svc-a", "b.kt", dup_a), ("svc-a", "c.kt", dup_b)]))
