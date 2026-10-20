@@ -21,7 +21,7 @@ import { compareVersions, formatVersion, nodesText, versionText } from '@/lib/pl
 type Row = { metric: Record<string, string>; value: [number, string] }
 const prom = (rows: Row[]) => new Response(JSON.stringify({ status: 'success', data: { result: rows } }), { status: 200 })
 const row = (metric: Record<string, string>, v: number): Row => ({ metric, value: [0, String(v)] })
-const imageRow = (image: string, observedAt: number): Row => row({ image }, observedAt)
+const imageRow = (image: string, observedAt: number, container?: string): Row => row({ image, ...(container ? { container } : {}) }, observedAt)
 
 /** Mock Prometheus keyed on which query string was sent. */
 function mockProm(answers: Partial<Record<keyof typeof QUERIES, Row[]>>): typeof fetch {
@@ -115,9 +115,9 @@ describe('live snapshot from mocked Prometheus', () => {
     nodesReady: [row({}, 2)],
     nodesTotal: [row({}, 3)],
     images: [
-      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000),
-      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000),
-      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000),
+      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000, 'kafka'),
+      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000, 'kafka'),
+      imageRow('quay.io/strimzi/kafka:0.77.0-kafka-9.8.7', fixedNow.getTime() / 1000, 'kafka'),
     ],
   })
 
@@ -143,9 +143,33 @@ describe('live snapshot from mocked Prometheus', () => {
     })
     const s = await fetchLiveSnapshot(query, () => fixedNow)
     expect(QUERIES.images).toContain('kube_pod_container_status_running == 1')
+    expect(QUERIES.images).toContain('on (namespace, pod, container)')
     expect(s.components['schema-registry']).toEqual([{ version: '2.6.2', count: 1, observedAt: fixedNow.toISOString() }])
     expect(s.components.grafana).toBeUndefined()
     expect(s.available).toBe(true)
+  })
+
+  it('uses the Kafka broker container version and ignores a newer kafka-exporter image', async () => {
+    const fixedNow = new Date('2026-10-19T18:00:00.000Z')
+    const observedAt = fixedNow.getTime() / 1000
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [
+        imageRow('quay.io/strimzi/kafka:1.2.0-kafka-4.2.0', observedAt, 'kafka'),
+        imageRow('quay.io/strimzi/kafka:1.2.0-kafka-4.3.1', observedAt, 'kafka-exporter'),
+      ],
+    }), () => fixedNow)
+    expect(s.components.kafka).toEqual([{ version: '4.2.0', count: 1, observedAt: fixedNow.toISOString() }])
+  })
+
+  it('keeps Kafka version unknown when Prometheus sees only exporter or unclassified containers', async () => {
+    const fixedNow = new Date('2026-10-19T18:00:00.000Z')
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [
+        imageRow('quay.io/strimzi/kafka:1.2.0-kafka-4.3.1', fixedNow.getTime() / 1000, 'kafka-exporter'),
+        imageRow('quay.io/strimzi/kafka:1.2.0-kafka-4.2.1', fixedNow.getTime() / 1000),
+      ],
+    }), () => fixedNow)
+    expect(s.components.kafka).toBeUndefined()
   })
 
   it('does not turn a digest identity into a declared-version drift claim', async () => {

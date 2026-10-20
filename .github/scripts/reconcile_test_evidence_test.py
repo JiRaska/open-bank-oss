@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
@@ -84,22 +83,24 @@ class GhJsonTests(unittest.TestCase):
         self.assertEqual(self.count_calls(), 2)
 
     def test_final_404_fails_without_retry(self):
-        with mock.patch.dict(os.environ, {"GH_STUB_MODE": "not_found"}):
-            with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
-                RECONCILE.gh_json("repos/org/repo/actions/runs")
+        with mock.patch.dict(os.environ, {"GH_STUB_MODE": "not_found"}), \
+                self.assertRaisesRegex(RuntimeError, "HTTP 404"):
+            RECONCILE.gh_json("repos/org/repo/actions/runs")
         self.assertEqual(self.count_calls(), 1)
 
     def test_invalid_json_fails_without_retry(self):
-        with mock.patch.dict(os.environ, {"GH_STUB_MODE": "invalid_json"}):
-            with self.assertRaisesRegex(RuntimeError, "returned invalid JSON"):
-                RECONCILE.gh_json("repos/org/repo/actions/runs")
+        with mock.patch.dict(os.environ, {"GH_STUB_MODE": "invalid_json"}), \
+                self.assertRaisesRegex(RuntimeError, "returned invalid JSON"):
+            RECONCILE.gh_json("repos/org/repo/actions/runs")
         self.assertEqual(self.count_calls(), 1)
 
     def test_total_timeout_terminates_wrapper_and_children(self):
-        with mock.patch.dict(os.environ, {"GH_STUB_MODE": "timeout"}):
-            with mock.patch.object(RECONCILE, "GH_API_TOTAL_TIMEOUT_SECONDS", 1):
-                with self.assertRaisesRegex(RuntimeError, "exceeded its 1s total budget"):
-                    RECONCILE.gh_json("repos/org/repo/actions/runs")
+        with (
+            mock.patch.dict(os.environ, {"GH_STUB_MODE": "timeout"}),
+            mock.patch.object(RECONCILE, "GH_API_TOTAL_TIMEOUT_SECONDS", 1),
+            self.assertRaisesRegex(RuntimeError, "exceeded its 1s total budget"),
+        ):
+            RECONCILE.gh_json("repos/org/repo/actions/runs")
         self.assertEqual(self.count_calls(), 1)
 
 

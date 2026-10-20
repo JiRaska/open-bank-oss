@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.8.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.8...admin-ui-v3.8.9) (2026-10-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive complete inventory and Kafka versions from source evidence ([#13466](https://github.com/JiRaska/open-bank-oss/issues/13466)) ([b3944f4](https://github.com/JiRaska/open-bank-oss/commit/b3944f497cb395f3da82265c4f88dd1451dd4359))
+* **admin-ui:** expose security evidence source and freshness ([#13465](https://github.com/JiRaska/open-bank-oss/issues/13465)) ([9e9545a](https://github.com/JiRaska/open-bank-oss/commit/9e9545a59bccb3b17d6f7deec14a57d6a5fe4505))
+
 ## [3.8.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.7...admin-ui-v3.8.8) (2026-10-20)
 
 
