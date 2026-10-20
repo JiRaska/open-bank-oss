@@ -120,6 +120,9 @@ own pull_request lane is only a fast echo. The rules:
       or overwrite the findings issue. Without D7 the only signal is a red scheduled run — which
       is the #4019 blind spot this file's ESCALATION section already rejects, and which this
       watch then reproduced for 87 consecutive real runs.
+  D8  Issue discovery must search the marker instead of paginating the full labelled backlog,
+      and unchanged verdicts must not write the same issue body on every run. Volatile run ids
+      belong in Actions logs, not in the stable issue body.
 
 WHAT THIS CANNOT DO
 -------------------
@@ -331,12 +334,12 @@ def _strip_comments(text: str) -> str:
     return "\n".join(re.sub(r"(?<!\S)#.*$", "", line) for line in text.splitlines())
 
 
-# The declaration lane's corpus: one workflow file, six rules applied to it. Reported through
+# The declaration lane's corpus: one workflow file, eight rules applied to it. Reported through
 # gatelib.subjects so a vanished workflow reads as "this gate examined nothing" rather than as a
 # pass — the #4339 failure mode, where a moved path turns a gate into a green no-op.
 BLIND_MARKER = "<!-- merged-past-red-check-blind -->"
 
-RULE_IDS = ("D1", "D2", "D3", "D4", "D5", "D6", "D7")
+RULE_IDS = ("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8")
 
 
 def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, list[str]]:
@@ -409,6 +412,20 @@ def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, l
             f"D7: no distinct `{BLIND_MARKER}` marker — the blind state would share an issue with "
             "the findings state, and a later clean window would close it."
         )
+
+    # D8 — keep issue discovery bounded and repeated writes idempotent. GitHub tokenizes the
+    # search query, so post-filter on the exact HTML marker before using an issue as a match.
+    if "github.rest.search.issuesAndPullRequests" not in body or "'in:body'" not in body or \
+        "A PR was merged while a required check was FAILING" not in body or \
+        "This watch could not read the ruleset bypass log" not in body:
+        fails.append("D8: issue discovery does not use the bounded body-marker search endpoint.")
+    if "return issues.find(i => (i.body || '').includes(m))" not in body:
+        fails.append("D8: search results are not checked for the exact issue marker.")
+    if "openBlind.title !== bTitle || openBlind.body !== bBody" not in body or \
+        "open.title !== title || open.body !== body" not in body:
+        fails.append("D8: identical blind/findings issue bodies are still written on every run.")
+    if "_Automated: \\`${context.workflow}\\` run ${context.runId}" in body:
+        fails.append("D8: the stable issue body still embeds a volatile run id.")
 
     # THIS script must still be the thing that keys on `failing`, not on the suite result.
     if not FAILING_RE.search("is failing.") or is_merge_past_red(
@@ -528,13 +545,24 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / WORKFLOW
         p.parent.mkdir(parents=True, exist_ok=True)
+        current = Path(__file__).resolve().parents[2] / WORKFLOW
+        valid_workflow = current.read_text()
         p.write_text(broken)
         code, fails = check_declaration(Path(td))
         if code == 0:
             bad.append("declaration passed a workflow with no time_period, no pagination, no issue")
-        for want in ("D1", "D2", "D3", "D4", "D5", "D6", "D7"):
+        for want in ("D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8"):
             if not any(f.startswith(want) for f in fails):
                 bad.append(f"declaration did not raise {want} against the deliberately broken file")
+
+        # 8e. D8 must fail on a workflow whose ONLY regression is returning to the unbounded
+        #     all-issues endpoint. This pins the quota fix into the existing declaration gate.
+        p.write_text(valid_workflow.replace(
+            "github.rest.search.issuesAndPullRequests", "github.rest.issues.listForRepo", 1,
+        ))
+        _, fails = check_declaration(Path(td))
+        if not any(f.startswith("D8") for f in fails):
+            bad.append("D8 accepted a workflow that paginates every labelled issue")
 
         # 8d. D7, falsified on its own rather than only inside the everything-broken file.
         #     Each half must fire alone, because each alone rebuilds the blind spot: gating the
@@ -585,7 +613,7 @@ def self_test() -> int:
         return 1
     print(
         f"self-test: {len(SIGNAL_DETAILS)} signal + {len(BENIGN_DETAILS)} benign detail strings, "
-        "dedup, rule-type scoping, suite-result scoping and 5 declaration falsifications all "
+        "dedup, rule-type scoping, suite-result scoping and 6 declaration falsifications all "
         "behaved as required"
     )
     return 0
@@ -612,7 +640,7 @@ def main() -> int:
         for f in fails:
             print(f"::error::{f}")
         if code == 0:
-            print(f"declaration holds: {WORKFLOW} satisfies D1-D7")
+            print(f"declaration holds: {WORKFLOW} satisfies D1-D8")
         return code
     if args.scan:
         return scan(args)

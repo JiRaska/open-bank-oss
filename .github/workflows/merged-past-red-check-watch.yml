@@ -168,11 +168,19 @@ jobs:
             const blindMarker = '<!-- merged-past-red-check-blind -->'
             const REOPEN_WINDOW_DAYS = 14
 
-            // Find by MARKER, not by title: the title carries a count and moves.
+            // Search a distinctive body phrase instead of walking every historical fleet-health
+            // issue. The list grows over time and can consume the installation's shared core API
+            // quota, particularly when a closed marker issue must be found again (#8690).
             const findByMarker = async (state, m) => {
-              const issues = await github.paginate(github.rest.issues.listForRepo, {
-                ...context.repo, state, labels: LABEL, per_page: 100,
-                sort: 'updated', direction: 'desc',
+              const phrase = m === blindMarker
+                ? '"This watch could not read the ruleset bypass log"'
+                : '"A PR was merged while a required check was FAILING"'
+              const query = [
+                `repo:${context.repo.owner}/${context.repo.repo}`,
+                'is:issue', `is:${state}`, `label:${LABEL}`, 'in:body', phrase,
+              ].join(' ')
+              const issues = await github.paginate(github.rest.search.issuesAndPullRequests, {
+                q: query, per_page: 100,
               })
               return issues.find(i => (i.body || '').includes(m))
             }
@@ -208,15 +216,17 @@ jobs:
                 'This issue is refreshed while the watch stays blind and is closed by the watch',
                 'itself on the first run that produces a verdict.',
                 '',
-                `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4791)._`,
+                `_Automated by \`${context.workflow}\` (issue #4791)._`,
               ].join('\n')
 
               const openBlind = await findByMarker('open', blindMarker)
-              if (openBlind) {
+              if (openBlind && (openBlind.title !== bTitle || openBlind.body !== bBody)) {
                 await github.rest.issues.update({
                   ...context.repo, issue_number: openBlind.number, title: bTitle, body: bBody,
                 })
                 core.info(`refreshed blind #${openBlind.number}`)
+              } else if (openBlind) {
+                core.info(`blind #${openBlind.number} unchanged; no issue write needed`)
               } else {
                 const created = await github.rest.issues.create({
                   ...context.repo, title: bTitle, body: bBody, labels: [LABEL],
@@ -284,13 +294,17 @@ jobs:
               'closed by the watch itself when the window comes back clean. Each row ages out on its',
               'own; closing it by hand does not.',
               '',
-              `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4240)._`,
+              `_Automated by \`${context.workflow}\` (issue #4240)._`,
             ].join('\n')
 
             const open = await findByMarker('open', marker)
             if (open) {
-              await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
-              core.info(`refreshed #${open.number}`)
+              if (open.title !== title || open.body !== body) {
+                await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
+                core.info(`refreshed #${open.number}`)
+              } else {
+                core.info(`#${open.number} unchanged; no issue write needed`)
+              }
               return
             }
             const closed = await findByMarker('closed', marker)
