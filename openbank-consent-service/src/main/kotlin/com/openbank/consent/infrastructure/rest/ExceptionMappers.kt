@@ -15,9 +15,9 @@ import java.time.Instant
 
 private const val HTTP_UNPROCESSABLE_ENTITY = 422
 
-private fun errorResponse(code: ErrorCode, message: String) = ApiError(
+private fun errorResponse(code: ErrorCode, message: String, status: Int = code.httpStatus) = ApiError(
     traceId = Ids.randomId().toString(),
-    status = code.httpStatus,
+    status = status,
     code = code.code,
     message = message,
     timestamp = Instant.now(),
@@ -54,6 +54,7 @@ class ConsentMixedScopeMapper : ExceptionMapper<ConsentMixedScopeException> {
             errorResponse(
                 ErrorCode.VALIDATION_ERROR,
                 e.message ?: "Cannot mix GDPR-only and SCA-required scopes",
+                HTTP_UNPROCESSABLE_ENTITY,
             ),
         )
         .build()

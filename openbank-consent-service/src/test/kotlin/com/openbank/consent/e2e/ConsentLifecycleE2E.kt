@@ -24,6 +24,7 @@ import jakarta.enterprise.inject.Alternative
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -416,6 +417,7 @@ class ConsentLifecycleE2E {
             post("/api/v1/consents")
         } Then {
             statusCode(422)
+            body("status", equalTo(422))
         }
     }
 
