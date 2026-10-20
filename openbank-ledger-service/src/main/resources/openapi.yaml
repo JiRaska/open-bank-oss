@@ -1458,7 +1458,12 @@ components:
         participant: { type: string }
         status:
           type: string
-          enum: [RAN, SKIPPED, REFUSED, WAIVED, MISSING]
+          description: >
+            RAN, SKIPPED and REFUSED are outcomes reported by product services.
+            WAIVED is recorded by a ledger operator; MISSING means no record exists.
+          oneOf:
+            - enum: [RAN, SKIPPED, REFUSED]
+            - enum: [WAIVED, MISSING]
         journalsPosted: { type: integer, minimum: 0 }
         itemsProcessed: { type: integer, minimum: 0 }
         reason: { type: string, nullable: true }
