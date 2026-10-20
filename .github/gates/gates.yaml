@@ -3590,6 +3590,27 @@ gates:
   # reported too. Self-test first — the must-NOT-flag half is what matters here,
   # since an outbound REST-client interface carries the identical annotation and
   # is not a defect (52 of the 115 raw matches on main). ENFORCED.
+  # ADR-0257 says the product-catalog kernel "contains no bank, insurance or telecom enum"; a
+  # pension approval workflow landed inside it anyway (#13429) and nothing noticed. Default-deny:
+  # every Kotlin file is kernel unless rules.yaml catalog_kernel_neutrality names it, and the pack
+  # vocabulary is DERIVED from catalog-packs/, so a new pack extends the check by existing.
+  - id: catalog-kernel-industry-neutral
+    name: "product-catalog kernel carries no industry vocabulary; legacy v1 enums frozen (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      A pack-specific enum, schema-id branch or column in the generic catalog kernel compiles,
+      passes every test and reads as a reasonable feature, so only a decidable check keeps
+      industry vocabulary in pack data where ADR-0257 put it.
+    review_after: 2027-04-20
+    min_subjects: 30   # 43 Kotlin files in the service on 2026-10-20
+    budget_seconds: 10   # 0.4 s measured 2026-10-20
+    selftest: python3 .github/scripts/check-catalog-kernel-neutral.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-catalog-kernel-neutral.py"]
+    run: |
+      python3 .github/scripts/check-catalog-kernel-neutral.py
+
   - id: nonnull-jaxrs-param-ratchet
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin

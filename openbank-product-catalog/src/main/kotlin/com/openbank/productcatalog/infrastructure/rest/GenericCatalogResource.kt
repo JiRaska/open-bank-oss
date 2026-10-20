@@ -379,8 +379,11 @@ class GenericCatalogResource(
         createdAt = revision.createdAt.atOffset(ZoneOffset.UTC),
         updatedAt = revision.updatedAt.atOffset(ZoneOffset.UTC),
         revision = revision.revision,
-        pensionApprovalDigest = revision.pensionApprovalDigest,
-        pensionApprovedEffectiveTo = revision.pensionApprovedEffectiveTo?.atOffset(ZoneOffset.UTC),
+        approvalDigest = revision.approvalDigest,
+        approvedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
+        // Deprecated wire aliases of the two fields above (#13429); removed with the compatibility window.
+        pensionApprovalDigest = revision.approvalDigest,
+        pensionApprovedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
     )
 
     private fun requiredRevision(ifMatch: String?): Long {
