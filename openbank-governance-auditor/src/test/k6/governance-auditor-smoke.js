@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // k6 smoke test for openbank-governance-auditor (ADR-0167 fleet governance sweep).
 // Runs a short read-only load against the findings list with lenient CI
 // thresholds.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // k6 smoke test for openbank-finops-agent (ADR-0119 daily cost-anomaly sweep).
 // Runs a short read-only load against the active-anomalies list with lenient CI
 // thresholds.

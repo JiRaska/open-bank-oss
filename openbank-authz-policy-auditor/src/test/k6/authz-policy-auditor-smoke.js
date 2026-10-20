@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // k6 smoke test for openbank-authz-policy-auditor (ADR-0167 weekly sweep findings).
 // Runs a short read-only load against the active-findings list with lenient CI
 // thresholds.

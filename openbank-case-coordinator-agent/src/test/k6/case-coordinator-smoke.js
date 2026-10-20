@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // k6 smoke test for openbank-case-coordinator-agent (case queue read lane).
 // Runs a short read-only load against the case list with lenient CI
 // thresholds.

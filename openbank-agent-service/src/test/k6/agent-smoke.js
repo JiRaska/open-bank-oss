@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: AGPL-3.0-only
 // k6 smoke test for openbank-agent-service (ADR-0031 HITL approval queue).
 // Runs a short read-only load against the proposals list with lenient CI
 // thresholds.
