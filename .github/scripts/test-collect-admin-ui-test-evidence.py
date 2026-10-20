@@ -19,7 +19,8 @@ COMPONENT = "openbank-example-service"
 SHA = "a" * 40
 RUN = {
     "id": 123, "run_attempt": 2, "head_sha": SHA, "head_branch": "main",
-    "path": ".github/workflows/services-ci.yml", "event": "push", "head_repository": "org/repo",
+    "path": ".github/workflows/services-ci.yml", "event": "push",
+    "head_repository": {"full_name": "org/repo"},
 }
 ENVELOPE = {
     "schemaVersion": 1,
@@ -43,13 +44,31 @@ def archive(files: dict[str, bytes]) -> bytes:
 
 
 class ArchiveTests(unittest.TestCase):
+    def payload(self, content, run=RUN, **kwargs):
+        return COLLECTOR.artifact_payload(
+            content, COMPONENT, run, repo_slug="org/repo",
+            expected_path=".github/workflows/services-ci.yml", **kwargs,
+        )
+
+    def test_merged_case_details_keep_existing_window_and_prioritize_failures(self):
+        rows = [{"fingerprint": str(index), "state": "stable", "name": str(index),
+                 "wastedDurationMs": 0, "lastObservedAt": "2026-10-18T00:00:00Z"} for index in range(2000)]
+        failure = {"fingerprint": "failed", "state": "failing", "name": "failure", "wastedDurationMs": 10}
+        core = {"testCases": [failure], "totals": {"passed": 12345}}
+        seed = {"schemaVersion": 1, "collectedAt": "2026-10-18T00:00:00Z", "testCases": rows}
+        result = COLLECTOR.merge_ancillary(core, seed)
+        self.assertEqual(len(result["testCases"]), 2000)
+        self.assertEqual(result["testCases"][0], failure)
+        self.assertEqual(result["totals"], {"passed": 12345})
+        self.assertTrue(any("1 historical detail rows omitted" in warning for warning in result["warnings"]))
+
     def test_stages_only_run_junit_and_kover_with_verified_identity(self):
-        payloads = COLLECTOR.artifact_payload(archive({
+        payloads = self.payload(archive({
             "run.json": json.dumps(ENVELOPE).encode(),
             "test-results/test/TEST-example.xml": b"<testsuite tests='1'/>\n",
             "reports/kover/report.xml": b"<report/>\n",
             "private/unrelated.txt": b"ignored",
-        }), COMPONENT, RUN)
+        }))
         self.assertEqual(set(payloads), {
             f"{COMPONENT}/build/test-intelligence/run.json",
             f"{COMPONENT}/build/test-results/test/TEST-example.xml",
@@ -67,12 +86,91 @@ class ArchiveTests(unittest.TestCase):
         for content, run in cases:
             with self.subTest(content=content[:20]):
                 with self.assertRaises(COLLECTOR.CollectionError):
-                    COLLECTOR.artifact_payload(content, COMPONENT, run)
+                    self.payload(content, run)
 
     def test_rejects_abbreviated_commit_even_when_it_prefix_matches_trusted_run(self):
         abbreviated = ENVELOPE | {"run": ENVELOPE["run"] | {"commit": SHA[:7]}}
         with self.assertRaisesRegex(COLLECTOR.CollectionError, "run identity"):
-            COLLECTOR.artifact_payload(archive({"run.json": json.dumps(abbreviated).encode()}), COMPONENT, RUN)
+            self.payload(archive({"run.json": json.dumps(abbreviated).encode()}))
+
+    def test_accepts_previous_attempt_only_when_exact_attempt_metadata_matches(self):
+        previous = RUN | {"run_attempt": 1,
+                          "run_started_at": "2026-10-19T11:00:00Z",
+                          "updated_at": "2026-10-19T12:30:00Z"}
+        old_envelope = ENVELOPE | {"run": ENVELOPE["run"] | {"attempt": 1}}
+        content = archive({"run.json": json.dumps(old_envelope).encode()})
+        payloads = self.payload(content, resolve_attempt=lambda run_id, attempt: previous,
+                                artifact_created_at="2026-10-19T12:10:00Z")
+        self.assertIn(f"{COMPONENT}/build/test-intelligence/run.json", payloads)
+
+        forged = [
+            previous | {"id": 124},
+            previous | {"run_attempt": 2},
+            previous | {"head_sha": "b" * 40},
+            previous | {"head_repository": "attacker/repo"},
+            previous | {"path": ".github/workflows/other.yml"},
+            previous | {"event": "pull_request"},
+        ]
+        for metadata in forged:
+            with self.subTest(metadata=metadata):
+                with self.assertRaisesRegex(COLLECTOR.CollectionError, "run identity"):
+                    self.payload(content, resolve_attempt=lambda _run_id, _attempt, metadata=metadata: metadata,
+                                 artifact_created_at="2026-10-19T12:10:00Z")
+
+    def test_rejects_future_attempt_and_unverified_previous_attempt(self):
+        future = ENVELOPE | {"run": ENVELOPE["run"] | {"attempt": 3}}
+        with self.assertRaisesRegex(COLLECTOR.CollectionError, "future"):
+            self.payload(archive({"run.json": json.dumps(future).encode()}))
+        previous = ENVELOPE | {"run": ENVELOPE["run"] | {"attempt": 1}}
+        with self.assertRaisesRegex(COLLECTOR.CollectionError, "metadata.*unavailable"):
+            self.payload(archive({"run.json": json.dumps(previous).encode()}))
+
+    def test_artifact_timestamp_must_fit_claimed_attempt(self):
+        previous = RUN | {"run_attempt": 1,
+                          "run_started_at": "2026-10-19T11:00:00Z",
+                          "updated_at": "2026-10-19T12:30:00Z"}
+        old_envelope = ENVELOPE | {"run": ENVELOPE["run"] | {"attempt": 1}}
+        content = archive({"run.json": json.dumps(old_envelope).encode()})
+        with self.assertRaisesRegex(COLLECTOR.CollectionError, "provenance"):
+            self.payload(content, resolve_attempt=lambda _run_id, _attempt: previous,
+                         artifact_created_at="2026-10-19T13:00:00Z")
+
+    def test_prior_attempt_requires_all_valid_aware_timestamps(self):
+        previous = RUN | {"run_attempt": 1,
+                          "run_started_at": "2026-10-19T11:00:00Z",
+                          "updated_at": "2026-10-19T12:30:00Z"}
+        old_envelope = ENVELOPE | {"run": ENVELOPE["run"] | {"attempt": 1}}
+        valid_created_at = "2026-10-19T12:10:00Z"
+        fields = ("run_started_at", "updated_at", "observedAt", "artifact_created_at")
+        for field in fields:
+            for invalid_value in (None, "not-a-timestamp", "2026-10-19T12:10:00"):
+                with self.subTest(field=field, value=invalid_value):
+                    attempt_metadata = dict(previous)
+                    evidence = old_envelope
+                    created_at = valid_created_at
+                    if field in {"run_started_at", "updated_at"}:
+                        if invalid_value is None:
+                            attempt_metadata.pop(field)
+                        else:
+                            attempt_metadata[field] = invalid_value
+                    elif field == "observedAt":
+                        run_data = dict(old_envelope["run"])
+                        if invalid_value is None:
+                            run_data.pop(field)
+                        else:
+                            run_data[field] = invalid_value
+                        evidence = old_envelope | {"run": run_data}
+                    else:
+                        created_at = invalid_value
+                    body = archive({"run.json": json.dumps(evidence).encode()})
+                    with self.assertRaises(COLLECTOR.CollectionError):
+                        self.payload(body, resolve_attempt=lambda _run_id, _attempt, attempt_metadata=attempt_metadata: attempt_metadata,
+                                     artifact_created_at=created_at)
+
+    def test_current_attempt_timestamps_remain_optional(self):
+        content = archive({"run.json": json.dumps(ENVELOPE).encode()})
+        self.assertIn(f"{COMPONENT}/build/test-intelligence/run.json",
+                      self.payload(content))
 
     def test_github_api_requests_reject_non_github_hosts_before_sending_credentials(self):
         for request in (COLLECTOR.api_json, COLLECTOR.api_bytes):
@@ -93,7 +191,7 @@ class ArchiveTests(unittest.TestCase):
             info.external_attr = (0o120777 << 16)
             zipped.writestr(info, json.dumps(ENVELOPE))
         with self.assertRaisesRegex(COLLECTOR.CollectionError, "symlink"):
-            COLLECTOR.artifact_payload(output.getvalue(), COMPONENT, RUN)
+            self.payload(output.getvalue())
 
 
 class CollectionTests(unittest.TestCase):
@@ -139,6 +237,7 @@ class CollectionTests(unittest.TestCase):
                 }), seed=seed, run_collector=self.fake_collector(seed),
             )
             report = json.loads(output.read_text())
+            self.assertEqual(output.read_text(), json.dumps(report, separators=(",", ":"), ensure_ascii=False) + "\n")
         self.assertEqual(result["staged"], [COMPONENT])
         self.assertEqual(report["components"], [])
         self.assertEqual(report["contracts"][0]["state"], "failed")
@@ -174,6 +273,41 @@ class CollectionTests(unittest.TestCase):
                               fetch_page=lambda *_: [artifact], fetch_run=lambda _: RUN,
                               fetch_archive=lambda _: archive({"run.json": json.dumps(ENVELOPE).encode()}),
                               seed=None, run_collector=self.fake_collector(None))
+
+    def test_caches_current_and_attempt_metadata_per_run_attempt(self):
+        second = "openbank-second-service"
+        (self.repo / second).mkdir()
+        (self.repo / second / "version.txt").write_text("1.0.0\n")
+        artifacts = {
+            7: {"id": 7, "name": f"test-intelligence-{COMPONENT}", "expired": False,
+                "created_at": "2026-10-19T12:10:00Z",
+                "workflow_run": {"id": 123, "head_branch": "main"}},
+            8: {"id": 8, "name": f"test-intelligence-{second}", "expired": False,
+                "created_at": "2026-10-19T12:10:00Z",
+                "workflow_run": {"id": 123, "head_branch": "main"}},
+        }
+        archives = {}
+        for artifact_id, component in ((7, COMPONENT), (8, second)):
+            envelope = ENVELOPE | {"component": component,
+                                   "run": ENVELOPE["run"] | {"attempt": 1}}
+            archives[artifact_id] = archive({"run.json": json.dumps(envelope).encode()})
+        run_calls = []
+        attempt_calls = []
+        prior_attempt = RUN | {"run_attempt": 1,
+                              "run_started_at": "2026-10-19T11:00:00Z",
+                              "updated_at": "2026-10-19T12:30:00Z"}
+        with tempfile.TemporaryDirectory() as output_dir:
+            result = COLLECTOR.collect(
+                self.repo, Path(output_dir) / "result.json", "org/repo", "token",
+                fetch_page=lambda name, _page: [next(row for row in artifacts.values() if row["name"] == name)],
+                fetch_run=lambda run_id: run_calls.append(run_id) or RUN,
+                fetch_attempt=lambda run_id, attempt: attempt_calls.append((run_id, attempt)) or prior_attempt,
+                fetch_archive=archives.__getitem__, seed=None,
+                run_collector=self.fake_collector(None),
+            )
+        self.assertEqual(set(result["staged"]), {COMPONENT, second})
+        self.assertEqual(run_calls, [123])
+        self.assertEqual(attempt_calls, [(123, 1)])
 
 
 if __name__ == "__main__":

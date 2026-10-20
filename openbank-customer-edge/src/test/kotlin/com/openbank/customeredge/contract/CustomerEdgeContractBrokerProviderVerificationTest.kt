@@ -15,8 +15,10 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
+import io.restassured.RestAssured
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
@@ -171,6 +173,16 @@ class CustomerEdgeContractBrokerProviderVerificationTest {
              "partyId":"$PARTY_ID","productId":"current-standard","currencyCode":"CZK",
              "status":"ACTIVE"}
         """
+    }
+}
+
+/** Verify the broker-side contract's customer role without Pact's parameterized setup hook. */
+@QuarkusTest
+class CustomerEdgeBrokerContractReadAuthorizationTest {
+    @Test
+    @TestSecurity(user = "wrong-role", roles = ["ROLE_API"])
+    fun `a caller without the customer role is forbidden from contract reads`() {
+        RestAssured.get("/customer/v1/accounts").then().statusCode(403)
     }
 }
 
