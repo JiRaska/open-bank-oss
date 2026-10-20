@@ -147,3 +147,10 @@ validate outgoing requests and parse the documented offer examples.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+
+## Pension-fund API v2 client transition
+
+The fund client now calls pension-fund-service `/api/v2` for holdings, orders, priced transactions and strategy reads. Its client-credentials identity, TLS bucket and idempotency-key forwarding are unchanged. This is an outbound contract migration; this service's public `/api/v2/pension` contract is unchanged. Consumer Pact and mutual-TLS fixtures use the new provider paths.
+
+Before a separately approved client rollout, verify every active fund backend serves v2. The provider retains deprecated v1 aliases for these unchanged operations, so older client images can coexist; that is not proof the target environment already runs the new provider. Roll back callers before selecting a v1-only provider. No deployment or live order execution is authorized by the source migration.

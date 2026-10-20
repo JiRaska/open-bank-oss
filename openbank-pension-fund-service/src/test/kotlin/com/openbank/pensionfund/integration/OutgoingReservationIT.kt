@@ -69,7 +69,10 @@ class OutgoingReservationIT {
             val executor = Executors.newFixedThreadPool(2)
             try {
                 val publish = executor.submit<Response> {
-                    given().post("/api/v1/navs/$navId/approve")
+                    given().header(
+                        "Idempotency-Key",
+                        java.util.UUID.randomUUID().toString(),
+                    ).post("/api/v2/navs/$navId/approve")
                 }
                 awaitHoldingWaiters(db, 1)
                 val reserve = executor.submit<Response> { redeem(contract, fund, "during-nav", 60) }
@@ -238,18 +241,21 @@ class OutgoingReservationIT {
         given().contentType("application/json")
             .header("Idempotency-Key", key)
             .body("""{"fundId":"$fund","type":"REDEEM","units":$units}""")
-            .post("/api/v1/contracts/$contract/orders")
+            .post("/api/v2/contracts/$contract/orders")
 
     private fun createFund(): UUID {
         val isin = "RS" + UUID.randomUUID().toString().replace("-", "").take(9).uppercase() + "0"
-        val id = given().contentType("application/json")
+        val id = given().header(
+            "Idempotency-Key",
+            java.util.UUID.randomUUID().toString(),
+        ).contentType("application/json")
             .body(
                 """{"name":"Reservation test","isin":"$isin","lei":"315700ABCDEF12345678",
                     "depositaryReference":"TEST-DEP","custodyAccountReference":"TEST-CUST",
                     "currency":"CZK","riskClass":3,"mandatoryConservative":false,
-                    "managementFeeRate":0,"launchNavPerUnit":1}
+                    "productRevisionId":"00000000-0000-0000-0000-000000000001","launchNavPerUnit":1}
                 """.trimIndent(),
-            ).post("/api/v1/funds").then().statusCode(201).extract().path<String>("id")
+            ).post("/api/v2/funds").then().statusCode(201).extract().path<String>("id")
         return UUID.fromString(id)
     }
 

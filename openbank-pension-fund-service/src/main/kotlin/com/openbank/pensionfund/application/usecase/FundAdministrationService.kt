@@ -5,6 +5,7 @@
 package com.openbank.pensionfund.application.usecase
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.pensionfund.application.port.FundTermsPort
 import com.openbank.pensionfund.application.port.NotFoundException
 import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.PensionFundStore
@@ -32,11 +33,22 @@ class FundAdministrationService(
     @ConfigProperty(name = "openbank.pension-fund.strategy-change.minimum-notice-days", defaultValue = "30")
     private val minimumNoticeDays: Long,
     private val metrics: PensionFundMetrics,
+    private val fundTerms: FundTermsPort,
 ) {
     private fun today(): LocalDate = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC)
 
     suspend fun createFund(definition: FundDefinition): Fund {
         val now = clock.instant()
+        // ADR-0341: the fee is the pinned revision's, resolved here at creation and cached on the fund;
+        // there is no request field for it. Opening without a resolvable published revision fails closed.
+        val revisionId = requireNotNull(definition.productRevisionId) {
+            "productRevisionId is required: a fund's fee comes from a published catalog revision"
+        }
+        val terms = fundTerms.resolve(revisionId)
+        val suppliedFee = definition.managementFeeRate
+        require(suppliedFee == null || suppliedFee.compareTo(terms.managementFeeRate) == 0) {
+            "managementFeeRate is deprecated and must equal the revision's fee ${terms.managementFeeRate}"
+        }
         val fund = Fund(
             id = Ids.newId(),
             name = definition.name,
@@ -47,7 +59,8 @@ class FundAdministrationService(
             currency = definition.currency,
             riskClass = definition.riskClass,
             mandatoryConservative = definition.mandatoryConservative,
-            managementFeeRate = definition.managementFeeRate,
+            managementFeeRate = terms.managementFeeRate,
+            productRevisionId = terms.revisionId,
             launchNavPerUnit = definition.launchNavPerUnit,
             status = FundStatus.ACTIVE,
             createdAt = now,
@@ -67,13 +80,21 @@ class FundAdministrationService(
         require(current.isin == definition.isin && current.currency == definition.currency) {
             "isin and currency identify the fund and cannot change"
         }
+        // The fee is derived from the pinned revision and never edited; moving a fund to another
+        // revision is an explicit re-pin, not an amendment.
+        require(definition.productRevisionId == null || definition.productRevisionId == current.productRevisionId) {
+            "productRevisionId cannot change: re-pinning a fund is not an amendment"
+        }
+        require(
+            definition.managementFeeRate == null ||
+                definition.managementFeeRate.compareTo(current.managementFeeRate) == 0,
+        ) { "managementFeeRate cannot be edited: it is derived from the pinned revision" }
         val amended = current.amend(
             name = definition.name,
             depositaryReference = definition.depositaryReference,
             custodyAccountReference = definition.custodyAccountReference,
             riskClass = definition.riskClass,
             mandatoryConservative = definition.mandatoryConservative,
-            managementFeeRate = definition.managementFeeRate,
             now = clock.instant(),
         )
         store.commit(StoreChanges(funds = listOf(amended)))

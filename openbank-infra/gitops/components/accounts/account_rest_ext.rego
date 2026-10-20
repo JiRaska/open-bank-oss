@@ -159,6 +159,18 @@ allowed_reasons contains "service-party-account-read" if {
 	input.action == "account.list"
 }
 
+# ADR-0341 — pension-fund-service's own machine identity (client `openbank-pension-fund`, no realm
+# role, the narrow `catalog:read` scope product-catalog maps to CATALOG_SCOPE_READ) reads ONE
+# immutable published revision by id (GET /api/v2/revisions/{id}) to pin a new fund's management
+# fee. That is action catalog.read - nothing here reaches catalog.author, catalog.publish or the
+# approval decisions. The scope alone is insufficient for OPA: only this named caller may use it.
+allowed_reasons contains "service-pension-fund-catalog-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-pension-fund")
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
 # #8481 / ADR-0341 — interest-service's own machine identity (client `openbank-interest`, ROLE_API
 # plus the narrow `catalog:read` scope that product-catalog maps to CATALOG_SCOPE_READ) reads the
 # published catalog: the event stream, a revision by its immutable id, and the offering it belongs

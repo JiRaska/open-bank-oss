@@ -67,7 +67,7 @@ class PensionFundPactConsumerTest {
     fun pricedHoldingsPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(PRICED_STATE)
         .uponReceiving("GET the unit holdings of a pension contract priced at a published NAV")
-        .path("/api/v1/contracts/$PRICED_CONTRACT/holdings")
+        .path("/api/v2/contracts/$PRICED_CONTRACT/holdings")
         .method("GET")
         .willRespondWith()
         .status(200)
@@ -98,7 +98,7 @@ class PensionFundPactConsumerTest {
     fun unpublishedNavHoldingsPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(UNPUBLISHED_STATE)
         .uponReceiving("GET the unit holdings of a pension contract whose fund has no published NAV yet")
-        .path("/api/v1/contracts/$UNPUBLISHED_CONTRACT/holdings")
+        .path("/api/v2/contracts/$UNPUBLISHED_CONTRACT/holdings")
         .method("GET")
         .willRespondWith()
         .status(200)
@@ -122,7 +122,7 @@ class PensionFundPactConsumerTest {
     fun holdingsWithoutIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NEGATIVE_AUTH_STATE)
         .uponReceiving("GET pension contract holdings with no M2M identity")
-        .path("/api/v1/contracts/$PRICED_CONTRACT/holdings")
+        .path("/api/v2/contracts/$PRICED_CONTRACT/holdings")
         .method("GET")
         .willRespondWith()
         .status(401)
@@ -134,7 +134,7 @@ class PensionFundPactConsumerTest {
     fun transactionsPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(PRICED_STATE)
         .uponReceiving("GET the priced unit transactions of a pension contract")
-        .path("/api/v1/contracts/$PRICED_CONTRACT/transactions")
+        .path("/api/v2/contracts/$PRICED_CONTRACT/transactions")
         .method("GET")
         .willRespondWith()
         .status(200)
@@ -162,7 +162,7 @@ class PensionFundPactConsumerTest {
     fun strategiesPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(PRICED_STATE)
         .uponReceiving("GET the fund strategies a pension contract may elect")
-        .path("/api/v1/strategies")
+        .path("/api/v2/strategies")
         .method("GET")
         .willRespondWith()
         .status(200)
@@ -188,7 +188,7 @@ class PensionFundPactConsumerTest {
     fun subscribePact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(PRICED_STATE)
         .uponReceiving("POST a SUBSCRIBE unit order for a pension contract with an Idempotency-Key")
-        .path("/api/v1/contracts/$ORDER_CONTRACT/orders")
+        .path("/api/v2/contracts/$ORDER_CONTRACT/orders")
         .method("POST")
         .matchHeader("Idempotency-Key", "[0-9a-f]{64}", "a".repeat(64))
         .matchHeader("Content-Type", "application/json.*", "application/json")
@@ -214,7 +214,7 @@ class PensionFundPactConsumerTest {
     fun redeemPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(PRICED_STATE)
         .uponReceiving("POST a REDEEM unit order in units for a pension contract with an Idempotency-Key")
-        .path("/api/v1/contracts/$PRICED_CONTRACT/orders")
+        .path("/api/v2/contracts/$PRICED_CONTRACT/orders")
         .method("POST")
         .matchHeader("Idempotency-Key", "[0-9a-f]{64}", "b".repeat(64))
         .matchHeader("Content-Type", "application/json.*", "application/json")
@@ -240,7 +240,7 @@ class PensionFundPactConsumerTest {
     fun orderWithoutIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(NEGATIVE_AUTH_STATE)
         .uponReceiving("POST a pension unit order with no M2M identity")
-        .path("/api/v1/contracts/$ORDER_CONTRACT/orders")
+        .path("/api/v2/contracts/$ORDER_CONTRACT/orders")
         .method("POST")
         .matchHeader("Idempotency-Key", "[0-9a-f]{64}", "c".repeat(64))
         .matchHeader("Content-Type", "application/json.*", "application/json")
@@ -260,7 +260,7 @@ class PensionFundPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "pricedHoldingsPact")
     fun `priced holdings decode into a holding with value and a pending order`(mock: MockServer) {
-        assertThat(clientPath("holdings", PRICED_CONTRACT)).isEqualTo("/api/v1/contracts/$PRICED_CONTRACT/holdings")
+        assertThat(clientPath("holdings", PRICED_CONTRACT)).isEqualTo("/api/v2/contracts/$PRICED_CONTRACT/holdings")
         val view = runBlocking { adapter(mock).holdings(UUID.fromString(PRICED_CONTRACT)) }
         val holding = view.holdings.single()
         assertThat(holding.fundId).isEqualTo(UUID.fromString(PRICED_FUND))
@@ -289,7 +289,7 @@ class PensionFundPactConsumerTest {
     @PactTestFor(pactMethod = "transactionsPact")
     fun `transactions decode through the adapter`(mock: MockServer) {
         assertThat(clientPath("transactions", PRICED_CONTRACT))
-            .isEqualTo("/api/v1/contracts/$PRICED_CONTRACT/transactions")
+            .isEqualTo("/api/v2/contracts/$PRICED_CONTRACT/transactions")
         val txs = runBlocking { adapter(mock).transactions(UUID.fromString(PRICED_CONTRACT)) }
         assertThat(txs.single().navPerUnit).isEqualByComparingTo("1.25")
         assertThat(txs.single().navId).isNotNull()
@@ -298,7 +298,7 @@ class PensionFundPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "strategiesPact")
     fun `strategies decode with their allocation`(mock: MockServer) {
-        assertThat(clientPath("strategies", null)).isEqualTo("/api/v1/strategies")
+        assertThat(clientPath("strategies", null)).isEqualTo("/api/v2/strategies")
         val strategies = runBlocking { register(mock).strategies() }
         assertThat(strategies.single().allocations.single().fundId).isEqualTo(UUID.fromString(PRICED_FUND))
     }
@@ -306,7 +306,7 @@ class PensionFundPactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "subscribePact")
     fun `a subscription order is accepted pending`(mock: MockServer) {
-        assertThat(clientPath("placeOrder", ORDER_CONTRACT)).isEqualTo("/api/v1/contracts/$ORDER_CONTRACT/orders")
+        assertThat(clientPath("placeOrder", ORDER_CONTRACT)).isEqualTo("/api/v2/contracts/$ORDER_CONTRACT/orders")
         val order = runBlocking {
             register(mock).placeOrder(
                 UUID.fromString(ORDER_CONTRACT),

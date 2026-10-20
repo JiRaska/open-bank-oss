@@ -213,7 +213,7 @@ class CatalogClientMtlsIT {
         )
         servers.catalog.verify(
             1,
-            getRequestedFor(urlEqualTo("/api/v1/strategies"))
+            getRequestedFor(urlEqualTo("/api/v2/strategies"))
                 .withHeader("Authorization", equalTo("Bearer test-token")),
         )
     }
