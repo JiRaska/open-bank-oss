@@ -25,13 +25,19 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
 
 TAG = re.compile(r"\b(openbank-[a-z0-9-]+):sandbox-([0-9a-f]{8})(?:-run\d+)?\b")
 ARTIFACT_RETENTION_DAYS = 30
+GH_API_ATTEMPTS = 3
+GH_API_TOTAL_TIMEOUT_SECONDS = 300
+GH_RETRY_MAX_WAIT_SECONDS = 60
+GH_API_DIAGNOSTIC_LIMIT = 400
 
 
 def sh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -39,8 +45,56 @@ def sh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def gh_json(path: str) -> list | dict:
-    out = sh("gh", "api", "--paginate", "--slurp", path).stdout
-    return json.loads(out)
+    helper = Path(__file__).with_name("gh-retry.sh")
+    wrapper = '''
+source "$1"; shift
+attempts="$1"; shift
+api_path="$1"; shift
+candidate=$(mktemp)
+trap 'rm -f "$candidate"' EXIT
+fetch_pages() { gh api --paginate --slurp "$api_path" > "$candidate"; }
+if gh_retry "$attempts" -- fetch_pages; then
+  cat "$candidate"
+else
+  exit $?
+fi
+'''
+    command = ("bash", "-c", wrapper, "gh-retry", str(helper), str(GH_API_ATTEMPTS), path)
+    env = os.environ.copy()
+    env["GH_RETRY_MAX_WAIT_SECONDS"] = str(GH_RETRY_MAX_WAIT_SECONDS)
+    env["GH_RETRY_DEAD_LETTER"] = "0"
+    process = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=env, start_new_session=True)
+    try:
+        stdout, stderr = process.communicate(timeout=GH_API_TOTAL_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        # Kill the process group so a child `gh` cannot outlive its Bash retry wrapper.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+        raise RuntimeError(f"gh api paginated GET {path} exceeded its "
+                           f"{GH_API_TOTAL_TIMEOUT_SECONDS}s total budget") from error
+
+    if process.returncode != 0:
+        # The helper classifies only shared-vocabulary transient failures for retry;
+        # 401/404/422 and other final answers return immediately. Keep untrusted CLI
+        # diagnostics bounded when reporting the final failure.
+        diagnostic = " ".join(stderr.split())[-GH_API_DIAGNOSTIC_LIMIT:]
+        raise RuntimeError(f"gh api paginated GET {path} failed (rc={process.returncode}): "
+                           f"{diagnostic or 'no diagnostic returned'}")
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"gh api paginated GET {path} returned invalid JSON: {error}") from error
 
 
 def running_images(root: Path) -> dict[str, str]:
