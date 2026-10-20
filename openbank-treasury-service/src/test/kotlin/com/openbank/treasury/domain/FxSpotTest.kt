@@ -27,7 +27,7 @@ import java.math.BigDecimal
 class FxSpotTest {
 
     private fun lines(d: com.openbank.treasury.domain.model.Deal) = PostingRules.settlement(d).lines.map {
-        "${it.side.name.first()} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}"
+        "${it.side.name.first()} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}"
     }
 
     @Test
@@ -62,8 +62,8 @@ class FxSpotTest {
     fun `a SELL posts the same four legs with every side flipped`() {
         val buy = PostingRules.settlement(fxSpot(side = FxSide.BUY)).lines
         val sell = PostingRules.settlement(fxSpot(side = FxSide.SELL)).lines
-        assertThat(sell.map { it.glCode to it.side }).isEqualTo(
-            buy.map { it.glCode to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
+        assertThat(sell.map { it.glCode() to it.side }).isEqualTo(
+            buy.map { it.glCode() to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
         )
     }
 
@@ -80,7 +80,7 @@ class FxSpotTest {
             .settle(approver, MONDAY.plusDays(2), NOW)
         val reversal = PostingRules.reversal(settled, DealState.SETTLED)!!
         assertThat(reversal.lines).hasSize(4)
-        assertThat(reversal.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
+        assertThat(reversal.lines.first().let { it.side to it.glCode() }).isEqualTo(Side.CREDIT to "1002")
         assertThat(PostingRules.reversal(settled, DealState.BOOKED)).isNull()
         assertThat(PostingRules.reversal(settled, DealState.CONFIRMED)).isNull()
         assertThatThrownBy { settled.mature(approver, MONDAY.plusDays(30), NOW) }

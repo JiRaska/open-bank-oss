@@ -107,6 +107,7 @@ export default function InterestPage() {
                   idle: t('interest-service spí (scale-to-zero), probouzí se…', 'interest-service idle (scaled to zero), waking…'),
                   down: t('interest-service neodpovídá', 'interest-service is not responding'),
                   checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                  unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
                 }}
               />
             )}

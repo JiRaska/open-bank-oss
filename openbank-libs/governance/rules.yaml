@@ -33,8 +33,8 @@ deploy_holds:
       release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
     openbank-ledger-service:
       issue: "#13167"
-      reason: "Day-close participation V31 and its API require owner-controlled first image delivery."
-      release_condition: "The owner approves the exact ledger image and deployment window, accepts V31 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval."
+      reason: "Day-close participation V33 and its API require owner-controlled first image delivery."
+      release_condition: "The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval."
     openbank-interest-service:
       issue: "#13167"
       reason: "Day-close participation V18 and its reporter require owner-controlled first image delivery."
@@ -4329,6 +4329,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/billing/infrastructure/adapter/LegacyRevisionBridge.kt"
       - "src/main/kotlin/com/openbank/billing/infrastructure/client/BillingRestClients.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"

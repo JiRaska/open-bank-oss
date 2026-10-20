@@ -90,6 +90,22 @@ class SupplyChainTest(unittest.TestCase):
             self.assertFalse(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {'branches': ['main']}},
                                                    'jobs': {}}))
 
+    def test_admin_ui_deploy_gitops_pr_declares_base_for_exact_sha_checkout(self):
+        path = guard.ROOT / '.github/workflows/admin-ui-deploy.yml'
+        original = yaml.safe_load(path.read_text())
+        self.assertFalse(guard.findings(path.name, original))
+
+        mutated = copy.deepcopy(original)
+        step = next(
+            step for job in mutated['jobs'].values() for step in job.get('steps', [])
+            if step.get('id') == 'gitops_pr'
+        )
+        step['with'].pop('base', None)
+        self.assertIn(
+            'GitOps pull request must declare base: main for exact-SHA checkout',
+            guard.findings(path.name, mutated),
+        )
+
     def test_pull_request_workflow_requires_concurrency(self):
         path = guard.ROOT / '.github/workflows/dependency-review.yml'
         original = yaml.safe_load(path.read_text())
@@ -232,11 +248,15 @@ class SupplyChainTest(unittest.TestCase):
             elif mutation == 'unbounded-verifier':
                 doc['jobs']['verification-metadata']['if'] = 'always()'
             elif mutation == 'missing-shard-verdict-passes':
-                doc['jobs']['all-green']['steps'][0]['run'] = (
+                step = next(step for step in doc['jobs']['all-green']['steps']
+                            if step.get('name') == 'Verify no service failed')
+                step['run'] = (
                     'if [ "${{ needs.changes.result }}" != "success" ]; then '
                     'echo "scope is unknown"; exit 1; fi')
             else:
-                doc['jobs']['all-green']['steps'][0]['run'] = 'echo green'
+                step = next(step for step in doc['jobs']['all-green']['steps']
+                            if step.get('name') == 'Verify no service failed')
+                step['run'] = 'echo green'
             with self.subTest(mutation=mutation):
                 self.assertTrue(guard.findings('services-ci.yml', doc))
 

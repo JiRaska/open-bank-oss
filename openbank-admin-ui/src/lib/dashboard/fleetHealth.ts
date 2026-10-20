@@ -4,7 +4,7 @@
 
 /** The only facts the dashboard learns from the fleet-health endpoint. */
 export type FleetHealthSample = {
-  deployed: boolean
+  deployed: boolean | null
   up: boolean
   /** Omit for legacy boolean samples; UNKNOWN remains neutral, not a failed check. */
   unknown?: boolean
@@ -28,9 +28,10 @@ export type FleetHealthSummary = {
  * none of those signals are in the discovery response.
  */
 export function summarizeFleetHealth(samples: FleetHealthSample[]): FleetHealthSummary {
-  const deployed = samples.filter(sample => sample.deployed)
+  const deployed = samples.filter(sample => sample.deployed === true)
+  const deploymentUnknown = samples.filter(sample => sample.deployed === null).length
   const observed = deployed.filter(sample => sample.unknown !== true)
-  const unknown = deployed.length - observed.length
+  const unknown = deployed.length - observed.length + deploymentUnknown
   const latencies = deployed.flatMap(sample => sample.latencyMs === null ? [] : [sample.latencyMs])
 
   return {
@@ -40,7 +41,7 @@ export function summarizeFleetHealth(samples: FleetHealthSample[]): FleetHealthS
     observed: observed.length,
     unknown,
     unhealthy: observed.filter(sample => !sample.up).length,
-    notDeployed: samples.length - deployed.length,
+    notDeployed: samples.filter(sample => sample.deployed === false).length,
     averageHealthCheckLatencyMs:
       latencies.length === 0 ? null : Math.round(latencies.reduce((sum, latency) => sum + latency, 0) / latencies.length),
   }

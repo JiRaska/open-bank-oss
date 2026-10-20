@@ -99,3 +99,7 @@ Posting is idempotent via the **`idempotencyKey` field on the request body** (no
 In `enforce`, the accounting-day service applies the participant check to both scheduler and manual operator `CUTOFF → TIED_OUT` transitions, under the existing transactional day lock. A missing or REFUSED participant returns 409 until a valid report or an explicit reasoned operator waiver is recorded. A caller cannot omit this policy. The default remains `shadow`; this change does not authorize enabling enforcement.
 
 A waiver requires a verified human JWT even when OPA authorization is advisory; a machine token is rejected with 403 despite an operator role. Audit attribution uses only the nonblank JWT `sub`; a missing, blank or unreadable subject is 401, without falling back to a display name.
+
+## Accounting-class map (ADR-0341 D3)
+
+Posters send an `accountingClass` and a role on each journal line and the ledger resolves the GL account from its own `accounting_class_gl_map` table (migration V31). The read side is `GET /api/v1/accounting-classes` and `GET /api/v1/accounting-classes/resolve`, for regulatory readers and reconciliations. There is deliberately no write endpoint: the map changes by reviewed migration, as the chart does.

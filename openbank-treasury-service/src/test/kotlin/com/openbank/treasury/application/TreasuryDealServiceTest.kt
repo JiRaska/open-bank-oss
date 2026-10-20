@@ -19,6 +19,7 @@ import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.DealFixtures
+import com.openbank.treasury.domain.glCode
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.CurvePillar
@@ -434,7 +435,7 @@ class TreasuryDealServiceTest {
         val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
         assertThat(accrued).isEqualByComparingTo(deal.interest)
         val maturity = ledger.posted.single { it.event == PostingEvent.MATURED }
-        assertThat(maturity.lines.map { it.glCode }).doesNotContain("4200").contains("1520")
+        assertThat(maturity.lines.map { it.glCode() }).doesNotContain("4200").contains("1520")
     }
 
     @Test
@@ -446,9 +447,55 @@ class TreasuryDealServiceTest {
         service.reverse(b.id, "test", DealFixtures.approver)
         val accrued = ledger.posted.filter { it.event == PostingEvent.ACCRUED }.sumOf { it.lines.first().amount }
         val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
-        val unwound = reversal.lines.single { it.glCode == "4200" }
+        val unwound = reversal.lines.single { it.glCode() == "4200" }
         assertThat(unwound.amount).isEqualByComparingTo(accrued)
     }
+
+    @Test
+    fun `a reversal offsets the accounts the settlement landed on even after the ledger map is re-pointed`(): Unit =
+        runBlocking {
+            val b = book()
+            service.runSimulatedMarket()
+            val settled = ledger.posted.single { it.event == PostingEvent.SETTLED }
+            val landedOn = settled.lines.associate {
+                Triple(it.accountingClass, it.role, it.currency) to ledger.resolve(it)
+            }
+            // A reviewed migration re-points every class between the settlement and its reversal.
+            ledger.mapGeneration = 2
+            service.reverse(b.id, "test", DealFixtures.approver)
+            val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+            reversal.lines.forEach {
+                assertThat(it.glAccountId)
+                    .describedAs("${it.accountingClass}/${it.role}/${it.currency} must keep the settlement's account")
+                    .isEqualTo(landedOn.getValue(Triple(it.accountingClass, it.role, it.currency)))
+                // and re-resolving the class NOW would have been a different account: not vacuous
+                assertThat(it.glAccountId).isNotEqualTo(ledger.resolve(it.copy(glAccountId = null)))
+            }
+        }
+
+    @Test
+    fun `a reversal also pins the accrued-interest unwind to the accounts the accruals landed on`(): Unit =
+        runBlocking {
+            val b = book()
+            service.runSimulatedMarket()
+            clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+            service.accrueInterest(LocalDate.now(clock))
+            val accrual = ledger.posted.first { it.event == PostingEvent.ACCRUED }
+            val accruedOn = accrual.lines.associate {
+                Triple(it.accountingClass, it.role, it.currency) to
+                    ledger.resolve(it)
+            }
+            ledger.mapGeneration = 2
+            service.reverse(b.id, "test", DealFixtures.approver)
+            val reversal = ledger.posted.single { it.event == PostingEvent.REVERSED }
+            val unwind = reversal.lines.filter { Triple(it.accountingClass, it.role, it.currency) in accruedOn }
+            assertThat(unwind).isNotEmpty()
+            unwind.forEach {
+                assertThat(
+                    it.glAccountId,
+                ).isEqualTo(accruedOn.getValue(Triple(it.accountingClass, it.role, it.currency)))
+            }
+        }
 
     @Test
     fun `a failing deal does not stop the accrual pass, and is reported`(): Unit = runBlocking {
@@ -499,7 +546,7 @@ class TreasuryDealServiceTest {
         assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
         val settlement = ledger.posted.single()
         assertThat(settlement.idempotencyKey).isEqualTo("treasury:${b.id}:settled")
-        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode()} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly(
                 "DEBIT 1002 1000.00 EUR",
                 "CREDIT 1991 1000.00 EUR",
@@ -525,9 +572,9 @@ class TreasuryDealServiceTest {
         service.runSimulatedMarket()
         service.reverse(b.id, "wrong side", DealFixtures.approver)
         val (settled, reversed) = ledger.posted
-        assertThat(settled.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
-        assertThat(reversed.lines.map { it.glCode to it.side }).isEqualTo(
-            settled.lines.map { it.glCode to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
+        assertThat(settled.lines.first().let { it.side to it.glCode() }).isEqualTo(Side.CREDIT to "1002")
+        assertThat(reversed.lines.map { it.glCode() to it.side }).isEqualTo(
+            settled.lines.map { it.glCode() to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
         )
         assertThat(deals.events.last().eventType).isEqualTo("treasury.deal.reversed.v1")
         assertThat(deals.events.last().payload).contains("\"fxSide\":\"SELL\"")

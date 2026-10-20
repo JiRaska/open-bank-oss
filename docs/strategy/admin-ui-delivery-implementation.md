@@ -242,3 +242,41 @@ Acceptance for broad route coverage is:
    build-artifact reuse as separate reviewable changes. The conceptual destination is
    one validated application artifact, independently refreshed data, and explicit feature
    contracts; separate frontend deployments require a measured benefit first.
+
+
+## Runtime evidence and content correctness
+
+Navigation coverage is only one acceptance layer. A source audit of 170 page templates
+separately classified API reads, service hooks, reference content and generated snapshots.
+The audit found two distinct ages that must remain visible: when the browser last checked,
+and when the producer observed the underlying fact. `cache: no-store` does not refresh a
+producer, and a successful HTTP response does not establish a valid domain payload.
+
+The independent evidence workflow now publishes four named datasets: Gate Health,
+Production Readiness, Test Intelligence and Security KPIs. Each has a validated payload,
+immutable content-addressed snapshot, source revision and conditional `current.json`
+selector. Readers verify the digest, dataset schema, timestamps and bounds before showing
+it. A one-hour selector expiry detects publisher failure independently of the dataset's
+age threshold. Re-publication never changes the original observation time. Security KPI
+collection remains weekly; its trusted workflow artifact reaches the runtime publisher
+without waiting for the reference snapshot's refresh PR or an application image rebuild.
+
+Readiness counts service modules from the canonical governance roster; Test Intelligence
+counts released components and its explicitly included test components. Those populations
+must be named, not forced to the same number. Readiness is repository/GitOps maturity and
+TTL-bound attestations, not an assertion that pods are healthy. Test evidence is bound to
+its producer run and component commit; a missing match cannot retain an unrelated green
+verdict. Stale or unavailable evidence remains distinguishable from failed execution.
+
+Reporting must validate the actual warehouse wire format. ClickHouse JSON DateTime64 values
+need ISO output for the browser's datetime contract. Invalid payloads are contract errors,
+not proof the warehouse is down. The report timestamp means query completion, not an
+unmeasured ingestion watermark. Populated browser fixtures exercise the Run report action
+as well as initial page navigation.
+
+Rollout requires the approved, narrowly scoped publisher policy, valid initial snapshots,
+and a verified application image. Then verify the live timestamp/source revision and a
+subsequent publication without rebuilding the image. For proxied tools, retain OIDC session
+and per-tool role checks, fail-closed edge policies and network isolation. Verify anonymous
+denial and authenticated content/assets through the real edge; direct gate unit tests alone
+do not establish that the complete browser journey works.

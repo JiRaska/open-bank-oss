@@ -11,7 +11,12 @@ info:
   # 1.23.0 -> 1.24.0 (#12501): additive frozen and live calendar-year-to-date flow reads.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.26.0
+  # 1.26.0 -> 1.27.0 (ADR-0341 D3): additive. GET /accounting-classes[/resolve] and an alternative way to
+  # name a journal line's account (accountingClass + accountingRole) -- glAccountId stops being required,
+  # which relaxes the request and breaks no caller.
+  # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
+  # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
+  version: 1.28.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -391,6 +396,51 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounting-classes:
+    get:
+      tags: [Accounting classes]
+      summary: List every accountingClass to GL account mapping (ADR-0341 D3)
+      description: >
+        The ledger owns the chart of accounts and the map from a product's accounting class to its
+        GL accounts. The map changes by reviewed migration only; this is its read side.
+      operationId: listAccountingClasses
+      responses:
+        '200':
+          description: All mappings, ordered by class, role and currency
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountingClassMappingResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/accounting-classes/resolve:
+    get:
+      tags: [Accounting classes]
+      summary: Resolve one (accountingClass, role, currency) to its GL account
+      operationId: resolveAccountingClass
+      parameters:
+        - { name: accountingClass, in: query, required: true, schema: { type: string } }
+        - { name: role, in: query, required: true, schema: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] } }
+        - { name: currency, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The mapping
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountingClassMappingResponse'
+        '400':
+          description: A required query parameter is missing
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: No GL account is mapped for that class, role and currency
   /api/v1/control-accounts/{controlAccountId}/tie-out:
     get:
       tags: [Ledger]
@@ -1723,13 +1773,36 @@ components:
             type: number
           description: Net booked delta per currency across the window — a sanity preview of what the replay carries.
 
+    AccountingClassMappingResponse:
+      type: object
+      required: [accountingClass, role, currencyCode, glAccountId, glCode]
+      properties:
+        accountingClass: { type: string }
+        role: { type: string, enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME] }
+        currencyCode: { type: string }
+        glAccountId: { type: string, format: uuid }
+        glCode: { type: string }
+
     PostJournalLineRequest:
       type: object
-      required: [glAccountId, side, amount, currencyCode, baseAmount, baseCurrencyCode]
+      description: >
+        Names its GL account either by `glAccountId` or by `accountingClass` + `accountingRole`
+        (ADR-0341 D3; resolved with the line's `currencyCode`). Exactly one of the two; both or
+        neither is a 400.
+      required: [side, amount, currencyCode, baseAmount, baseCurrencyCode]
       properties:
         glAccountId:
           type: string
           format: uuid
+          nullable: true
+        accountingClass:
+          type: string
+          nullable: true
+          description: Product accounting class, resolved by the ledger to a GL account (ADR-0341 D3).
+        accountingRole:
+          type: string
+          nullable: true
+          enum: [PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE, FEE_INCOME]
         side:
           type: string
           enum: [DEBIT, CREDIT]
