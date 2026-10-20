@@ -100,7 +100,7 @@ gates:
     review_after: "2027-10-17"
     selftest: python3 .github/scripts/check-coverage-floor-ratchet.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py"]
+    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py", ".github/scripts/merge_train_carrier.py"]
     run: |
       # Compares every Kover minValue at HEAD against the PR's merge base, position by position.
       # The trailer is read from the PR body (optional: a PR with no body can still justify a
@@ -5321,7 +5321,7 @@ gates:
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge_train_carrier.py", ".github/scripts/merge-train.py"]
     run: |
       # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
       # Editing the body to add the checklist (the documented remediation) only reached this
