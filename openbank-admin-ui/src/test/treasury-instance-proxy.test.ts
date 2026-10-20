@@ -8,10 +8,20 @@ vi.mock('@/lib/services/fleet', () => ({ getProxyAllowlist: () => ({
   'treasury-service': { container: 'openbank-treasury-service', port: 8160 },
   'treasury-pension-co': { container: 'openbank-treasury-service', port: 8443 },
 }) }))
-vi.mock('@/lib/discovery', () => ({ inCluster: () => state.cluster, discoverServices: async () => [
-  { name: 'treasury-service', namespace: 'treasury', port: 8160, scaledToZero: false },
-  { name: 'treasury-service', namespace: 'treasury-pension-co', port: 8160, scaledToZero: false },
-] }))
+// Discovery keys the company workload by its own alias (discoveryServiceKey), so the two
+// namespaces' treasury-service never collide; resolution is the real typed resolver.
+vi.mock('@/lib/discovery', async importOriginal => {
+  const real = await importOriginal<typeof import('@/lib/discovery')>()
+  const snapshot = { status: 'complete', services: [
+    { name: 'treasury-service', namespace: 'treasury', port: 8160, scaledToZero: false },
+    { name: 'treasury-pension-co', namespace: 'treasury-pension-co', port: 8160, scaledToZero: false },
+  ] } as unknown as Parameters<typeof real.resolveServiceInSnapshot>[0]
+  return {
+    ...real,
+    inCluster: () => state.cluster,
+    resolveInClusterService: async (name: string) => real.resolveServiceInSnapshot(snapshot, name),
+  }
+})
 import { GET } from '@/app/api/svc/[service]/[...path]/route'
 let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => { state.tls.mockReset(); state.tls.mockResolvedValue(new Response('{}', {status:202,headers:{etag:'v1'}})); state.cluster = true; state.token = 'operator-token'; fetchMock = vi.fn(async () => new Response('{}')); vi.stubGlobal('fetch', fetchMock) })
