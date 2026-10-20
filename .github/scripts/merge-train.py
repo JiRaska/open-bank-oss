@@ -1127,18 +1127,23 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
     reserved = strict_reservation(git, base, strict)
+    # A reserved head turning green must merge before fast auto-merge is re-enabled. The
+    # fast classification above is stale after a strict merge, and an update starts a new hold.
+    merged_before = len(summary["merged"])
+    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, reserved)
+    strict_advanced = len(summary["merged"]) != merged_before or bool(summary["updated"])
     for m in fast:
-        if reserved is not None:
+        if reserved is not None or strict_advanced:
             # Main is reserved for a strict-lane PR whose CI is running on a head over this main: a
             # fast merge now would put it behind again. Withdraw a success posted before the
             # reservation began, so auto-merge cannot act on it either.
             if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] == "success":
-                gh.post_status(m.head_sha, "pending", f"fast lane: main reserved for strict-lane #{reserved}")
+                reason = f"main reserved for strict-lane #{reserved}" if reserved is not None else "strict lane advanced"
+                gh.post_status(m.head_sha, "pending", f"fast lane: {reason}")
             continue
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
         summary["fast"].append(m.number)
-    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, reserved)
     stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
 
@@ -2269,6 +2274,28 @@ def self_test() -> int:
             gh.head_checks.clear()
             settle_now()
             check("strict starvation: the reserved PR merges first once its CI is green", gh.merged == [35], str(gh.merged))
+            reset()
+
+            # The reservation-to-green handoff must beat an already armed fast auto-merge.
+            reserved_for_35(**{"gates (data)": None})
+            open_only("pF")
+            settle_now()
+            gh.head_checks.clear()
+            real_post_status = gh.post_status
+            fast_head = gh.prs[34]["head"]["sha"]
+
+            def auto_merge_fast(sha, state, description, context=STATUS_CONTEXT, creator=BOT_LOGIN):
+                real_post_status(sha, state, description, context, creator)
+                if sha == fast_head and state == "success" and context == STATUS_CONTEXT:
+                    gh.merge(34, fast_head)
+
+            gh.post_status = auto_merge_fast
+            try:
+                s = settle_now()
+            finally:
+                gh.post_status = real_post_status
+            check("strict starvation: reserved green head merges before fast auto-merge can move main",
+                  gh.merged == [35], f"{s} merged={gh.merged}")
             reset()
 
             # (d) a hung CI cannot freeze main: past the cap the reservation lapses.
