@@ -147,20 +147,47 @@ class ArchiveFreshnessTest(unittest.TestCase):
             self.assertFalse((tmp / 'verified-jvm-pacts.txt').exists())
 
     def test_js_only_scope_keeps_js_freshness_and_ignores_jvm_output(self):
+        for manifest_present in (False, True):
+            with self.subTest(manifest_present=manifest_present), tempfile.TemporaryDirectory() as d:
+                root = Path(d)
+                tmp = self.fixture(root, include_js=True)
+                if not manifest_present:
+                    (tmp / 'expected-jvm-pacts.txt').unlink()
+                stale = self.run_step('Verify every committed pact was actually regenerated', root, tmp,
+                                      jvm_required='false')
+                self.assertNotEqual(stale.returncode, 0)
+                self.assertIn(JS, stale.stdout)
+                self.assertFalse((tmp / 'verified-jvm-pacts.txt').exists())
+
+                marker_time = (tmp / 'pact-regen-marker').stat().st_mtime
+                os.utime(root / JS, (marker_time + 10, marker_time + 10))
+                fresh = self.run_step('Verify every committed pact was actually regenerated', root, tmp,
+                                      jvm_required='false')
+                self.assertEqual(fresh.returncode, 0, fresh.stdout + fresh.stderr)
+                self.assertEqual((tmp / 'verified-jvm-pacts.txt').read_text(), '')
+
+    def test_required_jvm_manifest_missing_fails_without_verified_receipt(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            tmp = self.fixture(root, include_js=True)
+            tmp = self.fixture(root)
             (tmp / 'expected-jvm-pacts.txt').unlink()
-            stale = self.run_step('Verify every committed pact was actually regenerated', root, tmp,
-                                  jvm_required='false')
-            self.assertNotEqual(stale.returncode, 0)
-            self.assertIn(JS, stale.stdout)
-
             marker_time = (tmp / 'pact-regen-marker').stat().st_mtime
-            os.utime(root / JS, (marker_time + 10, marker_time + 10))
-            fresh = self.run_step('Verify every committed pact was actually regenerated', root, tmp,
-                                  jvm_required='false')
-            self.assertEqual(fresh.returncode, 0, fresh.stdout + fresh.stderr)
+            os.utime(root / JVM, (marker_time + 10, marker_time + 10))
+            result = self.run_step('Verify every committed pact was actually regenerated', root, tmp)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((tmp / 'verified-jvm-pacts.txt').exists())
+
+    def test_unknown_jvm_requirement_fails_without_verified_receipt(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            tmp = self.fixture(root)
+            marker_time = (tmp / 'pact-regen-marker').stat().st_mtime
+            os.utime(root / JVM, (marker_time + 10, marker_time + 10))
+            result = self.run_step('Verify every committed pact was actually regenerated', root, tmp,
+                                   jvm_required='unknown')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Unknown JVM regeneration requirement', result.stdout)
+            self.assertFalse((tmp / 'verified-jvm-pacts.txt').exists())
 
 
 if __name__ == '__main__':

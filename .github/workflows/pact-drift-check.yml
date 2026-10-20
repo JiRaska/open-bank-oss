@@ -101,16 +101,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Verify regeneration scope classifier
+        run: python3 -m unittest discover -s .github/scripts/tests -p test_pact_regeneration_scope.py
       - name: Classify complete changed inputs
         id: scope
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s .github/scripts/tests -p test_pact_regeneration_scope.py
           git diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/pact-inputs.bin"
           required="$(python3 .github/scripts/pact-regeneration-scope.py < "${RUNNER_TEMP}/pact-inputs.bin")"
+          # Main publishes the complete Admin UI set, including JVM-owned consumer pacts.
+          # PR-only UI changes may keep the scoped skip; publication cannot reuse unverified JVM output.
+          if [ "$EVENT_NAME" = push ] && [ "$EVENT_REF" = refs/heads/main ]; then
+            required=true
+          fi
           echo "jvm_required=$required" >> "$GITHUB_OUTPUT"
 
   gradle-pacts:
@@ -343,8 +351,19 @@ jobs:
             exit 1
           fi
           echo "Coverage OK — every pact in the classified regeneration scope was rewritten (JVM required: $JVM_REQUIRED)."
-          cp -- "${RUNNER_TEMP}/expected-jvm-pacts.txt" \
-            "${RUNNER_TEMP}/verified-jvm-pacts.txt"
+          case "$JVM_REQUIRED" in
+            true)
+              cp -- "${RUNNER_TEMP}/expected-jvm-pacts.txt" \
+                "${RUNNER_TEMP}/verified-jvm-pacts.txt"
+              ;;
+            false)
+              : > "${RUNNER_TEMP}/verified-jvm-pacts.txt"
+              ;;
+            *)
+              echo "::error::Unknown JVM regeneration requirement"
+              exit 1
+              ;;
+          esac
 
       - name: Fail on drift between regenerated and committed pacts
         run: |
