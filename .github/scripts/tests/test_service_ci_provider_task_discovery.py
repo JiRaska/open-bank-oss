@@ -50,13 +50,24 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         (trusted / ".github/scripts/pact-broker-post.sh").write_text(
             "#!/usr/bin/env bash\n[ \"${1:-}\" = --self-test ]\n"
         )
-        for name in ("service-ci-provider-task-list.sh", "service-ci-discover-provider-pact-task.sh"):
+        for name in (
+            "service-ci-provider-task-list.sh",
+            "service-ci-discover-provider-pact-task.sh",
+            "resolve-historical-service-ref.sh",
+            "tests/test-resolve-historical-service-ref.sh",
+        ):
             source = ROOT / ".github/scripts" / name
-            (trusted / ".github/scripts" / name).write_bytes(source.read_bytes())
+            target = trusted / ".github/scripts" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+            target.chmod(0o755)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
 
         # P deliberately has no copies of the newly introduced trusted helpers.
         self.assertFalse((historical / ".github/scripts/service-ci-provider-task-list.sh").exists())
         self.assertFalse((historical / ".github/scripts/service-ci-discover-provider-pact-task.sh").exists())
+        self.assertFalse((historical / ".github/scripts/resolve-historical-service-ref.sh").exists())
+        self.assertFalse((historical / ".github/scripts/tests/test-resolve-historical-service-ref.sh").exists())
         (historical / f"{SERVICE}/src/test/SampleProviderVerificationTest.kt").touch()
 
         calls = root / "gradle-calls"
