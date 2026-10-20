@@ -112,8 +112,8 @@ export default function ReadinessPage() {
         icon={<ClipboardCheck size={28} className="tone-text-accent" />}
         title={t('Připravenost na produkci', 'Production Readiness')}
         subtitle={t(
-          'Odvozená matice zralosti modulů služeb × 9 dimenzí z repozitáře, GitOps deklarací a časově omezených atestací; nejde o živý stav podů. Money-path vyžaduje vše ≥ Verified a kritické dimenze = Bank-grade.',
-          'Derived maturity matrix for service modules across 9 dimensions, based on repository code, GitOps declarations, and time-limited attestations; it is not live pod health. Money-path requires all ≥ Verified and critical dimensions = Bank-grade.',
+          'Odvozená matice zralosti backendových komponent × 9 dimenzí z repozitáře, GitOps deklarací a časově omezených atestací; nejde o živý stav podů. Money-path vyžaduje vše ≥ Verified a kritické dimenze = Bank-grade.',
+          'Derived maturity matrix for backend components across 9 dimensions, based on repository code, GitOps declarations, and time-limited attestations; it is not live pod health. Money-path requires all ≥ Verified and critical dimensions = Bank-grade.',
         )}
         actions={
           <button
@@ -180,7 +180,7 @@ export default function ReadinessPage() {
 
       {/* Summary cards */}
       {report && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-        <StatCard label={t('Služeb', 'Services')} value={services.length} />
+        <StatCard label={t('Komponent', 'Components')} value={services.length} />
         <StatCard label="GO" value={go} tone="success" icon={<CheckCircle2 size={16} />} />
         <StatCard label="NO-GO" value={nogo} tone="danger" icon={<XCircle size={16} />} />
         {undeployed > 0 && (
@@ -266,10 +266,10 @@ export default function ReadinessPage() {
           </span>
           {report && (
             <span style={{ marginLeft: 'auto' }}>
-              {data?.source === 'runtime' ? t('Živý snapshot', 'Live snapshot') : t('Snapshot z image', 'Image snapshot')} ·
+              {data?.source === 'runtime' ? t('Publikovaná evidence', 'Published evidence') : t('Snapshot z image', 'Image snapshot')} ·
               {' '}{t('nasbíráno', 'collected')} {new Date(report.collected_at).toLocaleString()} ({ageLabel(report.collected_at)}) ·
               {' '}{t('zdrojový commit', 'source commit')} {report.source_sha.slice(0, 12)} ·
-              {' '}{t('rozsah', 'scope')} {report.scope.service_count} {t('modulů služby', 'service modules')}, {report.scope.money_path_count} money-path
+              {' '}{t('rozsah', 'scope')} {report.scope.service_count} {t('backendových komponent', 'backend components')}, {report.scope.money_path_count} money-path
             </span>
           )}
         </div>
