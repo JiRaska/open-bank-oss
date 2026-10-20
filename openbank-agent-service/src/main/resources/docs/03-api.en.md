@@ -11,6 +11,7 @@ Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`
 | MCP server | `POST /mcp` | JSON-RPC 2.0 over HTTP | `X-Agent-Id` identity (deny-by-default if absent) |
 | Admin assistant | `POST /agent/chat` | JSON | Keycloak OIDC; runs as `ui-assistant` |
 | Model registry | `GET /agent/models` | JSON | Keycloak OIDC |
+| Catalog review capability/review | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
 | Merge-record evidence | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | none (management port 8085) |
 
@@ -75,6 +76,17 @@ The loop enforces the `ui-assistant` charter: a runs-per-day pre-flight check (o
 
 Returns the default model id and every enabled model in the gateway registry: `{ default, models: [{ id, provider, sensitivity }] }` where `sensitivity ∈ {HOSTED, SELF_HOSTED}`.
 
+## Catalog Intelligence — `/agent/catalog-reviews`
+
+Both operations require `ROLE_OPERATOR`, `ROLE_ADMIN`, or `ROLE_COMPLIANCE`.
+
+- **`GET /agent/catalog-reviews`** returns the catalog-review capability: whether a configured route is eligible, its mode, configured default model id, and the eligible model descriptors. The list is derived from the service model registry and deployment policy; it does not probe the provider or guarantee that an upstream model is currently healthy. The UI reads this response rather than embedding model ids.
+- **`POST /agent/catalog-reviews`** accepts `offeringId` and `revisionId` UUIDs, plus an optional `model` from the capability allow-list. If omitted, the service uses the configured default. The service fetches that exact catalog revision, requires it to remain `DRAFT`, and rejects snapshots over 64,000 characters. The model receives the pinned snapshot with tools disabled. The only persisted result is a `PROPOSED` item in the human-in-the-loop queue; the operation does not write, publish, or retire catalog content.
+
+Hosted review is a catalog-only sandbox exception. `catalog-review.allow-hosted-models` defaults to `false`; the sandbox deployment explicitly enables it. When enabled, the server permits only registered `openai-compat` models whose configured endpoint matches the in-cluster LiteLLM gateway. It uses the already configured default and existing LiteLLM budget controls; it adds no provider credential or direct-provider route. In deployments without the opt-in, catalog review retains the existing self-hosted sensitive-context requirement. This exception does not change routing for other agent workflows.
+
+Invalid identifiers, non-DRAFT revisions, oversized snapshots, or a model outside the allow-list return `400`; no eligible configured route or an unavailable model returns `503`. A successful response includes the proposal id/state, context hash, bounded findings, and the model id used.
+
 ## Recorded human merges — `/api/v1/agent-merge-records`
 
 ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merged an agent-authored PR** (table in [04 — Data](./04-data.md)). Records enter **out-of-band** — the `record-agent-merge` GitHub Actions workflow POSTs every merged agent PR with the pipeline's `ROLE_MERGE_RECORDER` service credential. The agent never self-reports its own merges.
@@ -92,3 +104,12 @@ ADR-0031 phase 3 "recorded human merge" evidence: a durable record of **who merg
 ## Versioning
 
 `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The MCP protocol version (`2024-11-05`) is negotiated separately on `initialize` and is independent of the HTTP API version.
+
+## Balance holds downstream contract
+
+`get_balance_holds` calls `GET /api/v1/balances/{accountId}/holds` and passes the `holds` array
+through unchanged, including sensitive reason/reference metadata. The balance provider filters
+released/expired rows without releasing funds. The consumer Pact covers an active hold, an empty
+result and propagation of a missing-identity 401; its canonical contract test is discovered by
+Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
+production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.

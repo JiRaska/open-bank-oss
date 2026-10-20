@@ -27,6 +27,21 @@ describe('SDD mandate response contract', () => {
     expect(parseSddMandates([valid])).toEqual([valid])
   })
 
+  it('accepts canonical UUID values independently of version bits and omitted nullable dates', () => {
+    expect(parseSddMandates([{
+      ...valid,
+      id: '00000000-0000-0000-0000-000000000000',
+      accountId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+      lastCollectionDate: undefined,
+      lastPreNotificationDate: undefined,
+    }])).toMatchObject([{
+      id: '00000000-0000-0000-0000-000000000000',
+      accountId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+      lastCollectionDate: null,
+      lastPreNotificationDate: null,
+    }])
+  })
+
   it('rejects partial records and invented enum values', () => {
     expect(() => parseSddMandates([{ ...valid, sequenceType: 'MONTHLY' }])).toThrow('Invalid SDD sequenceType')
     expect(() => parseSddMandates([{ ...valid, b2bConfirmed: undefined }])).toThrow('Invalid SDD b2bConfirmed')

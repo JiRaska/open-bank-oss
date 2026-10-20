@@ -152,3 +152,7 @@ labels:
   - name: deps-freshness
     color: "0e8a16"
     description: "Standing dependency-freshness report issue (ADR-0279 #15), bot-maintained."
+
+  - name: "merge-priority:repair"
+    color: "d93f0b"
+    description: "Defer new deploy auto-merges while this repair PR is open; remove to release."

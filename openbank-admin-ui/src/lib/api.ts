@@ -160,7 +160,7 @@ export const transactionApi = {
   get: (id: string) => apiFetchSimple<Transaction>(`${TRANSACTION_SERVICE}/api/v1/transactions/${pathSegment(id)}`),
 }
 
-import type { ServiceHealthEntry } from '@/app/api/services/health/route'
+import type { ServiceHealthEntry } from '@/lib/services/healthContract'
 
 export type { ServiceHealthEntry }
 
@@ -226,13 +226,19 @@ function isHealthEntry(value: unknown): value is ServiceHealthEntry {
     (entry.latencyMs === null || (typeof entry.latencyMs === 'number' && Number.isFinite(entry.latencyMs))) &&
     (entry.version == null || typeof entry.version === 'string') &&
     (entry.gitCommit == null || typeof entry.gitCommit === 'string') &&
+    (entry.namespace === undefined || (typeof entry.namespace === 'string' && entry.namespace.length > 0)) &&
     isStack(entry.stack)
+}
+
+function healthEntryIdentity(entry: ServiceHealthEntry): string {
+  return entry.namespace ? `${entry.namespace}/${entry.name}` : `${entry.name}:${entry.port}`
 }
 
 function snapshotFromHealthEntry(entry: ServiceHealthEntry): ServiceSnapshot {
   const hasInfoSignal = Boolean(entry.version || entry.gitCommit || entry.stack)
   return {
     name: entry.name,
+    ...(entry.namespace ? { namespace: entry.namespace } : {}),
     port: entry.port,
     info: hasInfoSignal ? {
       service: entry.name,
@@ -264,9 +270,23 @@ export async function fetchAllServiceSnapshotsEvidence(): Promise<ServiceSnapsho
     if (typeof data !== 'object' || data === null || !Array.isArray((data as { services?: unknown }).services)) {
       return { ok: false, failure: 'error' }
     }
-    const services = (data as { services: unknown[] }).services
+    const healthEvidence = data as { services: unknown[]; source?: unknown; discoveryStatus?: unknown }
+    if (healthEvidence.source === 'kubernetes') {
+      if (healthEvidence.discoveryStatus !== 'complete') {
+        // Partial, unavailable, and malformed inventory can contain useful
+        // positive observations, but cannot establish the absence of services.
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else if (healthEvidence.source === 'static') {
+      if (healthEvidence.discoveryStatus !== 'static') {
+        return { ok: false, failure: 'discovery_unavailable' }
+      }
+    } else {
+      return { ok: false, failure: 'discovery_unavailable' }
+    }
+    const services = healthEvidence.services
     if (!services.every(isHealthEntry)) return { ok: false, failure: 'error' }
-    if (new Set(services.map(entry => `${entry.name}:${entry.port}`)).size !== services.length) {
+    if (new Set(services.map(healthEntryIdentity)).size !== services.length) {
       return { ok: false, failure: 'error' }
     }
     return { ok: true, snapshots: services.map(snapshotFromHealthEntry) }

@@ -30,7 +30,9 @@ export interface SddMandate {
 const SCHEMES = new Set<string>(SDD_SCHEMES)
 const SEQUENCES = new Set<string>(SDD_SEQUENCE_TYPES)
 const STATUSES = new Set<string>(SDD_MANDATE_STATUSES)
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+// Java UUID accepts any canonical 128-bit hex value; do not impose RFC version/variant bits
+// that the service's UUID persistence layer does not validate.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const IBAN = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/
 const CREDITOR_ID = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,31}$/
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
@@ -64,7 +66,7 @@ function isValidIban(value: string): boolean {
 
 function dateOnly(record: Record<string, unknown>, field: string, nullable = false): string | null {
   const value = record[field]
-  if (nullable && value === null) return null
+  if (nullable && (value === null || value === undefined)) return null
   const parsed = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
     ? new Date(`${value}T00:00:00Z`)
     : null

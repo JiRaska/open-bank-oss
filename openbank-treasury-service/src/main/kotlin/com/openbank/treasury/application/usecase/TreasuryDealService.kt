@@ -37,6 +37,7 @@ import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
+import com.openbank.treasury.domain.model.LedgerRole
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingRules
@@ -257,7 +258,13 @@ class TreasuryDealService(
         val reversed = deal.reverse(actor, reason, clock.instant())
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
-            ?.let { post(it, bankToday(), "treasury ${deal.product} reversal") }
+            ?.let {
+                post(
+                    pinToOriginalAccounts(it, deals.journals(deal.id)),
+                    bankToday(),
+                    "treasury ${deal.product} reversal",
+                )
+            }
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -403,9 +410,35 @@ class TreasuryDealService(
     private suspend fun accruedSoFar(deal: Deal): BigDecimal =
         lastAccrued(deal)?.let { PostingRules.accruedThrough(deal, it) } ?: BigDecimal.ZERO
 
+    /**
+     * A reversal offsets the accounts the deal's own journals actually landed on, NOT whatever the
+     * ledger's class map says today: the map can be re-pointed by a reviewed migration between a
+     * settlement and its reversal, and a reversal that re-resolved would then leave the original
+     * account uncleared. A leg with no recorded account (a deal posted before accounts were recorded)
+     * stays a class leg and resolves now; the first recorded posting of a class/role/currency wins.
+     */
+    private fun pinToOriginalAccounts(spec: JournalSpec, journals: List<LedgerJournalRef>): JournalSpec {
+        val original = LinkedHashMap<Triple<String, LedgerRole, String>, java.util.UUID>()
+        journals.sortedBy { it.postedAt }.flatMap { it.accounts }.forEach {
+            original.putIfAbsent(Triple(it.accountingClass, it.role, it.currency), it.glAccountId)
+        }
+        return spec.copy(
+            lines = spec.lines.map {
+                it.copy(glAccountId = original[Triple(it.accountingClass, it.role, it.currency)])
+            },
+        )
+    }
+
     private suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): LedgerJournalRef {
-        val journalId = ledger.post(spec, entryDate, description)
-        return LedgerJournalRef(spec.dealId, spec.event, spec.idempotencyKey, journalId, clock.instant())
+        val posted = ledger.post(spec, entryDate, description)
+        return LedgerJournalRef(
+            spec.dealId,
+            spec.event,
+            spec.idempotencyKey,
+            posted.journalId,
+            clock.instant(),
+            posted.accounts,
+        )
     }
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {

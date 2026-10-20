@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => true,
-  resolveInClusterBaseUrl: vi.fn(async () => 'http://transaction-service.test:8080'),
+  resolveInClusterService: vi.fn(async () => ({ state: 'found', service: {}, baseUrl: 'http://transaction-service.test:8080', coverage: 'partial' })),
 }))
 vi.mock('@/lib/services/fleet', () => ({
   getProxyAllowlist: () => ({ 'transaction-service': { container: 'tx', port: 8080 } }),

@@ -3,6 +3,7 @@
 
 import { expect, test, type Route } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
+import { waitForSettledShell } from './helpers/shell'
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -31,6 +32,7 @@ test('shows every onboarding stage and purges customer evidence after authorizat
   }))
 
   await page.goto('/onboarding')
+  await waitForSettledShell(page)
   const filters = page.getByRole('group', { name: 'Onboarding stage filters' })
   await expect(filters.getByRole('button')).toHaveCount(7)
   await expect(filters.getByRole('button', { name: /KYC Documents/ })).toContainText('3')
@@ -39,7 +41,11 @@ test('shows every onboarding stage and purges customer evidence after authorizat
   await expect(page.getByRole('dialog')).toContainText('customer@example.test')
 
   unauthorized = true
-  await page.locator('[aria-label="Refresh onboarding"]').evaluate((button: HTMLButtonElement) => button.click())
+  // Keep the details dialog open: the shell intentionally hides its background controls
+  // from the accessibility tree, but this refresh must still purge the open customer view.
+  const refresh = page.getByRole('button', { name: 'Refresh onboarding', includeHidden: true })
+  await expect(refresh).toHaveCount(1)
+  await refresh.evaluate((button: HTMLButtonElement) => button.click())
   await expect(page.getByText('Sensitive Customer')).toBeHidden()
   await expect(page.getByRole('dialog')).toBeHidden()
   await expect(page.getByText(/session has expired/).first()).toBeVisible()

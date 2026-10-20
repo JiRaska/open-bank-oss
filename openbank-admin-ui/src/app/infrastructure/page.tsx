@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { EVENT_INSIGHTS } from '@/components/insights/catalog'
 import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
+import { classifyBffFailure } from '@/lib/services/bff'
 
 type InfraStatus = InfrastructureStatus
 
@@ -29,17 +30,17 @@ interface InfraComponent {
 }
 
 const INFRA_COMPONENTS: InfraComponent[] = [
-  { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 via Gatus',                  icon: <Database size={20} /> },
-  { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9092 via Gatus',                  icon: <Layers size={20} /> },
-  { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /health/ready via Gatus',         icon: <Lock size={20} /> },
-  { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'TCP :6379 via Gatus',                  icon: <HardDrive size={20} /> },
-  { id: 'openbao',         name: 'OpenBao',            probeNote: 'HTTP /v1/sys/health via Gatus',        icon: <Lock size={20} /> },
-  { id: 'schema-registry', name: 'Schema Registry',   probeNote: 'HTTP :8081 via Gatus',                 icon: <Server size={20} /> },
-  { id: 'grafana',         name: 'Grafana',            probeNote: 'HTTP /api/health via Gatus',           icon: <Eye size={20} /> },
-  { id: 'prometheus',      name: 'Prometheus',         probeNote: 'HTTP /-/healthy via Gatus',            icon: <Activity size={20} /> },
-  { id: 'loki',            name: 'Loki',               probeNote: 'HTTP /ready via Gatus',                icon: <Activity size={20} /> },
-  { id: 'tempo',           name: 'Tempo',              probeNote: 'HTTP /ready via Gatus',                icon: <Activity size={20} /> },
-  { id: 'kafka-ui',        name: 'Kafka UI',           probeNote: 'HTTP /actuator/health via BFF',        icon: <LayoutTemplate size={20} /> },
+  { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 service probe',              icon: <Database size={20} /> },
+  { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9093 mTLS listener',               icon: <Layers size={20} /> },
+  { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /realms/master',                   icon: <Lock size={20} /> },
+  { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'Prometheus readiness (≤2m sample age)', icon: <HardDrive size={20} /> },
+  { id: 'openbao',         name: 'OpenBao',            probeNote: 'HTTP /v1/sys/health',                    icon: <Lock size={20} /> },
+  { id: 'schema-registry', name: 'Schema Registry',   probeNote: 'TCP :8080 service probe',              icon: <Server size={20} /> },
+  { id: 'grafana',         name: 'Grafana',            probeNote: 'HTTP /api/health',                      icon: <Eye size={20} /> },
+  { id: 'prometheus',      name: 'Prometheus',         probeNote: 'HTTP /-/ready',                         icon: <Activity size={20} /> },
+  { id: 'loki',            name: 'Loki',               probeNote: 'HTTP /ready',                           icon: <Activity size={20} /> },
+  { id: 'tempo',           name: 'Tempo',              probeNote: 'TCP :3200 service probe',              icon: <Activity size={20} /> },
+  { id: 'kafka-ui',        name: 'Kafka UI',           probeNote: 'HTTP /actuator/health',                icon: <LayoutTemplate size={20} /> },
   // Expanded observability stack (ADR-0077/0079/0088), all in the observability namespace.
   { id: 'pyroscope',       name: 'Pyroscope',          probeNote: 'TCP :4040 · continuous profiling',     icon: <Activity size={20} /> },
   { id: 'alertmanager',    name: 'Alertmanager',       probeNote: 'TCP :9093 · alert routing',            icon: <AlertTriangle size={20} /> },
@@ -99,7 +100,7 @@ export default function InfrastructurePage() {
     try {
       const res = await fetch('/api/infra/kafka-topics', { cache: 'no-store' })
       if (!res.ok) {
-        setKafkaUnavailable({ kind: 'not_deployed' })
+        setKafkaUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
       const data = await res.json() as { topics: KafkaTopic[]; clusterName: string }
@@ -117,7 +118,7 @@ export default function InfrastructurePage() {
     try {
       const res = await fetch('/api/infra/status', { cache: 'no-store' })
       if (!res.ok) {
-        setUnavailable({ kind: res.status === 404 ? 'not_deployed' : 'unreachable' })
+        setUnavailable({ kind: await classifyBffFailure(res) })
       } else {
         try {
           setStatuses(parseInfrastructureStatuses(await res.json() as unknown))
@@ -163,6 +164,8 @@ export default function InfrastructurePage() {
 
   const upCount = Object.values(statuses).filter(s => s.status === 'UP').length
   const totalCount = INFRA_COMPONENTS.length
+  const downCount = Object.values(statuses).filter(s => s.status === 'DOWN').length
+  const unknownCount = Math.max(0, totalCount - upCount - downCount)
   const attention = Object.values(lifecycle).filter(c => ['vulnerable', 'eol-soon', 'eol'].includes(c.urgency)).length
   const upgradable = Object.values(lifecycle).filter(c => c.urgency === 'patch-available' || c.urgency === 'major-available').length
 
@@ -180,8 +183,8 @@ export default function InfrastructurePage() {
             </span>
           )}
           {!loading && !unavailable && (
-            <span style={{ fontSize: '11px', color: upCount === totalCount ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
-              {upCount}/{totalCount} UP
+            <span role="status" style={{ fontSize: '11px', color: downCount > 0 ? 'var(--danger)' : unknownCount > 0 ? 'var(--warning-text)' : 'var(--success)', fontWeight: 600 }}>
+              {upCount}/{totalCount} UP · {downCount} DOWN · {unknownCount} UNKNOWN
             </span>
           )}
           {attention > 0 && (

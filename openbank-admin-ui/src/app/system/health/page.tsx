@@ -165,7 +165,7 @@ export default function SystemHealthPage() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '12px' }}>
-          {snapshots.map(s => <ServiceCard key={s.name} snapshot={s} resilience={configMap[s.name] ?? null} governance={govMap[s.name]} govTimestamp={govTimestamp} />)}
+          {snapshots.map(s => <ServiceCard key={s.namespace ? `${s.namespace}/${s.name}` : `${s.name}:${s.port}`} snapshot={s} resilience={configMap[s.name] ?? null} governance={govMap[s.name]} govTimestamp={govTimestamp} />)}
         </div>
       )}
       {hasSample && !healthFailure && snapshots.length > 0 && <CatalogDriftBanner present={snapshots.map(s => s.name)} />}
@@ -197,7 +197,7 @@ function SummaryCard({ label, count, total, icon, color, bg, border }: {
 function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snapshot: ServiceSnapshot; resilience: ServiceConfigResponse | null; governance?: GovernanceManifestEntry; govTimestamp?: string | null }) {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const { name, port, info, health, rateLimitMax, rateLimitRemaining, apiVersion, latencyMs, reachable } = snapshot
+  const { name, namespace, port, info, health, rateLimitMax, rateLimitRemaining, apiVersion, latencyMs, reachable } = snapshot
 
   const isUnknown = health === null
   const isDegraded = reachable && health?.status === 'DOWN'
@@ -225,13 +225,17 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
         background: isDown ? 'var(--danger-bg)' : 'var(--surface-2)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           <div style={{
             width: '8px', height: '8px', borderRadius: '50%',
             background: dotColor,
             boxShadow: `0 0 0 2px ${dotColor}33`,
+            flex: '0 0 8px',
           }} />
-          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{name}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px', minWidth: 0 }}>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{name}</span>
+            {namespace && <span className="tag" aria-label={t(`Jmenný prostor ${namespace}`, `Namespace ${namespace}`)} style={{ fontSize: '10px' }}>{namespace}</span>}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span className="tag" style={{ fontFamily: 'JetBrains Mono, monospace' }}>:{port}</span>

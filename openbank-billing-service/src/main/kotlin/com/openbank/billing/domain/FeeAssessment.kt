@@ -48,6 +48,10 @@ data class AssessedFee(
      * date, matching `AssessedFeeEntity.postedAt` one-for-one.
      */
     val postedAt: Instant? = null,
+    /** The catalog revision the fee was priced from (ADR-0341 D2); null on rows assessed before the pin existed. */
+    val productRevisionId: String? = null,
+    /** The accounting class the ledger resolves the customer leg with (ADR-0341 D3); null on pre-pin rows. */
+    val accountingClass: String? = null,
 ) {
     val idempotencyKey: String get() = "fee-$cycleId-$accountId-$feeId-$currency"
 
@@ -67,6 +71,8 @@ data class FeeJournalCommand(
     val amount: BigDecimal,
     val currency: String,
     val description: String,
+    /** The customer leg's accounting class; the ledger, not billing, decides which GL account that is. */
+    val accountingClass: String,
 )
 
 /**
@@ -85,6 +91,7 @@ data class FeeReversalCommand(
     val amount: BigDecimal,
     val currency: String,
     val reason: String,
+    val accountingClass: String,
 )
 
 /**
@@ -125,6 +132,9 @@ data class BillingAssessment(
                 amount = fee.chargedAmount,
                 currency = fee.currency,
                 description = "Fee charge: ${fee.name}",
+                accountingClass = requireNotNull(fee.accountingClass) {
+                    "chargeable fee ${fee.idempotencyKey} has no accounting class"
+                },
             )
         }
 }

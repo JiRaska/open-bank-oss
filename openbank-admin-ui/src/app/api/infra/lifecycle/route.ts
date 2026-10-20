@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { inCluster } from '@/lib/discovery'
+import { getLiveSnapshot, IMAGE_SAMPLE_MAX_AGE_MS } from '@/lib/live-platform-versions'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -154,24 +155,41 @@ export async function GET() {
   }
 
   const probeOn = inCluster()
+  // kube-state-metrics reports container images actually present on running pods.
+  // Keep this separate from the build-time GitOps image declaration below.
+  const liveImages = probeOn ? await getLiveSnapshot() : null
+  const checkedAtMs = Date.now()
   const components = await Promise.all(snap.components.map(async c => {
-    // 1. running version
+    // 1. measured running version: prefer live workload images, then an application
+    // build-info endpoint. GitOps image tags are declarations, never runtime evidence.
     let running: string | null = null
     let versionSource: string
-    if (c.versionSource === 'gitops') {
-      running = c.gitopsVersion
-      versionSource = 'gitops-image-tag'
+    const imageVersions = (liveImages?.components[c.id] ?? []).filter(image => {
+      const ageMs = checkedAtMs - Date.parse(image.observedAt)
+      return Number.isFinite(ageMs) && ageMs >= -30_000 && ageMs <= IMAGE_SAMPLE_MAX_AGE_MS
+    })
+    if (imageVersions.length === 1) {
+      running = imageVersions[0].version
+      versionSource = running.startsWith('sha256:')
+        ? 'prometheus-workload-image-digest'
+        : 'prometheus-workload-image'
+    } else if (imageVersions.length > 1) {
+      // A rolling deployment can legitimately run more than one version. Never pick
+      // the most common one and call it "the" running version.
+      versionSource = 'mixed-running-images'
     } else if (c.versionSource === 'probe' && probeOn) {
       running = await probeVersion(c.id)
       versionSource = running ? 'build-info-probe' : 'unavailable'
     } else {
-      versionSource = 'unknown'
+      versionSource = probeOn ? 'unavailable' : 'unknown'
     }
 
     // 2. lifecycle from endoflife cycles
     const cycles = c.lifecycle?.cycles ?? []
     const newest = cycles[0] ?? null
-    const matched = running && cycles.length ? matchCycle(running, cycles) : null
+    const runningIsVersion = running !== null && !running.startsWith('sha256:')
+    const runningVersion = runningIsVersion ? running : null
+    const matched = runningVersion && cycles.length ? matchCycle(runningVersion, cycles) : null
 
     let eolDate: string | null = null
     let eolPassed = false
@@ -188,9 +206,9 @@ export async function GET() {
     const support = matched?.support ?? null
 
     const latestInCycle = matched?.latest ?? null
-    const patchAvailable = !!(running && latestInCycle && cmp(running, latestInCycle) < 0)
+    const patchAvailable = !!(runningVersion && latestInCycle && cmp(runningVersion, latestInCycle) < 0)
     const majorAvailable = !!(matched && newest && newest.cycle !== matched.cycle &&
-      newest.latest && running && cmp(newest.latest, running) > 0)
+      newest.latest && runningVersion && cmp(newest.latest, runningVersion) > 0)
 
     // recommended upgrade target: safe patch first, else the newest major
     const target = patchAvailable ? latestInCycle : (majorAvailable ? newest?.latest ?? null : null)
@@ -209,7 +227,7 @@ export async function GET() {
 
     // urgency (worst wins)
     let urgency: Urgency = 'unknown'
-    if (running && (matched || !c.eolProduct)) {
+    if (runningIsVersion && (matched || !c.eolProduct)) {
       if (eolPassed) urgency = 'eol'
       else if (eolDaysLeft !== null && eolDaysLeft <= 90) urgency = 'eol-soon'
       else if (highCrit > 0) urgency = 'vulnerable'
@@ -220,7 +238,14 @@ export async function GET() {
 
     return {
       id: c.id,
-      running: { version: running, source: versionSource },
+      running: {
+        version: running,
+        source: versionSource,
+        observedAt: imageVersions.length === 1 ? imageVersions[0].observedAt : null,
+        versions: imageVersions.map(({ version, count, observedAt }) => ({ version, count, observedAt })),
+        mixed: imageVersions.length > 1,
+      },
+      declared: { version: c.versionSource === 'gitops' ? c.gitopsVersion : null, source: c.versionSource === 'gitops' ? 'gitops-image-tag' : null },
       lifecycle: c.eolProduct
         ? {
             available: cycles.length > 0,
