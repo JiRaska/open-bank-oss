@@ -6,8 +6,10 @@ package com.openbank.billing.e2e
 
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
+import com.openbank.billing.application.port.out.AccountingClassSource
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
-import com.openbank.billing.application.port.out.ProductCatalogPort
+import com.openbank.billing.application.port.out.ProductRevisionPort
+import com.openbank.billing.application.port.out.RevisionTerms
 import com.openbank.billing.domain.BillableFee
 import com.openbank.billing.it.PostgresRedisTestResource
 import com.openbank.libs.product.FeeContext
@@ -30,6 +32,7 @@ import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -81,6 +84,7 @@ class BillingLifecycleE2E {
                 AccountBilling(
                     productId = PRODUCT_ID,
                     context = FeeContext(balance = BigDecimal("10.00"), currency = currency),
+                    openedAt = Instant.parse("2026-01-15T10:00:00Z"),
                 )
             } else {
                 null
@@ -90,16 +94,23 @@ class BillingLifecycleE2E {
     /** One non-waivable fee — the chargeable outcome is deterministic, not waiver-evaluation-dependent. */
     @Alternative
     @ApplicationScoped
-    class E2EOneFeeCatalog : ProductCatalogPort {
-        override suspend fun billableFees(productId: String, currency: String) = listOf(
-            BillableFee(
-                feeId = FEE_ID,
-                name = "Monthly maintenance",
-                type = "MAINTENANCE",
-                amount = BigDecimal("150.00"),
-                currency = currency,
-                waivable = false,
-                waiveCondition = null,
+    class E2EOneFeeCatalog : ProductRevisionPort {
+        override suspend fun publishedRevisionIdFor(productId: String, effectiveAt: Instant?): String = REVISION_ID
+
+        override suspend fun terms(revisionId: String, currency: String) = RevisionTerms(
+            revisionId = revisionId,
+            accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
+            accountingClassSource = AccountingClassSource.REVISION,
+            fees = listOf(
+                BillableFee(
+                    feeId = FEE_ID,
+                    name = "Monthly maintenance",
+                    type = "MAINTENANCE",
+                    amount = BigDecimal("150.00"),
+                    currency = currency,
+                    waivable = false,
+                    waiveCondition = null,
+                ),
             ),
         )
     }
@@ -454,6 +465,7 @@ class BillingLifecycleE2E {
         const val VIEWER_ID = "00000000-0000-0000-0000-0000000000e2"
         const val PRODUCT_ID = "CURRENT_CZK"
         const val FEE_ID = "maintenance-monthly"
+        const val REVISION_ID = "0191c0de-0000-7000-8000-0000000000a1"
         const val CURRENCY = "CZK"
 
         const val POST_INTENT = "billing.fee.post-intent.v1"
