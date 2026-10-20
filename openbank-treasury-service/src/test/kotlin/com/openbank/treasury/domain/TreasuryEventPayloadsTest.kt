@@ -340,4 +340,26 @@ class TreasuryEventPayloadsTest {
         assertThat(booked().rollDirection).isEqualTo(RollDirection.FROM_END)
         assertThat(booked(RollDirection.FROM_START).rollDirection).isEqualTo(RollDirection.FROM_START)
     }
+
+    @Test
+    fun `deal booked carries the header calendars and business-day convention`() {
+        val booked = DealBooked(
+            dealId = dealId,
+            product = ProductType.IRS,
+            counterpartyId = "cp-1",
+            currency = "CZK",
+            principal = BigDecimal("1000000"),
+            rate = BigDecimal("3"),
+            valueDate = valueDate,
+            maturityDate = maturityDate,
+            createdBy = "dealer-1",
+            approvedBy = "approver-1",
+            occurredAt = occurredAt,
+            calendars = listOf("CERTIS", "TARGET2"),
+            businessDayConvention = "MODIFIED_FOLLOWING",
+        )
+
+        assertThat(booked.calendars).containsExactly("CERTIS", "TARGET2")
+        assertThat(booked.businessDayConvention).isEqualTo("MODIFIED_FOLLOWING")
+    }
 }

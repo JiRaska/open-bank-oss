@@ -258,7 +258,7 @@ class TreasuryDealConsumer {
             val published = publishedLegs(
                 node,
                 LegDefaults(
-                    calendars = node.get("calendars")?.takeIf { it.isArray }?.map { it.asText() },
+                    calendars = node.get("calendars")?.takeIf { it.isArray && it.size() > 0 }?.map { it.asText() },
                     businessDayConvention = node.text("businessDayConvention"),
                     rollDirection = LegDefaults.parseRollDirection(node.text("rollDirection")),
                 ),

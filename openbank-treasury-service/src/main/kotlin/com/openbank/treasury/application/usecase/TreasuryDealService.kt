@@ -279,6 +279,8 @@ class TreasuryDealService(
                     scheduleVersion = booked.scheduleVersion,
                     scheduleHash = booked.scheduleHash,
                     rollDirection = booked.header.rollDirection,
+                    calendars = booked.header.calendars,
+                    businessDayConvention = booked.header.businessDayConvention,
                 ),
             ),
         )

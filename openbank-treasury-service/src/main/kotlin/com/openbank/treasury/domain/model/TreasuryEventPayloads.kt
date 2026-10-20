@@ -55,6 +55,13 @@ data class DealBooked(
      * on older events = FROM_END, the deal default.
      */
     val rollDirection: RollDirection = RollDirection.FROM_END,
+    /**
+     * The deal header's calendar codes (additive, asyncapi 1.10.0): the joint calendar a leg without
+     * its own `paymentCalendars` is generated on. Empty = the leg currency's calendar.
+     */
+    val calendars: List<String> = emptyList(),
+    /** The deal header's business-day convention (additive, 1.10.0); null = the product default. */
+    val businessDayConvention: String? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.booked.v1"

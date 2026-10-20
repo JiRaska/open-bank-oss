@@ -14,7 +14,11 @@ info:
     1.10.0 (additive): `DealBooked.rollDirection` (FROM_START | FROM_END) — the deal's roll
     direction. A leg whose `stub` is `NONE` has no stub of its own: the roll direction places it
     (FROM_START -> SHORT_FINAL, FROM_END -> SHORT_INITIAL), the rule `StubType.resolve` in
-    libs-finance owns. Absent on older events = FROM_END, the deal default.
+    libs-finance owns. Absent on older events = FROM_END, the deal default. Also
+    `DealBooked.calendars` (the deal header's calendar codes, joint when several) and
+    `DealBooked.businessDayConvention`: the conventions a leg without its own inherits, so a
+    consumer derives the schedule treasury generated. Absent = the leg currency's calendar and the
+    consumer's default convention.
 
     1.9.0 (additive, ADR-0344 contract 9): the bank-own payment rail. Release is ASYNC and ATOMIC:
     `treasury.payment.released.v1` is written on the NEW channel `openbank.treasury.payments` in
@@ -276,6 +280,8 @@ components:
         scheduleVersion: { type: integer }
         scheduleHash: { type: [string, 'null'] }
         rollDirection: { type: string, enum: [FROM_START, FROM_END], description: 'Absent = FROM_END. Places a leg whose stub is NONE.' }
+        calendars: { type: array, items: { type: string }, description: 'Deal header calendar codes; a leg without paymentCalendars uses their joint calendar. Empty/absent = leg currency calendar.' }
+        businessDayConvention: { type: [string, 'null'], description: 'Deal header convention a leg without its own inherits.' }
 
     DealConfirmed:
       type: object
