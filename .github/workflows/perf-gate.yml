@@ -65,8 +65,9 @@ jobs:
           # fifty-seventh
           # read-only subjects). Kept as a named constant so the summary
           # can say what the run was
-          # SUPPOSED to measure, not only what it did. All subjects are non-mutating
-          # reads booted against disposable PostgreSQL. Keep money-path WRITES out of
+          # SUPPOSED to measure, not only what it did. Subjects do not submit money-path
+          # writes; some GETs can prune expired Redis index entries. They boot against
+          # disposable PostgreSQL. Keep money-path WRITES out of
           # this GitHub-hosted lane until their isolated target and synthetic identities
           # exist (perf/scenarios.yaml).
           DECLARED = [
@@ -342,8 +343,8 @@ jobs:
       PORT: ${{ matrix.port }}
       DB: ${{ matrix.db }}
       NEEDS_REDIS: ${{ matrix.redis }}
-      # Non-empty only for the derive step's NEEDS_TEMPORAL declaration (the three payment
-      # rails whose workers register at boot by default — see the derive step for the
+      # Non-empty only for the derive step's NEEDS_TEMPORAL declaration (the five
+      # services whose workers register at boot by default — see the derive step for the
       # measured per-service gate keys). Namespace read from the service's own config;
       # every other subject gets an empty value and the boot skips the server entirely.
       TEMPORAL_NS: ${{ matrix.temporal }}
@@ -418,9 +419,9 @@ jobs:
             docker run -d --name perf-redis -p 6379:6379 redis:7.2-alpine >/dev/null
           fi
 
-          # Only the NEEDS_TEMPORAL subjects (the three payment rails — see the derive
+          # Only the NEEDS_TEMPORAL subjects (five services — see the derive
           # step) get a dev server: their workers register against Temporal at BOOT and
-          # quarkusDev dies with gRPC UNAVAILABLE without one (measured on all three:
+          # quarkusDev dies with gRPC UNAVAILABLE without one (measured on these:
           # connection refused on localhost:7233). temporalio/temporal:1.8.2
           # `server start-dev` is IN-MEMORY (no extra database) and creates the namespace
           # it is given — the api-fuzz-authenticated harness's image and readiness probe.
