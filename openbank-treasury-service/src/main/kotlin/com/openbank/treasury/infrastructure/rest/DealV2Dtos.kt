@@ -4,11 +4,13 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.treasury.application.port.`in`.CashFlowLedgerView
 import com.openbank.treasury.application.port.out.DealVersionView
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.CashFlowConflict
 import com.openbank.treasury.domain.cashflow.CashFlowOverride
+import com.openbank.treasury.domain.cashflow.RateSourceWire
 import com.openbank.treasury.domain.model.Amortisation
 import com.openbank.treasury.domain.model.AmortisationStep
 import com.openbank.treasury.domain.model.AmortisationType
@@ -20,7 +22,6 @@ import com.openbank.treasury.domain.model.DealDocument
 import com.openbank.treasury.domain.model.DealFee
 import com.openbank.treasury.domain.model.DealHeader
 import com.openbank.treasury.domain.model.FraTerms
-import com.openbank.treasury.domain.model.Frequency
 import com.openbank.treasury.domain.model.FxDealTerms
 import com.openbank.treasury.domain.model.LegRate
 import com.openbank.treasury.domain.model.LegSpec
@@ -108,9 +109,9 @@ data class LegSpecDto(
         amortisation = amortisation?.let {
             Amortisation(it.type ?: AmortisationType.BULLET, it.schedule.orEmpty())
         } ?: Amortisation.BULLET,
-        accrualFrequency = accrualFrequency ?: Frequency.ONCE,
-        paymentFrequency = paymentFrequency ?: accrualFrequency ?: Frequency.ONCE,
-        stub = stub ?: StubType.NONE,
+        accrualFrequency = accrualFrequency ?: Frequency.Zero,
+        paymentFrequency = paymentFrequency ?: accrualFrequency ?: Frequency.Zero,
+        stub = stub,
         adjustPaymentDate = adjustPaymentDate ?: true,
         adjustAccrualPeriod = adjustAccrualPeriod ?: false,
         paymentLagBusinessDays = paymentLagBusinessDays ?: 0,
@@ -253,7 +254,7 @@ data class CashFlowDto(
             paymentDate = f.paymentDate,
             notional = f.notional,
             rate = f.rate,
-            rateSource = f.rateSource.name,
+            rateSource = RateSourceWire.encode(f.rateSource),
             amount = f.amount,
             state = f.state.name,
             manual = f.manual,

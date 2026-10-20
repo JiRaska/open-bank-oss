@@ -5,35 +5,33 @@
 package com.openbank.treasury.domain.model
 
 import com.openbank.libs.domain.money.RoundingPolicy
+import com.openbank.libs.finance.schedule.Frequency
 import java.math.BigDecimal
 import java.security.MessageDigest
 import java.time.LocalDate
 import com.openbank.libs.domain.calendar.DayCount as KernelDayCount
 
-/** ADR-0344 D2: only ACTUAL books, posts and pays; PLANNED feeds the forecast; HYPOTHETICAL is priced only. */
-enum class DealKind { ACTUAL, PLANNED, HYPOTHETICAL }
+/**
+ * ADR-0344 D2: only ACTUAL books, posts and pays; PLANNED feeds the forecast; HYPOTHETICAL is priced
+ * only. Owned by `openbank-libs-finance` (risk-engine values the same kinds).
+ */
+typealias DealKind = com.openbank.libs.finance.deal.DealKind
 
 enum class PayReceive { PAY, RECEIVE }
 
 /** NONE = an exchange-only leg (an FX leg): notional moves, nothing accrues. */
 enum class RateType { FIXED, FLOATING, NONE }
 
-@Suppress("MagicNumber") // months per period: the definition of each frequency
-enum class Frequency(val months: Int?) {
-    ONCE(null),
-    DAILY(null),
-    WEEKLY(null),
-    MONTHLY(1),
-    QUARTERLY(3),
-    SEMI_ANNUAL(6),
-    ANNUAL(12),
-}
-
 enum class AmortisationType { BULLET, LINEAR, ANNUITY, CUSTOM }
 
-enum class StubType { SHORT_INITIAL, LONG_INITIAL, SHORT_FINAL, LONG_FINAL, NONE }
+/**
+ * Where a leg's irregular period goes: `openbank-libs-finance`'s stub type. A leg that names none
+ * (`null`, spelled `NONE` on the wire) lets the deal's [RollDirection] place it.
+ */
+typealias StubType = com.openbank.libs.finance.schedule.StubType
 
-enum class RollDirection { FROM_START, FROM_END }
+/** The direction a deal's schedule rolls in; owned by `openbank-libs-finance`. */
+typealias RollDirection = com.openbank.libs.finance.schedule.RollDirection
 
 enum class CapFloorBasis { INDEX, INDEX_PLUS_SPREAD }
 
@@ -117,9 +115,11 @@ data class LegSpec(
     val dayCount: DayCountConvention,
     val rate: LegRate,
     val amortisation: Amortisation = Amortisation.BULLET,
-    val accrualFrequency: Frequency = Frequency.ONCE,
-    val paymentFrequency: Frequency = Frequency.ONCE,
-    val stub: StubType = StubType.NONE,
+    /** `openbank-libs-finance`'s schedule frequency; a leg uses only the [Frequency.NAMED] ones (wire: their codes). */
+    val accrualFrequency: Frequency = Frequency.Zero,
+    val paymentFrequency: Frequency = Frequency.Zero,
+    /** null = no stub named: the deal's roll direction places it (`NONE` on the wire). */
+    val stub: StubType? = null,
     val adjustPaymentDate: Boolean = true,
     val adjustAccrualPeriod: Boolean = false,
     val paymentLagBusinessDays: Int = 0,
@@ -148,6 +148,9 @@ data class LegSpec(
         require(expectedPeriods() <= MAX_PERIODS_PER_LEG) {
             "a leg generates at most $MAX_PERIODS_PER_LEG periods (this one ${expectedPeriods()}: tenor / frequency)"
         }
+        listOfNotNull(accrualFrequency, paymentFrequency, rate.resetFrequency).forEach {
+            require(Frequency.codeOf(it) != null) { "a leg frequency is one of ${Frequency.NAMED.keys}" }
+        }
         require(paymentLagBusinessDays in 0..LegRate.MAX_LAG) { "paymentLagBusinessDays must be 0..${LegRate.MAX_LAG}" }
         rate.validate()
         amortisationStart?.let {
@@ -170,10 +173,10 @@ data class LegSpec(
     fun expectedPeriods(): Long {
         val days = java.time.temporal.ChronoUnit.DAYS.between(accrualStart, accrualEnd)
         fun periods(f: Frequency): Long = when (f) {
-            Frequency.ONCE -> 1
-            Frequency.DAILY -> days
-            Frequency.WEEKLY -> days / DAYS_PER_WEEK + 1
-            else -> java.time.temporal.ChronoUnit.MONTHS.between(accrualStart, accrualEnd) / checkNotNull(f.months) + 1
+            Frequency.Zero -> 1
+            is Frequency.Days -> days / f.days
+            is Frequency.Weeks -> days / (DAYS_PER_WEEK * f.weeks) + 1
+            is Frequency.Months -> java.time.temporal.ChronoUnit.MONTHS.between(accrualStart, accrualEnd) / f.months + 1
         }
         return maxOf(
             periods(accrualFrequency),
@@ -185,8 +188,8 @@ data class LegSpec(
 
     /** True when the leg is one accrual period paying once — what the bullet generator handles. */
     val singlePeriod: Boolean
-        get() = accrualFrequency == Frequency.ONCE &&
-            paymentFrequency == Frequency.ONCE &&
+        get() = accrualFrequency == Frequency.Zero &&
+            paymentFrequency == Frequency.Zero &&
             amortisation.type == AmortisationType.BULLET
 
     /**

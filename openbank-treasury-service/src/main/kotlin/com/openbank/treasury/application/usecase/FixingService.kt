@@ -16,6 +16,7 @@ import com.openbank.treasury.application.port.out.ObservationBatchNotFoundExcept
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.CashFlowState
 import com.openbank.treasury.domain.cashflow.RateSource
+import com.openbank.treasury.domain.cashflow.RateSourceWire
 import com.openbank.treasury.domain.marketdata.BatchKind
 import com.openbank.treasury.domain.marketdata.BatchStatus
 import com.openbank.treasury.domain.marketdata.FixingCase
@@ -228,7 +229,7 @@ class FixingService(
                             it.paymentDate,
                             checkNotNull(it.rate),
                             checkNotNull(it.amount),
-                            it.rateSource.name,
+                            RateSourceWire.encode(it.rateSource),
                             it.state.name,
                         )
                     },

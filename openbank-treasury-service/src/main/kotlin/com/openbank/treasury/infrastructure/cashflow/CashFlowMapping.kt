@@ -12,7 +12,7 @@ import com.openbank.treasury.domain.cashflow.CashFlowState
 import com.openbank.treasury.domain.cashflow.FlowDirection
 import com.openbank.treasury.domain.cashflow.FlowSlot
 import com.openbank.treasury.domain.cashflow.OverrideStatus
-import com.openbank.treasury.domain.cashflow.RateSource
+import com.openbank.treasury.domain.cashflow.RateSourceWire
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 
@@ -31,7 +31,7 @@ internal fun CashFlowEntity.fill(f: CashFlow) = apply {
     paymentDate = f.paymentDate
     notional = f.notional
     rate = f.rate
-    rateSource = f.rateSource.name
+    rateSource = RateSourceWire.encode(f.rateSource)
     amount = f.amount
     state = f.state.name
     legHash = f.legHash
@@ -59,7 +59,7 @@ internal fun CashFlowEntity.toDomain() = CashFlow(
     paymentDate = paymentDate,
     notional = notional,
     rate = rate,
-    rateSource = RateSource.valueOf(rateSource),
+    rateSource = RateSourceWire.decode(rateSource),
     amount = amount,
     state = CashFlowState.valueOf(state),
     legHash = legHash,

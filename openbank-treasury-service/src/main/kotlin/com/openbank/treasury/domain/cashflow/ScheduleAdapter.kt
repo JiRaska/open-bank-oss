@@ -18,10 +18,10 @@ import com.openbank.libs.finance.leg.NotionalSpec
 import com.openbank.libs.finance.leg.RateBounds
 import com.openbank.libs.finance.leg.RateSpec
 import com.openbank.libs.finance.leg.ScheduleSpec
+import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.libs.finance.schedule.ScheduleGenerator
 import com.openbank.treasury.domain.model.AmortisationType
 import com.openbank.treasury.domain.model.CapFloorBasis
-import com.openbank.treasury.domain.model.Frequency
 import com.openbank.treasury.domain.model.LegSpec
 import com.openbank.treasury.domain.model.PayReceive
 import com.openbank.treasury.domain.model.RateType
@@ -33,8 +33,6 @@ import java.time.LocalDate
 import java.util.UUID
 import com.openbank.libs.finance.leg.LegSpec as FinanceLeg
 import com.openbank.libs.finance.leg.PayReceive as FinancePayReceive
-import com.openbank.libs.finance.schedule.Frequency as FinanceFrequency
-import com.openbank.libs.finance.schedule.StubType as FinanceStub
 
 /** Everything a generation needs besides the legs. */
 data class ScheduleContext(
@@ -93,8 +91,7 @@ object ScheduleAdapter {
         val hash = leg.specHash()
         val projected = projection.flows.map { row(it, index, leg, hash, ctx) }
         val projectedPeriods = projection.flows.filter {
-            it.kind ==
-                com.openbank.libs.finance.cashflow.CashFlowKind.INTEREST
+            it.kind == CashFlowKind.INTEREST
         }
             .map { it.periodIndex }.toSet()
         val unfixed = if (leg.rate.type == RateType.FLOATING) {
@@ -114,7 +111,7 @@ object ScheduleAdapter {
                     paymentDate = p.paymentDate,
                     notional = p.notional,
                     rate = null,
-                    rateSource = RateSource.MISSING,
+                    rateSource = null,
                     amount = null,
                     state = CashFlowState.PROJECTED,
                     legHash = hash,
@@ -136,20 +133,15 @@ object ScheduleAdapter {
 
     private fun row(f: ProjectedCashFlow, index: Int, leg: LegSpec, hash: String, ctx: ScheduleContext): CashFlow {
         val applied = f.rate
-        val source = when (applied?.source) {
-            null -> RateSource.FIXED
-            com.openbank.libs.finance.cashflow.RateSource.FIXED -> RateSource.FIXED
-            com.openbank.libs.finance.cashflow.RateSource.OBSERVED -> RateSource.OBSERVED
-            com.openbank.libs.finance.cashflow.RateSource.PROJECTED -> RateSource.PROJECTED
-            com.openbank.libs.finance.cashflow.RateSource.RATE_UNTIL_FIRST_FIXING -> RateSource.RATE_UNTIL_FIRST_FIXING
-        }
+        // An exchange or principal flow has no applied rate: it is contractual, FIXED.
+        val source = applied?.source ?: RateSource.FIXED
         return CashFlow(
             flowId = ctx.newId(),
             dealId = ctx.dealId,
             scheduleVersion = ctx.scheduleVersion,
             legIndex = index,
             periodIndex = f.periodIndex,
-            kind = CashFlowKind.valueOf(f.kind.name),
+            kind = f.kind,
             direction = if (f.amount.signum() < 0) FlowDirection.OUT else FlowDirection.IN,
             currency = leg.currency,
             accrualStart = f.accrualStart,
@@ -198,8 +190,8 @@ object ScheduleAdapter {
             schedule = ScheduleSpec(
                 start = start,
                 end = leg.accrualEnd,
-                accrualFrequency = frequency(leg.accrualFrequency),
-                paymentFrequency = frequency(leg.paymentFrequency),
+                accrualFrequency = leg.accrualFrequency,
+                paymentFrequency = leg.paymentFrequency,
                 stub = stub(leg.stub, ctx.rollDirection),
                 endOfMonth = leg.endOfMonth,
             ),
@@ -231,10 +223,10 @@ object ScheduleAdapter {
                     ),
                     // A single-period leg (an FRA, a bullet deposit) fixes once whatever tenor the
                     // index resets on: its reset IS the period.
-                    resetFrequency = if (leg.accrualFrequency == Frequency.ONCE) {
-                        FinanceFrequency.Zero
+                    resetFrequency = if (leg.accrualFrequency == Frequency.Zero) {
+                        Frequency.Zero
                     } else {
-                        frequency(r.resetFrequency ?: leg.accrualFrequency)
+                        r.resetFrequency ?: leg.accrualFrequency
                     },
                     bounds = RateBounds(
                         cap = r.cap?.let(::pct),
@@ -253,25 +245,11 @@ object ScheduleAdapter {
 
     private fun pct(p: BigDecimal): BigDecimal = p.divide(HUNDRED, MathContext.DECIMAL128)
 
-    private fun frequency(f: Frequency): FinanceFrequency = when (f) {
-        Frequency.ONCE -> FinanceFrequency.Zero
-        Frequency.DAILY -> FinanceFrequency.Days(1)
-        Frequency.WEEKLY -> FinanceFrequency.Weeks(1)
-        else -> FinanceFrequency.Months(checkNotNull(f.months))
-    }
-
     /** The deal's roll direction decides where an unspecified stub goes (FROM_START = stub at the end). */
-    private fun stub(s: StubType, direction: RollDirection): FinanceStub = when (s) {
-        StubType.SHORT_INITIAL -> FinanceStub.SHORT_INITIAL
-        StubType.LONG_INITIAL -> FinanceStub.LONG_INITIAL
-        StubType.SHORT_FINAL -> FinanceStub.SHORT_FINAL
-        StubType.LONG_FINAL -> FinanceStub.LONG_FINAL
-        StubType.NONE -> if (direction ==
-            RollDirection.FROM_START
-        ) {
-            FinanceStub.SHORT_FINAL
+    private fun stub(s: StubType?, direction: RollDirection): StubType =
+        s ?: if (direction == RollDirection.FROM_START) {
+            StubType.SHORT_FINAL
         } else {
-            FinanceStub.SHORT_INITIAL
+            StubType.SHORT_INITIAL
         }
-    }
 }

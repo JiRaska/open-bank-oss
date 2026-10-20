@@ -13,12 +13,27 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-enum class CashFlowKind { PRINCIPAL, INTEREST, FEE, NOTIONAL_EXCHANGE, PREMIUM }
+/** The ADR-0344 D4 cash-flow kinds; owned by `openbank-libs-finance`, whose projector produces them. */
+typealias CashFlowKind = com.openbank.libs.finance.cashflow.CashFlowKind
 
 /** From the bank's side. */
 enum class FlowDirection { IN, OUT }
 
-enum class RateSource { FIXED, OBSERVED, PROJECTED, RATE_UNTIL_FIRST_FIXING, MISSING }
+/** Where a flow's rate came from; owned by `openbank-libs-finance`. A row with no rate yet carries none (null). */
+typealias RateSource = com.openbank.libs.finance.cashflow.RateSource
+
+/**
+ * The stored and published spelling of a row's rate source: the [RateSource] name, or [MISSING] for
+ * a floating period with no rate yet (no observed fixing and no forward curve at generation). MISSING
+ * is not a source a rate can come from, so it is a wire value here, never a [RateSource].
+ */
+object RateSourceWire {
+    const val MISSING = "MISSING"
+
+    fun encode(source: RateSource?): String = source?.name ?: MISSING
+
+    fun decode(wire: String): RateSource? = if (wire == MISSING) null else RateSource.valueOf(wire)
+}
 
 /**
  * ADR-0344 D4: `PROJECTED → FIXED → DUE → SETTLED → POSTED`, plus `CANCELLED`. Slice 2 reaches
@@ -49,7 +64,8 @@ data class CashFlow(
     val paymentDate: LocalDate,
     val notional: BigDecimal?,
     val rate: BigDecimal?,
-    val rateSource: RateSource,
+    /** null = no rate yet (stored and published as [RateSourceWire.MISSING]). */
+    val rateSource: RateSource?,
     val amount: BigDecimal?,
     val state: CashFlowState,
     val legHash: String,

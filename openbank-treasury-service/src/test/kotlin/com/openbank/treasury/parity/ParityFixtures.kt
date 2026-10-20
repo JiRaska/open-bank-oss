@@ -30,6 +30,7 @@ import com.openbank.treasury.domain.reference.IndexSource
 import com.openbank.treasury.domain.reference.ReferenceKind
 import com.openbank.treasury.domain.reference.ReferenceRecord
 import com.openbank.treasury.domain.reference.ReferenceStatus
+import com.openbank.treasury.infrastructure.LegWireJackson
 import com.openbank.treasury.infrastructure.rest.LegSpecDto
 import java.io.File
 import java.math.BigDecimal
@@ -43,7 +44,7 @@ import java.util.UUID
 object ParityFixtures {
     private const val COUNTERPARTY = "CPTY-PARITY"
     private val DEALER = Actor("parity-replay", ActorType.HUMAN)
-    private val mapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(jacksonObjectMapper().registerModule(JavaTimeModule()))
 
     fun fixtures(): List<Pair<File, JsonNode>> {
         val dir = File(checkNotNull(ParityFixtures::class.java.getResource("/parity")) { "no parity fixtures" }.toURI())

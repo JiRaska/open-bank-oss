@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.treasury.domain.cashflow.RateSourceWire
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -226,7 +227,11 @@ data class LedgerFlowItem(
     companion object {
         fun of(f: com.openbank.treasury.domain.cashflow.CashFlow) = LedgerFlowItem(
             f.flowId, f.legIndex, f.periodIndex, f.kind.name, f.direction.name, f.currency, f.accrualStart,
-            f.accrualEnd, f.fixingDate, f.paymentDate, f.notional, f.rate, f.rateSource.name, f.amount,
+            f.accrualEnd, f.fixingDate, f.paymentDate, f.notional, f.rate,
+            RateSourceWire.encode(
+                f.rateSource,
+            ),
+            f.amount,
             f.state.name, f.manual,
         )
     }

@@ -6,6 +6,7 @@ package com.openbank.treasury.domain.cashflow
 
 import com.openbank.libs.domain.calendar.BusinessDayConvention
 import com.openbank.libs.finance.calendar.Calendars
+import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorNotPermittedException
@@ -13,7 +14,6 @@ import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.DayCountConvention
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.FourEyesViolationException
-import com.openbank.treasury.domain.model.Frequency
 import com.openbank.treasury.domain.model.LegRate
 import com.openbank.treasury.domain.model.LegSpec
 import com.openbank.treasury.domain.model.LegacyLegs

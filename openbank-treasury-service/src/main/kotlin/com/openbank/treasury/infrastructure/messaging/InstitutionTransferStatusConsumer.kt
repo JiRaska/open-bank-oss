@@ -65,7 +65,7 @@ class InstitutionTransferStatusConsumer(
             InstitutionTransferStatus(
                 paymentId = UUID.fromString(d.text("paymentId")),
                 idempotencyKey = d.text("idempotencyKey")!!.also { require(it.length <= MAX_KEY) },
-                status = RailStatus.valueOf(d.text("status")!!),
+                status = RailStatus.valueOf(d.text("status")!!).also { require(it.announced) },
                 messageType = d.text("messageType")?.take(MAX_SHORT),
                 schemeReference = d.text("schemeReference")?.take(MAX_SHORT),
                 reasonCode = d.text("reasonCode")?.take(MAX_SHORT),

@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.application
 
+import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.treasury.application.port.out.BookValuation
 import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.DayCompletionRepository
@@ -29,7 +30,6 @@ import com.openbank.treasury.domain.model.DayStepStatus
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealHeader
 import com.openbank.treasury.domain.model.DealKind
-import com.openbank.treasury.domain.model.Frequency
 import com.openbank.treasury.domain.model.LegRate
 import com.openbank.treasury.domain.model.LegSpec
 import com.openbank.treasury.domain.model.PayReceive

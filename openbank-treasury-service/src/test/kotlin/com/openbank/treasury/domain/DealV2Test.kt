@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain
 
+import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.treasury.domain.DealFixtures.NOW
 import com.openbank.treasury.domain.DealFixtures.approver
 import com.openbank.treasury.domain.DealFixtures.dealer
@@ -23,7 +24,6 @@ import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.DocumentType
 import com.openbank.treasury.domain.model.FourEyesViolationException
-import com.openbank.treasury.domain.model.Frequency
 import com.openbank.treasury.domain.model.LegRate
 import com.openbank.treasury.domain.model.LegSpec
 import com.openbank.treasury.domain.model.LinkRelation
@@ -261,9 +261,9 @@ class DealV2Test {
 
     @Test
     fun `daily is the finest frequency there is`() {
-        // The request enum has no finer value: an unknown frequency never reaches the domain.
-        assertThat(Frequency.entries.map { it.name }).doesNotContain("HOURLY")
-        assertThatThrownBy { Frequency.valueOf("HOURLY") }.isInstanceOf(IllegalArgumentException::class.java)
+        // The named codes have no finer value: an unknown frequency never reaches the domain.
+        assertThat(Frequency.NAMED.keys).doesNotContain("HOURLY")
+        assertThat(Frequency.named("HOURLY")).isNull()
     }
 
     @Test

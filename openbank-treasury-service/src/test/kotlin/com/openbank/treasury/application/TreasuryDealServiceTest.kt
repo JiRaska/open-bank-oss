@@ -33,6 +33,7 @@ import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.LegWireJackson
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -59,7 +60,7 @@ class TreasuryDealServiceTest {
         override suspend fun findById(id: String) = all.find { it.id == id }
         override suspend fun list() = all
     }
-    private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule()))
     private var fxMid: FxMidRatePort = FxMidRatePort.NONE
     private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
     private var confirmationRequired = true

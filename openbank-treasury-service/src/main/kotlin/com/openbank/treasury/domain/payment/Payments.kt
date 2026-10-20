@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.payment
 
+import com.openbank.libs.iso20022.InstitutionTransferRail
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.CashFlowState
 import com.openbank.treasury.domain.cashflow.FlowDirection
@@ -75,11 +76,14 @@ data class SsiSnapshot(
     val intermediaryBic: String? = null,
 )
 
-/** Contract 9.1: the rail a bank-own institution transfer travels on. */
-enum class TransferRail { CERTIS, TARGET2, SWIFT }
+/** Contract 9.1: the rail a bank-own institution transfer travels on (owned by `openbank-libs-iso20022`). */
+typealias TransferRail = InstitutionTransferRail
 
-/** What the rail reported about one released payment (contract 9.2). */
-enum class RailStatus { ACCEPTED, SENT, SETTLED, REJECTED }
+/**
+ * What the rail reported about one released payment (contract 9.2): the rail's lifecycle, owned by
+ * `openbank-libs-iso20022`. Only its announced statuses reach treasury; an internal one is a conflict.
+ */
+typealias RailStatus = com.openbank.libs.iso20022.InstitutionTransferStatus
 
 /** A rail status that cannot apply to the payment as it stands (never released, or contradicts a terminal state). */
 class RailStatusConflictException(message: String) : IllegalStateException(message)
@@ -98,12 +102,7 @@ object TransferRails {
             "EUR" -> TransferRail.TARGET2
             else -> TransferRail.SWIFT
         }
-        val fromSsi = when (ssi.rail) {
-            SettlementRail.CERTIS -> TransferRail.CERTIS
-            SettlementRail.SEPA, SettlementRail.TARGET2 -> TransferRail.TARGET2
-            SettlementRail.SWIFT -> TransferRail.SWIFT
-        }
-        return expected.takeIf { it == fromSsi }
+        return expected.takeIf { it == ssi.rail.institutionRail }
     }
 }
 
@@ -193,6 +192,8 @@ data class Payment(
             RailStatus.SETTLED -> terminal(rail, PaymentStatus.SETTLED, SETTLED_ALREADY, ref, null)
             RailStatus.REJECTED ->
                 terminal(rail, PaymentStatus.FAILED, FAILED_ALREADY, ref, (reason ?: "rejected by the rail"))
+            // The rail's internal states are never announced (contract 9.2); one arriving here is not guessed at.
+            RailStatus.SUBMITTING, RailStatus.SUBMISSION_UNKNOWN, RailStatus.MANUAL_RECONCILIATION -> conflict(rail)
         }
     }
 

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.treasury.application.usecase.ScheduleService
 import com.openbank.treasury.domain.cashflow.CashFlow
 import com.openbank.treasury.domain.cashflow.ProductLedger
+import com.openbank.treasury.domain.cashflow.RateSourceWire
 import com.openbank.treasury.domain.model.ProductType
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -125,7 +126,7 @@ class TreasuryParityReplayTest {
                 findings +=
                     "$id ${label(k)}: rate expected ${e.textOrNull("rate")}, actual ${a.rate?.toPlainString()}"
             }
-            diff("rateSource", e.textOrNull("rateSource"), a.rateSource.name)
+            diff("rateSource", e.textOrNull("rateSource"), RateSourceWire.encode(a.rateSource))
             amount("amount", e.textOrNull("amount"), a.amount)
         }
         byKey.keys.filter { it !in expectedKeys }.forEach {
