@@ -251,7 +251,7 @@ set) apply equally to the new `ledger.approval.decide` action.
 - **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
   `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
   reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
-  roles). New table `ledger_close_participation` (V31, append-only history). `AccountingDayScheduler`
+  roles). New table `ledger_close_participation` (V33, append-only history). `AccountingDayScheduler`
   now also requires every declared participant to have reported before `CUTOFF → TIED_OUT`
   (`openbank.ledger.close.participants-mode`, ships `shadow`). **STRIDE-S/E:** the PUT is admitted
   under the existing `ledger.create` grant (no rego change), so any principal that may post journals
@@ -265,9 +265,9 @@ set) apply equally to the new `ledger.approval.decide` action.
   the day in CUTOFF under `enforce`, which the existing stuck-CUTOFF alert pages and the waiver
   releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
   counts, service names and bounded automatic failure categories. Operator identities and free-text waiver reasons are intentional audit personal data, not anonymous counts. The closed-day 409 body now also carries
-  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert the application while preserving additive V31 audit history; schema removal needs a separate reviewed retention/rollback plan.
+  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert the application while preserving additive V33 audit history; schema removal needs a separate reviewed retention/rollback plan.
 - **2026-10-19** — **Treasury joins the day-close participants (ADR-0342 D2).** `openbank.ledger.close.participants.treasury` with principal `service-account-openbank-treasury` (rules.yaml `close_participants`, gate `close-participants-declared`). No new surface: the existing participation PUT, admitted under treasury's existing `ledger.create` grant and bound to that verified principal. Under `enforce` a missing treasury report holds the day in CUTOFF (stuck-CUTOFF alert, operator waiver releases it).
-- **2026-10-19** — **Treasury instrument accounts, `V33` (ADR-0344 D7).** Also maps the matrix's accounting classes onto them in `accounting_class_gl_map` (78 rows, seeded by code as V32 does, with a count and currency check that fail the migration) and adds nine instrument roles to the closed role vocabulary (CHECK + `AccountingRole`, additive). 66 new leaf GL accounts (33 per
+- **2026-10-19** — **Treasury instrument accounts, `V34` (ADR-0344 D7).** Also maps the matrix's accounting classes onto them in `accounting_class_gl_map` (78 rows, seeded by code as V32 does, with a count and currency check that fail the migration) and adds nine instrument roles to the closed role vocabulary (CHECK + `AccountingRole`, additive). 66 new leaf GL accounts (33 per
   currency, EUR = CZK code + 1) for the treasury posting-rule matrix: securities by IFRS 9 category and
   their premium/discount, accrued interest per product family, treasury loans, repo payable and reverse
   repo receivable, derivative assets and liabilities at fair value, the FVOCI reserve (EQUITY), realised

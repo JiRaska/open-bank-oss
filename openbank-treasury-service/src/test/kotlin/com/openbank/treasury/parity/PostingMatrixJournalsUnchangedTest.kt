@@ -16,7 +16,7 @@ import java.security.MessageDigest
 
 /**
  * ADR-0341 D3 x ADR-0344 D7: the posting-rule matrix names accounting class + role, and the ledger
- * map (V33, mirrored by [LedgerMapGolden]) resolves them. The journals of every matrix fixture's whole
+ * map (V34, mirrored by [LedgerMapGolden]) resolves them. The journals of every matrix fixture's whole
  * life must land on EXACTLY the GL accounts, sides, amounts, order and keys the matrix produced when
  * it still named GL codes. The golden was rendered once from that code and is never regenerated from
  * the code under test: every non-accrual journal verbatim, every accrual's account shape, and a hash

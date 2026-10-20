@@ -30,7 +30,7 @@ import java.util.UUID
 @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
 class AccountingClassGlMapIT {
 
-    /** (accountingClass, role, currency) -> GL code. Keep identical to treasury's `LedgerMapGolden` + billing rows (V32 + V33). */
+    /** (accountingClass, role, currency) -> GL code. Keep identical to treasury's `LedgerMapGolden` + billing rows (V32 + V34). */
     private val golden: Map<Triple<String, String, String>, String> = (
         listOf(
             row("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", "1001"),
@@ -241,7 +241,7 @@ class AccountingClassGlMapIT {
     }
 
     private companion object {
-        /** ADR-0344 D7 (V33): the treasury posting-rule matrix classes, as treasury's `LedgerMapGolden`. */
+        /** ADR-0344 D7 (V34): the treasury posting-rule matrix classes, as treasury's `LedgerMapGolden`. */
         val TREASURY_MATRIX_ROWS: List<Pair<Triple<String, String, String>, String>> = listOf(
             mrow("CASH_IN_TRANSIT", "PRINCIPAL", "CZK", "1690"),
             mrow("CASH_IN_TRANSIT", "PRINCIPAL", "EUR", "1691"),

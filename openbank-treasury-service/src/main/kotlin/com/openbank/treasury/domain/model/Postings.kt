@@ -45,7 +45,7 @@ enum class LedgerRole {
     INTEREST_INCOME,
     INTEREST_EXPENSE,
 
-    // ADR-0344 D7: the instrument roles of the posting-rule matrix (ledger V33 adds them to the map).
+    // ADR-0344 D7: the instrument roles of the posting-rule matrix (ledger V34 adds them to the map).
     PREMIUM_DISCOUNT,
     FAIR_VALUE,
     REVALUATION_RESERVE,
@@ -62,7 +62,7 @@ object AccountingClasses {
     const val NOSTRO = "NOSTRO_ACCOUNT"
     const val FX_POSITION = "FX_SPOT_POSITION"
 
-    // ADR-0344 D7: the classes of the posting-rule matrix products (ledger V33).
+    // ADR-0344 D7: the classes of the posting-rule matrix products (ledger V34).
     const val CASH_IN_TRANSIT = "CASH_IN_TRANSIT"
     const val TREASURY_LOAN = "TREASURY_LOAN"
     const val SECURITY_AMORTISED_COST = "DEBT_SECURITY_AMORTISED_COST"

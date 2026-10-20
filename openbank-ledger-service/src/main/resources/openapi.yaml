@@ -14,10 +14,12 @@ info:
   # 1.26.0 -> 1.27.0 (ADR-0341 D3): additive. GET /accounting-classes[/resolve] and an alternative way to
   # name a journal line's account (accountingClass + accountingRole) -- glAccountId stops being required,
   # which relaxes the request and breaks no caller.
-  # 1.27.0 -> 1.28.0 (ADR-0344 D7): additive. The accounting role enum gains the treasury instrument
+  # 1.27.0 -> 1.28.0 (ADR-0342): additive. Day-close participants: GET/PUT
+  # /ledger/accounting-days/{businessDate}/participants[/{participant}] and PUT .../{participant}/waiver.
+  # 1.28.0 -> 1.29.0 (ADR-0344 D7): additive. The accounting role enum gains the treasury instrument
   # roles (premium/discount, fair value, revaluation reserve, realised/unrealised result, memo, memo
-  # contra) that migration V33 maps for the posting-rule matrix classes.
-  version: 1.28.0
+  # contra) that migration V34 maps for the posting-rule matrix classes.
+  version: 1.29.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0

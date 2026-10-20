@@ -18,7 +18,7 @@ enum class AccountingRole {
     INTEREST_EXPENSE,
     FEE_INCOME,
 
-    // ADR-0344 D7 (V33): the instrument roles of the treasury posting-rule matrix.
+    // ADR-0344 D7 (V34): the instrument roles of the treasury posting-rule matrix.
     PREMIUM_DISCOUNT,
     FAIR_VALUE,
     REVALUATION_RESERVE,

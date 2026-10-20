@@ -17,12 +17,12 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * ADR-0344 D7: V33 seeds the accounts the treasury posting-rule matrix posts to. Posting a balanced
+ * ADR-0344 D7: V34 seeds the accounts the treasury posting-rule matrix posts to. Posting a balanced
  * journal to EVERY one of them through the real API, in its own currency, is the proof that each
  * fixed id exists with the currency it is used in — and a line in the other currency is refused,
  * so a matrix row naming the wrong currency's account fails loudly instead of posting. Treasury
  * names its legs by accounting class + role (ADR-0341 D3), so every (class, role, currency) the
- * matrix uses is also posted BY CLASS and must land on the account V33 maps it to.
+ * matrix uses is also posted BY CLASS and must land on the account V34 maps it to.
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
@@ -54,7 +54,7 @@ class TreasuryInstrumentAccountsPostingIT {
 
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
-    fun `every V33 account accepts a balanced posting in its own currency`() {
+    fun `every V34 account accepts a balanced posting in its own currency`() {
         val refused = mutableListOf<String>()
         CZK_CODES.forEach { code ->
             val pairs = listOf(Triple(code, "1001", "CZK"), Triple((code.toInt() + 1).toString(), "1002", "EUR"))
@@ -74,7 +74,7 @@ class TreasuryInstrumentAccountsPostingIT {
 
     @Test
     @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
-    fun `a V33 account refuses a line in the other currency`() {
+    fun `a V34 account refuses a line in the other currency`() {
         val status = post(
             journal(
                 "treasury:it-v33-wrong-ccy:settlement",
@@ -119,7 +119,7 @@ class TreasuryInstrumentAccountsPostingIT {
     }
 
     companion object {
-        /** Every (class, role, currency) V33 maps; keep identical to treasury's `LedgerMapGolden`. */
+        /** Every (class, role, currency) V34 maps; keep identical to treasury's `LedgerMapGolden`. */
         val MATRIX_CLASSES: Map<Triple<String, String, String>, String> = listOf(
             Triple("CASH_IN_TRANSIT", "PRINCIPAL", "CZK") to "1690",
             Triple("CASH_IN_TRANSIT", "PRINCIPAL", "EUR") to "1691",
@@ -201,7 +201,7 @@ class TreasuryInstrumentAccountsPostingIT {
             Triple("COLLATERAL_PLEDGED", "MEMO_CONTRA", "EUR") to "9121",
         ).toMap()
 
-        /** The CZK code of every V33 pair (EUR = code + 1). Must list the migration exactly. */
+        /** The CZK code of every V34 pair (EUR = code + 1). Must list the migration exactly. */
         val CZK_CODES = listOf(
             "1600", "1610", "1620", "1630", "1640", "1650", "1660", "1670", "1680", "1685", "1690", "1700",
             "2400", "2410", "2420", "2430", "3100", "4210", "4220", "4230", "4240", "4300", "4310",

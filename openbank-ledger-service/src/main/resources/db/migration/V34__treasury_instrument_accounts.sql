@@ -11,14 +11,14 @@
 -- off-balance type, so each memo asset has a contra liability and a memo journal always balances
 -- within the pair — it never touches a real balance-sheet account.
 --
--- New accounts only; nothing existing changes, and no code collides with V1..V32.
+-- New accounts only; nothing existing changes, and no code collides with V1..V33.
 --
 -- ADR-0341 D3: treasury names a journal leg by (accountingClass, role, currency), never a GL code, so
 -- this migration also maps the matrix's classes onto the new accounts in accounting_class_gl_map
 -- (V32), seeded BY CODE exactly as V32 does. The role vocabulary grows additively by the instrument
 -- roles the matrix needs (premium/discount, fair value, revaluation reserve, realised and
 -- unrealised result, memo and memo contra); V32's five roles and rows are untouched.
--- Rollback: DELETE the V33 map rows, restore the V32 role CHECK, then delete the accounts while no
+-- Rollback: DELETE the V34 map rows, restore the V32 role CHECK, then delete the accounts while no
 -- journal line references them.
 
 INSERT INTO gl_accounts (id, code, name, type, currency_code, is_leaf, is_enabled) VALUES
@@ -187,7 +187,7 @@ JOIN gl_accounts g ON g.code = m.gl_code;
 DO $$
 BEGIN
     IF (SELECT count(*) FROM accounting_class_gl_map) <> 35 + 78 THEN
-        RAISE EXCEPTION 'accounting_class_gl_map holds % of 113 rows after V33: a GL code it names does not exist',
+        RAISE EXCEPTION 'accounting_class_gl_map holds % of 113 rows after V34: a GL code it names does not exist',
             (SELECT count(*) FROM accounting_class_gl_map);
     END IF;
     IF EXISTS (

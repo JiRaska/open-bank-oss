@@ -33,7 +33,7 @@ import java.time.LocalDate
  * replayed day by day exactly as the service's daily run does it, and three things must hold:
  *
  * 1. every journal is balanced per currency (JournalSpec refuses otherwise) and posts only to
- *    accounts the ledger maps (V29/V30/V33, by class);
+ *    accounts the ledger maps (V29/V30/V34, by class);
  * 2. after maturity every balance-sheet account the deal touched is back to zero — instrument,
  *    accrued interest, premium/discount, repo, memo pairs — so nothing is left behind;
  * 3. the nostro moved by exactly the deal's cash flows: Σ IN − Σ OUT per currency.

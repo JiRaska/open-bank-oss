@@ -124,7 +124,7 @@ object PostingMatrix {
 
     /**
      * The matrix's account vocabulary -> (accounting class, role). The ledger's
-     * `accounting_class_gl_map` (V32 + V33) maps each to a GL account per currency.
+     * `accounting_class_gl_map` (V32 + V34) maps each to a GL account per currency.
      */
     private val ACCOUNTS: Map<String, Pair<String, LedgerRole>> = mapOf(
         "nostro" to (AccountingClasses.NOSTRO to LedgerRole.PRINCIPAL),

@@ -7,7 +7,7 @@ package com.openbank.treasury.domain
 import com.openbank.treasury.domain.model.PostingLine
 
 /**
- * The treasury rows of the ledger's `accounting_class_gl_map` (migrations V32 and V33), as a literal.
+ * The treasury rows of the ledger's `accounting_class_gl_map` (migrations V32 and V34), as a literal.
  * `AccountingClassGlMapIT` in openbank-ledger-service holds the same table against the real
  * database, so the chain "new rules + this map == the legacy chart" (see
  * [PostingJournalsUnchangedTest]) and "this map == the migration" together prove the journals land
@@ -38,7 +38,7 @@ object LedgerMapGolden {
         row("CNB_LOMBARD_BORROWING", "INTEREST_EXPENSE", "CZK", "5200"),
         row("FX_SPOT_POSITION", "PRINCIPAL", "CZK", "1990"),
         row("FX_SPOT_POSITION", "PRINCIPAL", "EUR", "1991"),
-        // ADR-0344 D7: the posting-rule matrix classes (ledger V33).
+        // ADR-0344 D7: the posting-rule matrix classes (ledger V34).
         row("CASH_IN_TRANSIT", "PRINCIPAL", "CZK", "1690"),
         row("CASH_IN_TRANSIT", "PRINCIPAL", "EUR", "1691"),
         row("TREASURY_LOAN", "PRINCIPAL", "CZK", "1660"),

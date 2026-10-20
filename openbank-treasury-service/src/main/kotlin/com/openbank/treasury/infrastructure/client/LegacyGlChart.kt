@@ -41,7 +41,7 @@ internal object LegacyGlChart {
         row("CNB_LOMBARD_BORROWING", "INTEREST_EXPENSE", "CZK", "5200"),
         row("FX_SPOT_POSITION", "PRINCIPAL", "CZK", "1990"),
         row("FX_SPOT_POSITION", "PRINCIPAL", "EUR", "1991"),
-        // ADR-0344 D7: the posting-rule matrix classes (ledger V33).
+        // ADR-0344 D7: the posting-rule matrix classes (ledger V34).
         row("CASH_IN_TRANSIT", "PRINCIPAL", "CZK", "1690"),
         row("CASH_IN_TRANSIT", "PRINCIPAL", "EUR", "1691"),
         row("TREASURY_LOAN", "PRINCIPAL", "CZK", "1660"),

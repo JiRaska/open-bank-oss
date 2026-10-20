@@ -32,8 +32,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.sql.DriverManager
+import java.sql.ResultSet
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -334,6 +337,87 @@ class DayCloseParticipantsIT {
             .put("/api/v1/ledger/accounting-days/$date/participants/interest/waiver").then().statusCode(403)
         assertThat(onEventLoop { participation.completeness(date) }.reported).doesNotContainKey("interest")
         assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-interest", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-interest"),
+            Claim(key = "sub", value = "interest-machine-sub"),
+            Claim(key = "preferred_username", value = "service-account-openbank-interest"),
+            Claim(key = "client_id", value = "openbank-interest"),
+        ],
+    )
+    fun `report rejects oversized reasons without appending and accepts a Unicode boundary`() {
+        val date = LocalDate.of(2019, 7, 10)
+        seedManualDay(date)
+        val path = "/api/v1/ledger/accounting-days/$date/participants/interest"
+        val boundary = "\uD83D\uDE00".repeat(1000)
+        given().contentType("application/json")
+            .body(mapOf("outcome" to "REFUSED", "reason" to boundary + "x"))
+            .put(path).then().statusCode(400)
+        assertReasonHistory(date, 0, null)
+        given().contentType("application/json")
+            .body(mapOf("outcome" to "REFUSED", "reason" to boundary))
+            .put(path).then().statusCode(200)
+        assertReasonHistory(date, 1, boundary)
+        given().contentType("application/json")
+            .body(mapOf("outcome" to "REFUSED", "reason" to "x".repeat(1001)))
+            .put(path).then().statusCode(400)
+        assertReasonHistory(date, 1, boundary)
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+    }
+
+    @Test
+    @TestSecurity(user = "reason-boundary-operator", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "reason-boundary-operator-sub"),
+            Claim(key = "preferred_username", value = "reason-boundary-operator"),
+        ],
+    )
+    fun `waiver rejects oversized reasons without appending and accepts a Unicode boundary`() {
+        val date = LocalDate.of(2019, 7, 11)
+        seedManualDay(date)
+        val path = "/api/v1/ledger/accounting-days/$date/participants/interest/waiver"
+        val boundary = "\uD83D\uDE00".repeat(1000)
+        given().contentType("application/json").body(mapOf("reason" to boundary + "x"))
+            .put(path).then().statusCode(400)
+        assertReasonHistory(date, 0, null)
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+        given().contentType("application/json").body(mapOf("reason" to boundary))
+            .put(path).then().statusCode(200)
+        assertReasonHistory(date, 1, boundary)
+        given().contentType("application/json").body(mapOf("reason" to "x".repeat(1001)))
+            .put(path).then().statusCode(400)
+        assertReasonHistory(date, 1, boundary)
+    }
+
+    private fun assertReasonHistory(date: LocalDate, expectedCount: Int, expectedReason: String?) {
+        val config = ConfigProvider.getConfig()
+        val reasons = DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { db ->
+            db.prepareStatement(
+                "SELECT reason FROM ledger_close_participation " +
+                    "WHERE business_date = ? AND participant = 'interest' ORDER BY seq",
+            ).use { statement ->
+                statement.setObject(1, date)
+                statement.executeQuery().use { rows ->
+                    readReasons(rows)
+                }
+            }
+        }
+        assertThat(reasons).hasSize(expectedCount)
+        if (expectedReason != null) assertThat(reasons).containsExactly(expectedReason)
+    }
+
+    private fun readReasons(rows: ResultSet): List<String> = buildList {
+        while (rows.next()) add(rows.getString(1))
     }
 
     private companion object {
