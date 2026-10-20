@@ -343,6 +343,11 @@ spec:
         - record: openbank:expected_service:info
           expr: vector(1)
           labels:
+            namespace: treasury-pension-co
+            workload: treasury-service
+        - record: openbank:expected_service:info
+          expr: vector(1)
+          labels:
             namespace: wealth
             workload: wealth-service
     - name: openbank.service.baseline
