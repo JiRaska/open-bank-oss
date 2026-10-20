@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.15.0...treasury-service-v0.15.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **treasury:** reverse per GL account what was posted there, fail closed ([#13412](https://github.com/JiRaska/open-bank-oss/issues/13412)) ([84e3f7c](https://github.com/JiRaska/open-bank-oss/commit/84e3f7c773eb1a4021dafd08015bf56f3dd37902)), closes [#13411](https://github.com/JiRaska/open-bank-oss/issues/13411)
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.14.0...treasury-service-v0.15.0) (2026-10-19)
 
 
