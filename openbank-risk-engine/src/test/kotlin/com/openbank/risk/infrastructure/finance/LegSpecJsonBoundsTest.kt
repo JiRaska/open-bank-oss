@@ -4,6 +4,7 @@
 
 package com.openbank.risk.infrastructure.finance
 
+import com.openbank.libs.finance.schedule.Frequency
 import com.openbank.libs.finance.schedule.ScheduleGenerator
 import com.openbank.libs.finance.schedule.ScheduleTooLongException
 import org.assertj.core.api.Assertions.assertThat
@@ -74,6 +75,17 @@ class LegSpecJsonBoundsTest {
         assertThatThrownBy {
             LegSpecJson.toLegs(List(9) { leg(end = "2086-01-10") }, LegDefaults(), LegBounds.PRICING_REQUEST)
         }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `every named frequency treasury publishes is read, including DAILY and WEEKLY`() {
+        assertThat(LegSpecJson.frequency(0, "accrualFrequency", "DAILY")).isEqualTo(Frequency.Days(1))
+        assertThat(LegSpecJson.frequency(0, "accrualFrequency", "WEEKLY")).isEqualTo(Frequency.Weeks(1))
+        assertThat(LegSpecJson.frequency(0, "accrualFrequency", "ONCE")).isEqualTo(Frequency.Zero)
+        assertThat(LegSpecJson.frequency(0, "accrualFrequency", "SEMIANNUAL")).isEqualTo(Frequency.SEMI_ANNUAL)
+        assertThat(LegSpecJson.frequency(0, "accrualFrequency", "3M")).isEqualTo(Frequency.QUARTERLY)
+        assertThatThrownBy { LegSpecJson.frequency(0, "accrualFrequency", "HOURLY") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 }

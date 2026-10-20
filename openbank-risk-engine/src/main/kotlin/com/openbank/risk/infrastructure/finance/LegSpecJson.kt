@@ -196,15 +196,12 @@ object LegSpecJson {
 
     private val FREQUENCY = Regex("^([1-9][0-9]{0,2})([DWMY])$")
 
-    /** `ZERO` / `TERM` (one period), or `<n>D|W|M|Y`; also the names MONTHLY..ANNUAL. */
+    /** `ZERO` / `TERM` (one period), or `<n>D|W|M|Y`; also libs-finance's named codes ONCE..ANNUAL. */
     fun frequency(i: Int, field: String, raw: String): Frequency {
         val v = raw.trim().uppercase()
-        return when (v) {
-            "ZERO", "TERM", "0T", "ONCE" -> Frequency.Zero
-            "MONTHLY" -> Frequency.MONTHLY
-            "QUARTERLY" -> Frequency.QUARTERLY
-            "SEMI_ANNUAL", "SEMIANNUAL" -> Frequency.SEMI_ANNUAL
-            "ANNUAL" -> Frequency.ANNUAL
+        return Frequency.named(v) ?: when (v) {
+            "ZERO", "TERM", "0T" -> Frequency.Zero
+            "SEMIANNUAL" -> Frequency.SEMI_ANNUAL
             else -> {
                 val m = requireNotNull(FREQUENCY.matchEntire(v)) { "legs[$i].$field '$raw' is not ZERO or <n>D|W|M|Y" }
                 val n = m.groupValues[1].toInt()
