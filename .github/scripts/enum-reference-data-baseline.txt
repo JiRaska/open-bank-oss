@@ -8,6 +8,7 @@ duplicate openbank-agent-service StopReason  # #13441
 duplicate openbank-authz-policy-auditor FindingStatus  # #13441
 duplicate openbank-campaign-service CampaignEngagementEventType  # #13441
 duplicate openbank-campaign-service CampaignProductKind  # #13441
+duplicate openbank-campaign-service InAppSurface  # #13441
 duplicate openbank-card-issuance-service AuthorizationChannel  # #13438
 duplicate openbank-card-issuance-service CardNetwork  # #13438
 duplicate openbank-card-processing-service PresentmentChannel  # #13438
@@ -26,6 +27,7 @@ duplicate openbank-domestic-payment FraudVerdict  # #13439
 duplicate openbank-domestic-payment ScreeningDecision  # #13439
 duplicate openbank-domestic-payment ScreeningMatchStatus  # #13439
 duplicate openbank-engagement-service EngagementEventType  # #13441
+duplicate openbank-engagement-service SurfaceSlot  # #13441
 duplicate openbank-finops-agent RunTrigger  # #13441
 duplicate openbank-flaky-test-hunter FindingStatus  # #13441
 duplicate openbank-fraud-service FraudVerdict  # #13439

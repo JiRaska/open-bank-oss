@@ -6894,7 +6894,7 @@ gates:
 
   # rules.yaml enum_reference_data: business vocabulary hard-coded as a Kotlin enum. Ratchet over
   # two mechanically decidable shapes (numeric-encoded values, cross-module value-set copies);
-  # today's 97 findings are baselined against #13434-#13441, a new one or a stale entry fails.
+  # today's 99 findings are baselined against #13434-#13441, a new one or a stale entry fails.
   - id: enum-reference-data-ratchet
     name: "enum reference-data ratchet (rules.yaml enum_reference_data, enforced)"
     group: data
@@ -6906,8 +6906,8 @@ gates:
       reference data in code: changing it is a release in every copy, and the copies drift.
       Ratchet so the 2026-10-20 estate is tracked and no new copy lands unnoticed.
     review_after: '2027-04-20'
-    verified: "2026-10-20 — origin/main b99d45e14b: 671 enum classes, 34 numeric + 63 duplicate findings, all hand-checked (no false positive found; generic lifecycle-only overlaps excluded after a first pass reported 146 pairs, ~60% unrelated status machines); an injected enum on the real tree exits 1; disabling either half fails the self-test"
-    min_subjects: 330   # 671 enum classes measured 2026-10-20; half
+    verified: "2026-10-20 — origin/main b99d45e14b: correcting Kotlin string/comment masking revealed 3 enum classes missed by the initial scan; 674 enum classes, 34 numeric + 65 duplicate findings (97 initial + 2 newly tracked #13441), with both newly revealed declarations manually checked; generic lifecycle-only overlaps excluded after a first pass reported 146 pairs, ~60% unrelated status machines; injected enum exits 1; disabling either half fails self-test"
+    min_subjects: 337   # 674 enum classes measured 2026-10-20; half
     selftest: python3 .github/scripts/check-enum-reference-data.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
