@@ -5,6 +5,8 @@ import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const INVENTORY = {
+  source: 'kubernetes',
+  discoveryStatus: 'complete',
   services: [{
     name: 'ledger-service',
     port: 8101,

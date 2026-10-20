@@ -258,6 +258,36 @@ describe('service registry drift guard', () => {
     ).toEqual([])
   })
 
+  it('every canonical Kubernetes namespace identity matches the module’s Argo application and GitOps workload', () => {
+    const identities = new Set<string>()
+    for (const file of walkYaml(GITOPS)) {
+      const src = readFileSync(file, 'utf-8')
+      for (const doc of src.split(/^---$/m)) {
+        if (!/^kind:\s*(Deployment|Rollout)\s*$/m.test(doc)) continue
+        const lines = doc.split('\n')
+        const metadataLineIdx = lines.findIndex(l => /^metadata:[ \t]*$/.test(l))
+        if (metadataLineIdx === -1) continue
+        const name = nameFromMetadataBlock(lines, metadataLineIdx)
+        const namespaceLine = lines.slice(metadataLineIdx + 1).find(l => !/^[ \t]/.test(l) || /^\s{2}namespace:/.test(l))
+        const namespace = namespaceLine?.match(/^\s{2}namespace:[ \t]*([a-z0-9][a-z0-9-]*)[ \t]*$/)?.[1]
+        if (name && namespace) identities.add(`${name}/${namespace}`)
+      }
+    }
+
+    const preferences = REGISTRY.filter(service => service.k8sNamespace)
+    expect(preferences.length).toBeGreaterThan(0)
+    for (const service of preferences) {
+      const appPath = path.join(GITOPS_APPS, `${service.id}.yaml`)
+      const app = readFileSync(appPath, 'utf-8')
+      const sourcePath = app.match(/^\s{4}path:[ \t]*([^\s]+)[ \t]*$/m)?.[1]
+      const destinationNamespace = app.match(/^\s{4}namespace:[ \t]*([a-z0-9][a-z0-9-]*)[ \t]*$/m)?.[1]
+      expect(sourcePath, `${service.id} Argo app source path`).toBe(`openbank-infra/gitops/components/${service.id}`)
+      expect(destinationNamespace, `${service.id} Argo app destination`).toBe(service.k8sNamespace)
+      expect(identities.has(`${k8sNameOf(service)}/${service.k8sNamespace}`), `${service.id} workload identity`)
+        .toBe(true)
+    }
+  })
+
   it('every k8sName override resolves to a real gitops workload', () => {
     // k8sNameOf() is what docs.ts and the BFF actually call to reach a service in-cluster. A
     // module with NO override is allowed to have no workload (not deployed yet - the console says
@@ -469,11 +499,12 @@ describe('service registry drift guard', () => {
     ).toEqual([])
   })
 
-  it('SERVICE_OVERRIDES stays presentation-only', () => {
-    // Overrides carry label/group/id/k8sName. If they start carrying ports or other facts, the
-    // list has become a second source of truth again - derive the fact in generate-catalog.mjs.
+  it('SERVICE_OVERRIDES stays presentation metadata plus explicit workload identity exceptions', () => {
+    // Namespace is allowed only as a reviewed identity discriminator for a duplicated workload
+    // name, and the preceding GitOps guard verifies it against the module's Argo application.
+    // Ports and other fleet facts remain derived from catalog.json.
     for (const [name, o] of Object.entries(SERVICE_OVERRIDES)) {
-      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName', 'exposeViaBff'].includes(k)), name).toEqual([])
+      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName', 'k8sNamespace', 'exposeViaBff'].includes(k)), name).toEqual([])
     }
   })
 })

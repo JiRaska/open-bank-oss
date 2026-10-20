@@ -7,7 +7,6 @@ package com.openbank.billing
 import com.openbank.billing.application.port.out.AccountBilling
 import com.openbank.billing.application.port.out.AccountContextPort
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
-import com.openbank.billing.application.port.out.ProductCatalogPort
 import com.openbank.billing.application.usecase.BillingCycleService
 import com.openbank.billing.application.usecase.FeeAssessmentService
 import com.openbank.billing.domain.BillableFee
@@ -27,15 +26,15 @@ import java.math.BigDecimal
  */
 class BillingCycleServiceTest {
 
-    private val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"))
+    private val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"), OPENED)
 
     private fun feeAssessmentService(fees: List<BillableFee> = listOf(fee("f1", "5"))) = FeeAssessmentService(
         object : AccountContextPort {
             override suspend fun resolve(accountId: String, currency: String): AccountBilling? = billing
         },
-        object : ProductCatalogPort {
-            override suspend fun billableFees(productId: String, currency: String): List<BillableFee> = fees
-        },
+        FakeRevisions(fees),
+        InMemoryPins(),
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
     )
 
     private fun fee(id: String, amount: String) =

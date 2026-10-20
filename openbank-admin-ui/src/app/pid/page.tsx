@@ -12,7 +12,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader, StatusBadge, statusTone, type Tone } from '@/components/ui'
-import { parsePidRecords, type PidRecordEvidence } from '@/lib/pid/pidRecordContract'
+import { PID_LOOKUP_TYPES, isPidLookupType, parsePidExternalIdLookup, type PidLookupType, type PidRecordEvidence } from '@/lib/pid/pidRecordContract'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
@@ -55,13 +55,14 @@ export default function PidPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [records, setRecords] = useState<PidRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  // Inline error is reserved for user-initiated writes (the quick-create form);
-  // a failed list load degrades to the calm <DataUnavailable> panel instead of a
-  // raw "HTTP 404" leak (admin-ui graceful-state rule).
+  const [loading, setLoading] = useState(false)
+  // Inline error is reserved for user-initiated writes and invalid search input;
+  // lookup transport failures degrade to the calm <DataUnavailable> panel.
   const [error, setError] = useState<string | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [search, setSearch] = useState('')
+  const [lookupType, setLookupType] = useState<PidLookupType>('BANKID_SUB')
+  const [hasSearched, setHasSearched] = useState(false)
   const [showNewForm, setShowNewForm] = useState(false)
   const [formData, setFormData] = useState({ 
     givenName: '', 
@@ -87,25 +88,39 @@ export default function PidPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null)
   const loadGeneration = useRef(0)
 
-  const load = useCallback(async () => {
+  useEffect(() => () => { loadGeneration.current += 1 }, [])
+
+  const load = useCallback(async (query: string = search, type: PidLookupType = lookupType) => {
+    const value = query.trim()
+    if (!value) return
     const generation = ++loadGeneration.current
-    setLoading(true); setError(null); setUnavailable(null)
+    setLoading(true); setError(null); setUnavailable(null); setRecords([]); setHasSearched(true)
     try {
-      const res = await fetch(`${PID_SERVICE}/api/v1/pids`, { signal: AbortSignal.timeout(5000) })
+      const res = await fetch(`${PID_SERVICE}/api/v1/parties/by-external-id/lookup`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type, value }),
+        signal: AbortSignal.timeout(5000),
+      })
       if (generation !== loadGeneration.current) return
       if (!res.ok) {
-        // The service publishes no PID-list route today. A 404 is therefore an unavailable
-        // capability, not a missing record; 405 proves the path cannot serve this read either.
-        const kind: UnavailableKind = res.status === 404
-          ? 'not_deployed'
-          : res.status === 405 ? 'error' : await classifyBffFailure(res)
+        const kind = await classifyBffFailure(res)
         if (generation !== loadGeneration.current) return
-        setRecords([])
-        setUnavailable({ kind })
+        // A backend 404 means this exact identifier has no match. Only the BFF's
+        // explicit Unknown service response means the service is not deployed.
+        if (kind === 'not_found') {
+          setRecords([])
+          setUnavailable(null)
+        } else {
+          setUnavailable({ kind })
+        }
         return
       }
-      const data = parsePidRecords(await res.json() as unknown)
-      if (generation === loadGeneration.current) setRecords(data)
+      const data = parsePidExternalIdLookup(await res.json() as unknown, type, value)
+      if (generation === loadGeneration.current) {
+        setRecords([data])
+        setUnavailable(null)
+      }
     } catch {
       // Timeout / abort / network — the BFF or pid-service didn't answer.
       if (generation !== loadGeneration.current) return
@@ -114,18 +129,16 @@ export default function PidPage() {
     } finally {
       if (generation === loadGeneration.current) setLoading(false)
     }
-  }, [])
+  }, [lookupType, search])
 
-  useEffect(() => {
-    const initialLoadId = window.setTimeout(load, 0)
-    return () => clearTimeout(initialLoadId)
-  }, [load])
-
-  const filtered = records.filter(r =>
-    !search || r.identifierValue?.toLowerCase().includes(search.toLowerCase()) ||
-    r.personId?.toLowerCase().includes(search.toLowerCase()) ||
-    r.id?.toLowerCase().includes(search.toLowerCase())
-  )
+  const submitLookup = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!search.trim()) {
+      setError(t('Zadejte přesnou hodnotu identifikátoru.', 'Enter an exact identifier value.'))
+      return
+    }
+    void load(search, lookupType)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -222,7 +235,9 @@ export default function PidPage() {
         givenName: '', familyName: '', birthdate: '', bankIdSub: '', nationalities: 'CZ', 
         gender: '', birthplace: '', email: '', phone: '', idDocType: 'NATIONAL_ID', idDocNumber: '', idDocCountry: 'CZ', idDocIssuedAt: '', idDocExpiresAt: '' 
       })
-      load()
+      setLookupType('BANKID_SUB')
+      setSearch(syncPayload.bankIdSub)
+      void load(syncPayload.bankIdSub, 'BANKID_SUB')
       setSuccessMsg(t('Záznam úspěšně vytvořen a synchronizován.', 'Record created and synchronized successfully.'))
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : t('Vytvoření záznamu selhalo.', 'Failed to create record.')
@@ -245,8 +260,8 @@ export default function PidPage() {
               <button
                 className="btn btn-secondary"
                 type="button"
-                onClick={load}
-                disabled={loading}
+                onClick={() => void load()}
+                disabled={loading || !hasSearched}
                 aria-busy={loading}
                 aria-label={t('Obnovit PID záznamy', 'Refresh PID records')}
               >
@@ -268,9 +283,9 @@ export default function PidPage() {
           </div>}
         />
 
-        {!loading && !unavailable && <div className="grid-4" style={{ marginBottom: '24px' }}>
+        {hasSearched && !loading && !unavailable && <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Záznamů celkem', 'Total Records'), value: records.length, icon: <Fingerprint size={16} />, color: 'var(--accent)' },
+            { label: t('Nalezené identifikátory', 'Matching identifiers'), value: records.length, icon: <Fingerprint size={16} />, color: 'var(--accent)' },
             { label: t('Aktivní', 'Active'), value: records.filter(r => r.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
             { label: t('Ověřeno', 'Verified'), value: records.filter(r => r.verified).length, icon: <ShieldCheck size={16} />, color: 'var(--info)' },
             { label: t('Expirované/Zrušené', 'Expired/Revoked'), value: records.filter(r => r.status === 'EXPIRED' || r.status === 'REVOKED').length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
@@ -524,19 +539,34 @@ export default function PidPage() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+        <form onSubmit={submitLookup} style={{ display: 'flex', gap: '10px', alignItems: 'end', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: '190px' }}>
+            <label htmlFor="pid-lookup-type" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Typ identifikátoru', 'Identifier type')}</label>
+            <select
+              id="pid-lookup-type"
+              className="input"
+              value={lookupType}
+              onChange={event => isPidLookupType(event.target.value) && setLookupType(event.target.value)}
+            >
+              {PID_LOOKUP_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </div>
           <div style={{ position: 'relative', flex: 1, maxWidth: '360px' }}>
             <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
+              id="pid-lookup-value"
               className="input"
               style={{ paddingLeft: '32px', width: '100%' }}
-              placeholder={t('Hledat číslo dokladu nebo rodné číslo…', 'Search document or birth number…')}
-              aria-label={t('Hledat PID případy', 'Search PID cases')}
+              placeholder={t('Přesná hodnota identifikátoru…', 'Exact identifier value…')}
+              aria-label={t('Přesná hodnota identifikátoru', 'Exact identifier value')}
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-        </div>
+          <button className="btn btn-primary" type="submit" aria-busy={loading}>
+            <Search size={13} aria-hidden="true" /> {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
+          </button>
+        </form>
 
         {error && (
           <div className="card" style={{ padding: '16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', marginBottom: '16px', fontSize: '13px', borderRadius: '8px' }}>
@@ -563,7 +593,6 @@ export default function PidPage() {
               <tr>
                 <th>{t('Typ', 'Type')}</th>
                 <th>{t('Hodnota', 'Value')}</th>
-                <th>{t('Země', 'Country')}</th>
                 <th>{t('Osoba', 'Person ID')}</th>
                 <th>{t('Status', 'Status')}</th>
                 <th>{t('Ověřeno', 'Verified')}</th>
@@ -574,29 +603,30 @@ export default function PidPage() {
             <tbody>
               {loading && Array.from({ length: 4 }).map((_, i) => (
                 <tr key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 7 }).map((_, j) => (
                     <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 1 ? '140px' : '80px', borderRadius: '4px' }} /></td>
                   ))}
                 </tr>
               ))}
-              {!loading && filtered.length === 0 && (
+              {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '48px' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '48px' }}>
                     <Map size={32} style={{ color: 'var(--text-tertiary)', marginBottom: '12px', margin: '0 auto' }} />
                     <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                      {search ? t('Nenalezeny žádné záznamy', 'No records found matching search') : t('Žádné PID záznamy', 'No PID records found')}
+                      {hasSearched ? t('Nenalezen žádný přesný záznam', 'No exact identifier match found') : t('Vyhledejte konkrétní identifikátor', 'Search for a specific identifier')}
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {t('Služba pid-service aktuálně nevrací žádná data.', 'The pid-service is currently returning no data.')}
+                      {hasSearched
+                        ? t('PID vyhledávání vrací pouze přesnou shodu; automatický seznam osob se nenačítá.', 'PID lookup returns an exact match only; no automatic party roster is loaded.')
+                        : t('Zadejte přesnou hodnotu a typ identifikátoru. Rodné číslo se v PID ukládá pouze jako nevratný otisk a nelze jej tímto hledáním použít.', 'Enter an exact value and identifier type. Birth numbers are stored only as keyed digests in PID and cannot be searched here.')}
                     </div>
                   </td>
                 </tr>
               )}
-              {!loading && filtered.map(r => (
+              {!loading && records.map(r => (
                 <tr key={r.id}>
                   <td><span className="tag">{r.identifierType}</span></td>
                   <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{r.identifierValue}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{r.issuingCountry}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
                     <Can permission="parties:view">
                       <Link href={`/parties/${r.personId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>

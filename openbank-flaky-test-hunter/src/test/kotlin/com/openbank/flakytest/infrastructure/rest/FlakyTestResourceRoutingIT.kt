@@ -5,15 +5,54 @@
 package com.openbank.flakytest.infrastructure.rest
 
 import com.openbank.flakytest.PostgresTestResource
+import com.openbank.flakytest.application.port.incoming.OperatorWorkflowStatus
+import com.openbank.flakytest.application.usecase.FlakyTestHunterService
+import io.mockk.every
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.junit.jupiter.api.Test
+import java.time.LocalDate
+import java.time.ZoneOffset
 
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 class FlakyTestResourceRoutingIT {
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `operator status endpoint reads the exact bounded workflow handle`() {
+        val workflowId = "flaky-test-hunter-check-operator_manual-${LocalDate.now(ZoneOffset.UTC)}"
+        val status = mockk<FlakyTestHunterService>()
+        every { status.getStatus(workflowId) } returns OperatorWorkflowStatus(workflowId, "RUNNING")
+        QuarkusMock.installMockForType(status, FlakyTestHunterService::class.java)
+
+        given()
+            .`when`().get("/api/v1/flaky-test-hunter/check/workflows/{workflowId}", workflowId)
+            .then()
+            .statusCode(200)
+            .body("workflowId", org.hamcrest.Matchers.equalTo(workflowId))
+            .body("status", org.hamcrest.Matchers.equalTo("RUNNING"))
+    }
+
+    @Test
+    @TestSecurity(user = "viewer", roles = ["ROLE_VIEWER"])
+    fun `workflow status is restricted to admins`() {
+        given()
+            .`when`().get("/api/v1/flaky-test-hunter/check/workflows/{workflowId}", "arbitrary-workflow")
+            .then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "admin", roles = ["ROLE_ADMIN"])
+    fun `workflow status rejects ids outside the operator workflow namespace`() {
+        given()
+            .`when`().get("/api/v1/flaky-test-hunter/check/workflows/{workflowId}", "arbitrary-workflow")
+            .then().statusCode(400)
+    }
 
     @Test
     @TestSecurity(user = "viewer", roles = ["ROLE_VIEWER"])

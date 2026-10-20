@@ -7,6 +7,7 @@ package com.openbank.treasury.integration
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.domain.glCode
 import com.openbank.treasury.domain.model.DealCalendars
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
