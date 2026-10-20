@@ -183,7 +183,7 @@ jobs:
               // marker, and fail closed at that cap rather than risk creating a duplicate.
               for (let page = 1; page <= 10; page += 1) {
                 const { data } = await github.rest.search.issuesAndPullRequests({
-                  q: query, per_page: 100, page,
+                  q: query, per_page: 100, page, sort: 'updated', order: 'desc',
                 })
                 const match = data.items.find(i => (i.body || '').includes(m))
                 if (match) return match
