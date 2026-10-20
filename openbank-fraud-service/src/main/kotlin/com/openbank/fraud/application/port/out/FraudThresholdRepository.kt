@@ -35,9 +35,10 @@ data class ThresholdSetProposal(
 interface FraudThresholdRepository {
 
     /**
-     * The set the engine must use at [at]: the EXECUTED version with the latest `activeFrom` not
-     * after [at] (ties broken by the higher version). Null when none is active — the engine then
-     * fails closed.
+     * The set the engine must use at [at]: the HIGHEST EXECUTED version whose `activeFrom` is not
+     * after [at]. Ordering by version, not by `activeFrom`, means a higher version always
+     * supersedes a lower one: a lower version scheduled for a later date cannot come back into
+     * force once a higher one is active. Null when none is active — the engine then fails closed.
      */
     suspend fun findActive(at: Instant): FraudThresholdSet?
 

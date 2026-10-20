@@ -37,6 +37,11 @@ data class FraudThresholdSet(val version: Int, val thresholds: Map<String, Map<S
             byCurrency.forEach { (currency, amount) ->
                 require(currency.matches(ISO_4217)) { "rule '$rule': '$currency' is not a 3-letter ISO 4217 code" }
                 require(amount.signum() > 0) { "rule '$rule' $currency: threshold must be positive, was $amount" }
+                // Bound the integer digits too: `1E+100000` passes a scale check and would expand into
+                // a 100 000-digit string in contentHash / the JSON payload (NUMERIC(20,4) holds 16).
+                require(amount.precision() - amount.scale() <= MAX_INTEGER_DIGITS) {
+                    "rule '$rule' $currency: at most $MAX_INTEGER_DIGITS integer digits, was $amount"
+                }
                 require(amount.stripTrailingZeros().scale() <= MAX_SCALE) {
                     "rule '$rule' $currency: at most $MAX_SCALE decimal places, was $amount"
                 }
@@ -81,6 +86,8 @@ data class FraudThresholdSet(val version: Int, val thresholds: Map<String, Map<S
         val RULE_KEYS: Set<String> = setOf(LARGE_SINGLE_TRANSACTION, VELOCITY_H1_AMOUNT, NEW_PAYEE_HIGH_AMOUNT)
 
         const val MAX_SCALE = 4
+
+        const val MAX_INTEGER_DIGITS = 16
 
         private val ISO_4217 = Regex("^[A-Z]{3}$")
     }

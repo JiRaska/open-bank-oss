@@ -35,7 +35,9 @@ class FraudThresholdRepositoryImpl(private val clock: Clock) :
 
     override suspend fun findActive(at: Instant): FraudThresholdSet? = Panache.withSession {
         find(
-            "state = ?1 and activeFrom <= ?2 order by activeFrom desc, version desc",
+            // Highest VERSION in force, not latest activeFrom: a lower version approved earlier with a
+            // later effectiveFrom must never reactivate over a higher version already in force.
+            "state = ?1 and activeFrom <= ?2 order by version desc",
             ProposalState.EXECUTED,
             at,
         ).firstResult()

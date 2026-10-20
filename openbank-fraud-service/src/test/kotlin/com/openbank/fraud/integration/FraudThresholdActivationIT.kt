@@ -165,6 +165,26 @@ class FraudThresholdActivationIT {
 
     @Test
     @Order(9)
+    @TestSecurity(user = "risk-reader", roles = ["ROLE_RISK"])
+    fun `a higher version stays in force over a lower one whatever their activeFrom order`() {
+        // v3 written directly with an activeFrom EARLIER than v2's: the active set must be the
+        // higher version, so a lower version scheduled for a later date can never reactivate.
+        jdbc {
+            it.createStatement().executeUpdate(
+                """
+                INSERT INTO fraud_threshold_set (id, version, state, thresholds_json, content_hash, active_from,
+                    proposed_by, proposed_at, decided_by, decided_at)
+                SELECT '01920000-0000-7000-8000-0000000003a3', 3, 'EXECUTED', thresholds_json, content_hash,
+                    now() - interval '2 hours', 'it-maker', now(), 'it-checker', now()
+                FROM fraud_threshold_set WHERE version = 1
+                """.trimIndent(),
+            )
+        }
+        Given { this } When { get("/api/v1/fraud/thresholds/active") } Then { body("version", equalTo(3)) }
+    }
+
+    @Test
+    @Order(10)
     @TestSecurity(user = "payment-surface", roles = ["ROLE_API"])
     fun `(c) with no active set scoring fails closed as REVIEW and names the cause`() {
         // Simulates the state no deployment should reach (V9 seeds v1): nothing EXECUTED. The

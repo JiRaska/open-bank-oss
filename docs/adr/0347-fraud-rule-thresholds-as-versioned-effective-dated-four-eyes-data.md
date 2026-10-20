@@ -56,10 +56,17 @@ over `…/proposals/{id}/decide`. maker ≠ checker is enforced three times: `Pr
 (422), a `CHECK (decided_by <> proposed_by)` constraint, and OPA, which admits only
 risk/compliance humans and vetoes every machine principal and the blanket operator grant. The
 decision is a conditional UPDATE on `state = PROPOSED`, so concurrent decisions cannot both win.
+Neither POST takes an `Idempotency-Key`, and both are recorded exceptions in the idempotency
+coverage baseline: a propose retry with identical content, version and `effectiveFrom` replays
+the pending proposal (and the live version number is unique), and a repeated decide is refused by
+that same state guard.
 
 **D3. Effective-dated, never back-dated.** A proposal may name a future `effectiveFrom`. Approval
 fixes `active_from` = the later of `effectiveFrom` and the approval instant. The set in force at
-time *t* is the EXECUTED version with the latest `active_from` ≤ *t*.
+time *t* is the HIGHEST EXECUTED version with `active_from` ≤ *t*. Ordering by version rather
+than by date means a higher version always supersedes a lower one: a lower version scheduled for
+a later date can never come back into force over a higher one. Withdrawing a scheduled set is done
+by approving a higher version; a separate four-eyes cancel verb is not part of this decision.
 
 **D4. Read per score, from the table.** The scoring path reads the active set on each request
 (one indexed query, next to the velocity and payee reads it already makes). There is no

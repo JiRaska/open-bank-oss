@@ -2,7 +2,8 @@
 -- effective-dated, four-eyes-activated data instead of Kotlin constants.
 --
 -- One row per proposed threshold-set version. The scoring path reads ONLY rows in state EXECUTED,
--- choosing the one with the latest active_from not after "now" (ties: the higher version). A row
+-- choosing the HIGHEST version whose active_from is not after "now" (so a lower version scheduled
+-- for a later date can never reactivate over a higher one). A row
 -- reaches EXECUTED only through FraudThresholdActivationService.decide with a checker other than
 -- the proposer; ck_fraud_threshold_set_four_eyes restates that in the schema so not even a direct
 -- write can record a self-approved set.
@@ -58,7 +59,7 @@ CREATE UNIQUE INDEX uq_fraud_threshold_set_live_version
     WHERE state IN ('PROPOSED', 'APPROVED', 'EXECUTED');
 
 CREATE INDEX idx_fraud_threshold_set_active
-    ON fraud_threshold_set (active_from DESC, version DESC)
+    ON fraud_threshold_set (version DESC, active_from)
     WHERE state = 'EXECUTED';
 
 INSERT INTO fraud_threshold_set (

@@ -59,6 +59,13 @@ class FraudThresholdSetTest {
             FraudThresholdSet(1, with("CZK", "1.00001"))
         }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { FraudThresholdSet(0, seed) }.isInstanceOf(IllegalArgumentException::class.java)
+        // Exponent amplification: passes a scale check, would render as 100 000 digits.
+        assertThatThrownBy {
+            FraudThresholdSet(1, with("CZK", "1E+100000"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { FraudThresholdSet(1, with("CZK", "12345678901234567")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(FraudThresholdSet(1, with("CZK", "1234567890123456.1234")).version).isEqualTo(1)
     }
 
     @Test

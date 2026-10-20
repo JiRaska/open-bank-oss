@@ -4,7 +4,7 @@ The amount-based rules (`large-single-transaction`, `velocity-h1-amount`, `new-p
 
 ## Which set is in force
 
-Each score reads the active set from the table: the `EXECUTED` version with the latest `active_from` that is not in the future. Nothing is cached, so an approval applies on every replica at its `active_from`. Every `fraud_scores` row records the version it was evaluated against in `threshold_set_version`.
+Each score reads the active set from the table: the highest `EXECUTED` version whose `active_from` is not in the future. A higher version always supersedes a lower one, even one scheduled for a later date. Nothing is cached, so an approval applies on every replica at its `active_from`. Every `fraud_scores` row records the version it was evaluated against in `threshold_set_version`.
 
 Version 1 is seeded by `V9__fraud_threshold_set.sql`. It holds exactly the figures the rules had as constants (CZK 500 000 / EUR 20 000, CZK 1 000 000 / EUR 40 000 per hour, CZK 250 000 / EUR 10 000 for a new payee), so verdicts did not change on rollout.
 

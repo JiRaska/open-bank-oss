@@ -107,7 +107,7 @@ class FraudThresholdActivationServiceTest {
 
         override suspend fun findActive(at: Instant) = rows.values
             .filter { it.state == ProposalState.EXECUTED && !it.activeFrom!!.isAfter(at) }
-            .maxWithOrNull(compareBy<ThresholdSetProposal> { it.activeFrom }.thenBy { it.set.version })?.set
+            .maxByOrNull { it.set.version }?.set
 
         override suspend fun insert(proposal: ThresholdSetProposal) {
             rows[proposal.id] = proposal

@@ -58,8 +58,8 @@ class FraudThresholdResource {
             thresholds = requireNotNull(body.thresholds) { "thresholds is required" }
                 .mapValues { (rule, byCcy) ->
                     byCcy.mapValues { (ccy, amount) ->
-                        requireNotNull(amount?.toBigDecimalOrNull()) {
-                            "rule '$rule' $ccy: amount must be a decimal string"
+                        requireNotNull(amount?.takeIf { it.matches(PLAIN_DECIMAL) }?.toBigDecimal()) {
+                            "rule '$rule' $ccy: amount must be a plain decimal string (no exponent, <= 16.4 digits)"
                         }
                     }
                 },
@@ -145,6 +145,9 @@ private fun ThresholdSetProposal.toView() = ThresholdProposalView(
     decidedAt = decidedAt,
     decisionReason = decisionReason,
 )
+
+/** Plain decimals only — an exponent form (`1E+9`) is refused before any BigDecimal is built. */
+private val PLAIN_DECIMAL = Regex("""^\d{1,16}(\.\d{1,4})?$""")
 
 private const val HTTP_CREATED = 201
 private const val HTTP_NOT_FOUND = 404

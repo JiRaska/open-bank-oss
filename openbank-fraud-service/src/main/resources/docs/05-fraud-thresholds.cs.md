@@ -4,7 +4,7 @@ Pravidla podle částky (`large-single-transaction`, `velocity-h1-amount`, `new-
 
 ## Která sada platí
 
-Každé skórování čte aktivní sadu z tabulky: verzi ve stavu `EXECUTED` s nejpozdějším `active_from`, které není v budoucnu. Nic se necachuje, takže schválení platí na všech replikách od svého `active_from`. Každý řádek `fraud_scores` zaznamenává v `threshold_set_version` verzi, podle které byl vyhodnocen.
+Každé skórování čte aktivní sadu z tabulky: nejvyšší verzi ve stavu `EXECUTED`, jejíž `active_from` není v budoucnu. Vyšší verze vždy nahrazuje nižší, i takovou, která je naplánovaná na pozdější datum. Nic se necachuje, takže schválení platí na všech replikách od svého `active_from`. Každý řádek `fraud_scores` zaznamenává v `threshold_set_version` verzi, podle které byl vyhodnocen.
 
 Verzi 1 zakládá `V9__fraud_threshold_set.sql`. Obsahuje přesně hodnoty, které pravidla měla jako konstanty (CZK 500 000 / EUR 20 000, CZK 1 000 000 / EUR 40 000 za hodinu, CZK 250 000 / EUR 10 000 pro nového příjemce), takže se nasazením verdikty nezměnily.
 
