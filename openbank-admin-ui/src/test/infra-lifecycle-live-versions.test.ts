@@ -9,6 +9,7 @@ const liveSnapshot = vi.hoisted(() => {
     components: {
       valkey: [{ version: '8.1.10', count: 1, observedAt }],
       kafka: [{ version: '4.2.0', count: 1, observedAt }],
+      clickhouse: [{ version: '26.8', count: 1, observedAt }],
       'schema-registry': [{ version: '2.6.2', count: 2, observedAt }],
     },
   }
@@ -24,6 +25,9 @@ afterEach(() => {
   liveSnapshot.components.valkey = [
     { version: '8.1.10', count: 1, observedAt: liveSnapshot.fetchedAt },
   ]
+  liveSnapshot.components.clickhouse = [
+    { version: '26.8', count: 1, observedAt: liveSnapshot.fetchedAt },
+  ]
   vi.unstubAllGlobals()
 })
 
@@ -35,6 +39,7 @@ describe('/api/infra/lifecycle runtime version evidence', () => {
     const payload = await res.json()
     const valkey = payload.components.find((component: { id: string }) => component.id === 'valkey')
     const kafka = payload.components.find((component: { id: string }) => component.id === 'kafka')
+    const clickhouse = payload.components.find((component: { id: string }) => component.id === 'clickhouse')
 
     expect(valkey.running).toEqual({
       version: '8.1.10', source: 'prometheus-workload-image', observedAt: liveSnapshot.fetchedAt,
@@ -44,10 +49,24 @@ describe('/api/infra/lifecycle runtime version evidence', () => {
       version: '4.2.0', source: 'prometheus-workload-image', observedAt: liveSnapshot.fetchedAt,
       versions: [{ version: '4.2.0', count: 1, observedAt: liveSnapshot.fetchedAt }], mixed: false,
     })
+    expect(clickhouse.running).toEqual({
+      version: '26.8', source: 'prometheus-workload-image', observedAt: liveSnapshot.fetchedAt,
+      versions: [{ version: '26.8', count: 1, observedAt: liveSnapshot.fetchedAt }], mixed: false,
+    })
     const registry = payload.components.find((component: { id: string }) => component.id === 'schema-registry')
     expect(registry.running.version).toBe('2.6.2')
     expect([null, 'gitops-image-tag']).toContain(valkey.declared.source)
     if (valkey.declared.version !== null) expect(valkey.declared.version).not.toBe(valkey.running.version)
+  })
+
+  it('does not invent a ClickHouse runtime version when the fresh image sample is absent', async () => {
+    liveSnapshot.components.clickhouse = []
+    const { GET } = await import('@/app/api/infra/lifecycle/route')
+    const res = await GET()
+    const payload = await res.json()
+    const clickhouse = payload.components.find((component: { id: string }) => component.id === 'clickhouse')
+    expect(clickhouse.running.version).toBeNull()
+    expect(clickhouse.urgency).toBe('unknown')
   })
 
   it('withholds a single running version and lifecycle verdict while different versions coexist', async () => {
