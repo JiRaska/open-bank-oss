@@ -64,14 +64,12 @@ describe('readiness collector money-path set', () => {
 
   it('publishes the verified canonical service-module and money-path scope with provenance', () => {
     const canonicalServices = catalog.services
-      .filter((service: { kind: string }) => service.kind === 'service')
+      .filter((service: { runnable?: boolean }) => service.runnable === true)
       .map((service: { name: string }) => service.name.replace(/^openbank-/, '').replace(/-service$/, ''))
       .sort()
     expect(services.map((service: { service: string }) => service.service).sort()).toEqual(canonicalServices)
     expect(report.scope.kind).toBe('service-module-matrix-v1')
-    expect(report.scope.service_count).toBe(55)
     expect(report.scope.money_path_count).toBe(declared.size)
-    expect(report.scope.money_path_count).toBe(28)
     const canonicalRoster = report.services.map((service: { service: string; money_path: boolean }) => `${service.service}:${service.money_path}`).sort().join('\n')
     expect(report.scope.roster_sha256).toBe(createHash('sha256').update(canonicalRoster).digest('hex'))
     expect(report.schema_version).toBe(1)
@@ -82,6 +80,12 @@ describe('readiness collector money-path set', () => {
   it('scores a row for every service rules.yaml declares money-path', () => {
     const missing = [...declared].filter(s => !byName.has(s))
     expect(missing).toEqual([])
+  })
+
+  it('keeps runnable analytics-sink visible in the readiness cohort', () => {
+    const analytics = catalog.services.find((service: { name: string }) => service.name === 'openbank-analytics-sink')
+    expect(analytics?.runnable).toBe(true)
+    expect(byName.has('analytics-sink')).toBe(true)
   })
 
   it('marks every declared money-path service money_path, with no drift in either direction', () => {

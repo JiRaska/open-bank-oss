@@ -82,6 +82,11 @@ def manual_deploy_head(event: dict) -> str | None:
             or not re.fullmatch(r"[0-9a-f]{40}", sha)
             or (run.get("head_repository") or {}).get("full_name") != repository):
         return None
+    if producer[1] == DEPLOY_PREFIXES[0]:
+        run_id = run.get("id")
+        if type(run_id) is not int or run_id <= 0:
+            return None
+        return producer[1] + sha + f"-run{run_id}"
     return producer[1] + sha
 
 
@@ -259,11 +264,11 @@ def self_test() -> int:
     # older PR must not steal a manual run's exemption, and routine events keep the window.
     with tempfile.TemporaryDirectory() as d:
         sha = "a" * 40
-        manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha,
+        manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha + "-run101",
                      "created_at": "2026-09-30T10:10:00Z", "armed": False}
         event = {"action": "completed", "repository": {"full_name": "example/open-bank"},
                  "workflow_run": {"name": "Auto deploy", "event": "workflow_dispatch",
-                                  "conclusion": "success", "head_sha": sha,
+                                  "conclusion": "success", "head_sha": sha, "id": 101,
                                   "path": ".github/workflows/auto-deploy.yml", "head_branch": "main",
                                   "head_repository": {"full_name": "example/open-bank"}}}
         paths = {name: os.path.join(d, name + ".json") for name in ("prs", "commits", "event")}
@@ -278,6 +283,15 @@ def self_test() -> int:
             return result.returncode, result.stdout
         check("manual producer completion expedites only its matching PR inside the window",
               run_fixture(prs + [manual_pr], event) == (0, "arm=21\narm_head=" + manual_pr["head"] + "\n"))
+        sibling = {**manual_pr, "number": 22, "head": DEPLOY_PREFIXES[0] + sha + "-run102"}
+        check("same-source producer completion cannot expedite another run's candidate",
+              run_fixture([sibling], event) == (0, "arm=\narm_head=\n"))
+        check("same-source second producer maps to its own candidate",
+              run_fixture([sibling], {**event, "workflow_run": {**event["workflow_run"], "id": 102}})
+              == (0, "arm=22\narm_head=" + sibling["head"] + "\n"))
+        for bad_id in (None, 0, -1, True, "101"):
+            check(f"invalid producer run identity {bad_id!r} cannot expedite",
+                  manual_deploy_head({**event, "workflow_run": {**event["workflow_run"], "id": bad_id}}) is None)
         check("CLI manual producer completion waits for explicit repair priority",
               run_fixture(prs + [manual_pr, repair], event) == (0, "arm=\narm_head=\n"))
         check("manual producer completion cannot expedite an unrelated PR",
