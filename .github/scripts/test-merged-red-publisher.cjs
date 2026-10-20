@@ -18,17 +18,25 @@ const source = workflow.slice(workflow.indexOf(anchor)).split('\n').map(line => 
 const publish = new AsyncFunction('require', 'github', 'context', 'core', 'process', source)
 let issue
 let writes = 0
+let comments = 0
+let closedIssues = []
 let suiteCount = 4
 let offenders = [{ pushed_at: '2026-10-20T00:00:00Z', pr: 1, head_sha: 'abc123', details: ['Required check is failing.'] }]
 const github = { rest: {
-  search: { issuesAndPullRequests: async ({ q }) => ({ data: {
-    items: issue && q.includes('is:open') && q.includes('A PR was merged') ? [issue] : [],
-    total_count: issue ? 1 : 0, incomplete_results: false,
-  } }) },
+  search: { issuesAndPullRequests: async ({ q }) => {
+    const items = q.includes('A PR was merged')
+      ? (q.includes('is:closed') ? closedIssues : issue ? [issue] : [])
+      : []
+    return { data: { items, total_count: items.length, incomplete_results: false } }
+  } },
   issues: {
     create: async value => { issue = { ...value, number: 1 }; writes++; return { data: issue } },
-    update: async value => { issue = { ...issue, ...value }; writes++ },
-    createComment: async () => { throw new Error('unexpected comment') },
+    update: async value => {
+      const old = [issue, ...closedIssues].find(i => i && i.number === value.issue_number)
+      issue = { ...old, ...value, number: value.issue_number }
+      writes++
+    },
+    createComment: async () => { comments++ },
   },
 } }
 const fakeRequire = name => name === 'fs' ? { readFileSync: () => JSON.stringify({
@@ -56,6 +64,21 @@ async function test() {
   await run()
   assert.equal(writes, 2, 'changed offenders must still update the finding')
   assert.match(issue.title, /^2 merges/)
-  console.log('publisher regression: create, unchanged, benign count, legacy migration and changed offenders pass')
+  const closedBody = issue.body
+  issue = undefined
+  closedIssues = [
+    { number: 11, body: closedBody,
+      closed_at: new Date(Date.now() - 30 * 864e5).toISOString(),
+      updated_at: new Date().toISOString() },
+    { number: 12, body: closedBody,
+      closed_at: new Date(Date.now() - 2 * 864e5).toISOString(),
+      updated_at: new Date(Date.now() - 864e5).toISOString() },
+  ]
+  await run()
+  assert.equal(issue.number, 12, 'reopen the latest closure even when an old issue was edited later')
+  assert.equal(issue.state, 'open')
+  assert.equal(writes, 3)
+  assert.equal(comments, 1)
+  console.log('publisher regression: create, unchanged, legacy migration, changed offenders and newest closure pass')
 }
 test().catch(error => { console.error(error); process.exitCode = 1 })

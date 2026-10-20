@@ -419,18 +419,19 @@ def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, l
         "A PR was merged while a required check was FAILING" not in body or \
         "This watch could not read the ruleset bypass log" not in body:
         fails.append("D8: issue discovery does not use the bounded body-marker search endpoint.")
-    if "data.items.find(i => (i.body || '').includes(m))" not in body:
+    if "data.items.filter(i => (i.body || '').includes(m))" not in body:
         fails.append("D8: search results are not checked for the exact issue marker.")
     if "github.paginate(github.rest.search.issuesAndPullRequests" in body or \
         "per_page: 100, page" not in body or \
         "sort: 'updated', order: 'desc'" not in body or \
         "for (let page = 1; page <= 10; page += 1)" not in body or \
-        "if (match) return match" not in body or \
+        "if (state === 'open') return issue" not in body or \
+        "Date.parse(issue.closed_at) > Date.parse(newestClosed.closed_at)" not in body or \
         "if (data.incomplete_results)" not in body or \
         "Issue marker search returned incomplete results" not in body or \
         "throw new Error(`Issue marker search exceeded the 1,000-result cap" not in body:
         fails.append(
-            "D8: marker search must stop on the first exact match and fail closed at the Search API cap."
+            "D8: marker search must return the first open match, select the latest closure, and fail closed at the Search API cap."
         )
     if "matchesRenderedIssue(openBlind, bTitle, bBody)" not in body or \
         "matchesRenderedIssue(open, title, body)" not in body or \
@@ -576,10 +577,10 @@ def self_test() -> int:
         if not any(f.startswith("D8") for f in fails):
             bad.append("D8 accepted a workflow that paginates every labelled issue")
 
-        # 8f. D8 must also reject eager pagination: finding a marker on page one must not fetch
-        #     every phrase match, and the Search API's 1,000-result ceiling must fail closed.
+        # 8f. Open issue discovery returns immediately on a match. Closed issue discovery
+        #     scans bounded results to select by closed_at, not mutable updated_at.
         eager_search = valid_workflow.replace(
-            "if (match) return match", "if (match) break", 1,
+            "if (state === 'open') return issue", "if (state === 'open') break", 1,
         )
         p.write_text(eager_search)
         _, fails = check_declaration(Path(td))
@@ -595,15 +596,16 @@ def self_test() -> int:
         if not any(f.startswith("D8") for f in fails):
             bad.append("D8 accepted incomplete marker search results as proof of absence")
 
-        # 8h. If several closed issues share the marker, reopening must select the most recently
-        #     updated record rather than whichever one Search's default relevance returns first.
-        unordered_search = valid_workflow.replace(
-            ", sort: 'updated', order: 'desc'", "", 1,
+        # 8h. A stale issue may have a newer edit timestamp than a fresh closure.
+        #     Reopening must compare closed_at across all bounded exact matches.
+        wrong_closed_order = valid_workflow.replace(
+            "Date.parse(issue.closed_at) > Date.parse(newestClosed.closed_at)",
+            "Date.parse(issue.updated_at) > Date.parse(newestClosed.updated_at)", 1,
         )
-        p.write_text(unordered_search)
+        p.write_text(wrong_closed_order)
         _, fails = check_declaration(Path(td))
         if not any(f.startswith("D8") for f in fails):
-            bad.append("D8 accepted unordered marker results that can reopen an obsolete issue")
+            bad.append("D8 accepted mutable update-time ordering for closed marker issues")
 
         # 8d. D7, falsified on its own rather than only inside the everything-broken file.
         #     Each half must fire alone, because each alone rebuilds the blind spot: gating the
