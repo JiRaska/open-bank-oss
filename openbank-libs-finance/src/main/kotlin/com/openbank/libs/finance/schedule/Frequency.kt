@@ -58,10 +58,32 @@ sealed interface Frequency {
     }
 
     companion object {
+        val DAILY: Frequency = Days(1)
+        val WEEKLY: Frequency = Weeks(1)
         val MONTHLY: Frequency = Months(1)
         val QUARTERLY: Frequency = Months(3)
         val SEMI_ANNUAL: Frequency = Months(6)
         val ANNUAL: Frequency = Months(12)
+
+        /**
+         * The named frequencies and their codes, the vocabulary deal and leg payloads spell a
+         * frequency in. ONCE is [Zero] (one period from start to end).
+         */
+        val NAMED: Map<String, Frequency> = linkedMapOf(
+            "ONCE" to Zero,
+            "DAILY" to DAILY,
+            "WEEKLY" to WEEKLY,
+            "MONTHLY" to MONTHLY,
+            "QUARTERLY" to QUARTERLY,
+            "SEMI_ANNUAL" to SEMI_ANNUAL,
+            "ANNUAL" to ANNUAL,
+        )
+
+        /** The frequency a [NAMED] code names, or `null` for any other text. */
+        fun named(code: String): Frequency? = NAMED[code]
+
+        /** The [NAMED] code of [frequency], or `null` when it has none (e.g. `Months(2)`). */
+        fun codeOf(frequency: Frequency): String? = NAMED.entries.firstOrNull { it.value == frequency }?.key
     }
 }
 
