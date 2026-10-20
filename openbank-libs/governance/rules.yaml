@@ -4613,3 +4613,59 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
     cardholder: []
+
+# ADR-0257 (#13429): the product-catalog kernel carries no industry vocabulary. Every Kotlin file
+# is KERNEL unless listed in non_kernel_files; enforced by check-catalog-kernel-neutral.py (gate
+# catalog-kernel-industry-neutral). Pack vocabulary is derived from catalog-packs/, never listed here.
+catalog_kernel_neutrality:
+  service: openbank-product-catalog
+  # Enums the kernel's own code branches on. Business vocabulary never belongs here.
+  structural_enums:
+    - RevisionState        # revision lifecycle
+    - PriceKind            # amount vs rate arithmetic
+    - PriceCadence         # charging schedule mechanics
+    - TaxTreatment         # price quoted tax-inclusive/exclusive (ADR-0339 D fences it as price semantics)
+    - EligibilityOperator  # rule-engine operators
+    - RelationshipKind     # offering graph edge semantics
+  # Words that occur in pack type names but are generic catalog/kernel language.
+  vocabulary_not_industry: [legacy, product, instrument, term]
+  # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
+  # only place new vocabulary may land. Removal follows the v1 sunset in the ADR-0257 amendment.
+  legacy_v1_frozen_enums:
+    ProductStatus: [ACTIVE, INACTIVE, DRAFT, DEPRECATED, ARCHIVED]
+    ProductType: [SAVINGS, CURRENT, LOAN, MORTGAGE, CREDIT_CARD, TERM_DEPOSIT, OVERDRAFT, INVESTMENT]
+    CardNetwork: [VISA, MASTERCARD, AMEX, UNIONPAY]
+    CardTier: [STANDARD, GOLD, PLATINUM, INFINITE]
+    InterestPayoutFrequency: [MONTHLY, QUARTERLY, SEMI_ANNUAL, ANNUAL, AT_MATURITY]
+    WithdrawalNotice: [NONE, DAYS_7, DAYS_14, DAYS_30, DAYS_60, DAYS_90]
+    OverdraftType: [ARRANGED, UNARRANGED, BOTH]
+    EligibilitySegment: [RETAIL, STUDENT, SENIOR, BUSINESS, PREMIUM, ALL]
+  non_kernel_files:
+    - {path: com/openbank/productcatalog/domain/Product.kt, reason: "v1 banking compatibility model"}
+    - {path: com/openbank/productcatalog/domain/ProductIds.kt, reason: "v1 identity"}
+    - {path: com/openbank/productcatalog/domain/ProductSeed.kt, reason: "v1 seed data"}
+    - {path: com/openbank/productcatalog/domain/ProductValidation.kt, reason: "v1 validation"}
+    - {path: com/openbank/productcatalog/domain/FeeRuleEvaluator.kt, reason: "v1 fee rules"}
+    - {path: com/openbank/productcatalog/application/ProductCatalogService.kt, reason: "v1 use cases"}
+    - {path: com/openbank/productcatalog/application/port/out/ProductRepository.kt, reason: "v1 port"}
+    - {path: com/openbank/productcatalog/infrastructure/ProductReflectionRegistration.kt, reason: "v1 native-image registration"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/BankV1CatalogMapping.kt, reason: "v1 <-> banking pack adapter"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/BankV1CompatibilityBackfill.kt, reason: "v1 <-> banking pack adapter"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/BankV1CompatibilityProjector.kt, reason: "v1 <-> banking pack adapter"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/LegacyProductJson.kt, reason: "v1 JSON shape"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/PostgresProductRepository.kt, reason: "v1 persistence"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/ProductCatalogSeeder.kt, reason: "v1 seeder"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/ProductEntity.kt, reason: "v1 entity"}
+    - {path: com/openbank/productcatalog/infrastructure/rest/ProductCatalogResource.kt, reason: "v1 REST"}
+    - {path: com/openbank/productcatalog/infrastructure/rest/FeesResource.kt, reason: "v1 REST"}
+    - {path: com/openbank/productcatalog/infrastructure/insurance/InsuranceTermLifeInteroperabilityAdapter.kt, reason: "insurance pack external-standard mapper (ADR-0257: packs contribute mappers)"}
+    - {path: com/openbank/productcatalog/infrastructure/catalog/CatalogReferenceOfferingSeeder.kt, reason: "pack reference-offering fixtures (ADR-0341)"}
+    - {path: com/openbank/productcatalog/infrastructure/persistence/BankV1PackGuard.kt, reason: "v1 adapter needs the banking pack"}
+    - path: com/openbank/productcatalog/infrastructure/rest/PensionRevisionApprovalResource.kt
+      reason: "deprecated alias of /approvals while admin-ui and OPA migrate"
+      expires: 2027-01-31
+      tracking: "#13429"
+  # Deprecated v2 wire names the kernel must still map during their compatibility window.
+  deprecated_wire_aliases:
+    - {name: pensionApprovalDigest, expires: 2027-01-31, tracking: "#13429"}
+    - {name: pensionApprovedEffectiveTo, expires: 2027-01-31, tracking: "#13429"}
