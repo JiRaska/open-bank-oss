@@ -290,7 +290,7 @@ simply stops existing).
   payments complete via Temporal end-to-end).
 - **2026-05-30** — Added `sepa_payments_seq`, `sepa_payment_outbox_seq` (Hibernate fix). Additive
   DDL only — no new flow/surface/boundary. Risk class = **availability**, mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-11** — Added the `openbank.outbox.backlog` domain-metric gauge (ADR-0077 / ADR-0079):
   `SepaPaymentOutboxBacklogGauge` + `SepaPaymentOutboxRepository.countProcessable()`. Touches the new
   **I — information disclosure** (metric-cardinality) row above. No new endpoint, data flow, or trust

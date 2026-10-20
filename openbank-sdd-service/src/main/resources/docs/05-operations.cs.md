@@ -104,3 +104,9 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Zaúčtování inkasního debetu
+
+Konzument inkasního debetu zaúčtovává debet přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319). Za odepsané se považuje jen čitelná transakce ve stavu COMPLETED; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 je idempotentní úspěch. Odmítnutí (400/422) vyhodí `SddDebitFailedException`, takže událost skončí v DLQ. Jakákoli jiná odpověď nebo ztracené spojení se vyhodí a zopakuje se se stejným idempotentním klíčem. Konfigurace se nezměnila.
+
+Před logováním opakovaných pokusů se u výjimek nejistého dokončení zachová pouze řízený stav a odstraní se příčiny dekódování těla, které mohou obsahovat odpověď poskytovatele. Počty pokusů a původní idempotentní klíče se nemění. Ostatní logování výjimek a sdílený logger zavírání odpovědi nejsou součástí této omezené záruky.
