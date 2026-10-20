@@ -8,10 +8,24 @@ vi.mock('@/lib/services/fleet', () => ({ getProxyAllowlist: () => ({
   'treasury-service': { container: 'openbank-treasury-service', port: 8160 },
   'treasury-pension-co': { container: 'openbank-treasury-service', port: 8443 },
 }) }))
-vi.mock('@/lib/discovery', () => ({ inCluster: () => state.cluster, discoverServices: async () => [
-  { name: 'treasury-service', namespace: 'treasury', port: 8160, scaledToZero: false },
-  { name: 'treasury-service', namespace: 'treasury-pension-co', port: 8160, scaledToZero: false },
-] }))
+vi.mock('@/lib/discovery', async () => {
+  const company = await import('@/lib/treasury-company')
+  // The real snapshot keys the company instance by discoveryServiceKey, so both workloads named
+  // treasury-service stay distinct instead of colliding as an ambiguous duplicate.
+  const services = [
+    { name: 'treasury-service', namespace: 'treasury', port: 8160, scaledToZero: false },
+    { name: 'treasury-service', namespace: 'treasury-pension-co', port: 8160, scaledToZero: false },
+  ].map(s => ({ ...s, name: company.discoveryServiceKey(s.name, s.namespace) }))
+  return {
+    inCluster: () => state.cluster,
+    resolveInClusterService: async (name: string) => {
+      const hit = services.find(s => s.name === name)
+      return hit
+        ? { state: 'found', service: hit, baseUrl: company.discoveredBaseUrl(hit.name, hit.namespace, hit.port), coverage: 'complete' }
+        : { state: 'not_found', coverage: 'complete' }
+    },
+  }
+})
 import { GET } from '@/app/api/svc/[service]/[...path]/route'
 let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => { state.tls.mockReset(); state.tls.mockResolvedValue(new Response('{}', {status:202,headers:{etag:'v1'}})); state.cluster = true; state.token = 'operator-token'; fetchMock = vi.fn(async () => new Response('{}')); vi.stubGlobal('fetch', fetchMock) })
