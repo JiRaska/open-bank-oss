@@ -179,10 +179,17 @@ jobs:
                 `repo:${context.repo.owner}/${context.repo.repo}`,
                 'is:issue', `is:${state}`, `label:${LABEL}`, 'in:body', phrase,
               ].join(' ')
-              const issues = await github.paginate(github.rest.search.issuesAndPullRequests, {
-                q: query, per_page: 100,
-              })
-              return issues.find(i => (i.body || '').includes(m))
+              // Search API caps accessible results at 1,000. Walk only as far as the exact
+              // marker, and fail closed at that cap rather than risk creating a duplicate.
+              for (let page = 1; page <= 10; page += 1) {
+                const { data } = await github.rest.search.issuesAndPullRequests({
+                  q: query, per_page: 100, page,
+                })
+                const match = data.items.find(i => (i.body || '').includes(m))
+                if (match) return match
+                if (data.items.length < 100 || page * 100 >= data.total_count) return undefined
+              }
+              throw new Error(`Issue marker search exceeded the 1,000-result cap for ${m}; refusing to create a duplicate`)
             }
             const withoutAutomationFooter = body => (body || '').replace(
               /\n?_Automated(?::| by) `[^`]+`(?: run \d+)? \(issue #\d+\)\._\s*$/,

@@ -419,8 +419,16 @@ def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, l
         "A PR was merged while a required check was FAILING" not in body or \
         "This watch could not read the ruleset bypass log" not in body:
         fails.append("D8: issue discovery does not use the bounded body-marker search endpoint.")
-    if "return issues.find(i => (i.body || '').includes(m))" not in body:
+    if "data.items.find(i => (i.body || '').includes(m))" not in body:
         fails.append("D8: search results are not checked for the exact issue marker.")
+    if "github.paginate(github.rest.search.issuesAndPullRequests" in body or \
+        "per_page: 100, page" not in body or \
+        "for (let page = 1; page <= 10; page += 1)" not in body or \
+        "if (match) return match" not in body or \
+        "throw new Error(`Issue marker search exceeded the 1,000-result cap" not in body:
+        fails.append(
+            "D8: marker search must stop on the first exact match and fail closed at the Search API cap."
+        )
     if "matchesRenderedIssue(openBlind, bTitle, bBody)" not in body or \
         "matchesRenderedIssue(open, title, body)" not in body or \
         "withoutAutomationFooter" not in body:
@@ -564,6 +572,16 @@ def self_test() -> int:
         _, fails = check_declaration(Path(td))
         if not any(f.startswith("D8") for f in fails):
             bad.append("D8 accepted a workflow that paginates every labelled issue")
+
+        # 8f. D8 must also reject eager pagination: finding a marker on page one must not fetch
+        #     every phrase match, and the Search API's 1,000-result ceiling must fail closed.
+        eager_search = valid_workflow.replace(
+            "if (match) return match", "if (match) break", 1,
+        )
+        p.write_text(eager_search)
+        _, fails = check_declaration(Path(td))
+        if not any(f.startswith("D8") for f in fails):
+            bad.append("D8 accepted marker search that does not return immediately on a match")
 
         # 8d. D7, falsified on its own rather than only inside the everything-broken file.
         #     Each half must fire alone, because each alone rebuilds the blind spot: gating the
