@@ -46,7 +46,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import gatelib
+import gatelib  # noqa: E402  (path must be set before the import)
 
 REPO = Path(__file__).resolve().parents[2]
 PY_COLLECTOR = REPO / "openbank-infra" / "scripts" / "prod-readiness-collector.py"
@@ -138,15 +138,13 @@ def self_test() -> int:
                 dst = work / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(src, dst)
-        # Mirror the collectors' structural roster, including suffixless payment/agent apps.
-        inventory = subprocess.run(
-            ["node", str(REPO / "openbank-admin-ui/scripts/service-inventory.mjs"),
-             "--repo", str(REPO)], check=True, capture_output=True, text=True,
-        )
-        for module in json.loads(inventory.stdout):
-            svc = REPO / module["name"]
-            shutil.copytree(svc, work / svc.name,
-                            ignore=shutil.ignore_patterns("build", ".gradle", "node_modules"))
+        # Enough of the fleet for both collectors to produce a non-empty, comparable population.
+        # Every governed module, not only `openbank-*-service`: the collectors refuse to run when a
+        # declared money-path module (openbank-domestic-payment, openbank-sepa-*) is missing (#13466).
+        for svc in sorted(p for p in REPO.glob("openbank-*") if p.is_dir()):
+            if (svc / "governance.yaml").exists():
+                shutil.copytree(svc, work / svc.name, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("build", ".gradle", "node_modules", ".next"))
         # The fixture omits .git; stamp its copied source explicitly, never infer another checkout.
         fixture_source_sha = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
