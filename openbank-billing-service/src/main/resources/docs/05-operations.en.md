@@ -4,9 +4,11 @@
 
 Warnings for unavailable revision terms, failed pin-store operations, failed catalog lookup, and
 dropped fee components contain fixed text. They do not include account, product, cycle, revision,
-exception details, or component counts. Use the bounded `billing.assessment.skipped` counter's
-`reason` label to distinguish skipped assessments and `billing.assessment.dropped_components` to
-detect dropped components. These aggregate counters do not identify an individual assessment;
+exception details, or component counts. The bounded `billing.assessment.skipped` counter's
+`reason` label identifies skip reasons recorded by that counter; it does not represent every
+skipped assessment. `billing.assessment.dropped_components` counts assessments with one or more
+dropped components; it does not count the components themselves. These aggregate counters do not
+identify an individual assessment;
 investigate affected records through authorized business data access, not operational logs.
 
 ## Ledger accounting-class rollout (ADR-0341 D3)
