@@ -36,11 +36,6 @@ quarkus:
     client-id: openbank-tax-reporting-service
   # Health and metrics on the fleet-common management port, scraped by the fleet PodMonitor
   # (port name `management`) and probed by the kubelet.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   smallrye-health:
     root-path: /q/health
   otel:

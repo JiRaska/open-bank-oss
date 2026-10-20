@@ -22,29 +22,9 @@ quarkus:
       methods: GET,POST,PUT,DELETE,OPTIONS
       headers: Content-Type,Authorization,If-Match
       exposed-headers: ETag
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   # Health/metrics on a separate management port, matching the fleet convention and the
   # Deployment's `management` containerPort that startup/liveness/readiness probes target.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
 
   datasource:
     db-kind: postgresql
