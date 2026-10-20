@@ -33,10 +33,10 @@ export function readAdminUiContentSnapshot(): Promise<EvidenceSnapshotResult<Adm
  */
 export function contentSourceMetadata(
   result: EvidenceSnapshotResult<AdminUiContentSnapshot>,
-  options: { imageFallbackAvailable: boolean; fetchedAt?: string } = { imageFallbackAvailable: false },
+  options: { imageFallbackAvailable: boolean; fetchedAt?: string; forceImageFallback?: boolean } = { imageFallbackAvailable: false },
 ): ContentSourceMetadata {
   const fetchedAt = options.fetchedAt ?? new Date().toISOString()
-  if (result.snapshot && result.provenance) {
+  if (result.snapshot && result.provenance && !options.forceImageFallback) {
     return {
       source: 'published',
       status: result.status,
@@ -88,14 +88,14 @@ export interface ResolvedContent<T> {
  * A stale published snapshot remains usable and keeps its original provenance.
  */
 export async function resolveAdminUiContent<T>(
-  selectPublished: (snapshot: AdminUiContentSnapshot) => T,
+  selectPublished: (snapshot: AdminUiContentSnapshot) => T | null | undefined,
   loadImageBaked: () => Promise<T | null>,
 ): Promise<ResolvedContent<T>> {
   const result = await readAdminUiContentSnapshot()
   if (result.snapshot) {
-    return {
-      value: selectPublished(result.snapshot),
-      contentSource: contentSourceMetadata(result),
+    const published = selectPublished(result.snapshot)
+    if (published !== null && published !== undefined) {
+      return { value: published, contentSource: contentSourceMetadata(result) }
     }
   }
 
@@ -103,6 +103,9 @@ export async function resolveAdminUiContent<T>(
   try { value = await loadImageBaked() } catch { /* report honest unavailable state below */ }
   return {
     value,
-    contentSource: contentSourceMetadata(result, { imageFallbackAvailable: value !== null }),
+    contentSource: contentSourceMetadata(result, {
+      imageFallbackAvailable: value !== null,
+      forceImageFallback: Boolean(result.snapshot),
+    }),
   }
 }

@@ -65,7 +65,12 @@ function generateJson(repoRoot, temporaryDirectory, name, script) {
 }
 
 /** Generate a single bounded payload from the reviewed source tree; no network or credentials. */
-export function collectAdminUiContent({ repoRoot = REPO, sourceSha, now = Date.now } = {}) {
+export function collectAdminUiContent({
+  repoRoot = REPO,
+  sourceSha,
+  now = Date.now,
+  includeClusterTopology = process.env.OPENBANK_ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY === 'true',
+} = {}) {
   const root = resolve(repoRoot)
   if (typeof sourceSha !== 'string' || !SOURCE_SHA.test(sourceSha)) throw new Error('source SHA must be a full lowercase 40-character Git SHA')
   const checkedOutSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
@@ -91,6 +96,11 @@ export function collectAdminUiContent({ repoRoot = REPO, sourceSha, now = Date.n
         bpmnManifests: bpmn,
         libsDocs,
       },
+    }
+    // Old Admin UI images reject unknown content keys. Keep this opt-in until the
+    // topology-capable image is deployed, then enable the publisher flag.
+    if (includeClusterTopology) {
+      snapshot.content.clusterTopology = generateJson(root, temporaryDirectory, 'cluster-topology', 'generate-cluster-topology.mjs')
     }
     const bytes = Buffer.from(`${JSON.stringify(snapshot)}\n`, 'utf8')
     if (bytes.byteLength > ADMIN_UI_CONTENT_MAX_BYTES) throw new Error(`content snapshot exceeds ${ADMIN_UI_CONTENT_MAX_BYTES} byte limit`)

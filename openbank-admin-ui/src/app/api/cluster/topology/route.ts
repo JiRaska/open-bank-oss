@@ -10,6 +10,7 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,14 +19,20 @@ function topologyFile(): string {
 }
 
 export async function GET() {
-  try {
-    const raw = await fs.readFile(topologyFile(), 'utf-8')
-    return NextResponse.json(JSON.parse(raw))
-  } catch {
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.clusterTopology,
+    async () => {
+      try { return JSON.parse(await fs.readFile(topologyFile(), 'utf-8')) as Record<string, unknown> }
+      catch { return null }
+    },
+  )
+  if (!resolved.value) {
     // Honest empty — the page degrades through the graceful-state rule rather than faking a posture.
-    return NextResponse.json(
-      { schema: 'openbank.cluster-topology/v1', source: 'unavailable', generatedAt: null, counts: {}, groups: [], namespaces: [], securityLayers: [], imageAnatomy: { steps: [] }, planVsReality: [] },
-      { status: 200 },
-    )
+    return NextResponse.json({
+      schema: 'openbank.cluster-topology/v1', source: 'unavailable', generatedAt: null,
+      counts: {}, groups: [], namespaces: [], securityLayers: [], imageAnatomy: { steps: [] }, planVsReality: [],
+      contentSource: resolved.contentSource,
+    })
   }
+  return NextResponse.json({ ...resolved.value, contentSource: resolved.contentSource })
 }

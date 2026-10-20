@@ -121,6 +121,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # Enable only after the deployed Admin UI accepts the optional topology content key.
+          OPENBANK_ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY: ${{ vars.ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY }}
         run: |
           set -euo pipefail
           case "$DATASET" in
