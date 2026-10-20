@@ -71,6 +71,12 @@ the collector reads its retained quality report/seed, not broker verification
 freshness. Scheduled and manual `all` runs still refresh every dataset, and a
 manual dataset selection or rollback remains scoped to that dataset.
 
+The Admin UI evidence collector, dataset selector, and their exact tests are
+publisher-only inputs, so Services CI classifies only those named paths as
+inert. Unknown automation and shared build inputs keep the conservative
+service-build fallback; this avoids rebuilding the Kotlin fleet for a UI
+evidence publication change without weakening validation of service changes.
+
 **Runtime health:** collect inventory and readiness independently of slow version
 or governance enrichment. Cache and coalesce concurrent read requests with a
 bounded TTL and explicit observation time. Discovery must distinguish partial
