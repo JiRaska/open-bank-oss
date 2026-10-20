@@ -6,6 +6,7 @@ package com.openbank.productcatalog.infrastructure.catalog
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
 import io.quarkus.runtime.StartupEvent
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
@@ -27,13 +28,36 @@ class CatalogPackSeeder(
     private val catalogJson: CatalogJson,
     private val schemaProfile: CatalogSchemaProfile,
     private val clock: Clock,
-    @ConfigProperty(name = "openbank.catalog.packs", defaultValue = "banking,insurance,retirement")
+    @ConfigProperty(name = "openbank.catalog.packs")
     private val enabledPacks: java.util.Optional<String>,
 ) {
     @Suppress("UnusedParameter")
     fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION - STARTUP_PRIORITY_OFFSET) event: StartupEvent) {
         val enabled = enabledPacks.orElse("").split(',').map(String::trim).filter(String::isNotEmpty).toSet()
-        PACKS.filter { it.pack in enabled }.forEach { pack -> register(pack) }
+        enabled.flatMap(::manifest).forEach { pack -> register(pack) }
+    }
+
+    /**
+     * A pack is discovered from its own `pack.json`; the kernel holds no list of packs, schemas or
+     * policies. An enabled pack without a manifest fails startup rather than registering nothing.
+     */
+    private fun manifest(pack: String): List<PackSchema> {
+        require(PACK_NAME.matches(pack)) { "catalog pack name '$pack' must match ${PACK_NAME.pattern}" }
+        val resource = "/catalog-packs/$pack/pack.json"
+        val manifest = requireNotNull(javaClass.getResourceAsStream(resource)) {
+            "catalog pack '$pack' is enabled but $resource is missing"
+        }.use(mapper::readTree)
+        require(manifest.path("pack").asText() == pack) { "$resource declares pack '${manifest.path("pack").asText()}'" }
+        return manifest.path("schemas").map { entry ->
+            PackSchema(
+                pack = pack,
+                id = entry.path("id").asText(),
+                version = entry.path("version").asInt(),
+                resource = "/catalog-packs/$pack/${entry.path("resource").asText()}",
+                approvalPolicy = entry.get("approvalPolicy")
+                    ?.let { mapper.treeToValue(it, RevisionApprovalPolicy::class.java) },
+            )
+        }.also { require(it.isNotEmpty()) { "$resource declares no schemas" } }
     }
 
     private fun register(pack: PackSchema) {
@@ -46,6 +70,7 @@ class CatalogPackSeeder(
             connection.inTransaction {
                 val inserted = insertSchema(connection, pack, document.toString(), hash)
                 assertRegisteredHash(connection, pack, hash)
+                registerApprovalPolicy(connection, pack)
                 if (inserted) recordRegistration(connection, pack)
             }
         }
@@ -67,6 +92,41 @@ class CatalogPackSeeder(
             )
             statement.executeUpdate() == 1
         }
+
+    /**
+     * A registered policy is immutable per schema version, like the schema document: a manifest
+     * that changes or drops it fails startup. Declaring a policy for a version that had none only
+     * tightens governance (open drafts then need the approvals), so that is accepted.
+     */
+    private fun registerApprovalPolicy(connection: Connection, pack: PackSchema) {
+        val stored = connection.prepareStatement(
+            "SELECT policy::text FROM catalog_schema_approval_policies WHERE schema_id = ? AND schema_version = ?",
+        ).use { statement ->
+            statement.bind(pack.id, pack.version)
+            statement.executeQuery().use { rows ->
+                if (rows.next()) mapper.readValue(rows.getString(1), RevisionApprovalPolicy::class.java) else null
+            }
+        }
+        when {
+            stored == pack.approvalPolicy -> Unit
+            stored == null && pack.approvalPolicy != null -> connection.prepareStatement(
+                "INSERT INTO catalog_schema_approval_policies (schema_id, schema_version, policy, registered_at) " +
+                    "VALUES (?, ?, CAST(? AS jsonb), ?)",
+            ).use { statement ->
+                statement.bind(
+                    pack.id,
+                    pack.version,
+                    mapper.writeValueAsString(pack.approvalPolicy),
+                    java.time.OffsetDateTime.ofInstant(Instant.now(clock), java.time.ZoneOffset.UTC),
+                )
+                statement.executeUpdate()
+            }
+            else -> error(
+                "approval policy of schema ${pack.id}:${pack.version} differs from the registered one " +
+                    "(registered=$stored, manifest=${pack.approvalPolicy}); policies are immutable per version",
+            )
+        }
+    }
 
     private fun assertRegisteredHash(connection: Connection, pack: PackSchema, expectedHash: String) {
         connection.prepareStatement("SELECT sha256 FROM catalog_schemas WHERE key = ?").use { statement ->
@@ -147,59 +207,16 @@ class CatalogPackSeeder(
         values.forEachIndexed { index, value -> setObject(index + 1, value) }
     }
 
-    private data class PackSchema(val pack: String, val id: String, val version: Int, val resource: String)
+    private data class PackSchema(
+        val pack: String,
+        val id: String,
+        val version: Int,
+        val resource: String,
+        val approvalPolicy: RevisionApprovalPolicy?,
+    )
 
     private companion object {
         const val STARTUP_PRIORITY_OFFSET = 100
-        val PACKS = listOf(
-            PackSchema("banking", "org.openbank.banking.deposit", 1, "/catalog-packs/banking/deposit-v1.schema.json"),
-            PackSchema("banking", "org.openbank.banking.deposit", 2, "/catalog-packs/banking/deposit-v2.schema.json"),
-            PackSchema(
-                "banking",
-                "org.openbank.banking.legacy-product",
-                1,
-                "/catalog-packs/banking/legacy-product-v1.schema.json",
-            ),
-            PackSchema("banking", "org.openbank.banking.loan", 1, "/catalog-packs/banking/loan-v1.schema.json"),
-            PackSchema("banking", "org.openbank.banking.deposit", 3, "/catalog-packs/banking/deposit-v3.schema.json"),
-            PackSchema("banking", "org.openbank.banking.loan", 2, "/catalog-packs/banking/loan-v2.schema.json"),
-            PackSchema("banking", "org.openbank.banking.loan", 3, "/catalog-packs/banking/loan-v3.schema.json"),
-            PackSchema(
-                "banking",
-                "org.openbank.banking.treasury-instrument",
-                1,
-                "/catalog-packs/banking/treasury-instrument-v1.schema.json",
-            ),
-            PackSchema(
-                "insurance",
-                "org.openbank.insurance.term-life",
-                1,
-                "/catalog-packs/insurance/term-life-v1.schema.json",
-            ),
-            PackSchema(
-                "insurance",
-                "org.openbank.insurance.term-life",
-                2,
-                "/catalog-packs/insurance/term-life-v2.schema.json",
-            ),
-            PackSchema(
-                "retirement",
-                "org.openbank.retirement.pension-savings",
-                1,
-                "/catalog-packs/retirement/pension-savings-v1.schema.json",
-            ),
-            PackSchema(
-                "retirement",
-                "org.openbank.retirement.pension-savings",
-                2,
-                "/catalog-packs/retirement/pension-savings-v2.schema.json",
-            ),
-            PackSchema(
-                "retirement",
-                "org.openbank.retirement.pension-savings",
-                3,
-                "/catalog-packs/retirement/pension-savings-v3.schema.json",
-            ),
-        )
+        val PACK_NAME = Regex("^[a-z][a-z0-9-]{1,63}$")
     }
 }
