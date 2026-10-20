@@ -860,6 +860,15 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if fetched != p["head"]["sha"]:
             log(f"#{n:>6} skip      fetched head differs from the API head (pushed meanwhile)")
             continue
+        # The ordinary candidate list is capped, but stale-red refresh must still inspect every
+        # armed PR. Once full, check only the verified head's required statuses: no diff, app-status,
+        # or strict-lane work is needed to decide whether it is red and belongs in the refresh queue.
+        if len(out) >= limit and red is not None:
+            view = pr_view(repo, p, [])
+            failing = stale_red_candidate(view, member_required, gh.checks(fetched))
+            if failing:
+                red.append((view, failing))
+            continue
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
@@ -880,7 +889,7 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             out.append(Member(n, view["title"], view["body"], fetched, view["head_ref"], view["created_at"],
                               ref=fetched, files=files))
             apps[n] = app
-        if len(out) >= limit:
+        if len(out) >= limit and red is None:
             break
     return out, apps
 
@@ -2275,6 +2284,36 @@ def self_test() -> int:
             check("stale-red: three eligible PRs -> only 2 refreshed, oldest first",
                   gh.updates == [1, 2] and s["refreshed"] == [1, 2], f"updates={gh.updates} {s}")
             stale_done()
+
+            # The green candidate cap must not hide a later red PR from the independent stale-red
+            # scan. Reuse one verified tree for these synthetic PRs; the status result is sequenced
+            # per API read so the first 64 qualify and the 65th is stale-red.
+            saved_prs, old_checks = gh.prs, gh.checks
+            gh.prs = {}
+            shared_head = gh.g("rev-parse", "p1").stdout.strip()
+            for i in range(65):
+                n = 1000 + i
+                gh.prs[n] = {"number": n, "state": "open", "draft": False, "auto_merge": {"x": 1},
+                             "title": f"p{n}", "body": "", "created_at": f"{i:03d}",
+                             "user": {"login": "someone"},
+                             "head": {"ref": "p1", "sha": shared_head, "repo": {"full_name": "o/r"}}}
+            reads = [0]
+
+            def sequenced_checks(sha):
+                reads[0] += 1
+                result = {c: "success" for c in SYN_REQUIRED[:4]}
+                if reads[0] == 65:
+                    result["Validate manifests"] = "failure"
+                return result
+
+            gh.checks = sequenced_checks
+            red = []
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0,
+                                           Untrainable(SYN_INVENTORY), red=red)
+            check("stale-red: a later red PR is inspected after the 64-green candidate cap",
+                  len(cands) == 64 and reads[0] == 65 and len(red) == 1 and red[0][0]["number"] == 1064,
+                  f"candidates={len(cands)} status_reads={reads[0]} red={[x[0]['number'] for x in red]}")
+            gh.prs, gh.checks = saved_prs, old_checks
 
             stale_red("p1", tip_red=True)
             s = settle_now()
