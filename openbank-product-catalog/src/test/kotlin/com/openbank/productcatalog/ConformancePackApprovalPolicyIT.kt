@@ -21,7 +21,9 @@ import io.restassured.module.kotlin.extensions.When
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
+import org.hamcrest.Matchers.not
 import org.hamcrest.Matchers.notNullValue
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -67,7 +69,19 @@ class ConformancePackApprovalPolicyIT {
             """{"schemaRef":{"id":"$SCHEMA_ID","version":1},"name":{"en":"Widget"},""" +
                 """"attributes":{"readiness":"DRAFTING"}}""",
         )
-        Given { this } When { get("/api/v2/product-types/$SCHEMA_ID/versions/1") } Then { statusCode(200) }
+        // The schema response publishes the pack's policy so clients render its roles, never the
+        // internal authority a principal must hold.
+        Given { this } When { get("/api/v2/product-types/$SCHEMA_ID/versions/1") } Then {
+            statusCode(200)
+            body("approvalPolicy.roles.code", equalTo(listOf("SAFETY_OFFICER")))
+            body("approvalPolicy.requireEffectiveFrom", equalTo(false))
+            body("approvalPolicy.requiredAttributes.readiness", equalTo("READY"))
+            body(not(containsString("WIDGET_SAFETY_APPROVER")))
+        }
+        Given { this } When { get("/api/v2/product-types/$BANKING_SCHEMA_ID/versions/1") } Then {
+            statusCode(200)
+            body("approvalPolicy", nullValue())
+        }
     }
 
     @Test
@@ -191,6 +205,7 @@ class ConformancePackApprovalPolicyIT {
 
     companion object {
         const val SCHEMA_ID = "org.openbank.conformance.widget"
+        const val BANKING_SCHEMA_ID = "org.openbank.banking.deposit"
         private var offeringId: String? = null
         private var revisionId: String? = null
     }
