@@ -215,6 +215,11 @@ mp:
       fraud-scoring-enabled: false
 
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
   outbox:
     # Defaults to FALSE fleet-wide: a service with an outbox that does not set this dispatches
     # nothing, with no error and attempt_count stuck at 0.

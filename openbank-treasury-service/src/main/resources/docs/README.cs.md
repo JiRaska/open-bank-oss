@@ -33,3 +33,7 @@ Pravidla hlášená v `breaches[]` jsou `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_P
 ## Kontrakt
 
 Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity jsou aditivní: 1.18.0, s odpovědí 422 u `submit` a `approve`.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.
