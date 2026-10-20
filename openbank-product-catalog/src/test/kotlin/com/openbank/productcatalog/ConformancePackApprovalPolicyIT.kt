@@ -43,7 +43,7 @@ import org.junit.jupiter.api.TestMethodOrder
 class ConformancePackApprovalPolicyIT {
     class ConformancePack : QuarkusTestProfile {
         override fun getConfigOverrides() = mapOf(
-            "openbank.catalog.packs" to "conformance",
+            "openbank.catalog.packs" to "banking,conformance",
             "openbank.catalog.reference-offerings-enabled" to "false",
             "openbank.catalog.approval.authorities.WIDGET_SAFETY_APPROVER.scope" to "widget:safety-approve",
             "openbank.catalog.approval.authorities.WIDGET_SAFETY_APPROVER.realm-role" to "ROLE_WIDGET_SAFETY",
@@ -87,7 +87,8 @@ class ConformancePackApprovalPolicyIT {
     )
     fun `the declared role cannot approve before the declared attribute holds, nor can another pack's role`() {
         approve("SAFETY_OFFICER", 409, "\"0\"") // readiness is still DRAFTING
-        approve("LEGAL_COUNSEL", 409, "\"0\"") // declared by another pack, not by this schema
+        // LEGAL_COUNSEL is declared by another pack; its authority is not one this officer holds.
+        approve("LEGAL_COUNSEL", 403, "\"0\"")
     }
 
     @Test

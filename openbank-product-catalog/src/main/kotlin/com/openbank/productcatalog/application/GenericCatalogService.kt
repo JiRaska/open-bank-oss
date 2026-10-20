@@ -227,6 +227,10 @@ class GenericCatalogService(
         return repository.revisionApprovals(revisionId)
     }
 
+    /** Authorities that any registered policy binds to [role]; empty when no pack declares it. */
+    suspend fun authoritiesForRole(role: String): Set<String> =
+        listSchemas().mapNotNullTo(linkedSetOf()) { it.approvalPolicy?.role(role)?.authority }
+
     /** The approval policy of the revision's exact schema version, or null when it has none. */
     suspend fun approvalPolicy(revision: ProductRevision): RevisionApprovalPolicy? =
         findSchema(revision.schemaRef).approvalPolicy

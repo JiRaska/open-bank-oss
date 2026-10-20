@@ -23,7 +23,9 @@ import java.util.UUID
 
 data class RevisionApprovalRequest(val reason: String)
 
-data class RevisionApprovalResponse(val role: String, val digest: String, val approvedAt: Instant)
+data class RevisionApprovalResponse(val role: String, val digest: String, val approvedAt: Instant) {
+    constructor(approval: RevisionApproval) : this(approval.role, approval.digest, approval.approvedAt)
+}
 
 /**
  * Identity rules for role-qualified revision approval, shared by the generic endpoint and its
@@ -42,7 +44,7 @@ class RevisionApprovalHandler(
     suspend fun list(offeringId: UUID, revisionId: UUID): List<RevisionApprovalResponse> {
         requireEvidenceReader()
         requireOwner(offeringId, revisionId)
-        return service.revisionApprovals(revisionId).map(::response)
+        return service.revisionApprovals(revisionId).map(::RevisionApprovalResponse)
     }
 
     @Suppress("ThrowsCount")
@@ -53,12 +55,16 @@ class RevisionApprovalHandler(
         ifMatch: String?,
         request: RevisionApprovalRequest,
     ): Response {
-        requireAnyApprovalAuthority()
+        // Every identity check runs BEFORE the revision is looked up, so a caller who could never
+        // approve as this role learns nothing about whether the revision exists.
+        val token = requireApprovalToken(service.authoritiesForRole(role))
+        val approverName = requireHumanApprover(token)
         val revision = requireOwner(offeringId, revisionId)
         val authority = service.approvalPolicy(revision)?.role(role)?.authority
             ?: throw CatalogConflictException("approval role $role is not declared by the revision's schema")
-        val token = requireApprovalToken(authority)
-        val approverName = requireHumanApprover(token)
+        if (authority !in heldAuthorities(token)) {
+            throw CatalogForbiddenException("approval role and scope are required")
+        }
         val issuer = token.issuer?.takeIf(String::isNotBlank)
             ?: throw CatalogForbiddenException("token issuer is required")
         val subject = (token.subject ?: token.getClaim<String>("sub"))?.takeIf(String::isNotBlank)
@@ -74,7 +80,7 @@ class RevisionApprovalHandler(
             approverName,
             request.reason,
         )
-        return Response.status(Response.Status.CREATED).entity(response(approved)).build()
+        return Response.status(Response.Status.CREATED).entity(RevisionApprovalResponse(approved)).build()
     }
 
     /** OPA is advisory by default; a catalog-read scope alone must not expose approval evidence. */
@@ -105,22 +111,14 @@ class RevisionApprovalHandler(
         return humanToken && scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).any { it in readers }
     }
 
-    /** Before any lookup: a caller holding no approval authority learns nothing about the revision. */
-    private fun requireAnyApprovalAuthority() {
-        val token = identity.principal as? JsonWebToken
-            ?: throw CatalogForbiddenException("a verified JWT principal is required")
-        val held = scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)
-        if (held.none { it in scopeMapper.approvalAuthorities }) {
-            throw CatalogForbiddenException("approval role and scope are required")
-        }
-    }
-
-    private fun requireApprovalToken(authority: String): JsonWebToken {
+    /** [candidates]: every authority any registered policy binds to the requested role code. */
+    @Suppress("ThrowsCount") // three distinct refusals, each with its own message (same shape as before #13429)
+    private fun requireApprovalToken(candidates: Set<String>): JsonWebToken {
         val token = identity.principal as? JsonWebToken
             ?: throw CatalogForbiddenException("a verified JWT principal is required")
         // Raw realm roles can reach this method. Derive the decision again from the verified realm
         // assignment and the independent approval scope on this exact JWT.
-        if (authority !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
+        if (heldAuthorities(token).none { it in candidates }) {
             throw CatalogForbiddenException("approval role and scope are required")
         }
         if (token.getClaim<String>("azp") != ADMIN_UI_CLIENT) {
@@ -129,15 +127,14 @@ class RevisionApprovalHandler(
         return token
     }
 
+    private fun heldAuthorities(token: JsonWebToken): Set<String> =
+        scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)
+
     private fun requireHumanApprover(token: JsonWebToken): String {
         val username = token.getClaim<String>("preferred_username").orEmpty()
         val approverName = token.name ?: username
-        if (username.isBlank() ||
-            approverName.isBlank() ||
-            isMachineIdentity(username) ||
-            isMachineIdentity(approverName) ||
-            token.subject?.startsWith("agent:") == true
-        ) {
+        val names = listOf(username, approverName)
+        if (names.any { it.isBlank() || isMachineIdentity(it) } || token.subject?.startsWith("agent:") == true) {
             throw CatalogForbiddenException("a human approver is required")
         }
         return approverName
@@ -150,9 +147,6 @@ class RevisionApprovalHandler(
             throw CatalogNotFoundException("revision $revisionId not found for offering $offeringId")
         }
     }
-
-    private fun response(approval: RevisionApproval) =
-        RevisionApprovalResponse(approval.role, approval.digest, approval.approvedAt)
 
     private companion object {
         const val ADMIN_UI_CLIENT = "openbank-admin-ui"
