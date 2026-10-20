@@ -64,8 +64,11 @@ function reportFile(): string {
 async function fromBundle(): Promise<NextResponse | null> {
   try {
     const raw = await fs.readFile(reportFile(), 'utf-8')
-    const report = JSON.parse(raw)
-    return NextResponse.json({ available: true, report }, { status: 200 })
+    const envelope = parseSecurityEnvelope({ available: true, report: JSON.parse(raw) })
+    if (!envelope.available) return null
+    // Return only validated fields, as for the scanner. A malformed bundle must
+    // not outrank a usable live report merely because it declares a newer time.
+    return NextResponse.json(envelope, { status: 200 })
   } catch {
     return null // no bundled report — try the live read-only source next
   }

@@ -176,6 +176,46 @@ describe('security BFF relays the operator bearer', () => {
     }
   })
 
+  it('ignores a newer malformed bundle instead of hiding a valid scanner report', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify({
+        ...validReport('2099-01-01T00:00:00Z'), totalServices: 1, internalDebug: 'must not be returned',
+      }))
+      vi.stubGlobal('fetch', jsonOk(validReport('2026-10-19T00:00:00Z')))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, source: 'scanner', report: { generatedAt: '2026-10-19T00:00:00Z' } })
+      expect(JSON.stringify(body)).not.toContain('internalDebug')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('serves only validated bundle fields when the scanner is unavailable', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
+    const bundlePath = path.join(dir, 'security-report.json')
+    try {
+      process.env.OPENBANK_SECURITY_REPORT = bundlePath
+      await writeFile(bundlePath, JSON.stringify({
+        ...validReport('2026-10-19T00:00:00Z'), internalDebug: 'must not be returned',
+      }))
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('scanner unavailable')))
+
+      const { GET } = await import('@/app/api/security/route')
+      const body = await (await GET()).json()
+
+      expect(body).toMatchObject({ available: true, source: 'ci-bundle', scannerStatus: 'unavailable' })
+      expect(JSON.stringify(body)).not.toContain('internalDebug')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('falls back to the bundle when the live scanner rejects the session', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'security-report-'))
     const bundlePath = path.join(dir, 'security-report.json')
