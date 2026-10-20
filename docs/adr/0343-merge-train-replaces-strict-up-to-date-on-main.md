@@ -293,6 +293,34 @@ green on main at its base) is never refreshed at all. Like the strict lane it us
 git queries and the API only, and executes no PR code; it adds no merge, only the update a human
 would otherwise click.
 
+**Main-red awareness.** The strict lane served manual-lane PRs oldest-first and updated the oldest
+green-but-behind one onto live main whatever main's state. With main red on a required context,
+that update could only manufacture main-caused red: the old PR went red on main's gate, the next
+oldest was updated onto the same red tip, and the PR carrying the fix — newer, so last in line —
+was never served (2026-10-20: `gates (gitops-api)` red on main, the fix waited while settle reported
+updated: [<older PR>] and then nothing). So at the start of settle, main_red is the set of
+required contexts (`merge-train` aside) that are FAILURE in main's latest completed CI at the live
+tip (the tip, or its nearest first-parent ancestor with a completed result — a fix that has merged
+keeps main red until its own push run reports). Then, in the strict lane only:
+1. a PR whose failing required contexts are all in `main_red` is **waiting**
+   (`strict: waiting for main (<ctx> red on main <sha12>)`, reported under `waiting`): it cannot
+   go green until main is fixed, so it is never served and never reserves main;
+2. ordinary behind PRs are not updated onto a red main. This avoids spending a cycle on a known red
+   combined tree;
+3. a green strict-lane PR whose merge-base (or nearest ancestor with a result) was red on a
+   main_red context is a **fix candidate**, ranked before other strict-lane PRs. If it is already
+   up to date and its required checks are green on that exact head, it can merge subject to all
+   existing guards and the live-main re-check. If it is behind, settle first calls update-branch
+   against the current main tip, reports it under `updated`, and reserves main while CI runs on the
+   new combined head. It can merge only after every required context passes on that refreshed head.
+   A later main regression in the same context is therefore included in the refreshed CI result;
+   a green result from an older base never authorizes a merge over current main.
+
+Every other condition still applies — armed, not draft, same repo, no excluded prefix,
+agent-pr-guard not refusing, no symlink/gitlink or control-character path, no train in flight,
+never in shadow — and live main is re-read immediately before the merge. When main is green, strict
+lane behavior remains as before.
+
 ### What the train is NOT
 
 It is not a replacement for a PR's own CI: a PR that is red on its own head never qualifies. It is
