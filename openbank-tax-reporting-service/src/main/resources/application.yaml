@@ -88,6 +88,13 @@ kafka:
       url: ${PENSION_COMPANY_LEDGER_URL:http://localhost:8099}
       connect-timeout: 2000
       read-timeout: 10000
+    # ADR-0337: the PENSION COMPANY's own treasury-service instance (PSP 34-12 PS, its own
+    # portfolio). No default on purpose: unset = PSP 34-12 PS is refused (503, "not configured")
+    # rather than read from whichever treasury happens to answer on a default port.
+    treasury-service:
+      url: ${PENSION_COMPANY_TREASURY_URL:}
+      connect-timeout: 2000
+      read-timeout: 10000
 
     # ADR-0340 B: the CRS/FATCA assembly's three read models, all under tax-reporting-service's
     # OWN machine identity (Keycloak client `openbank-tax-reporting`, ROLE_API only). party-service
@@ -210,4 +217,9 @@ openbank:
         protocols: TLSv1.3
     rest-client:
       ledger-service:
+        tls-configuration-name: internal-authority
+      # The pension company's own treasury-service instance (PSP 34-12 PS, ADR-0337): 8443, client
+      # auth REQUIRED; the call carries a bearer token and the cluster has no mesh, so plaintext 8160
+      # is not an option.
+      treasury-service:
         tls-configuration-name: internal-authority

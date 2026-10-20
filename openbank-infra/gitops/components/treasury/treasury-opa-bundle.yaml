@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "d22c2772bf547559"
+    openbank.tech/policy-checksum: "be3f4853fdf27629"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -779,6 +779,15 @@ data:
     #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
     #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
     #                                               balance; it is still back-office evidence, #10896)
+    #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
+    #                                               tax-reporting's OWN client (ADR-0337 amendment)
+    #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
+    #
+    # treasury.portfolio.inspect is the one treasury read a MACHINE reaches, so it deliberately does not
+    # end in `.read`: base rest.rego's operator-read-any and compliance-read-any grant every `.read` to
+    # any HUMAN-classified principal holding ROLE_OPERATOR / ROLE_COMPLIANCE, which the shared
+    # service-account does in at least one realm. A non-read verb is served ONLY by the identity-scoped
+    # rules below (the fleet convention since pension-fund.holding.inspect, #12481).
     #
     # Four-eyes (approver != creator) is enforced in the domain (ADR-0315 D3); these rules decide only
     # WHO may attempt each step. Dealer and approver are separate roles on purpose: a dealer cannot
@@ -824,6 +833,8 @@ data:
     		"treasury.counterparty.read",
     		"treasury.position.read",
     		"treasury.nostro.read",
+    		# ADR-0337 amendment: the custodian's period-end statement of holdings.
+    		"treasury.portfolio.inspect",
     		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
     		"treasury.quote.read",
     	}
@@ -872,6 +883,28 @@ data:
     	treasury_staff
     	"ROLE_TREASURY_APPROVER" in input.principal.roles
     	input.action == "treasury.nostro.upload"
+    }
+
+    # ADR-0337 amendment: the custodian's semt.002 is the source of record for PSP 34-12 PS, so only a
+    # back-office approver supplies it — the same rule, and the same reason, as the nostro camt.053.
+    allowed_reasons contains "treasury-portfolio-upload" if {
+    	treasury_staff
+    	"ROLE_TREASURY_APPROVER" in input.principal.roles
+    	input.action == "treasury.portfolio.upload"
+    }
+
+    # tax-reporting, and ONLY tax-reporting, reads the period-end portfolio for PSP 34-12 PS. Gated on
+    # its own identity (Keycloak service-account-<clientId>), never on a role every machine may hold;
+    # its whole grant here is this one read — never the upload, never any other treasury action.
+    treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
+
+    allowed_reasons contains "service-tax-reporting-portfolio-read" if {
+    	input.principal.type == "HUMAN"
+    	machine_named(treasury_portfolio_reader_account)
+    	# Undefined is legacy; explicit null is not a verified or absent marker.
+    	not input.principal.service_account == null
+    	"ROLE_API" in input.principal.roles
+    	input.action == "treasury.portfolio.inspect"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
