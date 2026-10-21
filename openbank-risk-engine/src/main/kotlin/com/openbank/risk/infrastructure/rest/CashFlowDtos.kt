@@ -13,7 +13,11 @@ import java.time.Instant
 import java.util.UUID
 
 /** Every field nullable and checked in the resource: an absent field must be a 400, not a 500. */
-data class QuoteDto(val tenor: String? = null, val rate: BigDecimal? = null)
+/**
+ * One curve quote. [instrument] is `DEPOSIT` (default — the only shape before ADR-0344 D8), `FRA`
+ * (tenor `<m>x<n>`) or `SWAP` (tenor `<n>Y`, a par fixed-versus-float rate).
+ */
+data class QuoteDto(val tenor: String? = null, val rate: BigDecimal? = null, val instrument: String? = null)
 
 data class CreateCurveSetRequest(
     val asOf: String? = null,
