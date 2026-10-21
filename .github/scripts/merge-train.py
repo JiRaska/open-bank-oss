@@ -1870,6 +1870,9 @@ TOP = [
     ("manual dispatch", "workflow_dispatch:"),
     ("concurrency group", "group: merge-train"),
     ("never cancels a train in flight", "cancel-in-progress: false"),
+    ("event-driven: main moved", "push:"),
+    ("event-driven: a required-context producer finished", "workflow_run:"),
+    ("event-driven: a PR was armed", "auto_merge_enabled"),
 ]
 _ISOLATION = [("script from origin/main", "show origin/main:.github/scripts/merge-train.py"),
               ("isolated python", "python3 -I -S"), ("no system git config", "GIT_CONFIG_NOSYSTEM: \"1\""),
@@ -1916,6 +1919,12 @@ def check_declaration() -> int:
     guard_src = inspect.getsource(mode_settle)
     if "gh.merge_guard()" not in guard_src or inspect.getsource(ruleset_guard).count("integration_id") < 1:
         fails.append("settle must gate merging on the live ruleset (merge_guard / ruleset_guard)")
+    # The event-driven triggers (push, workflow_run, pull_request_target) carry no authority only while
+    # nothing reads their payload and nothing checks out anything but main.
+    if "github.event." in code or "github.head_ref" in code:
+        fails.append("no job may read the event payload (github.event.* / github.head_ref): triggers carry no authority")
+    if code.count("actions/checkout@") != len(re.findall(r"^\s+ref: main\s*$", code, re.MULTILINE)):
+        fails.append("every actions/checkout must pin `ref: main` (pull_request_target/workflow_run run with secrets)")
     if "contents: write" in code:
         fails.append("GITHUB_TOKEN must stay read-only (writes use the App token)")
     for job in JOB_MUST:
@@ -1930,7 +1939,7 @@ def check_declaration() -> int:
         fails.append(f"{RULES_FILE}: merge_train.extra_gates must declare at least one check (parsed as empty)")
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
-    n = len(TOP) + 4 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
+    n = len(TOP) + 6 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
     print(f"SUBJECTS={n}")
     print("merge-train declaration OK" if not fails else f"{len(fails)} declaration failure(s)")
     return 1 if fails else 0

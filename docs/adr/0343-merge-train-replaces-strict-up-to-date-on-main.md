@@ -462,6 +462,10 @@ run from another app or workflow can neither turn it green nor mask a red. The d
 closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
 `--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
 
+### Amendment (2026-10-21) — event-driven trigger, cron as heartbeat (#13400)
+
+The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
