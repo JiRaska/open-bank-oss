@@ -225,6 +225,12 @@ spec:
             # public host would send them through the gate, which has no session
             # to present. Only the browser leg goes via admin.open-bank.tech.
             - --route-prefix=/tools/pyrra
+            # Browser query links use the existing identity-gated Grafana Explore
+            # route. The Prometheus datasource remains server-side (access: proxy).
+            # Pyrra appends /explore, so this base must not have a trailing slash.
+            - --grafana-external-url=https://admin.open-bank.tech/tools/grafana
+            - --grafana-external-datasource-id=prometheus
+            - --grafana-external-org-id=1
           ports:
             - name: http
               containerPort: 9099
