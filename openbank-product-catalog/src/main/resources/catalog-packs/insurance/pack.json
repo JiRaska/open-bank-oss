@@ -1,0 +1,16 @@
+{
+  "$comment": "Pack manifest (ADR-0257, #13429): the schemas this pack contributes, in registration order, and any revision approval policy. Data, not kernel code.",
+  "pack": "insurance",
+  "schemas": [
+    {
+      "id": "org.openbank.insurance.term-life",
+      "version": 1,
+      "resource": "term-life-v1.schema.json"
+    },
+    {
+      "id": "org.openbank.insurance.term-life",
+      "version": 2,
+      "resource": "term-life-v2.schema.json"
+    }
+  ]
+}
