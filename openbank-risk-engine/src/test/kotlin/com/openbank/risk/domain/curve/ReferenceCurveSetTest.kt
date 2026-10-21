@@ -41,7 +41,7 @@ class ReferenceCurveSetTest {
     @Test
     fun `every quote is a plausible fraction, not a percentage typed as a number`() {
         ReferenceCurveSet.QUOTES.values.flatten().forEach {
-            assertThat(it.simpleRate).isBetween(BigDecimal("0.001"), BigDecimal("0.10"))
+            assertThat(it.rate).isBetween(BigDecimal("0.001"), BigDecimal("0.10"))
         }
     }
 }
