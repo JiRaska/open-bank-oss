@@ -59,8 +59,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import fnmatch
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -927,8 +929,14 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
     member_required = [c for c in required if c != STATUS_CONTEXT]
-    armed = [p for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)])
-             if p.get("auto_merge") and not p.get("draft")]
+    armed = []
+    for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)]):
+        if p.get("auto_merge") and not p.get("draft"):
+            armed.append(p)
+        else:
+            # Every open PR gets a decision line: a disarmed or draft PR used to be filtered out in
+            # silence, so a settle log with no line for a PR could not say whether it was ever seen.
+            log(f"#{p['number']:>6} skip      {'draft' if p.get('draft') else 'auto-merge not armed'}")
     if armed:
         git("fetch", "-q", "origin", *[f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}" for p in armed])
     out: list[Member] = []
@@ -999,6 +1007,12 @@ def plan_train(gh, git, repo: str, base: str) -> tuple[list[Member], list[Member
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
     fragments = regen_inventory_fragments(regen_text)
     fast, train = partition(git, base, cands, fragments)
+    main_red = main_red_contexts(gh, git, required, base)
+    if main_red and train:
+        # A train over a red main is red on that context whatever its members do (the settle lane serves
+        # a FIX alone, promote_fixes), so it would only burn a CI run to reach "inconclusive".
+        log(f"train: none while main {base[:12]} is red on {', '.join(sorted(main_red))} — fixes go first, alone")
+        train = []
     return fast, train, {n: bisect_size(a) for n, a in apps.items()}
 
 
@@ -1204,8 +1218,14 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                     break
                 expected = merged
                 summary["merged"].append(n)
+        elif not [c for c in failing if c not in main_red]:
+            # Red only on contexts main itself is red on: says nothing about any member — never a culprit,
+            # never a bisect (a bisect ends in a culprit). Closed with no verdict; nobody is blamed.
+            log(f"::warning::carrier #{carrier}: red only on {', '.join(failing)}, red on main {chain[0][:12]} too — inconclusive")
+            summary["inconclusive"].append(carrier)
         else:
             members = chain[1]
+            failing = [c for c in failing if c not in main_red]  # blame names only what main is green on
             if len(members) == 1:
                 n, head = members[0]
                 gh.post_status(head, "failure", culprit_description(failing, chain[0]))
@@ -1261,7 +1281,32 @@ def settle_view(gh, git, repo: str, required: list[str]):
         log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red,
                                   main_red=main_red)
+    cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
     return base, regen_text, strict, red, cands, apps, main_red, main_cache
+
+
+def promote_fixes(gh, git, repo: str, base: str, cands: list, strict: list, main_red: dict[str, str],
+                  cache: dict | None = None) -> list:
+    """Main red (ADR-0343): a train/fast-lane candidate that demonstrably FIXES a main-red context (the
+    same test as the strict lane's, fix_contexts) leaves the train and the fast lane and joins the strict
+    list as a green fix, so strict_lane serves it first, alone, without update-branch, after re-reading
+    live main and pinned to its head. Returns the candidates that stay. No-op while main is green."""
+    if not main_red:
+        return cands
+    keep = []
+    for m in cands:
+        view = pr_view(repo, gh.pr(m.number), m.files)
+        if view["head_sha"] != m.head_sha:
+            keep.append(m)
+            continue
+        fixed = fix_contexts(gh, git, base, view, main_red, cache)
+        if not fixed:
+            keep.append(m)
+            continue
+        view["strict_why"] = f"fix for {', '.join(fixed)} red on main {base[:12]}"
+        log(f"#{m.number:>6} fix       green over a base red on {', '.join(fixed)}: served first, alone, without update")
+        strict.append(("green", view))
+    return keep
 
 
 def strict_fixes(gh, git, base: str, strict: list, main_red: dict[str, str], cache: dict | None = None) -> dict[int, list[str]]:
@@ -2073,8 +2118,12 @@ def self_test() -> int:
             reset()
 
             # Semantic pair green alone, red together: one merges, the other is the culprit.
+            # The fake squashes the PR head, not the carrier, so main would lack the regenerated derived
+            # file and read red on `derived` — and no train is built over a red main. Not under test here.
             open_only("pA", "pB")
+            gh.carrier_override = {"derived": "success"}
             drain()
+            gh.carrier_override = {}
             check("semantic pair: exactly one merges, the other is the culprit",
                   gh.merged == [11] and (12, CULPRIT_MESSAGE) in gh.comments, f"{gh.merged} {gh.comments}")
             reset()
@@ -2736,8 +2785,10 @@ def self_test() -> int:
             gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
             holder, _to = reservation_now()
             s = settle_now()
+            # pF's own CI ran green over base0, which is red here: by fix_contexts it is a FIX, so it is served
+            # first in its own right (every lane, ADR-0343) — what matters is that the waiting PR holds nothing.
             check("main red x reservation: a waiting PR is never the holder; the fast lane is not held for it",
-                  holder is None and s.get("waiting", []) == [35] and 34 in s["fast"] and not s["in_flight"],
+                  holder != 35 and s.get("waiting", []) == [35] and (34 in s["fast"] or 34 in gh.merged) and not s["in_flight"],
                   f"holder={holder} {s}")
             main_red_done()
 
@@ -2752,6 +2803,76 @@ def self_test() -> int:
                   holder == 36 and gh.merged == [36] and s["fast"] == [] and 34 not in gh.merged,
                   f"holder={holder} merged={gh.merged} {s}")
             main_red_done()
+
+            # ---- main red x EVERY lane: a fix is served first even when it is not manual-lane ----
+            def main_breaks_on_content():
+                """main gains bad.txt, so its own CI (ci.py) is red on MR; returns a NON-manual-lane fix PR
+                (#70) cut from that red tip that deletes it — green over a base red on MR."""
+                pathlib.Path(origin, "bad.txt").write_text("x\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "break main (content)")
+                gh.g("checkout", "-q", "-f", "-B", "pZ", "main")
+                gh.g("rm", "-q", "bad.txt")
+                gh.g("commit", "-q", "-m", "pZ: fix main")
+                gh.g("checkout", "-q", "-f", "main")
+                gh.add_pr(70, "pZ", "2026-01-70")
+
+            open_only("p1")
+            main_breaks_on_content()
+            s = settle_now()
+            check("main red, any lane: a non-manual-lane fix merges first, alone, without update",
+                  gh.merged == [70] and gh.updates == [] and 1 not in gh.merged and 70 in s["strict"],
+                  f"merged={gh.merged} updates={gh.updates} {s} status={strict_desc(70)}")
+            main_red_done()
+
+            open_only("p1")
+            main_breaks_on_content()
+            _f, train, _z = plan_train(gh, Git(clone("plan")), "o/r", gh.main_sha())
+            check("main red, any lane: no train is planned over a red main (it could only come back red)",
+                  train == [], str([m.number for m in train]))
+            main_red_done()
+
+            # A train over a red main that is red ONLY on the main-red context blames nobody. The train is
+            # built while main still reads green (main CI not reported yet), then main's red verdict lands.
+            open_only("p1")
+            pathlib.Path(origin, "bad.txt").write_text("x\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "break main (content)")
+            gh.head_checks[gh.main_sha()] = {MR: "success"}
+            tick()
+            gh.head_checks.clear()
+            s = settle_now()
+            check("main red: a train red only on a main-red context names no culprit and bisects nothing",
+                  s["culprits"] == [] and s["bisected"] == [] and s["inconclusive"] and mt_status(1)[0] != "failure"
+                  and not gh.comments and not open_carriers(), f"{s} status={mt_status(1)} comments={gh.comments}")
+            main_red_done()
+
+            # ... but a context main is GREEN on still blames, naming only that context.
+            open_only("p3", "p1")
+            pathlib.Path(origin, "services", "z.txt").write_text("z\n")   # count.txt now wrong: gates (data) red
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "break main (data)")
+            gh.head_checks[gh.main_sha()] = {"gates (data)": "success", "derived": "success"}
+            gh.prs[3]["created_at"] = "2026-01-00"
+            tick(batch_size=1)
+            gh.head_checks.clear()
+            s = settle_now()
+            check("main red: a context main is green on still names the culprit, and only that context",
+                  s["culprits"] == [3] and mt_status(3)[1].startswith(CULPRIT_PREFIX + "Validate manifests red")
+                  and "gates (data)" not in mt_status(3)[1], f"{s} status={mt_status(3)}")
+            main_red_done()
+
+            # Every open PR leaves a decision line, armed or not (a disarmed fix was invisible in the log).
+            open_only("p1", "p2")
+            gh.prs[1]["auto_merge"] = None
+            gh.prs[2]["draft"] = True
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                settle_now()
+            check("settle log: a disarmed and a draft PR each get a decision line",
+                  "#     1 skip      auto-merge not armed" in buf.getvalue() and "#     2 skip      draft" in buf.getvalue(),
+                  buf.getvalue()[-400:])
+            reset()
 
             # ---- stale-red refresh: PRs left red by a red MAIN get one update-branch once main is green ----
             VM = "Validate manifests"
