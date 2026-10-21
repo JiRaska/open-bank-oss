@@ -1761,6 +1761,7 @@ class FakeGitHub:
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
         self.carrier_override: dict = {}         # carrier (train head) check overrides, e.g. cancelled
+        self.main_override: dict = {}            # main tip check overrides, kept apart from carriers
         self.reruns: list[tuple[str, list[str]]] = []
         self.rerun_ok = True
         self.on_rerun = None                     # callable run after a rerun request (the rerun's outcome)
@@ -1801,7 +1802,10 @@ class FakeGitHub:
                 failing = [c for c in r.stdout.strip().split(",") if c]
                 self.g("worktree", "remove", "--force", wt)
                 self._ci[sha] = {**{c: ("failure" if c in failing else "success") for c in SYN_REQUIRED[:3]}, "issue-hygiene": "success"}
-            out = {**self._ci[sha], **self.carrier_override, **self.head_checks.get(sha, {})}
+            # carrier_override models a carrier's CI and main_override main's tip, which is read too
+            # (main_red_contexts, #13517): one shared override made every red-carrier fixture "red on main".
+            override = self.main_override if sha == self.main_sha() else self.carrier_override
+            out = {**self._ci[sha], **override, **self.head_checks.get(sha, {})}
             if self.main_sequence.get(sha):            # main CI finishing mid-tick: next read differs
                 out.update(self.main_sequence[sha].pop(0))
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
@@ -2339,9 +2343,9 @@ def self_test() -> int:
             # The fake squashes the PR head, not the carrier, so main would lack the regenerated derived
             # file and read red on `derived` — and no train is built over a red main. Not under test here.
             open_only("pA", "pB")
-            gh.carrier_override = {"derived": "success"}
+            gh.carrier_override = gh.main_override = {"derived": "success"}
             drain()
-            gh.carrier_override = {}
+            gh.carrier_override, gh.main_override = {}, {}
             check("semantic pair: exactly one merges, the other is the culprit",
                   gh.merged == [11] and (12, CULPRIT_MESSAGE) in gh.comments, f"{gh.merged} {gh.comments}")
             reset()
