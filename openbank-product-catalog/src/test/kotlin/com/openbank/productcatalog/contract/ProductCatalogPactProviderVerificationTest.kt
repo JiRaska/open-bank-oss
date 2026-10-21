@@ -12,6 +12,8 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.domain.ProductIds
+import com.openbank.productcatalog.domain.ProductSeed
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
@@ -20,9 +22,11 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -131,6 +135,20 @@ class ProductCatalogPactProviderVerificationTest {
         // Assert the negative provider state before Pact replays its own 404 interaction.
         io.restassured.RestAssured.given().get("/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT")
             .then().statusCode(404)
+    }
+
+    /** Assert the real seeded schedule; never replace it with consumer-shaped fixture data. */
+    @State("a product with fees exists for code CURRENT_PERSONAL")
+    fun feeBearingProductIsSeeded() {
+        val product = ProductSeed.products.single { it.code == "CURRENT_PERSONAL" }
+        val monthlyFee = product.fees.single { it.name == "Monthly Fee" }
+        val id = ProductIds.canonicalId(product.id)
+        given().accept("application/json").get("/api/v1/products/$id/fees")
+            .then().statusCode(200)
+            .body("find { it.name == 'Monthly Fee' }.type", equalTo(monthlyFee.type))
+            .body("find { it.name == 'Monthly Fee' }.amount", equalTo(monthlyFee.amount.toFloat()))
+            .body("find { it.name == 'Monthly Fee' }.currency", equalTo(monthlyFee.currency))
+            .body("find { it.name == 'Monthly Fee' }.waivable", equalTo(monthlyFee.waivable))
     }
 
     @State("a published v1-projected deposit revision exists for billing")

@@ -1047,8 +1047,12 @@ def main() -> int:
                 entries = breaking_entries(args.oasdiff, old_path, head_path)
                 if idempotency_hardening(entries, is_money_path):
                     if os.environ.get("GITHUB_EVENT_NAME") != "push":
+                        # A merge-train carrier's body is bot text; the section lives on its members (ADR-0343).
+                        sys.path.insert(0, str(Path(__file__).resolve().parent))
+                        import merge_train_carrier as carrier_lib
                         findings.extend(migration_assertion_findings(
-                            os.environ.get("PR_BODY", ""), service, entries, set(changed_all),
+                            carrier_lib.pr_body_with_members(os.environ.get("PR_BODY", ""), args.base),
+                            service, entries, set(changed_all),
                         ))
                     print(
                         f"::notice::api-contract gate: {service}: every breaking change is a newly "
