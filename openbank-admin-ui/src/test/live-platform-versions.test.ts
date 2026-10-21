@@ -21,7 +21,7 @@ import { compareVersions, formatVersion, nodesText, versionText } from '@/lib/pl
 type Row = { metric: Record<string, string>; value: [number, string] }
 const prom = (rows: Row[]) => new Response(JSON.stringify({ status: 'success', data: { result: rows } }), { status: 200 })
 const row = (metric: Record<string, string>, v: number): Row => ({ metric, value: [0, String(v)] })
-const imageRow = (image: string, observedAt: number, container?: string): Row => row({ image, ...(container ? { container } : {}) }, observedAt)
+const imageRow = (image: string, observedAt: number, container?: string, namespace?: string): Row => row({ image, ...(container ? { container } : {}), ...(namespace ? { namespace } : {}) }, observedAt)
 
 /** Mock Prometheus keyed on which query string was sent. */
 function mockProm(answers: Partial<Record<keyof typeof QUERIES, Row[]>>): typeof fetch {
@@ -45,6 +45,26 @@ describe('parsers', () => {
     expect(parseImageVersion('kafka', 'quay.io/strimzi/kafka:0.77.0-kafka-9.8.7')).toBe('9.8.7')
     expect(parseImageVersion('kafka', 'quay.io/strimzi/operator:0.77.0')).toBeNull()
     expect(parseImageVersion('strimziOperator', 'quay.io/strimzi/operator:0.77.0')).toBe('0.77.0')
+  })
+
+  it('parses ClickHouse server image versions without treating related images as the server', () => {
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8-alpine')).toBe('26.8')
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8.30.8-alpine')).toBe('26.8.30.8')
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8@sha256:0123456789abcdef')).toBe('26.8')
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-server:26.8junk')).toBeNull()
+    expect(parseImageVersion('clickhouse', 'docker.io/clickhouse/clickhouse-keeper:26.8-alpine')).toBeNull()
+  })
+
+  it('counts only the analytics ClickHouse server container as its runtime image', () => {
+    const observedAt = '2026-10-21T00:00:00.000Z'
+    expect(aggregateImages([
+      { image: 'docker.io/clickhouse/clickhouse-server:26.8-alpine', container: 'clickhouse', namespace: 'analytics', count: 1, observedAt },
+      { image: 'docker.io/clickhouse/clickhouse-server:26.9-alpine', container: 'clickhouse-init', namespace: 'analytics', count: 1, observedAt },
+      { image: 'docker.io/clickhouse/clickhouse-server:27.1-alpine', container: 'clickhouse', namespace: 'ai-platform', count: 1, observedAt },
+      { image: 'docker.io/clickhouse/clickhouse-keeper:26.8-alpine', container: 'keeper', namespace: 'analytics', count: 1, observedAt },
+    ])).toEqual({
+      clickhouse: [{ version: '26.8', count: 1, observedAt }],
+    })
   })
 
   it('parses postgres, valkey, apicurio, loki, keycloak, grafana', () => {
@@ -159,6 +179,20 @@ describe('live snapshot from mocked Prometheus', () => {
       ],
     }), () => fixedNow)
     expect(s.components.kafka).toEqual([{ version: '4.2.0', count: 1, observedAt: fixedNow.toISOString() }])
+  })
+
+  it('reports only the analytics ClickHouse server container from the fresh Prometheus sample', async () => {
+    const fixedNow = new Date('2026-10-19T18:00:00.000Z')
+    const observedAt = fixedNow.getTime() / 1000
+    const s = await fetchLiveSnapshot(mockProm({
+      images: [
+        imageRow('docker.io/clickhouse/clickhouse-server:26.8-alpine', observedAt, 'clickhouse', 'analytics'),
+        imageRow('docker.io/clickhouse/clickhouse-server:26.9-alpine', observedAt, 'clickhouse-init', 'analytics'),
+        imageRow('docker.io/clickhouse/clickhouse-server:27.1-alpine', observedAt, 'clickhouse', 'ai-platform'),
+        imageRow('docker.io/clickhouse/clickhouse-keeper:26.8-alpine', observedAt, 'keeper', 'analytics'),
+      ],
+    }), () => fixedNow)
+    expect(s.components.clickhouse).toEqual([{ version: '26.8', count: 1, observedAt: fixedNow.toISOString() }])
   })
 
   it('keeps Kafka version unknown when Prometheus sees only exporter or unclassified containers', async () => {
