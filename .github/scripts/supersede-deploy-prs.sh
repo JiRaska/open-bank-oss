@@ -66,7 +66,18 @@ set -euo pipefail
 # ── ancestry ────────────────────────────────────────────────────────────────────────────────────
 # Extract the 40-hex commit a deploy branch pins. Anything else yields "" and is treated as unknown.
 sha_of_branch() {
-  local sha="${1#"$2"}"
+  local sha="${1#"$2"}" run
+  # auto-deploy isolates candidates by producer run (#13460): `<sha>-run<digits>`. Strip exactly
+  # that suffix; anything else after the sha leaves the remainder non-hex, so it stays unknown.
+  case "$sha" in
+    *-run*)
+      run="${sha##*-run}"
+      case "$run" in
+        ''|*[!0-9]*) printf ''; return ;;
+      esac
+      sha="${sha%-run"$run"}"
+      ;;
+  esac
   # 40 hex characters exactly. A truncated, suffixed or hand-cut branch name yields "" (unknown),
   # and unknown must never mean "close it" — that was the pre-#6231 behaviour.
   case "$sha" in
@@ -1136,11 +1147,28 @@ HOOK
     echo "self-test case 28 OK (predecessor file-list partial stdout ignored; hold protected)"
   fi
 
+  # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
+  # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on
+  # main: `closed=0 skipped=24` with "could not read a commit sha off" on each run. A malformed
+  # suffix (no digits, trailing text) remains unknown, never permission.
+  if [ "$(sha_of_branch "${P}${NEW}-run39578054239" "$P")" != "$NEW" ]; then
+    echo "SELF-TEST FAIL case 29: '-run<id>' branch did not yield its sha"; ok=1
+  elif [ -n "$(sha_of_branch "${P}${NEW}-run" "$P")$(sha_of_branch "${P}${NEW}-runx1" "$P")$(sha_of_branch "${P}${NEW}-run1-x" "$P")" ]; then
+    echo "SELF-TEST FAIL case 29: a malformed run suffix parsed as a sha"; ok=1
+  else
+    out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s-run123' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" -ne 0 ] || ! contains_text "$out" 'would close #6225'; then
+      echo "SELF-TEST FAIL case 29: run-suffixed ancestor was not superseded; rc=$rc"; ok=1; dump_out "$out"
+    else
+      echo "self-test case 29 OK (run-suffixed branches parse; malformed suffixes stay unknown)"
+    fi
+  fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 28 cases OK"
+  echo "self-test: all 29 cases OK"
   return 0
 }
 
