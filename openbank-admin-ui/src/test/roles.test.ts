@@ -8,7 +8,7 @@ describe('hasPermission', () => {
   // treasury-rbac.guard.test.ts ties these to the Kotlin annotations.
   // #10896: NostroResource's upload endpoint is method-level APPROVER only, same shape as the
   // treasury deal writes above — ADMIN sits in the class-level @RolesAllowed but not this method's.
-  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload', 'catalog:pension:legal-approve', 'catalog:pension:product-approve'])
+  const ADMIN_EXCLUDED_BY_SERVICE = new Set(['treasury:deal:create', 'treasury:deal:approve', 'treasury:deal:cancel', 'treasury:deal:override-limit', 'treasury:nostro:upload', 'catalog:revision-approve:LEGAL_COUNSEL', 'catalog:revision-approve:PRODUCT_OWNER'])
 
   it('returns true for admin except specialist-only treasury and pension approvals', () => {
     const admin = [ROLES.ADMIN]
@@ -18,12 +18,12 @@ describe('hasPermission', () => {
   })
 
   it('keeps pension legal and product approval with separate roles, without an admin shortcut', () => {
-    expect(hasPermission([ROLES.ADMIN], 'catalog:pension:legal-approve')).toBe(false)
-    expect(hasPermission([ROLES.ADMIN], 'catalog:pension:product-approve')).toBe(false)
-    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:pension:legal-approve')).toBe(true)
-    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:pension:product-approve')).toBe(false)
-    expect(hasPermission([ROLES.PENSION_PRODUCT_OWNER], 'catalog:pension:legal-approve')).toBe(false)
-    expect(hasPermission([ROLES.PENSION_PRODUCT_OWNER], 'catalog:pension:product-approve')).toBe(true)
+    expect(hasPermission([ROLES.ADMIN], 'catalog:revision-approve:LEGAL_COUNSEL')).toBe(false)
+    expect(hasPermission([ROLES.ADMIN], 'catalog:revision-approve:PRODUCT_OWNER')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:revision-approve:LEGAL_COUNSEL')).toBe(true)
+    expect(hasPermission([ROLES.PENSION_LEGAL_APPROVER], 'catalog:revision-approve:PRODUCT_OWNER')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_PRODUCT_OWNER], 'catalog:revision-approve:LEGAL_COUNSEL')).toBe(false)
+    expect(hasPermission([ROLES.PENSION_PRODUCT_OWNER], 'catalog:revision-approve:PRODUCT_OWNER')).toBe(true)
   })
 
   it('returns true when role is in allowed list', () => {
