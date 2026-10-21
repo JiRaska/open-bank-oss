@@ -36,6 +36,12 @@ enum class LimitMetric(val wire: String, val bound: LimitBound, val description:
         LimitBound.MAX,
         "Largest exposure to a single bank counterparty / Tier 1 capital",
     ),
+
+    /** ADR-0344 D8: |PV01| of the ACTUAL own book, CZK per +1bp parallel shift (either sign is risk). */
+    PV01("pv01", LimitBound.MAX, "Absolute PV01 of the own treasury book, CZK per +1bp parallel zero-rate shift"),
+
+    /** ADR-0344 D8: historical-simulation VaR of the own book, 99 % one-day, CZK (a positive loss). */
+    VAR_99_1D("var-99-1d", LimitBound.MAX, "Historical-simulation VaR of the own treasury book, 99 % / 1 day, CZK"),
     ;
 
     companion object {

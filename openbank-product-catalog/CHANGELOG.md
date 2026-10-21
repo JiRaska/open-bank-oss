@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.2.0...product-catalog-v1.3.0) (2026-10-21)
+
+
+### Features
+
+* **product-catalog:** expose schema approval policy; move consumers off pension-approval aliases ([#13496](https://github.com/JiRaska/open-bank-oss/issues/13496)) ([6174564](https://github.com/JiRaska/open-bank-oss/commit/61745645e041c190e49bfe9d01d384a80bc7bce9))
+
 ## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.1.0...product-catalog-v1.2.0) (2026-10-20)
 
 

@@ -1,5 +1,30 @@
 # 05 — Provoz
 
+## Varování při vyhodnocení poplatků
+
+Varování o nedostupných podmínkách revize, selhání úložiště pinů, vyhledání v katalogu a
+vynechaných složkách poplatků mají pevný text. Neobsahují účet, produkt, cyklus, revizi,
+podrobnosti výjimky ani počty složek. Zaznamenané důvody přeskočení určuje omezený štítek
+`reason` čítače `openbank.billing.assessment.skipped`; čítač nepokrývá všechna vynechaná vyhodnocení.
+`openbank.billing.assessment.dropped_components` počítá vyhodnocení s jednou či více
+vynechanými složkami, nikoli samotné složky. Tyto souhrnné čítače neurčují konkrétní vyhodnocení;
+dotčené záznamy vyšetřujte přes oprávněný přístup k obchodním datům, nikoli provozní logy.
+
+## Přechod na prefix metrik billingu
+
+Sedm čítačů billingu nyní používá prefix Micrometer `openbank.billing.*`. Jejich koncovky jsou
+`assessment.no_fee_identity`, `assessment.dropped_components`, `assessment.skipped{reason}`,
+`revision_pin.fallback_to_current`, `accounting_class.derived{source}`,
+`fee.component.dropped{reason}` a `fee.post.legacy_payload`. Prometheus převádí tečky na
+podtržítka (a přidává příponu čítače); před nasazením nového billing image aktualizujte externí
+dashboardy, recording rules a alerty. V tomto repozitáři není evidován žádný čtenář sedmi
+starých řad. Změna názvu či reset čítače nedokazuje, že příslušný stav billingu přestal nastávat.
+Čítač dropped-components roste jednou za dotčené vyhodnocení, nikoli za každou složku zvlášť.
+
+Vrácení billing image obnoví staré názvy řad. Po dobu přechodu ponechte v externích dotazech
+oba selektory; starý odstraňte až po ověření nové řady na běžící instanci. Tato změna metrik
+nezapíná účtování a nemění rozhodování o poplatcích.
+
 ## Nasazení účetních tříd v ledgeru (ADR-0341 D3)
 
 Billing umí účtovat podle účetní třídy (GL účet určí ledger) nebo s explicitními GL účty.

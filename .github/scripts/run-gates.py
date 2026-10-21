@@ -79,6 +79,13 @@ MANIFEST = ".github/gates/gates.yaml"
 PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
 SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
 SUBJECTS_UNRESOLVED = "UNRESOLVED"  # must match gatelib.SUBJECTS_UNRESOLVED
+# A gate that could not READ its subject (a timed-out API, an unreachable carrier member) prints this
+# and exits non-zero. Must match merge_train_carrier.NOT_EVALUATED_LINE. #13400.
+NOT_EVALUATED_LINE = "GATE_VERDICT=NOT_EVALUATED"
+# Why a failed gate failed, in the --json record (`failure_kind`), so a machine reader never has to
+# re-parse the log. Only "budget" and "not_evaluated" carry no finding about the change: the merge
+# train treats a carrier red ONLY for those as inconclusive, never as a culprit (ADR-0343).
+FAILURE_KINDS = ("content", "budget", "not_evaluated", "timeout", "unfalsified", "setup")
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -363,6 +370,7 @@ class Result:
     def __init__(self, gate):
         self.gate = gate
         self.status = "pending"  # ok | failed | warned | skipped | unfalsified
+        self.failure_kind = None  # one of FAILURE_KINDS when status is failed/warned/unfalsified
         self.output = ""
         self.seconds = 0.0
         # Split out separately (ADR-0255 Gate Tax follow-up, external review 2026-08-10):
@@ -451,6 +459,16 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
                 os.unlink(scratch.name)
             except OSError:
                 pass
+
+
+def last_verdict(out: str):
+    """The LAST `GATE_VERDICT=...` line of a gate's own output (comment stripped), or None."""
+    found = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("GATE_VERDICT="):
+            found = line.split("#")[0].strip()
+    return found
 
 
 def last_subject_count(out: str):
@@ -549,7 +567,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         # Fail loudly. Running the gate with an empty base would diff against nothing and
         # pass — a gate green about work it never did. `optional` gates fall through: they
         # supply their own default and are written to work without a base.
-        r.status = "failed"
+        r.status, r.failure_kind = "failed", "setup"
         r.output = "PR_DIFF_BASE is empty but this gate requires it — refusing to run vacuously\n"
         return r
     missing_env = [v for v in gate.get("needs_env", ()) if not os.environ.get(v)]
@@ -557,7 +575,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         # Say which variable and that the runner provides it. Without this the gate dies on
         # `unbound variable` — same red, but it names a shell symptom instead of the cause, and
         # reads like a finding to anyone running the manifest locally.
-        r.status = "failed"
+        r.status, r.failure_kind = "failed", "setup"
         r.output = (
             f"{', '.join(missing_env)} {'is' if len(missing_env) == 1 else 'are'} empty but this "
             f"gate requires {'it' if len(missing_env) == 1 else 'them'} — refusing to run "
@@ -590,7 +608,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         r.selftest_seconds = time.monotonic() - st0
         buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
         if (rc == 0) != want_pass:
-            r.status = "unfalsified"
+            r.status, r.failure_kind = "unfalsified", "unfalsified"
             buf.append(
                 "\n[run-gates] the self-test "
                 + (
@@ -610,6 +628,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
 
     rc, out = _run(gate["run"], root, gate.get("env"), timeout, index)
     buf.append("--- gate ---\n" + out)
+    # NOT EVALUATED is only ever a non-zero exit: a gate that could not read its subject must never
+    # read as PASS (#13400), and it must not be mistaken for a finding either.
+    not_evaluated = rc != 0 and rc != 124 and last_verdict(out) == NOT_EVALUATED_LINE
 
     # The subject floor. A gate that examined nothing passes everything, and its output says
     # so out loud — `0 .kt files checked`, `0 @RolesAllowed site(s) checked` — while exiting 0.
@@ -655,7 +676,15 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     # locally against a whole shard of 20s in CI. Off the runner the overrun is printed and
     # nothing fails.
     budget = gate.get("budget_seconds")
-    if budget is not None and r.seconds > budget:
+    content_rc = rc
+    over_budget = False
+    if not_evaluated:
+        # Already red and already explained; a slow, unreadable subject is the same event, so it is
+        # not ALSO reported as a budget regression (a gate that could not read anything has no
+        # timing worth profiling).
+        buf.append("\n[run-gates] this gate is NOT EVALUATED on this run: it could not read its "
+                   "subject. Not a pass and not a finding — re-run the job.\n")
+    elif budget is not None and r.seconds > budget:
         on_ci = os.environ.get("CI") == "true"
         note = (
             f"\n[run-gates] this gate took {r.seconds:.1f}s against a budget of {budget}s. "
@@ -664,11 +693,15 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         )
         buf.append(note)
         if on_ci:
+            over_budget = content_rc == 0
             rc = rc or 1
         else:
             buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
 
     r.output = "".join(buf)
+    if rc != 0:
+        r.failure_kind = ("not_evaluated" if not_evaluated else "budget" if over_budget
+                          else "timeout" if content_rc == 124 else "content")
     if rc == 0:
         r.status = "ok"
     elif gate["mode"] == "advisory":
@@ -733,7 +766,8 @@ def report(results, jobs):
     print(f"--- verdicts ({len(results)} gates) ---")
     for r in results:
         print(f"  {ICON[r.status]:12s} {r.gate['id']:{max(len(x.gate['id']) for x in results)}s}"
-              f"  {r.seconds:6.1f}s  [{r.gate.get('group')}]")
+              f"  {r.seconds:6.1f}s  [{r.gate.get('group')}]"
+              + (f"  ({r.failure_kind.replace('_', ' ')})" if r.failure_kind in ("budget", "not_evaluated") else ""))
 
     for r in warned:
         print(f"::warning title={r.gate['id']}::advisory gate failed: {r.gate['name']}")
@@ -762,6 +796,10 @@ def json_records(results) -> list[dict]:
             "group": g.get("group"),
             "mode": g.get("mode", "enforced"),
             "status": r.status,
+            # Why a non-ok gate is not ok (FAILURE_KINDS), None when ok/skipped. Read by
+            # merge-train.py settle: a carrier red only for "budget"/"not_evaluated" is
+            # inconclusive, not a culprit (#13400, ADR-0343).
+            "failure_kind": r.failure_kind,
             "seconds": round(r.seconds, 3),
             # Purely additive: `seconds` keeps meaning "total time this gate cost" (self-test +
             # run:, unchanged), so nothing already reading it — the admin-ui collector, the
@@ -1001,6 +1039,20 @@ gates:
     group: t
     budget_seconds: 0.2
     run: "sleep 0.5"
+  - id: not-evaluated
+    name: "a gate that could not read its subject (#13400): red, never PASS, never a budget overrun"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.5; echo 'GATE_VERDICT=NOT_EVALUATED  # API timed out'; exit 1"
+  - id: not-evaluated-exit-zero
+    name: "the NOT EVALUATED line never turns a zero exit into anything but its own verdict"
+    group: t
+    run: "echo 'GATE_VERDICT=NOT_EVALUATED  # stale fixture line'; true"
+  - id: over-budget-and-finding
+    name: "a gate that found something AND was slow is a finding, not a budget overrun"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.5; exit 1"
   - id: within-budget
     name: "a gate inside its budget"
     group: t
@@ -1023,6 +1075,9 @@ EXPECTED = {
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
     "over-budget": "failed",
+    "not-evaluated": "failed",
+    "not-evaluated-exit-zero": "ok",
+    "over-budget-and-finding": "failed",
     "within-budget": "ok",
     "failing": "failed",
     "advisory-failing": "warned",
@@ -1074,6 +1129,16 @@ def self_test():
             # timeout path that raises instead of reporting.
             if r.id == "over-budget" and "against a budget of" not in r.output:
                 bad.append("over-budget: failed, but not for the budget reason")
+            # failure_kind is the machine-readable WHY that merge-train settle reads (#13400).
+            want_kind = {"over-budget": "budget", "not-evaluated": "not_evaluated",
+                         "over-budget-and-finding": "content", "failing": "content", "slow": "timeout",
+                         "harness-broken": "unfalsified", "passing": None, "not-evaluated-exit-zero": None}
+            if r.id in want_kind and r.failure_kind != want_kind[r.id]:
+                bad.append(f"{r.id}: failure_kind want {want_kind[r.id]}, got {r.failure_kind}")
+            if r.id in want_kind and json_records([r])[0].get("failure_kind") != want_kind[r.id]:
+                bad.append(f"{r.id}: --json record does not carry failure_kind {want_kind[r.id]}")
+            if r.id == "not-evaluated" and "against a budget of" in r.output:
+                bad.append("not-evaluated: also reported as a budget overrun")
             if r.id == "floor-missed" and "below its declared floor" not in r.output:
                 bad.append("floor-missed: failed, but not for the floor reason")
             # The third state, both halves: an UNRESOLVED corpus must pass DESPITE the floor,
