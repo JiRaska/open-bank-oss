@@ -459,6 +459,29 @@ run from another app or workflow can neither turn it green nor mask a red. The d
 closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
 `--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
 
+### Amendment (2026-10-21) — lane fairness: the strict lane yields one turn to the train
+
+The strict-lane reservation holds main for one manual-lane PR, and while any reservation runs no
+train is built. With a strict queue that never empties this starved the train lane completely:
+over 12.5 h of `merge-train.yml` (2026-10-20T23:38Z .. 2026-10-21T12:28Z, 40 runs) 11 carriers were
+published, **0 train members merged**, and 13 strict-lane PRs merged. Every strict merge was
+followed in the next tick by an update-branch for the next strict PR, and that update-branch was
+issued even while a carrier was open, so a carrier that went green was held for the new
+reservation and then voided by its merge (carrier #13529: held for #13526, then "main moved since
+publish"). The strict lane now does not START a reservation (update-branch) when:
+
+1. **a train carrier is open** — the carrier is the train's turn in flight, bounded by its own CI
+   and settlement; or
+2. **main's head is a strict-lane merge** (its PR head carries the App's `strict lane:` status)
+   **and train candidates wait** — the train gets the next turn, bounded by `TRAIN_TURN_S`
+   (30 min, two ticks at the measured p90 cron gap) from that merge, so a train that cannot be
+   built never freezes the strict lane.
+
+The result is alternation: one strict-lane PR, then one train, then one strict-lane PR. Neither
+lane can starve the other — the strict turn returns as soon as a train merges, its carrier closes,
+or the turn expires. A reservation already running, a green up-to-date strict PR, and the main-red
+fix path are unchanged.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
