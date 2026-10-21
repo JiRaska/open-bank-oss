@@ -451,7 +451,9 @@ declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` 
 the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
 by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
 PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
-armed); running = wait; never triggered, skipped or neutral = not applicable. A carrier red on an
+armed); running = wait; never reported = wait too (fail closed, #13400) — not applicable only
+when the pinned workflow has a COMPLETED run for that head without the check, or it concluded
+skipped or neutral. A carrier red on an
 extra gate is a verdict like any required context, unless main is red on that gate too: then it
 counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
 Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
@@ -482,6 +484,10 @@ The result is alternation: one strict-lane PR, then one train, then one strict-l
 lane can starve the other — the strict turn returns as soon as a train merges, its carrier closes,
 or the turn expires. A reservation already running, a green up-to-date strict PR, and the main-red
 fix path are unchanged.
+
+### Amendment (2026-10-21) — event-driven trigger, cron as heartbeat (#13400)
+
+The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
 
 ## Rollout
 
