@@ -15,7 +15,7 @@ is_inert_service_path() {
   case "$1" in
     openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
-    .github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/scripts/collect-admin-ui-test-evidence.py|.github/scripts/test-collect-admin-ui-test-evidence.py|.github/scripts/select_admin_ui_evidence_datasets.py|.github/scripts/select_admin_ui_evidence_datasets_test.py|.github/scripts/await-admin-ui-source-validation.py|.github/scripts/test-await-admin-ui-source-validation.py|.github/scripts/reconcile-test-evidence.py|.github/scripts/reconcile_test_evidence_test.py|.github/gates/workflow-write-permissions-baseline.txt)
+    .github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/scripts/verify-dependabot-auto-merge.py|.github/scripts/test-verify-dependabot-auto-merge.py|.github/scripts/collect-admin-ui-test-evidence.py|.github/scripts/test-collect-admin-ui-test-evidence.py|.github/scripts/select_admin_ui_evidence_datasets.py|.github/scripts/select_admin_ui_evidence_datasets_test.py|.github/scripts/await-admin-ui-source-validation.py|.github/scripts/test-await-admin-ui-source-validation.py|.github/scripts/reconcile-test-evidence.py|.github/scripts/reconcile_test_evidence_test.py|.github/scripts/check-readiness-collectors-agree.py|.github/gates/workflow-write-permissions-baseline.txt)
       # Exact governance, Pact, and evidence publisher/reconcile paths do not build services.
       # Keep unknown helpers relevant so new CI/build behavior still gets validated.
       return 0 ;;
@@ -120,6 +120,8 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: evidence reconcile script must not full-fleet" >&2; return 1; }
   is_inert_service_path ".github/scripts/reconcile_test_evidence_test.py" \
     || { echo "selector self-test: evidence reconcile tests must not full-fleet" >&2; return 1; }
+  is_inert_service_path ".github/scripts/check-readiness-collectors-agree.py" \
+    || { echo "selector self-test: readiness collector parity gate must not full-fleet" >&2; return 1; }
   is_inert_service_path ".github/gates/workflow-write-permissions-baseline.txt" \
     || { echo "selector self-test: Pact permission baseline is service-inert" >&2; return 1; }
   [ "$(pact_build_modules pacts/openbank-admin-ui-openbank-context-service.json)" = "openbank-context-service" ] \

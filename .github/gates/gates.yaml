@@ -100,7 +100,7 @@ gates:
     review_after: "2027-10-17"
     selftest: python3 .github/scripts/check-coverage-floor-ratchet.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py"]
+    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py", ".github/scripts/merge_train_carrier.py"]
     run: |
       # Compares every Kover minValue at HEAD against the PR's merge base, position by position.
       # The trailer is read from the PR body (optional: a PR with no body can still justify a
@@ -397,7 +397,10 @@ gates:
     group: lint
     mode: enforced
     min_subjects: 30   # 63 shell scripts today (2026-08-09)
-    budget_seconds: 30   # 5.7s over 63 scripts
+    # Re-derived 2026-10-20 per derive-gate-observability-budgets.py: ceil(max(p95*3, max*1.5, 5)).
+    # 25 CI runs: min 12.6 / p50 19.4 / p95 26.8 / max 30.2s over 104 scripts (30s budget
+    # failed a clean run at 30.2s). p95*3 = 80.4 -> 81.
+    budget_seconds: 81
     run: |
       # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
       # files implementing the gates themselves — the code every other gate's verdict rests
@@ -3587,6 +3590,27 @@ gates:
   # reported too. Self-test first — the must-NOT-flag half is what matters here,
   # since an outbound REST-client interface carries the identical annotation and
   # is not a defect (52 of the 115 raw matches on main). ENFORCED.
+  # ADR-0257 says the product-catalog kernel "contains no bank, insurance or telecom enum"; a
+  # pension approval workflow landed inside it anyway (#13429) and nothing noticed. Default-deny:
+  # every Kotlin file is kernel unless rules.yaml catalog_kernel_neutrality names it, and the pack
+  # vocabulary is DERIVED from catalog-packs/, so a new pack extends the check by existing.
+  - id: catalog-kernel-industry-neutral
+    name: "product-catalog kernel carries no industry vocabulary; legacy v1 enums frozen (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      A pack-specific enum, schema-id branch or column in the generic catalog kernel compiles,
+      passes every test and reads as a reasonable feature, so only a decidable check keeps
+      industry vocabulary in pack data where ADR-0257 put it.
+    review_after: 2027-04-20
+    min_subjects: 30   # 43 Kotlin files in the service on 2026-10-20
+    budget_seconds: 10   # 0.4 s measured 2026-10-20
+    selftest: python3 .github/scripts/check-catalog-kernel-neutral.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-catalog-kernel-neutral.py"]
+    run: |
+      python3 .github/scripts/check-catalog-kernel-neutral.py
+
   - id: nonnull-jaxrs-param-ratchet
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
@@ -5323,7 +5347,7 @@ gates:
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge_train_carrier.py", ".github/scripts/merge-train.py"]
     run: |
       # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
       # Editing the body to add the checklist (the documented remediation) only reached this
