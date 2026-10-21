@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.35.1",
-  "openbank-admin-ui": "3.8.7",
+  "openbank-admin-ui": "3.8.9",
   "openbank-agent-service": "1.31.1",
   "openbank-aml-service": "0.13.6",
   "openbank-anacredit-service": "0.10.0",
@@ -16,7 +16,7 @@
   "openbank-consent-service": "0.27.0",
   "openbank-control-liveness-sentinel": "0.9.0",
   "openbank-copilot-service": "0.17.7",
-  "openbank-customer-edge": "1.4.0",
+  "openbank-customer-edge": "1.4.1",
   "openbank-devops-agent": "0.8.4",
   "openbank-dispute-service": "0.11.3",
   "openbank-docs-truth-agent": "0.6.4",
@@ -40,7 +40,7 @@
   "openbank-pension-service": "3.0.0",
   "openbank-pension-fund-service": "1.0.2",
   "openbank-pid-service": "0.10.10",
-  "openbank-product-catalog": "1.1.0",
+  "openbank-product-catalog": "1.2.0",
   "openbank-psd2-service": "0.11.10",
   "openbank-incentive-service": "0.8.0",
   "openbank-referral-service": "0.7.0",
@@ -49,7 +49,7 @@
   "openbank-sca-service": "0.22.0",
   "openbank-sdd-service": "0.14.4",
   "openbank-security-scanner": "0.10.1",
-  "openbank-sepa-instant": "0.12.0",
+  "openbank-sepa-instant": "0.12.1",
   "openbank-sepa-payment": "0.19.0",
   "openbank-settlement-service": "0.13.0",
   "openbank-standing-order-service": "0.19.0",
@@ -67,6 +67,6 @@
   "openbank-wealth-service": "0.3.2",
   "openbank-context-service": "0.4.3",
   "openbank-risk-engine": "0.27.2",
-  "openbank-treasury-service": "0.15.0",
+  "openbank-treasury-service": "0.15.1",
   "openbank-card-processing-service": "0.7.1"
 }

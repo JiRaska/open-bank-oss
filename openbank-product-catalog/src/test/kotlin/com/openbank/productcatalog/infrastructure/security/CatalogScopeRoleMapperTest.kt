@@ -12,8 +12,10 @@ class CatalogScopeRoleMapperTest {
         "catalog:read",
         "catalog:author",
         "catalog:publish",
-        "pension:legal-approve",
-        "pension:product-approve",
+        approvalConfig(
+            "LEGAL_APPROVER" to ("legal:approve" to "ROLE_LEGAL_COUNSEL"),
+            "PRODUCT_APPROVER" to ("product:approve" to "ROLE_PRODUCT_OWNER"),
+        ),
     )
 
     @Test
@@ -23,11 +25,33 @@ class CatalogScopeRoleMapperTest {
         assertThat(mapper.roles(listOf("catalog:read", "catalog:publish")))
             .containsExactlyInAnyOrder(CatalogRoles.READ, CatalogRoles.PUBLISH)
         assertThat(mapper.roles("unrelated")).isEmpty()
-        assertThat(mapper.roles("pension:legal-approve pension:product-approve")).isEmpty()
-        assertThat(mapper.roles("pension:legal-approve", setOf(CatalogRoles.PENSION_LEGAL_REALM_ROLE)))
-            .containsExactly(CatalogRoles.PENSION_LEGAL_APPROVER)
-        assertThat(mapper.roles("pension:product-approve", setOf(CatalogRoles.PENSION_PRODUCT_REALM_ROLE)))
-            .containsExactly(CatalogRoles.PENSION_PRODUCT_OWNER)
-        assertThat(mapper.roles("pension:legal-approve", setOf(CatalogRoles.PENSION_PRODUCT_REALM_ROLE))).isEmpty()
     }
+
+    @Test
+    fun `an approval authority needs its configured scope AND realm role on the same token`() {
+        assertThat(mapper.roles("legal:approve product:approve")).isEmpty()
+        assertThat(mapper.roles("legal:approve", setOf("ROLE_LEGAL_COUNSEL"))).containsExactly("LEGAL_APPROVER")
+        assertThat(mapper.roles("product:approve", setOf("ROLE_PRODUCT_OWNER"))).containsExactly("PRODUCT_APPROVER")
+        assertThat(mapper.roles("legal:approve", setOf("ROLE_PRODUCT_OWNER"))).isEmpty()
+        assertThat(mapper.approvalAuthorities).containsExactlyInAnyOrder("LEGAL_APPROVER", "PRODUCT_APPROVER")
+    }
+
+    @Test
+    fun `an authority no deployment binds can never be held`() {
+        val unbound = CatalogScopeRoleMapper("catalog:read", "catalog:author", "catalog:publish", approvalConfig())
+        assertThat(unbound.roles("legal:approve", setOf("ROLE_LEGAL_COUNSEL"))).isEmpty()
+        assertThat(unbound.approvalAuthorities).isEmpty()
+    }
+
+    private fun approvalConfig(vararg bindings: Pair<String, Pair<String, String>>) =
+        object : CatalogApprovalSecurityConfig {
+            override fun authorities() = bindings.associate { (authority, binding) ->
+                authority to object : CatalogApprovalSecurityConfig.AuthorityBinding {
+                    override fun scope() = binding.first
+                    override fun realmRole() = binding.second
+                }
+            }
+
+            override fun evidenceReaders(): Map<String, String> = emptyMap()
+        }
 }

@@ -20,8 +20,20 @@ Nasazení Treasury před ledgerem je bezpečné, dokud je příznak `false`.
 
 Odsouhlasení nostra se řídí stejným příznakem: s `false` se nostro účty berou z vestavěné náhradní osnovy,
 takže 404 starého ledgeru na mapě tříd nezastaví nahrávání ani odsouhlasení; s `true` se mapa ledgeru čte
-jednou na každý upload či běh odsouhlasení. Storno vždy vyrovnává účty zapsané na žurnálech obchodu
-(`deal_journals.resolved_accounts`), ať mapa dnes říká cokoli.
+jednou na každý upload či běh odsouhlasení. Storno vyrovnává po jednotlivých GL účtech přesně to, co
+na ně žurnály obchodu zaúčtovaly (`deal_journals.resolved_accounts`), ať mapa dnes říká cokoli: časové
+rozlišení, které po přesměrování mapy dopadlo na dva účty, se odúčtuje dvěma řádky.
+
+**Storno odmítnuto s 409 `REVERSAL_ACCOUNTS_UNKNOWN`.** Některý stornovaný žurnál nemá zapsané účty
+(zaúčtován před `V15`, nebo odpověď ledgeru nešlo spárovat s řádky) nebo zápis jeho řádkům neodpovídá.
+Treasury třídu podle dnešní mapy znovu nevyhodnocuje, nic nezaúčtuje a obchod zůstává `SETTLED`. Postup:
+
+1. Z chybové zprávy vezměte id žurnálu a v ledgeru přečtěte jeho řádky (záznam ledgeru, kam který
+   řádek dopadl, v pořadí `sequence`). Žurnály z doby před ADR-0341 mají pevné účty
+   `a0000000-0000-0000-0000-00000000<kód>`; ověřte, nepředpokládejte.
+2. V rámci změnového záznamu s druhým schvalovatelem zapište do `deal_journals.resolved_accounts`
+   pro daný řádek jeden řádek `třída|role|měna|glAccountId` na každou nohu, v pořadí z účtovací tabulky.
+3. Storno zopakujte (neúspěšný pokus neuložil klíč příkazu, stejný `Idempotency-Key` tedy projde).
 
 **Rollback.** S příznakem `true` řádky účet neobsahují, takže starší ledger (pod `V32`) odmítne každý
 řádek. Samotnou konfigurací se vrátit nelze: nejdřív nastavte `OPENBANK_TREASURY_LEDGER_POST_BY_CLASS=false` a znovu nasaďte Treasury,

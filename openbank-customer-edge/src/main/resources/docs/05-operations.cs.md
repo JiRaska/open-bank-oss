@@ -46,6 +46,10 @@ Pozor na **oddělený management port 8085** (`quarkus.management.port`), aby pr
 
 > **Past (ze zdrojových komentářů):** **nedeklarujte** `client-secret` v `application.yaml` s expanzí `${UPSTREAM_OIDC_CLIENT_SECRET:}` — název property ve formě ENV se rozlišuje nespolehlivě a tiše vrátí `""`, čímž každý fetch tokenu skončí 401. Dodejte ho přes env var `OPENBANK_UPSTREAM_CLIENT_SECRET` (standardní mapování ENV→dotted-property).
 
+## Sdílený dočasný stav
+
+Nearby-payment sessions jsou uložené ve sdíleném Redis, ne v lokální paměti podu, takže token příjemce může rozřešit kterákoli replika customer-edge. Každá session expiruje po pěti minutách; při změně backendu zachovejte dostupnost Redis a stejné chování TTL napříč replikami. Životní cyklus `check`/`build` spouští test sdílení session v samostatném JVM po běžné testovací sadě; samotný `:openbank-customer-edge:test` tento test nespustí.
+
 ## Health checky
 
 - **Liveness:** `/q/health/live` (port 8085) — běží JVM + ArC.
