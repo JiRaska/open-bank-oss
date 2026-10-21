@@ -31,6 +31,7 @@ interface InfraComponent {
 
 const INFRA_COMPONENTS: InfraComponent[] = [
   { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 service probe',              icon: <Database size={20} /> },
+  { id: 'clickhouse',      name: 'ClickHouse',        probeNote: 'Configured endpoint TCP reachability', icon: <Database size={20} /> },
   { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9093 mTLS listener',               icon: <Layers size={20} /> },
   { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /realms/master',                   icon: <Lock size={20} /> },
   { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'Prometheus readiness (≤2m sample age)', icon: <HardDrive size={20} /> },
@@ -216,7 +217,7 @@ export default function InfrastructurePage() {
         }}>
           <DataUnavailable
             kind={unavailable.kind}
-            service={t('Gatus monitoring agent', 'Gatus monitoring agent')}
+            service={t('Sonda infrastruktury', 'Infrastructure probe')}
             feature={t('Stav infrastruktury', 'Infrastructure status')}
             lang={language}
             detail={Object.keys(statuses).length > 0
