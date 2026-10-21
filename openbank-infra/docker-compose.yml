@@ -2055,6 +2055,7 @@ services:
       KEYCLOAK_REALM: openbank
       NEXT_PUBLIC_KEYCLOAK_URL: http://localhost:8080
       SERVICES_HOST: container
+      CLICKHOUSE_URL: http://clickhouse:8123
     ports:
       - "3000:3000"
     depends_on:
