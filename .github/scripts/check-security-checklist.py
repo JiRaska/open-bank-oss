@@ -1375,12 +1375,10 @@ def self_test() -> int:
         print("self-test FAIL (deepen-not-needed): a non-shallow checkout tried to fetch"); bad += 1
     # The gate end to end: unreadable PR on a train head, and a timed-out member read, are NOT
     # EVALUATED (exit 1 + the verdict line), never exit 0.
-    import contextlib as _cl
-    import io as _io
     for label, fetch_pr, fetch_bodies in [
             ("PR object unreadable on a train/ head", lambda *_a, **_k: None, counting_bodies),
             ("member bodies timed out", lambda *_a, **_k: carrier_pr(), lambda *_a, **_k: None)]:
-        def gate_main() -> int:
+        def gate_main(fetch_pr=fetch_pr, fetch_bodies=fetch_bodies) -> int:
             saved_env = {k: os.environ.get(k) for k in ("GITHUB_REPOSITORY", "PR_NUMBER", "GITHUB_HEAD_REF", carrier_lib.CACHE_DIR_ENV)}
             os.environ.update({"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", "GITHUB_HEAD_REF": "train/123-1"})
             os.environ.pop(carrier_lib.CACHE_DIR_ENV, None)
