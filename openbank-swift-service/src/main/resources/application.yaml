@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -105,11 +90,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
