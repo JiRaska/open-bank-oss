@@ -9,8 +9,8 @@
 # Run dev mode (live reload, OIDC disabled)
 ./gradlew :openbank-consent-service:quarkusDev
 
-# Docker (multi-stage, fast-jar; see Dockerfile)
-docker build -t openbank/consent-service -f openbank-consent-service/Dockerfile .
+# Image: built by .github/workflows/Dockerfile.deploy from a host-side fast-jar (no per-service Dockerfile)
+./gradlew :openbank-consent-service:quarkusBuild -Dquarkus.package.jar.type=fast-jar
 ```
 
 Runtime entrypoint uses ZGC: `java -XX:+UseZGC -jar /app/quarkus-run.jar` on Eclipse Temurin 25 JRE (alpine), non-root user.
