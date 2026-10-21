@@ -66,13 +66,16 @@ set -euo pipefail
 # ── ancestry ────────────────────────────────────────────────────────────────────────────────────
 # Extract the 40-hex commit a deploy branch pins. Anything else yields "" and is treated as unknown.
 sha_of_branch() {
-  local sha="${1#"$2"}"
-  # 40 hex characters exactly. A truncated, suffixed or hand-cut branch name yields "" (unknown),
-  # and unknown must never mean "close it" — that was the pre-#6231 behaviour.
-  case "$sha" in
-    *[!0-9a-f]*) printf '' ;;
-    *) if [ "${#sha}" -eq 40 ]; then printf '%s' "$sha"; else printf ''; fi ;;
+  local sha
+  case "$1" in
+    "$2"*) sha="${1#"$2"}" ;;
+    *) return 0 ;;
   esac
+  # The workflow adds a positive run ID for unique carrier branches. It does not change the
+  # pinned source commit. Preserve legacy names; every other suffix remains unknown.
+  if [[ "$sha" =~ ^([0-9a-f]{40})(-run[1-9][0-9]*)?$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+  fi
 }
 
 # Ask GitHub how `head` relates to `base`: ahead | behind | identical | diverged.
@@ -857,6 +860,7 @@ case "${1:-}" in
           printf '%s\n' "$FAKE_GH_KEEP_BRANCH"
         fi
         printf 'pr:view\n' >>"$FAKE_GH_EVENTS" ;;
+      list) printf '%s\n' "${FAKE_GH_PAIRS:-}" ;;
       ready) printf 'pr:ready\n' >>"$FAKE_GH_EVENTS"; [ "${FAKE_GH_FAIL_READY:-false}" != true ] || exit 44 ;;
       edit) printf 'pr:edit\n' >>"$FAKE_GH_EVENTS"; [ "${FAKE_GH_FAIL_EDIT:-false}" != true ] || exit 45 ;;
       comment) printf 'pr:comment\n' >>"$FAKE_GH_EVENTS" ;;
@@ -1136,11 +1140,67 @@ HOOK
     echo "self-test case 28 OK (predecessor file-list partial stdout ignored; hold protected)"
   fi
 
+  # Cases 29-35 exercise the actual CLI's KEEP headRefName lookup and OTHER parser through
+  # fake gh. They never contact GitHub or change holds; DRY_RUN keeps the same safety decisions.
+  export DRY_RUN=true
+  local script_path="${BASH_SOURCE[0]}" bad
+  export FAKE_GH_PAIRS
+  export FAKE_GH_KEEP_BRANCH="$P$NEW-run39500952309"
+  FAKE_GH_PAIRS="$(printf '6225\t%s%s-run39476343618\t0' "$P" "$OLD")"
+  out="$(GITHUB_REPOSITORY="$REPO" bash "$script_path" "$P" 6222 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! contains_text "$out" 'would close #6225'; then
+    echo "SELF-TEST FAIL case 29: workflow run-suffixed KEEP/OTHER source was not classified; rc=$rc"; ok=1; dump_out "$out"
+  else echo "self-test case 29 OK (actual CLI workflow KEEP/OTHER format closes proven ancestor)"; fi
+
+  FAKE_GH_PAIRS="$(printf '6225\t%s%s-run1\t0' "$P" "$NEW")"
+  out="$(GITHUB_REPOSITORY="$REPO" bash "$script_path" "$P" 6222 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! contains_text "$out" 'would close #6225'; then
+    echo "SELF-TEST FAIL case 30: same source with different run IDs was not identical; rc=$rc"; ok=1; dump_out "$out"
+  else echo "self-test case 30 OK (different run IDs preserve identical source identity)"; fi
+
+  export FAKE_GH_KEEP_BRANCH="$P$OLD-run1"
+  FAKE_GH_PAIRS="$(printf '6222\t%s%s-run2\t0' "$P" "$NEW")"
+  out="$(GITHUB_REPOSITORY="$REPO" bash "$script_path" "$P" 6225 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close'; then
+    echo "SELF-TEST FAIL case 31: stale run-suffixed KEEP was not refused; rc=$rc"; ok=1; dump_out "$out"
+  else echo "self-test case 31 OK (stale workflow source still fails closed)"; fi
+
+  export FAKE_GH_KEEP_BRANCH="${P}cccccccccccccccccccccccccccccccccccccccc-run3"
+  FAKE_GH_PAIRS="$(printf '2\t%s%s-run1\t0' "$P" "$OLD")"
+  out="$(GITHUB_REPOSITORY="$REPO" bash "$script_path" "$P" 1 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || contains_text "$out" 'would close'; then
+    echo "SELF-TEST FAIL case 32: unknown run-suffixed ancestry closed a PR; rc=$rc"; ok=1; dump_out "$out"
+  else echo "self-test case 32 OK (unknown ancestry remains open)"; fi
+
+  for bad in "$NEW" "wrong-$NEW-run1" "$P${NEW:0:39}-run1" "$P$NEW-run" \
+      "$P$NEW-runx" "$P$NEW-run0" "$P$NEW-run01" "$P$NEW-run-1" "$P$NEW-run1-extra"; do
+    if [ -n "$(sha_of_branch "$bad" "$P")" ]; then
+      echo "SELF-TEST FAIL case 33: unsupported branch format was accepted"; ok=1
+    fi
+  done
+  if [ "$(sha_of_branch "$P$NEW" "$P")" != "$NEW" ]; then
+    echo "SELF-TEST FAIL case 33: legacy source format stopped working"; ok=1
+  fi
+  echo "self-test case 33 checked (strict prefix, complete SHA, canonical positive run ID, legacy preserved)"
+
+  export FAKE_GH_KEEP_BRANCH="$P$NEW-run3"
+  FAKE_GH_PAIRS="$(printf '11491\t%s%s-run2\t1' "$P" "$OLD")"
+  out="$(GITHUB_REPOSITORY="$REPO" bash "$script_path" "$P" 11499 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'would inherit hold: #11499' ; then
+    echo "SELF-TEST FAIL case 34: workflow predecessor hold was not retained; rc=$rc"; ok=1; dump_out "$out"
+  else echo "self-test case 34 OK (held workflow predecessor protects survivor and fails closed)"; fi
+
+  FAKE_GH_PAIRS="$(printf '11498\t%s%s-run2\t1' "$P" "$OLD")"
+  out="$(GITHUB_REPOSITORY="$REPO" bash "$script_path" "$P" 11499 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || contains_text "$out" 'would close #11498'; then
+    echo "SELF-TEST FAIL case 35: unreadable workflow hold was dropped; rc=$rc"; ok=1; dump_out "$out"
+  else echo "self-test case 35 OK (unrecordable held workflow predecessor remains open)"; fi
+
   if [ "$ok" -ne 0 ]; then
     echo "self-test: FAILED"
     return 1
   fi
-  echo "self-test: all 28 cases OK"
+  echo "self-test: all 35 cases OK"
   return 0
 }
 
