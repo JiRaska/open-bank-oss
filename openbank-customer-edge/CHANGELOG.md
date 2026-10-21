@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.0...customer-edge-v1.4.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **customer-edge:** scope the Pact provider stub to its own test class ([#13477](https://github.com/JiRaska/open-bank-oss/issues/13477)) ([140993e](https://github.com/JiRaska/open-bank-oss/commit/140993e36fcd92073fa0ea7034338a69caa81b35))
+
 ## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.3.2...customer-edge-v1.4.0) (2026-10-17)
 
 
