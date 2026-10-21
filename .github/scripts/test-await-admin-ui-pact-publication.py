@@ -28,8 +28,15 @@ def run(*, sha=SHA, status="completed", conclusion="success"):
 
 def evaluate_github_expression(expression, context):
     """Evaluate the side-effect-free expression subset used by the build job."""
+    expression = expression.strip()
+    if expression.startswith("${{") and expression.endswith("}}"):
+        expression = expression[3:-2].strip()
+    elif "${{" in expression or "}}" in expression:
+        raise AssertionError("malformed GitHub expression wrapper")
     expression = re.sub(r"needs\.([a-z][a-z-]*-[a-z][a-z-]*)\.", r'needs["\1"].', expression)
-    tree = ast.parse(expression.replace("&&", " and ").replace("||", " or "), mode="eval")
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    expression = re.sub(r"!(?!=)", " not ", expression).strip()
+    tree = ast.parse(expression, mode="eval")
 
     def value(node):
         if isinstance(node, ast.Constant):
@@ -44,6 +51,12 @@ def evaluate_github_expression(expression, context):
             if node.args or node.keywords:
                 raise AssertionError("unexpected arguments to always()")
             return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "cancelled":
+            if node.args or node.keywords:
+                raise AssertionError("unexpected arguments to cancelled()")
+            return context["cancelled"]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return not value(node.operand)
         if isinstance(node, ast.BoolOp):
             values = [value(child) for child in node.values]
             return all(values) if isinstance(node.op, ast.And) else any(values)
@@ -118,22 +131,23 @@ class PublicationWaitTest(unittest.TestCase):
         build_condition = re.search(r"(?m)^    if: (.+)$", build)
         self.assertIsNotNone(build_condition)
         condition = build_condition.group(1)
-        for changes_result, selected, publication_result, expected in [
-            ("success", "true", "success", True),
-            ("success", "true", "skipped", True),
-            ("success", "true", "failure", False),
-            ("success", "true", "cancelled", False),
-            ("failure", "true", "skipped", False),
-            ("cancelled", "true", "success", False),
-            ("skipped", "true", "skipped", False),
-            ("success", "false", "skipped", False),
+        for changes_result, selected, publication_result, cancelled, expected in [
+            ("success", "true", "success", False, True),
+            ("success", "true", "skipped", False, True),
+            ("success", "true", "failure", False, False),
+            ("success", "true", "cancelled", False, False),
+            ("failure", "true", "skipped", False, False),
+            ("cancelled", "true", "success", False, False),
+            ("skipped", "true", "skipped", False, False),
+            ("success", "false", "skipped", False, False),
+            ("success", "true", "success", True, False),
         ]:
             context = {"needs": {
                 "changes": {"result": changes_result, "outputs": {"any": selected}},
                 "publication-ready": {"result": publication_result},
-            }}
+            }, "cancelled": cancelled}
             with self.subTest(changes_result=changes_result, selected=selected,
-                              publication_result=publication_result):
+                              publication_result=publication_result, cancelled=cancelled):
                 self.assertEqual(evaluate_github_expression(condition, context), expected)
         self.assertIn("needs.publication-ready.result == 'success'", build)
         self.assertIn("needs.publication-ready.result == 'skipped'", build)
