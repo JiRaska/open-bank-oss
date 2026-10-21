@@ -175,22 +175,65 @@ RULES_PATH=openbank-libs/governance/rules.yaml
 HOLD_NOTICE_MARKER='<!-- supersede-owner-hold -->'
 HOLD_NOTICE_TEXT="A newer deploy PR supersedes this one, but it is held by an owner, so it stays open; if the hold should persist, move it to main's rules.yaml deploy_holds and close this PR. $HOLD_NOTICE_MARKER"
 
-# owner | bot | unknown for PR $1. Overridable via SUPERSEDE_HOLD_ACTOR_HOOK for the self-test.
-hold_applier() {
-  local types
-  if [ -n "${SUPERSEDE_HOLD_ACTOR_HOOK:-}" ]; then
-    "$SUPERSEDE_HOLD_ACTOR_HOOK" "$1"
+# The exact identities the deploy automation acts as when it drafts or labels a PR: the gitops
+# App (auto-deploy's app_token) and GITHUB_TOKEN, its fallback. Matched by LOGIN, never by actor
+# type — any other App is also type `Bot`, and it is not this automation.
+DEPLOY_AUTOMATION_LOGINS="${DEPLOY_AUTOMATION_LOGINS:-openbank-gitops-bot[bot] github-actions[bot]}"
+
+# Actor logins of every `labeled blocked` / `convert_to_draft` event on PR $1, one per line.
+# Non-zero on an API failure. Overridable via SUPERSEDE_TIMELINE_HOOK for the self-test.
+hold_event_logins() {
+  if [ -n "${SUPERSEDE_TIMELINE_HOOK:-}" ]; then
+    "$SUPERSEDE_TIMELINE_HOOK" "$1"
     return
   fi
-  if ! types="$(gh api --paginate "repos/$REPO/issues/$1/timeline" \
-      --jq '.[] | select((.event == "labeled" and .label.name == "blocked") or .event == "convert_to_draft")
-                | (.actor.type // "unknown")' 2>/dev/null)"; then
-    printf 'unknown'; return
+  gh api --paginate "repos/$REPO/issues/$1/timeline" \
+    --jq '.[] | select((.event == "labeled" and .label.name == "blocked") or .event == "convert_to_draft")
+          | (.actor.login // "")' 2>/dev/null
+}
+
+# owner | bot | unknown. `bot` ONLY when the timeline was read, is non-empty, and EVERY applying
+# event was made by a DEPLOY_AUTOMATION_LOGINS identity. A human or foreign login is `owner`; an
+# API error or an empty timeline is `unknown`. Callers treat both owner and unknown as a HOLD.
+hold_applier() {
+  local logins login
+  if ! logins="$(hold_event_logins "$1")"; then printf 'unknown'; return; fi
+  [ -n "$logins" ] || { printf 'unknown'; return; }
+  while IFS= read -r login; do
+    case " $DEPLOY_AUTOMATION_LOGINS " in
+      *" $login "*) [ -n "$login" ] || { printf 'unknown'; return; } ;;
+      *) printf 'owner'; return ;;
+    esac
+  done <<<"$logins"
+  printf 'bot'
+}
+
+# Legacy chain (issue #11503): branches opened under the retired design carry deploy_holds that
+# were copied from owner-held PRs (e.g. #12948). Until those services are held on main, such a
+# PR is itself a hold. Prints the PR branch's deploy_holds services that main does not hold;
+# non-zero when either rules.yaml cannot be read or parsed. Overridable via
+# SUPERSEDE_BRANCH_HOLDS_HOOK for the self-test.
+unmigrated_branch_holds() {
+  if [ -n "${SUPERSEDE_BRANCH_HOLDS_HOOK:-}" ]; then
+    "$SUPERSEDE_BRANCH_HOLDS_HOOK" "$1"
+    return
   fi
-  if [ -z "$types" ]; then printf 'unknown'
-  elif grep -qx 'User' <<<"$types"; then printf 'owner'
-  elif grep -qvx 'Bot' <<<"$types"; then printf 'unknown'
-  else printf 'bot'; fi
+  local head branch_rules main_rules
+  head="$(gh pr view "$1" --repo "$REPO" --json headRefOid --jq .headRefOid)" || return 1
+  [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
+  branch_rules="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=$head")" || return 1
+  main_rules="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$RULES_PATH?ref=main")" || return 1
+  BRANCH_RULES="$branch_rules" MAIN_RULES="$main_rules" "${DEPLOY_HOLD_PYTHON:-python3}" -c '
+import os, yaml
+def held(text):
+    doc = yaml.safe_load(text) or {}
+    services = ((doc.get("deploy_holds") or {}).get("services")) or {}
+    if not isinstance(services, dict):
+        raise SystemExit("deploy_holds.services is not a map")
+    return set(services)
+for name in sorted(held(os.environ["BRANCH_RULES"]) - held(os.environ["MAIN_RULES"])):
+    print(name)
+'
 }
 
 # rc 0 iff PR $1 already carries the owner-hold notice. Overridable via SUPERSEDE_NOTICE_HOOK.
@@ -209,7 +252,7 @@ hold_noticed() {
 run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
   local n ref held other_sha verdict applier failed=0 stale_keep=0 closed=0 skipped=0 owner_held=0
-  local KEEP_FILES other_files cov_verdict keep_files_ok=1 safety_unknown=0
+  local KEEP_FILES other_files cov_verdict keep_files_ok=1 safety_unknown=0 carries_rules=0 legacy
 
   if [ -z "$PAIRS" ]; then
     echo "supersede: no other open '$PREFIX*' PRs besides #$KEEP — nothing to close."
@@ -231,6 +274,8 @@ run() {
     if [ "$verdict" = "CLOSE" ]; then
       if [ "$keep_files_ok" -eq 1 ] && other_files="$(changed_files "$n")"; then
         # rules.yaml on a deploy branch is the retired hold copy, never an image pin to cover.
+        carries_rules=0
+        grep -qxF -- "$RULES_PATH" <<<"$other_files" && carries_rules=1
         other_files="$(grep -vxF -- "$RULES_PATH" <<<"$other_files" || true)"
         cov_verdict="$(classify_coverage "$KEEP_FILES" "$other_files")"
       else
@@ -259,6 +304,19 @@ run() {
         echo "::warning::supersede: cannot establish that #$KEEP supersedes #$n (keep=${KEEP_SHA:-?} other=${other_sha:-?}, unrelated or unparsable) — leaving #$n OPEN."
         ;;
       CLOSE)
+        if [ "$carries_rules" -eq 1 ]; then
+          if ! legacy="$(unmigrated_branch_holds "$n")"; then
+            owner_held=$((owner_held + 1)); skipped=$((skipped + 1))
+            echo "::warning::supersede: cannot read #$n's branch deploy_holds against main — treating it as held; leaving it OPEN and untouched."
+            continue
+          fi
+          if [ -n "$legacy" ]; then
+            owner_held=$((owner_held + 1)); skipped=$((skipped + 1))
+            echo "::warning::supersede: #$n carries deploy_holds not yet on main — held; leaving it OPEN and untouched." \
+                 "migrate to main: $(printf '%s' "$legacy" | tr '\n' ' ')"
+            continue
+          fi
+        fi
         if [ "${held:-0}" = "1" ]; then
           applier="$(hold_applier "$n")"
           case "$applier" in
@@ -387,7 +445,10 @@ HOOK
 #!/usr/bin/env bash
 pr="$1"
 case "$pr" in
-  11491|11498|11499) echo "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml" ;;
+  11491|11498|11499) echo "openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml"
+                     # a legacy branch also carries the retired rules.yaml hold copy
+                     if [ "$pr" = 11491 ] && [ -n "${HOLD_BRANCH:-}" ]; then
+                       echo "openbank-libs/governance/rules.yaml"; fi ;;
   13010) printf '%s\n%s\n' \
           'openbank-infra/gitops/components/accounts/account-service.yaml' \
           'openbank-infra/gitops/components/balances/balance-service.yaml' ;;
@@ -514,19 +575,33 @@ case "$*" in
 esac
 exit 0
 HOOK
-  cat >"$tmp/actor" <<'HOOK'
+  # Timeline seam: prints the actor LOGIN of every draft/`blocked` event, one per line; the
+  # spec `ERR` simulates an API failure. Short names: bot = the deploy App, owner = a human.
+  cat >"$tmp/timeline" <<'HOOK'
 #!/usr/bin/env bash
-printf '%s' "$HOLD_APPLIER"
+case "$HOLD_APPLIER" in
+  ERR|unknown) exit 1 ;;
+  bot) printf '%s\n' 'openbank-gitops-bot[bot]' ;;
+  owner) printf '%s\n' 'some-owner' ;;
+  *) printf '%s' "$HOLD_APPLIER" | tr '|' '\n' ;;
+esac
+HOOK
+  # Branch-holds seam: deploy_holds services on the PR's branch that are NOT on main; `ERR` fails.
+  cat >"$tmp/branchholds" <<'HOOK'
+#!/usr/bin/env bash
+[ "${HOLD_BRANCH:-}" != ERR ] || exit 1
+[ -z "${HOLD_BRANCH:-}" ] || printf '%s' "$HOLD_BRANCH" | tr '|' '\n'
 HOOK
   cat >"$tmp/notice" <<'HOOK'
 #!/usr/bin/env bash
 [ "${HOLD_NOTICED:-false}" = true ]
 HOOK
-  chmod +x "$hb/gh" "$tmp/actor" "$tmp/notice"
-  hold_run() { # hold_run <applier> [noticed] -> rc; events in $hev
+  chmod +x "$hb/gh" "$tmp/timeline" "$tmp/branchholds" "$tmp/notice"
+  hold_run() { # hold_run <timeline spec> [noticed] [branch-holds spec] -> rc; events in $hev
     : >"$hev"
     ( export PATH="$hb:$PATH" HOLD_EVENTS="$hev" HOLD_APPLIER="$1" HOLD_NOTICED="${2:-false}" \
-             DRY_RUN=false REPO=fixture/repo SUPERSEDE_HOLD_ACTOR_HOOK="$tmp/actor" \
+             HOLD_BRANCH="${3:-}" DRY_RUN=false REPO=fixture/repo \
+             SUPERSEDE_TIMELINE_HOOK="$tmp/timeline" SUPERSEDE_BRANCH_HOLDS_HOOK="$tmp/branchholds" \
              SUPERSEDE_NOTICE_HOOK="$tmp/notice"
       run "$P" 11499 "$NEW" "$(printf '11491\t%s%s-run7\t1' "$P" "$OLD")" )
   }
@@ -578,12 +653,43 @@ HOOK
 
   # case 34 — a predecessor polluted by the retired hold copy (its diff includes rules.yaml) is
   # still covered by a survivor that pins the same manifests: rules.yaml is not an image pin.
-  out="$(run "$P" 13011 "$NEW" "$(printf '13021\t%s%s\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  printf '#!/usr/bin/env bash\n' >"$tmp/nolegacy"; chmod +x "$tmp/nolegacy"
+  out="$(SUPERSEDE_BRANCH_HOLDS_HOOK="$tmp/nolegacy" run "$P" 13011 "$NEW" "$(printf '13021\t%s%s\t0' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
   if [ "$rc" -ne 0 ] || ! contains_text "$out" 'would close #13021'; then
     echo "SELF-TEST FAIL case 34: rules.yaml in a predecessor's diff blocked coverage; rc=$rc"; ok=1; dump_out "$out"
   else
     echo "self-test case 34 OK (retired rules.yaml copy ignored by coverage)"
   fi
+
+  # case 35 — the applier is matched by exact automation LOGIN, never by actor type: another
+  # App (type Bot), an empty timeline and an API error are each an owner hold — left open.
+  local spec
+  for spec in 'other-app[bot]' 'openbank-gitops-bot[bot]|other-app[bot]' '' ERR; do
+    out="$(hold_run "$spec" 2>&1)" || true
+    if grep -qE '^pr close' "$hev"; then
+      echo "SELF-TEST FAIL case 35: timeline '$spec' was not treated as an owner hold"; ok=1; dump_out "$out"
+    fi
+  done
+  out="$(hold_run 'github-actions[bot]|openbank-gitops-bot[bot]' 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || ! grep -q '^pr close 11491' "$hev"; then
+    echo "SELF-TEST FAIL case 35: an all-automation timeline was not closable; rc=$rc"; ok=1; dump_out "$out"
+  fi
+  echo "self-test case 35 checked (exact automation logins only; foreign/empty/error = owner hold)"
+
+  # case 36 — legacy chain: a branch carrying deploy_holds that main does not hold is a hold.
+  # Leave it untouched and name the services to migrate; an unreadable branch is the same.
+  local bh
+  for bh in 'openbank-kyc-service|openbank-fraud-service' ERR; do
+    out="$(hold_run bot false "$bh" 2>&1)" || true
+    if [ -n "$(mutations)" ]; then
+      echo "SELF-TEST FAIL case 36: branch holds '$bh' did not block closure: $(mutations | tr '\n' '|')"; ok=1; dump_out "$out"
+    fi
+  done
+  out="$(hold_run bot false 'openbank-kyc-service|openbank-fraud-service' 2>&1)" || true
+  if ! contains_text "$out" 'migrate to main: openbank-kyc-service openbank-fraud-service'; then
+    echo "SELF-TEST FAIL case 36: services to migrate were not reported"; ok=1; dump_out "$out"
+  fi
+  echo "self-test case 36 checked (unmigrated branch holds -> held, untouched, reported)"
 
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on
