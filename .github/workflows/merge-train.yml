@@ -22,9 +22,25 @@
 # owner's ruleset change (commands in ADR-0343) is irrelevant. Rollback is the ruleset revert alone.
 name: Merge train
 
+# EVENT-DRIVEN (#13400): the train is fired by every change it waits on, and the cron is only a
+# fallback heartbeat (GitHub ran 127 of ~235 expected `*/10` ticks over 39 h, median gap 17 min).
+# Triggers carry NO authority: no job reads any `github.event` field, every checkout is `ref: main`,
+# and settle/build/publish judge only live state, so a fork's arming or a non-required workflow
+# can at most cause one more read-only pass. The `merge-train` concurrency group below coalesces
+# bursts: one run in flight, at most ONE pending (a newer queued run replaces the older pending one).
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/10 * * * *"   # heartbeat fallback only
+  push:
+    branches: [main]         # main moved: strict-lane heads are behind, a carrier base is stale
+  workflow_run:
+    # Producers of the required contexts (main-protection) and of the extra gate (Security scan),
+    # on PRs, carriers and main. Names are workflow `name:` values.
+    workflows: ["Services CI", "CI", "Secret scan", "OPA policy", "Security scan", "Issue hygiene"]
+    types: [completed]
+  pull_request_target:
+    # Runs in the BASE context; nothing here checks out or executes the PR (all jobs use ref: main).
+    types: [auto_merge_enabled]
   workflow_dispatch:
     inputs:
       batch_size:
