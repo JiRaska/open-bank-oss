@@ -312,6 +312,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-1",job="treasury-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-2",job="treasury-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
@@ -435,6 +439,8 @@ tests:
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -764,6 +770,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-1",job="treasury-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-2",job="treasury-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
@@ -887,6 +897,8 @@ tests:
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -1193,6 +1205,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-1",job="treasury-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-2",job="treasury-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
@@ -1318,6 +1334,8 @@ tests:
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -1628,6 +1646,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-1",job="treasury-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-2",job="treasury-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
@@ -1751,6 +1773,8 @@ tests:
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -2066,6 +2090,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-1",job="treasury-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-2",job="treasury-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
@@ -2187,6 +2215,8 @@ tests:
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
@@ -2495,6 +2525,10 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-1",job="treasury-pension-co-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury-pension-co",pod="treasury-pension-co-db-2",job="treasury-pension-co-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
@@ -2616,6 +2650,8 @@ tests:
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury-pension-co"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"

@@ -24,6 +24,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
 
     testImplementation(libs.quarkus.test.security)

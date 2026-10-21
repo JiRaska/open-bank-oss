@@ -30,7 +30,7 @@ triaging an incident that starts on `treasury`.
 
 ## Health & probes
 
-- Readiness: `GET :8090/q/health/ready` · Liveness: `GET :8090/q/health/live`
+- Readiness: multiple workload declarations; inspect GitOps · Liveness: multiple workload declarations; inspect GitOps
 - Metrics: scraped by the fleet PodMonitor (namespace `treasury`); dashboards in Grafana.
 - Logs: `kubectl logs -n treasury deploy/treasury-service -f`, or Loki
   `{namespace="treasury"}`.

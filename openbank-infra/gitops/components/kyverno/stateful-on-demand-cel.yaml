@@ -92,6 +92,7 @@ spec:
           'sca/sca-db',
           'sdd/sdd-db',
           'temporal/temporal-db',
+          'treasury-pension-co/treasury-pension-co-db',
           'treasury/treasury-db',
         ]
     # END GENERATED targets

@@ -14,6 +14,7 @@
 // Off-cluster (local dev / docker-compose) there is no ServiceAccount token, so
 // discoverServices() returns null and callers fall back to the static probe.
 
+import { discoveryServiceKey, discoveredBaseUrl } from '@/lib/treasury-company'
 import { readFileSync, existsSync } from 'node:fs'
 import https from 'node:https'
 import { getRegistry } from '@/lib/services/fleet'
@@ -63,6 +64,7 @@ export interface ServiceDiscoverySnapshot {
 // Adding a service *inside* an existing namespace is fully automatic.
 // Unknown namespaces fall back to 'platform' so they are never silently hidden.
 const NS_GROUP: Record<string, ServiceGroup> = {
+  'treasury-pension-co': 'core',
   accounts:           'core',
   payments:           'payments',
   compliance:         'compliance',
@@ -256,7 +258,7 @@ export async function collectServiceDiscovery(
       const readyReplicas = d.status?.readyReplicas ?? 0
       const desired = d.spec?.replicas ?? d.status?.replicas ?? 0
       return {
-        name: d.metadata.name,
+        name: discoveryServiceKey(d.metadata.name, d.metadata.namespace),
         namespace: d.metadata.namespace,
         port: businessPort(d),
         group: NS_GROUP[d.metadata.namespace] ?? 'platform',
@@ -335,7 +337,7 @@ export function resolveServiceInSnapshot(
     return {
       state: 'found',
       service,
-      baseUrl: `http://${service.name}.${service.namespace}.svc:${service.port}`,
+      baseUrl: discoveredBaseUrl(service.name, service.namespace, service.port),
       coverage: snapshot.status,
     }
   }
