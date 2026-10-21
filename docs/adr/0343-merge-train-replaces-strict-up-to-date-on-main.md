@@ -245,7 +245,8 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    merge would move the carrier's base; the carrier's own "main moved since publish" check also
    rejects it if one ever does), and at most one per tick, since a merge makes every other
    strict-lane head behind;
-2. if the head is up to date and its required CI is still running (or has just gone green), *reserves*
+2. if the head is up to date and its required CI is still running — including not yet reported, the
+   normal state for the first minutes after update-branch — (or has just gone green), *reserves*
    main: settle reports in-flight, so no train is built under it; no other strict-lane PR is updated;
    **and nothing else may move main** — the fast lane posts no status (GitHub auto-merge acts on it)
    and a carrier that finished green is held, not merged. Main moves only when the reserved PR
@@ -258,7 +259,8 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
    and a later tick merges it. A reservation is bounded by `RESERVATION_TIMEOUT_S`, twice the p95 of
    green pull-request CI (measured: p50 17 min, p95 32 min, so 64 min), counted from the head's
-   committer time, which update-branch sets: past it the reservation is released, the fast lane and
+   committer time, which update-branch sets (a committer time in the future, which only an author can
+   write, counts as timed out): past it the reservation is released, the fast lane and
    trains resume, and the PR goes to the back of the strict queue, so a hung CI cannot freeze main.
    The cost is bounded too: fast-lane and train merges wait at most one strict-lane CI cycle. A
    file-disjoint fast lane during the reservation was rejected: any merge makes the reserved head
@@ -336,6 +338,7 @@ check main itself was failing. So, while `main_red` is non-empty:
    `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
    lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
    merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+   *amended (2026-10-21): a fix behind main is no longer merged without update — it is update-branched and holds the reservation, and only its combined head merges, with the fix set green and every other required context green or red on main too.*
 5. **no train is planned over a red main**: it could only come back red on the main-red context,
    so building it would spend a CI run to learn nothing; the fast lane is unchanged;
 6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
@@ -448,7 +451,9 @@ declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` 
 the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
 by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
 PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
-armed); running = wait; never triggered, skipped or neutral = not applicable. A carrier red on an
+armed); running = wait; never reported = wait too (fail closed, #13400) — not applicable only
+when the pinned workflow has a COMPLETED run for that head without the check, or it concluded
+skipped or neutral. A carrier red on an
 extra gate is a verdict like any required context, unless main is red on that gate too: then it
 counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
 Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
