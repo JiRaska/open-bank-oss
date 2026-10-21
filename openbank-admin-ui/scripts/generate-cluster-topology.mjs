@@ -34,9 +34,7 @@ const GITOPS = path.join(REPO, 'openbank-infra', 'gitops')
 // settled before committing. A logic change shows up in the derived content instead.
 const INPUTS = [
   'openbank-infra/gitops',
-  'openbank-ledger-service/Dockerfile',
-  'openbank-account-service/Dockerfile',
-  'openbank-party-service/Dockerfile',
+  '.github/workflows/Dockerfile.deploy',
 ]
 
 const read = (p) => { try { return readFileSync(p, 'utf8') } catch { return null } }
@@ -75,9 +73,9 @@ function countKind(kind) {
 
 // ── derived: image anatomy from a representative Dockerfile ────────────────────────────────────
 function imageFacts() {
-  const candidates = ['openbank-ledger-service', 'openbank-account-service', 'openbank-party-service']
-  let df = null
-  for (const c of candidates) { df = read(path.join(REPO, c, 'Dockerfile')); if (df) break }
+  // The ONE recipe every service image is built from. Per-service Dockerfiles were
+  // declarations nothing built, and are being removed in favour of this file.
+  const df = read(path.join(REPO, '.github', 'workflows', 'Dockerfile.deploy'))
   if (!df) return { ok: false }
   const froms = [...df.matchAll(/FROM\s+([^\s]+)(?:\s+AS\s+(\w+))?/g)].map((m) => ({ image: m[1], stage: m[2] || null }))
   const buildBase = (froms.find((f) => f.stage === 'build') || froms[0] || {}).image

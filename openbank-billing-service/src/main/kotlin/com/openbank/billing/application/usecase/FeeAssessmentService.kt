@@ -65,7 +65,7 @@ class FeeAssessmentService(
             } else {
                 "PRODUCT_CATALOG_UNREACHABLE"
             }
-            log.warnf(it, "terms of revision %s for account %s unavailable: %s", pinned, accountId, reason)
+            log.warn("Revision terms unavailable; assessment skipped")
             return skipped(cycleId, accountId, currency, reason)
         }
         // A fee with no accounting class has no ledger account to land in; charging it anyway would
@@ -89,12 +89,7 @@ class FeeAssessmentService(
             // This assessment charges less than the product declares; a persistent gap must be visible to
             // an alert, which a once-per-revision counter (the revision is cached) cannot give.
             meters.counter("openbank.billing.assessment.dropped_components").increment()
-            log.warnf(
-                "assessment %s/%s charges without %d dropped fee component(s)",
-                cycleId,
-                accountId,
-                terms.droppedFeeComponents,
-            )
+            log.warn("Assessment has dropped fee components")
         }
         val assessed = terms.fees.map { fee ->
             assessOne(cycleId, accountId, currency, fee, billing.context, terms.revisionId, accountingClass)
@@ -130,7 +125,7 @@ class FeeAssessmentService(
     /** The account's pinned revision, pinning it as of the account's opening on first sight. */
     private suspend fun resolvePin(accountId: String, billing: AccountBilling): Pin {
         val existing = attempt { pins.find(accountId) }.getOrElse {
-            log.warnf(it, "pin store read failed for account %s", accountId)
+            log.warn("Revision pin store read failed; assessment skipped")
             return Pin.Skip("REVISION_PIN_STORE_UNAVAILABLE")
         }
         if (existing != null) return Pin.Found(existing)
@@ -138,13 +133,13 @@ class FeeAssessmentService(
         // force the first time billing looks at it (ADR-0341 D1).
         val openedAt = billing.openedAt ?: return Pin.Skip("ACCOUNT_OPENING_UNKNOWN")
         val published = attempt { revisions.publishedRevisionIdFor(billing.productId, openedAt) }.getOrElse {
-            log.warnf(it, "catalog lookup failed for product %s", billing.productId)
+            log.warn("Catalog revision lookup failed; assessment skipped")
             return Pin.Skip("PRODUCT_CATALOG_UNREACHABLE")
         } ?: return Pin.Skip("PRODUCT_REVISION_UNRESOLVED")
         return attempt { pins.pinIfAbsent(accountId, published) }.fold(
             onSuccess = { Pin.Found(it) },
             onFailure = {
-                log.warnf(it, "pin store write failed for account %s", accountId)
+                log.warn("Revision pin store write failed; assessment skipped")
                 Pin.Skip("REVISION_PIN_STORE_UNAVAILABLE")
             },
         )

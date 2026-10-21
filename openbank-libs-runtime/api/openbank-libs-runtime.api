@@ -366,6 +366,16 @@ public final class com/openbank/libs/approval/impl/RedisApprovalStore : com/open
 public final class com/openbank/libs/approval/impl/RedisApprovalStore$Companion {
 }
 
+public final class com/openbank/libs/approval/impl/RedisApprovalStoreProducer {
+	public static final field Companion Lcom/openbank/libs/approval/impl/RedisApprovalStoreProducer$Companion;
+	public static final field STORE_PROPERTY Ljava/lang/String;
+	public fun <init> ()V
+	public final fun approvalStore (Lio/quarkus/redis/datasource/ReactiveRedisDataSource;Ljava/time/Clock;)Lcom/openbank/libs/approval/ApprovalStore;
+}
+
+public final class com/openbank/libs/approval/impl/RedisApprovalStoreProducer$Companion {
+}
+
 public final class com/openbank/libs/approval/web/ApprovalEndpointSupport {
 	public static final field Companion Lcom/openbank/libs/approval/web/ApprovalEndpointSupport$Companion;
 	public static final field MAX_PENDING_LIMIT I

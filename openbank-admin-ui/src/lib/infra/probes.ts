@@ -27,6 +27,7 @@ export interface InfraStatusResult {
 type InfraProbe =
   | { kind: 'http'; url: string; okCodes?: number[] }
   | { kind: 'tcp'; host: string; port: number }
+  | { kind: 'configured-tcp'; urlEnv: 'CLICKHOUSE_URL' }
   | { kind: 'prometheus-deployment'; namespace: string; deployment: string }
   | { kind: 'absent' } // not deployed in this topology → UNKNOWN, never a false DOWN
 
@@ -43,6 +44,7 @@ export interface InfraDef {
 // keys consumed by /docs/bcp and /infrastructure.
 export const CLUSTER_INFRA: InfraDef[] = [
   { id: 'postgres',        probe: { kind: 'tcp',  host: 'accounts-db-rw.accounts.svc',                       port: 5432 } },
+  { id: 'clickhouse',      probe: { kind: 'configured-tcp', urlEnv: 'CLICKHOUSE_URL' } },
   { id: 'kafka',           probe: { kind: 'tcp',  host: 'openbank-cluster-kafka-bootstrap.messaging.svc',    port: 9093 } },
   { id: 'keycloak',        probe: { kind: 'http', url: 'http://keycloak.iam.svc:8080/realms/master', okCodes: [200] } },
   { id: 'openbao',         probe: { kind: 'http', url: 'http://openbao.vault.svc:8200/v1/sys/health', okCodes: [200, 429, 472, 473] } },
@@ -85,6 +87,7 @@ function containerHost(name: string): string {
 
 export const LOCAL_INFRA: InfraDef[] = [
   { id: 'postgres',        probe: { kind: 'tcp',  host: containerHost('openbank-postgres'),         port: 5432 } },
+  { id: 'clickhouse',      probe: { kind: 'configured-tcp', urlEnv: 'CLICKHOUSE_URL' } },
   { id: 'kafka',           probe: { kind: 'tcp',  host: containerHost('openbank-kafka'),             port: process.env.SERVICES_HOST === 'container' ? 9092 : 29092 } },
   { id: 'keycloak',        probe: { kind: 'http', url: `http://${containerHost('openbank-keycloak')}:8080/realms/master`, okCodes: [200] } },
   // Local docker-compose still ships Vault; the in-cluster store is OpenBao (runbook 0005).
@@ -122,6 +125,22 @@ function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<number 
   })
 }
 
+export function parseConfiguredTcpTarget(urlEnv: string): { host: string; port: number } | null {
+  const value = process.env[urlEnv]
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) return null
+    const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+    // WHATWG URL retains brackets for IPv6; net.connect expects the bare IP literal.
+    const host = url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname
+    return { host, port }
+  } catch {
+    return null
+  }
+}
+
 export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
   const now = new Date().toISOString()
   try {
@@ -134,6 +153,12 @@ export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
       const latencyMs = await tcpProbe(def.probe.host, def.probe.port)
       // A failed connect establishes that this probe could not reach the port, not
       // that the component itself is down (DNS, routing and policy failures look the same).
+      return { id: def.id, status: latencyMs !== null ? 'UP' : 'UNKNOWN', latencyMs, checkedAt: now }
+    }
+    if (def.probe.kind === 'configured-tcp') {
+      const target = parseConfiguredTcpTarget(def.probe.urlEnv)
+      if (!target) return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
+      const latencyMs = await tcpProbe(target.host, target.port)
       return { id: def.id, status: latencyMs !== null ? 'UP' : 'UNKNOWN', latencyMs, checkedAt: now }
     }
     if (def.probe.kind === 'prometheus-deployment') {
