@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { getReport } from '@/lib/reporting/registry'
 import { parseReportResult } from '@/lib/reporting/clientContract'
-import { clickHouseRiskLargeSettledRows } from '@/test/fixtures/clickhouse-risk-large-settled'
+import { clickHouseRiskLargeSettledRows } from '../../e2e/fixtures/clickhouse-risk-large-settled'
 
 const permissionMock = vi.fn()
 vi.mock('@/lib/auth/api-permission', () => ({
