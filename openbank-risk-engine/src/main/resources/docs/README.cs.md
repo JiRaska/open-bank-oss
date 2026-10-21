@@ -101,6 +101,10 @@ v existujících likviditních testech a v `RiskLiquidityApiIT`.
 
 Risk engine odebírá `openbank.fx.cnb-policy-rate.published` do vlastní tabulky faktů o sazbách. Opakované doručení je idempotentní podle nástroje a data účinnosti; opravená sazba aktualizuje uložené faktum. Endpoint minimálních rezerv odvozuje výsledek z odsouhlaseného snapshotu a sazby rezerv i úročení účinných k datu tohoto běhu. Chybějící fakta vedou k `424 NOT_EVALUABLE` s důvodem namísto výpočtu s náhradní číselnou sazbou; neznámý běh vrací 404 a neodsouhlasený běh 409. Analýza se počítá při čtení a neukládá se jako samostatný výsledek.
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
