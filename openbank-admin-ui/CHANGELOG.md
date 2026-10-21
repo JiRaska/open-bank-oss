@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.8.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.9...admin-ui-v3.8.10) (2026-10-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive catalog schema dependency closure ([#13494](https://github.com/JiRaska/open-bank-oss/issues/13494)) ([5fd0448](https://github.com/JiRaska/open-bank-oss/commit/5fd0448dccfbca541d8e02fc43d25873bab12fc2))
+
 ## [3.8.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.8...admin-ui-v3.8.9) (2026-10-20)
 
 
