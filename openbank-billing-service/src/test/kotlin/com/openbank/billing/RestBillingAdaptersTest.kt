@@ -156,7 +156,7 @@ class RestBillingAdaptersTest {
             assertThat(fee.waiveCondition).isEqualTo("Balance > 50 000 CZK")
             assertThat(terms.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
             assertThat(terms.accountingClassSource).isEqualTo(AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE)
-            assertThat(meters.get("billing.accounting_class.derived").counter().count()).isEqualTo(1.0)
+            assertThat(meters.get("openbank.billing.accounting_class.derived").counter().count()).isEqualTo(1.0)
         }
 
     @Test
@@ -178,7 +178,7 @@ class RestBillingAdaptersTest {
         assertThat(terms.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_TERM")
         assertThat(terms.accountingClassSource).isEqualTo(AccountingClassSource.REVISION)
         assertThat(terms.fees.single().feeId).isEqualTo("f1")
-        assertThat(meters.find("billing.accounting_class.derived").counter()).isNull()
+        assertThat(meters.find("openbank.billing.accounting_class.derived").counter()).isNull()
     }
 
     @Test
@@ -202,7 +202,7 @@ class RestBillingAdaptersTest {
             assertThat(terms.droppedFeeComponents).isEqualTo(0)
             // the two AMOUNTs have no fee identity (the RATE is not an amount and is not counted)
             assertThat(terms.noFeeIdentityComponents).isEqualTo(2)
-            assertThat(meters.find("billing.fee.component.dropped").counter()).isNull()
+            assertThat(meters.find("openbank.billing.fee.component.dropped").counter()).isNull()
         }
 
     @Test
@@ -223,7 +223,9 @@ class RestBillingAdaptersTest {
             assertThat(terms.fees.map { it.feeId }).containsExactly("f1")
             assertThat(terms.droppedFeeComponents).isEqualTo(1)
             assertThat(
-                meters.get("billing.fee.component.dropped").tag("reason", "MISSING_PRICE_COMPONENT").counter().count(),
+                meters.get(
+                    "openbank.billing.fee.component.dropped",
+                ).tag("reason", "MISSING_PRICE_COMPONENT").counter().count(),
             ).isEqualTo(1.0)
         }
 
@@ -350,12 +352,18 @@ class RestBillingAdaptersTest {
             assertThat(terms.fees).isEmpty()
             assertThat(terms.feeBearing).isTrue()
             assertThat(terms.droppedFeeComponents).isEqualTo(3)
-            assertThat(meters.get("billing.fee.component.dropped").tag("reason", "NON_AMOUNT_KIND").counter().count())
-                .isEqualTo(1.0)
-            assertThat(meters.get("billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count())
+            assertThat(
+                meters.get("openbank.billing.fee.component.dropped").tag("reason", "NON_AMOUNT_KIND").counter().count(),
+            )
                 .isEqualTo(1.0)
             assertThat(
-                meters.get("billing.fee.component.dropped").tag("reason", "NOT_IN_LEGACY_DOCUMENT").counter().count(),
+                meters.get("openbank.billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count(),
+            )
+                .isEqualTo(1.0)
+            assertThat(
+                meters.get(
+                    "openbank.billing.fee.component.dropped",
+                ).tag("reason", "NOT_IN_LEGACY_DOCUMENT").counter().count(),
             )
                 .isEqualTo(1.0)
         }
@@ -402,7 +410,7 @@ class RestBillingAdaptersTest {
 
         assertThat(port.publishedRevisionIdFor("prod-1", opened)).isEqualTo(REVISION)
         verify(exactly = 0) { catalog.getPublishedRevisionForLegacyProduct("prod-1", null) }
-        assertThat(meters.find("billing.revision_pin.fallback_to_current").counter()).isNull()
+        assertThat(meters.find("openbank.billing.revision_pin.fallback_to_current").counter()).isNull()
     }
 
     @Test
@@ -417,7 +425,7 @@ class RestBillingAdaptersTest {
 
             assertThat(port.publishedRevisionIdFor("prod-1", java.time.Instant.parse("2020-01-01T00:00:00Z")))
                 .isEqualTo(REVISION)
-            assertThat(meters.get("billing.revision_pin.fallback_to_current").counter().count()).isEqualTo(1.0)
+            assertThat(meters.get("openbank.billing.revision_pin.fallback_to_current").counter().count()).isEqualTo(1.0)
         }
 
     @Test
@@ -427,7 +435,7 @@ class RestBillingAdaptersTest {
             Uni.createFrom().failure(NotFoundException())
         val port = RestProductRevisionPort(catalog, meters)
         assertThat(port.publishedRevisionIdFor("none", java.time.Instant.parse("2020-01-01T00:00:00Z"))).isNull()
-        assertThat(meters.find("billing.revision_pin.fallback_to_current").counter()).isNull()
+        assertThat(meters.find("openbank.billing.revision_pin.fallback_to_current").counter()).isNull()
     }
 
     @Test

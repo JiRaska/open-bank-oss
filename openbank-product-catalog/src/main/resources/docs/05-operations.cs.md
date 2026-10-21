@@ -51,6 +51,7 @@ Služba se konfiguruje přes `application.yaml`. Bankovní profil vyžaduje Post
 | `CATALOG_SCOPE_CLAIM` | `scope` | JWT claim se scopes |
 | `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral mapování oprávnění |
 | `OPENBANK_CATALOG_PACKS` | bank: `banking,insurance,retirement`; standalone: prázdné | explicitní výběr důvěryhodných packů |
+| `CATALOG_PENSION_LEGAL_SCOPE` / `CATALOG_PENSION_PRODUCT_SCOPE` | `pension:legal-approve` / `pension:product-approve` | scope, který spolu s realm rolí uděluje schvalovací autoritu (`openbank.catalog.approval.authorities.*`) |
 | `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | bank: `true`; standalone: `false` | zapnutí legacy bankovního API, seedů a projekce |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | bezpečnostní hlavičky | CSP, HSTS, X-Frame-Options, nosniff atd. |
@@ -111,6 +112,10 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ## Release
 
 Vydávaný komponent (má `version.txt`). Verzování/changelog vlastní release-please z Conventional Commits ([ADR 0029](../../../../docs/adr/0029-versioning-release-and-governance-as-code.md)). Neupravuj `version.txt` ručně ve feature PR. Změny API kontraktu zvedají `openapi.yaml:info.version` nezávisle ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
 
 ## Sdílené závislosti sestavení
 

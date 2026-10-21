@@ -8,6 +8,7 @@ import io.vertx.core.json.JsonObject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
+import jakarta.persistence.IdClass
 import jakarta.persistence.Table
 import jakarta.persistence.Version
 import org.hibernate.annotations.JdbcTypeCode
@@ -112,11 +113,11 @@ class CatalogRevisionEntity {
     @Column(name = "content_hash")
     var contentHash: String? = null
 
-    @Column(name = "pension_approval_digest")
-    var pensionApprovalDigest: String? = null
+    @Column(name = "approval_digest")
+    var approvalDigest: String? = null
 
-    @Column(name = "pension_approved_effective_to")
-    var pensionApprovedEffectiveTo: Instant? = null
+    @Column(name = "approved_effective_to")
+    var approvedEffectiveTo: Instant? = null
 
     @Column(name = "created_at")
     lateinit var createdAt: Instant
@@ -186,8 +187,8 @@ class CatalogApprovalEntity {
 }
 
 @Entity
-@Table(name = "pension_revision_approvals")
-class PensionRevisionApprovalEntity {
+@Table(name = "catalog_revision_role_approvals")
+class RevisionRoleApprovalEntity {
     @Id lateinit var id: UUID
 
     @Column(name = "revision_id")
@@ -201,6 +202,28 @@ class PensionRevisionApprovalEntity {
     @Column(name = "approved_at")
     lateinit var approvedAt: Instant
 }
+
+@Entity
+@Table(name = "catalog_schema_approval_policies")
+@IdClass(SchemaApprovalPolicyKey::class)
+class SchemaApprovalPolicyEntity {
+    @Id
+    @Column(name = "schema_id")
+    lateinit var schemaId: String
+
+    @Id
+    @Column(name = "schema_version")
+    var schemaVersion: Int = 0
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    lateinit var policy: JsonObject
+
+    @Column(name = "registered_at")
+    lateinit var registeredAt: Instant
+}
+
+data class SchemaApprovalPolicyKey(var schemaId: String = "", var schemaVersion: Int = 0) : java.io.Serializable
 
 @Entity
 @Table(name = "catalog_audit")

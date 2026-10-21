@@ -191,7 +191,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     const main = page.locator('#main-content:visible')
     await expect(main).toHaveCount(1)
     await expect(main.locator('.stat-card')
-      .filter({ has: page.locator('.stat-label', { hasText: /^Services$/ }) })
+      .filter({ has: page.locator('.stat-label', { hasText: /^Components$/ }) })
       .locator('.stat-value').first()).toHaveText('2')
 
     // Anchor on the LABEL element with an exact-match regex: a plain `hasText: 'GO'` is a
@@ -209,7 +209,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     const [go, nogo] = [await colourOf('GO'), await colourOf('NO-GO')]
     expect(go).not.toBe(nogo)
 
-    const plain = await colourOf('Services')
+    const plain = await colourOf('Components')
     expect(plain).not.toBe(go)
   })
 

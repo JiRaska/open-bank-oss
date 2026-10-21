@@ -46,6 +46,10 @@ Note the **separate management port 8085** (`quarkus.management.port`), so probe
 
 > **Gotcha (from the source comments):** do **not** declare `client-secret` in `application.yaml` with a `${UPSTREAM_OIDC_CLIENT_SECRET:}` expansion — an ENV-form property name resolves unreliably and silently yields `""`, making every token fetch 401. Supply it via the env var `OPENBANK_UPSTREAM_CLIENT_SECRET` (standard ENV→dotted-property mapping).
 
+## Shared ephemeral state
+
+Nearby-payment sessions are stored in shared Redis rather than a pod's local memory, so any customer-edge replica can resolve the receiver's token. Each session expires after five minutes; keep Redis connectivity and TTL behavior consistent across replicas when changing this backend. The service's `check`/`build` lifecycle runs the cross-replica Redis test in its own JVM after the regular suite; running `:openbank-customer-edge:test` alone does not run that test.
+
 ## Health checks
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC running.
@@ -91,6 +95,10 @@ Symptom: every proxied call returns `{"error":"upstream unavailable"}`.
 ### 403 on a read the customer expects to own
 
 This is the IDOR guard working as designed: the `accountId` did not resolve to the JWT party. Confirm the account belongs to the calling party in account-service; a 403 is returned (not 404) deliberately, to avoid an existence oracle.
+
+## Metric naming
+
+Every custom Micrometer counter is registered with the `openbank.` prefix (the `metric-name-prefix` CI gate rejects a new unprefixed name). Prometheus scrapes dots as underscores and appends `_total` to counters: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` and `openbank_feedback_emit_failures_total`. Older unprefixed names (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) are no longer emitted once this version is deployed, so dashboards and alerts must use the prefixed names; the in-repo PrometheusRules already do.
 
 ## Deploy / release
 

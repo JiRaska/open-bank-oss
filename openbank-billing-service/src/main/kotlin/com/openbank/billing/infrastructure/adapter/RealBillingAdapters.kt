@@ -116,7 +116,7 @@ class RestProductRevisionPort(
         // an account that falls back here is priced by a revision that did not exist when it was opened.
         val current = lookup(productId, null)
         if (current != null) {
-            meters.counter("billing.revision_pin.fallback_to_current").increment()
+            meters.counter("openbank.billing.revision_pin.fallback_to_current").increment()
             log.warnf("no revision of product %s was effective at %s; pinning the current one", productId, effectiveAt)
         }
         return current
@@ -142,7 +142,7 @@ class RestProductRevisionPort(
         require(revision.id == revisionId) { "catalog answered revision ${revision.id} for $revisionId" }
         val terms = toTerms(revision)
         if (terms.accountingClassSource == AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE) {
-            meters.counter("billing.accounting_class.derived", "source", "legacy_product_type").increment()
+            meters.counter("openbank.billing.accounting_class.derived", "source", "legacy_product_type").increment()
         }
         // Only an immutable revision may be cached.
         if (revision.state == "PUBLISHED" || revision.state == "SUPERSEDED") {
@@ -219,7 +219,7 @@ class RestProductRevisionPort(
     /** A component billing cannot price is DROPPED, never silently: counted and logged by reason. */
     private fun reportDropped(revisionId: String, dropped: List<Pair<String, String>>) {
         dropped.forEach { (code, reason) ->
-            meters.counter("billing.fee.component.dropped", "reason", reason).increment()
+            meters.counter("openbank.billing.fee.component.dropped", "reason", reason).increment()
             log.warnf("revision %s: fee component %s is not billable: %s", revisionId, code, reason)
         }
     }

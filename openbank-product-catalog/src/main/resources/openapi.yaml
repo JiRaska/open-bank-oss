@@ -6,7 +6,7 @@ info:
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
   # 2.4.0 -> 2.5.0 (ADR-0341): additive GET /api/v2/legacy-products/{productId}/published-revision, the
   # revision a contract pins when it still knows a product only by its v1 id.
-  version: 2.5.0
+  version: 2.7.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -38,8 +38,10 @@ tags:
     description: Durable pull cursor for standalone change delivery
   - name: Catalog V2
     description: Generated runtime contract for the governed generic catalog
+  - name: Revision Approvals
+    description: Independent role-qualified approval evidence for schemas whose pack declares an approval policy
   - name: Pension Approvals
-    description: Independent legal and product evidence for pension pack v2 revisions
+    description: Deprecated alias of Revision Approvals (#13429)
 security:
   - bearerAuth: []
 paths:
@@ -597,11 +599,64 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals:
+    get:
+      tags: [Revision Approvals]
+      operationId: listRevisionApprovalsV2
+      summary: List role approvals recorded for a revision's current content and effective interval
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Approval metadata matching the revision's current content and effective interval
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RevisionApprovalResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/approvals/{role}:
+    post:
+      tags: [Revision Approvals]
+      operationId: approveRevisionV2
+      summary: Record one immutable, authenticated approval by a role the revision's pack policy declares
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: role
+          in: path
+          required: true
+          description: A role code declared by the approval policy of the revision's schema (pack.json).
+          schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevisionApprovalRequest' }
+      responses:
+        '201':
+          description: Immutable approval evidence recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevisionApprovalResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals:
     get:
       tags: [Pension Approvals]
       operationId: listPensionRevisionApprovalsV2
-      summary: List role approvals recorded for a pension catalog revision
+      deprecated: true
+      summary: Deprecated alias of listRevisionApprovalsV2 (#13429)
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -620,7 +675,8 @@ paths:
     post:
       tags: [Pension Approvals]
       operationId: approvePensionRevisionV2
-      summary: Record one immutable, authenticated, role-qualified approval of an exact draft
+      deprecated: true
+      summary: Deprecated alias of approveRevisionV2 (#13429)
       parameters:
         - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -780,13 +836,29 @@ components:
       description: Strong optimistic-concurrency token for this product representation.
       schema: { type: string, pattern: '^"[0-9]+"$' }
   schemas:
+    RevisionApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 4096 }
+    RevisionApprovalResponse:
+      type: object
+      additionalProperties: false
+      required: [role, digest, approvedAt]
+      properties:
+        role: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
+        digest: { type: string, pattern: '^[0-9a-f]{64}$' }
+        approvedAt: { type: string, format: date-time }
     PensionApprovalRequest:
+      deprecated: true
       type: object
       additionalProperties: false
       required: [reason]
       properties:
         reason: { type: string, minLength: 1, maxLength: 4096 }
     PensionApprovalResponse:
+      deprecated: true
       type: object
       additionalProperties: false
       required: [role, digest, approvedAt]
@@ -825,7 +897,32 @@ components:
         document: { type: object, additionalProperties: true }
         sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
         registeredAt: { type: string, format: date-time }
+        approvalPolicy:
+          $ref: '#/components/schemas/RevisionApprovalPolicy'
+          description: >-
+            Role approvals the pack requires before a revision of this exact schema version may
+            publish; absent when publication is maker-checker only. Internal authorities stay private.
       required: [id, version, document, sha256, registeredAt]
+    RevisionApprovalPolicy:
+      type: object
+      additionalProperties: false
+      required: [roles, requireEffectiveFrom, requiredAttributes]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/RevisionApprovalRole' }
+        requireEffectiveFrom: { type: boolean }
+        requiredAttributes:
+          type: object
+          description: Top-level attribute values a draft must carry before any role may approve it.
+          additionalProperties: { type: string }
+    RevisionApprovalRole:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
     SchemaViolation:
       type: object
       additionalProperties: false
@@ -1036,8 +1133,24 @@ components:
         checkerId: { type: [string, 'null'] }
         reason: { type: [string, 'null'] }
         contentHash: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
-        pensionApprovalDigest: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
-        pensionApprovedEffectiveTo: { type: [string, 'null'], format: date-time }
+        approvalDigest:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: Content digest the pack-declared role approvals covered, frozen at publication.
+        approvedEffectiveTo:
+          type: [string, 'null']
+          format: date-time
+          description: Effective-to the approvers saw; a successor may shorten effectiveTo, never this.
+        pensionApprovalDigest:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          deprecated: true
+          description: Deprecated alias of approvalDigest (#13429).
+        pensionApprovedEffectiveTo:
+          type: [string, 'null']
+          format: date-time
+          deprecated: true
+          description: Deprecated alias of approvedEffectiveTo (#13429).
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }

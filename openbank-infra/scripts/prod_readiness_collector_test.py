@@ -135,20 +135,36 @@ class CollectorScorerTest(unittest.TestCase):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("money_path_services:\n" + "".join(f"    - {e}\n" for e in entries))
 
+    def runnable_module(self, name):
+        module = self.root / name
+        (module / "src" / "main").mkdir(parents=True, exist_ok=True)
+        (module / "build.gradle.kts").write_text(
+            'plugins { id("openbank.quarkus-service") }\n'
+            'implementation(project(":openbank-libs-runtime"))\n'
+        )
+        return module
+
     def test_all_services_includes_a_money_path_module_the_glob_would_miss(self):
         """openbank-sepa-payment has no `-service` suffix, so the glob alone dropped it — and with
         it every headline the matrix printed (#2364)."""
         self.write_rules()
-        (self.root / "openbank-ledger-service").mkdir(exist_ok=True)
-        (self.root / "openbank-sepa-payment").mkdir(exist_ok=True)
+        self.runnable_module("openbank-ledger-service")
+        self.runnable_module("openbank-sepa-payment")
         services = self.mod.all_services()
         self.assertIn("sepa-payment", services)
         self.assertIn("ledger", services)
 
-    def test_all_services_skips_a_declared_module_with_no_directory(self):
+    def test_all_services_fails_closed_for_a_declared_money_path_module_without_runnable_marker(self):
         self.write_rules(("openbank-ledger-service", "openbank-ghost-service"))
-        (self.root / "openbank-ledger-service").mkdir(exist_ok=True)
-        self.assertNotIn("ghost", self.mod.all_services())
+        self.runnable_module("openbank-ledger-service")
+        with self.assertRaisesRegex(RuntimeError, "ghost"):
+            self.mod.all_services()
+
+    def test_all_services_keeps_runnable_module_without_gitops_workload(self):
+        self.write_rules(("openbank-ledger-service",))
+        self.runnable_module("openbank-ledger-service")
+        self.runnable_module("openbank-analytics-sink")
+        self.assertEqual(self.mod.all_services(), ["analytics-sink", "ledger"])
 
     def test_money_path_comes_from_rules_yaml_not_a_literal(self):
         """The hardcoded set named 14 while rules.yaml declared 20, so six declared money-path

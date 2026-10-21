@@ -120,13 +120,17 @@ export function parseImageVersion(component: string, image: string): string | nu
   return null
 }
 
-/** Aggregate `count by (image)` rows into distinct running versions per component. */
+/** Aggregate running-container image rows into distinct running versions per component. */
 export interface LiveImageVersion extends LiveVersion { observedAt: string }
 
-export function aggregateImages(rows: { image: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
+export function aggregateImages(rows: { image: string; container?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
   const out: Record<string, Map<string, { count: number; observedAt: string }>> = {}
-  for (const { image, count, observedAt } of rows) {
+  for (const { image, container, count, observedAt } of rows) {
     for (const component of Object.keys(IMAGE_PATTERNS)) {
+      // Kafka's exporter is a separate Strimzi pod and can carry a Kafka-derived image tag.
+      // Only the broker container is evidence for the broker version; a missing or different
+      // container role must remain unknown rather than becoming a version observation.
+      if (component === 'kafka' && container !== 'kafka') continue
       const v = parseImageVersion(component, image)
       if (v) {
         const m = (out[component] ??= new Map())
@@ -224,12 +228,12 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
   const imageRows = rows(images)
   const freshImageRows = (imageRows ?? [])
     .filter(r => r.metric.image && Number.isFinite(r.value))
-    .map(r => ({ image: r.metric.image, sampledAtMs: r.value * 1000 }))
+    .map(r => ({ image: r.metric.image, container: r.metric.container, sampledAtMs: r.value * 1000 }))
     .filter(r => {
       const ageMs = fetchedAt.getTime() - r.sampledAtMs
       return ageMs >= -30_000 && ageMs <= IMAGE_SAMPLE_MAX_AGE_MS
     })
-    .map(r => ({ image: r.image, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
+    .map(r => ({ image: r.image, container: r.container, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
   const components = aggregateImages(freshImageRows)
 
   const readyRows = rows(ready)
