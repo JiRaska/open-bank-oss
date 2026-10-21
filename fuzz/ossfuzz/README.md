@@ -20,12 +20,19 @@ statement imports, webhook payloads) — one object with a
 ## Local run
 
 ```bash
-./gradlew :openbank-libs-domain:classes           # from the repo root
-cd fuzz/ossfuzz && gradle shadowJar               # standalone build (deliberately
-                                                  # not in the root settings)
+./gradlew :openbank-libs-domain:classes :openbank-libs-iso20022:classes
+./gradlew -p fuzz/ossfuzz test shadowJar           # standalone build, root wrapper
 # https://github.com/CodeIntelligenceTesting/jazzer/releases
 jazzer --cp=build/libs/ossfuzz-all.jar --target_class=com.openbank.fuzz.Pacs008ReaderFuzzer
 ```
+
+Run the last command from `fuzz/ossfuzz` with a Jazzer driver that supports JDK 25 bytecode
+(the 0.22.1 driver does not; the harness's API dependency is separate). Bound local runs with
+`-max_total_time=60 -max_len=65536` and put generated corpus/crash artifacts outside tracked
+sources. Keep the driver version, JVM and budget with the results. The public seed is a reader
+example, not an XSD-valid recovery oracle: the harness builds its own complete message and checks
+exact fields after every arbitrary input. Corpus regression tests run before coverage-guided
+fuzzing in `ossfuzz-build.sh`, and separately in `libs-quality.yml`.
 
 ## Files for google/oss-fuzz `projects/openbank/`
 

@@ -49,6 +49,8 @@ import com.openbank.productcatalog.generated.model.CatalogSchema as GeneratedCat
 import com.openbank.productcatalog.generated.model.MarketContext as GeneratedMarketContext
 import com.openbank.productcatalog.generated.model.Offering as GeneratedOffering
 import com.openbank.productcatalog.generated.model.ProductRevision as GeneratedProductRevision
+import com.openbank.productcatalog.generated.model.RevisionApprovalPolicy as GeneratedRevisionApprovalPolicy
+import com.openbank.productcatalog.generated.model.RevisionApprovalRole as GeneratedRevisionApprovalRole
 import com.openbank.productcatalog.generated.model.RevisionContent as GeneratedRevisionContent
 import com.openbank.productcatalog.generated.model.SchemaRef as GeneratedSchemaRef
 import com.openbank.productcatalog.generated.model.SchemaViolation as GeneratedSchemaViolation
@@ -336,6 +338,13 @@ class GenericCatalogResource(
             .entries.associate { it.key.toString() to it.value as Any },
         sha256 = schema.sha256,
         registeredAt = schema.registeredAt.atOffset(ZoneOffset.UTC),
+        approvalPolicy = schema.approvalPolicy?.let { policy ->
+            GeneratedRevisionApprovalPolicy(
+                roles = policy.roles.map { GeneratedRevisionApprovalRole(code = it.code) },
+                requireEffectiveFrom = policy.requireEffectiveFrom,
+                requiredAttributes = policy.requiredAttributes,
+            )
+        },
     )
 
     private fun specificationResponse(specification: ProductSpecification) = GeneratedSpecification(

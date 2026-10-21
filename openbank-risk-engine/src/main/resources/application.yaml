@@ -96,12 +96,6 @@ quarkus:
       attributes:
         service.name: openbank-risk-engine
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
-
   dev-ui:
     enabled: false
 
@@ -751,12 +745,27 @@ openbank:
     # Not declared: an open FX position per currency — the snapshot carries no FX derivative legs and
     # the ledger's FX revaluation accounts (1990-1997) are not modelled, so no net open position is
     # computable from the data.
+    # ADR-0344 D8: historical-simulation VaR over the stored curve-set and FX-fixing history. Fewer
+    # complete scenarios than minimum-scenarios in the window answers an explicit data gap, never a
+    # number (the ADR-0097 rule). 250 scenarios is the customary one-year minimum; the window is in
+    # calendar days and must hold that many recorded curve-set days.
+    var:
+      minimum-scenarios: 250
+      window-days: 400
+      # Wall-clock budget per VaR request (full revaluation per scenario); past it the work stops
+      # and the call answers 503 COMPUTATION_TIMEOUT. Same for the two budgets below.
+      timeout: 30S
+    pricing:
+      timeout: 5S
+    valuation:
+      timeout: 10S
     limits:
       parameter-set-id: openbank-risk-appetite
       parameter-sets:
         openbank-risk-appetite:
-          version: "1"
-          source: "Regulatory minima (CRR, Delegated Regulations (EU) 2015/61 and 2024/856) as limits; every early-warning threshold is a risk-appetite POLICY choice awaiting ALCO sign-off"
+          # v2 (ADR-0344 D8): adds the own-book PV01 and VaR limits.
+          version: "2"
+          source: "Regulatory minima (CRR, Delegated Regulations (EU) 2015/61 and 2024/856) as limits; every early-warning threshold, and the PV01 and VaR limits themselves, are risk-appetite POLICY choices awaiting ALCO sign-off"
           limits:
             lcr-min:
               metric: lcr
@@ -783,6 +792,18 @@ openbank:
               limit: 0.25
               early-warning: 0.20
               citation: "CRR Art. 395(1): exposure to one client or group at most 25 % of Tier 1; the EUR 150m alternative for institutions is NOT applied (conservative); early warning 20 % POLICY"
+            # ADR-0344 D8: market-risk appetite of the own treasury book, in CZK. No regulatory minimum
+            # exists for either figure; both levels are POLICY placeholders sized for the sandbox book.
+            own-book-pv01-max:
+              metric: pv01
+              limit: 500000
+              early-warning: 400000
+              citation: "Risk appetite POLICY: absolute PV01 of the own treasury book at most CZK 500k per bp; early warning CZK 400k"
+            own-book-var-max:
+              metric: var-99-1d
+              limit: 25000000
+              early-warning: 20000000
+              citation: "Risk appetite POLICY: 99 % one-day historical-simulation VaR of the own treasury book at most CZK 25m; early warning CZK 20m"
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

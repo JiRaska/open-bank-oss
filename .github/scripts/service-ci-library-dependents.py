@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build modules affected by a small shared library change in Services CI.
+"""Build modules affected by shared library changes in CI or deployment.
 
-The two scoped libraries have a small consumer graph. Read the Gradle project
+The scoped libraries have a small consumer graph. Read the Gradle project
 declarations, including test dependencies, and follow transitive edges. Unknown
 dependency syntax or a convention-plugin reference falls back to the full matrix.
 """
@@ -13,10 +13,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+from library_dependency_graph import read_dependencies, reverse_dependents
+
 
 ROOT = Path(__file__).resolve().parents[2]
-SCOPED = {"openbank-libs-lending", "openbank-libs-iso20022"}
-PROJECT = re.compile(r'project\(\s*"(:openbank-[^"]+)"\s*\)')
+SCOPED = {"openbank-libs-lending", "openbank-libs-iso20022", "openbank-libs-finance"}
+RUNTIME_CHANGE = re.compile(
+    r"^(openbank-(?:libs(?:-[A-Za-z0-9._-]+)?|client-[A-Za-z0-9._-]+))/"
+    r"(?:src/main(?:/|$)|build\.gradle\.kts$|gradle/)"
+)
 
 
 def affected(root: Path, changed: list[str], buildable: set[str]) -> set[str]:
@@ -39,30 +44,32 @@ def affected(root: Path, changed: list[str], buildable: set[str]) -> set[str]:
     if any(path.endswith("/build.gradle.kts") and path.split("/", 1)[0] not in seeds for path in changed):
         return buildable
 
-    # A convention plugin can add project dependencies outside a module's build file.
-    # Until that relationship is modelled here, it requires the full matrix.
-    for script in [root / "build.gradle.kts", *root.glob("build-logic/**/*.gradle.kts")]:
-        if script.is_file() and any(name in script.read_text() for name in seeds):
-            return buildable
+    return consumers(root, seeds, buildable, include_tests=True)
 
-    dependencies: dict[str, set[str]] = {}
-    for script in root.glob("openbank-*/build.gradle.kts"):
-        source = re.sub(r"//[^\n]*", "", script.read_text())
-        matches = list(PROJECT.finditer(source))
-        refs = {match.group(1)[1:] for match in matches}
-        # Dynamic project(...) declarations cannot be enumerated safely.
-        if len(re.findall(r"\bproject\s*\(", source)) != len(matches):
-            return buildable
-        dependencies[script.parent.name] = refs
-    if not seeds <= dependencies.keys():
+
+def consumers(root: Path, seeds: set[str], buildable: set[str], include_tests: bool) -> set[str]:
+    graph = read_dependencies(root, include_tests)
+    if graph is None:
+        return buildable
+    try:
+        return reverse_dependents(graph, seeds) & buildable
+    except ValueError:
         return buildable
 
-    closure = set(seeds)
-    while True:
-        new = closure | {name for name, refs in dependencies.items() if refs & closure}
-        if new == closure:
-            return closure & buildable
-        closure = new
+
+def runtime_affected(root: Path, changed: list[str], buildable: set[str]) -> set[str]:
+    """Deployment follows runtime edges; test-only changes never seed a rollout.
+
+    Global build inputs remain the shell caller's responsibility. A concurrent
+    consumer build-file change may remove an edge from the checked-out graph:
+    without a trustworthy before graph, rebuild the complete deployable set.
+    """
+    seeds = {match.group(1) for path in changed if (match := RUNTIME_CHANGE.match(path))}
+    if not seeds:
+        return set()
+    if any(path.endswith("/build.gradle.kts") and path.split("/", 1)[0] not in seeds for path in changed):
+        return buildable
+    return consumers(root, seeds, buildable, include_tests=False)
 
 
 def self_test() -> int:
@@ -88,8 +95,17 @@ def self_test() -> int:
         assert affected(root, changed + ["openbank-lending-service/build.gradle.kts"], all_modules) == all_modules
         assert affected(root, ["openbank-libs-lending/src/test/kotlin/X.kt"], all_modules) == expected
         assert affected(root, ["openbank-unrelated/src/main/kotlin/X.kt"], all_modules) == set()
+        assert runtime_affected(root, changed, all_modules) == {
+            "openbank-libs-lending", "openbank-lending-service",
+        }
+        assert runtime_affected(root, ["openbank-libs-lending/src/test/kotlin/X.kt"], all_modules) == set()
+        assert runtime_affected(root, ["openbank-libs-lending/docs/README.md"], all_modules) == set()
+        assert runtime_affected(root, ["openbank-libs-new/src/main/kotlin/X.kt"], all_modules) == all_modules
+        assert runtime_affected(root, changed + ["openbank-lending-service/build.gradle.kts"], all_modules) == all_modules
+        assert runtime_affected(root, changed, {"openbank-unrelated"}) == set()
         (root / "openbank-unrelated" / "build.gradle.kts").write_text("implementation(project(dynamicName))")
         assert affected(root, changed, all_modules) == all_modules
+        assert runtime_affected(root, changed, all_modules) == all_modules
     # Prove the current repository still has a bounded, non-empty real graph.
     modules = {p.parent.name for p in ROOT.glob("openbank-*/build.gradle.kts")}
     actual = affected(ROOT, ["openbank-libs-lending/src/main/kotlin/X.kt"], modules)
@@ -106,14 +122,18 @@ def self_test() -> int:
         if "if grep -qE '^(openbank-libs/" in line:
             assert "openbank-libs-lending/" not in line
             assert "openbank-libs-iso20022/" not in line
-    print(f"self-test OK: lending {len(actual)}, ISO 20022 {len(iso)} of {len(modules)} modules")
+    finance = affected(ROOT, ["openbank-libs-finance/src/main/kotlin/X.kt"], modules)
+    assert "openbank-libs-finance" in finance and finance != modules
+    print(f"self-test OK: lending {len(actual)}, ISO 20022 {len(iso)}, finance {len(finance)} of {len(modules)} modules")
     return 0
 
 
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         raise SystemExit(self_test())
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: service-ci-library-dependents.py '<buildable modules>' < changed-files")
-    selected = affected(ROOT, [line.strip() for line in sys.stdin if line.strip()], set(sys.argv[1].split()))
+    runtime = len(sys.argv) == 3 and sys.argv[1] == "--runtime"
+    if not runtime and len(sys.argv) != 2:
+        raise SystemExit("usage: service-ci-library-dependents.py [--runtime] '<buildable modules>' < changed-files")
+    resolver = runtime_affected if runtime else affected
+    selected = resolver(ROOT, [line.strip() for line in sys.stdin if line.strip()], set(sys.argv[-1].split()))
     print("\n".join(sorted(selected)))
