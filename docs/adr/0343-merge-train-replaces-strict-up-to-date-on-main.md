@@ -328,6 +328,22 @@ green base proves nothing about the breakage and is not treated as a fix. A fix 
 combination shows up on main's own next push run, as any red main does. When main is green none
 of this applies and the strict lane behaves exactly as before.
 
+*Every lane, not only the strict lane (#13400).* Rule 3 originally applied only to manual-lane PRs,
+and a red main also reached the other two lanes: a train built over the red tip came back red on the
+main-red context whatever its members did, and settle named its single member the culprit for a
+check main itself was failing. So, while `main_red` is non-empty:
+4. **a fix is served first in every lane**: a train/fast-lane candidate that passes the same
+   `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
+   lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
+   merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+5. **no train is planned over a red main**: it could only come back red on the main-red context,
+   so building it would spend a CI run to learn nothing; the fast lane is unchanged;
+6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
+   inconclusive (closed, no status, no comment, no bisect); a carrier also red on a context main is
+   green on still blames, and the culprit status names only those contexts.
+And every open PR leaves a decision line in the settle log, armed or not: a disarmed or draft PR was
+filtered out in silence, so a log with no line for it could not say whether it was ever seen.
+
 ### What the train is NOT
 
 It is not a replacement for a PR's own CI: a PR that is red on its own head never qualifies. It is
