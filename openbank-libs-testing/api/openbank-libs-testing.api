@@ -1,0 +1,244 @@
+public abstract class com/openbank/libs/testing/approval/ApprovalEndpointConformance {
+	public fun <init> ()V
+	public final fun a null body is rejected before the identity is read ()V
+	public final fun an absent principal decides as the literal anonymous id ()V
+	public final fun an unknown or already-decided id is a 404 ()V
+	protected abstract fun bind (Lcom/openbank/libs/approval/ApprovalStore;Lio/quarkus/security/identity/SecurityIdentity;)Lcom/openbank/libs/testing/approval/ApprovalEndpointConformance$Endpoint;
+	public final fun decide carries the pinned roles and authorization action ()V
+	public final fun decide passes the authenticated principal name as checker ()V
+	protected abstract fun getDecideSecurity ()Lcom/openbank/libs/testing/approval/ApprovalEndpointConformance$EndpointSecurity;
+	protected abstract fun getListPendingSecurity ()Lcom/openbank/libs/testing/approval/ApprovalEndpointConformance$EndpointSecurity;
+	protected abstract fun getResourceClass ()Ljava/lang/Class;
+	public final fun listPending carries the pinned roles and authorization action ()V
+	public final fun listPending clamps a caller-controlled limit ()V
+	public final fun listPending serves the store's queue ()V
+	public final fun self-approval refused by the store propagates ()V
+}
+
+public abstract interface class com/openbank/libs/testing/approval/ApprovalEndpointConformance$Endpoint {
+	public abstract fun decide (Ljava/lang/String;Ljava/lang/Boolean;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public abstract fun listPending (ILkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/openbank/libs/testing/approval/ApprovalEndpointConformance$EndpointSecurity {
+	public fun <init> (Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/util/Set;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/testing/approval/ApprovalEndpointConformance$EndpointSecurity;
+	public static synthetic fun copy$default (Lcom/openbank/libs/testing/approval/ApprovalEndpointConformance$EndpointSecurity;Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/testing/approval/ApprovalEndpointConformance$EndpointSecurity;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAction ()Ljava/lang/String;
+	public final fun getResource ()Ljava/lang/String;
+	public final fun getRoles ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/testing/audit/AuditEventTime {
+	public static final field INSTANCE Lcom/openbank/libs/testing/audit/AuditEventTime;
+	public final fun assertRecordedAsEventTime (Ljava/lang/String;Ljava/time/Instant;)V
+	public final fun classify (Ljava/lang/String;)Lcom/openbank/libs/testing/audit/AuditEventTime$Source;
+	public final fun eventTimeOf (Ljava/lang/String;)Ljava/time/Instant;
+}
+
+public final class com/openbank/libs/testing/audit/AuditEventTime$Source : java/lang/Enum {
+	public static final field EVENT Lcom/openbank/libs/testing/audit/AuditEventTime$Source;
+	public static final field INGEST Lcom/openbank/libs/testing/audit/AuditEventTime$Source;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/testing/audit/AuditEventTime$Source;
+	public static fun values ()[Lcom/openbank/libs/testing/audit/AuditEventTime$Source;
+}
+
+public final class com/openbank/libs/testing/authz/AllowAllPolicyDecisionPoint : com/openbank/libs/authz/PolicyDecisionPoint {
+	public fun <init> ()V
+	public fun allow (Lcom/openbank/libs/authz/AuthzQuery;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract class com/openbank/libs/testing/authz/RestAuthzConformanceTest {
+	public fun <init> ()V
+	public final fun every REST endpoint carries RolesAllowed ()V
+	protected abstract fun getResourceClasses ()Ljava/util/List;
+	public final fun no REST endpoint is PermitAll ()V
+}
+
+public final class com/openbank/libs/testing/containers/DockerRequirement {
+	public static final field INSTANCE Lcom/openbank/libs/testing/containers/DockerRequirement;
+	public final fun require (ZLjava/lang/String;)V
+	public static synthetic fun require$default (Lcom/openbank/libs/testing/containers/DockerRequirement;ZLjava/lang/String;ILjava/lang/Object;)V
+}
+
+public abstract class com/openbank/libs/testing/containers/PostgresBase : io/quarkus/test/common/QuarkusTestResourceLifecycleManager {
+	public static final field Companion Lcom/openbank/libs/testing/containers/PostgresBase$Companion;
+	public static final field POSTGRES_IMAGE Ljava/lang/String;
+	public fun <init> (Ljava/lang/String;)V
+	protected final fun getResourceScopeId ()Ljava/lang/String;
+	public fun init (Ljava/util/Map;)V
+	protected final fun postgresConfig (Lorg/testcontainers/containers/PostgreSQLContainer;)Ljava/util/Map;
+	protected final fun startPostgres ()Lorg/testcontainers/containers/PostgreSQLContainer;
+	public fun stop ()V
+}
+
+public final class com/openbank/libs/testing/containers/PostgresBase$Companion {
+}
+
+public final class com/openbank/libs/testing/containers/PostgresRedisTestResource : com/openbank/libs/testing/containers/PostgresBase {
+	public fun <init> ()V
+	public fun start ()Ljava/util/Map;
+	public fun stop ()V
+}
+
+public final class com/openbank/libs/testing/containers/PostgresRedpandaRedisTestResource : com/openbank/libs/testing/containers/PostgresBase {
+	public fun <init> ()V
+	public fun start ()Ljava/util/Map;
+	public fun stop ()V
+}
+
+public final class com/openbank/libs/testing/containers/PostgresRedpandaTestResource : com/openbank/libs/testing/containers/PostgresBase {
+	public fun <init> ()V
+	public fun start ()Ljava/util/Map;
+	public fun stop ()V
+}
+
+public final class com/openbank/libs/testing/containers/PostgresTestResource : com/openbank/libs/testing/containers/PostgresBase {
+	public fun <init> ()V
+	public fun start ()Ljava/util/Map;
+}
+
+public final class com/openbank/libs/testing/evidence/TestInfrastructureEvidence {
+	public static final field INSTANCE Lcom/openbank/libs/testing/evidence/TestInfrastructureEvidence;
+	public final fun record (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;)V
+	public static synthetic fun record$default (Lcom/openbank/libs/testing/evidence/TestInfrastructureEvidence;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;ILjava/lang/Object;)V
+}
+
+public final class com/openbank/libs/testing/lock/NoOpClusterLock : com/openbank/libs/persistence/lock/ClusterLock {
+	public fun <init> ()V
+	public fun tryRunExclusively (Ljava/lang/String;Lkotlin/jvm/functions/Function1;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public final class com/openbank/libs/testing/money/MoneyArb {
+	public static final field INSTANCE Lcom/openbank/libs/testing/money/MoneyArb;
+	public final fun currency ()Lio/kotest/property/Arb;
+	public final fun money (Ljava/lang/String;Lkotlin/ranges/LongRange;)Lio/kotest/property/Arb;
+	public static synthetic fun money$default (Lcom/openbank/libs/testing/money/MoneyArb;Ljava/lang/String;Lkotlin/ranges/LongRange;ILjava/lang/Object;)Lio/kotest/property/Arb;
+}
+
+public final class com/openbank/libs/testing/money/MoneyTestData {
+	public static final field INSTANCE Lcom/openbank/libs/testing/money/MoneyTestData;
+	public final fun balancedPair (Ljava/lang/String;Ljava/lang/String;)Lkotlin/Pair;
+	public final fun boundaryAmounts (Ljava/lang/String;)Ljava/util/List;
+	public final fun getCOMMON_CURRENCIES ()Ljava/util/List;
+	public final fun largeNegative (Ljava/lang/String;)Lcom/openbank/libs/domain/money/Money;
+	public final fun largePositive (Ljava/lang/String;)Lcom/openbank/libs/domain/money/Money;
+	public final fun minNegative (Ljava/lang/String;)Lcom/openbank/libs/domain/money/Money;
+	public final fun minPositive (Ljava/lang/String;)Lcom/openbank/libs/domain/money/Money;
+	public final fun zero (Ljava/lang/String;)Lcom/openbank/libs/domain/money/Money;
+}
+
+public abstract class com/openbank/libs/testing/mtls/ListenerAuthParityConformance {
+	public fun <init> ()V
+	public final fun a trusted client certificate without a bearer is 401 on the mTLS listener ()V
+	public final fun a valid bearer with the certificate is served exactly as on the plain port ()V
+	public fun getAuthenticatedStatus ()I
+	public abstract fun getPath ()Ljava/lang/String;
+	public final fun the mTLS listener refuses a client that presents no certificate ()V
+	public final fun the plain HTTP listener refuses the same route without a bearer ()V
+}
+
+public final class com/openbank/libs/testing/mtls/ListenerMaterial : io/quarkus/test/common/QuarkusTestResourceLifecycleManager {
+	public static final field Companion Lcom/openbank/libs/testing/mtls/ListenerMaterial$Companion;
+	public fun <init> ()V
+	public fun start ()Ljava/util/Map;
+	public fun stop ()V
+}
+
+public final class com/openbank/libs/testing/mtls/ListenerMaterial$Companion {
+	public final fun bearer (Ljava/util/List;)Ljava/lang/String;
+	public static synthetic fun bearer$default (Lcom/openbank/libs/testing/mtls/ListenerMaterial$Companion;Ljava/util/List;ILjava/lang/Object;)Ljava/lang/String;
+	public final fun sslContext (Z)Ljavax/net/ssl/SSLContext;
+}
+
+public final class com/openbank/libs/testing/mtls/ProductionListenerKeys {
+	public static final field INSTANCE Lcom/openbank/libs/testing/mtls/ProductionListenerKeys;
+	public final fun read (Ljava/nio/file/Path;)Ljava/util/Map;
+	public static synthetic fun read$default (Lcom/openbank/libs/testing/mtls/ProductionListenerKeys;Ljava/nio/file/Path;ILjava/lang/Object;)Ljava/util/Map;
+}
+
+public abstract class com/openbank/libs/testing/mtls/ProductionListenerProfile : io/quarkus/test/junit/QuarkusTestProfile {
+	public fun <init> ()V
+	public fun extraOverrides ()Ljava/util/Map;
+	public fun extraResources ()Ljava/util/List;
+	public fun getConfigOverrides ()Ljava/util/Map;
+	public fun testResources ()Ljava/util/List;
+}
+
+public abstract class com/openbank/libs/testing/outbox/OutboxDispatchConformanceIT {
+	public fun <init> ()V
+	public final fun dispatch publishes pending rows with a stable per-aggregate key plus CloudEvents headers, marks SENT ()V
+	protected fun eventType (Ljava/lang/String;)Ljava/lang/String;
+	protected abstract fun findEntry (Ljava/util/UUID;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	protected abstract fun getChannelName ()Ljava/lang/String;
+	protected abstract fun getConnector ()Lio/smallrye/reactive/messaging/memory/InMemoryConnector;
+	protected final fun onEventLoop (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
+	public final fun one dispatch relays a batch of distinct aggregates - the publish path admits concurrent sends ()V
+	public final fun replaying dispatch after a row is SENT does not re-publish it ()V
+	protected abstract fun seed (Lcom/openbank/libs/persistence/outbox/OutboxMessage;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	protected abstract fun triggerDispatch (Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+}
+
+public abstract class com/openbank/libs/testing/outbox/OutboxRepositoryV2ConformanceIT {
+	public fun <init> ()V
+	public final fun a DISPATCHING row is reclaimed only once its claim is stale ()V
+	public final fun a failed head parks its aggregate - N+1 is not sent before N ()V
+	public final fun a failed row is scheduled with backoff, stays backlog, and becomes claimable when it is due ()V
+	protected abstract fun findEntry (Ljava/util/UUID;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	protected abstract fun getRepository ()Lcom/openbank/libs/persistence/outbox/OutboxRepositoryV2;
+	protected final fun onEventLoop (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
+	public final fun purgeSent removes only old SENT rows - PENDING, FAILED and DEAD survive ()V
+	protected abstract fun seed (Lcom/openbank/libs/persistence/outbox/OutboxMessage;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public final fun two concurrent dispatchers deliver each aggregate's events once, in created_at order ()V
+}
+
+public final class com/openbank/libs/testing/security/LocalAesGcmFieldProtector : com/openbank/libs/security/FieldProtector {
+	public fun <init> (Ljava/util/Map;[B)V
+	public fun decrypt (Ljava/lang/String;[B)[B
+	public fun encrypt ([B[B)Ljava/lang/String;
+	public fun rewrap (Ljava/lang/String;[B)Ljava/lang/String;
+	public fun tokenize (Ljava/lang/String;)Ljava/lang/String;
+	public fun tokenize (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/testing/time/MutableClock : java/time/Clock {
+	public fun <init> ()V
+	public fun <init> (Ljava/time/Instant;Ljava/time/ZoneId;)V
+	public synthetic fun <init> (Ljava/time/Instant;Ljava/time/ZoneId;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun advance (Ljava/time/Duration;)V
+	public fun getZone ()Ljava/time/ZoneId;
+	public fun instant ()Ljava/time/Instant;
+	public final fun set (Ljava/time/Instant;)V
+	public fun withZone (Ljava/time/ZoneId;)Ljava/time/Clock;
+}
+
+public final class com/openbank/libs/testing/trace/RecordingSpanExporter : io/opentelemetry/sdk/trace/export/SpanExporter {
+	public fun <init> ()V
+	public final fun contract ()Lcom/openbank/libs/testing/trace/TraceContract;
+	public fun export (Ljava/util/Collection;)Lio/opentelemetry/sdk/common/CompletableResultCode;
+	public fun flush ()Lio/opentelemetry/sdk/common/CompletableResultCode;
+	public fun shutdown ()Lio/opentelemetry/sdk/common/CompletableResultCode;
+	public final fun spans ()Ljava/util/List;
+}
+
+public final class com/openbank/libs/testing/trace/TraceContract {
+	public static final field Companion Lcom/openbank/libs/testing/trace/TraceContract$Companion;
+	public final fun hasNoErrorSpan ()Lcom/openbank/libs/testing/trace/TraceContract;
+	public final fun requiresAttribute (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
+	public final fun requiresSameTrace ([Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
+	public final fun requiresSpan (Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
+	public final fun spanCompletesWithin (Ljava/lang/String;Ljava/time/Duration;)Lcom/openbank/libs/testing/trace/TraceContract;
+	public final fun verifiedAs (Ljava/lang/String;)Lcom/openbank/libs/testing/trace/TraceContract;
+}
+
+public final class com/openbank/libs/testing/trace/TraceContract$Companion {
+	public final fun from (Ljava/util/Collection;)Lcom/openbank/libs/testing/trace/TraceContract;
+}
+

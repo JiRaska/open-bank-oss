@@ -8,3 +8,11 @@ Tato stránka zatím popisuje jen outbox limitních událostí a jeho deduplika�
 - **`risk_outbox`** je doručovací buffer. `PgRiskOutbox.recordNonOk` nejdřív zabere klíč v deduplikační tabulce a řádek outboxu vloží jen z nového záboru, v jediné transakci vyhodnocení. Přehraný EOD běh nebo dva pody tikající současně tak nezapíšou nic nového — ani poté, co byl původní řádek outboxu smazán.
 - **Retence SENT:** doručené řádky starší než `openbank.outbox.retention.sent-days` (výchozí 7) maže každou noc `OutboxSentRetentionJob` z libs-runtime. `PgRiskOutbox` před každou dávkou v téže transakci doplní způsobilé klíče do trvalé deduplikační tabulky a smaže jen řádky s trvalým záznamem. Platí to i pro starší pod, který zapsal až po jednorázovém backfillu V10. Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne. Signály: `openbank_outbox_purged_total{service="risk",status="SENT"}`, `openbank_outbox_purge_failed_total`, workflow liveness `outbox-sent-retention`.
 - **Rollback V10:** starší binárka deduplikuje jen přes `risk_outbox.dedup_key` a nerespektuje záznamy pro již smazané řádky. Před rollbackem vypněte retenci; zabrání to další ztrátě ochrany, ale neobnoví již smazané řádky. Se starší binárkou nepřehrávejte běhy, jejichž původní outbox řádky byly smazány. Deduplikační tabulku zachovejte, dokud ji některá binárka čte.
+
+## Treasury obchody, uložené peněžní toky a nástroje křivek (ADR-0344 D2, D4, D8)
+
+- **`treasury_deal`** nese druh obchodu `kind` (`ACTUAL`, `PLANNED`, `HYPOTHETICAL`; obchod z doby před V11 je `ACTUAL`), `book_id`, publikované `legs`, `schedule_hash` a `legs_error`. Obchod, jehož nohy nelze sestavit, se uloží a vykáže jako mezera v datech, nikdy se nezahodí.
+- **`treasury_deal_cash_flows`** drží poslední uloženou verzi peněžních toků obchodu. Engine tyto toky u vlastních obchodů spotřebovává a odvozuje je jen jako záložní variantu.
+- **`curve_set_quote.instrument`** je `DEPOSIT`, `FRA` nebo `SWAP`; stávající řádky jsou depozita. Unikátnost nově zahrnuje nástroj.
+- **`snapshot_run`** eviduje verzi modelu křivky a ocenění daného běhu; starší běhy ji nemají.
+- **Rollback V11:** příkazy jsou uvedeny v hlavičce migrace. Odstranění nových sloupců zahodí nohy a uložené toky; obnoví se přehráním událostí obchodů.

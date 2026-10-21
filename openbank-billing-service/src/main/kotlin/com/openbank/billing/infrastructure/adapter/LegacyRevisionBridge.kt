@@ -68,7 +68,7 @@ internal object LegacyFees {
  * Only the DEPOSIT types imply a class. A product that is not a deposit (LOAN, MORTGAGE, CREDIT_CARD,
  * OVERDRAFT, INVESTMENT) has no class billing may assume -- picking the current-account class for it
  * would be an accounting guess -- so it yields null and the assessment is a COUNTED skip
- * (`billing.assessment.skipped{reason=ACCOUNTING_CLASS_UNRESOLVED}`) until its revision carries an
+ * (`openbank.billing.assessment.skipped{reason=ACCOUNTING_CLASS_UNRESOLVED}`) until its revision carries an
  * explicit `accountingClass`.
  */
 internal object LegacyProductTypes {

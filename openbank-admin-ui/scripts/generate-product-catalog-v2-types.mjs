@@ -21,7 +21,7 @@ const input = resolve(root, 'openbank-product-catalog/src/main/resources/openapi
 const output = resolve(moduleRoot, 'src/lib/generated/product-catalog-v2.ts')
 const document = YAML.parse(readFileSync(input, 'utf8'))
 const schemas = document.components.schemas
-const selected = [
+const selected = new Set([
   'SchemaRef', 'CatalogSchema', 'Specification', 'MarketContext', 'Offering',
   'SpecificationRequest', 'OfferingRequest', 'RevisionRequest', 'PublishRequest',
   'PriceComponent', 'EligibilityOperator', 'EligibilityRule', 'OfferingRelationship', 'RevisionContent',
@@ -31,10 +31,17 @@ const selected = [
   'RevisionApprovalRequest', 'RevisionApprovalResponse', 'RevisionApprovalPolicy', 'RevisionApprovalRole',
   // Deprecated alias operations (#13429); drop with them from openapi.yaml.
   'PensionApprovalRequest', 'PensionApprovalResponse',
-]
+])
 
 function typeOf(schema = {}) {
-  if (schema.$ref) return schema.$ref.split('/').at(-1)
+  if (schema.$ref) {
+    const prefix = '#/components/schemas/'
+    if (!schema.$ref.startsWith(prefix)) throw new Error(`Unsupported schema reference: ${schema.$ref}`)
+    const name = schema.$ref.slice(prefix.length)
+    if (!Object.hasOwn(schemas, name)) throw new Error(`Missing schema reference: ${schema.$ref}`)
+    selected.add(name)
+    return name
+  }
   if (schema.enum) return schema.enum.map(value => JSON.stringify(value)).join(' | ')
   if (Array.isArray(schema.type)) return schema.type.map(type => typeOf({ ...schema, type })).join(' | ')
   if (schema.type === 'array') return `Array<${typeOf(schema.items)}>`
@@ -94,7 +101,10 @@ const operationTypes = operations.map(([id, operation]) =>
   `    request: ${operation.request ? typeOf(operation.request) : 'undefined'}\n` +
   `    response: ${operation.response}\n` +
   `  }`).join('\n')
-const body = selected.map(name => `export type ${name} = ${typeOf(schemas[name])}`).join('\n\n')
+// Set iteration includes newly discovered dependencies, while cycles are emitted only once.
+const declarations = []
+for (const name of selected) declarations.push(`export type ${name} = ${typeOf(schemas[name])}`)
+const body = declarations.join('\n\n')
 mkdirSync(dirname(output), { recursive: true })
 writeFileSync(output, `// GENERATED from openbank-product-catalog/src/main/resources/openapi.yaml. DO NOT EDIT.\n` +
   `// Run: npm run generate:catalog-types\n\n${body}\n\n` +

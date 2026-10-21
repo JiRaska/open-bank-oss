@@ -79,7 +79,7 @@ class RiskLimitsApiIT {
         val body = limits(snapshot("2024-03-04", "TIED_OUT"))
 
         assertThat(body["limitSet"]["id"].asText()).isEqualTo("openbank-risk-appetite")
-        assertThat(body["limitSet"]["version"].asText()).isEqualTo("1")
+        assertThat(body["limitSet"]["version"].asText()).isEqualTo("2")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         assertThat(body["limits"].map { it["limitId"].asText() }).containsExactlyInAnyOrder(
             "lcr-min",
@@ -87,7 +87,11 @@ class RiskLimitsApiIT {
             "total-capital-ratio-min",
             "irrbb-eve-outlier",
             "large-exposure-bank-max",
+            "own-book-pv01-max",
+            "own-book-var-max",
         )
+        // ADR-0344 D8: VaR over a single recorded day is a data gap, never a number.
+        assertThat(body.limit("own-book-var-max")["status"].asText()).isEqualTo("NOT_EVALUABLE")
 
         val lcr = body.limit("lcr-min")
         assertThat(lcr["status"].asText()).isEqualTo("BREACH")
@@ -115,7 +119,8 @@ class RiskLimitsApiIT {
         val summary = body["summary"]
         assertThat(summary["BREACH"].asInt()).isEqualTo(1)
         assertThat(summary["OK"].asInt()).isEqualTo(2)
-        assertThat(summary["NOT_EVALUABLE"].asInt()).isEqualTo(2)
+        // + own-book PV01 (no curve set as of this run) and VaR (no history): gaps, never OK.
+        assertThat(summary["NOT_EVALUABLE"].asInt()).isEqualTo(4)
         assertThat(summary["EARLY_WARNING"].asInt()).isEqualTo(0) // present at zero, never absent
     }
 
