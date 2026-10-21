@@ -108,6 +108,9 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import merge_train_carrier as carrier_lib  # noqa: E402  (sibling module; scripts run as files)
+
 RULES = Path("openbank-libs/governance/rules.yaml")
 SECTION = re.compile(r"^##\s+Security checklist\s*$", re.M | re.I)
 NEXT_HEADING = re.compile(r"^##\s+", re.M)
@@ -195,9 +198,9 @@ def item_of(text: str) -> str | None:
     return None
 
 
-def diff_lines(base: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+def diff_lines(base: str, head: str = "HEAD") -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """(added, removed) lines of the diff as (path, text). A deleted file's lines carry its old path."""
-    out = subprocess.run(["git", "diff", "-U0", "--no-color", f"{base}...HEAD"],
+    out = subprocess.run(["git", "diff", "-U0", "--no-color", f"{base}...{head}"],
                          capture_output=True, text=True, check=True).stdout
     cur, old, add, rem = "", "", [], []
     for ln in out.splitlines():
@@ -460,22 +463,37 @@ def declarations_from_text(text: str) -> dict[str, dict[str, list[str]]] | None:
     return out
 
 
-def load_declarations(root: Path) -> dict[str, dict[str, list[str]]]:
-    d = declarations_from_text((root / RULES).read_text())
+def rules_text(root: Path, ref: str = "HEAD") -> str | None:
+    """Read governance at the assessed tree; a carrier's later member must not classify an earlier one."""
+    if ref == "HEAD":
+        path = root / RULES
+        return path.read_text() if path.is_file() else None
+    shown = subprocess.run(["git", "show", f"{ref}:{RULES}"], cwd=root,
+                           capture_output=True, text=True, check=False)
+    return shown.stdout if shown.returncode == 0 else None
+
+
+def load_declarations(root: Path, ref: str = "HEAD") -> dict[str, dict[str, list[str]]]:
+    text = rules_text(root, ref)
+    d = declarations_from_text(text) if text is not None else None
     if d is None:
-        print(f"::warning::{DECL_KEY} unreadable — every money-path service treated as undeclared (fail closed)")
+        print(f"::warning::{DECL_KEY} unreadable at {ref} — every money-path service treated as undeclared (fail closed)")
         return {}
     return d
 
 
-def declaration_changed(base: str) -> bool:
+def declaration_changed(base: str, head: str = "HEAD") -> bool:
     """True when the diff changes the declaration block (or it cannot be compared)."""
     try:
         old = subprocess.run(["git", "show", f"{base}:{RULES}"], capture_output=True, text=True,
                              check=True).stdout
     except subprocess.CalledProcessError:
         return False  # no rules.yaml at base: nothing to narrow
-    new = RULES.read_text() if RULES.exists() else ""
+    if head == "HEAD":
+        new = RULES.read_text() if RULES.exists() else ""
+    else:
+        shown = subprocess.run(["git", "show", f"{head}:{RULES}"], capture_output=True, text=True)
+        new = shown.stdout if shown.returncode == 0 else ""
     a, b = declarations_from_text(old), declarations_from_text(new)
     return a is None or b is None or a != b
 
@@ -505,12 +523,15 @@ def coverage_findings(root: Path, decls: dict[str, dict[str, list[str]]]) -> lis
     return bad
 
 
-def money_path_dirs(root: Path) -> list[str]:
-    """The one list from rules.yaml; a bare `- openbank-foo-service` under
-    `money_path_services:` — no YAML dependency for a 20-line block."""
+def money_path_dirs(root: Path, ref: str = "HEAD") -> list[str]:
+    """The one list from rules.yaml at the assessed tree; no YAML dependency for this 20-line block."""
+    text = rules_text(root, ref)
+    if text is None:
+        print(f"::error::money_path_services unreadable at {ref} — fail closed")
+        sys.exit(1)
     names: list[str] = []
     in_block = False
-    for line in (root / RULES).read_text().splitlines():
+    for line in text.splitlines():
         if line.startswith("money_path_services:"):
             in_block = True
             continue
@@ -526,9 +547,9 @@ def money_path_dirs(root: Path) -> list[str]:
     return names
 
 
-def changed_files(base: str) -> list[str]:
+def changed_files(base: str, head: str = "HEAD") -> list[str]:
     out = subprocess.run(
-        ["git", "diff", "--no-renames", "--name-only", f"{base}...HEAD"],
+        ["git", "diff", "--no-renames", "--name-only", f"{base}...{head}"],
         capture_output=True, text=True, check=True,
     )
     return [ln for ln in out.stdout.splitlines() if ln]
@@ -547,13 +568,13 @@ def unticked(body: str) -> tuple[str, list[str]] | None:
 
 
 def run(root: Path, body: str, base: str, enforce: bool,
-        live_body: Callable[[], str | None] | None = None) -> int:
-    dirs = money_path_dirs(root)
-    files = changed_files(base)
+        live_body: Callable[[], str | None] | None = None, head: str = "HEAD") -> int:
+    dirs = money_path_dirs(root, head)
+    files = changed_files(base, head)
     in_money_path = [f for f in files if any(f == d or f.startswith(d + "/") for d in dirs)]
     touched = [f for f in in_money_path if not is_release_derived(f)]
     derived = len(in_money_path) - len(touched)
-    decl_changed = declaration_changed(base)
+    decl_changed = declaration_changed(base, head)
     if decl_changed:
         print(f"security-checklist: rules.yaml `{DECL_KEY}` changed — governance change, the auth, PII "
               "and cardholder items need a human tick regardless of which files moved")
@@ -572,11 +593,11 @@ def run(root: Path, body: str, base: str, enforce: bool,
     print(f"security-checklist: {len(touched)} money-path file(s) touched "
           f"({', '.join(sorted({t.split('/')[0] for t in touched}))})")
 
-    decls = load_declarations(root)
+    decls = load_declarations(root, head)
     for svc in sorted({t.split("/")[0] for t in touched if not is_inert(t)}):
         print(f"security-checklist: {svc}: " + (f"declared in {DECL_KEY}" if svc in decls
               else f"NOT declared in {DECL_KEY} — judgement items fail closed"))
-    add, rem = diff_lines(base)
+    add, rem = diff_lines(base, head)
     answers = decide(files, touched, add, decls, decl_changed, removed=rem)
     auto = {k: v for k, v in answers.items() if v is not None}
     human = [k for k, v in answers.items() if v is None]
@@ -658,6 +679,51 @@ def run(root: Path, body: str, base: str, enforce: bool,
     print("security-checklist: every human-judgement box ticked")
     _write_summary(summary)
     return 0
+
+
+def run_carrier(root: Path, base: str, enforce: bool, member_body: Callable[[int], str | None],
+                head: str = "HEAD") -> int:
+    """A verified merge-train carrier (ADR-0343): the attestation lives on the MEMBERS. Each member's
+    own live body is judged by the same rule against that member's own diff — its train commit, which
+    is exactly the member's change as applied in this train. The carrier's own (bot) body is never
+    read and never written. The single regeneration commit is not a member's diff: it is bounded to
+    DERIVED_OUTPUTS and proven by main's derived-freshness gates on this exact tree."""
+    try:
+        members = carrier_lib.carrier_members(base, head)
+    except carrier_lib.CarrierError as exc:
+        print(f"::error::security-checklist: verified merge-train carrier, but its members cannot be "
+              f"derived from its commits ({exc}) — fail closed")
+        return 1 if enforce else 0
+    print(f"security-checklist: merge-train carrier — judging {len(members)} member(s) on their own "
+          f"bodies and diffs: {', '.join(f'#{n}' for n, _ in members)}")
+    lacking: list[int] = []
+    for n, commit in members:
+        print(f"security-checklist: --- member #{n} (train commit {commit[:12]}) ---")
+        body = member_body(n)
+        if body is None:
+            body = ""
+            print(f"security-checklist: member #{n}: live body unreadable — judged as empty (fail closed)")
+        if run(root, body, f"{commit}^", enforce=True, head=commit) != 0:
+            lacking.append(n)
+    if lacking:
+        print("::error::merge-train carrier: these member PR(s) touch money-path code and their OWN body "
+              "lacks the required Security checklist ticks: " + ", ".join(f"#{n}" for n in lacking)
+              + ". Tick the checklist on that member PR (not on the carrier) and re-run this check.")
+        return 1 if enforce else 0
+    print("security-checklist: every member of the carrier passes on its own body")
+    return 0
+
+
+def judge(root: Path, body: str, base: str, enforce: bool, live_body: Callable[[], str | None] | None,
+          pr: dict | None, repo: str, member_body: Callable[[int], str | None]) -> int:
+    """Dispatch: a VERIFIED carrier is judged by its members; everything else (a spoofed `train/…`
+    included) is judged as an ordinary PR on its own body."""
+    if carrier_lib.is_verified_carrier(pr, repo):
+        return run_carrier(root, base, enforce, member_body)
+    if pr is not None and str((pr.get("head") or {}).get("ref") or "").startswith("train/"):
+        print("security-checklist: head is train/… but the PR is not a verified merge-train carrier "
+              "(author, label or branch) — judged as an ordinary PR")
+    return run(root, body, base, enforce, live_body=live_body)
 
 
 def unknown_box_required(section: str) -> bool:
@@ -1128,6 +1194,125 @@ def self_test() -> int:
         if run_coverage(root) == 0:
             print("self-test FAIL (k3): uncovered PAN field not caught"); bad += 1
 
+    # ── merge-train carriers (ADR-0343): the attestation lives on the members ──────────────────
+    # Negative cases first: a spoofed carrier is an ordinary PR; one unticked member fails and is
+    # named; only then the all-ticked carrier passes and a non-money-path carrier is unaffected.
+    carrier_body = "<!-- merge-train -->\nMerge-train carrier (ADR-0343): CI on this head verifies one train."
+    repo = "o/r"
+
+    def carrier_pr(**over) -> dict:
+        pr = {"user": {"login": carrier_lib.BOT_LOGIN, "type": "Bot"}, "labels": [{"name": "merge-train"}],
+              "head": {"ref": "train/123-1", "repo": {"full_name": repo}}}
+        for k, v in over.items():
+            pr[k] = v
+        return pr
+
+    def carrier_fixture(member_paths: dict[int, list[str]], bodies: dict[int, str], pr: dict,
+                        extra_commit: bool = False, inner: Callable[[], int] | None = None,
+                        rules_by_member: dict[int, str] | None = None) -> tuple[int, str, list[int]]:
+        """A real git repo: base, then one train member commit per PR (merge-train.py's exact
+        message), optionally a foreign commit; judged through judge() exactly as main() does."""
+        import contextlib
+        import io
+        reads: list[int] = []
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "openbank-libs" / "governance").mkdir(parents=True)
+            (root / "openbank-libs" / "governance" / "rules.yaml").write_text(
+                "money_path_services:\n  - " + svc + "\n", encoding="utf-8")
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ.get("PATH", "")}
+
+            def git(*a):
+                return _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env, text=True)
+            git("init", "-q", "-b", "base")
+            git("add", "-A"); git("commit", "-q", "-m", "base")
+            git("checkout", "-q", "-b", "train")
+            for n, paths in member_paths.items():
+                for rel in paths:
+                    f = root / rel
+                    f.parent.mkdir(parents=True, exist_ok=True)
+                    f.write_text(f"member {n}\n", encoding="utf-8")
+                if rules_by_member and n in rules_by_member:
+                    (root / "openbank-libs" / "governance" / "rules.yaml").write_text(
+                        rules_by_member[n], encoding="utf-8")
+                git("add", "-A")
+                git("commit", "-q", "-m", f"merge-train: member #{n}\n\nPR-Number: #{n}\nPR-Head: {'a' * 40}\n")
+            if extra_commit:
+                (root / "foreign.txt").write_text("x\n")
+                git("add", "-A"); git("commit", "-q", "-m", "not a train commit")
+            cwd = os.getcwd()
+            out = io.StringIO()
+            try:
+                os.chdir(root)
+                with contextlib.redirect_stdout(out):
+                    rc = inner() if inner else judge(root, carrier_body, "base", True, lambda: carrier_body, pr, repo,
+                               lambda n: (reads.append(n), bodies.get(n))[1])
+            finally:
+                os.chdir(cwd)
+            return rc, out.getvalue(), reads
+
+    money = {1: [f"{svc}/src/main/kotlin/Money.kt"], 2: [f"{svc}/src/main/kotlin/Ledger.kt"]}
+    all_ticked = {1: ticked, 2: ticked}
+    for label, pr in [("wrong author", carrier_pr(user={"login": "mallory", "type": "User"})),
+                      ("bot-looking login typed User", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "User"})),
+                      ("wrong branch", carrier_pr(head={"ref": "train/x", "repo": {"full_name": repo}})),
+                      ("fork head", carrier_pr(head={"ref": "train/123-1", "repo": {"full_name": "evil/r"}})),
+                      ("missing label", carrier_pr(labels=[])),
+                      ("unreadable PR", None)]:
+        rc, out, reads = carrier_fixture(money, all_ticked, pr)
+        if rc == 0 or reads:
+            print(f"self-test FAIL (carrier-spoof): {label} was trusted as a carrier (rc={rc}, member reads={reads})"); bad += 1
+    rc, out, _ = carrier_fixture(money, {1: ticked, 2: tpl}, carrier_pr())
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#2" not in named[0] or "#1" in named[0]:
+        print("self-test FAIL (carrier-member-unticked): carrier with member #2 unticked passed or did not name #2"); bad += 1
+    rc, out, _ = carrier_fixture(money, {1: ticked}, carrier_pr())
+    if rc == 0:
+        print("self-test FAIL (carrier-member-unreadable): an unreadable member body passed"); bad += 1
+    rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr(), extra_commit=True)
+    if rc == 0:
+        print("self-test FAIL (carrier-foreign-commit): a carrier with a non-train commit passed"); bad += 1
+    rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr())
+    if rc != 0:
+        print("self-test FAIL (carrier-all-ticked): carrier whose members are all ticked failed:\n" + out[-800:]); bad += 1
+    later_declaration = (
+        f"money_path_services:\n  - {svc}\n"
+        f"security_sensitive_paths:\n  {svc}:\n"
+        "    auth_crypto_payment: []\n"
+        "    pii: [src/main/kotlin/Excluded.kt]\n"
+        "    cardholder: []\n"
+    )
+    rc, out, _ = carrier_fixture(
+        {1: [f"{svc}/src/main/kotlin/Business.kt"], 2: []},
+        {1: "", 2: ticked}, carrier_pr(),
+        rules_by_member={2: later_declaration})
+    named = [ln for ln in out.splitlines() if "lacks the required" in ln]
+    if rc == 0 or len(named) != 1 or "#1" not in named[0]:
+        print("self-test FAIL (carrier-member-governance-snapshot): a later member's new declaration "
+              "classified an earlier production-code member:\n" + out[-1000:]); bad += 1
+    rc, out, reads = carrier_fixture({1: ["docs/readme.txt"], 2: ["other-service/src/main/kotlin/X.kt"]}, {}, carrier_pr())
+    if rc != 0:
+        print("self-test FAIL (carrier-non-money-path): non-money-path carrier failed:\n" + out[-800:]); bad += 1
+    # pr_body_with_members (api-contract's per-service section): union only for a verified carrier.
+    got: dict[str, str] = {}
+
+    def fake_pr(pr: dict | None):
+        return lambda _repo, n: pr if str(n) == "500" else {"body": f"member {n} body"}
+    for label, pr in [("carrier", carrier_pr()), ("spoof", carrier_pr(labels=[]))]:
+        carrier_fixture(money, {}, pr, inner=lambda pr=pr, label=label: got.__setitem__(label, carrier_lib.pr_body_with_members(
+            "carrier", "base", env={"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500"}, fetch_pr=fake_pr(pr))) or 0)
+    if got.get("carrier") != "carrier\n\nmember 1 body\n\nmember 2 body" or got.get("spoof") != "carrier":
+        print(f"self-test FAIL: pr_body_with_members union wrong: {got}"); bad += 1
+
+    # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
+    mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
+    for name, val in [("BOT_LOGIN", carrier_lib.BOT_LOGIN), ("CARRIER_LABEL", carrier_lib.CARRIER_LABEL)]:
+        if f'{name} = "{val}"' not in mt:
+            print(f"self-test FAIL: merge_train_carrier.{name} drifted from merge-train.py"); bad += 1
+    if carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.OWN_MEMBER_RE.pattern not in mt:
+        print("self-test FAIL: merge_train_carrier branch/member regex drifted from merge-train.py"); bad += 1
+
     print("security-checklist self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
@@ -1188,8 +1373,15 @@ def main() -> int:
             return None
         return result.stdout.strip()
 
-    return run(Path(args.root), body, args.base, args.enforce,
-               live_body=fetch_live_body if args.live_body else None)
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    pr = carrier_lib.gh_pr(repo, os.environ.get("PR_NUMBER", "")) if args.live_body else None
+
+    def member_body(n: int) -> str | None:
+        m = carrier_lib.gh_pr(repo, n)
+        return None if m is None else (m.get("body") or "")
+
+    return judge(Path(args.root), body, args.base, args.enforce,
+                 fetch_live_body if args.live_body else None, pr, repo, member_body)
 
 
 if __name__ == "__main__":
