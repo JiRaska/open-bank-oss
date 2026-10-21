@@ -53,8 +53,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -79,8 +83,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-agent-service:
       all_of:
       - issue: '#12948'
@@ -111,8 +119,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -137,8 +149,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-aml-service:
       all_of:
       - issue: '#12948'
@@ -169,8 +185,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -193,8 +213,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-anacredit-service:
       all_of:
       - issue: '#12948'
@@ -225,8 +249,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -249,8 +277,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-analytics-sink:
       issue: '#13304'
       reason: The consolidated deployment proposes an analytics-sink image that is not
@@ -289,8 +321,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -313,8 +349,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-audit-service:
       all_of:
       - issue: '#12948'
@@ -345,8 +385,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -371,8 +415,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-authz-policy-auditor:
       all_of:
       - issue: '#13304'
@@ -399,8 +447,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-balance-service:
       all_of:
       - issue: '#12948'
@@ -431,8 +483,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -457,8 +513,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-billing-service:
       all_of:
       - issue: '#12948'
@@ -489,8 +549,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -513,8 +577,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-campaign-service:
       all_of:
       - issue: '#12948'
@@ -545,8 +613,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -573,8 +645,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-card-issuance-service:
       all_of:
       - issue: '#13080'
@@ -605,8 +681,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -631,8 +711,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-card-processing-service:
       all_of:
       - issue: '#12948'
@@ -657,8 +741,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13231'
         reason: Automatic ledger posting re-drive must wait for verified provider-wide
           idempotency protection.
@@ -674,8 +762,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-case-coordinator-agent:
       all_of:
       - issue: '#12948'
@@ -700,8 +792,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -726,8 +822,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-clearing-service:
       all_of:
       - issue: '#12948'
@@ -758,8 +858,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -782,8 +886,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-clearing-simulator:
       all_of:
       - issue: '#12948'
@@ -808,8 +916,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-communication-service:
       all_of:
       - issue: '#12948'
@@ -840,8 +952,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -864,8 +980,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-consent-service:
       all_of:
       - issue: '#12948'
@@ -896,8 +1016,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -920,8 +1044,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-context-service:
       all_of:
       - issue: '#12948'
@@ -952,8 +1080,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -976,8 +1108,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-control-liveness-sentinel:
       all_of:
       - issue: '#12948'
@@ -1008,8 +1144,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1034,8 +1174,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-copilot-service:
       all_of:
       - issue: '#12948'
@@ -1066,8 +1210,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1090,8 +1238,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-delegation-service:
       all_of:
       - issue: '#12948'
@@ -1122,8 +1274,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1146,8 +1302,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-devops-agent:
       all_of:
       - issue: '#12948'
@@ -1172,8 +1332,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1198,8 +1362,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-dispute-service:
       all_of:
       - issue: '#12948'
@@ -1230,8 +1398,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1254,8 +1426,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-docs-truth-agent:
       all_of:
       - issue: '#12948'
@@ -1280,8 +1456,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1308,8 +1488,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-document-service:
       all_of:
       - issue: '#12948'
@@ -1334,8 +1518,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1358,8 +1546,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-domestic-payment:
       all_of:
       - issue: '#13079'
@@ -1390,8 +1582,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1418,8 +1614,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-engagement-service:
       all_of:
       - issue: '#12948'
@@ -1450,8 +1650,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1474,8 +1678,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-finops-agent:
       all_of:
       - issue: '#12948'
@@ -1500,8 +1708,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1528,8 +1740,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-finrep-service:
       all_of:
       - issue: '#12948'
@@ -1560,8 +1776,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1584,8 +1804,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-flaky-test-hunter:
       all_of:
       - issue: '#12948'
@@ -1610,8 +1834,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1638,8 +1866,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-fraud-service:
       all_of:
       - issue: '#13079'
@@ -1670,8 +1902,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1694,8 +1930,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-fx-service:
       all_of:
       - issue: '#12948'
@@ -1726,8 +1966,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1754,8 +1998,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-governance-auditor:
       all_of:
       - issue: '#12948'
@@ -1780,8 +2028,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1808,8 +2060,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-incentive-service:
       all_of:
       - issue: '#12948'
@@ -1840,8 +2096,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1864,8 +2124,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-interest-service:
       all_of:
       - issue: '#13079'
@@ -1896,8 +2160,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1920,8 +2188,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-kyb-service:
       all_of:
       - issue: '#12948'
@@ -1952,8 +2224,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -1982,8 +2258,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-kyc-service:
       all_of:
       - issue: '#12948'
@@ -2014,8 +2294,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-ledger-service:
       all_of:
       - issue: '#12948'
@@ -2042,8 +2326,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2066,8 +2354,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-lending-service:
       all_of:
       - issue: '#12948'
@@ -2098,8 +2390,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2128,8 +2424,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-loyalty-service:
       all_of:
       - issue: '#12948'
@@ -2160,8 +2460,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2184,8 +2488,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-mcp-service:
       all_of:
       - issue: '#12948'
@@ -2216,8 +2524,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2240,8 +2552,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-notification-service:
       all_of:
       - issue: '#12948'
@@ -2272,8 +2588,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2296,8 +2616,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-onboarding-service:
       all_of:
       - issue: '#12948'
@@ -2328,8 +2652,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2352,8 +2680,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-party-service:
       all_of:
       - issue: '#12948'
@@ -2378,8 +2710,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-pension-fund-service:
       all_of:
       - issue: '#12948'
@@ -2410,8 +2746,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2436,8 +2776,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-pid-service:
       all_of:
       - issue: '#12948'
@@ -2466,8 +2810,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2488,8 +2836,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-psd2-service:
       all_of:
       - issue: '#12948'
@@ -2520,8 +2872,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2544,8 +2900,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-referral-service:
       all_of:
       - issue: '#12948'
@@ -2576,8 +2936,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2602,8 +2966,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-release-steward:
       all_of:
       - issue: '#12948'
@@ -2628,8 +2996,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2656,8 +3028,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-risk-engine:
       all_of:
       - issue: '#12948'
@@ -2688,8 +3064,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2712,8 +3092,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-sanctions-service:
       all_of:
       - issue: '#13079'
@@ -2744,8 +3128,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2768,8 +3156,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-sca-service:
       all_of:
       - issue: '#12948'
@@ -2800,8 +3192,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2824,8 +3220,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-sdd-service:
       all_of:
       - issue: '#12948'
@@ -2856,8 +3256,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2880,8 +3284,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-security-scanner:
       all_of:
       - issue: '#12948'
@@ -2906,8 +3314,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-sepa-instant:
       all_of:
       - issue: '#12948'
@@ -2938,8 +3350,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -2962,8 +3378,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-sepa-payment:
       all_of:
       - issue: '#12948'
@@ -2994,8 +3414,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3022,8 +3446,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-settlement-service:
       all_of:
       - issue: '#12948'
@@ -3054,8 +3482,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3082,8 +3514,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-standing-order-service:
       all_of:
       - issue: '#12948'
@@ -3108,8 +3544,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-statement-service:
       all_of:
       - issue: '#12948'
@@ -3140,8 +3580,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3168,8 +3612,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-swift-service:
       all_of:
       - issue: '#12948'
@@ -3200,8 +3648,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3224,8 +3676,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-tpp-registry-service:
       all_of:
       - issue: '#12948'
@@ -3256,8 +3712,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3280,8 +3740,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-transaction-service:
       all_of:
       - issue: '#13079'
@@ -3312,8 +3776,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13231'
         reason: V22 requires an owner-controlled maintenance rollout before card ledger
           posting re-drive.
@@ -3329,8 +3797,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3355,8 +3827,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-treasury-service:
       all_of:
       - issue: '#12948'
@@ -3387,8 +3863,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3413,8 +3893,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-vop-service:
       all_of:
       - issue: '#12948'
@@ -3445,8 +3929,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3469,8 +3957,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
     openbank-wealth-service:
       all_of:
       - issue: '#12948'
@@ -3501,8 +3993,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
       - issue: '#13304'
         reason: 'Inherited from held deploy PR #13304 while preserving the hold owner
           (issue #11503).'
@@ -3527,8 +4023,12 @@ deploy_holds:
           head: 1032d89864e4bb13a1493226e94efc9d7bf26ec6
         - pr: 13428
           head: 5d0783dc152ac623040b81937fe4c66f91d03a9f
+        - pr: 13432
+          head: 47bc483b112441d617586f452bfda7cac74a9fcd
         - pr: 13471
           head: 0f11701643d908af59c365ee206a27ca791d74ca
+        - pr: 13481
+          head: 36b67cb8885f3db64f27df96a6daa648c133ddb7
 
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
