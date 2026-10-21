@@ -103,6 +103,14 @@ This stage provides server authentication; it does not establish mutual TLS.
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
 
+## Catalog revision approvals
+
+The strategy-instrument catalog adapter reads generic revision approvals and the
+`approvalDigest` from product-catalog. The older `pension-approvals` alias remains
+served by the catalog during the transition, but this service no longer calls it.
+Roll out the updated pension client before retiring the alias in a later catalog
+change; the catalog must keep both routes available until then.
+
 ## Published DIP catalog regression
 
 Run `./gradlew :openbank-pension-service:dipCrossServiceIT` from the repository root.

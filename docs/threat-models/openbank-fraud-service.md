@@ -9,7 +9,7 @@ Money-path service (it sits in the synchronous payment path once wired). Reviewe
 referenced from ADR-0084.
 
 - **Status:** Draft (lightweight, first pass for ADR-0084 Phase 1 skeleton)
-- **Last reviewed:** 2026-06-14
+- **Last reviewed:** 2026-10-20
 - **Owner:** fraud CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0084 (fraud bounded context — this service),
   ADR-0032 (sibling sanctions/AML screening gate), ADR-0021/0073 (SCA),
@@ -44,7 +44,10 @@ Assets protected, in priority order:
    A forged or tampered verdict directly enables fraud (false ALLOW) or denial of service (false
    DECLINE).
 2. **Rule set + rule version** — the deterministic, versioned, code-reviewed rules (ADR-0084 §3).
-   Rules are config-as-code, never UI-editable; an unreviewed rule change is a money-path change.
+   Rule LOGIC is code, never UI-editable; an unreviewed rule change is a money-path change.
+2a. **Threshold sets** (`fraud_threshold_set`, ADR-0347) — the money figures the amount rules compare
+   against, per rule and currency. Versioned, effective-dated, four-eyes-activated data. A
+   tampered or self-approved set moves verdicts at scale exactly like a rule change.
 3. **Scoring audit trail** (`fraud_scores`) — the immutable per-decision record; the reference
    fraud-rate dataset RTS Art. 18 needs and the evidence for every verdict.
 4. **Behavioural aggregates** (Phase 2) — per-account/per-party velocity counters, known-payee
@@ -86,7 +89,10 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 | T1 | Verdict | **Tampering** — a false ALLOW waves through fraud, or a false DECLINE denies a legitimate payment | Verdict is computed server-side in the pure domain from a versioned rule set; never accepted from the caller; the surface acts only on the response body | Phase-1 stub always ALLOWs (no protection yet) — accepted, documented §0 |
 | T2 | Rule set | **Tampering** — an unreviewed/malicious rule flips verdicts at scale | Rules are code-as-config (no runtime mutation, ADR-0033); every change is a money-path PR (2 approvals + this threat model, ADR-0030); `ruleVersion` pinned into every persisted decision | Signed rule-set provenance — *planned* |
 | T3 | `fraud_scores` rows | **Tampering** — direct DB mutation of the audit trail | App-only write path; reactive Panache; forward-only Flyway; rows are append-only (no update/delete in the adapter); DB creds via Vault (ADR-0017) in deployed env | DB-admin insider — infra scope |
-| R1 | Scoring decision | **Repudiation** — dispute over what verdict was returned for a payment | Every decision persisted immutably (`fraud_scores`: request context + verdict + `score` + `reasons` + `rule_version` + `created_at`) | Wire signed audit / evidence bundle (ADR-0029) — *planned* |
+| T6 | Threshold set (ADR-0347) | **Tampering / elevation** — one insider raises a threshold so fraud passes under it, or an M2M client or operator rewrites the figures | maker ≠ checker enforced three times: `Proposal.approve` (422), `CHECK (decided_by <> proposed_by)` in `V9`, and OPA (`risk-fraud-thresholds` admits only verified human ROLE_RISK/ROLE_COMPLIANCE/ROLE_ADMIN; `operator-fraud-write` excludes `fraud.thresholds.*`; machine principals vetoed at the allow head). `@RolesAllowed` excludes ROLE_OPERATOR/ROLE_API. Decision is a conditional UPDATE on `state = PROPOSED` (no lost update). A proposal changes no verdict; only EXECUTED rows are read | Two colluding risk principals can still activate a bad set — the residual every four-eyes control carries; every set is attributed and content-hashed, and each verdict pins its version |
+| T7 | Threshold set effective dating | **Tampering** — back-dating a set to rewrite which figures governed past decisions | `effectiveFrom` must not be in the past at propose; approval fixes `active_from` = max(effectiveFrom, approval instant); past `fraud_scores` rows keep the `threshold_set_version` they were scored under | DB-admin insider — infra scope (same as T3) |
+| D3 | Threshold read | **DoS / fail-open** — no active set (deleted, mis-migrated) silently lets every amount through | Fails CLOSED: amount rules return REVIEW and the verdict carries `threshold-set-unavailable`; `GET /thresholds/active` answers 404. REVIEW, not DECLINE, so a config gap does not refuse every payment | A DB error on the read surfaces as a 500 like the velocity read; the caller's ADR-0084 §4 fail-open flag governs that case |
+| R1 | Scoring decision | **Repudiation** — dispute over what verdict was returned for a payment | Every decision persisted immutably (`fraud_scores`: request context + verdict + `score` + `reasons` + `rule_version` + `threshold_set_version` + `created_at`); threshold-set rows record maker, checker, times, reason and content hash | Wire signed audit / evidence bundle (ADR-0029) — *planned* |
 | I1 | Verdict reasons | **Information disclosure** — reason codes / score leak the rule logic to an attacker probing the boundary | Reason strings are coarse, non-PII (`baseline-allow`); endpoint role-gated to service/operator/admin, never customer-facing; customer-safe decline reason mapping is a surface concern | Reason-code taxonomy reviewed as Phase-2 rules land — *open* |
 | I3 | Analyst review queue | **Information disclosure** — automated callers read staff investigation material | The fraud-specific policy prohibits machine principals on `fraud.review.read`, using the phase-two verified service-account classifier (absent or invalid markers are not staff). Human operator, administrator and compliance access remains subject to existing staff grants. Scoring and other services' read policies are unchanged | Policy source and generated bundle are covered by allow/deny regressions; deployment and runtime enforcement require separate verification |
 | I2 | Metrics / persisted columns | **Information disclosure** — high-cardinality labels or audit columns enable per-customer inference / leak PII | DomainMetrics deferred (Phase 1) — when added (#850 follow-up), `openbank_fraud_scores_total` is tagged **only** by `verdict` (a closed 4-value set), never account/party/amount (ADR-0077 cardinality contract). `account_id`/`counterparty_id` live in row columns (access-controlled), not metric labels. `/q/metrics` is cluster-internal | Low — verdict tag is bounded |
@@ -108,8 +114,11 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - The **domain layer is framework-free** (ADR-0002); the rule engine is deterministic and
   unit-tested in isolation.
 - **No endpoint is `@PermitAll`** — `/api/v1/fraud/score` is role-gated.
-- Rules are **code-as-config** — no runtime-mutable rule engine (ADR-0033); every rule change is a
+- Rule logic is **code** — no runtime-mutable rule engine (ADR-0084 §3); every rule change is a
   money-path PR and bumps `ruleVersion`.
+- Money thresholds are **data** (ADR-0347): no money literal in `domain/rules`; the engine takes
+  the active `FraudThresholdSet` as an argument; only an EXECUTED set approved by a principal other
+  than its proposer is ever read; no active set ⇒ REVIEW, never ALLOW.
 - Once DomainMetrics is added, verdict labels are **low-cardinality and PII-free** (the closed
   `verdict` set only; never account/party/amount/id — ADR-0077).
 
@@ -138,6 +147,17 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - **Load test the p99 ≤ 150 ms latency budget** before flipping any surface to challenge/enforce.
 
 ## 6. Change log
+
+- **2026-10-20** — **Fraud rule money thresholds moved from Kotlin constants to versioned,
+  four-eyes-activated data** (ADR-0347, #13437). New table `fraud_threshold_set` (V9) seeded with
+  exactly the six previous constants as version 1, so verdicts are unchanged on rollout; new
+  column `fraud_scores.threshold_set_version`. New admin surface `/api/v1/fraud/thresholds/**`
+  (propose / decide / pending / active), ROLE_RISK/ROLE_COMPLIANCE/ROLE_ADMIN only, OPA actions
+  `fraud.thresholds.{propose,decide,read}` with machine principals vetoed and the operator
+  blanket grant excluded. New threats T6, T7, D3 above. This is the first runtime write path to a
+  fraud control. Before it, the control was protected by having no such path; now authz and
+  four-eyes protect it. Rollback: revert the change; the V9 rollback note applies only while
+  version 1 is the sole activated set.
 
 - **2026-10-15** — Scope the analyst review queue to staff callers in the fraud policy.
   The action-specific prohibition applies to machine principals, including absent or invalid
@@ -308,3 +328,5 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   lands, since output stays shadow-only), D2 (native inference engine DoS — bounded by a
   fixed/repo-bundled model and try/catch degrade-to-null). Rollback: revert this commit
   (`BaselineFraudModel` restored verbatim); no data migration, no config change.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
