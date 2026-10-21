@@ -387,6 +387,20 @@ rides one more train, and that train overwrites the status either way — `succe
 was an artifact (#12506, #13137), a `culprit: …` failure when it was real. No new status is written
 with the legacy text, so the mechanism retires itself; nobody needs to push an empty commit.
 
+### Amendment (2026-10-21) — extra gates: a red security scan blocks serving
+
+The train judged only the ruleset-required contexts, so a PR with a red `Security scan / Trivy`
+was served while sessions disarmed it by hand (`--disable-auto`): two automations enforcing
+opposite policies, and nothing merged. **This replaces manual disarming.** The policy now has one
+declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` (today: `Trivy`,
+the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
+by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
+PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
+armed); running = wait; never triggered, skipped or neutral = not applicable. A carrier red on an
+extra gate is a verdict like any required context, unless main is red on that gate too: then it
+counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
+`--check-declaration` fails when the key parses as empty, so the gate cannot be switched off silently.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
