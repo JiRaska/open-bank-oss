@@ -19,6 +19,7 @@ import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { EVENT_INSIGHTS } from '@/components/insights/catalog'
 import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { usePlatformView } from '@/lib/use-platform-view'
 
 type InfraStatus = InfrastructureStatus
 
@@ -75,6 +76,10 @@ function InfrastructureStatusBadge({ status }: { status: InfraStatus }) {
 
 export default function InfrastructurePage() {
   const { t, language } = useLanguage()
+  const platformView = usePlatformView()
+  const declaredApplications = platformView?.inventory?.gitops?.applications
+  const helmReleaseDeclarations = platformView?.inventory?.iac?.helmReleaseDeclarations
+  const moduleTraversalGaps = platformView?.inventory?.iac?.moduleTraversalGaps
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, StatusResult>>({})
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -369,6 +374,125 @@ export default function InfrastructurePage() {
           )}
         </>
       )}
+      <section aria-labelledby="declared-applications-title" style={{ marginTop: '32px', marginBottom: '32px' }}>
+        <h2 id="declared-applications-title" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <LayoutTemplate size={16} color="var(--info)" />
+          {t('Deklarované GitOps aplikace', 'Declared GitOps applications')}
+        </h2>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+          {t(
+            'Zdrojový inventář deklarací. Neprokazuje nasazení, běh ani úplnost platformy; živé sondy jsou uvedeny výše.',
+            'Source inventory of declarations. It does not prove deployment, runtime, or platform completeness; live probes are shown above.',
+          )}
+        </p>
+        {!declaredApplications ? (
+          <div className="card" role="status" style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+            {t('Inventář deklarovaných aplikací není dostupný.', 'Declared application inventory is unavailable.')}
+          </div>
+        ) : (
+          <details style={{ marginBottom: '16px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', padding: '10px 0' }}>
+              {t('Deklarace GitOps aplikací', 'GitOps application declarations')} ({declaredApplications.length})
+            </summary>
+            {declaredApplications.length === 0 ? (
+              <div role="status" className="card" style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                {t('Inventář neobsahuje žádné záznamy aplikací.', 'The inventory contains no application records.')}
+              </div>
+            ) : (
+              <div className="card" style={{ padding: '0', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Deklarace', 'Declaration')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Namespace', 'Namespace')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Zdroj', 'Source')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Mapování workloadu', 'Workload mapping')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {declaredApplications.map((application, index) => (
+                      <tr key={`${application.sourceFile}:${index}`} style={{ borderBottom: index === declaredApplications.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-primary)' }}>
+                          <div style={{ fontWeight: 600 }}>{application.name ?? t('Neznámá deklarace', 'Unknown declaration')}</div>
+                          <div style={{ color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{application.sourceFile}</div>
+                          {application.kind === 'unknown' && <div style={{ color: 'var(--warning-text)' }}>{t('Typ deklarace neznámý', 'Declaration type unknown')}</div>}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{application.namespace ?? t('Neznámý', 'Unknown')}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                          {application.sources.length === 0 ? t('Neznámý zdroj', 'Unknown source') : application.sources.map((source, sourceIndex) => (
+                            <div key={`${source.kind}:${sourceIndex}`} style={{ overflowWrap: 'anywhere' }}>
+                              {source.kind === 'helm-chart' ? `Helm chart: ${source.chart}` : source.kind === 'manifest-path' ? `Manifest path: ${source.path}` : t('Neznámý zdroj', 'Unknown source')}
+                            </div>
+                          ))}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                          {application.workloadMapping === 'unknown' ? t('Neznámé; pouze deklarace', 'Unknown; declaration only') : t('Neznámé', 'Unknown')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </details>
+        )}
+        {!helmReleaseDeclarations ? (
+          <div role="status" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            {t('Inventář Helm deklarací není dostupný.', 'Helm declaration inventory is unavailable.')}
+          </div>
+        ) : (
+          <details style={{ marginBottom: '16px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', padding: '10px 0' }}>
+              {t('Deklarace Helm release v IaC', 'IaC Helm release declarations')} ({helmReleaseDeclarations.length})
+              {moduleTraversalGaps && moduleTraversalGaps.length > 0 && ` · ${t('mezery v procházení modulů', 'module traversal gaps')}: ${moduleTraversalGaps.length}`}
+            </summary>
+            {helmReleaseDeclarations.length === 0 ? (
+              <div role="status" className="card" style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                {t('Inventář neobsahuje žádné záznamy Helm deklarací.', 'The inventory contains no Helm declaration records.')}
+              </div>
+            ) : (
+              <div className="card" style={{ padding: '0', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Prostředí', 'Environment')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Deklarace', 'Declaration')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Zdroj', 'Source')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Rozbalení instance', 'Instance expansion')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {helmReleaseDeclarations.map((release, index) => (
+                      <tr key={`${release.environment}:${release.sourceFile}:${release.address}:${index}`} style={{ borderBottom: index === helmReleaseDeclarations.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{release.environment}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{release.address}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{release.sourceFile}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                          {release.instanceExpansion === 'unknown' ? t('Neznámé; deklarace není instance', 'Unknown; declaration is not an instance') : t('Neznámé', 'Unknown')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </details>
+        )}
+        {moduleTraversalGaps && moduleTraversalGaps.length > 0 && (
+          <div role="status" className="card" style={{ padding: '16px', marginTop: '8px', borderColor: 'var(--warning)' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--warning-text)' }}>
+              {t('Inventář IaC je částečný: neprošly všechny moduly.', 'IaC inventory is partial: some modules could not be traversed.')}
+            </div>
+            <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              {moduleTraversalGaps.map((gap, index) => (
+                <li key={`${gap.environment}:${gap.modulePath}:${index}`}>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{gap.environment}: {gap.modulePath}</span> — {gap.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
     </div>
   )
 }
