@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.9.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.0...admin-ui-v3.9.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** observe ClickHouse and resolve lifecycle release links ([#13497](https://github.com/JiRaska/open-bank-oss/issues/13497)) ([fd7f44d](https://github.com/JiRaska/open-bank-oss/commit/fd7f44dd42c223be3f63eea73360884d451beaad))
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
 ## [3.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.9...admin-ui-v3.9.0) (2026-10-21)
 
 
