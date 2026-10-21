@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build modules affected by shared library changes in CI or deployment.
 
-The two scoped libraries have a small consumer graph. Read the Gradle project
+The scoped libraries have a small consumer graph. Read the Gradle project
 declarations, including test dependencies, and follow transitive edges. Unknown
 dependency syntax or a convention-plugin reference falls back to the full matrix.
 """
@@ -17,7 +17,7 @@ from library_dependency_graph import read_dependencies, reverse_dependents
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCOPED = {"openbank-libs-lending", "openbank-libs-iso20022"}
+SCOPED = {"openbank-libs-lending", "openbank-libs-iso20022", "openbank-libs-finance"}
 RUNTIME_CHANGE = re.compile(
     r"^(openbank-(?:libs(?:-[A-Za-z0-9._-]+)?|client-[A-Za-z0-9._-]+))/"
     r"(?:src/main(?:/|$)|build\.gradle\.kts$|gradle/)"
@@ -122,7 +122,9 @@ def self_test() -> int:
         if "if grep -qE '^(openbank-libs/" in line:
             assert "openbank-libs-lending/" not in line
             assert "openbank-libs-iso20022/" not in line
-    print(f"self-test OK: lending {len(actual)}, ISO 20022 {len(iso)} of {len(modules)} modules")
+    finance = affected(ROOT, ["openbank-libs-finance/src/main/kotlin/X.kt"], modules)
+    assert "openbank-libs-finance" in finance and finance != modules
+    print(f"self-test OK: lending {len(actual)}, ISO 20022 {len(iso)}, finance {len(finance)} of {len(modules)} modules")
     return 0
 
 

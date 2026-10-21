@@ -41,6 +41,9 @@ THREE JOBS, EACH ON ITS OWN RUNNER
            chain's base must be live main, and every required context must be green on that sha.
            Green: `merge-train` success on each verified member head, merge with the head sha
            pinned. Red: halve (an App `bisect size N` status) or, at one member, name the culprit.
+           A cancelled/stale context (or skipped next to a cancellation) is INCONCLUSIVE, never red:
+           its jobs are re-run once (App `merge-train/rerun` marker), then the carrier is in flight;
+           still inconclusive after that, it closes with no verdict. Only a real failure blames.
            Also computes the fast lane from live data. Comments are fixed text.
 
 MODES
@@ -56,8 +59,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import fnmatch
 import inspect
+import io
 import json
 import os
 import pathlib
@@ -66,6 +71,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -89,7 +95,37 @@ BUNDLE_REF = "refs/heads/merge-train-bundle"
 # Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
 GUARD_CONTEXT_HINT = "agent-pr-guard"
+STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
+STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
+# A strict-lane reservation (ADR-0343) holds main for one PR's CI; past this it is released so a hung
+# CI cannot freeze main. 2 x the p95 of successful pull_request ci.yml runs, measured 2026-10-21 with
+# `gh run list -w ci.yml -e pull_request -s completed -L 200` (n=103 green: p50 17 min, p95 32 min).
+RESERVATION_TIMEOUT_S = 64 * 60
 OK_STATES = frozenset({"success"})
+# A cancelled (or stale) check ran nothing that could be judged — "Canceling since a higher priority
+# waiting request exists" on carrier #13452 blamed #13137 for a job that executed no step. Such a
+# context is INCONCLUSIVE: never red, never a bisect, never a culprit. A `skipped` context is
+# inconclusive only next to a cancellation on the same head (a job skipped because its `needs`
+# was cancelled); on its own it keeps today's meaning.
+INCONCLUSIVE_STATES = frozenset({"cancelled", "stale"})
+# Extra gates (ADR-0343): checks beyond the ruleset-required contexts that the train itself refuses to
+# serve over when they are red on a PR head. ONE declaration, `merge_train.extra_gates` in rules.yaml,
+# read from the live main being judged — never listed here. Absent (not triggered) = not applicable.
+RULES_FILE = "openbank-libs/governance/rules.yaml"
+EXTRA_GATE_CONTEXT = "merge-train/extra-gate"     # App marker: the author was told once for this head
+EXTRA_GATE_NA_STATES = frozenset({"skipped", "neutral"})
+EXTRA_GATE_MESSAGE = ("merge-train: this PR is not served while a declared extra gate (`merge_train.extra_gates` in "
+                      "rules.yaml, e.g. Security scan / Trivy) is red on its head. It stays armed: push a commit that "
+                      "turns the scan green and the train picks it up on its own. Do not disable auto-merge for this.")
+RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+# Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
+# whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
+# the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
+# final: the member re-qualifies and rides one more train, which overwrites the mark either way —
+# success when it was an artifact, a CULPRIT_PREFIX failure when it was real. Self-retiring: no
+# new status is ever written with the legacy text.
+CULPRIT_PREFIX = "culprit: "
+LEGACY_CULPRIT_PREFIX = "isolated as the cause of a red train"
 # Fast-lane exclusions.
 PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/", "docs/adr/", ".github/")
 PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
@@ -250,10 +286,76 @@ class Member:
     files: list[str] = field(default_factory=list)
 
 
+def parse_extra_gates(text: str) -> dict[str, str] | None:
+    """`merge_train.extra_gates` from rules.yaml text: check name -> the workflow file that must produce
+    it, from items `- {workflow: <path>, check: <name>}`. Runs under `python3 -I -S` (no PyYAML), so it
+    reads exactly that one shape; None = key absent, empty or ANY item malformed (callers fail closed)."""
+    lines = text.splitlines()
+    try:
+        i = next(k for k, ln in enumerate(lines) if re.fullmatch(r"merge_train:\s*(#.*)?", ln))
+    except StopIteration:
+        return None
+    out: dict[str, str] | None = None
+    for ln in lines[i + 1:]:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        if not ln.startswith(" "):
+            break
+        if out is None:
+            if re.fullmatch(r"  extra_gates:\s*(#.*)?", ln):
+                out = {}
+            continue
+        if not ln.startswith("    "):
+            break
+        m = re.fullmatch(r"    - \{\s*workflow:\s*(\.github/workflows/[A-Za-z0-9._-]+\.ya?ml)\s*,"
+                         r"\s*check:\s*\"?([^\"{},]+?)\"?\s*\}\s*(#.*)?", ln)
+        if not m:
+            return None
+        out[m.group(2)] = m.group(1)
+    return out or None
+
+
+def train_extra_gates(git, base: str) -> dict[str, str] | None:
+    """TRAIN_EXTRA_GATES (check name -> producing workflow) as declared on `base` (live main) — the single
+    source every lane reads. None = missing or unparseable: the caller serves NOTHING (fail closed)."""
+    gates = parse_extra_gates(git("show", f"{base}:{RULES_FILE}", check=False).stdout)
+    if gates is None:
+        log(f"::error::{RULES_FILE} on {base[:12]}: merge_train.extra_gates missing or unparseable — "
+            "the train serves no PR until it is fixed")
+    return gates
+
+
+def pinned_checks(gh, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
+    """gh.checks(sha) with every extra gate replaced by its PINNED verdict (gh.extra_checks): only runs
+    from the declared workflow count, and any failing one of them is red — a same-name run from any
+    other app or workflow can neither turn it green nor mask a red."""
+    checks = {k: v for k, v in gh.checks(sha).items() if k not in gates}
+    checks.update(gh.extra_checks(sha, gates))
+    return checks
+
+
+def extra_gate_red(checks: dict[str, str | None], extra) -> list[str]:
+    """Declared extra gates that are red on this head. Absent / skipped / neutral = not applicable."""
+    return [g for g in extra or () if g in checks and checks[g] is not None
+            and checks[g] not in OK_STATES and checks[g] not in EXTRA_GATE_NA_STATES]
+
+
+def extra_verdict(states: list[str | None]) -> str | None:
+    """One pinned extra gate from all its runs on a head: any red wins, then running, then green/n.a."""
+    red = [s for s in states if s is not None and s not in OK_STATES and s not in EXTRA_GATE_NA_STATES]
+    if red:
+        return "failure" if "failure" in red else red[0]
+    if any(s is None for s in states):
+        return None
+    return "success" if any(s in OK_STATES for s in states) else states[0]
+
+
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
-              app: dict[str, tuple[str, str]] | None = None, untrainable=None) -> tuple[bool, str]:
+              app: dict[str, tuple[str, str]] | None = None, untrainable=None,
+              extra: list[str] | None = None) -> tuple[bool, str]:
     """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses.
-    `pr["files"]` must come from `git diff` against the verified head, never from the files API."""
+    `pr["files"]` must come from `git diff` against the verified head, never from the files API.
+    `extra`: TRAIN_EXTRA_GATES — red refuses, running waits, never triggered is not applicable."""
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
     if pr.get("state", "open") != "open":
         return False, f"state {pr.get('state')}"
@@ -272,30 +374,42 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
             return False, "a path contains a control character — manual lane, never a train"
         if untrainable(f):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if (app or {}).get(STATUS_CONTEXT, ("", ""))[0] == "failure":
+    app_state, app_desc = (app or {}).get(STATUS_CONTEXT, ("", ""))
+    if app_state == "failure" and not app_desc.startswith(LEGACY_CULPRIT_PREFIX):
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
     for name, state in checks.items():
         if GUARD_CONTEXT_HINT in name and state not in OK_STATES and state is not None:
             return False, f"{name} refused ({state})"
-    for c in (c for c in required if c != STATUS_CONTEXT):
+    member = [c for c in required if c != STATUS_CONTEXT]
+    for c in member:
+        if c in checks and checks[c] is not None and checks[c] not in OK_STATES:
+            return False, f"required context {checks[c]}: {c}"
+    for g in extra_gate_red(checks, extra):
+        return False, f"extra gate red: {g}" + ("" if checks[g] == "failure" else f" ({checks[g]})")
+    for c in member:
         if c not in checks:
             return False, f"required context never reported: {c}"
         if checks[c] is None:
             return False, f"required context pending: {c}"
-        if checks[c] not in OK_STATES:
-            return False, f"required context {checks[c]}: {c}"
+    for g in extra or ():
+        if g in checks and checks[g] is None:
+            return False, f"extra gate pending: {g}"
     return True, "armed + all required green"
 
 
 def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | None],
-                      app: dict[str, tuple[str, str]] | None, untrainable, modes: list[str]) -> tuple[str | None, str]:
+                      app: dict[str, tuple[str, str]] | None, untrainable, modes: list[str],
+                      main_red: dict[str, str] | None = None, extra: list[str] | None = None) -> tuple[str | None, str]:
     """The strict lane (ADR-0343): a PR the train refuses ONLY because it is manual-lane (an executable
     `.github/` path, a generator, gates.yaml, the inventory) is judged exactly as strict up-to-date used
     to judge every PR. Returns ("green" | "pending" | None, why). Every other refusal in `qualifies` —
     closed, draft, disarmed, fork, excluded prefix, a merge-train failure, agent-pr-guard, red — still
-    applies, and a control-character path or a symlink/gitlink never enters this lane at all."""
+    applies, and a control-character path or a symlink/gitlink never enters this lane at all.
+    "waiting": every required context it has failed is red on main's tip too (`main_red`, context ->
+    the main commit that verdict came from) — it cannot go green until main is fixed, so it must
+    neither hold the lane nor be served."""
     files = pr.get("files") or []
     if any(unsafe_path(f) for f in files):
         return None, "a path contains a control character — never the strict lane"
@@ -304,14 +418,94 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
     if not any(untrainable(f) for f in files):
         return None, "not manual-lane"
-    ok, why = qualifies(pr, required, checks, app, untrainable=lambda _f: False)
+    ok, why = qualifies(pr, required, checks, app, untrainable=lambda _f: False, extra=extra)
     if ok:
         return "green", why
     member = [c for c in required if c != STATUS_CONTEXT]
-    if why.startswith("required context pending") and not any(
+    failed = [c for c in member if checks.get(c) is not None and checks.get(c) not in OK_STATES]
+    if main_red and failed and why.startswith("required context") and set(failed) <= set(main_red):
+        return "waiting", main_red_reason(failed, main_red)
+    red_extra = extra_gate_red(checks, extra)
+    if main_red and red_extra and why.startswith("extra gate red") and set(red_extra) <= set(main_red):
+        return "waiting", main_red_reason(red_extra, main_red)
+    # "never reported" is the normal state for the first minutes after update-branch (no workflow has
+    # registered its check yet): it is pending, or the fresh head holds no reservation exactly when
+    # it needs one (#13485).
+    if why.startswith(("required context pending", "required context never reported", "extra gate pending")) and not any(
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
+
+
+def classify_carrier(checks: dict[str, str | None], required: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """(failing, pending, inconclusive) over `required`. Only `failing` may ever blame a member."""
+    cancelled_here = any(v in INCONCLUSIVE_STATES for v in checks.values())
+    inconclusive = [c for c in required if checks.get(c) in INCONCLUSIVE_STATES
+                    or (checks.get(c) == "skipped" and cancelled_here)]
+    pending = [c for c in required if checks.get(c) is None]
+    failing = [c for c in required if checks.get(c) not in (None, *OK_STATES) and c not in inconclusive]
+    return failing, pending, inconclusive
+
+
+# A gate that PASSED on content but overran its wall-time budget, or could not read its subject (NOT
+# EVALUATED — a timed-out API, an unreadable carrier member), says nothing about the members (#13400:
+# carrier #13501 blamed #13137 for two gates that printed "every member ... passes" and "none lowered").
+# Read from run-gates.py's --json `failure_kind`, the gate runner's own machine-readable verdict.
+INCONCLUSIVE_GATE_KINDS = frozenset({"budget", "not_evaluated"})
+GATE_SHARD_JOB_RE = re.compile(r"^gates \(([a-z0-9-]+)\)$")   # ci.yml `gates (${{ matrix.slug }})`
+GATE_AGGREGATE_JOB = "Validate manifests"                      # red exactly when a shard is red
+GATE_ARTIFACT_PREFIX = "gate-results-"                         # ci.yml uploads gate-results-<slug>-a<attempt>
+
+
+def gate_failures_inconclusive(failed_jobs: list[str], records: dict[str, list | None]) -> tuple[bool, str]:
+    """(True, why) only when EVERY failed job of the carrier's CI run is a gate shard whose every non-ok
+    gate failed for an inconclusive kind (or the aggregate that mirrors the shards). `records` maps shard
+    slug -> that shard's --json records (None = unreadable). Anything unknown is conclusive: a missing
+    artifact, an old runner without `failure_kind`, a failed non-gate job, an unfalsified gate."""
+    shards = []
+    for job in failed_jobs:
+        m = GATE_SHARD_JOB_RE.fullmatch(job)
+        if m:
+            shards.append(m.group(1))
+        elif job != GATE_AGGREGATE_JOB:
+            return False, f"job `{job}` failed"
+    if not shards:
+        return False, "no gate shard failed"
+    kinds = []
+    for slug in shards:
+        recs = records.get(slug)
+        if not isinstance(recs, list):
+            return False, f"gate results of `{slug}` unreadable"
+        bad = [r for r in recs if isinstance(r, dict) and r.get("status") in ("failed", "unfalsified")]
+        if not bad:
+            return False, f"shard `{slug}` failed with no failed gate recorded"
+        for r in bad:
+            if r.get("failure_kind") not in INCONCLUSIVE_GATE_KINDS:
+                return False, f"gate `{r.get('id')}` failed ({r.get('failure_kind') or 'unknown kind'})"
+            kinds.append(f"{r.get('id')}: {str(r.get('failure_kind')).replace('_', ' ')}")
+    return True, "; ".join(kinds)
+
+
+def culprit_description(failing: list[str], base: str) -> str:
+    return f"{CULPRIT_PREFIX}{', '.join(failing)} red on a train over main {base[:12]}"[:140]
+
+
+def main_red_reason(ctxs, main_red: dict[str, str]) -> str:
+    ctxs = sorted(ctxs)
+    return f"waiting for main ({', '.join(ctxs)} red on main {main_red[ctxs[0]][:12]})"
+
+
+def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | None = None) -> dict[str, str]:
+    """Required contexts (merge-train aside) that are FAILURE in main's latest completed CI at `base`:
+    context -> the main commit carrying that verdict. A still-running main run reads as its nearest
+    first-parent ancestor's verdict, so a fix that just merged keeps main red until its own push run reports."""
+    out: dict[str, str] = {}
+    # Extra gates count too: a scan red on main itself makes PRs wait and never makes anyone a culprit.
+    for ctx in sorted({c for c in required if c != STATUS_CONTEXT} | set(train_extra_gates(git, base) or {})):
+        res = main_ci_result(gh, git, ctx, base, cache)
+        if res and res[1] == "failure":
+            out[ctx] = res[0]
+    return out
 
 
 def order_candidates(prs: list[dict]) -> list[dict]:
@@ -782,6 +976,30 @@ class GitHub:
             out.setdefault(st["context"], None if st["state"] == "pending" else st["state"])
         return out
 
+    def extra_checks(self, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
+        """Pinned extra-gate verdicts on `sha`: only check runs by the `github-actions` app whose workflow
+        run's path is the declared workflow. Any completed non-success, non-skipped run = that state (red
+        wins over every later green); else running = None; else success/skipped. No pinned run = absent."""
+        runs: dict[str, list[str | None]] = {}
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            name = check.get("name")
+            if name not in gates or (check.get("app") or {}).get("slug") != "github-actions":
+                continue
+            m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
+            if not m:
+                continue
+            path = self._run_path(int(m.group(1)))
+            if path.split("@", 1)[0] != gates[name]:
+                continue
+            runs.setdefault(name, []).append(check["conclusion"] if check["status"] == "completed" else None)
+        return {name: extra_verdict(states) for name, states in runs.items()}
+
+    def _run_path(self, run_id: int) -> str:
+        cache = self.__dict__.setdefault("_paths", {})
+        if run_id not in cache:
+            cache[run_id] = (get(f"/repos/{self.repo}/actions/runs/{run_id}") or {}).get("path") or ""
+        return cache[run_id]
+
     def app_statuses(self, sha: str) -> dict[str, tuple[str, str]]:
         """The App's own latest status per context on `sha` — statuses by anyone else are ignored."""
         out: dict[str, tuple[str, str]] = {}
@@ -805,6 +1023,96 @@ class GitHub:
         """Squash-merge pinned to the verified head sha (the API's `sha` = --match-head-commit)."""
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+
+    def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
+        """Re-run the cancelled (or inconclusively failed, #13400) jobs of the workflow runs behind
+        `contexts` on `sha` (once per carrier; the caller records it). True only when every run accepted."""
+        latest: dict[str, dict] = {}
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check["name"] in contexts and (check["name"] not in latest or check["id"] > latest[check["name"]]["id"]):
+                latest[check["name"]] = check
+        runs = set()
+        for check in latest.values():
+            m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
+            if not m:
+                return False
+            runs.add(int(m.group(1)))
+        if not runs:
+            return False
+        return all(api("POST", f"/repos/{self.repo}/actions/runs/{r}/rerun-failed-jobs", {})[0] == 201 for r in sorted(runs))
+
+    def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
+        """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
+        NOT EVALUATED), from the gate runner's own --json artifacts — never from the log. Any read that
+        does not succeed answers False: today's conclusive verdict, never a silent pass."""
+        latest: dict[str, dict] = {}
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check["name"] in failing and (check["name"] not in latest or check["id"] > latest[check["name"]]["id"]):
+                latest[check["name"]] = check
+        if set(latest) != set(failing):
+            return False, "a failing context is not a check run"
+        runs = set()
+        for check in latest.values():
+            m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
+            if not m:
+                return False, f"`{check['name']}` has no workflow run"
+            runs.add(int(m.group(1)))
+        why = []
+        for run in sorted(runs):
+            code, run_info = api("GET", f"/repos/{self.repo}/actions/runs/{run}")
+            attempt = run_info.get("run_attempt") if code == 200 and isinstance(run_info, dict) else None
+            if type(attempt) is not int or attempt < 1:
+                return False, f"workflow run `{run}` has no current attempt"
+            jobs = paginate(f"/repos/{self.repo}/actions/runs/{run}/jobs?filter=latest", "jobs")
+            failed_jobs = [j for j in jobs if j.get("conclusion") not in ("success", "skipped", "neutral", None)]
+            if any(j.get("run_attempt") != attempt for j in failed_jobs):
+                return False, f"a failing job of run `{run}` is not from attempt {attempt}"
+            failed = [j["name"] for j in failed_jobs]
+            arts: dict[str, dict] = {}
+            for a in paginate(f"/repos/{self.repo}/actions/runs/{run}/artifacts", "artifacts"):
+                name = a.get("name") or ""
+                if name.startswith(GATE_ARTIFACT_PREFIX) and not a.get("expired") and (
+                        name not in arts or a["id"] > arts[name]["id"]):
+                    arts[name] = a
+            records: dict[str, list | None] = {}
+            for job in failed:
+                m = GATE_SHARD_JOB_RE.fullmatch(job)
+                if m:
+                    a = arts.get(f"{GATE_ARTIFACT_PREFIX}{m.group(1)}-a{attempt}")
+                    records[m.group(1)] = self.artifact_json(a["id"]) if a else None
+            ok, reason = gate_failures_inconclusive(failed, records)
+            if not ok:
+                return False, reason
+            why.append(reason)
+        return True, "; ".join(why)
+
+    def artifact_json(self, artifact_id: int) -> list | None:
+        """The single JSON file inside an artifact zip. The archive URL redirects to blob storage, which
+        must NOT receive the GitHub token, so the redirect is followed by hand without it."""
+        import io
+        import zipfile
+
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        req = urllib.request.Request(f"{API}/repos/{self.repo}/actions/artifacts/{int(artifact_id)}/zip")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
+        try:
+            try:
+                with urllib.request.build_opener(_NoRedirect).open(req, timeout=30) as r:
+                    blob = r.read()
+            except urllib.error.HTTPError as e:
+                if e.code not in (301, 302, 303, 307, 308) or not e.headers.get("Location", "").startswith("https://"):
+                    return None
+                with urllib.request.urlopen(e.headers["Location"], timeout=30) as r:
+                    blob = r.read()
+            with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                names = [n for n in z.namelist() if n.endswith(".json")]
+                data = json.loads(z.read(names[0])) if len(names) == 1 else None
+        except (OSError, ValueError, zipfile.BadZipFile, KeyError):
+            return None
+        return data if isinstance(data, list) else None
 
     def update_branch(self, n: int, head: str) -> bool:
         """Merge main into the PR branch, pinned to the head the strict lane judged."""
@@ -840,13 +1148,23 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
 
 
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
-                    limit: int = 64, strict: list | None = None) -> tuple[list[Member], dict[int, dict]]:
+                    limit: int = 64, strict: list | None = None,
+                    red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
     """Open PRs that qualify RIGHT NOW. Each head is fetched and must equal the API's head sha, and
     the file list is changed_paths(<base>...<verified head>) — the PR files API stops at
     3000 entries, so a long PR could hide a path there; git has no such cap."""
     member_required = [c for c in required if c != STATUS_CONTEXT]
-    armed = [p for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)])
-             if p.get("auto_merge") and not p.get("draft")]
+    extra = train_extra_gates(git, base)
+    if extra is None:
+        return [], {}
+    armed = []
+    for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)]):
+        if p.get("auto_merge") and not p.get("draft"):
+            armed.append(p)
+        else:
+            # Every open PR gets a decision line: a disarmed or draft PR used to be filtered out in
+            # silence, so a settle log with no line for a PR could not say whether it was ever seen.
+            log(f"#{p['number']:>6} skip      {'draft' if p.get('draft') else 'auto-merge not armed'}")
     if armed:
         git("fetch", "-q", "origin", *[f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}" for p in armed])
     out: list[Member] = []
@@ -857,23 +1175,44 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         if fetched != p["head"]["sha"]:
             log(f"#{n:>6} skip      fetched head differs from the API head (pushed meanwhile)")
             continue
+        # The ordinary candidate list is capped, but stale-red refresh must still inspect every
+        # armed PR. Once full, check only the verified head's required statuses: no diff, app-status,
+        # or strict-lane work is needed to decide whether it is red and belongs in the refresh queue.
+        if len(out) >= limit and red is not None:
+            view = pr_view(repo, p, [])
+            failing = stale_red_candidate(view, member_required, pinned_checks(gh, fetched, extra))
+            if failing:
+                red.append((view, failing))
+            continue
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
-        checks = gh.checks(fetched)
-        ok, why = qualifies(view, member_required, checks, app, untrainable)
+        checks = pinned_checks(gh, fetched, extra)
+        ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
+        # The lane-independent verdict (manual-lane paths aside): is an extra gate the reason it waits?
+        xwhy = why if ok else qualifies(view, member_required, checks, app, lambda _f: False, extra=extra)[1]
+        if strict is not None and xwhy.startswith("extra gate red") and EXTRA_GATE_CONTEXT not in app:
+            # settle only (build never writes): tell the author once per head, never disarm.
+            gh.comment(n, EXTRA_GATE_MESSAGE)
+            gh.post_status(fetched, "failure", f"{xwhy} on this head; the train waits for a green scan",
+                           context=EXTRA_GATE_CONTEXT)
         if not ok and strict is not None:
             modes = [m for c in changed_entries(git, f"{base}...{fetched}") for m in (c.old_mode, c.new_mode)]
-            state, swhy = strict_lane_state(view, member_required, checks, app, untrainable, modes)
+            state, swhy = strict_lane_state(view, member_required, checks, app, untrainable, modes, main_red, extra)
             if state:
+                view["strict_why"] = swhy
                 log(f"#{n:>6} strict    {state}: {swhy}")
                 strict.append((state, view))
+        if not ok and red is not None:
+            failing = stale_red_candidate(view, member_required, checks)
+            if failing:
+                red.append((view, failing))
         if ok:
             out.append(Member(n, view["title"], view["body"], fetched, view["head_ref"], view["created_at"],
                               ref=fetched, files=files))
             apps[n] = app
-        if len(out) >= limit:
+        if len(out) >= limit and red is None:
             break
     return out, apps
 
@@ -903,6 +1242,12 @@ def plan_train(gh, git, repo: str, base: str) -> tuple[list[Member], list[Member
     cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
     fragments = regen_inventory_fragments(regen_text)
     fast, train = partition(git, base, cands, fragments)
+    main_red = main_red_contexts(gh, git, required, base)
+    if main_red and train:
+        # A train over a red main is red on that context whatever its members do (the settle lane serves
+        # a FIX alone, promote_fixes), so it would only burn a CI run to reach "inconclusive".
+        log(f"train: none while main {base[:12]} is red on {', '.join(sorted(main_red))} — fixes go first, alone")
+        train = []
     return fast, train, {n: bisect_size(a) for n, a in apps.items()}
 
 
@@ -1026,7 +1371,8 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
 
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
-    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": []}
+    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [],
+                     "inconclusive": [], "rerun": [], "refreshed": []}
     if not shadow:
         # Phase 1 is gated on the live ruleset, not on the env flag alone: until it requires the App-pinned
         # context with strict off, behave exactly as shadow. Flip order of env vs ruleset is irrelevant.
@@ -1037,13 +1383,62 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     required = gh.required()
     train_required = [c for c in required if c != STATUS_CONTEXT and c not in TREE_INDEPENDENT_CONTEXTS]
     carrier_in_flight = False
+    # Read the strict lane BEFORE settling any carrier: a reservation holds train merges as well as the
+    # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
+    base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+    holder, timed_out = strict_reservation(git, base, strict, shadow,
+                                           fixes=strict_fixes(gh, git, base, strict, main_red, main_cache))
+    acted = False
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
-        checks = gh.checks(sha)
-        failing = [c for c in train_required if checks.get(c) not in (None, *OK_STATES)]
-        if not failing and any(checks.get(c) is None for c in train_required):
+        extra = train_extra_gates(git, base)
+        if extra is None:   # fail closed: no carrier is judged (nothing merges, nobody blamed) until fixed
             summary["in_flight"] = True
             carrier_in_flight = True
+            continue
+        checks = pinned_checks(gh, sha, extra)
+        failing, pending, inconclusive = classify_carrier(
+            checks, train_required + [g for g in extra if g in checks and checks[g] not in EXTRA_GATE_NA_STATES])
+        main_extra = [c for c in failing if c in extra and c in main_red]
+        failing = [c for c in failing if c not in main_extra]   # red on main too: never a culprit
+        if main_extra and not failing:
+            if pending:
+                summary["in_flight"] = True
+                carrier_in_flight = True
+                continue
+            log(f"::warning::carrier #{carrier}: red only on extra gate(s) {', '.join(main_extra)}, red on main too — no verdict")
+            summary["inconclusive"].append(carrier)
+            gh.close_carrier(carrier)
+            if TRAIN_BRANCH_RE.fullmatch(branch):
+                Pusher(git, branch, gh.remote).delete()
+            continue
+        if failing:
+            # Red only because gates overran a budget or were NOT EVALUATED (#13400) — the same as a
+            # cancelled job: no verdict about any member, so no culprit and no bisect.
+            only_inconclusive, why = gh.failures_inconclusive(sha, failing)
+            if only_inconclusive:
+                log(f"carrier #{carrier}: {', '.join(failing)} red only for inconclusive gates ({why}) — inconclusive")
+                failing, inconclusive = [], sorted(set(inconclusive) | set(failing))
+        if not failing and pending:
+            summary["in_flight"] = True
+            carrier_in_flight = True
+            continue
+        if not failing and inconclusive:
+            # Wait for a terminal non-cancelled result: re-run the cancelled jobs ONCE, then the
+            # carrier is in flight again. A second all-inconclusive verdict (or a refused rerun)
+            # closes the carrier with NO verdict — nobody is blamed and the next tick rebuilds.
+            if not gh.app_statuses(sha).get(RERUN_CONTEXT, ("", ""))[0] and gh.rerun_inconclusive(sha, inconclusive):
+                gh.post_status(sha, "success", "rerun 1 of 1: " + ", ".join(inconclusive), context=RERUN_CONTEXT)
+                log(f"carrier #{carrier}: inconclusive ({', '.join(inconclusive)}) — re-ran once, in flight")
+                summary["rerun"].append(carrier)
+                summary["in_flight"] = True
+                carrier_in_flight = True
+                continue
+            log(f"::warning::carrier #{carrier}: still inconclusive ({', '.join(inconclusive)}) — closed with no verdict")
+            summary["inconclusive"].append(carrier)
+            gh.close_carrier(carrier)
+            if TRAIN_BRANCH_RE.fullmatch(branch):
+                Pusher(git, branch, gh.remote).delete()
             continue
         got = git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode == 0
         fetched = git("rev-parse", "refs/merge-train/settle").stdout.strip() if got else ""
@@ -1057,6 +1452,11 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         live_main = gh.main_sha()
         if not problem and chain[0] != live_main:
             problem = "main moved since publish — the next tick rebuilds"
+        if not problem and not failing and holder is not None:
+            log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
+            summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
+            continue
+        acted = True
         if problem:
             log(f"::warning::carrier #{carrier}: {problem}")
             summary["rejected"].append(carrier)
@@ -1079,11 +1479,17 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                     break
                 expected = merged
                 summary["merged"].append(n)
+        elif not [c for c in failing if c not in main_red]:
+            # Red only on contexts main itself is red on: says nothing about any member — never a culprit,
+            # never a bisect (a bisect ends in a culprit). Closed with no verdict; nobody is blamed.
+            log(f"::warning::carrier #{carrier}: red only on {', '.join(failing)}, red on main {chain[0][:12]} too — inconclusive")
+            summary["inconclusive"].append(carrier)
         else:
             members = chain[1]
+            failing = [c for c in failing if c not in main_red]  # blame names only what main is green on
             if len(members) == 1:
                 n, head = members[0]
-                gh.post_status(head, "failure", f"isolated as the cause of a red train over main {chain[0][:12]}")
+                gh.post_status(head, "failure", culprit_description(failing, chain[0]))
                 gh.comment(n, CULPRIT_MESSAGE)
                 summary["culprits"].append(n)
             else:
@@ -1093,34 +1499,250 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         gh.close_carrier(carrier)
         if TRAIN_BRANCH_RE.fullmatch(branch):
             Pusher(git, branch, gh.remote).delete()
-    # Fast lane, from live data only — nothing here reads a stored classification.
-    base = live_base(gh, git)
-    regen_text = main_regen_text(git, base)
-    strict: list = []
-    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict)
+    if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
+        base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+        holder, timed_out = strict_reservation(git, base, strict, shadow,
+                                               fixes=strict_fixes(gh, git, base, strict, main_red, main_cache))
+    summary["main_red"] = sorted(main_red)
+    if timed_out:
+        summary["timed_out"] = timed_out
+        # Released: never reserving again on that head, and served after every other strict-lane PR.
+        strict.sort(key=lambda sv: sv[1]["number"] in timed_out)
+    # Strict lane first: an update-branch it issues starts a reservation THIS tick, so the fast lane
+    # below must already see it.
+    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out)
+    # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
+    # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
+    # and a merge now would put the reserved head behind main again.
     fragments = regen_inventory_fragments(regen_text)
     fast, _train = partition(git, base, cands, fragments)
+    hold = (f"main reserved for strict-lane #{holder}" if holder is not None
+            else "strict-lane update-branch requested" if summary["updated"]
+            else "a strict-lane PR merged; main moved" if summary["strict"] else None)
     for m in fast:
+        if hold:
+            log(f"#{m.number:>6} fast      held: {hold} — next tick")
+            continue
         if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success":
             gh.post_status(m.head_sha, "success", f"fast lane: disjoint from main {base[:12]} and the batch")
         summary["fast"].append(m.number)
-    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary)
+    stale_red_refresh(gh, git, base, red, shadow, summary)
     return summary
 
 
-def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict) -> None:
+def settle_view(gh, git, repo: str, required: list[str]):
+    """Live main and every armed PR judged against it: (base, regen_text, strict, red, cands, apps)."""
+    base = live_base(gh, git)
+    regen_text = main_regen_text(git, base)
+    strict: list = []
+    red: list = []
+    main_cache: dict = {}
+    main_red = main_red_contexts(gh, git, required, base, main_cache)
+    if main_red:
+        log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red,
+                                  main_red=main_red)
+    cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
+    return base, regen_text, strict, red, cands, apps, main_red, main_cache
+
+
+def promote_fixes(gh, git, repo: str, base: str, cands: list, strict: list, main_red: dict[str, str],
+                  cache: dict | None = None) -> list:
+    """Main red (ADR-0343): a train/fast-lane candidate that demonstrably FIXES a main-red context (the
+    same test as the strict lane's, fix_contexts) leaves the train and the fast lane and joins the strict
+    list as a green fix, so strict_lane serves it first, alone, without update-branch, after re-reading
+    live main and pinned to its head. Returns the candidates that stay. No-op while main is green."""
+    if not main_red:
+        return cands
+    keep = []
+    for m in cands:
+        view = pr_view(repo, gh.pr(m.number), m.files)
+        if view["head_sha"] != m.head_sha:
+            keep.append(m)
+            continue
+        fixed = fix_contexts(gh, git, base, view, main_red, cache)
+        if not fixed:
+            keep.append(m)
+            continue
+        view["strict_why"] = f"fix for {', '.join(fixed)} red on main {base[:12]}"
+        log(f"#{m.number:>6} fix       green over a base red on {', '.join(fixed)}: served first, alone, without update")
+        strict.append(("green", view))
+    return keep
+
+
+def strict_fixes(gh, git, base: str, strict: list, main_red: dict[str, str], cache: dict | None = None) -> dict[int, list[str]]:
+    """Green strict-lane PRs that demonstrably fix a main-red context (see fix_contexts): number -> contexts."""
+    if not main_red:
+        return {}
+    out: dict[int, list[str]] = {}
+    for state, view in strict:
+        if state == "green":
+            fixed = fix_contexts(gh, git, base, view, main_red, cache)
+            if fixed:
+                out[view["number"]] = fixed
+    return out
+
+
+def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
+                       fixes: dict | None = None) -> tuple[int | None, list[int]]:
+    """(holder, timed_out). The holder is the oldest strict-lane PR whose head already contains live
+    main and whose CI is still running with nothing failed — or has just gone green, so it merges this
+    tick: main is reserved for it, so neither the
+    fast lane nor a train nor another strict-lane update may move or contend for main until it
+    settles (merged, failed, or timed out). A green holder that cannot merge (merge refused) is
+    bounded by the same timeout. A reservation older than RESERVATION_TIMEOUT_S — measured
+    from the head's committer time, which update-branch sets — is released and listed in timed_out.
+    Main red (ADR-0343): a "waiting" PR never holds (it cannot go green until main is fixed); a green
+    FIX (`fixes`) merges without being up to date, so it holds — first, as strict_lane serves it first."""
+    now = time.time() if now is None else now
+    holder, timed_out = None, []
+    fixes = fixes or {}
+    ordered = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)
+    for state, view in ordered:
+        n, head = view["number"], view["head_sha"]
+        if state not in ("pending", "green"):
+            continue
+        if not (state == "green" and n in fixes) and git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
+            continue
+        if state == "green" and shadow:
+            continue  # shadow never merges it, so it must not hold anything
+        ct = git("show", "-s", "--format=%ct", head, check=False).stdout.strip()
+        # The committer time is author-supplied: a head dated in the future would otherwise hold
+        # main for as long as its CI never reports, so a future stamp counts as timed out (#13485).
+        if not ct.isdigit() or not 0 <= now - int(ct) <= RESERVATION_TIMEOUT_S:
+            log(f"#{n:>6} strict    reservation timed out (> {RESERVATION_TIMEOUT_S // 60} min): released, back of the queue")
+            timed_out.append(n)
+        elif holder is None:
+            holder = n
+    return holder, timed_out
+
+
+def stale_red_candidate(pr: dict, member_required: list[str], checks: dict[str, str | None]) -> list[str]:
+    """The required contexts (merge-train aside) that are FAILURE on a same-repo PR that agent-pr-guard
+    did not refuse. Empty = not a stale-red candidate. live_candidates only ever passes armed, non-draft
+    PRs here; attribution to main is decided later, against main's own CI."""
+    if not pr.get("same_repo", True):
+        return []
+    for name, state in checks.items():
+        if GUARD_CONTEXT_HINT in name and state not in OK_STATES and state is not None:
+            return []
+    return [c for c in member_required if c != STATUS_CONTEXT and checks.get(c) == "failure"]
+
+
+def main_ci_result(gh, git, ctx: str, sha: str, cache: dict | None = None, depth: int = STALE_RED_WALK) -> tuple[str, str] | None:
+    """main's own CI verdict for `ctx` at `sha`: the push run's result on that commit, or on the nearest
+    first-parent ancestor that has a completed one. (commit, conclusion) or None."""
+    walk = git("rev-list", "--first-parent", f"--max-count={depth}", sha, check=False).stdout.split()
+    for c in walk:
+        if cache is not None and c in cache:
+            res = cache[c]
+        else:
+            res = gh.checks(c)
+            if cache is not None:
+                cache[c] = res
+        if res.get(ctx) is not None and res[ctx] not in INCONCLUSIVE_STATES:   # a cancelled run says nothing about main
+            return c, res[ctx]
+    return None
+
+
+def stale_red_refresh(gh, git, base: str, red: list, shadow: bool, summary: dict) -> None:
+    """Stale-red refresh (ADR-0343): an armed PR left red only because MAIN was red when its CI ran gets
+    ONE update-branch once main is green again. Every failing required context must have failed on main
+    at the PR's merge-base (or its nearest ancestor with a result) and be green on the current tip; and
+    the PR must be behind main. After the refresh its merge-base IS the fixed main, so a PR still red
+    then fails the attribution test and is never refreshed again — no loop. Oldest first, at most
+    STALE_RED_CAP per tick. Git queries and the API only; no PR code runs."""
+    summary.setdefault("refreshed", [])
+    cache: dict = {}
+    for view, failing in red:
+        if len(summary["refreshed"]) >= STALE_RED_CAP:
+            break
+        n, head = view["number"], view["head_sha"]
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0:
+            log(f"#{n:>6} stale-red not behind main — red on its own merits")
+            continue
+        mb = git("merge-base", head, base, check=False).stdout.strip()
+        if not mb:
+            continue
+        why = None
+        for ctx in failing:
+            at_base = main_ci_result(gh, git, ctx, mb, cache)
+            if not at_base or at_base[1] != "failure":
+                why = f"{ctx} was not red on main at its base {mb[:12]} — its own defect"
+                break
+            at_tip = main_ci_result(gh, git, ctx, base)
+            if not at_tip or at_tip[1] not in OK_STATES:
+                why = f"{ctx} is not green on main yet — no point refreshing"
+                break
+        if why:
+            log(f"#{n:>6} stale-red skip: {why}")
+            continue
+        msg = f"stale-red refresh: {', '.join(failing)} was red on main {mb[:12]}, green on {base[:12]}"
+        if shadow:
+            log(f"#{n:>6} {msg} (shadow: no update)")
+            continue
+        ok = gh.update_branch(n, head)
+        log(f"#{n:>6} {msg}: update-branch {'requested' if ok else 'refused'}")
+        if ok:
+            summary["refreshed"].append(n)
+
+
+def fix_contexts(gh, git, base: str, view: dict, main_red: dict[str, str], cache: dict | None = None) -> list[str]:
+    """The main-red contexts this green PR demonstrably fixes: red in main's CI at the PR's own
+    merge-base (or nearest ancestor with a verdict), green on the PR head. A PR that went green over a
+    base that was still green proves nothing about the breakage and is NOT a fix."""
+    mb = git("merge-base", view["head_sha"], base, check=False).stdout.strip()
+    if not mb:
+        return []
+    out = []
+    extra = train_extra_gates(git, base) or {}
+    for ctx in sorted(main_red):
+        if ctx in extra and gh.extra_checks(view["head_sha"], {ctx: extra[ctx]}).get(ctx) not in OK_STATES:
+            continue   # an extra gate is not required: only its own pinned GREEN on the head proves a fix
+        at_base = main_ci_result(gh, git, ctx, mb, cache)
+        if at_base and at_base[1] == "failure":
+            out.append(ctx)
+    return out
+
+
+def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict,
+                main_red: dict[str, str] | None = None, cache: dict | None = None,
+                holder: int | None = None, timed_out: list | None = None) -> None:
     """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
     contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
     date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
     behind -> update-branch for the oldest one only, and none while another is reserved, so CI is never
-    flooded. Nothing here executes PR
-    code: ancestry is a git query, the rest is the API."""
+    flooded. Nothing here executes PR code: ancestry is a git query, the rest is the API.
+
+    Main red (ADR-0343, main-red awareness): a PR whose only failures are red on main too is
+    "waiting" — skipped, never reserving. No update-branch is issued onto a red main: it could only
+    manufacture main-caused red. A green PR that was red-based on a main-red context is the FIX: it
+    is ranked first and merges without being up to date (its own CI already ran that gate green
+    over a red base), with every other condition and the live-main re-check still applied."""
     summary.setdefault("strict", [])
     summary.setdefault("updated", [])
-    updated = False
+    summary.setdefault("waiting", [])
+    main_red = main_red or {}
+    fixes: dict[int, list[str]] = {}
+    for state, view in strict:
+        if state == "waiting":  # never served, never reserving: logged before any merge can end the loop
+            log(f"#{view['number']:>6} strict    {view.get('strict_why') or main_red_reason(list(main_red), main_red)}")
+            summary["waiting"].append(view["number"])
+    if main_red:
+        fixes = strict_fixes(gh, git, base, strict, main_red, cache)
+        strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
+    updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
+        if holder is not None and n != holder:
+            log(f"#{n:>6} strict    held: main reserved for strict-lane #{holder}")
+            continue
+        if state == "waiting":
+            continue
         current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
+        if current and state == "pending" and n in (timed_out or []):
+            continue
+        fix = fixes.get(n)
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
@@ -1128,25 +1750,35 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
             continue
         if state != "green":
             continue
-        if not current:
+        if not current and not fix:
+            if main_red:
+                ctxs = sorted(main_red)
+                log(f"#{n:>6} strict    behind main, not updated: {main_red_reason(ctxs, main_red)}")
+                continue
             if updated or shadow:
                 continue
             ok = gh.update_branch(n, head)
             log(f"#{n:>6} strict    behind main {base[:12]}: update-branch {'requested' if ok else 'refused'}")
             if ok:
                 updated = True
+                summary["in_flight"] = True  # the reservation starts now: no train is built under it
                 summary["updated"].append(n)
             continue
         if carrier_in_flight:
-            log(f"#{n:>6} strict    green and up to date, but a train is in flight over main — next tick")
+            log(f"#{n:>6} strict    green{'' if current else ' fix'}, but a train is in flight over main — next tick")
             continue
         if shadow:
-            log(f"#{n:>6} strict    green and up to date (shadow: no status, no merge)")
+            log(f"#{n:>6} strict    green {'and up to date' if current else 'fix for ' + ', '.join(fix)} (shadow: no status, no merge)")
             continue
         if gh.main_sha() != base:
             log(f"#{n:>6} strict    main moved since it was read — next tick")
             break
-        gh.post_status(head, "success", f"strict lane: green on an up-to-date head over main {base[:12]}")
+        if current:
+            desc = f"strict lane: green on an up-to-date head over main {base[:12]}"
+        else:
+            desc = f"strict lane: fix for {', '.join(fix)} red on main {base[:12]}, green over its red base"
+            log(f"#{n:>6} strict    fix for {', '.join(fix)} red on main {base[:12]}: merging without update")
+        gh.post_status(head, "success", desc)
         merged = gh.merge(n, head)
         if not merged:
             log(f"#{n:>6} strict    did not merge; stopping")
@@ -1224,9 +1856,12 @@ def check_declaration() -> int:
             continue
         fails += [label for label, needle in JOB_MUST[job] if needle not in sec]
         fails += [label for label, needle in JOB_FORBID[job] if needle in sec]
+    rules = pathlib.Path(RULES_FILE)
+    if not parse_extra_gates(rules.read_text() if rules.exists() else ""):
+        fails.append(f"{RULES_FILE}: merge_train.extra_gates must declare at least one check (parsed as empty)")
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
-    n = len(TOP) + 3 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
+    n = len(TOP) + 4 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
     print(f"SUBJECTS={n}")
     print("merge-train declaration OK" if not fails else f"{len(fails)} declaration failure(s)")
     return 1 if fails else 0
@@ -1246,6 +1881,7 @@ SYN_GENERATOR_SRC = (
     "    for f in fs:\n"
     "        if fnmatch.fnmatch(f,'gen-*opa-bundle*.sh'): subprocess.run(['bash',os.path.join(r,f)])\n"
 )
+SYN_RULES = "merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
 SYN_REQUIRED = ["gates (data)", "Validate manifests", "derived", "issue-hygiene", STATUS_CONTEXT]
 # The GENERATORS fragments make docs/, services/, count.txt and bad.txt protected, so PRs touching
 # them ride trains (as real inventory sources do) instead of the fast lane; svc/ stays fast-lane.
@@ -1275,6 +1911,15 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
+        self.carrier_override: dict = {}         # carrier (train head) check overrides, e.g. cancelled
+        self.main_override: dict = {}            # main tip check overrides, kept apart from carriers
+        self.reruns: list[tuple[str, list[str]]] = []
+        self.rerun_ok = True
+        self.on_rerun = None                     # callable run after a rerun request (the rerun's outcome)
+        self.main_sequence: dict[str, list] = {}  # main sha -> successive check overrides, one per read
+        self.pinned: dict[str, dict[str, list]] = {}  # sha -> extra gate -> states of runs from the pinned workflow
+        self.gate_records: dict[str, list] = {}  # shard slug -> run-gates --json records of the carrier's CI
+        self.inconclusive_reads = 0
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
         self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
 
@@ -1309,10 +1954,25 @@ class FakeGitHub:
                 failing = [c for c in r.stdout.strip().split(",") if c]
                 self.g("worktree", "remove", "--force", wt)
                 self._ci[sha] = {**{c: ("failure" if c in failing else "success") for c in SYN_REQUIRED[:3]}, "issue-hygiene": "success"}
-            out = dict(self._ci[sha])
+            # carrier_override models a carrier's CI and main_override main's tip, which is read too
+            # (main_red_contexts, #13517): one shared override made every red-carrier fixture "red on main".
+            override = self.main_override if sha == self.main_sha() else self.carrier_override
+            out = {**self._ci[sha], **override, **self.head_checks.get(sha, {})}
+            if self.main_sequence.get(sha):            # main CI finishing mid-tick: next read differs
+                out.update(self.main_sequence[sha].pop(0))
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
             out.setdefault(ctx, None if state == "pending" else state)
-        return out
+        return {c: v for c, v in out.items() if v != "absent"}   # "absent": the context never reported
+
+    def extra_checks(self, sha, gates):
+        """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
+        head's Trivy override stands for one pinned run (an unpinned spoof lives only in checks())."""
+        if sha in self.pinned:
+            return {n: extra_verdict(v) for n, v in self.pinned[sha].items() if n in gates}
+        plain = dict(self.head_checks.get(sha, {}))   # not self.checks(): status reads are counted by tests
+        if not any(p["head"]["sha"] == sha for p in self.prs.values()):
+            plain = {**self.carrier_override, **plain}
+        return {n: plain[n] for n in gates if n in plain}
 
     def app_statuses(self, sha):
         out = {}
@@ -1346,6 +2006,16 @@ class FakeGitHub:
             self.g("commit", "-q", "-m", "foreign")
             self.foreign_after_merge = None
         return sha
+
+    def failures_inconclusive(self, sha, failing):
+        self.inconclusive_reads += 1
+        return gate_failures_inconclusive(list(failing), self.gate_records)
+
+    def rerun_inconclusive(self, sha, contexts):
+        self.reruns.append((sha, list(contexts)))
+        if self.rerun_ok and self.on_rerun:
+            self.on_rerun()
+        return self.rerun_ok
 
     def update_branch(self, n, head):
         p = self.prs[n]
@@ -1389,6 +2059,7 @@ def _synthetic_origin(root: str) -> None:
     g("config", "maintenance.auto", "false")
     w("services/s1.txt", "s1\n")
     w("count.txt", "1\n")
+    w(RULES_FILE, SYN_RULES)
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
     w(REGEN_INVENTORY, SYN_INVENTORY)
     w(SYN_BASELINE, "base\n")
@@ -1504,6 +2175,82 @@ def self_test() -> int:
         check(f"qualifies: a DATA path with a control character {f!r} is refused", not ok and "control character" in why, why)
     check("untrainable: an unparsable runner fails closed (any gen-* at any depth)",
           Untrainable("")("openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh") and Untrainable("")("x/y/z/gen-q.py"))
+    # ---- #13400: a gate red only for its budget / NOT EVALUATED is inconclusive ---------------
+    def recs(*kinds):
+        return [{"id": f"g{i}", "status": "failed" if k else "ok", "failure_kind": k} for i, k in enumerate(kinds)]
+    for label, jobs, records, want in [
+        ("budget only", ["gates (lint-x)", "Validate manifests"], {"lint-x": recs("budget", None)}, True),
+        ("not evaluated + budget", ["gates (a)", "gates (b)"], {"a": recs("not_evaluated"), "b": recs("budget")}, True),
+        ("content next to budget", ["gates (a)"], {"a": recs("budget", "content")}, False),
+        ("unfalsified", ["gates (a)"], {"a": [{"id": "x", "status": "unfalsified", "failure_kind": "unfalsified"}]}, False),
+        ("pre-#13400 record (no failure_kind)", ["gates (a)"], {"a": [{"id": "x", "status": "failed"}]}, False),
+        ("artifact unreadable", ["gates (a)"], {"a": None}, False),
+        ("artifact missing", ["gates (a)"], {}, False),
+        ("a non-gate job failed too", ["gates (a)", "derived"], {"a": recs("budget")}, False),
+        ("aggregate alone", ["Validate manifests"], {}, False),
+        ("shard red with no failed record", ["gates (a)"], {"a": recs(None)}, False),
+    ]:
+        got, why = gate_failures_inconclusive(jobs, records)
+        check(f"gate verdict: {label} -> {'inconclusive' if want else 'conclusive'}", got is want, why)
+
+    # A GitHub rerun keeps attempt-1 artifacts under the same workflow run id. The failing
+    # attempt-2 job may be a content failure even when attempt 1 wrote a budget-only verdict.
+    original_api, original_paginate, original_artifact_json = api, paginate, GitHub.artifact_json
+    try:
+        run = 123
+        attempt = 2
+        artifacts = [{"id": 10, "name": "gate-results-data-a1", "expired": False}]
+        jobs = [{"name": "gates (data)", "conclusion": "failure", "run_attempt": attempt}]
+        def fixture_api(method, path, body=None):
+            return (200, {"run_attempt": attempt}) if path.endswith(f"/actions/runs/{run}") else (404, {})
+        def fixture_paginate(path, key=None):
+            if path.endswith("/check-runs"):
+                return [{"name": "gates (data)", "id": 20,
+                         "details_url": f"https://github.com/x/y/actions/runs/{run}/job/20"}]
+            if path.endswith("/jobs?filter=latest"):
+                return jobs
+            if path.endswith("/artifacts"):
+                return artifacts
+            raise AssertionError(path)
+        globals()["api"], globals()["paginate"] = fixture_api, fixture_paginate
+        GitHub.artifact_json = lambda self, artifact_id: [
+            {"id": "g", "status": "failed", "failure_kind": "budget"}]
+        gh_attempt = GitHub("x/y", "main", "")
+        got, why = gh_attempt.failures_inconclusive("head", ["gates (data)"])
+        check("attempt evidence: old budget artifact cannot excuse a new red shard", not got and "unreadable" in why, why)
+        artifacts.append({"id": 11, "name": "gate-results-data-a2", "expired": False})
+        got, why = gh_attempt.failures_inconclusive("head", ["gates (data)"])
+        check("attempt evidence: exact current attempt is accepted", got and "budget" in why, why)
+        jobs[0]["run_attempt"] = 1
+        got, why = gh_attempt.failures_inconclusive("head", ["gates (data)"])
+        check("attempt evidence: stale failing job is rejected", not got and "not from attempt" in why, why)
+    finally:
+        globals()["api"], globals()["paginate"] = original_api, original_paginate
+        GitHub.artifact_json = original_artifact_json
+
+    # ---- inconclusive is never red; legacy culprit marks are re-evaluated -----------------
+    rq = ["gates (data)", "derived", "sec"]
+    f, pnd, inc = classify_carrier({"gates (data)": "success", "derived": "success", "sec": "cancelled"}, rq)
+    check("classify: a cancelled context is inconclusive, not failing", f == [] and inc == ["sec"] and pnd == [], f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "failure", "derived": "success", "sec": "cancelled"}, rq)
+    check("classify: failure + cancelled -> only the real failure is failing", f == ["gates (data)"] and inc == ["sec"], f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "skipped", "derived": "success", "sec": "cancelled"}, rq)
+    check("classify: skipped next to a cancellation is inconclusive", f == [] and set(inc) == {"gates (data)", "sec"}, f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "skipped", "derived": "success", "sec": "success"}, rq)
+    check("classify: skipped with no cancellation keeps its old meaning (failing)", f == ["gates (data)"] and inc == [], f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "stale", "derived": None, "sec": "success"}, rq)
+    check("classify: stale is inconclusive, a pending context is pending", f == [] and inc == ["gates (data)"] and pnd == ["derived"])
+    check("culprit description carries the prefix and the failing contexts",
+          culprit_description(["gates (data)"], "a" * 40) == "culprit: gates (data) red on a train over main aaaaaaaaaaaa")
+    legacy = {STATUS_CONTEXT: ("failure", "isolated as the cause of a red train over main 0123456789ab")}
+    check("qualifies: a LEGACY culprit mark (pre-inconclusive rule) is re-evaluated, not final",
+          qualifies({**base_pr, "files": ["svc/a"]}, req, green, legacy)[0])
+    check("qualifies: a new-format culprit mark is final until a push",
+          not qualifies({**base_pr, "files": ["svc/a"]}, req, green,
+                        {STATUS_CONTEXT: ("failure", culprit_description(["x"], "b" * 40))})[0])
+    check("qualifies: a manual-lane failure stays final",
+          not qualifies({**base_pr, "files": ["svc/a"]}, req, green,
+                        {STATUS_CONTEXT: ("failure", "not verifiable by the merge train: manual lane")})[0])
     check("qualifies: an App failure (culprit) on the head waits for a push",
           not qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", "x")})[0])
     check("order: oldest first", [p["number"] for p in order_candidates(
@@ -1565,7 +2312,63 @@ def self_test() -> int:
           "not the recorded tree" in (record_problem(f"tree={t1}", BOT_LOGIN, t2) or ""))
     check("record: a record by any other creator is refused", record_problem(f"tree={t1}", "someone", t1) is not None)
     check("record: a malformed record is refused", record_problem(f"tree={t1} members=1", BOT_LOGIN, t1) is not None)
-    check("comments: fixed texts carry no placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE + MANUAL_LANE_MESSAGE)
+    check("comments: fixed texts carry no placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE + MANUAL_LANE_MESSAGE
+          + EXTRA_GATE_MESSAGE)
+
+    # ---- extra gates (merge_train.extra_gates) -------------------------------------------------
+    decl = ("a: 1\nmerge_train:\n  # why\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+            "    - {workflow: .github/workflows/security.yml, check: \"CodeQL\"}  # c\nnext: 2\n")
+    want = {"Trivy": ".github/workflows/security.yml", "CodeQL": ".github/workflows/security.yml"}
+    check("extra gates: the rules.yaml block list is parsed (name -> pinned workflow)", parse_extra_gates(decl) == want,
+          str(parse_extra_gates(decl)))
+    for label, text in [("absent", "a: 1\n"), ("empty", "merge_train:\n  extra_gates: []\n"),
+                        ("other key only", "merge_train:\n  batch: 8\n"),
+                        ("an unpinned item", "merge_train:\n  extra_gates:\n    - Trivy\n"),
+                        ("one malformed item among good ones", "merge_train:\n  extra_gates:\n"
+                         "    - {workflow: .github/workflows/security.yml, check: Trivy}\n    - {check: X}\n")]:
+        check(f"extra gates: {label} declaration parses as None", parse_extra_gates(text) is None, str(parse_extra_gates(text)))
+    xg = {"Trivy": ".github/workflows/security.yml"}
+    # The REAL GitHub.extra_checks over canned API pages: a spoofed green from another app and a later
+    # green from another workflow must neither mask the Security scan red nor count on their own.
+    def _runs(*specs):
+        return [{"id": i, "name": "Trivy", "status": "completed", "conclusion": c, "app": {"slug": slug},
+                 "details_url": f"https://github.com/o/r/actions/runs/{run}/job/{i}"} for i, (c, slug, run) in enumerate(specs)]
+    paths = {1: ".github/workflows/security.yml", 2: ".github/workflows/evil.yml"}
+    saved_api = (globals()["paginate"], globals()["get"])
+    try:
+        for label, page, want in [
+                ("pinned red + later spoof green (other app)", _runs(("failure", "github-actions", 1), ("success", "evil-app", 1)), "failure"),
+                ("pinned red + later green (other workflow)", _runs(("failure", "github-actions", 1), ("success", "github-actions", 2)), "failure"),
+                ("only a spoofed green: absent, not green", _runs(("success", "evil-app", 1), ("success", "github-actions", 2)), "absent"),
+                ("pinned green", _runs(("success", "github-actions", 1)), "success")]:
+            globals()["paginate"] = lambda path, key=None, _p=page: _p
+            globals()["get"] = lambda path: {"path": paths[int(path.rsplit("/", 1)[1])] + "@refs/heads/x"}
+            got = GitHub("o/r", "main", "").extra_checks("a" * 40, {"Trivy": ".github/workflows/security.yml"})
+            check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
+    finally:
+        globals()["paginate"], globals()["get"] = saved_api
+    check("extra gates: one red pinned run beats a later green one", extra_verdict(["failure", "success"]) == "failure")
+    check("extra gates: pinned running waits, skipped alone is n/a",
+          extra_verdict(["success", None]) is None and extra_verdict(["skipped"]) == "skipped")
+    check("extra gates: red Trivy refuses (any lane reads qualifies)",
+          qualifies(base_pr, req, {**green, "Trivy": "failure"}, extra=xg) == (False, "extra gate red: Trivy"))
+    check("extra gates: without the declaration a red Trivy is not judged (the negative control)",
+          qualifies(base_pr, req, {**green, "Trivy": "failure"})[0])
+    check("extra gates: running Trivy waits", qualifies(base_pr, req, {**green, "Trivy": None}, extra=xg)
+          == (False, "extra gate pending: Trivy"))
+    check("extra gates: Trivy never triggered is not applicable", qualifies(base_pr, req, green, extra=xg)[0])
+    check("extra gates: skipped Trivy is not applicable", qualifies(base_pr, req, {**green, "Trivy": "skipped"}, extra=xg)[0])
+    check("extra gates: green Trivy is served", qualifies(base_pr, req, {**green, "Trivy": "success"}, extra=xg)[0])
+    check("extra gates: a required failure is still reported as such",
+          qualifies(base_pr, req, {**green, "Gitleaks": "failure", "Trivy": "failure"}, extra=xg)[1]
+          == "required context failure: Gitleaks")
+    wf = {**base_pr, "files": [".github/workflows/x.yml"]}
+    check("extra gates: strict lane refuses a red Trivy",
+          strict_lane_state(wf, req, {**green, "Trivy": "failure"}, None, U, [], None, xg)[0] is None)
+    check("extra gates: strict lane WAITS when Trivy is red on main too",
+          strict_lane_state(wf, req, {**green, "Trivy": "failure"}, None, U, [], {"Trivy": "c" * 40}, xg)[0] == "waiting")
+    check("extra gates: strict lane reads a running Trivy as pending",
+          strict_lane_state(wf, req, {**green, "Trivy": None}, None, U, [], None, xg)[0] == "pending")
 
     # ---- real git, real ticks ----------------------------------------------------------------
     saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP")}
@@ -1637,9 +2440,131 @@ def self_test() -> int:
             check("ticks: every carrier was closed", all(c["state"] == "closed" for c in gh.carriers.values()))
             reset()
 
-            # Semantic pair green alone, red together: one merges, the other is the culprit.
-            open_only("pA", "pB")
+            def settle_once():
+                return mode_settle(gh, Git(clone("settle")), "o/r", False)
+
+            def mt_status(n):
+                return gh.app_statuses(gh.prs[n]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))
+
+            def open_carriers():
+                return [c for c in gh.carriers.values() if c["state"] == "open"]
+
+            # Fully cancelled carrier (#13452 shape): no culprit; ONE rerun, then in flight.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "cancelled", "derived": "skipped"}
+            s = settle_once()
+            check("cancelled: a fully cancelled carrier blames nobody, re-runs once and is in flight",
+                  s["culprits"] == [] and s["bisected"] == [] and len(gh.reruns) == 1 and s["in_flight"]
+                  and len(open_carriers()) == 1 and mt_status(1)[0] != "failure" and not gh.comments,
+                  f"{s} reruns={gh.reruns} status={mt_status(1)}")
+            check("cancelled: the rerun asked for exactly the inconclusive contexts",
+                  bool(gh.reruns) and sorted(gh.reruns[0][1]) == ["derived", "gates (data)"], str(gh.reruns))
+            s = settle_once()
+            check("cancelled: still inconclusive after the one rerun -> closed with no verdict, no second rerun",
+                  s["culprits"] == [] and s["inconclusive"] and len(gh.reruns) == 1 and not open_carriers()
+                  and mt_status(1)[0] != "failure", f"{s} reruns={gh.reruns}")
+            gh.carrier_override = {}
             drain()
+            check("cancelled: once CI is terminal and green, the member merges", gh.merged == [1], str(gh.merged))
+            gh.reruns.clear()
+            reset()
+
+            # Rerun succeeds: the next settle sees a terminal green result and merges.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "cancelled"}
+            gh.on_rerun = lambda: gh.carrier_override.clear()
+            settle_once()
+            s = settle_once()
+            gh.on_rerun = None
+            check("cancelled: a rerun that finishes green merges the member, nobody blamed",
+                  gh.merged == [1] and s["culprits"] == [] and len(gh.reruns) == 1, f"{s} merged={gh.merged}")
+            gh.reruns.clear()
+            reset()
+
+            # Failure + cancelled mix: only the real failure blames, and the status names only it.
+            open_only("p3")
+            tick()
+            gh.carrier_override = {"issue-hygiene": "cancelled"}
+            real = [c for c in SYN_REQUIRED[:3] if gh.checks(open_carriers()[0]["head"]["sha"]).get(c) == "failure"]
+            gh.carrier_override = {"derived": "cancelled"} if "derived" not in real else {"gates (data)": "cancelled"}
+            s = settle_once()
+            st, desc = mt_status(3)
+            check("mix: a real failure next to a cancelled job still names the culprit",
+                  s["culprits"] == [3] and st == "failure" and desc.startswith(CULPRIT_PREFIX) and gh.reruns == [],
+                  f"{s} {st} {desc!r}")
+            check("mix: the culprit status names only the really failing context(s), never the cancelled one",
+                  all(c in desc for c in real) and not any(c in desc for c in gh.carrier_override), f"{desc!r} real={real}")
+            gh.carrier_override = {}
+            reset()
+
+            # #13400 (carrier #13501 blamed #13137): gates that PASSED on content but overran their budget,
+            # or were NOT EVALUATED, are inconclusive exactly like a cancelled job — never a culprit.
+            for kind in ("budget", "not_evaluated"):
+                open_only("p1")
+                tick()
+                gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure"}
+                gh.gate_records = {"data": [{"id": "security-checklist-money-path", "status": "failed", "failure_kind": kind},
+                                            {"id": "other", "status": "ok", "failure_kind": None}]}
+                s = settle_once()
+                check(f"{kind}: a carrier red only for {kind} gates blames nobody, re-runs once and is in flight",
+                      s["culprits"] == [] and s["bisected"] == [] and len(gh.reruns) == 1 and s["in_flight"]
+                      and mt_status(1)[0] != "failure" and not gh.comments, f"{s} reruns={gh.reruns} status={mt_status(1)}")
+                s = settle_once()
+                check(f"{kind}: still red the same way after the one rerun -> closed with no verdict",
+                      s["culprits"] == [] and s["inconclusive"] and len(gh.reruns) == 1 and not open_carriers()
+                      and mt_status(1)[0] != "failure", f"{s} reruns={gh.reruns}")
+                gh.carrier_override, gh.gate_records = {}, {}
+                gh.reruns.clear()
+                reset()
+            # Control: the same red with a CONTENT failure in the shard still names the culprit.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure"}
+            gh.gate_records = {"data": [{"id": "a", "status": "failed", "failure_kind": "budget"},
+                                        {"id": "b", "status": "failed", "failure_kind": "content"}]}
+            s = settle_once()
+            check("budget control: a content failure next to a budget overrun is still a culprit",
+                  s["culprits"] == [1] and gh.reruns == [] and mt_status(1)[0] == "failure", f"{s} {mt_status(1)}")
+            gh.carrier_override, gh.gate_records = {}, {}
+            reset()
+            # Control: no machine-readable verdict (artifact missing / pre-#13400 runner) stays conclusive.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure"}
+            s = settle_once()
+            check("budget control: a red shard with no gate-results artifact is still a culprit",
+                  s["culprits"] == [1] and gh.reruns == [], str(s))
+            gh.carrier_override = {}
+            reset()
+
+            # A legacy (pre-fix) culprit mark is re-evaluated: the member rides again and merges when green.
+            open_only("p1")
+            gh.post_status(gh.prs[1]["head"]["sha"], "failure", "isolated as the cause of a red train over main 0123456789ab")
+            drain()
+            check("legacy mark: a pre-fix culprit status is re-evaluated and overwritten by the next train",
+                  gh.merged == [1] and mt_status(1)[0] == "success", f"{gh.merged} {mt_status(1)}")
+            reset()
+
+            # Rerun refused by the API: no verdict, nobody blamed.
+            open_only("p1")
+            tick()
+            gh.carrier_override, gh.rerun_ok = {"gates (data)": "cancelled"}, False
+            s = settle_once()
+            check("cancelled: a refused rerun closes the carrier with no verdict, nobody blamed",
+                  s["culprits"] == [] and s["inconclusive"] and not open_carriers() and mt_status(1)[0] != "failure", str(s))
+            gh.carrier_override, gh.rerun_ok = {}, True
+            gh.reruns.clear()
+            reset()
+
+            # Semantic pair green alone, red together: one merges, the other is the culprit.
+            # The fake squashes the PR head, not the carrier, so main would lack the regenerated derived
+            # file and read red on `derived` — and no train is built over a red main. Not under test here.
+            open_only("pA", "pB")
+            gh.carrier_override = gh.main_override = {"derived": "success"}
+            drain()
+            gh.carrier_override, gh.main_override = {}, {}
             check("semantic pair: exactly one merges, the other is the culprit",
                   gh.merged == [11] and (12, CULPRIT_MESSAGE) in gh.comments, f"{gh.merged} {gh.comments}")
             reset()
@@ -2066,10 +2991,11 @@ def self_test() -> int:
             gh.prs[1]["auto_merge"] = None
             gh.merge(1, gh.prs[1]["head"]["sha"])          # main advances: pW and pW2 are now behind
             gh.merged.clear()
-            settle_now()
+            s = settle_now()
             check("strict lane: green but behind gets update-branch, is not merged, one PR per tick (oldest)",
-                  gh.merged == [] and gh.updates == [35] and not strict_desc(35)[0] and not strict_desc(36)[0],
-                  f"merged={gh.merged} updates={gh.updates}")
+                  gh.merged == [] and gh.updates == [35] and not strict_desc(35)[0] and not strict_desc(36)[0]
+                  and s.get("main_red", []) == [] and s.get("waiting", []) == [],
+                  f"merged={gh.merged} updates={gh.updates} {s}")
             # The updated head runs its CI; while it does, settle reserves main (no train builds).
             gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
             s = settle_now()
@@ -2133,6 +3059,518 @@ def self_test() -> int:
             check("strict lane: main re-checked right before the merge; a moved main means no merge",
                   gh.merged == [], f"merged={gh.merged}")
             reset()
+
+            # STARVATION (#13456): a strict-lane PR is updated, and while its CI runs a fast-lane PR
+            # merges (GitHub auto-merge acts on the success status settle posts). The updated head is
+            # behind again the moment its CI goes green, so it is re-updated — forever. The
+            # reservation must hold the fast lane and train merges, not only other strict updates.
+            def automerge_fast(s):
+                for n in s["fast"]:
+                    if gh.prs[n]["state"] == "open":
+                        gh.merge(n, gh.prs[n]["head"]["sha"])
+
+            gh.updates.clear()
+            open_only("pW", "p1")
+            gh.prs[1]["auto_merge"] = None
+            gh.merge(1, gh.prs[1]["head"]["sha"])          # main advances: pW is behind
+            gh.merged.clear()
+            settle_now()                                   # tick 1: pW updated
+            open_only("pF")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            s = settle_now()                               # tick 2: pW's CI runs; pF is fast-eligible
+            automerge_fast(s)
+            check("reservation: while the reserved head's CI runs the fast lane is held, main does not move",
+                  s["in_flight"] and s["fast"] == [] and 34 not in gh.merged
+                  and not gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT),
+                  f"{s} merged={gh.merged}")
+            gh.head_checks.clear()
+            s = settle_now()                               # tick 3: pW green on its updated head
+            automerge_fast(s)
+            check("reservation: the reserved PR merges after its CI, updated exactly once (no starvation)",
+                  35 in gh.merged and gh.updates == [35], f"merged={gh.merged} updates={gh.updates}")
+            s = settle_now()                               # tick 4: the held fast-lane PR goes
+            automerge_fast(s)
+            check("reservation: the held fast-lane candidate waits one tick, then goes",
+                  34 in gh.merged, f"{s} merged={gh.merged}")
+            gh.updates.clear()
+            reset()
+
+            # Two strict-lane PRs may both be current: the older one's pending CI reserves main, so
+            # the younger green one must not merge and invalidate that CI. Regression for #13500.
+            open_only("pW", "pW2")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            s = settle_now()
+            check("reservation: a green strict PR cannot merge past another strict PR's pending reservation",
+                  s["in_flight"] and gh.merged == [] and not strict_desc(36)[0],
+                  f"{s} merged={gh.merged} #36={strict_desc(36)}")
+            gh.head_checks.clear()
+            s = settle_now()
+            check("reservation: the strict reservation holder gets served before the younger green PR",
+                  gh.merged == [35], f"{s} merged={gh.merged}")
+            reset()
+
+            # A train whose CI went green while a strict-lane reservation is active does not merge:
+            # the carrier is left for a later tick (it is rejected and rebuilt once main moves).
+            open_only("p1")
+            tick()
+            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+            open_only("pW")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            gh.pending_shas.clear()                        # the train finishes green; pW still running
+            s = settle_now()
+            check("reservation: a green train does not merge while a strict-lane reservation is active",
+                  s["in_flight"] and 1 not in gh.merged and any(c["state"] == "open" for c in gh.carriers.values()),
+                  f"{s} merged={gh.merged}")
+            gh.head_checks.clear()
+            s = settle_now()
+            check("reservation: once the reserved PR goes green it merges first; the train stays held",
+                  gh.merged == [35] and s["in_flight"], f"{s} merged={gh.merged}")
+            s = settle_now()
+            check("reservation: the held train, now over a stale main, is rejected for a rebuild",
+                  gh.merged == [35] and s["rejected"], f"{s} merged={gh.merged}")
+            reset()
+
+            # A hung CI cannot freeze main: past RESERVATION_TIMEOUT_S the reservation is released,
+            # the fast lane runs again, and the PR goes to the back of the strict queue.
+            global RESERVATION_TIMEOUT_S
+            saved_timeout = RESERVATION_TIMEOUT_S
+            RESERVATION_TIMEOUT_S = -1
+            try:
+                open_only("pW", "pF")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+                s = settle_now()
+                check("reservation timeout: a hung reservation is released and the fast lane runs",
+                      not s["in_flight"] and 34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            finally:
+                RESERVATION_TIMEOUT_S = saved_timeout
+                gh.head_checks.clear()
+            reset()
+            # #13485: what #13500 left open; both cases fail on the code before it.
+            # (a) right after update-branch nothing has REPORTED yet; that head must still hold main.
+            open_only("pW", "pF")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {c: "absent" for c in SYN_REQUIRED[:4]}
+            s = settle_now()
+            check("reservation: a head whose CI has not reported yet still holds main (fast lane held)",
+                  s["in_flight"] and s["fast"] == [], str(s))
+            gh.head_checks.clear()
+            reset()
+
+            # (b) the committer time is the author's: a head dated in the future holds nothing.
+            real_time = time.time
+            time.time = lambda: real_time() - 3600
+            try:
+                open_only("pW", "pF")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+                s = settle_now()
+            finally:
+                time.time = real_time
+                gh.head_checks.clear()
+            check("reservation timeout: a head committed in the future holds no reservation",
+                  34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            reset()
+
+            # ---- main-red awareness: the strict lane never deadlocks behind a PR red only because main is ----
+            MR = "Validate manifests"
+
+            def main_breaks(base_red=False):
+                """Advance main by one commit whose own CI is red on MR (and base0 too, if base_red), so
+                every fixture PR is behind a red main tip."""
+                if base_red:
+                    gh.head_checks[base0] = {MR: "failure"}
+                pathlib.Path(origin, "svc", "break.txt").parent.mkdir(parents=True, exist_ok=True)
+                pathlib.Path(origin, "svc", "break.txt").write_text("break\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "break main")
+                gh.head_checks[gh.main_sha()] = {MR: "failure"}
+
+            def main_red_done():
+                gh.head_checks.clear()
+                gh.updates.clear()
+                reset()
+
+            # The production deadlock: an older manual-lane PR red only on the main-red context (one
+            # context still running), a newer green PR cut from the red main that fixes it. The fix
+            # merges first; the old PR is skipped and reserves nothing.
+            open_only("pW", "pW2")
+            main_breaks(base_red=True)
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            s = settle_now()
+            check("main red: deadlock — the green fix merges first, the old main-red PR waits unreserved",
+                  gh.merged == [36] and gh.updates == [] and s.get("waiting", []) == [35] and not s["in_flight"]
+                  and s.get("main_red", []) == [MR] and strict_desc(36)[1].startswith("strict lane: fix for Validate manifests"),
+                  f"merged={gh.merged} updates={gh.updates} {s} status={strict_desc(36)}")
+            main_red_done()
+
+            # Main red: a green PR whose CI ran over a GREEN base is not a fix — no update-branch onto
+            # the red tip (it would only manufacture main-caused red), and no merge.
+            open_only("pW", "pW2")
+            main_breaks()
+            s = settle_now()
+            check("main red: no update-branch and no merge for a green PR that is not the fix",
+                  gh.updates == [] and gh.merged == [] and s["updated"] == [] and s.get("main_red", []) == [MR],
+                  f"merged={gh.merged} updates={gh.updates} {s}")
+            main_red_done()
+
+            # A PR red on its OWN context (not red on main) is judged as before: no lane, no wait.
+            open_only("pW")
+            main_breaks()
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": "failure", MR: "failure"}
+            s = settle_now()
+            check("main red: a PR also red on a context main is green on is not 'waiting' and gets nothing",
+                  gh.updates == [] and gh.merged == [] and s.get("waiting", []) == [] and not strict_desc(35)[0],
+                  f"merged={gh.merged} updates={gh.updates} {s}")
+            main_red_done()
+            open_only("pW")
+            main_breaks()
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            gh.g("checkout", "-q", "-f", "-B", "pW-cur", "pW")
+            gh.g("merge", "-q", "--no-edit", "main")
+            gh.g("checkout", "-q", "-f", "main")
+            gh.prs[35]["head"].update(ref="pW-cur", sha=gh.g("rev-parse", "pW-cur").stdout.strip())
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            s = settle_now()
+            check("main red: an up-to-date PR with CI still running and no failure still reserves main",
+                  s["in_flight"] and gh.merged == [] and s.get("waiting", []) == [], f"{s} merged={gh.merged}")
+            main_red_done()
+
+            # ---- main red x reservation ----
+            def reservation_now():
+                sg = Git(clone("settle"))
+                base, _rt, strict, _red, _c, _a, mr, mc = settle_view(gh, sg, "o/r", gh.required())
+                return strict_reservation(sg, base, strict, fixes=strict_fixes(gh, sg, base, strict, mr, mc))
+
+            # A main-red "waiting" PR, even up to date with CI still running, never holds main: the fast
+            # lane is not held for a PR that cannot go green until main is fixed.
+            open_only("pW", "pF")
+            main_breaks(base_red=True)
+            gh.g("checkout", "-q", "-f", "-B", "pW-cur", "pW")
+            gh.g("merge", "-q", "--no-edit", "main")
+            gh.g("checkout", "-q", "-f", "main")
+            gh.prs[35]["head"].update(ref="pW-cur", sha=gh.g("rev-parse", "pW-cur").stdout.strip())
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            holder, _to = reservation_now()
+            s = settle_now()
+            # pF's own CI ran green over base0, which is red here: by fix_contexts it is a FIX, so it is served
+            # first in its own right (every lane, ADR-0343) — what matters is that the waiting PR holds nothing.
+            check("main red x reservation: a waiting PR is never the holder; the fast lane is not held for it",
+                  holder != 35 and s.get("waiting", []) == [35] and (34 in s["fast"] or 34 in gh.merged) and not s["in_flight"],
+                  f"holder={holder} {s}")
+            main_red_done()
+
+            # The green FIX (behind a red main, merging without update) holds main: no fast-lane status
+            # and no train merge may move main under it before it merges.
+            open_only("pW", "pW2", "pF")
+            main_breaks(base_red=True)
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {MR: "failure", "gates (data)": None}
+            holder, _to = reservation_now()
+            s = settle_now()
+            check("main red x reservation: the fix candidate is the holder, merges, and the fast lane waits",
+                  holder == 36 and gh.merged == [36] and s["fast"] == [] and 34 not in gh.merged,
+                  f"holder={holder} merged={gh.merged} {s}")
+            main_red_done()
+
+            # ---- main red x EVERY lane: a fix is served first even when it is not manual-lane ----
+            def main_breaks_on_content():
+                """main gains bad.txt, so its own CI (ci.py) is red on MR; returns a NON-manual-lane fix PR
+                (#70) cut from that red tip that deletes it — green over a base red on MR."""
+                pathlib.Path(origin, "bad.txt").write_text("x\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "break main (content)")
+                gh.g("checkout", "-q", "-f", "-B", "pZ", "main")
+                gh.g("rm", "-q", "bad.txt")
+                gh.g("commit", "-q", "-m", "pZ: fix main")
+                gh.g("checkout", "-q", "-f", "main")
+                gh.add_pr(70, "pZ", "2026-01-70")
+
+            open_only("p1")
+            main_breaks_on_content()
+            s = settle_now()
+            check("main red, any lane: a non-manual-lane fix merges first, alone, without update",
+                  gh.merged == [70] and gh.updates == [] and 1 not in gh.merged and 70 in s["strict"],
+                  f"merged={gh.merged} updates={gh.updates} {s} status={strict_desc(70)}")
+            main_red_done()
+
+            open_only("p1")
+            main_breaks_on_content()
+            _f, train, _z = plan_train(gh, Git(clone("plan")), "o/r", gh.main_sha())
+            check("main red, any lane: no train is planned over a red main (it could only come back red)",
+                  train == [], str([m.number for m in train]))
+            main_red_done()
+
+            # A train over a red main that is red ONLY on the main-red context blames nobody. The train is
+            # built while main still reads green (main CI not reported yet), then main's red verdict lands.
+            open_only("p1")
+            pathlib.Path(origin, "bad.txt").write_text("x\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "break main (content)")
+            gh.head_checks[gh.main_sha()] = {MR: "success"}
+            tick()
+            gh.head_checks.clear()
+            s = settle_now()
+            check("main red: a train red only on a main-red context names no culprit and bisects nothing",
+                  s["culprits"] == [] and s["bisected"] == [] and s["inconclusive"] and mt_status(1)[0] != "failure"
+                  and not gh.comments and not open_carriers(), f"{s} status={mt_status(1)} comments={gh.comments}")
+            main_red_done()
+
+            # ... but a context main is GREEN on still blames, naming only that context.
+            open_only("p3", "p1")
+            pathlib.Path(origin, "services", "z.txt").write_text("z\n")   # count.txt now wrong: gates (data) red
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "break main (data)")
+            gh.head_checks[gh.main_sha()] = {"gates (data)": "success", "derived": "success"}
+            gh.prs[3]["created_at"] = "2026-01-00"
+            tick(batch_size=1)
+            gh.head_checks.clear()
+            s = settle_now()
+            check("main red: a context main is green on still names the culprit, and only that context",
+                  s["culprits"] == [3] and mt_status(3)[1].startswith(CULPRIT_PREFIX + "Validate manifests red")
+                  and "gates (data)" not in mt_status(3)[1], f"{s} status={mt_status(3)}")
+            main_red_done()
+
+            # Every open PR leaves a decision line, armed or not (a disarmed fix was invisible in the log).
+            open_only("p1", "p2")
+            gh.prs[1]["auto_merge"] = None
+            gh.prs[2]["draft"] = True
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                settle_now()
+            check("settle log: a disarmed and a draft PR each get a decision line",
+                  "#     1 skip      auto-merge not armed" in buf.getvalue() and "#     2 skip      draft" in buf.getvalue(),
+                  buf.getvalue()[-400:])
+            reset()
+
+            # ---- stale-red refresh: PRs left red by a red MAIN get one update-branch once main is green ----
+            VM = "Validate manifests"
+
+            def stale_red(*branches, base_red=True, tip_red=False, behind=True):
+                """Open `branches` red on VM; main at their base red on VM (or not); main then gets a
+                fix commit (unless not behind) whose own CI is green on VM (or still red)."""
+                gh.updates.clear()
+                gh.head_checks.clear()
+                open_only(*branches)
+                if base_red:
+                    gh.head_checks[base0] = {VM: "failure"}
+                if behind:
+                    pathlib.Path(origin, "svc", "fix.txt").parent.mkdir(parents=True, exist_ok=True)
+                    pathlib.Path(origin, "svc", "fix.txt").write_text("fix\n")
+                    gh.g("add", "-A")
+                    gh.g("commit", "-q", "-m", "fix main")
+                    if tip_red:
+                        gh.head_checks[gh.main_sha()] = {VM: "failure"}
+                for br in branches:
+                    gh.head_checks[gh.prs[numbers[br]]["head"]["sha"]] = {VM: "failure"}
+
+            def stale_done():
+                gh.head_checks.clear()
+                gh.main_sequence.clear()
+                gh.updates.clear()
+                reset()
+
+            stale_red("p1")
+            s = settle_now()
+            check("stale-red: red on a context main was red on at its base, green on the tip -> refreshed",
+                  gh.updates == [1] and s["refreshed"] == [1] and gh.merged == [], f"updates={gh.updates} {s}")
+            # After the refresh its base contains the fixed main; still red -> never refreshed again.
+            gh.head_checks[gh.prs[1]["head"]["sha"]] = {VM: "failure"}
+            gh.updates.clear()
+            s = settle_now()
+            check("stale-red: a refreshed PR still red is not refreshed again (no loop)",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1", base_red=False)
+            s = settle_now()
+            check("stale-red: red on a context that was green on main at its base -> NOT refreshed (own defect)",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            # Not behind: main's CI for the tip finishes mid-tick (a re-run of the failed job going
+            # green), so one read says red and the next green. Only the behind test stops it.
+            stale_red("p1", behind=False)
+            gh.main_sequence[base0] = [{VM: "failure"}, {VM: "success"}]
+            s = settle_now()
+            check("stale-red: red but not behind main -> NOT refreshed",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p4", "p2", "p1")
+            s = settle_now()
+            check("stale-red: three eligible PRs -> only 2 refreshed, oldest first",
+                  gh.updates == [1, 2] and s["refreshed"] == [1, 2], f"updates={gh.updates} {s}")
+            stale_done()
+
+            # The green candidate cap must not hide a later red PR from the independent stale-red
+            # scan. Reuse one verified tree for these synthetic PRs; the status result is sequenced
+            # per API read so the first 64 qualify and the 65th is stale-red.
+            saved_prs, old_checks = gh.prs, gh.checks
+            gh.prs = {}
+            shared_head = gh.g("rev-parse", "p1").stdout.strip()
+            for i in range(65):
+                n = 1000 + i
+                gh.prs[n] = {"number": n, "state": "open", "draft": False, "auto_merge": {"x": 1},
+                             "title": f"p{n}", "body": "", "created_at": f"{i:03d}",
+                             "user": {"login": "someone"},
+                             "head": {"ref": "p1", "sha": shared_head, "repo": {"full_name": "o/r"}}}
+            reads = [0]
+
+            def sequenced_checks(sha):
+                reads[0] += 1
+                result = {c: "success" for c in SYN_REQUIRED[:4]}
+                if reads[0] == 65:
+                    result["Validate manifests"] = "failure"
+                return result
+
+            gh.checks = sequenced_checks
+            red = []
+            cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0,
+                                           Untrainable(SYN_INVENTORY), red=red)
+            check("stale-red: a later red PR is inspected after the 64-green candidate cap",
+                  len(cands) == 64 and reads[0] == 65 and len(red) == 1 and red[0][0]["number"] == 1064,
+                  f"candidates={len(cands)} status_reads={reads[0]} red={[x[0]['number'] for x in red]}")
+            gh.prs, gh.checks = saved_prs, old_checks
+
+            stale_red("p1", tip_red=True)
+            s = settle_now()
+            check("stale-red: main tip still red on that context -> NOT refreshed",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.prs[1]["auto_merge"] = None
+            s = settle_now()
+            check("stale-red: a disarmed PR is NOT refreshed", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.prs[1]["draft"] = True
+            s = settle_now()
+            check("stale-red: a draft PR is NOT refreshed", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.head_checks[gh.prs[1]["head"]["sha"]]["gates / agent-pr-guard"] = "failure"
+            s = settle_now()
+            check("stale-red: a PR agent-pr-guard refused is NOT refreshed",
+                  gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            gh.prs[1]["head"]["repo"] = {"full_name": "fork/r"}
+            s = settle_now()
+            check("stale-red: a fork PR is NOT refreshed", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            stale_red("p1")
+            s = mode_settle(gh, Git(clone("settle")), "o/r", True)
+            check("stale-red: shadow settle refreshes nothing", gh.updates == [] and s["refreshed"] == [], f"updates={gh.updates} {s}")
+            stale_done()
+
+            # ---- extra gates, end to end: the declaration lives on main, every lane reads it ----
+            def declare_extra_gates():
+                p = pathlib.Path(origin, RULES_FILE)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(SYN_RULES)
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "declare extra gates", check=False)  # already declared by the fixture
+
+            def extra_done():
+                gh.head_checks.clear()
+                gh.carrier_override = {}
+                gh.updates.clear()
+                reset()
+
+            def trivy(n, state):
+                gh.head_checks.setdefault(gh.prs[n]["head"]["sha"], {})["Trivy"] = state
+
+            # Red Trivy: never merged, in any lane (train/fast: p1, p2; strict: pW); told once per head.
+            declare_extra_gates()
+            carriers_before = len(gh.carriers)
+            open_only("p1", "p2", "pW")
+            for n in (1, 2, 35):
+                trivy(n, "failure")
+            drain(max_ticks=4)
+            s = settle_once()
+            told = [n for n, t in gh.comments if t == EXTRA_GATE_MESSAGE]
+            check("extra gate red: an armed PR is never merged in any lane",
+                  gh.merged == [] and gh.updates == [] and s["fast"] == [] and len(gh.carriers) == carriers_before,
+                  f"merged={gh.merged} updates={gh.updates} carriers={len(gh.carriers) - carriers_before} {s}")
+            check("extra gate red: the author is told once per head, the PR stays armed",
+                  sorted(told) == [1, 2, 35] and all(gh.prs[n]["auto_merge"] for n in (1, 2, 35)), str(gh.comments))
+            # A new head that turns the scan green is served without anyone re-arming it.
+            trivy(1, "success")
+            drain(max_ticks=4)
+            check("extra gate red -> green on the same armed PR: served", 1 in gh.merged and 2 not in gh.merged,
+                  str(gh.merged))
+            extra_done()
+
+            declare_extra_gates()
+            open_only("p1")
+            trivy(1, None)
+            s = settle_once()
+            _f, train, _z = plan_train(gh, Git(clone("plan")), "o/r", gh.main_sha())
+            check("extra gate pending: waits (no fast lane, no train, no comment)",
+                  gh.merged == [] and s["fast"] == [] and train == [] and not gh.comments, f"{s} {gh.comments}")
+            extra_done()
+
+            declare_extra_gates()
+            open_only("p1")
+            drain(max_ticks=4)
+            check("extra gate not triggered on the head: served", gh.merged == [1] and not gh.comments,
+                  f"{gh.merged} {gh.comments}")
+            extra_done()
+
+            # Carrier judged on the extra gate: red on the carrier with main green is a culprit (control) ...
+            declare_extra_gates()
+            open_only("p1", "p3")
+            tick()
+            gh.carrier_override = {"Trivy": "failure"}
+            gh.head_checks[gh.main_sha()] = {"Trivy": "success"}   # main green: the override is the carrier's alone
+            s = settle_once()
+            check("extra gate on a carrier: red with main green is a verdict (bisect / culprit)",
+                  gh.merged == [] and (s["bisected"] or s["culprits"]), str(s))
+            extra_done()
+            # ... and red on main too blames nobody: no verdict, no culprit, nothing merged.
+            declare_extra_gates()
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"Trivy": "failure"}
+            gh.head_checks[gh.main_sha()] = {"Trivy": "failure"}
+            s = settle_once()
+            check("extra gate red on main: the carrier blames nobody and nothing merges",
+                  gh.merged == [] and not s["culprits"] and not s["bisected"] and s["inconclusive"]
+                  and CULPRIT_MESSAGE not in [t for _n, t in gh.comments]
+                  and mt_status(1)[0] != "failure", f"{s} {gh.comments} {mt_status(1)}")
+            check("extra gate red on main: it reads as main red", "Trivy" in s["main_red"], str(s))
+            extra_done()
+
+            # Spoofing: a same-name GREEN Trivy from another app/workflow next to a pinned RED one.
+            open_only("p1", "pW")
+            for n in (1, 35):
+                sha = gh.prs[n]["head"]["sha"]
+                gh.head_checks[sha] = {"Trivy": "success"}            # the latest same-name run: spoofed green
+                gh.pinned[sha] = {"Trivy": ["failure", "success"]}    # Security scan's own runs: one red
+            drain(max_ticks=4)
+            check("extra gate spoof: a green same-name run from another source cannot mask the pinned red",
+                  gh.merged == [] and gh.updates == [], f"merged={gh.merged} updates={gh.updates}")
+            gh.pinned.clear()
+            extra_done()
+
+            # Fail closed: declaration absent or unparseable on main -> nothing is served, nothing judged.
+            for label, text in [("absent", None), ("unparseable", "merge_train:\n  extra_gates:\n    - Trivy\n")]:
+                p = pathlib.Path(origin, RULES_FILE)
+                if text is None:
+                    gh.g("rm", "-q", RULES_FILE)
+                else:
+                    p.write_text(text)
+                    gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", f"declaration {label}")
+                open_only("p1", "pW")
+                drain(max_ticks=3)
+                _f, train, _z = plan_train(gh, Git(clone("plan")), "o/r", gh.main_sha())
+                check(f"extra gate declaration {label}: no PR is served in any lane",
+                      gh.merged == [] and gh.updates == [] and train == [] and _f == [],
+                      f"merged={gh.merged} updates={gh.updates} train={[m.number for m in train]}")
+                extra_done()
     finally:
         for k, v in saved.items():
             if v is None:

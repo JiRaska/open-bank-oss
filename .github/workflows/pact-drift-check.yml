@@ -15,6 +15,10 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      # Ledger regeneration loads this profile and its manifest before filtering tests.
+      - "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt"
+      - "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml"
+      - "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
@@ -42,6 +46,10 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      # Ledger regeneration loads this profile and its manifest before filtering tests.
+      - "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt"
+      - "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml"
+      - "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"

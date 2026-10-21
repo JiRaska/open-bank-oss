@@ -525,27 +525,35 @@ def collect(short: str, att, today: str) -> ServiceReadiness:
 
 
 def all_services() -> list[str]:
-    """Every module the matrix scores: the `-service` modules PLUS every declared money-path one.
-
-    The `openbank-*-service` glob alone missed openbank-sepa-payment, openbank-sepa-instant and
-    openbank-domestic-payment — three released components with a governance.yaml, an openapi.yaml
-    and a threat model, which rules.yaml declares money-path and which move SEPA and domestic
-    payments. They had no row at all, so every headline this collector produced ("N cells below
-    Verified", "GO x/37") silently excluded them (#2364). A module governance calls money-path
-    must never be absent from the readiness matrix.
-
-    Deliberately NOT widened to every module carrying a governance.yaml + src/main: that would
-    add 12 further agent/auxiliary modules and is a scoping decision about what the matrix
-    covers, not a correctness fix.
-    """
-    out = set()
-    for d in REPO.glob("openbank-*-service"):
-        m = re.match(r"openbank-(.+)-service", d.name)
-        if m:
-            out.add(m.group(1))
-    for short in money_path():
-        if module_dir(short, REPO).is_dir():
-            out.add(short)
+    """Use the shared Gradle-derived runnable inventory for Python and Node collectors."""
+    helper = Path(__file__).resolve().parents[2] / "openbank-admin-ui" / "scripts" / "service-inventory.mjs"
+    try:
+        result = subprocess.run(
+            ["node", str(helper), "--repo", str(REPO)], check=True,
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            "cannot build readiness roster: Node.js and the shared service inventory helper are required"
+        ) from exc
+    try:
+        rows = json.loads(result.stdout)
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get("short"), str)
+            or not isinstance(row.get("name"), str) for row in rows
+        ):
+            raise ValueError("unexpected inventory schema")
+        out = {row["short"] for row in rows}
+        if len(out) != len(rows):
+            raise ValueError("duplicate module identity")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError("shared service inventory returned invalid data; refusing readiness scoring") from exc
+    missing_money = sorted(money_path() - out)
+    if missing_money:
+        raise RuntimeError(
+            "declared money-path module(s) missing from runnable service inventory: "
+            + ", ".join(missing_money)
+        )
     return sorted(out)
 
 

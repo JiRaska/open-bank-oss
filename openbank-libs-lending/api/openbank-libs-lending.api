@@ -298,6 +298,8 @@ public final class com/openbank/libs/lending/CreditQuote {
 public final class com/openbank/libs/lending/CreditQuoteCalculator {
 	public static final field INSTANCE Lcom/openbank/libs/lending/CreditQuoteCalculator;
 	public final fun quote (Lcom/openbank/libs/lending/CreditQuoteRequest;Ljava/time/Instant;Ljava/time/Duration;Ljava/time/LocalDate;)Lcom/openbank/libs/lending/CreditQuote;
+	public final fun quote (Lcom/openbank/libs/lending/CreditQuoteRequest;Ljava/time/Instant;Ljava/time/Duration;Ljava/time/LocalDate;Ljava/time/LocalDate;)Lcom/openbank/libs/lending/CreditQuote;
+	public static synthetic fun quote$default (Lcom/openbank/libs/lending/CreditQuoteCalculator;Lcom/openbank/libs/lending/CreditQuoteRequest;Ljava/time/Instant;Ljava/time/Duration;Ljava/time/LocalDate;Ljava/time/LocalDate;ILjava/lang/Object;)Lcom/openbank/libs/lending/CreditQuote;
 }
 
 public final class com/openbank/libs/lending/CreditQuoteRequest {

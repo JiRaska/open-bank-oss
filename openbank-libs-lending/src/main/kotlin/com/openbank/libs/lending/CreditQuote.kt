@@ -6,8 +6,12 @@ package com.openbank.libs.lending
 
 import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
+import java.math.MathContext
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 /**
  * ADR-0269 rule 4 — price comes only from the server, and only as a quote.
@@ -81,13 +85,22 @@ object CreditQuoteCalculator {
      * The APRC is solved over the SAME cash flows the customer will really see: the net advance
      * (principal minus any upfront fee) against every instalment plus its monthly fee. Fees are
      * not a decoration on the rate; they are the reason the APRC exists.
+     *
+     * [drawdownDate] is the assumed date the net advance is received; an indicative quote defaults
+     * to the UTC date of [now]. Callers with a known funding date must supply it. Repayments must
+     * start strictly after drawdown. APRC timing uses calendar months counted backwards from each
+     * due date, then actual residual days; see [aprcYearFraction]. Moving the first due date changes
+     * these discount intervals, while the contractual schedule still determines the payment amounts.
      */
+    @JvmOverloads
     fun quote(
         request: CreditQuoteRequest,
         now: Instant,
         validityDuration: java.time.Duration,
         firstDueDate: LocalDate,
+        drawdownDate: LocalDate = now.atOffset(ZoneOffset.UTC).toLocalDate(),
     ): CreditQuote {
+        require(firstDueDate.isAfter(drawdownDate)) { "firstDueDate must be after drawdownDate" }
         val schedule = Amortization.schedule(
             principal = request.principal,
             nominalAnnualRate = request.nominalAnnualRate,
@@ -115,8 +128,7 @@ object CreditQuoteCalculator {
                 advances = listOf(Aprc.CashFlow(BigDecimal.ZERO, netAdvance.amount)),
                 payments = schedule.installments.map {
                     Aprc.CashFlow(
-                        yearsFromStart = BigDecimal(it.number)
-                            .divide(BigDecimal(MONTHS_PER_YEAR), java.math.MathContext.DECIMAL128),
+                        yearsFromStart = aprcYearFraction(drawdownDate, it.dueDate),
                         amount = (it.payment + monthlyFee).amount,
                     )
                 },
@@ -126,6 +138,30 @@ object CreditQuoteCalculator {
     }
 
     private fun zero(request: CreditQuoteRequest) = Money.of(BigDecimal.ZERO, request.principal.currency.code)
+
+    /**
+     * Monthly timing convention from Directive (EU) 2023/2225, Annex III I(c):
+     * https://eur-lex.europa.eu/eli/dir/2023/2225/oj
+     *
+     * Count whole calendar months backwards from the payment without crossing drawdown, then
+     * divide residual days by the length of the complete year backwards from the residual endpoint.
+     * Same-day-of-month intervals retain months/12. LocalDate's clipped backwards month arithmetic
+     * is deliberate: Jan 31 to Feb 29 is 29/366, while Feb 29 to Mar 31 is 1/12. No implicit
+     * end-of-month rolling or ISDA accrual convention is applied to these APRC discount intervals.
+     */
+    private fun aprcYearFraction(drawdown: LocalDate, due: LocalDate): BigDecimal {
+        var months = ChronoUnit.MONTHS.between(YearMonth.from(drawdown), YearMonth.from(due))
+        if (due.minusMonths(months).isBefore(drawdown)) months--
+        val residualEnd = due.minusMonths(months)
+        val wholeMonths = BigDecimal(months).divide(BigDecimal(MONTHS_PER_YEAR), MathContext.DECIMAL128)
+        val days = ChronoUnit.DAYS.between(drawdown, residualEnd)
+        if (days == 0L) return wholeMonths
+        val daysInYear = ChronoUnit.DAYS.between(residualEnd.minusYears(1), residualEnd)
+        return wholeMonths.add(
+            BigDecimal(days).divide(BigDecimal(daysInYear), MathContext.DECIMAL128),
+            MathContext.DECIMAL128,
+        )
+    }
 
     private const val MONTHS_PER_YEAR = 12
 }

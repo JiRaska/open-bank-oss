@@ -1061,6 +1061,7 @@ public final class com/openbank/libs/domain/calendar/BusinessDayConvention : jav
 	public static final field MODIFIED_FOLLOWING Lcom/openbank/libs/domain/calendar/BusinessDayConvention;
 	public static final field MODIFIED_PRECEDING Lcom/openbank/libs/domain/calendar/BusinessDayConvention;
 	public static final field PRECEDING Lcom/openbank/libs/domain/calendar/BusinessDayConvention;
+	public static final field UNADJUSTED Lcom/openbank/libs/domain/calendar/BusinessDayConvention;
 	public static fun getEntries ()Lkotlin/enums/EnumEntries;
 	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/domain/calendar/BusinessDayConvention;
 	public static fun values ()[Lcom/openbank/libs/domain/calendar/BusinessDayConvention;

@@ -142,7 +142,7 @@ class CatalogPensionOidcApprovalIT {
         approve(path, "LEGAL_COUNSEL", missingScope, 403)
         dataSource.connection.use { connection ->
             connection.prepareStatement(
-                "SELECT role, issuer, subject FROM pension_revision_approvals WHERE revision_id = ? ORDER BY role",
+                "SELECT role, issuer, subject FROM catalog_revision_role_approvals WHERE revision_id = ? ORDER BY role",
             ).use { statement ->
                 statement.setObject(1, revisionId)
                 statement.executeQuery().use { rows ->
