@@ -100,11 +100,6 @@ quarkus:
   # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
   # PodMonitor scrapes the same port. Without this block nothing listens there, so the
   # pod never goes ready and the liveness probe restarts it forever.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   log:
     level: INFO
 
