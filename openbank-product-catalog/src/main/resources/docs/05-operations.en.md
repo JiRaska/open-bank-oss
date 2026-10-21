@@ -48,6 +48,7 @@ The service is configured via `application.yaml`. PostgreSQL and OIDC are requir
 | `CATALOG_SCOPE_CLAIM` | `scope` | claim containing space-separated or array OAuth scopes |
 | `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral permission mapping |
 | `OPENBANK_CATALOG_PACKS` | `banking,insurance,retirement` in bank; empty standalone | explicit trusted-pack selection |
+| `CATALOG_PENSION_LEGAL_SCOPE` / `CATALOG_PENSION_PRODUCT_SCOPE` | `pension:legal-approve` / `pension:product-approve` | scope that, together with the realm role, grants an approval authority (`openbank.catalog.approval.authorities.*`) |
 | `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | `true` in bank; `false` standalone | explicit legacy banking API, seed and projection opt-in |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | security headers | CSP, HSTS, X-Frame-Options, nosniff, etc. |

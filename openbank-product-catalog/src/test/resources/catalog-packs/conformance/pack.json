@@ -1,0 +1,16 @@
+{
+  "$comment": "Test-only pack (#13429). Its role and authority names exist nowhere in src/main.",
+  "pack": "conformance",
+  "schemas": [
+    {
+      "id": "org.openbank.conformance.widget",
+      "version": 1,
+      "resource": "widget-v1.schema.json",
+      "approvalPolicy": {
+        "roles": [{ "code": "SAFETY_OFFICER", "authority": "WIDGET_SAFETY_APPROVER" }],
+        "requireEffectiveFrom": false,
+        "requiredAttributes": { "readiness": "READY" }
+      }
+    }
+  ]
+}

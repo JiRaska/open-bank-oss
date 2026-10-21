@@ -53,7 +53,7 @@ describe('production readiness recovery states', () => {
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('unavailable right now'))
     expect(screen.queryByText(/No data — run prod-readiness-collector/)).not.toBeInTheDocument()
-    expect(screen.queryByText('Services')).not.toBeInTheDocument()
+    expect(screen.queryByText('Components')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry loading the readiness report' })).toBeInTheDocument()
   })
 
@@ -93,7 +93,7 @@ describe('production readiness recovery states', () => {
     await renderPage()
 
     await waitFor(() => expect(screen.getByText(/image-baked snapshot, not live evidence/)).toBeInTheDocument())
-    expect(screen.getByText(/1 service modules, 1 money-path/)).toBeInTheDocument()
+    expect(screen.getByText(/1 backend components, 1 money-path/)).toBeInTheDocument()
     expect(screen.getByText(/source commit aaaaaaaaaaaa/)).toBeInTheDocument()
     expect(screen.getByText('ledger')).toBeInTheDocument()
   })

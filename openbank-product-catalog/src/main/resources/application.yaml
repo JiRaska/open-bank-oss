@@ -85,6 +85,19 @@ openbank:
       read-scope: ${CATALOG_READ_SCOPE:catalog:read}
       author-scope: ${CATALOG_AUTHOR_SCOPE:catalog:author}
       publish-scope: ${CATALOG_PUBLISH_SCOPE:catalog:publish}
+    # Revision approval authorities named by pack policies (catalog-packs/*/pack.json). A token
+    # holds one only with BOTH the scope and the realm role. Packs declare, deployments bind (#13429).
+    approval:
+      authorities:
+        PENSION_LEGAL_APPROVER:
+          scope: ${CATALOG_PENSION_LEGAL_SCOPE:pension:legal-approve}
+          realm-role: ROLE_PENSION_LEGAL_COUNSEL
+        PENSION_PRODUCT_OWNER:
+          scope: ${CATALOG_PENSION_PRODUCT_SCOPE:pension:product-approve}
+          realm-role: ROLE_PENSION_PRODUCT_OWNER
+      # Machine clients that may read approval evidence: azp -> service-account username.
+      evidence-readers:
+        openbank-pension: service-account-openbank-pension
   api:
     # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
     version: "2"
