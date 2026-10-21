@@ -397,7 +397,10 @@ gates:
     group: lint
     mode: enforced
     min_subjects: 30   # 63 shell scripts today (2026-08-09)
-    budget_seconds: 30   # 5.7s over 63 scripts
+    # Re-derived 2026-10-20 per derive-gate-observability-budgets.py: ceil(max(p95*3, max*1.5, 5)).
+    # 25 CI runs: min 12.6 / p50 19.4 / p95 26.8 / max 30.2s over 104 scripts (30s budget
+    # failed a clean run at 30.2s). p95*3 = 80.4 -> 81.
+    budget_seconds: 81
     run: |
       # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
       # files implementing the gates themselves — the code every other gate's verdict rests
