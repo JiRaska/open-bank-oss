@@ -171,7 +171,8 @@ class FeeAssessmentServiceTest {
         assertThat(a.journalCommands().single().accountingClass).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
     }
 
-    private fun skipCount(reason: String) = meters.counter("billing.assessment.skipped", "reason", reason).count()
+    private fun skipCount(reason: String) =
+        meters.counter("openbank.billing.assessment.skipped", "reason", reason).count()
 
     @Test
     fun `a fee-bearing product with no fee in the account currency is skipped, never a zero-fee assessment`(): Unit =
@@ -323,10 +324,10 @@ class FeeAssessmentServiceTest {
             val service = serviceWith(revisions)
             service.assess("c", "acc-1", "CZK")
             service.assess("c", "acc-2", "CZK")
-            assertThat(meters.counter("billing.assessment.dropped_components").count()).isEqualTo(2.0)
+            assertThat(meters.counter("openbank.billing.assessment.dropped_components").count()).isEqualTo(2.0)
             // and an assessment with nothing dropped does not count
             serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
-            assertThat(meters.counter("billing.assessment.dropped_components").count()).isEqualTo(2.0)
+            assertThat(meters.counter("openbank.billing.assessment.dropped_components").count()).isEqualTo(2.0)
         }
 
     @Test
@@ -336,9 +337,9 @@ class FeeAssessmentServiceTest {
         service.assess("c", "acc-2", "CZK")
         assertThat(a.skipped).isFalse()
         assertThat(a.assessedFees).isEmpty()
-        assertThat(meters.counter("billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
+        assertThat(meters.counter("openbank.billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
         // a revision without such components does not count
         serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
-        assertThat(meters.counter("billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
+        assertThat(meters.counter("openbank.billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
     }
 }
