@@ -57,6 +57,10 @@ class FraudScoreEntity : PanacheEntity() {
     @Column(name = "rule_version", nullable = false)
     lateinit var ruleVersion: String
 
+    /** ADR-0347: the threshold-set version this verdict was evaluated against; null = none active. */
+    @Column(name = "threshold_set_version")
+    var thresholdSetVersion: Int? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 }
@@ -107,6 +111,7 @@ private fun toEntity(request: ScoreRequest, result: FraudScore, objectMapper: Ob
         it.score = result.score
         it.reasonsJson = objectMapper.writeValueAsString(result.reasons)
         it.ruleVersion = result.ruleVersion
+        it.thresholdSetVersion = result.thresholdSetVersion
         it.createdAt = Instant.now(clock)
     }
 
