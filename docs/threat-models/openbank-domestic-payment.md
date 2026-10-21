@@ -141,7 +141,7 @@ not change any existing request's outcome until explicitly flipped.
   Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
   a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -359,7 +359,7 @@ not change any existing request's outcome until explicitly flipped.
   sequence); verified by a sandbox canary (worker registers + polls `openbank-domestic-payments`, real
   payments complete via Temporal end-to-end).
 - **2026-07-08** — ADR-0155 rollout (issue #413): wired the four-eyes maker-checker mechanism
-  piloted on sepa-payment. New `ApprovalConfig` (`ApprovalStore` via `RedisApprovalStore`) and
+  piloted on sepa-payment. New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (`ApprovalStore` via `RedisApprovalStore`) and
   new checker-facing endpoint `PATCH /api/v1/domestic-payments/approvals/{id}`
   (`@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`,
   `@Authorize(action="domestic-payment.approval.decide")`). Two new exception mappers

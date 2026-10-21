@@ -177,7 +177,7 @@ also be deleted (nothing else in balance-service depends on it).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `balance_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -296,7 +296,7 @@ also be deleted (nothing else in balance-service depends on it).
 
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
   `balance.credit`/`balance.debit`, mirroring the account-service rollout (issue #413). New
-  `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH /api/v1/balances/approvals/{id}`
+  ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (`RedisApprovalStore` producer) and `PATCH /api/v1/balances/approvals/{id}`
   checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`, `@Authorize(action =
   "balance.approval.decide")`); two new exception mappers (`SelfApprovalNotAllowedMapper` → 403,
   `InvalidApprovalStateMapper` → 409). Also adds balance-service's **first** Redis dependency (a

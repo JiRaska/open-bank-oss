@@ -29,7 +29,7 @@ quarkus:
       generation: none
   # Four-eyes ApprovalStore backing store (ADR-0155). party-service has no other Redis
   # usage. The cluster value comes from QUARKUS_REDIS_HOSTS on the Deployment, pointing at
-  # gitops/components/party/redis.yaml — without a reachable Redis the ApprovalConfig bean
+  # gitops/components/party/redis.yaml — without a reachable Redis the RedisApprovalStoreProducer bean
   # still resolves (so the interceptor believes four-eyes is wired) and every gated merge
   # fails on a connection error instead: issue #1354.
   redis:
@@ -251,6 +251,16 @@ mp:
   authz:
     enforce: false
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own RedisApprovalStoreProducer. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   outbox:
     dispatch-enabled: true
   rate-limit:
