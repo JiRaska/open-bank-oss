@@ -1420,9 +1420,12 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
     if main_red:
         fixes = strict_fixes(gh, git, base, strict, main_red, cache)
         strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
-    updated = holder is not None  # main reserved (strict_reservation): no other update while it runs
+    updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
+        if holder is not None and n != holder:
+            log(f"#{n:>6} strict    held: main reserved for strict-lane #{holder}")
+            continue
         if state == "waiting":
             continue
         current = git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0
@@ -2600,6 +2603,20 @@ def self_test() -> int:
             check("reservation: the held fast-lane candidate waits one tick, then goes",
                   34 in gh.merged, f"{s} merged={gh.merged}")
             gh.updates.clear()
+            reset()
+
+            # Two strict-lane PRs may both be current: the older one's pending CI reserves main, so
+            # the younger green one must not merge and invalidate that CI. Regression for #13500.
+            open_only("pW", "pW2")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            s = settle_now()
+            check("reservation: a green strict PR cannot merge past another strict PR's pending reservation",
+                  s["in_flight"] and gh.merged == [] and not strict_desc(36)[0],
+                  f"{s} merged={gh.merged} #36={strict_desc(36)}")
+            gh.head_checks.clear()
+            s = settle_now()
+            check("reservation: the strict reservation holder gets served before the younger green PR",
+                  gh.merged == [35], f"{s} merged={gh.merged}")
             reset()
 
             # A train whose CI went green while a strict-lane reservation is active does not merge:
