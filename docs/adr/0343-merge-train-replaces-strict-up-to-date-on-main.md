@@ -439,6 +439,24 @@ closed with no verdict. A missing or unreadable artifact, a record without `fail
 failed job, or any content failure keeps the verdict conclusive. Budgets were not raised: with the
 fetch fixed, carrier mode is not legitimately slower than an ordinary run.
 
+### Amendment (2026-10-21) — extra gates: a red security scan blocks serving
+
+The train judged only the ruleset-required contexts, so a PR with a red `Security scan / Trivy`
+was served while sessions disarmed it by hand (`--disable-auto`): two automations enforcing
+opposite policies, and nothing merged. **This replaces manual disarming.** The policy now has one
+declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` (today: `Trivy`,
+the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
+by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
+PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
+armed); running = wait; never triggered, skipped or neutral = not applicable. A carrier red on an
+extra gate is a verdict like any required context, unless main is red on that gate too: then it
+counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
+Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
+`github-actions` check runs from that workflow count, and any red one of them is red, so a same-name
+run from another app or workflow can neither turn it green nor mask a red. The declaration fails
+closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
+`--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
