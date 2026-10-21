@@ -23,6 +23,10 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
   services:
+    openbank-analytics-sink:
+      issue: "#13304"
+      reason: "The consolidated deployment proposes an analytics-sink image that is not covered by an existing durable hold"
+      release_condition: "The owner approves the exact image and rollout window after registry publication, provenance and signature, vulnerability scan, applicable contracts, and sandbox runtime capability are verified; remove this hold only in a separately reviewed change."
     openbank-transaction-service:
       issue: "#13231"
       reason: "V22 requires an owner-controlled maintenance rollout before card ledger posting re-drive."
@@ -4667,3 +4671,19 @@ catalog_kernel_neutrality:
   deprecated_wire_aliases:
     - {name: pensionApprovalDigest, expires: 2027-01-31, tracking: "#13429"}
     - {name: pensionApprovedEffectiveTo, expires: 2027-01-31, tracking: "#13429"}
+
+# ---------------------------------------------------------------------------------------
+# Merge train (ADR-0343). The train serves a PR only when the ruleset-required contexts are
+# green on its head; `extra_gates` adds checks the train ALSO refuses to serve over while red.
+# This is the single declaration of that policy: .github/scripts/merge-train.py reads it from
+# live main in every lane (train, fast lane, strict lane, fix-first) and for carriers. A check
+# that never ran on a head (path-scoped, not triggered) is not applicable; running = wait;
+# red on main itself = wait, never a culprit. It replaces disarming PRs by hand.
+# Each gate is PINNED to its producer: only check runs by the github-actions app from that
+# workflow file count, and any red one of them is red — a same-name run from anywhere else is
+# ignored. `Trivy` is the `Security scan` job, which runs on every pull_request (no path filter).
+# Missing or unparseable = the train serves nothing (fail closed) and --check-declaration fails.
+# ---------------------------------------------------------------------------------------
+merge_train:
+  extra_gates:
+    - {workflow: .github/workflows/security.yml, check: Trivy}
