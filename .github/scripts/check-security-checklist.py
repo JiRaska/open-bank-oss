@@ -690,20 +690,38 @@ def run_carrier(root: Path, base: str, enforce: bool, member_body: Callable[[int
     DERIVED_OUTPUTS and proven by main's derived-freshness gates on this exact tree."""
     try:
         members = carrier_lib.carrier_members(base, head)
+    except carrier_lib.CarrierUnavailable as exc:
+        carrier_lib.not_evaluated("security-checklist", f"carrier members could not be read ({exc})")
+        return 1 if enforce else 0
     except carrier_lib.CarrierError as exc:
         print(f"::error::security-checklist: verified merge-train carrier, but its members cannot be "
               f"derived from its commits ({exc}) — fail closed")
         return 1 if enforce else 0
     print(f"security-checklist: merge-train carrier — judging {len(members)} member(s) on their own "
           f"bodies and diffs: {', '.join(f'#{n}' for n, _ in members)}")
+    # An unreadable body is not an empty one. Judging it as empty used to blame a member for an API
+    # outage; now, when a member's diff actually NEEDS its body (a human box to answer), the carrier is
+    # NOT EVALUATED — red, so nothing merges unjudged, and inconclusive to the train, so nobody is
+    # blamed. A member whose diff the checklist answers mechanically never needs its body at all.
+    class _Unread(Exception):
+        pass
+
+    def need(n: int) -> Callable[[], str | None]:
+        def read() -> str | None:
+            b = member_body(n)
+            if b is None:
+                raise _Unread(n)
+            return b
+        return read
     lacking: list[int] = []
     for n, commit in members:
         print(f"security-checklist: --- member #{n} (train commit {commit[:12]}) ---")
-        body = member_body(n)
-        if body is None:
-            body = ""
-            print(f"security-checklist: member #{n}: live body unreadable — judged as empty (fail closed)")
-        if run(root, body, f"{commit}^", enforce=True, head=commit) != 0:
+        try:
+            rc = run(root, "", f"{commit}^", enforce=True, live_body=need(n), head=commit)
+        except _Unread:
+            carrier_lib.not_evaluated("security-checklist", f"member #{n} needs its body and it is unreadable")
+            return 1 if enforce else 0
+        if rc != 0:
             lacking.append(n)
     if lacking:
         print("::error::merge-train carrier: these member PR(s) touch money-path code and their OWN body "
@@ -1268,8 +1286,9 @@ def self_test() -> int:
     if rc == 0 or len(named) != 1 or "#2" not in named[0] or "#1" in named[0]:
         print("self-test FAIL (carrier-member-unticked): carrier with member #2 unticked passed or did not name #2"); bad += 1
     rc, out, _ = carrier_fixture(money, {1: ticked}, carrier_pr())
-    if rc == 0:
-        print("self-test FAIL (carrier-member-unreadable): an unreadable member body passed"); bad += 1
+    if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out or "lacks the required" in out:
+        print("self-test FAIL (carrier-member-unreadable): an unreadable member body passed, or was judged "
+              "as a finding instead of NOT EVALUATED:\n" + out[-600:]); bad += 1
     rc, out, _ = carrier_fixture(money, all_ticked, carrier_pr(), extra_commit=True)
     if rc == 0:
         print("self-test FAIL (carrier-foreign-commit): a carrier with a non-train commit passed"); bad += 1
@@ -1298,12 +1317,86 @@ def self_test() -> int:
     got: dict[str, str] = {}
 
     def fake_pr(pr: dict | None):
-        return lambda _repo, n: pr if str(n) == "500" else {"body": f"member {n} body"}
+        return lambda _repo, n, **_kw: pr
+
+    def fake_bodies(_repo, numbers, **_kw):
+        return {n: f"member {n} body" for n in numbers}
     for label, pr in [("carrier", carrier_pr()), ("spoof", carrier_pr(labels=[]))]:
         carrier_fixture(money, {}, pr, inner=lambda pr=pr, label=label: got.__setitem__(label, carrier_lib.pr_body_with_members(
-            "carrier", "base", env={"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500"}, fetch_pr=fake_pr(pr))) or 0)
+            "carrier", "base", env={"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500"}, fetch_pr=fake_pr(pr),
+            fetch_bodies=fake_bodies)) or 0)
     if got.get("carrier") != "carrier\n\nmember 1 body\n\nmember 2 body" or got.get("spoof") != "carrier":
         print(f"self-test FAIL: pr_body_with_members union wrong: {got}"); bad += 1
+
+    # ── #13400: one carrier resolution per JOB, and an unreadable subject is NOT EVALUATED ─────────
+    # Carrier #13501 spent 33.7 s / 44.9 s in two gates because each re-derived the carrier (deepening
+    # every origin branch). The first gate resolves; every later gate in the job reads the cache file.
+    calls = {"pr": 0, "bodies": 0}
+
+    def counting_pr(_repo, _n, **_kw):
+        calls["pr"] += 1
+        return carrier_pr()
+
+    def counting_bodies(_repo, ns, **_kw):
+        calls["bodies"] += 1
+        return {n: ticked for n in ns}
+    with _tf.TemporaryDirectory() as cache:
+        env = {"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", carrier_lib.CACHE_DIR_ENV: cache}
+        seen: list = []
+        before = carrier_lib.FETCHES["resolve"]
+        carrier_fixture(money, {}, carrier_pr(), inner=lambda: [seen.append(carrier_lib.resolve(
+            "base", env, fetch_pr=counting_pr, fetch_bodies=counting_bodies)) for _gate in range(3)] and 0)
+        if (calls != {"pr": 1, "bodies": 1} or carrier_lib.FETCHES["resolve"] - before != 1
+                or [r.kind for r in seen] != ["carrier"] * 3 or [n for n, _, _ in seen[2].members] != [1, 2]):
+            print(f"self-test FAIL (carrier-resolve-once): three gates in one job resolved {calls} "
+                  f"{[r.kind for r in seen]} — want ONE fetch of the PR and ONE of the member bodies"); bad += 1
+    # A real `gh` that hangs past its timeout is unreadable (None), never an empty body or a pass.
+    with _tf.TemporaryDirectory() as fake_bin:
+        gh = Path(fake_bin) / "gh"
+        gh.write_text("#!/bin/sh\nsleep 5\n")
+        gh.chmod(0o755)
+        saved_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{fake_bin}:{saved_path}"
+        try:
+            hung = (carrier_lib.gh_member_bodies(repo, [1], timeout=1), carrier_lib.gh_pr(repo, 1, timeout=1))
+        finally:
+            os.environ["PATH"] = saved_path
+        if hung != (None, None):
+            print(f"self-test FAIL (api-timeout): a hung gh call returned {hung!r}, want unreadable (None)"); bad += 1
+
+    def timed_out(*_a, **_k):
+        raise _sp.TimeoutExpired("git fetch", 1)
+    try:
+        with _tf.TemporaryDirectory() as td:
+            _sp.run(["git", "init", "-q", td], check=True)
+            carrier_lib.deepen_for_chain("HEAD", "HEAD", cwd=td, runner=timed_out)
+        # Not shallow: no fetch is attempted at all, which is the point (no network when not needed).
+    except carrier_lib.CarrierUnavailable:
+        print("self-test FAIL (deepen-not-needed): a non-shallow checkout tried to fetch"); bad += 1
+    # The gate end to end: unreadable PR on a train head, and a timed-out member read, are NOT
+    # EVALUATED (exit 1 + the verdict line), never exit 0.
+    for label, fetch_pr, fetch_bodies in [
+            ("PR object unreadable on a train/ head", lambda *_a, **_k: None, counting_bodies),
+            ("member bodies timed out", lambda *_a, **_k: carrier_pr(), lambda *_a, **_k: None)]:
+        def gate_main(fetch_pr=fetch_pr, fetch_bodies=fetch_bodies) -> int:
+            saved_env = {k: os.environ.get(k) for k in ("GITHUB_REPOSITORY", "PR_NUMBER", "GITHUB_HEAD_REF", carrier_lib.CACHE_DIR_ENV)}
+            os.environ.update({"GITHUB_REPOSITORY": repo, "PR_NUMBER": "500", "GITHUB_HEAD_REF": "train/123-1"})
+            os.environ.pop(carrier_lib.CACHE_DIR_ENV, None)
+            saved = (carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv)
+            carrier_lib.gh_pr, carrier_lib.gh_member_bodies = fetch_pr, fetch_bodies
+            sys.argv = ["x", "--live-body", "--body", carrier_body, "--base", "base", "--enforce"]
+            try:
+                return main()
+            finally:
+                carrier_lib.gh_pr, carrier_lib.gh_member_bodies, sys.argv = saved
+                for k, v in saved_env.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+        rc, out, _ = carrier_fixture(money, {}, carrier_pr(), inner=gate_main)
+        if rc == 0 or carrier_lib.NOT_EVALUATED_LINE not in out or "lacks the required" in out:
+            print(f"self-test FAIL (not-evaluated: {label}): rc={rc}, want 1 + NOT EVALUATED:\n{out[-600:]}"); bad += 1
 
     # The helper's constants must equal merge-train.py's: the carrier identity is ONE definition.
     mt = (Path(__file__).resolve().parent / "merge-train.py").read_text()
@@ -1374,11 +1467,17 @@ def main() -> int:
         return result.stdout.strip()
 
     repo = os.environ.get("GITHUB_REPOSITORY", "")
-    pr = carrier_lib.gh_pr(repo, os.environ.get("PR_NUMBER", "")) if args.live_body else None
+    # One resolution per JOB, shared with every other gate that asks (merge_train_carrier.resolve):
+    # the live PR object, the member chain and every member body, under one deadline.
+    res = carrier_lib.resolve(args.base) if args.live_body else carrier_lib.Resolution("none")
+    if res.kind == "unavailable":
+        carrier_lib.not_evaluated("security-checklist", res.reason)
+        return 1 if args.enforce else 0
+    pr = res.pr
+    member_bodies = {n: b for n, _, b in res.members}
 
     def member_body(n: int) -> str | None:
-        m = carrier_lib.gh_pr(repo, n)
-        return None if m is None else (m.get("body") or "")
+        return member_bodies.get(n)
 
     return judge(Path(args.root), body, args.base, args.enforce,
                  fetch_live_body if args.live_body else None, pr, repo, member_body)

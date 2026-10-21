@@ -1,5 +1,21 @@
 # 05 — Operations
 
+## Billing metric prefix migration
+
+Seven billing counters now use the `openbank.billing.*` Micrometer prefix. The suffixes are
+`assessment.no_fee_identity`, `assessment.dropped_components`, `assessment.skipped{reason}`,
+`revision_pin.fallback_to_current`, `accounting_class.derived{source}`,
+`fee.component.dropped{reason}`, and `fee.post.legacy_payload`. Prometheus exports these dot
+names with underscores (and a counter suffix); update any external dashboards, recording rules,
+and alerts to the new series before deploying this billing image. No reader of the seven old
+series is tracked in this repository. Do not interpret a series-name change or counter reset as
+proof that the underlying billing condition stopped occurring. The dropped-components assessment
+counter increments once per affected assessment, not once per individual component.
+
+Rollback of the billing image restores the old series names. Keep both selectors in external
+queries during the cutover; remove the old selector only after verifying the new series on a
+running billing instance. This metric change does not enable posting or alter fee decisions.
+
 ## Ledger accounting-class rollout (ADR-0341 D3)
 
 Billing can post by accounting class (the ledger resolves the GL account) or with explicit GL accounts.

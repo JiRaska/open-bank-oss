@@ -330,6 +330,22 @@ green base proves nothing about the breakage and is not treated as a fix. A fix 
 combination shows up on main's own next push run, as any red main does. When main is green none
 of this applies and the strict lane behaves exactly as before.
 
+*Every lane, not only the strict lane (#13400).* Rule 3 originally applied only to manual-lane PRs,
+and a red main also reached the other two lanes: a train built over the red tip came back red on the
+main-red context whatever its members did, and settle named its single member the culprit for a
+check main itself was failing. So, while `main_red` is non-empty:
+4. **a fix is served first in every lane**: a train/fast-lane candidate that passes the same
+   `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
+   lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
+   merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+5. **no train is planned over a red main**: it could only come back red on the main-red context,
+   so building it would spend a CI run to learn nothing; the fast lane is unchanged;
+6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
+   inconclusive (closed, no status, no comment, no bisect); a carrier also red on a context main is
+   green on still blames, and the culprit status names only those contexts.
+And every open PR leaves a decision line in the settle log, armed or not: a disarmed or draft PR was
+filtered out in silence, so a log with no line for it could not say whether it was ever seen.
+
 ### What the train is NOT
 
 It is not a replacement for a PR's own CI: a PR that is red on its own head never qualifies. It is
@@ -388,6 +404,42 @@ label in the same API call.
 rides one more train, and that train overwrites the status either way — `success` when the old mark
 was an artifact (#12506, #13137), a `culprit: …` failure when it was real. No new status is written
 with the legacy text, so the mechanism retires itself; nobody needs to push an empty commit.
+
+### Amendment (2026-10-21) — a gate's budget overrun or NOT EVALUATED is inconclusive (#13400)
+
+Carrier #13501 (CI run 39526539131), the first carrier judged in carrier mode, named #13137 culprit
+for two gates that passed on content — `security-checklist-money-path` printed "every member of the
+carrier passes on its own body" in 33.7 s and `coverage-floor-ratchet` "none lowered" in 44.9 s —
+and went red only on their 20 s `budget_seconds`. Measured over the last 10 carrier and 12 ordinary
+PR runs, the same gates took 0.2–5.9 s everywhere else; the nine other carriers ran before carrier
+mode existed, so this one run was the whole carrier-mode sample. The cost was not the API: each gate
+called `git fetch --deepen=128 origin` in the depth-2 checkout, which deepens every one of the
+remote's ~665 branch refs — 29.4 s from a depth-2 clone, against 1.7 s for
+`git fetch --no-tags --deepen=128 origin <head sha>`, which yields the same walkable chain. Every
+gate repeated it, because the checkout stays shallow after a deepen.
+
+**Rule 3 — carrier facts are resolved once per job, under one deadline.**
+`merge_train_carrier.resolve()` reads the live PR, the member chain (deepening only the head's
+history, and not at all when the chain is already walkable) and every member body (one GraphQL
+query), within 15 s, and writes the result to run-gates' per-job cache directory keyed by PR number,
+head sha and base; every later gate in the job reads that file. `coverage-floor-ratchet` asks only
+once it has found a lowering, so a carrier that lowers nothing costs it no fetch at all.
+
+**Rule 4 — an unreadable subject is NOT EVALUATED, never PASS and never a finding.** A timed-out or
+failed read (the PR object on a `train/…` head, the chain, a member body that the verdict needs)
+makes the gate print `GATE_VERDICT=NOT_EVALUATED` and exit non-zero: red, so an unjudged train never
+merges, but not a statement about any member. Previously an unreadable member body was judged as
+empty and blamed the member.
+
+**Rule 5 — settle reads the gate runner's verdict, not the log.** `run-gates.py --json` records a
+`failure_kind` per gate (`content`, `budget`, `not_evaluated`, `timeout`, `unfalsified`, `setup`);
+a budget overrun is `budget` only when the gate passed on content. In `settle`, a carrier whose
+failing required contexts come from one CI run whose every failed job is a gate shard (or the
+`Validate manifests` aggregate), and whose every failed gate in those shards' `gate-results-<slug>`
+artifacts is `budget` or `not_evaluated`, is INCONCLUSIVE exactly as under Rule 2: re-run once, then
+closed with no verdict. A missing or unreadable artifact, a record without `failure_kind`, any other
+failed job, or any content failure keeps the verdict conclusive. Budgets were not raised: with the
+fetch fixed, carrier mode is not legitimately slower than an ordinary run.
 
 ## Rollout
 
