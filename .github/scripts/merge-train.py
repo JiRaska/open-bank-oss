@@ -41,6 +41,9 @@ THREE JOBS, EACH ON ITS OWN RUNNER
            chain's base must be live main, and every required context must be green on that sha.
            Green: `merge-train` success on each verified member head, merge with the head sha
            pinned. Red: halve (an App `bisect size N` status) or, at one member, name the culprit.
+           A cancelled/stale context (or skipped next to a cancellation) is INCONCLUSIVE, never red:
+           its jobs are re-run once (App `merge-train/rerun` marker), then the carrier is in flight;
+           still inconclusive after that, it closes with no verdict. Only a real failure blames.
            Also computes the fast lane from live data. Comments are fixed text.
 
 MODES
@@ -92,6 +95,21 @@ GUARD_CONTEXT_HINT = "agent-pr-guard"
 STALE_RED_CAP = 2      # stale-red refreshes per settle tick (ADR-0343)
 STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 OK_STATES = frozenset({"success"})
+# A cancelled (or stale) check ran nothing that could be judged — "Canceling since a higher priority
+# waiting request exists" on carrier #13452 blamed #13137 for a job that executed no step. Such a
+# context is INCONCLUSIVE: never red, never a bisect, never a culprit. A `skipped` context is
+# inconclusive only next to a cancellation on the same head (a job skipped because its `needs`
+# was cancelled); on its own it keeps today's meaning.
+INCONCLUSIVE_STATES = frozenset({"cancelled", "stale"})
+RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+# Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
+# whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
+# the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
+# final: the member re-qualifies and rides one more train, which overwrites the mark either way —
+# success when it was an artifact, a CULPRIT_PREFIX failure when it was real. Self-retiring: no
+# new status is ever written with the legacy text.
+CULPRIT_PREFIX = "culprit: "
+LEGACY_CULPRIT_PREFIX = "isolated as the cause of a red train"
 # Fast-lane exclusions.
 PROTECTED_PREFIXES = ("openbank-libs/", "build-logic/", "openbank-infra/gitops/", "docs/adr/", ".github/")
 PROTECTED_GLOBS = ("*/src/main/resources/openapi.yaml",)
@@ -274,7 +292,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
             return False, "a path contains a control character — manual lane, never a train"
         if untrainable(f):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
-    if (app or {}).get(STATUS_CONTEXT, ("", ""))[0] == "failure":
+    app_state, app_desc = (app or {}).get(STATUS_CONTEXT, ("", ""))
+    if app_state == "failure" and not app_desc.startswith(LEGACY_CULPRIT_PREFIX):
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
@@ -314,6 +333,20 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
+
+
+def classify_carrier(checks: dict[str, str | None], required: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """(failing, pending, inconclusive) over `required`. Only `failing` may ever blame a member."""
+    cancelled_here = any(v in INCONCLUSIVE_STATES for v in checks.values())
+    inconclusive = [c for c in required if checks.get(c) in INCONCLUSIVE_STATES
+                    or (checks.get(c) == "skipped" and cancelled_here)]
+    pending = [c for c in required if checks.get(c) is None]
+    failing = [c for c in required if checks.get(c) not in (None, *OK_STATES) and c not in inconclusive]
+    return failing, pending, inconclusive
+
+
+def culprit_description(failing: list[str], base: str) -> str:
+    return f"{CULPRIT_PREFIX}{', '.join(failing)} red on a train over main {base[:12]}"[:140]
 
 
 def order_candidates(prs: list[dict]) -> list[dict]:
@@ -808,6 +841,23 @@ class GitHub:
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
+    def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
+        """Re-run the cancelled jobs of the workflow runs behind `contexts` on `sha` (once per carrier;
+        the caller records it). True only when every run accepted the request."""
+        latest: dict[str, dict] = {}
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            if check["name"] in contexts and (check["name"] not in latest or check["id"] > latest[check["name"]]["id"]):
+                latest[check["name"]] = check
+        runs = set()
+        for check in latest.values():
+            m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
+            if not m:
+                return False
+            runs.add(int(m.group(1)))
+        if not runs:
+            return False
+        return all(api("POST", f"/repos/{self.repo}/actions/runs/{r}/rerun-failed-jobs", {})[0] == 201 for r in sorted(runs))
+
     def update_branch(self, n: int, head: str) -> bool:
         """Merge main into the PR branch, pinned to the head the strict lane judged."""
         code, _ = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head})
@@ -1042,7 +1092,8 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
 
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
-    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [], "refreshed": []}
+    summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [],
+                     "inconclusive": [], "rerun": [], "refreshed": []}
     if not shadow:
         # Phase 1 is gated on the live ruleset, not on the env flag alone: until it requires the App-pinned
         # context with strict off, behave exactly as shadow. Flip order of env vs ruleset is irrelevant.
@@ -1056,10 +1107,27 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
         checks = gh.checks(sha)
-        failing = [c for c in train_required if checks.get(c) not in (None, *OK_STATES)]
-        if not failing and any(checks.get(c) is None for c in train_required):
+        failing, pending, inconclusive = classify_carrier(checks, train_required)
+        if not failing and pending:
             summary["in_flight"] = True
             carrier_in_flight = True
+            continue
+        if not failing and inconclusive:
+            # Wait for a terminal non-cancelled result: re-run the cancelled jobs ONCE, then the
+            # carrier is in flight again. A second all-inconclusive verdict (or a refused rerun)
+            # closes the carrier with NO verdict — nobody is blamed and the next tick rebuilds.
+            if not gh.app_statuses(sha).get(RERUN_CONTEXT, ("", ""))[0] and gh.rerun_inconclusive(sha, inconclusive):
+                gh.post_status(sha, "success", "rerun 1 of 1: " + ", ".join(inconclusive), context=RERUN_CONTEXT)
+                log(f"carrier #{carrier}: inconclusive ({', '.join(inconclusive)}) — re-ran once, in flight")
+                summary["rerun"].append(carrier)
+                summary["in_flight"] = True
+                carrier_in_flight = True
+                continue
+            log(f"::warning::carrier #{carrier}: still inconclusive ({', '.join(inconclusive)}) — closed with no verdict")
+            summary["inconclusive"].append(carrier)
+            gh.close_carrier(carrier)
+            if TRAIN_BRANCH_RE.fullmatch(branch):
+                Pusher(git, branch, gh.remote).delete()
             continue
         got = git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode == 0
         fetched = git("rev-parse", "refs/merge-train/settle").stdout.strip() if got else ""
@@ -1099,7 +1167,7 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             members = chain[1]
             if len(members) == 1:
                 n, head = members[0]
-                gh.post_status(head, "failure", f"isolated as the cause of a red train over main {chain[0][:12]}")
+                gh.post_status(head, "failure", culprit_description(failing, chain[0]))
                 gh.comment(n, CULPRIT_MESSAGE)
                 summary["culprits"].append(n)
             else:
@@ -1149,7 +1217,7 @@ def main_ci_result(gh, git, ctx: str, sha: str, cache: dict | None = None, depth
             res = gh.checks(c)
             if cache is not None:
                 cache[c] = res
-        if res.get(ctx) is not None:
+        if res.get(ctx) is not None and res[ctx] not in INCONCLUSIVE_STATES:   # a cancelled run says nothing about main
             return c, res[ctx]
     return None
 
@@ -1363,6 +1431,10 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
+        self.carrier_override: dict = {}         # carrier (train head) check overrides, e.g. cancelled
+        self.reruns: list[tuple[str, list[str]]] = []
+        self.rerun_ok = True
+        self.on_rerun = None                     # callable run after a rerun request (the rerun's outcome)
         self.main_sequence: dict[str, list] = {}  # main sha -> successive check overrides, one per read
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
         self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
@@ -1398,7 +1470,7 @@ class FakeGitHub:
                 failing = [c for c in r.stdout.strip().split(",") if c]
                 self.g("worktree", "remove", "--force", wt)
                 self._ci[sha] = {**{c: ("failure" if c in failing else "success") for c in SYN_REQUIRED[:3]}, "issue-hygiene": "success"}
-            out = {**self._ci[sha], **self.head_checks.get(sha, {})}
+            out = {**self._ci[sha], **self.carrier_override, **self.head_checks.get(sha, {})}
             if self.main_sequence.get(sha):            # main CI finishing mid-tick: next read differs
                 out.update(self.main_sequence[sha].pop(0))
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
@@ -1437,6 +1509,12 @@ class FakeGitHub:
             self.g("commit", "-q", "-m", "foreign")
             self.foreign_after_merge = None
         return sha
+
+    def rerun_inconclusive(self, sha, contexts):
+        self.reruns.append((sha, list(contexts)))
+        if self.rerun_ok and self.on_rerun:
+            self.on_rerun()
+        return self.rerun_ok
 
     def update_branch(self, n, head):
         p = self.prs[n]
@@ -1595,6 +1673,29 @@ def self_test() -> int:
         check(f"qualifies: a DATA path with a control character {f!r} is refused", not ok and "control character" in why, why)
     check("untrainable: an unparsable runner fails closed (any gen-* at any depth)",
           Untrainable("")("openbank-infra/gitops/a/b/c/d/gen-x-opa-bundle.sh") and Untrainable("")("x/y/z/gen-q.py"))
+    # ---- inconclusive is never red; legacy culprit marks are re-evaluated -----------------
+    rq = ["gates (data)", "derived", "sec"]
+    f, pnd, inc = classify_carrier({"gates (data)": "success", "derived": "success", "sec": "cancelled"}, rq)
+    check("classify: a cancelled context is inconclusive, not failing", f == [] and inc == ["sec"] and pnd == [], f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "failure", "derived": "success", "sec": "cancelled"}, rq)
+    check("classify: failure + cancelled -> only the real failure is failing", f == ["gates (data)"] and inc == ["sec"], f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "skipped", "derived": "success", "sec": "cancelled"}, rq)
+    check("classify: skipped next to a cancellation is inconclusive", f == [] and set(inc) == {"gates (data)", "sec"}, f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "skipped", "derived": "success", "sec": "success"}, rq)
+    check("classify: skipped with no cancellation keeps its old meaning (failing)", f == ["gates (data)"] and inc == [], f"{f} {inc}")
+    f, pnd, inc = classify_carrier({"gates (data)": "stale", "derived": None, "sec": "success"}, rq)
+    check("classify: stale is inconclusive, a pending context is pending", f == [] and inc == ["gates (data)"] and pnd == ["derived"])
+    check("culprit description carries the prefix and the failing contexts",
+          culprit_description(["gates (data)"], "a" * 40) == "culprit: gates (data) red on a train over main aaaaaaaaaaaa")
+    legacy = {STATUS_CONTEXT: ("failure", "isolated as the cause of a red train over main 0123456789ab")}
+    check("qualifies: a LEGACY culprit mark (pre-inconclusive rule) is re-evaluated, not final",
+          qualifies({**base_pr, "files": ["svc/a"]}, req, green, legacy)[0])
+    check("qualifies: a new-format culprit mark is final until a push",
+          not qualifies({**base_pr, "files": ["svc/a"]}, req, green,
+                        {STATUS_CONTEXT: ("failure", culprit_description(["x"], "b" * 40))})[0])
+    check("qualifies: a manual-lane failure stays final",
+          not qualifies({**base_pr, "files": ["svc/a"]}, req, green,
+                        {STATUS_CONTEXT: ("failure", "not verifiable by the merge train: manual lane")})[0])
     check("qualifies: an App failure (culprit) on the head waits for a push",
           not qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", "x")})[0])
     check("order: oldest first", [p["number"] for p in order_candidates(
@@ -1726,6 +1827,84 @@ def self_test() -> int:
                   (3, CULPRIT_MESSAGE) in gh.comments
                   and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure", str(gh.comments))
             check("ticks: every carrier was closed", all(c["state"] == "closed" for c in gh.carriers.values()))
+            reset()
+
+            def settle_once():
+                return mode_settle(gh, Git(clone("settle")), "o/r", False)
+
+            def mt_status(n):
+                return gh.app_statuses(gh.prs[n]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))
+
+            def open_carriers():
+                return [c for c in gh.carriers.values() if c["state"] == "open"]
+
+            # Fully cancelled carrier (#13452 shape): no culprit; ONE rerun, then in flight.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "cancelled", "derived": "skipped"}
+            s = settle_once()
+            check("cancelled: a fully cancelled carrier blames nobody, re-runs once and is in flight",
+                  s["culprits"] == [] and s["bisected"] == [] and len(gh.reruns) == 1 and s["in_flight"]
+                  and len(open_carriers()) == 1 and mt_status(1)[0] != "failure" and not gh.comments,
+                  f"{s} reruns={gh.reruns} status={mt_status(1)}")
+            check("cancelled: the rerun asked for exactly the inconclusive contexts",
+                  bool(gh.reruns) and sorted(gh.reruns[0][1]) == ["derived", "gates (data)"], str(gh.reruns))
+            s = settle_once()
+            check("cancelled: still inconclusive after the one rerun -> closed with no verdict, no second rerun",
+                  s["culprits"] == [] and s["inconclusive"] and len(gh.reruns) == 1 and not open_carriers()
+                  and mt_status(1)[0] != "failure", f"{s} reruns={gh.reruns}")
+            gh.carrier_override = {}
+            drain()
+            check("cancelled: once CI is terminal and green, the member merges", gh.merged == [1], str(gh.merged))
+            gh.reruns.clear()
+            reset()
+
+            # Rerun succeeds: the next settle sees a terminal green result and merges.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "cancelled"}
+            gh.on_rerun = lambda: gh.carrier_override.clear()
+            settle_once()
+            s = settle_once()
+            gh.on_rerun = None
+            check("cancelled: a rerun that finishes green merges the member, nobody blamed",
+                  gh.merged == [1] and s["culprits"] == [] and len(gh.reruns) == 1, f"{s} merged={gh.merged}")
+            gh.reruns.clear()
+            reset()
+
+            # Failure + cancelled mix: only the real failure blames, and the status names only it.
+            open_only("p3")
+            tick()
+            gh.carrier_override = {"issue-hygiene": "cancelled"}
+            real = [c for c in SYN_REQUIRED[:3] if gh.checks(open_carriers()[0]["head"]["sha"]).get(c) == "failure"]
+            gh.carrier_override = {"derived": "cancelled"} if "derived" not in real else {"gates (data)": "cancelled"}
+            s = settle_once()
+            st, desc = mt_status(3)
+            check("mix: a real failure next to a cancelled job still names the culprit",
+                  s["culprits"] == [3] and st == "failure" and desc.startswith(CULPRIT_PREFIX) and gh.reruns == [],
+                  f"{s} {st} {desc!r}")
+            check("mix: the culprit status names only the really failing context(s), never the cancelled one",
+                  all(c in desc for c in real) and not any(c in desc for c in gh.carrier_override), f"{desc!r} real={real}")
+            gh.carrier_override = {}
+            reset()
+
+            # A legacy (pre-fix) culprit mark is re-evaluated: the member rides again and merges when green.
+            open_only("p1")
+            gh.post_status(gh.prs[1]["head"]["sha"], "failure", "isolated as the cause of a red train over main 0123456789ab")
+            drain()
+            check("legacy mark: a pre-fix culprit status is re-evaluated and overwritten by the next train",
+                  gh.merged == [1] and mt_status(1)[0] == "success", f"{gh.merged} {mt_status(1)}")
+            reset()
+
+            # Rerun refused by the API: no verdict, nobody blamed.
+            open_only("p1")
+            tick()
+            gh.carrier_override, gh.rerun_ok = {"gates (data)": "cancelled"}, False
+            s = settle_once()
+            check("cancelled: a refused rerun closes the carrier with no verdict, nobody blamed",
+                  s["culprits"] == [] and s["inconclusive"] and not open_carriers() and mt_status(1)[0] != "failure", str(s))
+            gh.carrier_override, gh.rerun_ok = {}, True
+            gh.reruns.clear()
             reset()
 
             # Semantic pair green alone, red together: one merges, the other is the culprit.

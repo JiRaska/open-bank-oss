@@ -206,8 +206,35 @@ def git_show(ref: str, path: str) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
+def carrier_member_bodies(pr: dict | None, repo: str, base: str, fetch=None) -> list[str] | None:
+    """For a VERIFIED merge-train carrier (ADR-0343), the live bodies of its members — the place a
+    `coverage-floor-lowered:` trailer was written. The carrier's bot body never carries one, so
+    without this every train holding a justified lowering went red and blamed that member. None when
+    the PR is not a verified carrier (a human `train/…` PR included) or its members cannot be derived."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    import merge_train_carrier as carrier_lib
+    if not carrier_lib.is_verified_carrier(pr, repo):
+        return None
+    try:
+        members = carrier_lib.carrier_members(base, "HEAD", cwd=str(REPO))
+    except carrier_lib.CarrierError as exc:
+        print(f"::warning::coverage-floor-ratchet: carrier members not derivable ({exc}) — carrier body only")
+        return None
+    fetch = fetch or (lambda n: (carrier_lib.gh_pr(repo, n) or {}).get("body") or "")
+    print(f"coverage-floor-ratchet: merge-train carrier — trailers read from members "
+          f"{', '.join(f'#{n}' for n, _ in members)}")
+    return [fetch(n) for n, _ in members]
+
+
 def pr_trailer_text(base: str, body: str | None) -> str:
     parts = [body or os.environ.get("PR_BODY", "")]
+    repo, number = os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("PR_NUMBER", "")
+    if repo and number.isdigit():
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        import merge_train_carrier as carrier_lib
+        pr = carrier_lib.gh_pr(repo, number)
+        if pr is not None and (pr.get("head") or {}).get("ref", "").startswith("train/"):
+            parts += carrier_member_bodies(pr, repo, base) or []
     log = subprocess.run(["git", "-C", str(REPO), "log", "--format=%B", f"{base}..HEAD"],
                          capture_output=True, text=True, check=False)
     parts.append(log.stdout if log.returncode == 0 else "")
@@ -446,6 +473,19 @@ def git_plumbing_test() -> bool:
             plugin.write_text(plugin.read_text().replace("minValue = 50", "minValue = 40"))
             run("git", "commit", "-q", "-am", "lower plugin floor", cwd=repo)
             results.append(("a floor lowered in build-logic must exit 1", gate(base2) == 1))
+            # Merge-train carrier (ADR-0343): members' bodies carry the trailer, never the bot body.
+            base3 = run("git", "rev-parse", "HEAD", cwd=repo)
+            plugin.write_text(plugin.read_text().replace("minValue = 40", "minValue = 50"))
+            run("git", "commit", "-q", "-am", f"merge-train: member #7\n\nPR-Number: #7\nPR-Head: {'a' * 40}\n", cwd=repo)
+            carrier = {"user": {"login": "openbank-gitops-bot[bot]", "type": "Bot"}, "labels": [{"name": "merge-train"}],
+                       "head": {"ref": "train/1-1", "repo": {"full_name": "o/r"}}}
+            bodies = carrier_member_bodies(carrier, "o/r", base3, fetch=lambda n: f"body of #{n}")
+            results.append(("a verified carrier reads its members' bodies", bodies == ["body of #7"]))
+            spoof = {**carrier, "user": {"login": "mallory", "type": "User"}}
+            results.append(("a spoofed train/ PR reads no member body",
+                            carrier_member_bodies(spoof, "o/r", base3, fetch=lambda n: "x") is None))
+            results.append(("an unlabelled carrier reads no member body",
+                            carrier_member_bodies({**carrier, "labels": []}, "o/r", base3, fetch=lambda n: "x") is None))
     finally:
         REPO = saved
     for label, passed in results:
