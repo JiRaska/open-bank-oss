@@ -47,6 +47,6 @@ internal class XmlDoc private constructor(private val namespace: String, val doc
     }
 
     companion object {
-        fun create(namespace: String): XmlDoc = XmlDoc(namespace, SecureXml.documentBuilder().newDocument())
+        fun create(namespace: String): XmlDoc = XmlDoc(namespace, SecureXml.newDocument())
     }
 }
