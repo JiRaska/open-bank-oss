@@ -105,6 +105,22 @@ rather than letting them read as the target state.
   declares a region or a residency guard. It happens to be right, which is not the same as being
   constrained. *(Pending)*
 
+## Amendment 2026-10-21: typed-decision model egress (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md)
+D8 applies §5 to typed-decision adapters without a new rule:
+
+- An adapter declares `sensitivity: hosted | self-hosted` in the same shape as a `model-gateway`
+  entry, and the enforced `model-residency-claims` gate covers it. A `self-hosted` label on an
+  off-cluster endpoint fails, exactly as it does for an LLM route today.
+- A `hosted` adapter outside the EU receives **class-3 data only**. The first candidate consumers
+  (complaint text, sanctions-hit names, remittance information) are class 1, so outside the sandbox
+  they need a `self-hosted` or contractually EU-resident adapter. **Pseudonymisation does not move
+  data out of class 1.** It remains personal data, and treating it otherwise would reopen the gap D3
+  was written to close.
+- D5 (transfer analysis) therefore gains a second subject the day a hosted typed-decision provider
+  is contracted for anything above class 3.
+
 ## Alternatives considered
 
 - **Pin production to `eu-central-1` (Frankfurt), as the README claims.** The conventional choice for
