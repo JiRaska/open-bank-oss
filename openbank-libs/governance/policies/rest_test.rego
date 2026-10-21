@@ -1994,3 +1994,61 @@ test_managed_template_full_decisions_require_verified_staff if {
         }
     }
 }
+
+# #13429: generic, pack-declared revision approval.
+test_catalog_revision_approval_decide_requires_derived_approver_marker if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "catalog-revision-decide-approval"
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ", "CATALOG_SCOPE_PUBLISH"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as {
+		"principal": {"id": "service-account-catalog", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_catalog_revision_approval_read_requires_read_scope if {
+	rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ"]},
+		"action": "catalog.revisionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.revisionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_catalog_revision_approval_evidence_machine_reader_is_named if {
+	rest.allow with input as {
+		"principal": {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		"action": "catalog.revisionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {"azp": "openbank-pension", "preferred_username": "service-account-openbank-pension", "subject": "s"},
+	}
+		with data.openbank.bundle as bundle
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {"azp": "openbank-pension", "preferred_username": "service-account-openbank-pension", "subject": "s"},
+	}
+}

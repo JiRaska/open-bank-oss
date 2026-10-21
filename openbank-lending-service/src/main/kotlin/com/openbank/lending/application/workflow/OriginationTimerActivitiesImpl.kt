@@ -41,7 +41,7 @@ class OriginationTimerActivitiesImpl(
             "document-collection SLA half elapsed for application %s — operator reminder (ADR-0211 D2)",
             applicationId,
         )
-        meterRegistry.counter("lending.origination.docs_sla.reminder").increment()
+        meterRegistry.counter("openbank.lending.origination.docs_sla.reminder").increment()
     }
 
     /**
@@ -61,7 +61,7 @@ class OriginationTimerActivitiesImpl(
                 "four-eyes SLA elapsed for application %s — operator escalation recorded (ADR-0211 D2)",
                 applicationId,
             )
-            meterRegistry.counter("lending.origination.four_eyes_sla_escalation").increment()
+            meterRegistry.counter("openbank.lending.origination.four_eyes_sla_escalation").increment()
         }
     }
 }

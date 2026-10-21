@@ -46,6 +46,10 @@ Pozor na **oddělený management port 8085** (`quarkus.management.port`), aby pr
 
 > **Past (ze zdrojových komentářů):** **nedeklarujte** `client-secret` v `application.yaml` s expanzí `${UPSTREAM_OIDC_CLIENT_SECRET:}` — název property ve formě ENV se rozlišuje nespolehlivě a tiše vrátí `""`, čímž každý fetch tokenu skončí 401. Dodejte ho přes env var `OPENBANK_UPSTREAM_CLIENT_SECRET` (standardní mapování ENV→dotted-property).
 
+## Sdílený dočasný stav
+
+Nearby-payment sessions jsou uložené ve sdíleném Redis, ne v lokální paměti podu, takže token příjemce může rozřešit kterákoli replika customer-edge. Každá session expiruje po pěti minutách; při změně backendu zachovejte dostupnost Redis a stejné chování TTL napříč replikami. Životní cyklus `check`/`build` spouští test sdílení session v samostatném JVM po běžné testovací sadě; samotný `:openbank-customer-edge:test` tento test nespustí.
+
 ## Health checky
 
 - **Liveness:** `/q/health/live` (port 8085) — běží JVM + ArC.
@@ -91,6 +95,10 @@ Symptom: každé proxované volání vrací `{"error":"upstream unavailable"}`.
 ### 403 na čtení, které zákazník očekává jako své
 
 Toto je IDOR ochrana fungující dle návrhu: `accountId` se neresolvoval na party z JWT. Ověř, že účet patří volající party v account-service; vrací se 403 (ne 404) záměrně, aby se předešlo existenčnímu oraclu.
+
+## Pojmenování metrik
+
+Každý vlastní čítač Micrometeru se registruje s předponou `openbank.` (CI brána `metric-name-prefix` odmítne nové jméno bez předpony). Prometheus převádí tečky na podtržítka a k čítačům přidává `_total`: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` a `openbank_feedback_emit_failures_total`. Dřívější názvy bez předpony (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) se po nasazení této verze už nevydávají, takže dashboardy a alerty musí používat názvy s předponou; PrometheusRules v repozitáři to již dělají.
 
 ## Deploy / release
 
