@@ -56,6 +56,18 @@ authz:
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:true}"
 
+openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
+
 "%dev":
   quarkus:
     oidc:

@@ -65,7 +65,6 @@ openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastr
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/FcmPushSender.kt::serviceAccountJson
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/webhook/SlackOversightWebhookPublisher.kt::enabled
 openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/webhook/SlackOversightWebhookPublisher.kt::url
-openbank-party-service/src/main/kotlin/com/openbank/party/infrastructure/authz/AuthzProducer.kt::opaTimeoutMs
 openbank-party-service/src/main/kotlin/com/openbank/party/infrastructure/flags/FlagdProducer.kt::flagsTimeoutMs
 openbank-standing-order-service/src/main/kotlin/com/openbank/standingorder/infrastructure/scheduler/StandingOrderExecutionScheduler.kt::enabled
 openbank-vop-service/src/main/kotlin/com/openbank/vop/infrastructure/ratelimit/VopRateLimitFilter.kt::enabled

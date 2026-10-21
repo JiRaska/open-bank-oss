@@ -206,7 +206,7 @@ gap closes only with a consumer pact or a run against a deployed stack.
   its fail-closed eligibility gate (T3) are as before. Rollback: revert.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -266,7 +266,7 @@ gap closes only with a consumer pact or a run against a deployed stack.
   `AUTHZ_FOUR_EYES_ENFORCE` today would therefore gate nothing while appearing to gate two
   money-path actions, which is a worse state than being visibly off. Prerequisite: an
   `ApprovalStore` of the kind account-, balance- and billing-service carry
-  (`infrastructure/approval/ApprovalConfig.kt`). One decision to take deliberately at that point:
+  (a per-service ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)). One decision to take deliberately at that point:
   `delegation.reserve.release` is a routine customer spending action that matches the `release`
   verb by accident of naming, so inheriting the money-path default would put a second approver in
   front of ordinary customer traffic.
