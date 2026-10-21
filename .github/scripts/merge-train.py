@@ -110,7 +110,8 @@ OK_STATES = frozenset({"success"})
 INCONCLUSIVE_STATES = frozenset({"cancelled", "stale"})
 # Extra gates (ADR-0343): checks beyond the ruleset-required contexts that the train itself refuses to
 # serve over when they are red on a PR head. ONE declaration, `merge_train.extra_gates` in rules.yaml,
-# read from the live main being judged — never listed here. Absent (not triggered) = not applicable.
+# read from the live main being judged — never listed here. Absent on a head = PENDING (fail closed):
+# not applicable only when the pinned workflow has COMPLETED for that head without producing the check.
 RULES_FILE = "openbank-libs/governance/rules.yaml"
 EXTRA_GATE_CONTEXT = "merge-train/extra-gate"     # App marker: the author was told once for this head
 EXTRA_GATE_NA_STATES = frozenset({"skipped", "neutral"})
@@ -335,7 +336,8 @@ def pinned_checks(gh, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
 
 
 def extra_gate_red(checks: dict[str, str | None], extra) -> list[str]:
-    """Declared extra gates that are red on this head. Absent / skipped / neutral = not applicable."""
+    """Declared extra gates that are red on this head. Skipped / neutral = not applicable; absent is not
+    red here, but `qualifies` and `carrier_contexts` hold it as pending (fail closed)."""
     return [g for g in extra or () if g in checks and checks[g] is not None
             and checks[g] not in OK_STATES and checks[g] not in EXTRA_GATE_NA_STATES]
 
@@ -355,7 +357,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
               extra: list[str] | None = None) -> tuple[bool, str]:
     """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses.
     `pr["files"]` must come from `git diff` against the verified head, never from the files API.
-    `extra`: TRAIN_EXTRA_GATES — red refuses, running waits, never triggered is not applicable."""
+    `extra`: TRAIN_EXTRA_GATES — red refuses, running or never reported waits (fail closed), and only
+    skipped/neutral (which GitHub.extra_checks also reports for a completed pinned run without it) is n/a."""
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
     if pr.get("state", "open") != "open":
         return False, f"state {pr.get('state')}"
@@ -394,7 +397,9 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         if checks[c] is None:
             return False, f"required context pending: {c}"
     for g in extra or ():
-        if g in checks and checks[g] is None:
+        if g not in checks:
+            return False, f"extra gate never reported: {g}"
+        if checks[g] is None:
             return False, f"extra gate pending: {g}"
     return True, "armed + all required green"
 
@@ -431,10 +436,17 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     # "never reported" is the normal state for the first minutes after update-branch (no workflow has
     # registered its check yet): it is pending, or the fresh head holds no reservation exactly when
     # it needs one (#13485).
-    if why.startswith(("required context pending", "required context never reported", "extra gate pending")) and not any(
+    if why.startswith(("required context pending", "required context never reported", "extra gate pending",
+                           "extra gate never reported")) and not any(
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
+
+
+def carrier_contexts(required: list[str], extra, checks: dict[str, str | None]) -> list[str]:
+    """What a carrier is judged on: the train's required contexts plus every declared extra gate."""
+    # Absent counts (classify_carrier reads it as pending): only an explicit skipped/neutral is n/a.
+    return required + [g for g in extra if checks.get(g) not in EXTRA_GATE_NA_STATES]
 
 
 def classify_carrier(checks: dict[str, str | None], required: list[str]) -> tuple[list[str], list[str], list[str]]:
@@ -979,7 +991,9 @@ class GitHub:
     def extra_checks(self, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
         """Pinned extra-gate verdicts on `sha`: only check runs by the `github-actions` app whose workflow
         run's path is the declared workflow. Any completed non-success, non-skipped run = that state (red
-        wins over every later green); else running = None; else success/skipped. No pinned run = absent."""
+        wins over every later green); else running = None; else success/skipped. No pinned check run:
+        "skipped" (not applicable) ONLY when the pinned workflow has a run for `sha` and every such run
+        is completed; otherwise absent, which every caller holds as pending (fail closed, #13400)."""
         runs: dict[str, list[str | None]] = {}
         for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
             name = check.get("name")
@@ -992,7 +1006,16 @@ class GitHub:
             if path.split("@", 1)[0] != gates[name]:
                 continue
             runs.setdefault(name, []).append(check["conclusion"] if check["status"] == "completed" else None)
-        return {name: extra_verdict(states) for name, states in runs.items()}
+        out = {name: extra_verdict(states) for name, states in runs.items()}
+        missing = [n for n in gates if n not in out]
+        if missing:
+            wruns = paginate(f"/repos/{self.repo}/actions/runs?head_sha={sha}", "workflow_runs")
+            for name in missing:
+                pinned = [r for r in wruns if r.get("head_sha", sha) == sha
+                          and (r.get("path") or "").split("@", 1)[0] == gates[name]]
+                if pinned and all(r.get("status") == "completed" for r in pinned):
+                    out[name] = "skipped"
+        return out
 
     def _run_path(self, run_id: int) -> str:
         cache = self.__dict__.setdefault("_paths", {})
@@ -1404,7 +1427,7 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             continue
         checks = pinned_checks(gh, sha, extra)
         failing, pending, inconclusive = classify_carrier(
-            checks, train_required + [g for g in extra if g in checks and checks[g] not in EXTRA_GATE_NA_STATES])
+            checks, carrier_contexts(train_required, extra, checks))
         main_extra = [c for c in failing if c in extra and c in main_red]
         failing = [c for c in failing if c not in main_extra]   # red on main too: never a culprit
         if main_extra and not failing:
@@ -1964,6 +1987,7 @@ class FakeGitHub:
         self.on_rerun = None                     # callable run after a rerun request (the rerun's outcome)
         self.main_sequence: dict[str, list] = {}  # main sha -> successive check overrides, one per read
         self.pinned: dict[str, dict[str, list]] = {}  # sha -> extra gate -> states of runs from the pinned workflow
+        self.xgate_unfinished: set[str] = set()   # heads whose pinned workflow has not completed (absent = pending)
         self.gate_records: dict[str, list] = {}  # shard slug -> run-gates --json records of the carrier's CI
         self.inconclusive_reads = 0
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
@@ -2018,7 +2042,7 @@ class FakeGitHub:
         plain = dict(self.head_checks.get(sha, {}))   # not self.checks(): status reads are counted by tests
         if not any(p["head"]["sha"] == sha for p in self.prs.values()):
             plain = {**self.carrier_override, **plain}
-        return {n: plain[n] for n in gates if n in plain}
+        return {n: plain.get(n, "skipped") for n in gates if n in plain or sha not in self.xgate_unfinished}
 
     def app_statuses(self, sha):
         out = {}
@@ -2387,10 +2411,27 @@ def self_test() -> int:
                 ("pinned red + later green (other workflow)", _runs(("failure", "github-actions", 1), ("success", "github-actions", 2)), "failure"),
                 ("only a spoofed green: absent, not green", _runs(("success", "evil-app", 1), ("success", "github-actions", 2)), "absent"),
                 ("pinned green", _runs(("success", "github-actions", 1)), "success")]:
-            globals()["paginate"] = lambda path, key=None, _p=page: _p
+            globals()["paginate"] = lambda path, key=None, _p=page: _p if key == "check_runs" else []
             globals()["get"] = lambda path: {"path": paths[int(path.rsplit("/", 1)[1])] + "@refs/heads/x"}
             got = GitHub("o/r", "main", "").extra_checks("a" * 40, {"Trivy": ".github/workflows/security.yml"})
             check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
+        # No pinned check run: n/a ONLY when the pinned workflow has a COMPLETED run for this head.
+        def _wf(*specs):
+            return [{"id": 10 + i, "path": f"{p}@refs/heads/x", "status": st, "head_sha": "a" * 40}
+                    for i, (p, st) in enumerate(specs)]
+        sec, evil = ".github/workflows/security.yml", ".github/workflows/evil.yml"
+        for label, wruns, want in [
+                ("absent, no workflow run at all: absent (pending)", _wf(), "absent"),
+                ("absent, pinned workflow still running: absent (pending)", _wf((sec, "in_progress")), "absent"),
+                ("absent, only ANOTHER workflow completed: absent (pending)", _wf((evil, "completed")), "absent"),
+                ("absent, pinned run completed + a rerun queued: absent (pending)", _wf((sec, "completed"), (sec, "queued")), "absent"),
+                ("absent, pinned workflow COMPLETED without the job: skipped (n/a)", _wf((sec, "completed")), "skipped")]:
+            globals()["paginate"] = lambda path, key=None, _w=wruns: _w if key == "workflow_runs" else []
+            got = GitHub("o/r", "main", "").extra_checks("a" * 40, {"Trivy": sec})
+            check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
+            if want == "skipped":
+                check("extra gates: absent but the pinned run completed without it is served",
+                      qualifies(base_pr, req, {**green, **got}, extra=xg)[0])
     finally:
         globals()["paginate"], globals()["get"] = saved_api
     check("extra gates: one red pinned run beats a later green one", extra_verdict(["failure", "success"]) == "failure")
@@ -2402,7 +2443,16 @@ def self_test() -> int:
           qualifies(base_pr, req, {**green, "Trivy": "failure"})[0])
     check("extra gates: running Trivy waits", qualifies(base_pr, req, {**green, "Trivy": None}, extra=xg)
           == (False, "extra gate pending: Trivy"))
-    check("extra gates: Trivy never triggered is not applicable", qualifies(base_pr, req, green, extra=xg)[0])
+    # Fail closed (#13400): absent on the head is PENDING — Security scan has no path filter, so "absent"
+    # almost always means "not reported yet". Only GitHub.extra_checks may turn absence into n/a.
+    check("extra gates: Trivy absent with no completed pinned run is PENDING, not served",
+          qualifies(base_pr, req, green, extra=xg) == (False, "extra gate never reported: Trivy"))
+    check("extra gates: strict lane reads an absent Trivy as pending",
+          strict_lane_state({**base_pr, "files": [".github/workflows/x.yml"]}, req, green, None, U, [], None, xg)[0] == "pending")
+    check("extra gates: a carrier with an absent Trivy is not judged green (pending)",
+          "Trivy" in classify_carrier(green, carrier_contexts(req, xg, green))[1])
+    check("extra gates: a carrier with a red Trivy is failing",
+          "Trivy" in classify_carrier({**green, "Trivy": "failure"}, carrier_contexts(req, xg, {**green, "Trivy": "failure"}))[0])
     check("extra gates: skipped Trivy is not applicable", qualifies(base_pr, req, {**green, "Trivy": "skipped"}, extra=xg)[0])
     check("extra gates: green Trivy is served", qualifies(base_pr, req, {**green, "Trivy": "success"}, extra=xg)[0])
     check("extra gates: a required failure is still reported as such",
