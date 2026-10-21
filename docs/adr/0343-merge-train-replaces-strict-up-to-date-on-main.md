@@ -245,11 +245,25 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    merge would move the carrier's base; the carrier's own "main moved since publish" check also
    rejects it if one ever does), and at most one per tick, since a merge makes every other
    strict-lane head behind;
-2. if the head is up to date and its required CI is still running, *reserves* main: settle reports
-   in-flight, so no train is built under it, and no other strict-lane PR is updated;
+2. if the head is up to date and its required CI is still running (or has just gone green), *reserves*
+   main: settle reports in-flight, so no train is built under it; no other strict-lane PR is updated;
+   **and nothing else may move main** — the fast lane posts no status (GitHub auto-merge acts on it)
+   and a carrier that finished green is held, not merged. Main moves only when the reserved PR
+   settles: merged, failed, or timed out. Holding only other strict-lane updates was not enough: on
+   2026-10-20 #13456 was updated at 23:18Z, fast-lane #13490 merged at 23:29Z while its CI ran, it
+   was updated again at 23:53Z, and fast-lane #13492 merged one minute later — re-updated on every
+   cycle, so it could starve forever. The reservation is read before any carrier is settled, and an
+   update-branch starts it in the same tick, before the fast lane is posted;
 3. if it is green but behind, calls update-branch (pinned to the judged head) for the oldest such PR
    only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
-   and a later tick merges it. With strict off `auto-update-armed-prs.yml` exits before enumerating
+   and a later tick merges it. A reservation is bounded by `RESERVATION_TIMEOUT_S`, twice the p95 of
+   green pull-request CI (measured: p50 17 min, p95 32 min, so 64 min), counted from the head's
+   committer time, which update-branch sets: past it the reservation is released, the fast lane and
+   trains resume, and the PR goes to the back of the strict queue, so a hung CI cannot freeze main.
+   The cost is bounded too: fast-lane and train merges wait at most one strict-lane CI cycle. A
+   file-disjoint fast lane during the reservation was rejected: any merge makes the reserved head
+   behind, and since strict up-to-date is what this lane restores, re-proving it without a new update
+   would mean a second definition of "up to date". With strict off `auto-update-armed-prs.yml` exits before enumerating
    PRs, so the train owns this update.
 Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
 fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
