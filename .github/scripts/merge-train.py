@@ -428,7 +428,10 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
     red_extra = extra_gate_red(checks, extra)
     if main_red and red_extra and why.startswith("extra gate red") and set(red_extra) <= set(main_red):
         return "waiting", main_red_reason(red_extra, main_red)
-    if why.startswith(("required context pending", "extra gate pending")) and not any(
+    # "never reported" is the normal state for the first minutes after update-branch (no workflow has
+    # registered its check yet): it is pending, or the fresh head holds no reservation exactly when
+    # it needs one (#13485).
+    if why.startswith(("required context pending", "required context never reported", "extra gate pending")) and not any(
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
@@ -1604,7 +1607,9 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         if state == "green" and shadow:
             continue  # shadow never merges it, so it must not hold anything
         ct = git("show", "-s", "--format=%ct", head, check=False).stdout.strip()
-        if not ct.isdigit() or now - int(ct) > RESERVATION_TIMEOUT_S:
+        # The committer time is author-supplied: a head dated in the future would otherwise hold
+        # main for as long as its CI never reports, so a future stamp counts as timed out (#13485).
+        if not ct.isdigit() or not 0 <= now - int(ct) <= RESERVATION_TIMEOUT_S:
             log(f"#{n:>6} strict    reservation timed out (> {RESERVATION_TIMEOUT_S // 60} min): released, back of the queue")
             timed_out.append(n)
         elif holder is None:
@@ -1957,7 +1962,7 @@ class FakeGitHub:
                 out.update(self.main_sequence[sha].pop(0))
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
             out.setdefault(ctx, None if state == "pending" else state)
-        return out
+        return {c: v for c, v in out.items() if v != "absent"}   # "absent": the context never reported
 
     def extra_checks(self, sha, gates):
         """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
@@ -3140,6 +3145,30 @@ def self_test() -> int:
                 RESERVATION_TIMEOUT_S = saved_timeout
                 gh.head_checks.clear()
             reset()
+            # #13485: what #13500 left open; both cases fail on the code before it.
+            # (a) right after update-branch nothing has REPORTED yet; that head must still hold main.
+            open_only("pW", "pF")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {c: "absent" for c in SYN_REQUIRED[:4]}
+            s = settle_now()
+            check("reservation: a head whose CI has not reported yet still holds main (fast lane held)",
+                  s["in_flight"] and s["fast"] == [], str(s))
+            gh.head_checks.clear()
+            reset()
+
+            # (b) the committer time is the author's: a head dated in the future holds nothing.
+            real_time = time.time
+            time.time = lambda: real_time() - 3600
+            try:
+                open_only("pW", "pF")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+                s = settle_now()
+            finally:
+                time.time = real_time
+                gh.head_checks.clear()
+            check("reservation timeout: a head committed in the future holds no reservation",
+                  34 in s["fast"] and s.get("timed_out") == [35], str(s))
+            reset()
+
             # ---- main-red awareness: the strict lane never deadlocks behind a PR red only because main is ----
             MR = "Validate manifests"
 
