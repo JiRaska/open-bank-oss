@@ -281,6 +281,13 @@ commercial control but not OSI-"open"; revisit if AGPL+dual-license friction pro
 4. **Expand** to more domains and, with 2 approvals + threat model, to money-path services.
 5. **Provenance + tamper-evidence** (D5) and EU AI Act technical documentation.
 
+## Amendment 2026-10-21: typed-decision models (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md) makes typed decisions available to agents on the same terms as any other
+tool. A charter may list a typed-decision use case under `tools.allow`; the call is OPA-gated like an
+MCP `tools/call`, and its `DecisionRecord` carries the agent's `actChain`. An agent can never lower a
+threshold, because that is a four-eyes configuration change (ADR-0348 D3), not a tool.
+
 ## Alternatives considered
 
 - **Let agents call MCP tools directly without a policy layer.** Pros: simplest, the endpoint exists.
