@@ -1,0 +1,46 @@
+{
+  "$comment": "Pack manifest (ADR-0257, #13429): the schemas this pack contributes, in registration order, and any revision approval policy. Data, not kernel code.",
+  "pack": "banking",
+  "schemas": [
+    {
+      "id": "org.openbank.banking.deposit",
+      "version": 1,
+      "resource": "deposit-v1.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.deposit",
+      "version": 2,
+      "resource": "deposit-v2.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.legacy-product",
+      "version": 1,
+      "resource": "legacy-product-v1.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.loan",
+      "version": 1,
+      "resource": "loan-v1.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.deposit",
+      "version": 3,
+      "resource": "deposit-v3.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.loan",
+      "version": 2,
+      "resource": "loan-v2.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.loan",
+      "version": 3,
+      "resource": "loan-v3.schema.json"
+    },
+    {
+      "id": "org.openbank.banking.treasury-instrument",
+      "version": 1,
+      "resource": "treasury-instrument-v1.schema.json"
+    }
+  ]
+}

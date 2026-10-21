@@ -51,6 +51,7 @@ Služba se konfiguruje přes `application.yaml`. Bankovní profil vyžaduje Post
 | `CATALOG_SCOPE_CLAIM` | `scope` | JWT claim se scopes |
 | `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral mapování oprávnění |
 | `OPENBANK_CATALOG_PACKS` | bank: `banking,insurance,retirement`; standalone: prázdné | explicitní výběr důvěryhodných packů |
+| `CATALOG_PENSION_LEGAL_SCOPE` / `CATALOG_PENSION_PRODUCT_SCOPE` | `pension:legal-approve` / `pension:product-approve` | scope, který spolu s realm rolí uděluje schvalovací autoritu (`openbank.catalog.approval.authorities.*`) |
 | `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | bank: `true`; standalone: `false` | zapnutí legacy bankovního API, seedů a projekce |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | bezpečnostní hlavičky | CSP, HSTS, X-Frame-Options, nosniff atd. |
