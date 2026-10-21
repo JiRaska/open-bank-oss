@@ -489,6 +489,10 @@ fix path are unchanged.
 
 The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
 
+### Amendment (2026-10-21) — silent drops are told once per head (#13400)
+
+A candidate build drops because `git merge-tree` conflicts with main, and a strict-lane PR whose update-branch is refused, now get one `merge-train` failure (`conflicts with main <sha12>` / `update-branch refused over main <sha12>`), one comment listing the conflicting paths and a `merge-train/notice` marker per head — posted by publish (re-deriving the conflict itself from build's data-only `drops.txt`) or settle, read by `qualifies` as information rather than a verdict, so no merge decision changes and a push clears it.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
