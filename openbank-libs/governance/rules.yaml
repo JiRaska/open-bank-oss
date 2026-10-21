@@ -4675,9 +4675,11 @@ catalog_kernel_neutrality:
 # live main in every lane (train, fast lane, strict lane, fix-first) and for carriers. A check
 # that never ran on a head (path-scoped, not triggered) is not applicable; running = wait;
 # red on main itself = wait, never a culprit. It replaces disarming PRs by hand.
-# Names are check-run (job) names: `Trivy` is the `Security scan` workflow's job, which runs
-# on every pull_request with no path filter.
+# Each gate is PINNED to its producer: only check runs by the github-actions app from that
+# workflow file count, and any red one of them is red — a same-name run from anywhere else is
+# ignored. `Trivy` is the `Security scan` job, which runs on every pull_request (no path filter).
+# Missing or unparseable = the train serves nothing (fail closed) and --check-declaration fails.
 # ---------------------------------------------------------------------------------------
 merge_train:
   extra_gates:
-    - Trivy
+    - {workflow: .github/workflows/security.yml, check: Trivy}

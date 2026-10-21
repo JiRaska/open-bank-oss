@@ -284,15 +284,16 @@ class Member:
     files: list[str] = field(default_factory=list)
 
 
-def parse_extra_gates(text: str) -> list[str] | None:
-    """`merge_train.extra_gates` from rules.yaml text: a block list of check names. Runs under
-    `python3 -I -S` (no PyYAML), so it reads exactly that one shape; None = key absent or malformed."""
+def parse_extra_gates(text: str) -> dict[str, str] | None:
+    """`merge_train.extra_gates` from rules.yaml text: check name -> the workflow file that must produce
+    it, from items `- {workflow: <path>, check: <name>}`. Runs under `python3 -I -S` (no PyYAML), so it
+    reads exactly that one shape; None = key absent, empty or ANY item malformed (callers fail closed)."""
     lines = text.splitlines()
     try:
         i = next(k for k, ln in enumerate(lines) if re.fullmatch(r"merge_train:\s*(#.*)?", ln))
     except StopIteration:
         return None
-    out: list[str] | None = None
+    out: dict[str, str] | None = None
     for ln in lines[i + 1:]:
         if not ln.strip() or ln.lstrip().startswith("#"):
             continue
@@ -300,25 +301,51 @@ def parse_extra_gates(text: str) -> list[str] | None:
             break
         if out is None:
             if re.fullmatch(r"  extra_gates:\s*(#.*)?", ln):
-                out = []
+                out = {}
             continue
-        m = re.fullmatch(r"    - (?:\"([^\"]+)\"|'([^']+)'|([^#\"']+?))\s*(#.*)?", ln)
-        if not m:
+        if not ln.startswith("    "):
             break
-        out.append(next(g for g in m.groups()[:3] if g))
+        m = re.fullmatch(r"    - \{\s*workflow:\s*(\.github/workflows/[A-Za-z0-9._-]+\.ya?ml)\s*,"
+                         r"\s*check:\s*\"?([^\"{},]+?)\"?\s*\}\s*(#.*)?", ln)
+        if not m:
+            return None
+        out[m.group(2)] = m.group(1)
     return out or None
 
 
-def train_extra_gates(git, base: str) -> list[str]:
-    """TRAIN_EXTRA_GATES as declared on `base` (live main) — the single source every lane reads."""
+def train_extra_gates(git, base: str) -> dict[str, str] | None:
+    """TRAIN_EXTRA_GATES (check name -> producing workflow) as declared on `base` (live main) — the single
+    source every lane reads. None = missing or unparseable: the caller serves NOTHING (fail closed)."""
     gates = parse_extra_gates(git("show", f"{base}:{RULES_FILE}", check=False).stdout)
-    return sorted(set(gates or []))
+    if gates is None:
+        log(f"::error::{RULES_FILE} on {base[:12]}: merge_train.extra_gates missing or unparseable — "
+            "the train serves no PR until it is fixed")
+    return gates
+
+
+def pinned_checks(gh, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
+    """gh.checks(sha) with every extra gate replaced by its PINNED verdict (gh.extra_checks): only runs
+    from the declared workflow count, and any failing one of them is red — a same-name run from any
+    other app or workflow can neither turn it green nor mask a red."""
+    checks = {k: v for k, v in gh.checks(sha).items() if k not in gates}
+    checks.update(gh.extra_checks(sha, gates))
+    return checks
 
 
 def extra_gate_red(checks: dict[str, str | None], extra) -> list[str]:
     """Declared extra gates that are red on this head. Absent / skipped / neutral = not applicable."""
     return [g for g in extra or () if g in checks and checks[g] is not None
             and checks[g] not in OK_STATES and checks[g] not in EXTRA_GATE_NA_STATES]
+
+
+def extra_verdict(states: list[str | None]) -> str | None:
+    """One pinned extra gate from all its runs on a head: any red wins, then running, then green/n.a."""
+    red = [s for s in states if s is not None and s not in OK_STATES and s not in EXTRA_GATE_NA_STATES]
+    if red:
+        return "failure" if "failure" in red else red[0]
+    if any(s is None for s in states):
+        return None
+    return "success" if any(s in OK_STATES for s in states) else states[0]
 
 
 def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
@@ -430,7 +457,7 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     first-parent ancestor's verdict, so a fix that just merged keeps main red until its own push run reports."""
     out: dict[str, str] = {}
     # Extra gates count too: a scan red on main itself makes PRs wait and never makes anyone a culprit.
-    for ctx in sorted({c for c in required if c != STATUS_CONTEXT} | set(train_extra_gates(git, base))):
+    for ctx in sorted({c for c in required if c != STATUS_CONTEXT} | set(train_extra_gates(git, base) or {})):
         res = main_ci_result(gh, git, ctx, base, cache)
         if res and res[1] == "failure":
             out[ctx] = res[0]
@@ -905,6 +932,30 @@ class GitHub:
             out.setdefault(st["context"], None if st["state"] == "pending" else st["state"])
         return out
 
+    def extra_checks(self, sha: str, gates: dict[str, str]) -> dict[str, str | None]:
+        """Pinned extra-gate verdicts on `sha`: only check runs by the `github-actions` app whose workflow
+        run's path is the declared workflow. Any completed non-success, non-skipped run = that state (red
+        wins over every later green); else running = None; else success/skipped. No pinned run = absent."""
+        runs: dict[str, list[str | None]] = {}
+        for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
+            name = check.get("name")
+            if name not in gates or (check.get("app") or {}).get("slug") != "github-actions":
+                continue
+            m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
+            if not m:
+                continue
+            path = self._run_path(int(m.group(1)))
+            if path.split("@", 1)[0] != gates[name]:
+                continue
+            runs.setdefault(name, []).append(check["conclusion"] if check["status"] == "completed" else None)
+        return {name: extra_verdict(states) for name, states in runs.items()}
+
+    def _run_path(self, run_id: int) -> str:
+        cache = self.__dict__.setdefault("_paths", {})
+        if run_id not in cache:
+            cache[run_id] = (get(f"/repos/{self.repo}/actions/runs/{run_id}") or {}).get("path") or ""
+        return cache[run_id]
+
     def app_statuses(self, sha: str) -> dict[str, tuple[str, str]]:
         """The App's own latest status per context on `sha` — statuses by anyone else are ignored."""
         out: dict[str, tuple[str, str]] = {}
@@ -987,6 +1038,8 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
     3000 entries, so a long PR could hide a path there; git has no such cap."""
     member_required = [c for c in required if c != STATUS_CONTEXT]
     extra = train_extra_gates(git, base)
+    if extra is None:
+        return [], {}
     armed = [p for p in order_candidates([p for p in gh.open_prs() if not is_carrier(p, repo)])
              if p.get("auto_merge") and not p.get("draft")]
     if armed:
@@ -1004,14 +1057,14 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         # or strict-lane work is needed to decide whether it is red and belongs in the refresh queue.
         if len(out) >= limit and red is not None:
             view = pr_view(repo, p, [])
-            failing = stale_red_candidate(view, member_required, gh.checks(fetched))
+            failing = stale_red_candidate(view, member_required, pinned_checks(gh, fetched, extra))
             if failing:
                 red.append((view, failing))
             continue
         files = changed_paths(git, f"{base}...{fetched}")
         view = pr_view(repo, p, files)
         app = gh.app_statuses(fetched)
-        checks = gh.checks(fetched)
+        checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
         # The lane-independent verdict (manual-lane paths aside): is an extra gate the reason it waits?
@@ -1209,8 +1262,12 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     acted = False
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
-        checks = gh.checks(sha)
         extra = train_extra_gates(git, base)
+        if extra is None:   # fail closed: no carrier is judged (nothing merges, nobody blamed) until fixed
+            summary["in_flight"] = True
+            carrier_in_flight = True
+            continue
+        checks = pinned_checks(gh, sha, extra)
         failing, pending, inconclusive = classify_carrier(
             checks, train_required + [g for g in extra if g in checks and checks[g] not in EXTRA_GATE_NA_STATES])
         main_extra = [c for c in failing if c in extra and c in main_red]
@@ -1652,6 +1709,7 @@ SYN_GENERATOR_SRC = (
     "    for f in fs:\n"
     "        if fnmatch.fnmatch(f,'gen-*opa-bundle*.sh'): subprocess.run(['bash',os.path.join(r,f)])\n"
 )
+SYN_RULES = "merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
 SYN_REQUIRED = ["gates (data)", "Validate manifests", "derived", "issue-hygiene", STATUS_CONTEXT]
 # The GENERATORS fragments make docs/, services/, count.txt and bad.txt protected, so PRs touching
 # them ride trains (as real inventory sources do) instead of the fast lane; svc/ stays fast-lane.
@@ -1685,7 +1743,8 @@ class FakeGitHub:
         self.reruns: list[tuple[str, list[str]]] = []
         self.rerun_ok = True
         self.on_rerun = None                     # callable run after a rerun request (the rerun's outcome)
-        self.main_sequence: dict[str, list] = {}  # main sha -> successive check overrides, one per read
+        self.main_sequence: dict[str, list] = {}
+        self.pinned: dict[str, dict[str, list]] = {}  # sha -> extra gate -> states of runs from the pinned workflow  # main sha -> successive check overrides, one per read
         # The live ruleset as the settle guard sees it: merge-train pinned to the App, strict off.
         self.app_id, self.rs_checks, self.rs_strict = "4242", [{"context": STATUS_CONTEXT, "integration_id": 4242}], False
 
@@ -1726,6 +1785,16 @@ class FakeGitHub:
         for ctx, state, _desc, _creator in reversed(self.statuses.get(sha, [])):
             out.setdefault(ctx, None if state == "pending" else state)
         return out
+
+    def extra_checks(self, sha, gates):
+        """Pinned runs: `self.pinned[sha]` = {name: [states]} from the declared workflow; with none set, a
+        head's Trivy override stands for one pinned run (an unpinned spoof lives only in checks())."""
+        if sha in self.pinned:
+            return {n: extra_verdict(v) for n, v in self.pinned[sha].items() if n in gates}
+        plain = dict(self.head_checks.get(sha, {}))   # not self.checks(): status reads are counted by tests
+        if not any(p["head"]["sha"] == sha for p in self.prs.values()):
+            plain = {**self.carrier_override, **plain}
+        return {n: plain[n] for n in gates if n in plain}
 
     def app_statuses(self, sha):
         out = {}
@@ -1808,6 +1877,7 @@ def _synthetic_origin(root: str) -> None:
     g("config", "maintenance.auto", "false")
     w("services/s1.txt", "s1\n")
     w("count.txt", "1\n")
+    w(RULES_FILE, SYN_RULES)
     w(SYN_GENERATOR, SYN_GENERATOR_SRC)
     w(REGEN_INVENTORY, SYN_INVENTORY)
     w(SYN_BASELINE, "base\n")
@@ -2011,13 +2081,40 @@ def self_test() -> int:
           + EXTRA_GATE_MESSAGE)
 
     # ---- extra gates (merge_train.extra_gates) -------------------------------------------------
-    decl = "a: 1\nmerge_train:\n  # why\n  extra_gates:\n    - Trivy\n    - \"CodeQL\"  # c\nnext: 2\n"
-    check("extra gates: the rules.yaml block list is parsed", parse_extra_gates(decl) == ["Trivy", "CodeQL"],
+    decl = ("a: 1\nmerge_train:\n  # why\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+            "    - {workflow: .github/workflows/security.yml, check: \"CodeQL\"}  # c\nnext: 2\n")
+    want = {"Trivy": ".github/workflows/security.yml", "CodeQL": ".github/workflows/security.yml"}
+    check("extra gates: the rules.yaml block list is parsed (name -> pinned workflow)", parse_extra_gates(decl) == want,
           str(parse_extra_gates(decl)))
     for label, text in [("absent", "a: 1\n"), ("empty", "merge_train:\n  extra_gates: []\n"),
-                        ("other key only", "merge_train:\n  batch: 8\n")]:
+                        ("other key only", "merge_train:\n  batch: 8\n"),
+                        ("an unpinned item", "merge_train:\n  extra_gates:\n    - Trivy\n"),
+                        ("one malformed item among good ones", "merge_train:\n  extra_gates:\n"
+                         "    - {workflow: .github/workflows/security.yml, check: Trivy}\n    - {check: X}\n")]:
         check(f"extra gates: {label} declaration parses as None", parse_extra_gates(text) is None, str(parse_extra_gates(text)))
-    xg = ["Trivy"]
+    xg = {"Trivy": ".github/workflows/security.yml"}
+    # The REAL GitHub.extra_checks over canned API pages: a spoofed green from another app and a later
+    # green from another workflow must neither mask the Security scan red nor count on their own.
+    def _runs(*specs):
+        return [{"id": i, "name": "Trivy", "status": "completed", "conclusion": c, "app": {"slug": slug},
+                 "details_url": f"https://github.com/o/r/actions/runs/{run}/job/{i}"} for i, (c, slug, run) in enumerate(specs)]
+    paths = {1: ".github/workflows/security.yml", 2: ".github/workflows/evil.yml"}
+    saved_api = (globals()["paginate"], globals()["get"])
+    try:
+        for label, page, want in [
+                ("pinned red + later spoof green (other app)", _runs(("failure", "github-actions", 1), ("success", "evil-app", 1)), "failure"),
+                ("pinned red + later green (other workflow)", _runs(("failure", "github-actions", 1), ("success", "github-actions", 2)), "failure"),
+                ("only a spoofed green: absent, not green", _runs(("success", "evil-app", 1), ("success", "github-actions", 2)), "absent"),
+                ("pinned green", _runs(("success", "github-actions", 1)), "success")]:
+            globals()["paginate"] = lambda path, key=None, _p=page: _p
+            globals()["get"] = lambda path: {"path": paths[int(path.rsplit("/", 1)[1])] + "@refs/heads/x"}
+            got = GitHub("o/r", "main", "").extra_checks("a" * 40, {"Trivy": ".github/workflows/security.yml"})
+            check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
+    finally:
+        globals()["paginate"], globals()["get"] = saved_api
+    check("extra gates: one red pinned run beats a later green one", extra_verdict(["failure", "success"]) == "failure")
+    check("extra gates: pinned running waits, skipped alone is n/a",
+          extra_verdict(["success", None]) is None and extra_verdict(["skipped"]) == "skipped")
     check("extra gates: red Trivy refuses (any lane reads qualifies)",
           qualifies(base_pr, req, {**green, "Trivy": "failure"}, extra=xg) == (False, "extra gate red: Trivy"))
     check("extra gates: without the declaration a red Trivy is not judged (the negative control)",
@@ -2997,9 +3094,9 @@ def self_test() -> int:
             def declare_extra_gates():
                 p = pathlib.Path(origin, RULES_FILE)
                 p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text("merge_train:\n  extra_gates:\n    - Trivy\n")
+                p.write_text(SYN_RULES)
                 gh.g("add", "-A")
-                gh.g("commit", "-q", "-m", "declare extra gates")
+                gh.g("commit", "-q", "-m", "declare extra gates", check=False)  # already declared by the fixture
 
             def extra_done():
                 gh.head_checks.clear()
@@ -3069,6 +3166,35 @@ def self_test() -> int:
                   and mt_status(1)[0] != "failure", f"{s} {gh.comments} {mt_status(1)}")
             check("extra gate red on main: it reads as main red", "Trivy" in s["main_red"], str(s))
             extra_done()
+
+            # Spoofing: a same-name GREEN Trivy from another app/workflow next to a pinned RED one.
+            open_only("p1", "pW")
+            for n in (1, 35):
+                sha = gh.prs[n]["head"]["sha"]
+                gh.head_checks[sha] = {"Trivy": "success"}            # the latest same-name run: spoofed green
+                gh.pinned[sha] = {"Trivy": ["failure", "success"]}    # Security scan's own runs: one red
+            drain(max_ticks=4)
+            check("extra gate spoof: a green same-name run from another source cannot mask the pinned red",
+                  gh.merged == [] and gh.updates == [], f"merged={gh.merged} updates={gh.updates}")
+            gh.pinned.clear()
+            extra_done()
+
+            # Fail closed: declaration absent or unparseable on main -> nothing is served, nothing judged.
+            for label, text in [("absent", None), ("unparseable", "merge_train:\n  extra_gates:\n    - Trivy\n")]:
+                p = pathlib.Path(origin, RULES_FILE)
+                if text is None:
+                    gh.g("rm", "-q", RULES_FILE)
+                else:
+                    p.write_text(text)
+                    gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", f"declaration {label}")
+                open_only("p1", "pW")
+                drain(max_ticks=3)
+                _f, train, _z = plan_train(gh, Git(clone("plan")), "o/r", gh.main_sha())
+                check(f"extra gate declaration {label}: no PR is served in any lane",
+                      gh.merged == [] and gh.updates == [] and train == [] and _f == [],
+                      f"merged={gh.merged} updates={gh.updates} train={[m.number for m in train]}")
+                extra_done()
     finally:
         for k, v in saved.items():
             if v is None:
