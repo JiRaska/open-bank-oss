@@ -245,27 +245,27 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    merge would move the carrier's base; the carrier's own "main moved since publish" check also
    rejects it if one ever does), and at most one per tick, since a merge makes every other
    strict-lane head behind;
-2. if the head is up to date and its required CI has not concluded (running, or not yet reported —
-   the normal state for the first minutes after update-branch), *reserves* main for the oldest such
-   PR: settle reports in-flight, so no train is built under it, no fast-lane status is posted (one
-   posted earlier is withdrawn to `pending`), and no other strict-lane PR is updated or merged. The
-   reservation lapses `STRICT_RESERVE_SECONDS` (90 min) after the head commit, so a hung or
-   never-starting CI cannot freeze main;
+2. if the head is up to date and its required CI is still running (or has just gone green), *reserves*
+   (*amended 2026-10-21:* "running" includes a required context not yet reported, the normal state right after update-branch)
+   main: settle reports in-flight, so no train is built under it; no other strict-lane PR is updated;
+   **and nothing else may move main** — the fast lane posts no status (GitHub auto-merge acts on it)
+   and a carrier that finished green is held, not merged. Main moves only when the reserved PR
+   settles: merged, failed, or timed out. Holding only other strict-lane updates was not enough: on
+   2026-10-20 #13456 was updated at 23:18Z, fast-lane #13490 merged at 23:29Z while its CI ran, it
+   was updated again at 23:53Z, and fast-lane #13492 merged one minute later — re-updated on every
+   cycle, so it could starve forever. The reservation is read before any carrier is settled, and an
+   update-branch starts it in the same tick, before the fast lane is posted;
 3. if it is green but behind, calls update-branch (pinned to the judged head) for the oldest such PR
-   only — one per tick, none while main is reserved or a train carrier is in flight, and only when
-   no strict-lane head is already green over live main (that one merges first, at no CI cost) — so
-   CI is never flooded and the fresh head is not overtaken before its CI ends. The tick that updates
-   also reports in-flight, so its own train build does not go ahead. Its CI then runs and a later
-   tick merges it. With strict off `auto-update-armed-prs.yml` exits before enumerating PRs, so the
-   train owns this update.
-
-   *Amended 2026-10-20 (strict-lane starvation).* As first written the reservation held only for a
-   head with an already-reported pending context, and blocked trains and strict updates but not fast
-   merges or a second strict merge. Measured over 103 `merge-train.yml` runs (2026-10-19 17:00Z to
-   2026-10-20 17:20Z), one manual-lane PR was updated five times and merged zero times: each fresh
-   head was overtaken by a strict merge in the same tick as its update, by a train that was already
-   in flight when it was updated, or by a fast-lane merge, so its CI always concluded on a head that
-   was behind again.
+   only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
+   and a later tick merges it. A reservation is bounded by `RESERVATION_TIMEOUT_S`, twice the p95 of
+   green pull-request CI (measured: p50 17 min, p95 32 min, so 64 min), counted from the head's
+   committer time, which update-branch sets: past it the reservation is released, the fast lane and
+   trains resume, and the PR goes to the back of the strict queue, so a hung CI cannot freeze main.
+   The cost is bounded too: fast-lane and train merges wait at most one strict-lane CI cycle. A
+   file-disjoint fast lane during the reservation was rejected: any merge makes the reserved head
+   behind, and since strict up-to-date is what this lane restores, re-proving it without a new update
+   would mean a second definition of "up to date". With strict off `auto-update-armed-prs.yml` exits before enumerating
+   PRs, so the train owns this update.
 Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
 fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
 symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming
@@ -298,28 +298,52 @@ green-but-behind one onto live main whatever main's state. With main red on a re
 that update could only manufacture main-caused red: the old PR went red on main's gate, the next
 oldest was updated onto the same red tip, and the PR carrying the fix — newer, so last in line —
 was never served (2026-10-20: `gates (gitops-api)` red on main, the fix waited while settle reported
-updated: [<older PR>] and then nothing). So at the start of settle, main_red is the set of
-required contexts (`merge-train` aside) that are FAILURE in main's latest completed CI at the live
+`updated: [<older PR>]` and then nothing). So at the start of settle, `main_red` is the set of
+required contexts (merge-train aside) that are FAILURE in main's latest completed CI at the live
 tip (the tip, or its nearest first-parent ancestor with a completed result — a fix that has merged
 keeps main red until its own push run reports). Then, in the strict lane only:
 1. a PR whose failing required contexts are all in `main_red` is **waiting**
    (`strict: waiting for main (<ctx> red on main <sha12>)`, reported under `waiting`): it cannot
    go green until main is fixed, so it is never served and never reserves main;
-2. ordinary behind PRs are not updated onto a red main. This avoids spending a cycle on a known red
-   combined tree;
-3. a green strict-lane PR whose merge-base (or nearest ancestor with a result) was red on a
-   main_red context is a **fix candidate**, ranked before other strict-lane PRs. If it is already
-   up to date and its required checks are green on that exact head, it can merge subject to all
-   existing guards and the live-main re-check. If it is behind, settle first calls update-branch
-   against the current main tip, reports it under `updated`, and reserves main while CI runs on the
-   new combined head. It can merge only after every required context passes on that refreshed head.
-   A later main regression in the same context is therefore included in the refreshed CI result;
-   a green result from an older base never authorizes a merge over current main.
+2. **no update-branch is issued onto a red main** to any PR: a behind PR simply waits, and the
+   stale-red refresh (which already requires the context green on the tip) updates it once main
+   is green;
+3. **the fix is preferred**: a strict-lane PR green on every required context, whose merge-base
+   (or nearest ancestor with a result) was red on a `main_red` context, demonstrably carries the
+   fix. It is ranked first and merges **without being up to date**
+   (`strict lane: fix for <ctx> red on main <sha12>, green over its red base`). Every other
+   condition still applies — armed, not draft, same repo, no excluded prefix, `agent-pr-guard` not
+   refusing, no symlink/gitlink or control-character path, no train in flight, never in shadow —
+   and live main is re-read immediately before the merge. The fix holds the strict-lane
+   reservation (it is the holder, ahead of any up-to-date PR), so neither the fast lane nor a train
+   moves main under it in the tick it merges; a waiting PR (1) is never the holder.
 
-Every other condition still applies — armed, not draft, same repo, no excluded prefix,
-agent-pr-guard not refusing, no symlink/gitlink or control-character path, no train in flight,
-never in shadow — and live main is re-read immediately before the merge. When main is green, strict
-lane behavior remains as before.
+*Trade-off of (3).* The fix is merged over a main it has not been tested against: commits that
+landed between its base and the tip are unverified in combination with it. That is accepted
+because (a) main is already red, so the strict guarantee it gives up is one main has already
+lost; (b) the PR's own CI ran the failing gate green over a base on which main's CI had it red,
+which is the strongest available evidence that it is the remedy; (c) the alternative — updating
+it onto the red tip and waiting a CI cycle — is exactly what deadlocked, since any older PR takes
+the lane first. Being red-based is required, not merely green: a PR whose CI ran over a still-
+green base proves nothing about the breakage and is not treated as a fix. A fix that is wrong in
+combination shows up on main's own next push run, as any red main does. When main is green none
+of this applies and the strict lane behaves exactly as before.
+
+*Every lane, not only the strict lane (#13400).* Rule 3 originally applied only to manual-lane PRs,
+and a red main also reached the other two lanes: a train built over the red tip came back red on the
+main-red context whatever its members did, and settle named its single member the culprit for a
+check main itself was failing. So, while `main_red` is non-empty:
+4. **a fix is served first in every lane**: a train/fast-lane candidate that passes the same
+   `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
+   lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
+   merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+5. **no train is planned over a red main**: it could only come back red on the main-red context,
+   so building it would spend a CI run to learn nothing; the fast lane is unchanged;
+6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
+   inconclusive (closed, no status, no comment, no bisect); a carrier also red on a context main is
+   green on still blames, and the culprit status names only those contexts.
+And every open PR leaves a decision line in the settle log, armed or not: a disarmed or draft PR was
+filtered out in silence, so a log with no line for it could not say whether it was ever seen.
 
 ### What the train is NOT
 
@@ -328,6 +352,57 @@ not a scheduler for CI capacity: one train per 10 minutes, at most 8 members, bo
 one CI run per batch plus one per halving for a culprit. And it is not four-eyes: `agent-pr-guard`,
 the money-path approval rules and the security checklist gate are evaluated on the member PR
 exactly as today, and a refusal there removes the PR from the candidate set.
+
+### Amendment (2026-10-20) — carriers are judged by their members; cancelled is inconclusive
+
+The first live hour of phase 1 marked two innocent members as culprits, one per defect (#13400).
+
+**Rule 1 — a body gate judges a carrier's MEMBERS.** A gate that reads the live PR body judged the
+carrier's bot boilerplate, so `security-checklist-money-path` failed every train holding a
+money-path member (#12506: carriers #13424/#13451 red on that alone, while #12506's own body had
+all six boxes ticked). The attestation is a human's, on the member; copying ticks onto the carrier
+would turn it into bot text, so that is never done. Instead the gate recognises a **verified
+carrier** — ALL of: head branch `^train/[0-9]+-[0-9]+$` in this repository, author exactly
+`openbank-gitops-bot[bot]` of type `Bot`, label `merge-train`, all read from the live PR object —
+derives the members from the carrier's own commits (`PR-Number: #N` trailers on the train's member
+commits over `base..head`; any other commit fails closed) and requires each member's LIVE body to
+pass the same rule against that member's own diff (its train commit). A human-opened `train/…` PR is
+an ordinary PR. The single regeneration commit is not a member's diff: it is bounded to
+DERIVED_OUTPUTS and proven by main's freshness gates on the same tree. The carrier identity lives in
+`.github/scripts/merge_train_carrier.py`, held equal to `merge-train.py` by the checklist self-test.
+
+Per gate that reads the PR body or PR metadata:
+
+| Gate | Carrier problem? | Decision |
+|---|---|---|
+| `security-checklist-money-path` | yes (the #12506 defect) | members judged on their own bodies and diffs |
+| `coverage-floor-ratchet` | yes, latent: a member's `coverage-floor-lowered:` trailer is in its body, never on the carrier | trailer text also read from the verified carrier's member bodies |
+| `issue-hygiene` | no | already exempt for `[bot]` authors, and the train already excludes it (`TREE_INDEPENDENT_CONTEXTS`); each member is judged on its own PR |
+| `security-regression-test` | no verdict problem: the carrier body closes nothing, so the rule never applies | members are judged on their own PRs; see rule 2 for its trigger fix |
+| `release-scope-mismatch-gate` | title-based and advisory (exit 0) | unchanged |
+| `agent-pr-guard` | no: it reads the event author, branch and diff; the carrier's `train/` branch is outside every agent prefix | unchanged |
+| `api-contract` (migration assertion) | yes, latent: the `## Idempotency caller migration` section lives in the member body | section read from the verified carrier's member bodies too (each line names its service) |
+
+**Rule 2 — a cancelled job is INCONCLUSIVE, never red.** #13137 was named culprit because carrier
+#13452's `security-regression-test` was cancelled by concurrency ("a higher priority waiting
+request") with no step run. In `settle`, a required context that is `cancelled` or `stale`, or
+`skipped` next to a cancellation on the same head, is inconclusive: it never bisects and never
+blames. If nothing failed and something is inconclusive, settle re-runs the cancelled jobs of that
+carrier **once** (App `merge-train/rerun` status as the marker) and the carrier is in flight again;
+still inconclusive after that, or a refused rerun, closes the carrier with no verdict and the next
+tick rebuilds. A real failure next to a cancellation still blames, and the culprit status names only
+the really failing contexts (`culprit: <contexts> red on a train over main <sha>`). The two competing
+runs had one cause: `security-regression-test` triggered on `labeled`, and a carrier is opened and
+then labelled `merge-train`, so the `labeled` run cancelled the `opened` one. That workflow never
+reads PR labels (its scope is the closed issue's `security` label), so `labeled`/`unlabeled` were
+dropped — cheaper and more correct than reordering the carrier's opening, which cannot attach a
+label in the same API call.
+
+**Clearing the wrong marks.** Culprit statuses written before this amendment start with
+`isolated as the cause of a red train`. Such a status is no longer final: the member re-qualifies,
+rides one more train, and that train overwrites the status either way — `success` when the old mark
+was an artifact (#12506, #13137), a `culprit: …` failure when it was real. No new status is written
+with the legacy text, so the mechanism retires itself; nobody needs to push an empty commit.
 
 ## Rollout
 
