@@ -362,7 +362,7 @@ class LookupTests(unittest.TestCase):
                 }
 
                 self.assertEqual(
-                    lookup("test", lambda *_: artifacts, runs.__getitem__),
+                    lookup("test", lambda *_, artifacts=artifacts: artifacts, runs.__getitem__),
                     "8",
                 )
 
