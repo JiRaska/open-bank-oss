@@ -91,7 +91,7 @@ class CloseParticipationReporter(
     }
 
     companion object {
-        const val METRIC = "openbank.close.participation.reports"
+        internal const val METRIC = "openbank.close.participation.reports"
         private const val MAX_REMEMBERED = 31
     }
 }
