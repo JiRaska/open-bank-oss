@@ -352,7 +352,7 @@ def classify_carrier(checks: dict[str, str | None], required: list[str]) -> tupl
 INCONCLUSIVE_GATE_KINDS = frozenset({"budget", "not_evaluated"})
 GATE_SHARD_JOB_RE = re.compile(r"^gates \(([a-z0-9-]+)\)$")   # ci.yml `gates (${{ matrix.slug }})`
 GATE_AGGREGATE_JOB = "Validate manifests"                      # red exactly when a shard is red
-GATE_ARTIFACT_PREFIX = "gate-results-"                         # ci.yml uploads gate-results-<slug>
+GATE_ARTIFACT_PREFIX = "gate-results-"                         # ci.yml uploads gate-results-<slug>-a<attempt>
 
 
 def gate_failures_inconclusive(failed_jobs: list[str], records: dict[str, list | None]) -> tuple[bool, str]:
@@ -915,8 +915,15 @@ class GitHub:
             runs.add(int(m.group(1)))
         why = []
         for run in sorted(runs):
+            code, run_info = api("GET", f"/repos/{self.repo}/actions/runs/{run}")
+            attempt = run_info.get("run_attempt") if code == 200 and isinstance(run_info, dict) else None
+            if type(attempt) is not int or attempt < 1:
+                return False, f"workflow run `{run}` has no current attempt"
             jobs = paginate(f"/repos/{self.repo}/actions/runs/{run}/jobs?filter=latest", "jobs")
-            failed = [j["name"] for j in jobs if j.get("conclusion") not in ("success", "skipped", "neutral", None)]
+            failed_jobs = [j for j in jobs if j.get("conclusion") not in ("success", "skipped", "neutral", None)]
+            if any(j.get("run_attempt") != attempt for j in failed_jobs):
+                return False, f"a failing job of run `{run}` is not from attempt {attempt}"
+            failed = [j["name"] for j in failed_jobs]
             arts: dict[str, dict] = {}
             for a in paginate(f"/repos/{self.repo}/actions/runs/{run}/artifacts", "artifacts"):
                 name = a.get("name") or ""
@@ -927,7 +934,7 @@ class GitHub:
             for job in failed:
                 m = GATE_SHARD_JOB_RE.fullmatch(job)
                 if m:
-                    a = arts.get(GATE_ARTIFACT_PREFIX + m.group(1))
+                    a = arts.get(f"{GATE_ARTIFACT_PREFIX}{m.group(1)}-a{attempt}")
                     records[m.group(1)] = self.artifact_json(a["id"]) if a else None
             ok, reason = gate_failures_inconclusive(failed, records)
             if not ok:
@@ -1808,6 +1815,41 @@ def self_test() -> int:
     ]:
         got, why = gate_failures_inconclusive(jobs, records)
         check(f"gate verdict: {label} -> {'inconclusive' if want else 'conclusive'}", got is want, why)
+
+    # A GitHub rerun keeps attempt-1 artifacts under the same workflow run id. The failing
+    # attempt-2 job may be a content failure even when attempt 1 wrote a budget-only verdict.
+    original_api, original_paginate, original_artifact_json = api, paginate, GitHub.artifact_json
+    try:
+        run = 123
+        attempt = 2
+        artifacts = [{"id": 10, "name": "gate-results-data-a1", "expired": False}]
+        jobs = [{"name": "gates (data)", "conclusion": "failure", "run_attempt": attempt}]
+        def fixture_api(method, path, body=None):
+            return (200, {"run_attempt": attempt}) if path.endswith(f"/actions/runs/{run}") else (404, {})
+        def fixture_paginate(path, key=None):
+            if path.endswith("/check-runs"):
+                return [{"name": "gates (data)", "id": 20,
+                         "details_url": f"https://github.com/x/y/actions/runs/{run}/job/20"}]
+            if path.endswith("/jobs?filter=latest"):
+                return jobs
+            if path.endswith("/artifacts"):
+                return artifacts
+            raise AssertionError(path)
+        globals()["api"], globals()["paginate"] = fixture_api, fixture_paginate
+        GitHub.artifact_json = lambda self, artifact_id: [
+            {"id": "g", "status": "failed", "failure_kind": "budget"}]
+        gh_attempt = GitHub("x/y", "main", "")
+        got, why = gh_attempt.failures_inconclusive("head", ["gates (data)"])
+        check("attempt evidence: old budget artifact cannot excuse a new red shard", not got and "unreadable" in why, why)
+        artifacts.append({"id": 11, "name": "gate-results-data-a2", "expired": False})
+        got, why = gh_attempt.failures_inconclusive("head", ["gates (data)"])
+        check("attempt evidence: exact current attempt is accepted", got and "budget" in why, why)
+        jobs[0]["run_attempt"] = 1
+        got, why = gh_attempt.failures_inconclusive("head", ["gates (data)"])
+        check("attempt evidence: stale failing job is rejected", not got and "not from attempt" in why, why)
+    finally:
+        globals()["api"], globals()["paginate"] = original_api, original_paginate
+        GitHub.artifact_json = original_artifact_json
 
     # ---- inconclusive is never red; legacy culprit marks are re-evaluated -----------------
     rq = ["gates (data)", "derived", "sec"]
