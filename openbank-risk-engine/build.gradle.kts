@@ -32,6 +32,9 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
 
     implementation(project(":openbank-libs-domain"))
+    // ADR-0344 D8: schedules, projection, pricing and sensitivities of the own book. One library,
+    // so treasury and the risk engine cannot disagree on a cash flow.
+    implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-lending"))
     implementation(project(":openbank-libs-runtime"))
 

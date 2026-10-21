@@ -802,7 +802,9 @@ jobs:
           mkdir -p pacts
           shopt -s nullglob
           files=(pact-handoff/*.json)
-          for f in "${files[@]}"; do cp "$f" pacts/; done
+          # bash 3.2 (macOS runners) treats an EMPTY array as unbound under `set -u`; the
+          # ${files[@]+...} form expands to nothing instead of aborting (consumer-less services).
+          for f in ${files[@]+"${files[@]}"}; do cp "$f" pacts/; done
           echo "Staged ${#files[@]} consumer pact file(s) from the build job's hand-off."
 
       # Publish this service's CONSUMER pacts to the broker (ADR-0092). Reads the files staged

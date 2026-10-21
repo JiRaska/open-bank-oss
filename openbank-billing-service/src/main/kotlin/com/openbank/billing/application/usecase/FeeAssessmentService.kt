@@ -77,7 +77,7 @@ class FeeAssessmentService(
         if (terms.noFeeIdentityComponents > 0) {
             // AMOUNT components with no fee identity are not fees (a minimum balance, a limit). Counted per
             // assessment so a v2 product whose fees are ALL unidentified shows up, not as a zero bill alone.
-            meters.counter("billing.assessment.no_fee_identity").increment()
+            meters.counter("openbank.billing.assessment.no_fee_identity").increment()
         }
         // A product that declares fees but yields none we can charge in this currency (only other
         // currencies, or only components billing cannot price) must NOT come out as a clean zero-fee
@@ -88,7 +88,7 @@ class FeeAssessmentService(
         if (terms.droppedFeeComponents > 0) {
             // This assessment charges less than the product declares; a persistent gap must be visible to
             // an alert, which a once-per-revision counter (the revision is cached) cannot give.
-            meters.counter("billing.assessment.dropped_components").increment()
+            meters.counter("openbank.billing.assessment.dropped_components").increment()
             log.warnf(
                 "assessment %s/%s charges without %d dropped fee component(s)",
                 cycleId,
@@ -154,7 +154,7 @@ class FeeAssessmentService(
 
     /** Every skip is COUNTED by reason: a skip is a fee not charged, and must never be invisible. */
     private fun skipped(cycleId: String, accountId: String, currency: String, reason: String): BillingAssessment {
-        meters.counter("billing.assessment.skipped", "reason", reason).increment()
+        meters.counter("openbank.billing.assessment.skipped", "reason", reason).increment()
         return BillingAssessment(
             cycleId = cycleId,
             accountId = accountId,

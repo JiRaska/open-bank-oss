@@ -100,7 +100,7 @@ gates:
     review_after: "2027-10-17"
     selftest: python3 .github/scripts/check-coverage-floor-ratchet.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py"]
+    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py", ".github/scripts/merge_train_carrier.py"]
     run: |
       # Compares every Kover minValue at HEAD against the PR's merge base, position by position.
       # The trailer is read from the PR body (optional: a PR with no body can still justify a
@@ -397,7 +397,10 @@ gates:
     group: lint
     mode: enforced
     min_subjects: 30   # 63 shell scripts today (2026-08-09)
-    budget_seconds: 30   # 5.7s over 63 scripts
+    # Re-derived 2026-10-20 per derive-gate-observability-budgets.py: ceil(max(p95*3, max*1.5, 5)).
+    # 25 CI runs: min 12.6 / p50 19.4 / p95 26.8 / max 30.2s over 104 scripts (30s budget
+    # failed a clean run at 30.2s). p95*3 = 80.4 -> 81.
+    budget_seconds: 81
     run: |
       # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
       # files implementing the gates themselves — the code every other gate's verdict rests
@@ -2998,7 +3001,7 @@ gates:
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py"]
+    selftest_inputs: [".github/scripts/merge-train.py", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -5198,6 +5201,24 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: metric-name-prefix
+    name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      An unprefixed Micrometer name escapes every openbank_* selector and is invisible to
+      check-alert-metric-emitted.py. Seven existed on 2026-10-17 (three found by the audit, two
+      more by this gate itself); all were renamed with their readers, so the baseline is empty
+      and the gate is prevention only.
+    review_after: '2027-04-17'
+    min_subjects: 100   # 198 literal metric names measured 2026-10-17
+    selftest: python3 .github/scripts/check-metric-name-prefix.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-metric-name-prefix.py"]
+    run: |
+      python3 .github/scripts/check-metric-name-prefix.py --root .
+
   # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
   # image, so every scheduler and outbound edge in it is live by default. The switch list is
   # derived from the ledger source; a new scheduler without a switch is red until the instance
@@ -5368,7 +5389,7 @@ gates:
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge_train_carrier.py", ".github/scripts/merge-train.py"]
     run: |
       # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
       # Editing the body to add the checklist (the documented remediation) only reached this
