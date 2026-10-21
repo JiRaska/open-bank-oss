@@ -175,7 +175,7 @@ data class LegSpec(
         fun periods(f: Frequency): Long = when (f) {
             Frequency.Zero -> 1
             is Frequency.Days -> days / f.days
-            is Frequency.Weeks -> days / (DAYS_PER_WEEK * f.weeks) + 1
+            is Frequency.Weeks -> days / (DAYS_PER_WEEK.toLong() * f.weeks) + 1
             is Frequency.Months -> java.time.temporal.ChronoUnit.MONTHS.between(accrualStart, accrualEnd) / f.months + 1
         }
         return maxOf(
