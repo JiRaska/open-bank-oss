@@ -118,6 +118,7 @@ EXTRA_GATE_MESSAGE = ("merge-train: this PR is not served while a declared extra
                       "rules.yaml, e.g. Security scan / Trivy) is red on its head. It stays armed: push a commit that "
                       "turns the scan green and the train picks it up on its own. Do not disable auto-merge for this.")
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: a green carrier pre-empted this running strict head once
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -1453,9 +1454,12 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         if not problem and chain[0] != live_main:
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
-            log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
-            summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
-            continue
+            if strict_defers(gh, git, strict, holder, shadow):
+                log(f"carrier #{carrier}: green; strict-lane #{holder} still running — it yields ONCE (bounded deferral)")
+            else:
+                log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
+                summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
+                continue
         acted = True
         if problem:
             log(f"::warning::carrier #{carrier}: {problem}")
@@ -1615,6 +1619,26 @@ def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: 
         elif holder is None:
             holder = n
     return holder, timed_out
+
+
+def strict_defers(gh, git, strict: list, holder: int, shadow: bool = False) -> bool:
+    """Bounded deferral (ADR-0343, #13400): may an already-green carrier merge past `holder`'s reservation?
+    Only while the holder's CI is still RUNNING ("pending"; a green head is never pre-empted), and at most
+    ONCE per strict head: the yield is recorded as DEFER_CONTEXT on that head. The carrier's merge puts the
+    head behind main and strict_lane update-branches it — that re-run IS the one deferral, so the record
+    on the update's first parent counts too. After that the holder has priority until it merges or fails."""
+    view = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
+    if view is None:
+        return False
+    head = view["head_sha"]
+    parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
+    for sha in [head] + parents[1:2]:
+        if gh.app_statuses(sha).get(DEFER_CONTEXT, ("", ""))[0]:
+            return False
+    if not shadow:
+        gh.post_status(head, "success", "strict lane: yielded once to a green carrier; priority from here",
+                       context=DEFER_CONTEXT)
+    return True
 
 
 def stale_red_candidate(pr: dict, member_required: list[str], checks: dict[str, str | None]) -> list[str]:
@@ -3109,25 +3133,97 @@ def self_test() -> int:
                   gh.merged == [35], f"{s} merged={gh.merged}")
             reset()
 
-            # A train whose CI went green while a strict-lane reservation is active does not merge:
-            # the carrier is left for a later tick (it is rejected and rebuilt once main moves).
-            open_only("p1")
-            tick()
-            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
-            open_only("pW")
-            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
-            gh.pending_shas.clear()                        # the train finishes green; pW still running
+            # BOUNDED DEFERRAL (#13400): a green carrier and a strict reservation whose CI is still
+            # running. The carrier may pre-empt the strict head ONCE (recorded as DEFER_CONTEXT on that
+            # head); the update-branch that follows inherits the record through its first parent.
+            def green_train_with(pw_pending=True, train_pending=False):
+                open_only("p1")
+                tick()
+                gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+                open_only("pW")
+                if pw_pending:
+                    gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+                if not train_pending:
+                    gh.pending_shas.clear()
+
+            def deferral(n):
+                return gh.app_statuses(gh.prs[n]["head"]["sha"]).get(DEFER_CONTEXT, ("", ""))[0]
+
+            # (1) no prior deferral: the carrier merges now and the deferral is recorded on pW's head.
+            green_train_with()
+            pw_head = gh.prs[35]["head"]["sha"]
             s = settle_now()
-            check("reservation: a green train does not merge while a strict-lane reservation is active",
+            check("deferral: a green carrier pre-empts a RUNNING strict reservation once, and records it",
+                  1 in gh.merged and 35 not in gh.merged
+                  and gh.app_statuses(pw_head).get(DEFER_CONTEXT, ("",))[0] == "success",
+                  f"{s} merged={gh.merged}")
+            gh.head_checks.clear()
+            gh.pending_shas.clear()
+            reset()
+
+            # (2) a deferral already recorded for this strict head: the carrier is held.
+            green_train_with()
+            gh.post_status(gh.prs[35]["head"]["sha"], "success", "deferred once", context=DEFER_CONTEXT)
+            s = settle_now()
+            check("deferral: a strict head that already yielded once is not pre-empted again (carrier held)",
                   s["in_flight"] and 1 not in gh.merged and any(c["state"] == "open" for c in gh.carriers.values()),
                   f"{s} merged={gh.merged}")
             gh.head_checks.clear()
             s = settle_now()
-            check("reservation: once the reserved PR goes green it merges first; the train stays held",
+            check("deferral: once the reserved PR goes green it merges first; the train stays held",
                   gh.merged == [35] and s["in_flight"], f"{s} merged={gh.merged}")
             s = settle_now()
-            check("reservation: the held train, now over a stale main, is rejected for a rebuild",
+            check("deferral: the held train, now over a stale main, is rejected for a rebuild",
                   gh.merged == [35] and s["rejected"], f"{s} merged={gh.merged}")
+            reset()
+
+            # (3) a GREEN strict head is never pre-empted: carrier held, strict merges first, no record.
+            green_train_with(pw_pending=False)
+            s = settle_now()
+            check("deferral: a green strict head is never pre-empted — it merges first, the carrier is held",
+                  gh.merged == [35] and 1 not in gh.merged and not deferral(35), f"{s} merged={gh.merged}")
+            reset()
+
+            # (4) a carrier that is not green: unchanged — in flight, nothing merges, nothing recorded.
+            green_train_with(train_pending=True)
+            s = settle_now()
+            check("deferral: a carrier still running changes nothing (no merge, no deferral recorded)",
+                  s["in_flight"] and gh.merged == [] and not deferral(35), f"{s} merged={gh.merged}")
+            gh.head_checks.clear()
+            gh.pending_shas.clear()
+            reset()
+
+            # (5) starvation bound: carriers keep arriving green while pW's CI runs. pW yields once,
+            # is updated once (the one deferral), its updated head inherits the record through the
+            # first parent, every later carrier is held, and pW merges within 2 CI cycles.
+            gh.updates.clear()
+            green_train_with()
+            s1 = settle_now()                              # cycle 1 (pW's CI on A runs): carrier merges, A deferred
+            gh.head_checks.clear()                         # A's CI finishes green, now behind main
+            settle_now()                                   # existing flow: update-branch -> B
+            b_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks[b_head] = {"gates (data)": None}   # cycle 2: B's CI runs
+            open_only("p2")
+            counter[0] += 1                                # a new carrier is built (build + publish only:
+            bdir = clone("build")                          # settle is in flight under B's reservation) ...
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",),
+                             overlay_roots=(".github/scripts",))
+            b.env["PROBE_OUT"] = probe
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            built = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            gh.pending_shas.clear()                        # ... and goes green
+            s2 = settle_now()
+            held = 2 not in gh.merged and not gh.app_statuses(b_head).get(DEFER_CONTEXT)
+            gh.head_checks.clear()                         # B's CI finishes green
+            settle_now()
+            check("deferral: starvation-free — after one yield the strict PR holds, merges within 2 CI cycles",
+                  1 in s1["merged"] and built != "idle" and held and 35 in gh.merged and gh.updates == [35]
+                  and gh.merged.index(35) < (gh.merged.index(2) if 2 in gh.merged else 99),
+                  f"built={built} s2={s2} merged={gh.merged} updates={gh.updates}")
+            gh.head_checks.clear()
+            gh.pending_shas.clear()
+            gh.updates.clear()
             reset()
 
             # A hung CI cannot freeze main: past RESERVATION_TIMEOUT_S the reservation is released,

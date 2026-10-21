@@ -441,6 +441,10 @@ closed with no verdict. A missing or unreadable artifact, a record without `fail
 failed job, or any content failure keeps the verdict conclusive. Budgets were not raised: with the
 fetch fixed, carrier mode is not legitimately slower than an ordinary run.
 
+### Amendment (2026-10-21) — bounded strict deferral (#13400)
+
+A strict reservation whose head CI is still running yields to an already-green carrier at most once per strict head (recorded as the App's `merge-train/strict-deferral` status on that head and inherited by its update-branch through the first parent); a green strict head is never pre-empted, and after the one yield the strict PR has priority until it merges or fails — N ready PRs merge now for one extra CI cycle of one PR, and the strict PR still merges within two cycles.
+
 ### Amendment (2026-10-21) — extra gates: a red security scan blocks serving
 
 The train judged only the ruleset-required contexts, so a PR with a red `Security scan / Trivy`
