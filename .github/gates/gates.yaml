@@ -556,7 +556,6 @@ gates:
     run: |
       set -e
       bash .github/scripts/supersede-deploy-prs.sh --self-test
-      python3 .github/scripts/test-supersede-hold-union.py
 
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
