@@ -338,6 +338,7 @@ check main itself was failing. So, while `main_red` is non-empty:
    `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
    lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
    merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+   *amended (2026-10-21): a fix behind main is no longer merged without update — it is update-branched and holds the reservation, and only its combined head merges, with the fix set green and every other required context green or red on main too.*
 5. **no train is planned over a red main**: it could only come back red on the main-red context,
    so building it would spend a CI run to learn nothing; the fast lane is unchanged;
 6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
