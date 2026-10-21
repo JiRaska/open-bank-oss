@@ -66,7 +66,7 @@ data class FeedbackSubmission(
  * user-initiated, so a lost event is a lost user report, not a lost telemetry sample. The emit
  * still never throws at the caller (the customer already consented and pressed send; a broker
  * hiccup must not turn into a 5xx they cannot act on), but every failure increments
- * `feedback_emit_failures_total` so the gap is alertable rather than invisible.
+ * `openbank_feedback_emit_failures_total` so the gap is alertable rather than invisible.
  */
 @ApplicationScoped
 class FeedbackPublisher(
@@ -86,7 +86,7 @@ class FeedbackPublisher(
             // watch feedback volume live without waiting on ClickHouse — and so a broken object
             // store shows up as a STORE_FAILED rate rather than only in a log line.
             meterRegistry.counter(
-                "feedback_submissions",
+                "openbank.feedback.submissions",
                 "category",
                 submission.category,
                 "screenshot_status",
@@ -148,8 +148,8 @@ class FeedbackPublisher(
         const val AGGREGATE_TYPE = "SCREEN_FEEDBACK"
 
         // Base name has NO _total suffix — the Prometheus registry appends it, so this is scraped
-        // as `feedback_emit_failures_total` (the name the edge PrometheusRule alerts on).
-        private const val FAILURE_COUNTER = "feedback_emit_failures"
+        // as `openbank_feedback_emit_failures_total` (the name the edge PrometheusRule alerts on).
+        private const val FAILURE_COUNTER = "openbank.feedback.emit_failures"
 
         /** Closed allow-list — the app's `FeedbackCategory` enum, mirrored (ADR-0192). */
         val VALID_CATEGORIES = setOf("BUG", "IDEA", "CONFUSING")
