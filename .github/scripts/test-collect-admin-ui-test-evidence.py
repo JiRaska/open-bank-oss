@@ -18,7 +18,7 @@ SPEC.loader.exec_module(COLLECTOR)
 COMPONENT = "openbank-example-service"
 SHA = "a" * 40
 RUN = {
-    "id": 123, "run_attempt": 2, "head_sha": SHA, "head_branch": "main",
+    "id": 123, "run_attempt": 2, "head_sha": SHA, "head_branch": "main", "status": "completed",
     "path": ".github/workflows/services-ci.yml", "event": "push",
     "head_repository": {"full_name": "org/repo"},
 }
@@ -261,6 +261,23 @@ class CollectionTests(unittest.TestCase):
             COLLECTOR.collect(self.repo, Path(self.temp.name) / "bad.json", "org/repo", "token",
                               fetch_page=lambda *_: (_ for _ in ()).throw(COLLECTOR.CollectionError("API down")),
                               seed=None, run_collector=run)
+
+    def test_missing_or_partial_run_status_cannot_stage_evidence(self):
+        artifact = {"id": 7, "name": f"test-intelligence-{COMPONENT}", "expired": False,
+                    "workflow_run": {"id": 123, "head_branch": "main"}}
+        for status in (None, "queued", "in_progress"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as output_dir:
+                metadata = RUN | {"status": status}
+                if status is None:
+                    metadata.pop("status")
+                result = COLLECTOR.collect(
+                    self.repo, Path(output_dir) / "result.json", "org/repo", "token",
+                    fetch_page=lambda *_: [artifact], fetch_run=lambda _, metadata=metadata: metadata,
+                    fetch_archive=lambda _: self.fail("unfinished evidence must not be downloaded"),
+                    seed=None, run_collector=self.fake_collector(None),
+                )
+                self.assertEqual(result["staged"], [])
+                self.assertEqual(result["missing"], [COMPONENT])
 
     def test_rejects_mixing_with_existing_build_evidence(self):
         target = self.repo / COMPONENT / "build/test-intelligence/run.json"
