@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA CLIENT certificate for tax-reporting-service's east-west mTLS calls (8443 listeners,
+# client auth REQUIRED) — the pension company's ledger-service and treasury-service (ADR-0337).
+# ASVS V9.1 forbids a new plaintext inter-service edge: these calls carry a bearer token and the
+# cluster has no service mesh. Same shape as treasury-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tax-reporting-internal-tls
+  namespace: tax-reporting
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: tax-reporting-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: tax-reporting-service.tax-reporting.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

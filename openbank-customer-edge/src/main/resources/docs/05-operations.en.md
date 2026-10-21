@@ -46,6 +46,10 @@ Note the **separate management port 8085** (`quarkus.management.port`), so probe
 
 > **Gotcha (from the source comments):** do **not** declare `client-secret` in `application.yaml` with a `${UPSTREAM_OIDC_CLIENT_SECRET:}` expansion — an ENV-form property name resolves unreliably and silently yields `""`, making every token fetch 401. Supply it via the env var `OPENBANK_UPSTREAM_CLIENT_SECRET` (standard ENV→dotted-property mapping).
 
+## Shared ephemeral state
+
+Nearby-payment sessions are stored in shared Redis rather than a pod's local memory, so any customer-edge replica can resolve the receiver's token. Each session expires after five minutes; keep Redis connectivity and TTL behavior consistent across replicas when changing this backend. The service's `check`/`build` lifecycle runs the cross-replica Redis test in its own JVM after the regular suite; running `:openbank-customer-edge:test` alone does not run that test.
+
 ## Health checks
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC running.
@@ -108,3 +112,7 @@ This is the IDOR guard working as designed: the `accountId` did not resolve to t
 | HTTP client (outbound) | JDK `java.net.http.HttpClient` (HTTP/1.1) |
 
 The exact pinned versions are emitted in the `/api/v1/info` payload at runtime.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

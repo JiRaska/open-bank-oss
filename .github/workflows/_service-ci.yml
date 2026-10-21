@@ -130,8 +130,9 @@ jobs:
           REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          bash .github/scripts/tests/test-resolve-historical-service-ref.sh
           git fetch --quiet origin main
-          resolved_ref="$(git rev-parse --verify "${REF}^{commit}")"
+          resolved_ref="$(bash .github/scripts/resolve-historical-service-ref.sh "$REF")"
           git merge-base --is-ancestor "$resolved_ref" origin/main || {
             echo '::error::Historical provider ref is not on main.'
             exit 1
@@ -415,6 +416,55 @@ jobs:
           retention-days: 14
           overwrite: true
 
+  # ── publish-evidence: commit-addressed Test Intelligence store (#13201) ─────────────────
+  # admin-ui reads each component's evidence for the commit it is RUNNING from
+  # `<store>/<component>/<sha8>/test-intelligence.json`. This job publishes that object from
+  # the run envelope `build` just retained. Main pushes only — a dispatch may build a
+  # historical ref whose envelope is not about GITHUB_SHA, and a PR's commit is never
+  # deployed. It observes the build and must never gate it (#6614): job-level
+  # continue-on-error, and nothing `needs` it. Write-once: the bucket refuses any PUT that
+  # is not `If-None-Match: *`, so a re-run answers 412 and the first publication stands.
+  publish-evidence:
+    name: ${{ inputs.service }} (publish test evidence)
+    needs: build
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            openbank-admin-ui/scripts/publish-test-evidence.mjs
+            openbank-admin-ui/src/lib/test-intelligence-run-projection.mjs
+            .github/scripts/publish-test-evidence.sh
+            openbank-libs/governance/rules.yaml
+            ${{ inputs.service }}/version.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Download this run's Test Intelligence envelope
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/evidence
+
+      - name: Assume the evidence-writer role (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-sandbox-test-evidence-writer
+          aws-region: eu-north-1
+
+      # Same upload path as test-evidence-reconcile.yml: the tests ran on GITHUB_SHA itself.
+      - name: Publish write-once
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          bash .github/scripts/publish-test-evidence.sh "${SERVICE}" "${GITHUB_SHA}" "${GITHUB_SHA}" \
+            identical "${RUNNER_TEMP}/evidence/run.json"
+
   # ── contract: Pact provider verification + consumer-pact publishing ─────────────────────
   # In-cluster ARC pool only (the Pact Broker has no public ingress, ADR-0056) and only on the
   # events that must publish a verification result: a push to main (the SHA auto-deploy gates
@@ -484,6 +534,10 @@ jobs:
           set -euo pipefail
           cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
           bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
+          cp .github/scripts/resolve-historical-service-ref.sh \
+            "$RUNNER_TEMP/resolve-historical-service-ref.sh"
+          chmod 700 "$RUNNER_TEMP/resolve-historical-service-ref.sh"
+          bash .github/scripts/tests/test-resolve-historical-service-ref.sh
 
       - name: Check out a requested provider version only after proving it is on main
         if: inputs.ref != '' || inputs.provider_version != ''
@@ -496,7 +550,7 @@ jobs:
           # the full main history, then reject anything that is not an on-main ancestor before it
           # replaces the trusted triggering checkout.
           git fetch --quiet origin main
-          RESOLVED_REF="$(git rev-parse --verify "${REF}^{commit}")"
+          RESOLVED_REF="$(bash "$RUNNER_TEMP/resolve-historical-service-ref.sh" "$REF")"
           if ! git merge-base --is-ancestor "$RESOLVED_REF" origin/main; then
             echo "::error::$REF is not an ancestor of origin/main. A verification may only be" \
                  "published for a commit that is on main (#3306)."
@@ -518,8 +572,10 @@ jobs:
             [ -x "$PROOF_RUNNER" ] || { echo "::error::trusted provider proof runner is absent"; exit 1; }
             PROVIDER_VERSION="$(bash "$PROOF_RUNNER" --resolve "$REQUESTED_PROVIDER_VERSION")"
             FIXTURE_REF="${REQUESTED_FIXTURE_REF:-$GITHUB_SHA}"
-            git fetch --quiet origin main "$FIXTURE_REF"
-            FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
+            # Fetch full main history once, then resolve F from objects already present. An
+            # abbreviated SHA is not a valid fetch refspec on every Git server.
+            git fetch --quiet origin main
+            FIXTURE_VERSION="$(bash "$RUNNER_TEMP/resolve-historical-service-ref.sh" "$FIXTURE_REF")"
             # The script proves P/F/main ancestry and requires this checkout to be P. If P and F
             # are byte-identical in every production build input of SERVICE, it replaces
             # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger and Balance,

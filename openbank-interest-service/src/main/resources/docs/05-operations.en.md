@@ -52,6 +52,8 @@ Scheduled jobs (config keys under `openbank.interest`):
 
 The placeholder secrets are dev-only; production must inject real values via Vault (ADR-0017).
 
+Outbound service-to-service calls (ledger, transaction-service, account-service, party-service and, since #8481, the product-catalog read) authenticate through the named `ledger` oidc-client: Keycloak client `openbank-interest` with its own secret `OIDC_LEDGER_CLIENT_SECRET`, never the shared `openbank-services` principal. The product-catalog read is granted `catalog.read` (published read only) for `service-account-openbank-interest` by `account_rest_ext.rego`; the shared `OIDC_CLIENT_SECRET` client stays configured as the default but no rest-client selects it.
+
 ## Health checks
 
 - **Liveness:** `/q/health/live` (port 8085) — JVM + ArC running.
@@ -124,3 +126,13 @@ Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):
 - Per-service path-scoped CI: test (unit + Testcontainers PostgreSQL/Valkey per JVM, in-memory Kafka), `quarkusBuild` fast-jar, SBOM, image build/push, ArgoCD picks up the tag.
 - **Release axis** (release-please) is driven by `version.txt` + Conventional Commits; **API-contract axis** is `openapi.yaml: info.version` (ADR-0048). Do not force them equal.
 - GitOps: for image-tag merge conflicts take `--ours` (the freshly-built tag); for RBAC/config take `--theirs` or resolve manually.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Withholding remittance booking
+
+The withholding-tax remittance consumer books its debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a readable COMPLETED transaction settles the batch; any other 2xx state (FAILED, in progress, unreadable) is thrown as completion-uncertain and retried with the same idempotency key. A 409 is an idempotent success. A 400/422 refusal throws `WithholdingRemittanceBookingFailedException` so the connector dead-letters the event. Any other answer or a dropped connection is thrown and retried with the same idempotency key. A due date that is not an ISO date is rejected once, before any retry, and dead-lettered. No configuration changed.
+
+Before retry logging, completion-uncertain exceptions retain only their controlled status and discard body-binding causes that can contain provider payloads. Retry counts and original idempotency keys remain unchanged. Other exception logging and the shared response-close logger remain outside this bounded guarantee.

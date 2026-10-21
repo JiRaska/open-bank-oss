@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "df691b0463637f29"
+        openbank.tech/policy-checksum: "c022f80806d8c706"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -270,6 +270,11 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0331 / ADR-0252: trust the taint only from customer-edge, which forwards it
+            # after its own trusted-principal decision (UpstreamClient). Held to that one
+            # relay identity by check-synthetic-customer-identity.py.
+            - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
+              value: "service-account-openbank-edge"
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the

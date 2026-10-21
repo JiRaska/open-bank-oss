@@ -95,8 +95,13 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 | `V6__preserve_mixed_version_outbox_and_published_children.sql` | Nejprve obnoví defaulty pro starý outbox writer a uzavře INSERT/přesun potomků publikované revize. |
 | `V7__track_bank_v1_projection_revision.sql` | Ukládá watermarky v1 i draftu; jednostrannou rollback změnu reconciliuje a oboustranný rozpor odmítne. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Přiděluje immutable commit-safe pořadí, takže opačný commit ani změna času nevytvoří mezeru v cursoru. |
+| `V14__generic_revision_role_approvals.sql` | Přejmenuje důkazy pension schválení na `catalog_revision_role_approvals` a sloupce na `approval_digest` / `approved_effective_to`, beze ztráty dat. Přidá append-only tabulku `catalog_schema_approval_policies`. (ADR-0345) |
 
 
 ## Převod objektů katalogu
 
 Vnořené objekty katalogu zachovávají dosavadní serializovanou podobu polí. Specializovaný převod zachovává výstupní kontrakt; nevyžaduje migraci dat katalogu ani změnu verze API.
+
+## Referenční nabídky a klasifikační schémata (ADR-0341)
+
+Bankovní balíček získává schémata `deposit-v3`, `loan-v3` a `treasury-instrument-v1` a balíček penzí schéma `pension-savings-v3`, která nesou účetní a regulatorní klasifikaci nabídky. Plánovaný seeder `CatalogReferenceOfferingSeeder` vytváří nabídku nástrojů vlastních obchodů treasury (bankovní balíček) a české penzijní nabídky DPS a DIP (ze souboru `catalog-seeds/retirement/cz-illustrative-offerings.json`, balíček penzí), vždy jen když je příslušný balíček povolen. Každá nabídka vzniká s otevřenou revizí ve stavu DRAFT pod systémovým tvůrcem. Publikovat ji musí jiný lidský schvalovatel, takže seedování samo nikdy neučiní revizi připnutelnou a penzijní hodnoty zůstávají ilustrativní do právního a obchodního posouzení. Seeder je idempotentní: existující nabídka zůstane beze změny bez ohledu na stav jejích revizí. Řídí ho `openbank.catalog.reference-offerings-enabled`, ve výchozím stavu zapnuté a v profilu standalone vypnuté.

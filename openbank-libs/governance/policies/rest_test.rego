@@ -1149,6 +1149,81 @@ test_deny_edge_service_account_decide_message_approval if {
 	}
 }
 
+test_allow_operator_create_managed_notification_template if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "service_account": false, "roles": ["ROLE_OPERATOR"]},
+		"action": "commstemplate.create",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "operator-manage-notification-template"
+}
+
+test_allow_admin_publish_managed_notification_template if {
+	rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "service_account": false, "roles": ["ROLE_ADMIN"]},
+		"action": "commstemplate.publish",
+		"resource": "revision-1",
+	}
+		with data.openbank.bundle as bundle
+}
+
+# ADR-0333 D6 / ADR-0285 D6: the checker of customer copy is ROLE_COMMS_APPROVER, not an operator.
+test_deny_operator_publish_managed_notification_template if {
+	not rest.allow with input as {
+		"principal": {"id": "operator-2", "type": "HUMAN", "service_account": false, "roles": ["ROLE_OPERATOR"]},
+		"action": "commstemplate.publish",
+		"resource": "revision-1",
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_allow_comms_approver_publish_managed_notification_template if {
+	decision := rest.allow with input as {
+		"principal": {"id": "approver-1", "type": "HUMAN", "service_account": false, "roles": ["ROLE_COMMS_APPROVER"]},
+		"action": "commstemplate.publish",
+		"resource": "revision-1",
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "commstemplate-publish"
+}
+
+test_allow_comms_approver_read_but_not_create_managed_notification_template if {
+	every action in {"commstemplate.read", "commstemplate.preview"} {
+		rest.allowed_reasons["commstemplate-approver-read"] with input as {
+			"principal": {"id": "approver-1", "type": "HUMAN", "service_account": false, "roles": ["ROLE_COMMS_APPROVER"]},
+			"action": action,
+		}
+	}
+	not rest.allow with input as {
+		"principal": {"id": "approver-1", "type": "HUMAN", "service_account": false, "roles": ["ROLE_COMMS_APPROVER"]},
+		"action": "commstemplate.create",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_deny_service_account_publish_managed_notification_template_even_with_approver_role if {
+	every roles in {["ROLE_OPERATOR", "ROLE_API"], ["ROLE_COMMS_APPROVER", "ROLE_ADMIN"]} {
+		not rest.allow with input as {
+			"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "service_account": true, "client_id": "openbank-services", "roles": roles},
+			"action": "commstemplate.publish",
+			"resource": "revision-1",
+		}
+			with data.openbank.bundle as bundle
+	}
+}
+
+test_deny_edge_service_account_publish_managed_notification_template if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "commstemplate.publish",
+		"resource": "revision-1",
+	}
+}
+
 # four_eyes_required fires for opsmessage.compose via the NEW data.rules.four_eyes.actions
 # list, not via money_path_scopes — notification-service is not and will never be in
 # money_path_services, so this proves the exact-action clause is what is actually firing.
@@ -1852,4 +1927,128 @@ test_operator_read_any_still_admits_service_account_pending_edge_inventory if {
 		"resource": {"type": "y", "id": "y-1"},
 	}
 	"operator-read-any" in reasons
+}
+
+# Template editing follows the verified person marker, never a username heuristic.
+test_managed_template_verified_people_keep_all_editorial_actions if {
+    every id in {"operator-opaque", "service-account-person"} {
+        every action in {"commstemplate.create", "commstemplate.read", "commstemplate.preview"} {
+            rest.allowed_reasons["operator-manage-notification-template"] with input as {
+                "principal": {"id": id, "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": false},
+                "action": action,
+            }
+        }
+    }
+}
+
+test_managed_template_verified_machines_have_no_editorial_grant if {
+    every client in {"openbank-edge", "other-client"} {
+        every id in {"opaque-machine-id", "service-account-openbank-edge"} {
+            every action in {"commstemplate.create", "commstemplate.read", "commstemplate.preview", "commstemplate.publish"} {
+                not rest.allowed_reasons["operator-manage-notification-template"] with input as {
+                    "principal": {"id": id, "type": "HUMAN", "roles": ["ROLE_OPERATOR", "ROLE_ADMIN"], "service_account": true, "client_id": client},
+                    "action": action,
+                }
+            }
+        }
+    }
+}
+
+test_managed_template_missing_or_invalid_person_marker_fails_closed if {
+    every principal in {
+        {"id": "operator-opaque", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+        {"id": "operator-opaque", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": null},
+        {"id": "operator-opaque", "type": "HUMAN", "roles": ["ROLE_OPERATOR"], "service_account": "false"},
+    } {
+        every action in {"commstemplate.create", "commstemplate.read", "commstemplate.preview", "commstemplate.publish"} {
+            not rest.allowed_reasons["operator-manage-notification-template"] with input as {"principal": principal, "action": action}
+        }
+    }
+}
+
+# Full decisions also cover generic read grants, not just the editorial named grant.
+# The actual generated rules projection is checked separately by the integration matrix.
+test_managed_template_full_decisions_require_verified_staff if {
+    editorial_rules := {"authz": {"operator_read_any_excluded_actions": ["tax.filing.read", "commstemplate.read"]}}
+    every role in {"ROLE_OPERATOR", "ROLE_ADMIN"} {
+        every id in {"opaque-id", "service-account-named"} {
+            every action in {"commstemplate.create", "commstemplate.read", "commstemplate.preview"} {
+                decision := rest.allow with input as {
+                    "principal": {"id": id, "type": "HUMAN", "roles": [role], "service_account": false},
+                    "action": action,
+                } with data.rules as editorial_rules
+                decision.allow == true
+                not rest.allow with input as {
+                    "principal": {"id": id, "type": "HUMAN", "roles": [role], "service_account": true, "client_id": "other-client"},
+                    "action": action,
+                } with data.rules as editorial_rules
+            }
+        }
+    }
+    every role in {"ROLE_VIEWER", "ROLE_COMPLIANCE"} {
+        every action in {"commstemplate.create", "commstemplate.read", "commstemplate.preview", "commstemplate.publish"} {
+            not rest.allow with input as {
+                "principal": {"id": "staff-without-editorial-role", "type": "HUMAN", "roles": [role], "service_account": false},
+                "action": action,
+            } with data.rules as editorial_rules
+        }
+    }
+}
+
+# #13429: generic, pack-declared revision approval.
+test_catalog_revision_approval_decide_requires_derived_approver_marker if {
+	decision := rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+
+	decision.allow == true
+	decision.reason == "catalog-revision-decide-approval"
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ", "CATALOG_SCOPE_PUBLISH"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as {
+		"principal": {"id": "service-account-catalog", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.publish",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_catalog_revision_approval_read_requires_read_scope if {
+	rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_SCOPE_READ"]},
+		"action": "catalog.revisionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+		with data.openbank.bundle as bundle
+	not rest.allow with input as {
+		"principal": {"id": "legal-reviewer", "type": "HUMAN", "roles": ["CATALOG_REVISION_APPROVER"]},
+		"action": "catalog.revisionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+	}
+}
+
+test_catalog_revision_approval_evidence_machine_reader_is_named if {
+	rest.allow with input as {
+		"principal": {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		"action": "catalog.revisionApproval.read",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {"azp": "openbank-pension", "preferred_username": "service-account-openbank-pension", "subject": "s"},
+	}
+		with data.openbank.bundle as bundle
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-pension", "type": "HUMAN", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		"action": "catalog.revisionApproval.decide",
+		"resource": {"type": "catalog", "id": "offering-1"},
+		"attributes": {"azp": "openbank-pension", "preferred_username": "service-account-openbank-pension", "subject": "s"},
+	}
 }

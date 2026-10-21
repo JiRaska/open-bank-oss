@@ -139,7 +139,7 @@ not change any existing request's outcome until explicitly flipped.
   the `ClearingResource` KDoc in this change. No DB, schema, endpoint or policy change.
 
 - **2026-05-30** — Added `clearing_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/
-  surface/boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  surface/boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
   sepa-payment pilot. New endpoint `PATCH /api/v1/clearing/approvals/{id}` +
@@ -208,7 +208,7 @@ not change any existing request's outcome until explicitly flipped.
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline

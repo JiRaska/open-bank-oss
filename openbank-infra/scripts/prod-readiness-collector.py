@@ -20,11 +20,13 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
@@ -523,28 +525,75 @@ def collect(short: str, att, today: str) -> ServiceReadiness:
 
 
 def all_services() -> list[str]:
-    """Every module the matrix scores: the `-service` modules PLUS every declared money-path one.
-
-    The `openbank-*-service` glob alone missed openbank-sepa-payment, openbank-sepa-instant and
-    openbank-domestic-payment — three released components with a governance.yaml, an openapi.yaml
-    and a threat model, which rules.yaml declares money-path and which move SEPA and domestic
-    payments. They had no row at all, so every headline this collector produced ("N cells below
-    Verified", "GO x/37") silently excluded them (#2364). A module governance calls money-path
-    must never be absent from the readiness matrix.
-
-    Deliberately NOT widened to every module carrying a governance.yaml + src/main: that would
-    add 12 further agent/auxiliary modules and is a scoping decision about what the matrix
-    covers, not a correctness fix.
-    """
-    out = set()
-    for d in REPO.glob("openbank-*-service"):
-        m = re.match(r"openbank-(.+)-service", d.name)
-        if m:
-            out.add(m.group(1))
-    for short in money_path():
-        if module_dir(short, REPO).is_dir():
-            out.add(short)
+    """Use the shared Gradle-derived runnable inventory for Python and Node collectors."""
+    helper = Path(__file__).resolve().parents[2] / "openbank-admin-ui" / "scripts" / "service-inventory.mjs"
+    try:
+        result = subprocess.run(
+            ["node", str(helper), "--repo", str(REPO)], check=True,
+            capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            "cannot build readiness roster: Node.js and the shared service inventory helper are required"
+        ) from exc
+    try:
+        rows = json.loads(result.stdout)
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get("short"), str)
+            or not isinstance(row.get("name"), str) for row in rows
+        ):
+            raise ValueError("unexpected inventory schema")
+        out = {row["short"] for row in rows}
+        if len(out) != len(rows):
+            raise ValueError("duplicate module identity")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise RuntimeError("shared service inventory returned invalid data; refusing readiness scoring") from exc
+    missing_money = sorted(money_path() - out)
+    if missing_money:
+        raise RuntimeError(
+            "declared money-path module(s) missing from runnable service inventory: "
+            + ", ".join(missing_money)
+        )
     return sorted(out)
+
+
+def source_revision() -> str:
+    """Return the exact source revision that produced this report; never invent one."""
+    candidate = os.environ.get("READINESS_SOURCE_SHA") or os.environ.get("GITHUB_SHA")
+    if not candidate:
+        try:
+            candidate = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise RuntimeError("cannot determine readiness source commit") from exc
+    if not re.fullmatch(r"[0-9a-f]{40}", candidate):
+        raise RuntimeError("READINESS_SOURCE_SHA must be a full 40-character Git SHA")
+    return candidate
+
+
+def build_snapshot(results: list[ServiceReadiness], generated_for: str,
+                   collected_at: str | None = None, source_sha: str | None = None) -> dict:
+    """Serialize complete score evidence with explicit scope and source provenance."""
+    services = [asdict(result) for result in results]
+    roster = "\n".join(sorted(
+        f"{result.service}:{str(result.money_path).lower()}" for result in results
+    )).encode("utf-8")
+    return {
+        "schema_version": 1,
+        "generated_for": generated_for,
+        "collected_at": collected_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "source_sha": source_sha or source_revision(),
+        "scope": {
+            "kind": "service-module-matrix-v1",
+            "service_count": len(services),
+            "money_path_count": sum(1 for result in results if result.money_path),
+            "roster_sha256": hashlib.sha256(roster).hexdigest(),
+        },
+        "dimensions": [{"code": c, "name": n} for c, n in DIMENSIONS],
+        "services": services,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +620,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("services", nargs="*", help="service short names (e.g. ledger)")
     ap.add_argument("--all", action="store_true", help="score the whole fleet")
+    ap.add_argument("--source-sha", help="full Git SHA for the source checkout (defaults to READINESS_SOURCE_SHA/GITHUB_SHA/git HEAD)")
     # Default to the real current date so the baked `generated_for` and the TTL
     # decay arithmetic stay live across builds; READINESS_TODAY pins it for tests.
     ap.add_argument("--today", default=os.environ.get("READINESS_TODAY") or date.today().isoformat())
@@ -594,11 +644,7 @@ def main():
         render_table(results)
 
     if args.json:
-        payload = {
-            "generated_for": args.today,
-            "dimensions": [{"code": c, "name": n} for c, n in DIMENSIONS],
-            "services": [asdict(r) for r in results],
-        }
+        payload = build_snapshot(results, args.today, source_sha=args.source_sha)
         Path(args.json).write_text(json.dumps(payload, indent=2, ensure_ascii=False))
         print(f"\nwrote {args.json}", file=sys.stderr)
 

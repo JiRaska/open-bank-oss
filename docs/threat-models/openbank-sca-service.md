@@ -235,7 +235,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
   (forces re-enrollment, never a silent bypass).
 - **2026-05-30** — Added `sca_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
   boundary, no change to challenge/verify logic. Risk class = **availability**, mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 
 - **2026-08-02** — **New inbound trust edge: the `delegation` namespace.** `#3414` added
   `delegation` as an allowed ingress peer in this component's `network-policies.yaml`, so

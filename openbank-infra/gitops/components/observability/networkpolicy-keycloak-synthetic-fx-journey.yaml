@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey fx-rates-read → Keycloak (:8080), used for token requests.
+# This L4 policy permits TCP 8080; it does not restrict HTTP paths to the token endpoint.
+#
+# Same reasoning as networkpolicy-keycloak-synthetic-journey.yaml: the journey mints a
+# client_credentials token for its own synthetic client before its one rate-sheet read.
+# Today that edge is ALSO admitted by keycloak-allow-grafana-oidc, which opens :8080 to
+# the whole observability namespace for Grafana's back-channel — relying on it would let
+# an unrelated policy's tightening turn this journey red with a connect timeout. This
+# rule names the labelled one-shot k6 pod instead, so the edge is declared by what uses
+# it. Lives with the observability component (which renders the CronJob); selects a
+# target in iam, which Kubernetes permits.
+#
+# The journey namespace carries no egress policy, so no egress rule is needed on the
+# caller side. Removing this file rolls the edge back to whatever the Grafana rule
+# still admits.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-ingress-synthetic-fx-read-journey
+  namespace: iam
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: journey
+              openbank.tech/journey: fx-rates-read
+      ports:
+        - protocol: TCP
+          port: 8080

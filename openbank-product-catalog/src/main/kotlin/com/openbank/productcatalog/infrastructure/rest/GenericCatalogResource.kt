@@ -230,6 +230,17 @@ class GenericCatalogResource(
             revisionResponse(service.findPublished(offeringId, effectiveAt?.toInstant() ?: Instant.now(clock))),
         ).build()
 
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
+    @Authorize(action = "catalog.read", resource = "#productId")
+    override suspend fun getPublishedRevisionForLegacyProductV2(
+        productId: UUID,
+        effectiveAt: java.time.OffsetDateTime?,
+    ): Response = Response.ok(
+        revisionResponse(
+            service.findPublishedForLegacyProduct(productId, effectiveAt?.toInstant() ?: Instant.now(clock)),
+        ),
+    ).build()
+
     @Suppress("LongMethod")
     private fun RevisionRequest.toContent(): RevisionContent {
         require(name.isNotEmpty() && name.size <= MAX_LOCALIZED_VALUES) {
@@ -368,8 +379,11 @@ class GenericCatalogResource(
         createdAt = revision.createdAt.atOffset(ZoneOffset.UTC),
         updatedAt = revision.updatedAt.atOffset(ZoneOffset.UTC),
         revision = revision.revision,
-        pensionApprovalDigest = revision.pensionApprovalDigest,
-        pensionApprovedEffectiveTo = revision.pensionApprovedEffectiveTo?.atOffset(ZoneOffset.UTC),
+        approvalDigest = revision.approvalDigest,
+        approvedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
+        // Deprecated wire aliases of the two fields above (#13429); removed with the compatibility window.
+        pensionApprovalDigest = revision.approvalDigest,
+        pensionApprovedEffectiveTo = revision.approvedEffectiveTo?.atOffset(ZoneOffset.UTC),
     )
 
     private fun requiredRevision(ifMatch: String?): Long {

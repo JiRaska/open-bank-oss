@@ -28,12 +28,11 @@ export const dynamic = "force-dynamic"
  * never throw. It returns no body on success and proxies nothing: its whole job
  * is to answer "may this session reach this tool".
  *
- * This is the one route excluded from `src/proxy.ts` (ADR-0080 P0 kept the
- * matcher at "everything except Auth.js and static assets"). It has to be: the
- * middleware answers an unauthenticated request with a 302 to /auth/login, and
- * nginx turns any non-2xx/401/403 auth sub-response into a 500 — so the gate
- * would fail closed on exactly the case it exists to handle. The session check
- * below is the same one the middleware would have applied.
+ * `src/proxy.ts` matches this route but selectively passes it through before
+ * console authentication and trailing-slash canonicalization. It has to reach
+ * this handler: the proxy's 302-to-login is not a valid nginx auth_request
+ * response (nginx turns it into a 500), while this route returns the required
+ * 401/403/204 contract after checking the session and role itself.
  */
 
 const STATUS = { allow: 204, unauthenticated: 401, forbidden: 403 } as const

@@ -315,6 +315,47 @@ allowed_reasons contains "operator-decide-message-approval" if {
 	input.action == "opsmessage.approval.decide"
 }
 
+# ADR-0333 D6: reviewed customer notification copy is drafted by staff (the maker side).
+# Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+# identity must never be able to change copy shown to a customer. Publishing is NOT here:
+# the checker is a distinct job function (ADR-0285 D6), see commstemplate-publish below.
+allowed_reasons contains "operator-manage-notification-template" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {
+        "commstemplate.create",
+        "commstemplate.read",
+        "commstemplate.preview",
+    }
+}
+
+# ADR-0333 D6 checker side, same role family as commstyle-publish (ADR-0285 D6): publishing
+# customer notification copy belongs to ROLE_COMMS_APPROVER (ADMIN as break-glass), never to
+# ROLE_OPERATOR, so one operator cannot author and release copy alone by colluding with a
+# second operator account. Maker != checker is ALSO enforced by notification-service
+# (ManagedTemplateResource.publish and the `created_by <> actor` predicate in the UPDATE);
+# this rule only decides WHO may attempt the call.
+allowed_reasons contains "commstemplate-publish" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action == "commstemplate.publish"
+}
+
+# The approver must be able to see the draft it publishes; a lone ROLE_COMMS_APPROVER has no
+# ROLE_OPERATOR, so the maker rule above would not admit it (same reason as
+# commstyle-read-publish-approval).
+allowed_reasons contains "commstemplate-approver-read" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {"commstemplate.read", "commstemplate.preview"}
+}
+
 # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
 # not `ROLE_OPERATOR` — the checker of the bank's VOICE is a distinct job function from an
 # operator's account/payment writes, and D6 declares the roles separately for exactly that
@@ -371,6 +412,25 @@ allowed_reasons contains "pension-catalog-read-approval" if {
 	"CATALOG_SCOPE_READ" in input.principal.roles
 }
 
+# Generic role-qualified revision approval (#13429). Which role a revision needs and which
+# authority proves it is pack data checked by product-catalog; OPA only requires a verified human
+# holding SOME approval authority (the derived CATALOG_REVISION_APPROVER marker).
+allowed_reasons contains "catalog-revision-decide-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.revisionApproval.decide"
+	input.resource.id
+	"CATALOG_REVISION_APPROVER" in input.principal.roles
+}
+
+allowed_reasons contains "catalog-revision-read-approval" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	input.action == "catalog.revisionApproval.read"
+	input.resource.id
+	"CATALOG_SCOPE_READ" in input.principal.roles
+}
+
 # A named human legal/product reviewer needs the catalog workspace before deciding a revision.
 # The read role is derived from that reviewer's verified realm role by product-catalog; it is
 # never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
@@ -379,7 +439,7 @@ allowed_reasons contains "pension-catalog-human-reviewer-read" if {
 	not startswith(input.principal.id, "service-account-")
 	input.action == "catalog.read"
 	"CATALOG_SCOPE_READ" in input.principal.roles
-	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "CATALOG_REVISION_APPROVER"}
 	role in input.principal.roles
 }
 
@@ -398,7 +458,7 @@ allowed_reasons contains "pension-catalog-m2m-read-approval" if {
     input.principal.id == "service-account-openbank-pension"
     "ROLE_API" in input.principal.roles
     "CATALOG_SCOPE_READ" in input.principal.roles
-    input.action == "catalog.pensionApproval.read"
+    input.action in {"catalog.pensionApproval.read", "catalog.revisionApproval.read"}
     input.resource.id
     input.attributes.azp == "openbank-pension"
     input.attributes.preferred_username == "service-account-openbank-pension"

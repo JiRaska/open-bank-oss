@@ -55,6 +55,8 @@ NODE_COLLECTOR = REPO / "openbank-admin-ui" / "scripts" / "collect-prod-readines
 # attestation expiring between two runs would otherwise look like a collector divergence.
 # Both collectors read it the same way (--today / READINESS_TODAY).
 FIXED_TODAY = "2026-01-15"
+# The throwaway copy is not a Git checkout, so the source commit is pinned too.
+FIXED_SOURCE_SHA = "0" * 40
 
 
 def run_python(repo: Path, out: Path) -> list[dict]:
@@ -62,12 +64,14 @@ def run_python(repo: Path, out: Path) -> list[dict]:
         [sys.executable, str(repo / "openbank-infra" / "scripts" / "prod-readiness-collector.py"),
          "--all", "--today", FIXED_TODAY, "--json", str(out)],
         cwd=repo, check=True, capture_output=True, text=True,
+        env=dict(os.environ, READINESS_SOURCE_SHA=os.environ.get("READINESS_SOURCE_SHA", FIXED_SOURCE_SHA)),
     )
     return json.loads(out.read_text())["services"]
 
 
 def run_node(repo: Path, out: Path) -> list[dict]:
-    env = dict(os.environ, READINESS_TODAY=FIXED_TODAY)
+    env = dict(os.environ, READINESS_TODAY=FIXED_TODAY,
+               READINESS_SOURCE_SHA=os.environ.get("READINESS_SOURCE_SHA", FIXED_SOURCE_SHA))
     subprocess.run(
         ["node", str(repo / "openbank-admin-ui" / "scripts" / "collect-prod-readiness.mjs"),
          "--repo", str(repo), "--out", str(out)],
@@ -136,10 +140,12 @@ def self_test() -> int:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(src, dst)
         # Enough of the fleet for both collectors to produce a non-empty, comparable population.
-        for svc in sorted(REPO.glob("openbank-*-service")):
+        # Every governed module, not only `openbank-*-service`: the collectors refuse to run when a
+        # declared money-path module (openbank-domestic-payment, openbank-sepa-*) is missing (#13466).
+        for svc in sorted(p for p in REPO.glob("openbank-*") if p.is_dir()):
             if (svc / "governance.yaml").exists():
-                shutil.copytree(svc, work / svc.name,
-                                ignore=shutil.ignore_patterns("build", ".gradle", "node_modules"))
+                shutil.copytree(svc, work / svc.name, dirs_exist_ok=True,
+                                ignore=shutil.ignore_patterns("build", ".gradle", "node_modules", ".next"))
         shutil.copytree(REPO / "openbank-infra" / "gitops", work / "openbank-infra" / "gitops")
 
         # Each collector run costs tens of seconds, so every result below is reused: two

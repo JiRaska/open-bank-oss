@@ -399,6 +399,10 @@ COPY --chmod=0644 openbank-admin-ui/service-graph.json ./service-graph.json
 # build so this file always exists (parse failure → an honest available:false
 # snapshot). --chmod=0644 for the same UID-100 readability reason.
 COPY --chmod=0644 openbank-admin-ui/security-graph.json ./security-graph.json
+# Canonical BCP classification and recovery targets (read-only parser source for
+# /api/bcp/policy; the source Markdown is copied as-is, never re-authored here).
+COPY --chmod=0644 docs/bcp/bcp-policy.md ./bcp-policy.md
+ENV OPENBANK_BCP_POLICY_FILE=/app/bcp-policy.md
 # Infrastructure lifecycle snapshot (ADR-0077): endoflife.date cycles + GitOps image
 # tags, baked by scripts/generate-infra-lifecycle.mjs. Read-only consumer:
 # src/app/api/infra/lifecycle/route.ts. build-push-admin-ui.sh runs the generator before
@@ -408,11 +412,10 @@ COPY --chmod=0644 openbank-admin-ui/infra-lifecycle.json ./infra-lifecycle.json
 # build ran with --scan-infra; otherwise an honest "not scanned" placeholder. The BFF
 # degrades gracefully when it is absent.
 COPY --chmod=0644 openbank-admin-ui/infra-vulns.json ./infra-vulns.json
-# Repo-derived production-readiness scorecard (C1–C9 maturity; read-only consumer,
-# src/app/api/prod-readiness/route.ts). build-push-admin-ui.sh runs
-# scripts/prod-readiness-collector.py before the build so this file always exists
-# (collector failure → an honest empty scorecard). --chmod=0644 for the same
-# UID-100 readability reason as test-results.json.
+# Repo-derived production-readiness scorecard (C1–C9 maturity). The API prefers the
+# validated runtime evidence-store snapshot; this image copy is a dated fallback and
+# is labeled as not live. --chmod=0644 for the same UID-100 readability reason as
+# test-results.json.
 COPY --chmod=0644 openbank-admin-ui/prod-readiness.json ./prod-readiness.json
 
 USER openbank

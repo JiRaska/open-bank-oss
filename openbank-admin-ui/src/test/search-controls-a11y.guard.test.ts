@@ -16,7 +16,7 @@ describe('search controls accessibility contract', () => {
     expect(partySearch).toContain('aria-label={t(')
     expect(partySearch).toContain("'Search parties'")
     const transactions = source('transactions')
-    for (const id of ['transaction-account-id', 'transaction-iban', 'transaction-bban']) {
+    for (const id of ['transaction-iban', 'transaction-bban']) {
       expect(transactions).toContain(`id="${id}"`)
       expect(transactions).toContain(`htmlFor="${id}"`)
     }

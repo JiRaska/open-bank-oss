@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: transaction-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "3763ee3e7faece14"
+    openbank.tech/policy-checksum: "1c51515b8cc7beec"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -329,6 +329,47 @@ data:
     	input.action == "opsmessage.approval.decide"
     }
 
+    # ADR-0333 D6: reviewed customer notification copy is drafted by staff (the maker side).
+    # Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+    # identity must never be able to change copy shown to a customer. Publishing is NOT here:
+    # the checker is a distinct job function (ADR-0285 D6), see commstemplate-publish below.
+    allowed_reasons contains "operator-manage-notification-template" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {
+            "commstemplate.create",
+            "commstemplate.read",
+            "commstemplate.preview",
+        }
+    }
+
+    # ADR-0333 D6 checker side, same role family as commstyle-publish (ADR-0285 D6): publishing
+    # customer notification copy belongs to ROLE_COMMS_APPROVER (ADMIN as break-glass), never to
+    # ROLE_OPERATOR, so one operator cannot author and release copy alone by colluding with a
+    # second operator account. Maker != checker is ALSO enforced by notification-service
+    # (ManagedTemplateResource.publish and the `created_by <> actor` predicate in the UPDATE);
+    # this rule only decides WHO may attempt the call.
+    allowed_reasons contains "commstemplate-publish" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action == "commstemplate.publish"
+    }
+
+    # The approver must be able to see the draft it publishes; a lone ROLE_COMMS_APPROVER has no
+    # ROLE_OPERATOR, so the maker rule above would not admit it (same reason as
+    # commstyle-read-publish-approval).
+    allowed_reasons contains "commstemplate-approver-read" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"commstemplate.read", "commstemplate.preview"}
+    }
+
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
     # not `ROLE_OPERATOR` — the checker of the bank's VOICE is a distinct job function from an
     # operator's account/payment writes, and D6 declares the roles separately for exactly that
@@ -385,6 +426,25 @@ data:
     	"CATALOG_SCOPE_READ" in input.principal.roles
     }
 
+    # Generic role-qualified revision approval (#13429). Which role a revision needs and which
+    # authority proves it is pack data checked by product-catalog; OPA only requires a verified human
+    # holding SOME approval authority (the derived CATALOG_REVISION_APPROVER marker).
+    allowed_reasons contains "catalog-revision-decide-approval" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.revisionApproval.decide"
+    	input.resource.id
+    	"CATALOG_REVISION_APPROVER" in input.principal.roles
+    }
+
+    allowed_reasons contains "catalog-revision-read-approval" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "catalog.revisionApproval.read"
+    	input.resource.id
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    }
+
     # A named human legal/product reviewer needs the catalog workspace before deciding a revision.
     # The read role is derived from that reviewer's verified realm role by product-catalog; it is
     # never a realm-wide default or an assignable CATALOG_SCOPE_READ role.
@@ -393,7 +453,7 @@ data:
     	not startswith(input.principal.id, "service-account-")
     	input.action == "catalog.read"
     	"CATALOG_SCOPE_READ" in input.principal.roles
-    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER"}
+    	some role in {"PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "CATALOG_REVISION_APPROVER"}
     	role in input.principal.roles
     }
 
@@ -412,7 +472,7 @@ data:
         input.principal.id == "service-account-openbank-pension"
         "ROLE_API" in input.principal.roles
         "CATALOG_SCOPE_READ" in input.principal.roles
-        input.action == "catalog.pensionApproval.read"
+        input.action in {"catalog.pensionApproval.read", "catalog.revisionApproval.read"}
         input.resource.id
         input.attributes.azp == "openbank-pension"
         input.attributes.preferred_username == "service-account-openbank-pension"
@@ -1042,11 +1102,19 @@ data:
     # tool -> tier before querying, so this rule re-validates only the (tier, resource) grant
     # against the served charter data). No input.tier, no grant: deny-by-default is preserved,
     # and the MCP / REST paths above are unchanged because they never send input.tier.
+    #
+    # input.tier is caller-DECLARED, so the grant must not trust it on its own: the tool has to be
+    # a member of that tier's tool set in agents.yaml tool_tiers. Without that binding a caller
+    # declaring tier=read with a granted resource got charter_allowed for ANY tool string -- a write,
+    # a REST action, anything not hard-denied -- because charter_allowed is the decision shared by
+    # the MCP and REST paths. The deny side stays unbound on purpose: a wider deny fails closed, and
+    # charters deny tiers (write, execute) that tool_tiers does not enumerate.
     charter_allowed if tier_resource_charter_allowed
 
     charter_denied if tier_resource_charter_denied
 
     tier_resource_charter_allowed if {
+    	input.tool in tier_tools(input.tier)
     	some entry in tier_resource_allow_entries
     	entry.tier == input.tier
     	tier_resource_resources_granted(entry.resources)
@@ -1057,6 +1125,13 @@ data:
     	entry.tier == input.tier
     	tier_resource_resources_granted(entry.resources)
     }
+
+    # The grantable tiers, each spelled out (gen-agents-opa-data.py projects data.agents statically,
+    # so no dynamic index). A tier not listed here -- write, execute, deny, or any typo -- has no
+    # tool set and therefore grants nothing.
+    tier_tools("read") := data.agents.tool_tiers.read
+
+    tier_tools("write_proposal") := data.agents.tool_tiers.write_proposal
 
     # Only OBJECT-shaped entries carry .tier; for a plain-string entry `entry.tier` is undefined
     # and the body fails, so string-pattern charters are never collected here.
@@ -1072,9 +1147,11 @@ data:
     	entry.tier
     }
 
-    tier_resource_resources_granted(resources) if input.resource in resources
-
-    tier_resource_resources_granted(resources) if "*" in resources
+    # Resources are globs ("*", "github-*"); glob_match also covers the exact and bare-"*" cases.
+    tier_resource_resources_granted(resources) if {
+    	some pattern in resources
+    	glob_match(pattern, input.resource)
+    }
 
     # rest.rego's "agent-charter-allows" rule reuses this package for a REST call from an
     # AI_AGENT principal by setting input.tool := input.action -- the raw REST action string
@@ -1192,8 +1269,33 @@ data:
     # Derived paths (read out of the .rego sources, never listed by hand):
     #   data.agents.agents  (each element projected to: id, skills, tools.allow, tools.deny)
     #   data.agents.tool_tiers.deny
+    #   data.agents.tool_tiers.read
+    #   data.agents.tool_tiers.write_proposal
 
     tool_tiers:
+      read:
+      - query.ledger.readonly
+      - query.gl.readonly
+      - query.catalog.readonly
+      - read.logs
+      - read.governance
+      - query.compliance.readonly
+      - query.payments.readonly
+      - query.interest.readonly
+      - query.disputes.readonly
+      - query.observability.readonly
+      - query.balance.readonly
+      - query.transaction.readonly
+      - query.account.readonly
+      - query.consent.readonly
+      - verify.mandate
+      write_proposal:
+      - draft.ticket
+      - gh.pr.open
+      - draft.adr
+      - git.branch
+      - git.commit.signed
+      - run.skill
       deny:
       - money.transfer
       - money.post.ledger
@@ -1964,6 +2066,7 @@ data:
       # service-account through operator-read-any (#12547). Retire it only after old images are gone.
       operator_read_any_excluded_actions:
         - tax.filing.read
+        - commstemplate.read
         # A virtual card's synthetic PAN/CVV. Machine-only (customer-edge's holder-checked, SCA-gated
         # reveal); card_issuance_rest_ext.rego grants it to that one principal by name.
         - card.details.read

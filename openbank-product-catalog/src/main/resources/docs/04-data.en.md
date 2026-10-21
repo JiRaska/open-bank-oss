@@ -102,8 +102,13 @@ erasure dimension because there is no personal data (see [06 — Compliance](./0
 | `V6__preserve_mixed_version_outbox_and_published_children.sql` | Restores old-writer outbox defaults first and closes published-child INSERT/relocation bypasses. |
 | `V7__track_bank_v1_projection_revision.sql` | Records v1 and draft watermarks so one-sided rollback writes reconcile and two-sided drift fails closed. |
 | `V8__order_catalog_outbox_for_cursor.sql` | Assigns immutable commit-safe cursor positions so reverse commits or clock changes cannot create a gap. |
+| `V14__generic_revision_role_approvals.sql` | Renames the pension approval evidence to `catalog_revision_role_approvals` and `approval_digest` / `approved_effective_to` in place. Adds append-only `catalog_schema_approval_policies`. (ADR-0345) |
 
 
 ## Catalog object conversion
 
 Nested catalog objects retain their existing serialized field representation. The specialized object conversion keeps the same output contract; no catalog data migration or API version change is required.
+
+## Reference offerings and classification schemas (ADR-0341)
+
+The banking pack gains `deposit-v3`, `loan-v3` and `treasury-instrument-v1` schemas and the retirement pack gains `pension-savings-v3`, which carry the accounting and regulatory classification of an offering. A scheduled seeder, `CatalogReferenceOfferingSeeder`, creates the treasury own-dealing instrument offering (banking pack) and the CZ DPS and DIP pension offerings (from `catalog-seeds/retirement/cz-illustrative-offerings.json`, retirement pack), each only when its pack is enabled. Every offering is seeded with an open DRAFT revision under a system maker. A different human checker must publish it, so seeding never makes a revision pinnable by itself, and the pension values stay illustrative until legal and commercial review. The seeder is idempotent: an offering that already exists is left alone whatever the state of its revisions. It is controlled by `openbank.catalog.reference-offerings-enabled`, which is on by default and off in the standalone profile.

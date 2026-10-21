@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.3...pension-service-v3.0.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension:** pension-service API moves to /api/v2; POST /api/v1/pension/contracts/{id}/activate and /early-termination are removed, and PUT .../strategy requires SCA.
+
+### Features
+
+* **pension:** observability as code — metrics, dashboards, alerts ([#12430](https://github.com/JiRaska/open-bank-oss/issues/12430)) ([273100f](https://github.com/JiRaska/open-bank-oss/commit/273100f3370809ca0eba5e55979cc118e1758b10))
+
 ## [2.0.3](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v2.0.2...pension-service-v2.0.3) (2026-10-16)
 
 

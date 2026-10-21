@@ -12,12 +12,16 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.domain.ProductIds
+import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
@@ -98,15 +102,22 @@ class ProductCatalogPactBrokerProviderVerificationTest {
             .then().statusCode(404)
     }
 
-    /**
-     * No seeding: `CURRENT_PERSONAL` carries four seeded fees in `ProductSeed` on every boot.
-     * Keep this broker replay state in lock-step with the always-on `@PactFolder` verifier so a
-     * newly published billing pact cannot pass on a PR and then strand at `can-i-deploy`.
-     */
+    /** Assert the real seeded schedule; never replace it with consumer-shaped fixture data. */
     @State("a product with fees exists for code CURRENT_PERSONAL")
     fun feeBearingProductIsSeeded() {
-        // Intentionally empty — see the KDoc above.
+        val product = ProductSeed.products.single { it.code == "CURRENT_PERSONAL" }
+        val monthlyFee = product.fees.single { it.name == "Monthly Fee" }
+        val id = ProductIds.canonicalId(product.id)
+        given().accept("application/json").get("/api/v1/products/$id/fees")
+            .then().statusCode(200)
+            .body("find { it.name == 'Monthly Fee' }.type", equalTo(monthlyFee.type))
+            .body("find { it.name == 'Monthly Fee' }.amount", equalTo(monthlyFee.amount.toFloat()))
+            .body("find { it.name == 'Monthly Fee' }.currency", equalTo(monthlyFee.currency))
+            .body("find { it.name == 'Monthly Fee' }.waivable", equalTo(monthlyFee.waivable))
     }
+
+    @State("a published v1-projected deposit revision exists for billing")
+    fun publishedLegacyDepositRevisionExists() = catalogFixtures.publishedLegacyDepositRevisionExists()
 
     /**
      * The pact-pinned UUID is deliberately absent from `ProductSeed`; the seeded catalogue
