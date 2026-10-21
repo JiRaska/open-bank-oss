@@ -101,6 +101,13 @@ STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # CI cannot freeze main. 2 x the p95 of successful pull_request ci.yml runs, measured 2026-10-21 with
 # `gh run list -w ci.yml -e pull_request -s completed -L 200` (n=103 green: p50 17 min, p95 32 min).
 RESERVATION_TIMEOUT_S = 64 * 60
+# Lane fairness (ADR-0343): after a strict-lane merge the train gets the next turn — no strict-lane
+# update-branch while train candidates wait — for at most this long after that merge, so a train that
+# cannot be built never freezes the strict lane. Two ticks of the */10 cron at its measured p90 gap.
+# Measured 2026-10-21 over 12.5 h of merge-train.yml: 11 carriers published, 0 train merges, 13
+# strict-lane merges — every strict merge was followed at once by the next strict update-branch.
+TRAIN_TURN_S = 30 * 60
+SQUASH_PR_RE = re.compile(r"(?:\(#|^#)(\d+)\)?$")
 OK_STATES = frozenset({"success"})
 # A cancelled (or stale) check ran nothing that could be judged — "Canceling since a higher priority
 # waiting request exists" on carrier #13452 blamed #13137 for a job that executed no step. Such a
@@ -1533,18 +1540,20 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache))
     summary["main_red"] = sorted(main_red)
+    fragments = regen_inventory_fragments(regen_text)
+    fast, train_waiting = partition(git, base, cands, fragments)
+    yield_why = train_turn(gh, git, base, train_waiting, any(is_carrier(p, repo) for p in gh.open_prs()))
     if timed_out:
         summary["timed_out"] = timed_out
         # Released: never reserving again on that head, and served after every other strict-lane PR.
         strict.sort(key=lambda sv: sv[1]["number"] in timed_out)
     # Strict lane first: an update-branch it issues starts a reservation THIS tick, so the fast lane
     # below must already see it.
-    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out)
+    strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
+                yield_why)
     # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
     # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
     # and a merge now would put the reserved head behind main again.
-    fragments = regen_inventory_fragments(regen_text)
-    fast, _train = partition(git, base, cands, fragments)
     hold = (f"main reserved for strict-lane #{holder}" if holder is not None
             else "strict-lane update-branch requested" if summary["updated"]
             else "a strict-lane PR merged; main moved" if summary["strict"] else None)
@@ -1610,6 +1619,37 @@ def strict_fixes(gh, git, base: str, strict: list, main_red: dict[str, str], cac
             if fixed:
                 out[view["number"]] = fixed
     return out
+
+
+def last_merge_was_strict(gh, git, base: str) -> bool:
+    """True when main's head is the squash of a PR this App merged through the strict lane: its
+    head carries the App's own `strict lane:` status. Anything unreadable counts as not strict."""
+    m = SQUASH_PR_RE.search(git("show", "-s", "--format=%s", base, check=False).stdout.strip())
+    if not m:
+        return False
+    try:
+        head = gh.pr(int(m.group(1)))["head"]["sha"]
+    except (KeyError, TypeError, ValueError):
+        return False
+    return gh.app_statuses(head).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:")
+
+
+def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now: float | None = None) -> str | None:
+    """Why the strict lane must not START a reservation (update-branch) this tick, or None. Lane
+    fairness (ADR-0343): (1) an open carrier is the train's in-flight turn — a reservation started
+    under it holds the carrier once green and then voids it by merging (#13529, 2026-10-21); (2) right
+    after a strict-lane merge, while train candidates wait, the next turn is the train's, bounded by
+    TRAIN_TURN_S. Either ends by itself: the carrier settles, or a train merges (main's head is no
+    longer a strict merge), or the turn expires. A reservation already running is never affected."""
+    if carrier_open:
+        return "a train carrier is open over main"
+    if not train_waiting or not last_merge_was_strict(gh, git, base):
+        return None
+    now = time.time() if now is None else now
+    ct = git("show", "-s", "--format=%ct", base, check=False).stdout.strip()
+    if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
+        return None
+    return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
 
 
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
@@ -1774,7 +1814,7 @@ def fix_head_state(gh, git, base: str, view: dict, member: list[str], checks: di
 
 def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shadow: bool, summary: dict,
                 main_red: dict[str, str] | None = None, cache: dict | None = None,
-                holder: int | None = None, timed_out: list | None = None) -> None:
+                holder: int | None = None, timed_out: list | None = None, yield_why: str | None = None) -> None:
     """Manual-lane PRs merge exactly as strict up-to-date allowed: CI green on a head that already
     contains live main. Oldest first. Up to date + green -> status + merge pinned to that head; up to
     date + CI running -> main is RESERVED (in_flight, so no train is built under it); green but
@@ -1823,6 +1863,10 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
                 log(f"#{n:>6} strict    behind main, not updated: {main_red_reason(ctxs, main_red)}")
                 continue
             if updated or shadow:
+                continue
+            if yield_why:
+                log(f"#{n:>6} strict    behind main, not updated: {yield_why} — next tick")
+                updated = True  # one log line: no younger strict PR is updated either
                 continue
             # A fix too: never merged untested against main. Its combined head must verify (fix_head_state).
             ok = gh.update_branch(n, head)
@@ -3233,6 +3277,49 @@ def self_test() -> int:
             s = settle_now()
             check("reservation: the held train, now over a stale main, is rejected for a rebuild",
                   gh.merged == [35] and s["rejected"], f"{s} merged={gh.merged}")
+            reset()
+
+            # LANE FAIRNESS (ADR-0343, 2026-10-21): the strict queue never empties, so before the fix
+            # every strict merge was followed at once by the next strict update-branch — main stayed
+            # reserved and no train ever merged (11 carriers, 0 train merges in 12.5 h; carrier
+            # #13529 was held for strict #13526 and then voided by its merge). Both cases below fail
+            # on that code: (a) an open carrier gets its turn, (b) after a strict merge the train goes
+            # next, bounded by TRAIN_TURN_S.
+            global TRAIN_TURN_S
+            open_only("pW", "pW2", "p1")
+            s, st = tick()                                 # pW merges (strict); a train over it is published
+            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+            gh.updates.clear()
+            s = settle_now()                               # carrier CI running; pW2 green but behind
+            check("fairness: no strict-lane update-branch while a train carrier is open",
+                  gh.merged == [35] and st == "published" and gh.updates == [] and s["in_flight"],
+                  f"{s} st={st} merged={gh.merged} updates={gh.updates}")
+            gh.pending_shas.clear()
+            s, _st = tick()                                # the carrier is green: the train merges
+            check("fairness: the train carrier merges instead of being held and voided by a strict merge",
+                  gh.merged == [35, 1] and not s["rejected"], f"{s} merged={gh.merged}")
+            check("fairness: once the train merged, the strict lane is served again in that same tick",
+                  gh.updates == [36], f"{s} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+
+            open_only("pW", "pW2")
+            settle_now()                                   # pW merges; pW2 is behind
+            open_only("p1")                                # a train candidate is waiting, no carrier
+            gh.updates.clear()
+            s = settle_now()
+            check("fairness: right after a strict merge a waiting train goes next (no update-branch, main free)",
+                  gh.merged == [35] and gh.updates == [] and not s["in_flight"],
+                  f"{s} merged={gh.merged} updates={gh.updates}")
+            saved_turn = TRAIN_TURN_S
+            TRAIN_TURN_S = -1
+            try:
+                s = settle_now()
+                check("fairness: the train's turn is bounded — expired, the strict lane updates again",
+                      gh.updates == [36] and s["in_flight"], f"{s} updates={gh.updates}")
+            finally:
+                TRAIN_TURN_S = saved_turn
+            gh.updates.clear()
             reset()
 
             # A hung CI cannot freeze main: past RESERVATION_TIMEOUT_S the reservation is released,
