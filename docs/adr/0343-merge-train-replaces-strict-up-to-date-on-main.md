@@ -286,6 +286,57 @@ one CI run per batch plus one per halving for a culprit. And it is not four-eyes
 the money-path approval rules and the security checklist gate are evaluated on the member PR
 exactly as today, and a refusal there removes the PR from the candidate set.
 
+### Amendment (2026-10-20) — carriers are judged by their members; cancelled is inconclusive
+
+The first live hour of phase 1 marked two innocent members as culprits, one per defect (#13400).
+
+**Rule 1 — a body gate judges a carrier's MEMBERS.** A gate that reads the live PR body judged the
+carrier's bot boilerplate, so `security-checklist-money-path` failed every train holding a
+money-path member (#12506: carriers #13424/#13451 red on that alone, while #12506's own body had
+all six boxes ticked). The attestation is a human's, on the member; copying ticks onto the carrier
+would turn it into bot text, so that is never done. Instead the gate recognises a **verified
+carrier** — ALL of: head branch `^train/[0-9]+-[0-9]+$` in this repository, author exactly
+`openbank-gitops-bot[bot]` of type `Bot`, label `merge-train`, all read from the live PR object —
+derives the members from the carrier's own commits (`PR-Number: #N` trailers on the train's member
+commits over `base..head`; any other commit fails closed) and requires each member's LIVE body to
+pass the same rule against that member's own diff (its train commit). A human-opened `train/…` PR is
+an ordinary PR. The single regeneration commit is not a member's diff: it is bounded to
+DERIVED_OUTPUTS and proven by main's freshness gates on the same tree. The carrier identity lives in
+`.github/scripts/merge_train_carrier.py`, held equal to `merge-train.py` by the checklist self-test.
+
+Per gate that reads the PR body or PR metadata:
+
+| Gate | Carrier problem? | Decision |
+|---|---|---|
+| `security-checklist-money-path` | yes (the #12506 defect) | members judged on their own bodies and diffs |
+| `coverage-floor-ratchet` | yes, latent: a member's `coverage-floor-lowered:` trailer is in its body, never on the carrier | trailer text also read from the verified carrier's member bodies |
+| `issue-hygiene` | no | already exempt for `[bot]` authors, and the train already excludes it (`TREE_INDEPENDENT_CONTEXTS`); each member is judged on its own PR |
+| `security-regression-test` | no verdict problem: the carrier body closes nothing, so the rule never applies | members are judged on their own PRs; see rule 2 for its trigger fix |
+| `release-scope-mismatch-gate` | title-based and advisory (exit 0) | unchanged |
+| `agent-pr-guard` | no: it reads the event author, branch and diff; the carrier's `train/` branch is outside every agent prefix | unchanged |
+| `api-contract` (migration assertion) | yes, latent: the `## Idempotency caller migration` section lives in the member body | section read from the verified carrier's member bodies too (each line names its service) |
+
+**Rule 2 — a cancelled job is INCONCLUSIVE, never red.** #13137 was named culprit because carrier
+#13452's `security-regression-test` was cancelled by concurrency ("a higher priority waiting
+request") with no step run. In `settle`, a required context that is `cancelled` or `stale`, or
+`skipped` next to a cancellation on the same head, is inconclusive: it never bisects and never
+blames. If nothing failed and something is inconclusive, settle re-runs the cancelled jobs of that
+carrier **once** (App `merge-train/rerun` status as the marker) and the carrier is in flight again;
+still inconclusive after that, or a refused rerun, closes the carrier with no verdict and the next
+tick rebuilds. A real failure next to a cancellation still blames, and the culprit status names only
+the really failing contexts (`culprit: <contexts> red on a train over main <sha>`). The two competing
+runs had one cause: `security-regression-test` triggered on `labeled`, and a carrier is opened and
+then labelled `merge-train`, so the `labeled` run cancelled the `opened` one. That workflow never
+reads PR labels (its scope is the closed issue's `security` label), so `labeled`/`unlabeled` were
+dropped — cheaper and more correct than reordering the carrier's opening, which cannot attach a
+label in the same API call.
+
+**Clearing the wrong marks.** Culprit statuses written before this amendment start with
+`isolated as the cause of a red train`. Such a status is no longer final: the member re-qualifies,
+rides one more train, and that train overwrites the status either way — `success` when the old mark
+was an artifact (#12506, #13137), a `culprit: …` failure when it was real. No new status is written
+with the legacy text, so the mechanism retires itself; nobody needs to push an empty commit.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
