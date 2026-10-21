@@ -133,6 +133,10 @@ Interest hlásí ledgeru jako účastník `interest`. Obchodní datum každého 
 
 Automatické doklady denní uzávěrky a jejich nová souhrnná varování obsahují pouze obchodní datum, počty a pevné kategorie selhání včetně příznaku chyby seznamu účtů. Zákaznické identifikátory, identifikátory účtů či produktů ani původní text výjimky nebo odmítnutí se do tohoto nového toku hlášení nekopírují. Nejde o tvrzení, že jsou anonymizovány všechny starší logy služby. Důvod výjimky a identita operátora v ledgeru zůstávají záměrnými auditními osobními údaji; do důvodu výjimky nepatří zákaznické podrobnosti. Výchozí režim zůstává shadow a změna nepovoluje aktivaci.
 
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
