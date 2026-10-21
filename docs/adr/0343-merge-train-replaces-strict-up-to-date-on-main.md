@@ -458,6 +458,7 @@ Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml,
 run from another app or workflow can neither turn it green nor mask a red. The declaration fails
 closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
 `--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
+Amended (#13400): absent on a head is PENDING, not "not applicable" — n/a only when the pinned workflow has a COMPLETED run for that head without the check (or it concluded skipped/neutral), in every lane and in carrier judgement.
 
 ## Rollout
 
