@@ -7,6 +7,7 @@ package com.openbank.fraud.application.usecase
 import com.openbank.fraud.application.port.`in`.ScoreFraudUseCase
 import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.FraudScoreRepository
+import com.openbank.fraud.application.port.out.FraudThresholdRepository
 import com.openbank.fraud.application.port.out.MlModelPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.ScoredRecord
@@ -69,11 +70,17 @@ class FraudScoringService @Inject constructor(
     @Inject
     lateinit var fraudHoldService: FraudHoldService
 
+    // Same field-injection reason as above. The ADR-0347 threshold set is read per score, from the
+    // table, never cached: an approval is then in force on every replica at once.
+    @Inject
+    lateinit var thresholdRepo: FraudThresholdRepository
+
     private val log = Logger.getLogger(FraudScoringService::class.java)
 
     override suspend fun score(request: ScoreRequest): FraudScore {
         val enriched = enrichWithPayeeHistory(enrichWithVelocity(request))
-        val result = FraudRuleEngine.score(enriched) // the ONLY thing that determines the verdict
+        val thresholds = thresholdRepo.findActive(Instant.now(clock)) // null -> engine fails closed (REVIEW)
+        val result = FraudRuleEngine.score(enriched, thresholds) // the ONLY thing that determines the verdict
         repository.save(enriched, result)
         metrics.recordVerdict(result.verdict, enriched.rail)
         runShadow(enriched, result) // logs + metrics only; its outcome is discarded
