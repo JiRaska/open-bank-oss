@@ -30,6 +30,9 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 class CloseParticipationServiceTest {
 
@@ -110,6 +113,45 @@ class CloseParticipationServiceTest {
                 service.report(command("service-account-openbank-interest", ParticipationOutcome.WAIVED, "x"))
             }
         }.isInstanceOf(LedgerValidationException::class.java)
+    }
+
+    @Test
+    fun `a CR LF in a participant name cannot forge a new log line`() {
+        val forged = "interest\r\nFORGED level=ERROR"
+        val hostile = CloseParticipationService(
+            object : CloseParticipantsConfig {
+                override fun participantsMode() = CloseParticipantsConfig.MODE_ENFORCE
+                override fun participants(): Map<String, CloseParticipantsConfig.Participant> = mapOf(
+                    forged to object : CloseParticipantsConfig.Participant {
+                        override fun principal() = "service-account-openbank-interest"
+                    },
+                )
+            },
+            repository,
+            SimpleMeterRegistry(),
+            Clock.fixed(Instant.parse("2026-10-17T01:30:00Z"), ZoneOffset.UTC),
+        )
+        coEvery { days.findByDate(day) } returns
+            AccountingDayRecord.open(day, Instant.parse("2026-10-15T22:00:00Z"), "s")
+                .copy(status = AccountingDayStatus.TIED_OUT)
+        val lines = mutableListOf<String>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                lines += record.message
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val jul = JulLogger.getLogger(CloseParticipationService::class.java.name)
+        jul.addHandler(handler)
+        try {
+            runBlocking { hostile.report(command("service-account-openbank-interest").copy(participant = forged)) }
+        } finally {
+            jul.removeHandler(handler)
+        }
+        val rendered = lines.joinToString("\n")
+        assertThat(rendered).contains("interest__FORGED level=ERROR")
+        assertThat(rendered).doesNotContain("\r").doesNotContain("\nFORGED")
     }
 
     @Test
