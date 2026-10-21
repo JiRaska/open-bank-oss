@@ -131,6 +131,11 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # First-request warm-up (#11890, libs-runtime StartupWarmup): the unauthenticated self-call
   # hits a real @RolesAllowed endpoint, so the 401 path runs the same security filters a
   # customer request does.
