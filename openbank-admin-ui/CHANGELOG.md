@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.9...admin-ui-v3.9.0) (2026-10-21)
+
+
+### Features
+
+* **admin-ui:** Camera QR docs page — SPAYD the phone camera can read ([#13542](https://github.com/JiRaska/open-bank-oss/issues/13542)) ([12b5a19](https://github.com/JiRaska/open-bank-oss/commit/12b5a19855722ae5ddd838a5a3c9ed39006f1904))
+* **admin-ui:** derive declared platform inventory from sources ([#13498](https://github.com/JiRaska/open-bank-oss/issues/13498)) ([fb129b0](https://github.com/JiRaska/open-bank-oss/commit/fb129b021422c84a0adc49d1d68f7ed039e00393))
+* **product-catalog:** expose schema approval policy; move consumers off pension-approval aliases ([#13496](https://github.com/JiRaska/open-bank-oss/issues/13496)) ([6174564](https://github.com/JiRaska/open-bank-oss/commit/61745645e041c190e49bfe9d01d384a80bc7bce9))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive catalog schema dependency closure ([#13494](https://github.com/JiRaska/open-bank-oss/issues/13494)) ([5fd0448](https://github.com/JiRaska/open-bank-oss/commit/5fd0448dccfbca541d8e02fc43d25873bab12fc2))
+* **admin-ui:** preserve configuration freshness and workload identity ([#13493](https://github.com/JiRaska/open-bank-oss/issues/13493)) ([81c8396](https://github.com/JiRaska/open-bank-oss/commit/81c839601ee918eb216c6311e7a5b71635f5bd94))
+
 ## [3.8.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.8...admin-ui-v3.8.9) (2026-10-20)
 
 

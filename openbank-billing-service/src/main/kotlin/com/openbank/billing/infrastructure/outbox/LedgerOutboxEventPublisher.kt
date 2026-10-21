@@ -123,7 +123,7 @@ class LedgerOutboxEventPublisher(
      */
     private fun accountingClassOf(fromPayload: String?, idempotencyKey: String): String {
         if (fromPayload != null) return fromPayload
-        meters.counter("billing.fee.post.legacy_payload").increment()
+        meters.counter("openbank.billing.fee.post.legacy_payload").increment()
         log.warnf("outbox row %s predates accounting classes; posting as %s", idempotencyKey, LEGACY_FALLBACK_CLASS)
         return LEGACY_FALLBACK_CLASS
     }

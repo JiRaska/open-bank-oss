@@ -191,8 +191,16 @@ def pins(text):
 def validate_services(root, entries, removed_pins=frozenset()):
     needed = set(entries) - set(removed_pins)
     for service in entries:
-        if not (root / service / "version.txt").is_file():
-            raise InvalidHold(f"{service}: no released module found")
+        module = root / service
+        released = (module / "version.txt").is_file()
+        # analytics-sink has a real GitOps image but is not a release-please
+        # component. Its Dockerfile is port/runtime metadata; the shared
+        # Dockerfile.deploy builds the image. Keep this exception exact; other
+        # unversioned directories must not become valid hold targets.
+        analytics_image = service == "openbank-analytics-sink" and (
+            module / "build.gradle.kts").is_file() and (module / "Dockerfile").is_file()
+        if not (released or analytics_image):
+            raise InvalidHold(f"{service}: no released or deployable module found")
     for path in (root / GITOPS).rglob("*"):
         if not needed:
             break
@@ -347,6 +355,38 @@ def self_test():
                '"openbank-ledger-service":"sandbox-bbbbbbbb"}'
         assert filter_tags(root, tags) == {
                                      "openbank-ledger-service": "sandbox-bbbbbbbb"}
+        analytics = root / "openbank-analytics-sink"
+        analytics.mkdir()
+        (analytics / "build.gradle.kts").write_text("plugins {}\n")
+        (analytics / "Dockerfile").write_text("FROM scratch\n")
+        analytics_hold = {"openbank-analytics-sink": {
+            "issue": "#13304", "reason": "review", "release_condition": "owner release"}}
+        manifest.write_text(original.replace(
+            "    - image: registry/openbank-ledger-service:sandbox-aaaaaaaa\n",
+            "    - image: registry/openbank-ledger-service:sandbox-aaaaaaaa\n"
+            "    - image: registry/openbank-analytics-sink:sandbox-aaaaaaaa\n"))
+        validate_services(root, analytics_hold)
+        other = root / "openbank-other-service"
+        other.mkdir()
+        (other / "build.gradle.kts").write_text("plugins {}\n")
+        (other / "Dockerfile").write_text("FROM scratch\n")
+        manifest.write_text(manifest.read_text() +
+                            "    - image: registry/openbank-other-service:sandbox-aaaaaaaa\n")
+        try:
+            validate_services(root, {"openbank-other-service": {
+                "issue": "#13304", "reason": "review", "release_condition": "owner release"}})
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("another unversioned module passed")
+        (analytics / "Dockerfile").unlink()
+        try:
+            validate_services(root, analytics_hold)
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("non-deployable unversioned module passed")
+        manifest.write_text(original)
         rule.write_text("deploy_holds:\n  services: {}\n")
         assert filter_tags(root, tags) == json.loads(tags)  # eligible on next reconcile
         rule.write_text("deploy_holds:\n  services:\n    openbank-typo-service:\n"

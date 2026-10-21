@@ -14,7 +14,9 @@ import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.`in`.ValuationUseCase
 import com.openbank.risk.domain.liquidity.LiquidityForecast
+import com.openbank.risk.domain.valuation.BucketSet
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -80,6 +82,9 @@ class RiskResource {
 
     @Inject
     lateinit var riskLimits: LimitUseCase
+
+    @Inject
+    lateinit var valuation: ValuationUseCase
 
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
@@ -236,6 +241,87 @@ class RiskResource {
     )
     @Authorize(action = "risk.snapshot.read", resource = "#id")
     suspend fun limits(@PathParam("id") id: UUID): Response = Response.ok(riskLimits.evaluate(id).toResponse()).build()
+
+    /**
+     * Valuation of the own book's ACTUAL deals (ADR-0344 D8): per deal and per book PV, accrued,
+     * clean and dirty, and where each deal's flows came from (STORED treasury ledger or DERIVED).
+     * `bookId` filters by the deal's book; `curveSetId` defaults to the newest set as of the run.
+     */
+    @GET
+    @Path("/{id}/valuation")
+    @Operation(summary = "Per-deal and per-book PV, accrued, clean and dirty of the own treasury book; 409 if UNTIED")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun valuation(
+        @PathParam("id") id: UUID,
+        @QueryParam("bookId") bookId: String?,
+        @QueryParam("curveSetId") curveSetId: String?,
+    ): Response =
+        Response.ok(valuation.valuation(id, bookId.blankToNull(), optionalCurveSetId(curveSetId)).toResponse()).build()
+
+    /**
+     * PV01, key-rate DV01 (bucket set by `bucketSetId`, or an explicit `buckets` list such as
+     * `1M,3M,1Y,5Y`; default the IRRBB ladder) and FX delta per currency of the own book.
+     */
+    @GET
+    @Path("/{id}/sensitivity")
+    @Operation(summary = "PV01, key-rate DV01 by bucket set and FX delta of the own treasury book; 409 if UNTIED")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun sensitivity(
+        @PathParam("id") id: UUID,
+        @QueryParam("bookId") bookId: String?,
+        @QueryParam("curveSetId") curveSetId: String?,
+        @QueryParam("bucketSetId") bucketSetId: String?,
+        @QueryParam("buckets") buckets: String?,
+    ): Response {
+        val set = BucketSet.resolve(bucketSetId, buckets)
+        return Response.ok(
+            valuation.sensitivity(id, bookId.blankToNull(), optionalCurveSetId(curveSetId), set).toResponse(),
+        ).build()
+    }
+
+    /**
+     * Historical-simulation VaR and expected shortfall of the own book by full revaluation over the
+     * stored curve-set and FX-fixing history; too little history answers a data gap, never a number.
+     * `confidence` default 0.99, `horizonDays` default 1.
+     */
+    @GET
+    @Path("/{id}/var")
+    @Operation(summary = "Historical-simulation VaR and ES of the own treasury book, or the data gap; 409 if UNTIED")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun valueAtRisk(
+        @PathParam("id") id: UUID,
+        @QueryParam("bookId") bookId: String?,
+        @QueryParam("confidence") confidence: String?,
+        @QueryParam("horizonDays") horizonDays: String?,
+    ): Response {
+        val c = confidence?.takeIf { it.isNotBlank() }?.let {
+            requireNotNull(it.trim().toBigDecimalOrNull()) { "query parameter 'confidence' must be a decimal number" }
+        } ?: DEFAULT_CONFIDENCE
+        val h = horizonDays?.takeIf { it.isNotBlank() }?.let {
+            requireNotNull(it.trim().toIntOrNull()) { "query parameter 'horizonDays' must be an integer" }
+        } ?: 1
+        return Response.ok(valuation.valueAtRisk(id, bookId.blankToNull(), c, h).toResponse()).build()
+    }
+
+    /** Net present value of the own book per currency, in that currency and in CZK, with its FX delta. */
+    @GET
+    @Path("/{id}/fx-position")
+    @Operation(summary = "FX position (net PV per currency) of the own treasury book; 409 if UNTIED")
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun fxPosition(
+        @PathParam("id") id: UUID,
+        @QueryParam("bookId") bookId: String?,
+        @QueryParam("curveSetId") curveSetId: String?,
+    ): Response =
+        Response.ok(valuation.fxPosition(id, bookId.blankToNull(), optionalCurveSetId(curveSetId)).toResponse()).build()
+
+    private fun String?.blankToNull(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun optionalCurveSetId(raw: String?): UUID? = raw.blankToNull()?.let { parseCurveSetId(it) }
+
+    private companion object {
+        val DEFAULT_CONFIDENCE = java.math.BigDecimal("0.99")
+    }
 
     private fun parseCurveSetId(curveSetId: String?): UUID {
         val raw = requireNotNull(curveSetId) { "query parameter 'curveSetId' is required" }
