@@ -8,6 +8,7 @@ import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
 import com.openbank.finrep.domain.mapper.F0102Mapper
+import com.openbank.finrep.domain.mapper.F0103Mapper
 import com.openbank.finrep.domain.mapper.F0200Mapper
 import com.openbank.finrep.domain.model.FinrepCell
 import org.assertj.core.api.Assertions.assertThat
@@ -147,6 +148,26 @@ class TreasuryGlMappingTest {
         assertThat(cell(liabs, "r0120")).isEqualByComparingTo("30")
         assertThat(cell(liabs, "r0130")).isEqualByComparingTo("0")
         assertThat(cell(liabs, "r0300")).isEqualByComparingTo("30")
+    }
+
+    @Test
+    fun `overdraft among other assets and liabilities keeps total assets equal to liabilities plus equity`() {
+        val s = snapshot(
+            line("1001", "ASSET", "-30"),
+            line("1100", "ASSET", "200"),
+            line("2300", "LIABILITY", "-50"),
+            line("4100", "INCOME", "-120"),
+        )
+        val assets = F0101Mapper.map(s, asOf).cells
+        val liabs = F0102Mapper.map(s, asOf).cells
+        val equity = F0103Mapper.map(s, asOf).cells
+        assertThat(cell(assets, "r0380")).isEqualByComparingTo("200")
+        assertThat(cell(liabs, "r0300")).isEqualByComparingTo("80")
+        assertThat(cell(liabs, "r0150")).isEqualByComparingTo("80")
+        assertThat(cell(equity, "r0300")).isEqualByComparingTo("120")
+        assertThat(cell(equity, "r0310")).isEqualByComparingTo("200")
+        assertThat(cell(assets, "r0380"))
+            .isEqualByComparingTo(cell(liabs, "r0300").add(cell(equity, "r0300")))
     }
 
     @Test

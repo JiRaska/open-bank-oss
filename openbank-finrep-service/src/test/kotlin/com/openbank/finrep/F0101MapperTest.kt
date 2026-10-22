@@ -42,9 +42,18 @@ class F0101MapperTest {
 
         assertThat(template.templateId).isEqualTo("F01.01")
         assertThat(template.cells).hasSize(7)
+        assertThat(cell(template.cells, "r0030")).isEqualByComparingTo("0")
         assertThat(cell(template.cells, "r0380")).isEqualByComparingTo("500000")
         assertThat(template.cells).allMatch { it.colRef == "c0010" }
         assertThat(template.hasDataGaps).isFalse()
+    }
+
+    @Test
+    fun `F01_01 r0030 carries the central bank balance`() {
+        val lines = balancedTrialBalance() + line("1510", "ASSET", "250") + line("4100", "INCOME", "-250")
+        val template = F0101Mapper.map(tb(lines, ledgerSays = true), asOf)
+        assertThat(cell(template.cells, "r0030")).isEqualByComparingTo("250")
+        assertThat(cell(template.cells, "r0380")).isEqualByComparingTo("500250")
     }
 
     @Test

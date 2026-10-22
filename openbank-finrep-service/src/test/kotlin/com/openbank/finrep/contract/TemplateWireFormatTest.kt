@@ -166,7 +166,7 @@ class TemplateWireFormatTest {
         val cells = json["cells"] as List<Map<*, *>>
         assertThat(cells).hasSize(7)
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
-        assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0040", "r0181", "r0183", "r0360", "r0380")
+        assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0030", "r0040", "r0181", "r0183", "r0360", "r0380")
         assertThat(cells.map { it["colRef"] }).containsOnly("c0010")
         assertThat(cells.first()["currency"]).isEqualTo("CZK")
         // Official F 01.01 r0380 total assets — proves the cell is really derived from the ledger
@@ -178,7 +178,7 @@ class TemplateWireFormatTest {
     }
 
     @Test
-    fun `the XBRL CSV preflight is ready when the governed mapping is complete and the trial balance agrees`() {
+    fun `the XBRL CSV preflight is blocked only by unverified datapoint ids when the trial balance agrees`() {
         val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
 
         assertThat(json.keys).containsExactlyInAnyOrder(
@@ -195,11 +195,12 @@ class TemplateWireFormatTest {
         assertThat(json["reportingFrameworkVersion"]).isEqualTo("4.2")
         assertThat(json["dpmVersion"]).isEqualTo("4.2.1")
         assertThat(json["taxonomyVersion"]).isEqualTo("4.2.0.0")
-        assertThat(json["state"]).isEqualTo("READY_FOR_RENDERING")
+        // F01.01 always emits r0030, whose datapoint id is unverified (#13603): never submission-ready.
+        assertThat(json["state"]).isEqualTo("BLOCKED")
 
         @Suppress("UNCHECKED_CAST")
         val blockers = json["blockers"] as List<Map<*, *>>
-        assertThat(blockers).isEmpty()
+        assertThat(blockers.map { it["code"] }).containsExactly("UNVERIFIED_DATAPOINT_ID")
     }
 
     @Test
