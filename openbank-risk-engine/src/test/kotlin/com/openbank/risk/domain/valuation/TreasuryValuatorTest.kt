@@ -208,4 +208,19 @@ class TreasuryValuatorTest {
         }
             .hasMessageContaining("at most 30")
     }
+
+    @Test
+    fun `preparing a deal honours the deadline - an expired budget stops schedule generation`() {
+        var now = 0L
+        val expired = TreasuryValuator(
+            market,
+            Deadline("pricing", java.time.Duration.ofSeconds(1)) { now },
+        )
+        now = java.time.Duration.ofSeconds(2).toNanos()
+        val deal = ValuableDeal(UUID.randomUUID(), "BOOK-1", DealKind.ACTUAL, irs(PayReceive.PAY))
+        org.assertj.core.api.Assertions.assertThatThrownBy { expired.prepare(deal) }
+            .isInstanceOf(ComputationTimeoutException::class.java)
+        // control: the same deal prepares under a live budget
+        assertThat(valuator.prepare(deal)).isInstanceOf(TreasuryValuator.Preparation.Ready::class.java)
+    }
 }

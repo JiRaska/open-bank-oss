@@ -103,9 +103,11 @@ jobs:
             git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags
             # The extra pathspecs are the governance gate's INPUTS, not UI code:
             # every per-service governance.yaml, plus the schema it validates them
-            # against. The generator itself lives under openbank-admin-ui/.
+            # against, plus the backend OpenAPI consumed by the catalog type generator.
+            # The generators themselves live under openbank-admin-ui/.
             N=$(git diff --name-only "${BASE}...HEAD" -- \
                   openbank-admin-ui/ \
+                  openbank-product-catalog/src/main/resources/openapi.yaml \
                   '*/governance.yaml' \
                   openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
@@ -617,7 +619,9 @@ jobs:
         with:
           # matrix.slug, not matrix.groups: a space is not valid in an artifact name, and
           # this must match the --json path above exactly or the upload finds no file.
-          name: gate-results-${{ matrix.slug }}
+          # A rerun retains artifacts from earlier attempts of the same run. Keep the
+          # evidence tied to the attempt whose gate job produced it.
+          name: gate-results-${{ matrix.slug }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/gate-results-${{ matrix.slug }}.json
           if-no-files-found: warn
           retention-days: 90

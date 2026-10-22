@@ -109,6 +109,31 @@ Cause: no `interest_rate_configs` row active for the product on `toDate`. Action
 
 By design: `interest-service` moves no cash. The `interest.withholding.remitted.v1` event delegates the odvod to the downstream tax/reporting consumer, which flips the batch to `SETTLED`. Check the consumer, not this service.
 
+## Catalog revision pins (ADR-0341)
+
+With catalog sync on, an account accrues from the published revision it was **pinned** to, never from
+"the currently effective" rate. A row in `account_rate_revision_pins` commits together with the account's first
+successful catalog-sourced accrual. Rate resolution, first pin and the accrual write share one
+transaction owned by a dedicated accrual unit-of-work port; failed accrual persistence must roll
+the pin back. The transaction adapter is required by CDI, with no production pass-through fallback. A natural-key conflict is resolved
+by reading the committed winner only after the failed transaction has rolled back. V20 backfilled a pin for every existing account from its latest non-reversed
+accrual under a catalog-sourced config; operator-managed accounts get no pin and keep operator semantics.
+
+Accrual rate lookup filters the requested currency. The read-only effective-rate lookup without
+a currency keeps its currency-agnostic behavior. Optional filtering is constructed before binding
+parameters, so a null-test placeholder cannot fail PostgreSQL type inference. Account override,
+product fallback and effective-date ordering are unchanged.
+
+**Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`) when a pin row exists but its
+revision does not resolve to a cached rate config, or when the account has catalog accrual history but no
+pin. The catalog rate is never used: the account accrues nothing. In the daily run the account counts as
+**failed**, logs a WARN and increments `openbank.interest.accrual.catalog.revision.unresolved`; the run is
+therefore incomplete, the close-job record is REFUSED, and the ledger **holds the accounting day** rather than
+closing it without that interest. The alert `InterestAccrualCatalogRevisionUnresolved` fires on the counter.
+Repair the cache (or the missing pin) and re-run for the same business date; the accrual is idempotent per
+account and day. A catalog-sourced effective rate met for an unpinned account fails closed the same way and
+is counted once, by `openbank.interest.accrual.catalog.rate.unpinned`, which should stay at zero.
+
 ## Tech-stack matrix
 
 Auto-surfaced in `/api/v1/info` (from `libs.versions.toml`):

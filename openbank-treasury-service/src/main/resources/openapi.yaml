@@ -40,7 +40,7 @@ info:
   #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
   #         kept), GET /portfolio/statements?date= (the version trail) and GET
   #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
-  # 1.20.0: additive — ADR-0344 slice 2: effective-dated four-eyes reference data
+  #         Also in 1.19.0 (one unreleased version) — ADR-0344 slice 2: effective-dated four-eyes reference data
   #         (/reference/{kind}), deal v2 request/response fields (kind, bookId, legs, calendars,
   #         securities, regulatory terms; eleven more request products), the stored cash-flow
   #         ledger with four-eyes overrides and conflicts, and deal versions. 422
@@ -51,7 +51,7 @@ info:
   #         Slice 4 (same unreleased version): four-eyes corrections of a booked deal
   #         (/deals/{id}/corrections, ADR-0344 D7) with a preview of the new flows and the delta
   #         journals they post.
-  version: 1.20.0
+  version: 1.19.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before

@@ -365,6 +365,8 @@ deadline rule or financial operation. These are source/test claims, not proof of
 log redaction or runtime enforcement. Rollback: revert the search parameter/response addition and UI
 changes together; no migration or stored-data rewrite is introduced.
 
+- **2026-10-17** — **OPA PolicyDecisionPoint now comes from libs-runtime (#13136).** The per-service AuthzProducer is removed and the service opts into the shared `OpaPolicyDecisionPointProducer` with `openbank.authz.opa-pdp-producer.enabled: true` (a build-time switch). `opa.url` and `opa.path` keep their keys and defaults. The timeout key is renamed from `opa.timeout` (`PT0.5S`) to `opa.timeout-ms` (`500`); no manifest or environment sets either, so the effective OPA timeout stays 500 ms. No change to policy, actions, roles, the sidecar edge or fail-closed behaviour; the PDP object is the same `OpaSidecarPolicyDecisionPoint`. Rollback: revert the PR.
+
 ## Tax-reporting read-model ingress declaration
 
 The tax-reporting deployment declares this provider's HTTPS Service URL on port 8443.

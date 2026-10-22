@@ -1,5 +1,53 @@
 # Changelog
 
+## [3.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.1...admin-ui-v3.10.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop running the readiness collector inside the image build ([#13577](https://github.com/JiRaska/open-bank-oss/issues/13577)) ([00c6dfe](https://github.com/JiRaska/open-bank-oss/commit/00c6dfeca7b357d4bca7d72168230c5da12595b9)), closes [#13014](https://github.com/JiRaska/open-bank-oss/issues/13014)
+
+## [3.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.0...admin-ui-v3.10.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** correct the Camera QR pilot step for the bank chooser ([#13569](https://github.com/JiRaska/open-bank-oss/issues/13569)) ([c7f52bc](https://github.com/JiRaska/open-bank-oss/commit/c7f52bce3b4a447e9bedad6e676b2cb971da7f5c)), closes [#13541](https://github.com/JiRaska/open-bank-oss/issues/13541)
+
+## [3.10.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.1...admin-ui-v3.10.0) (2026-10-22)
+
+
+### Features
+
+* **ledger:** day-close participants — the accounting day waits for product services (ADR-0342) ([#13197](https://github.com/JiRaska/open-bank-oss/issues/13197)) ([cc8b400](https://github.com/JiRaska/open-bank-oss/commit/cc8b40005ac00a2c73142a6890fa146556017950))
+
+## [3.9.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.0...admin-ui-v3.9.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** observe ClickHouse and resolve lifecycle release links ([#13497](https://github.com/JiRaska/open-bank-oss/issues/13497)) ([fd7f44d](https://github.com/JiRaska/open-bank-oss/commit/fd7f44dd42c223be3f63eea73360884d451beaad))
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
+## [3.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.9...admin-ui-v3.9.0) (2026-10-21)
+
+
+### Features
+
+* **admin-ui:** Camera QR docs page — SPAYD the phone camera can read ([#13542](https://github.com/JiRaska/open-bank-oss/issues/13542)) ([12b5a19](https://github.com/JiRaska/open-bank-oss/commit/12b5a19855722ae5ddd838a5a3c9ed39006f1904))
+* **admin-ui:** derive declared platform inventory from sources ([#13498](https://github.com/JiRaska/open-bank-oss/issues/13498)) ([fb129b0](https://github.com/JiRaska/open-bank-oss/commit/fb129b021422c84a0adc49d1d68f7ed039e00393))
+* **product-catalog:** expose schema approval policy; move consumers off pension-approval aliases ([#13496](https://github.com/JiRaska/open-bank-oss/issues/13496)) ([6174564](https://github.com/JiRaska/open-bank-oss/commit/61745645e041c190e49bfe9d01d384a80bc7bce9))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive catalog schema dependency closure ([#13494](https://github.com/JiRaska/open-bank-oss/issues/13494)) ([5fd0448](https://github.com/JiRaska/open-bank-oss/commit/5fd0448dccfbca541d8e02fc43d25873bab12fc2))
+* **admin-ui:** preserve configuration freshness and workload identity ([#13493](https://github.com/JiRaska/open-bank-oss/issues/13493)) ([81c8396](https://github.com/JiRaska/open-bank-oss/commit/81c839601ee918eb216c6311e7a5b71635f5bd94))
+
 ## [3.8.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.8...admin-ui-v3.8.9) (2026-10-20)
 
 

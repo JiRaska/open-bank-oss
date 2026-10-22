@@ -116,9 +116,17 @@ Remove the temporary GitOps environment entry only after **every** target databa
 ### Flyway checksum mismatch on startup
 Never rewrite an applied migration. Set `QUARKUS_FLYWAY_REPAIR_AT_START=true` transiently, let the DB settle, then remove it.
 
+## Metric naming
+
+Custom Micrometer counters carry the `openbank.` prefix (enforced by the `metric-name-prefix` CI gate). The origination SLA counters are scraped as `openbank_lending_origination_docs_sla_reminder_total` and `openbank_lending_origination_four_eyes_sla_escalation_total`; the earlier unprefixed `lending_origination_*` names are no longer emitted after this version is deployed, so any external query on them must be updated.
+
 ## Deploy
 
 GitOps (ArgoCD) per the platform pattern. For image-tag merge conflicts take `--ours` (freshly-built tag), `--theirs` for RBAC/config/env (CLAUDE.md). Version bumps and changelog are owned by release-please from Conventional Commits — never hand-edit `version.txt` or `CHANGELOG.md`.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
 
 ## Shared build dependencies
 

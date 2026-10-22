@@ -364,3 +364,27 @@ class WithholdingRemittanceEntity : PanacheEntityBase() {
     @Column(name = "created_at")
     var createdAt: OffsetDateTime = OffsetDateTime.MIN
 }
+
+/** ADR-0341: the catalog revision an account's rate was pinned to on its first catalog-sourced accrual. */
+@Entity
+@Table(name = "account_rate_revision_pins")
+class AccountRateRevisionPinEntity : PanacheEntityBase() {
+    @Id
+    @Column(name = "id", columnDefinition = "uuid")
+    var id: UUID = Ids.newId()
+
+    @Column(name = "account_id", columnDefinition = "uuid")
+    var accountId: UUID = Ids.newId()
+
+    @Column(name = "product_id", length = 64)
+    var productId: String = ""
+
+    @Column(name = "currency", length = 3)
+    var currency: String = ""
+
+    @Column(name = "revision_id", columnDefinition = "uuid")
+    var revisionId: UUID = Ids.newId()
+
+    @Column(name = "pinned_at")
+    var pinnedAt: OffsetDateTime = OffsetDateTime.MIN
+}

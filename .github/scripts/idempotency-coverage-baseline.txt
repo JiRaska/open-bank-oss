@@ -49,6 +49,8 @@ openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/con
 openbank-delegation-service POST /api/v1/delegations/{id}/reservations/{rid}/release  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-delegation-service POST /api/v1/delegations/{id}/suspend  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-fraud-service POST /api/v1/fraud/score  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
+openbank-fraud-service POST /api/v1/fraud/thresholds/proposals  # content-addressed replay while PROPOSED (contentHash+version+effectiveFrom) + uq_fraud_threshold_set_live_version (V9) — ADR-0347 exception
+openbank-fraud-service POST /api/v1/fraud/thresholds/proposals/{id}/decide  # aggregate-state guard: conditional UPDATE on state=PROPOSED, a replay is refused — ADR-0347 exception
 openbank-fx-service POST /api/v1/fx/cnb/ingest  # per-currency natural key (source, validFrom) skip — verified inherent — ADR-0299, burn-down #8351
 openbank-interest-service POST /api/v1/interest/accrue  # natural-key replay (V12) — ADR-0291, burn-down #8351
 openbank-interest-service POST /api/v1/interest/accrue/all  # re-runnable batch, per-account natural-key dedup — ADR-0291, burn-down #8351

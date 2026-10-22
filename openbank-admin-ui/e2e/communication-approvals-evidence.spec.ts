@@ -76,7 +76,7 @@ test('a refused decision shows the sanitized explanation, never the raw backend 
   await expect(page.getByText(/SelfApprovalNotAllowedException/)).not.toBeVisible()
 })
 
-test('queue load failure is a named unavailability with retry, and roles without decide stay out', async ({ page, context, browser, baseURL }) => {
+test('operator without decide sees the missing permission', async ({ page, context, baseURL }) => {
   // Edge gate: ROLE_OPERATOR holds approvals:view (passes the generic queue guard) but
   // not communication:style:decide — the in-page AuthGuard names the missing permission
   // instead of rendering the queue.
@@ -84,37 +84,29 @@ test('queue load failure is a named unavailability with retry, and roles without
   await page.goto('/approvals/communication')
   await expect(page.getByText('Access denied')).toBeVisible()
   await expect(page.getByText('Required permission: communication:style:decide')).toBeVisible()
+})
 
+test('viewer is redirected by the edge gate', async ({ page, context, baseURL }) => {
   // Viewer lacks both halves of the OR-set: the edge gate refuses before any page render.
-  const viewerContext = await browser.newContext({ baseURL: baseURL! })
-  try {
-    await signInWithRoles(viewerContext, baseURL!, ['ROLE_VIEWER'])
-    const viewerPage = await viewerContext.newPage()
-    await viewerPage.goto('/approvals/communication')
-    await expect(viewerPage).toHaveURL(/\/auth\/forbidden/)
-  } finally {
-    await viewerContext.close()
-  }
+  await signInWithRoles(context, baseURL!, ['ROLE_VIEWER'])
+  await page.goto('/approvals/communication')
+  await expect(page).toHaveURL(/\/auth\/forbidden/)
+})
 
+test('queue load failure is a named unavailability and retry recovers', async ({ page, context, baseURL }) => {
   // Checker with a failing backend: named unavailability, retry recovers.
-  const checkerContext = await browser.newContext({ baseURL: baseURL! })
-  try {
-    await signInWithRoles(checkerContext, baseURL!, ['ROLE_COMMS_APPROVER'])
-    const checkerPage = await checkerContext.newPage()
-    let mode: 'error' | 'ok' | 'empty' = 'error'
-    await checkerPage.route(APPROVALS, route => {
-      if (route.request().method() !== 'GET') return route.fallback()
-      if (mode === 'error') return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
-      if (mode === 'empty') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([pendingItem]) })
-    })
+  await signInWithRoles(context, baseURL!, ['ROLE_COMMS_APPROVER'])
+  let mode: 'error' | 'ok' | 'empty' = 'error'
+  await page.route(APPROVALS, route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    if (mode === 'error') return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+    if (mode === 'empty') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([pendingItem]) })
+  })
 
-    await checkerPage.goto('/approvals/communication')
-    await expect(checkerPage.getByText('Failed to load: approval queue')).toBeVisible()
-    mode = 'ok'
-    await checkerPage.getByRole('button', { name: 'Retry' }).click()
-    await expect(checkerPage.getByText('commstyle.publish')).toBeVisible()
-  } finally {
-    await checkerContext.close()
-  }
+  await page.goto('/approvals/communication')
+  await expect(page.getByText('Failed to load: approval queue')).toBeVisible()
+  mode = 'ok'
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByText('commstyle.publish')).toBeVisible()
 })

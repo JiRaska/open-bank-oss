@@ -79,3 +79,7 @@ A byte-identical replay returns its original version and does not repair missing
 Do not backfill dimensions from instrument class or CFI. Before rollback, stop writes and retain
 the dimension evidence; an older binary cannot safely aggregate unlike dimensions, so keep
 period-end reporting unavailable until forward recovery is complete.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.

@@ -127,6 +127,32 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 - **Release osa** (release-please) je řízena `version.txt` + Conventional Commits; **osa API kontraktu** je `openapi.yaml: info.version` (ADR-0048). Nevynucujte jejich rovnost.
 - GitOps: u konfliktů image-tagů berte `--ours` (čerstvě sestavený tag); u RBAC/config berte `--theirs` nebo řešte ručně.
 
+## Připnutí revize katalogu (ADR-0341)
+
+Při zapnuté synchronizaci katalogu účet akruuje podle publikované revize, ke které je **připnut**, nikdy
+podle "aktuálně platné" sazby. Řádek v `account_rate_revision_pins` se potvrzuje společně s prvním úspěšným
+akruálem účtu pod katalogovou sazbou. Určení sazby, první pin a zápis akruálu sdílejí jednu transakci, kterou
+vlastní vyhrazený port jednotky práce akruálu; selže-li zápis akruálu, pin se vrátí zpět. Adaptér transakce
+vyžaduje CDI, bez produkčního průchozího záložního řešení. Konflikt přirozeného klíče se řeší čtením
+potvrzeného vítěze až po vrácení neúspěšné transakce. Migrace V20 doplnila pin každému existujícímu účtu podle
+jeho posledního nezrušeného akruálu pod katalogovou konfigurací; účty s provozní sazbou pin nemají a zůstávají
+na provozní sémantice.
+
+Vyhledání sazby pro akruál filtruje požadovanou měnu. Čistě čtecí vyhledání platné sazby bez měny si
+zachovává chování nezávislé na měně. Volitelný filtr se sestavuje před navázáním parametrů, takže zástupný
+symbol testu na null nemůže způsobit selhání odvození typu v PostgreSQL. Přednost účtu, produktový výchozí
+záznam a řazení podle data účinnosti zůstávají beze změny.
+
+**Chování fail-closed.** Účet je odmítnut (`POST /accrue` vrací `409`), pokud pin existuje, ale jeho revize se
+nepřeloží na uloženou sazbu, nebo má účet katalogovou historii akruálů bez pinu. Katalogová sazba se nikdy
+nepoužije: účet nic neakruuje. V denním běhu se účet počítá jako **selhaný**, zapíše WARN a zvýší
+`openbank.interest.accrual.catalog.revision.unresolved`; běh je proto neúplný, záznam závěrkové úlohy je
+REFUSED a ledger **drží účetní den** místo toho, aby ho uzavřel bez tohoto úroku. Na čítač upozorňuje alert
+`InterestAccrualCatalogRevisionUnresolved`. Opravte cache (nebo chybějící pin) a spusťte znovu pro stejné
+obchodní datum; akruál je idempotentní na účet a den. Katalogová účinná sazba zjištěná u nepřipnutého účtu
+selže stejným způsobem a počítá se jednou, v `openbank.interest.accrual.catalog.rate.unpinned`, který má
+zůstat na nule.
+
 ## Účast na závěrce dne (ADR-0342)
 
 Interest hlásí ledgeru jako účastník `interest`. Obchodní datum každého běhu připsání i kapitalizace je účetní den ledgeru (`Europe/Prague`, přes `AccountingClock`), nikoli kalendářní datum UTC; běh mezi 00:00 a 02:00 pražského času se proto zapíše pod den, který ledger skutečně uzavírá. Běh kapitalizace, ve kterém byl některý pár odmítnut (409 uzavřeného dne) nebo selhal z jiného důvodu, se eviduje jako neúplný a hlásí se jako `REFUSED` s počty a pevnými kategoriemi selhání; jako `RAN` se hlásí jen plně kapitalizovaný běh. Totéž platí pro připsání: účet, jehož připsání selhalo nebo jehož zůstatek account-service nedodal, způsobí `REFUSED`, stejně jako zaseknutý claim kapitalizace, který se obnovou nepodařilo dokončit. Den ve stavu `REFUSED` nebo s chybou se sám znovu nespustí; zbývá jen opakovat běh pro STEJNÉ pražské obchodní datum (ruční `POST /accrue/all` a `/capitalize` toto datum používají jako výchozí a jsou idempotentní na účet a den) nebo waiver operátora na stránce uzávěrky dne v ledgeru. `openbank_workflow_last_success_age_seconds{workflow="interest-close-participation"}` se obnoví jen tehdy, když ledger hlášení z daného běhu přijal, takže nedostupný ledger nebo trvalé 403/404 nechá zazvonit alert na zastaralost.

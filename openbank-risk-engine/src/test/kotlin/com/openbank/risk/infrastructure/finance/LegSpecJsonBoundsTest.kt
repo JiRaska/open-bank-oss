@@ -88,4 +88,40 @@ class LegSpecJsonBoundsTest {
         assertThatThrownBy { LegSpecJson.frequency(0, "accrualFrequency", "HOURLY") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
+
+    private fun floating(payLag: Int? = null, fixLag: Int? = null) = leg().copy(
+        paymentLagBusinessDays = payLag,
+        rate = RateDto(type = "FLOATING", index = "PRIBOR-3M", fixingLagBusinessDays = fixLag),
+    )
+
+    @Test
+    fun `a payment lag over thirty business days is refused, negative too, zero to thirty accepted`() {
+        listOf(31, Int.MAX_VALUE, -1).forEach { lag ->
+            assertThatThrownBy {
+                LegSpecJson.toLegs(listOf(floating(payLag = lag)), LegDefaults(), LegBounds.PRICING_REQUEST)
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("paymentLagBusinessDays")
+        }
+        listOf(0, 2, 30).forEach { lag ->
+            assertThat(
+                LegSpecJson.toLegs(listOf(floating(payLag = lag)), LegDefaults(), LegBounds.PRICING_REQUEST),
+            ).hasSize(1)
+        }
+    }
+
+    @Test
+    fun `a fixing lag over thirty business days is refused, two accepted`() {
+        listOf(31, Int.MAX_VALUE, -1).forEach { lag ->
+            assertThatThrownBy {
+                LegSpecJson.toLegs(listOf(floating(fixLag = lag)), LegDefaults(), LegBounds.PRICING_REQUEST)
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("fixingLagBusinessDays")
+        }
+        assertThat(LegSpecJson.toLegs(listOf(floating(fixLag = 2)), LegDefaults(), LegBounds.PRICING_REQUEST))
+            .hasSize(1)
+    }
+
+    @Test
+    fun `a BOOKED deal is not held to the lag bound`() {
+        assertThat(LegSpecJson.toLegs(listOf(floating(payLag = 31, fixLag = 45)), LegDefaults(), LegBounds.BOOKED))
+            .hasSize(1)
+    }
 }

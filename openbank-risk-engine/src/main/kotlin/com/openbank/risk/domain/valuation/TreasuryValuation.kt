@@ -124,6 +124,7 @@ class TreasuryValuator(private val market: MarketState, private val deadline: De
         val legIndices = (deal.legs.indices.toSet() + stored.keys).sorted()
         val slots = mutableListOf<Slot>()
         for (i in legIndices) {
+            deadline.check()
             val leg = deal.legs.getOrNull(i)
             val rows = stored[i].orEmpty()
             val currency = leg?.currency?.code ?: rows.first().currency
