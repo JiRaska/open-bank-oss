@@ -24,6 +24,7 @@ tests:
               severity: warning
               service: billing
             exp_annotations:
+              subject_period: 1d
               summary: "billing-service is dropping a FEE price component that no v1 fee identifies (revenue not billed)"
               description: "A published revision tags a price component as FEE, but the v1 document it embeds derives no such code, so billing cannot give it a stable fee id and does not charge it. Every assessment under that revision misses the fee until the revision is corrected. Remedy (runbook): add the fee to the v1 document so its code is derived, or publish a revision without the embedded v1 document. Refs #13230."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0031-billing-fee-not-in-legacy-document.md"
@@ -54,6 +55,7 @@ tests:
               severity: warning
               service: billing
             exp_annotations:
+              subject_period: 1d
               summary: "billing-service is dropping a FEE price component that no v1 fee identifies (revenue not billed)"
               description: "A published revision tags a price component as FEE, but the v1 document it embeds derives no such code, so billing cannot give it a stable fee id and does not charge it. Every assessment under that revision misses the fee until the revision is corrected. Remedy (runbook): add the fee to the v1 document so its code is derived, or publish a revision without the embedded v1 document. Refs #13230."
               runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0031-billing-fee-not-in-legacy-document.md"
