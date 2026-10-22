@@ -498,6 +498,10 @@ The train now also runs on `push` to main, `workflow_run: completed` of every re
 
 A candidate build drops because `git merge-tree` conflicts with main, and a strict-lane PR whose update-branch is refused, now get one `merge-train` failure (`conflicts with main <sha12>` / `update-branch refused over main <sha12>`), one comment listing the conflicting paths and a `merge-train/notice` marker per head — posted by publish (re-deriving the conflict itself from build's data-only `drops.txt`) or settle, read by `qualifies` as information rather than a verdict, so no merge decision changes and a push clears it.
 
+### Amendment (2026-10-22) — bounded strict deferral: one carrier during a running reservation (#13400)
+
+While a strict reservation's CI is running and that head has never yielded, settle lets the train build and publish one carrier from green candidates; publish records the yield as the App's `merge-train/strict-deferral` status on the strict head, a green carrier merges past it only under that record, the update-branch that follows inherits it through the first parent, and a green strict head is never pre-empted — so the strict PR still merges within two CI cycles.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
