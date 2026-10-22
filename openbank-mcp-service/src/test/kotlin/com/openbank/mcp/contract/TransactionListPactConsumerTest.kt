@@ -19,6 +19,7 @@ import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.util.UUID
 
 /**
  * Consumer-driven contract for `GET /api/v1/transactions?accountId=&limit=` — the read behind the
@@ -35,10 +36,11 @@ import org.junit.jupiter.api.extension.ExtendWith
  * only a provider replay answers. `accountId` is a required `@QueryParam` on the provider (a
  * non-null `UUID`), so omitting it is a 400 — pinning it here records that.
  *
- * No seeded data needed: the listing answers **200** with an empty `data` array and a `pagination`
- * envelope for an account with no transactions. The 200 is what proves the route exists; a 404
- * would not, since Quarkus answers 404 for an absent route too. `minArrayLike(min = 0)` matches the
- * provider's empty-DB response while still recording the element shape.
+ * The provider state SEEDS one transaction for a dedicated account (#13225). The pact used to replay
+ * against an empty page with `minArrayLike(min = 0)`, so its element shape was never compared with
+ * anything - and it named the field `currency`, which the provider has never sent (`currencyCode`).
+ * With `min = 1` and a seeded row, a renamed element field is red at the provider replay. The 200 is
+ * still what proves the route exists; a 404 would not, since Quarkus answers 404 for an absent route.
  *
  * **The expected path is a LITERAL; only the outgoing request is reflected off the client's
  * `@Path`** — deriving both sides would be vacuous (CLAUDE.md "Contract tests", measured on #2290).
@@ -56,7 +58,7 @@ class TransactionListPactConsumerTest {
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun transactionsForAccountPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("transaction-service is reachable and holds no transactions for the pact account")
+        .given("transaction-service holds a transaction for the pact account")
         .uponReceiving("GET the transaction page the MCP list_transactions tool returns verbatim")
         .path(EXPECTED_TRANSACTIONS_PATH)
         .query("accountId=$PACT_ACCOUNT_ID&limit=$PACT_LIMIT")
@@ -67,10 +69,11 @@ class TransactionListPactConsumerTest {
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
             newJsonBody { o ->
-                // min = 0: the provider replays against a fresh Testcontainer DB with no rows.
-                o.minArrayLike("data", 0, 1) { t ->
-                    t.stringType("id", "9f8e7d6c-5b4a-4390-8123-456789abcdef")
-                    t.stringType("currency", "CZK")
+                // min = 1: the provider state seeds a row, so the element shape is actually compared.
+                o.minArrayLike("data", 1, 1) { t ->
+                    t.uuid("id", UUID.fromString("9f8e7d6c-5b4a-4390-8123-456789abcdef"))
+                    // The provider's field name (TransactionResponse.currencyCode), never `currency`.
+                    t.stringType("currencyCode", "CZK")
                 }
                 o.`object`("pagination") { p ->
                     p.numberType("limit", PACT_LIMIT)
@@ -100,6 +103,7 @@ class TransactionListPactConsumerTest {
 
         val node = mapper.readTree(raw)
         assertThat(node.path("data").isArray).isTrue()
+        assertThat(node.path("data").first().has("currencyCode")).isTrue()
         assertThat(node.path("pagination").has("limit")).isTrue()
     }
 
@@ -107,8 +111,8 @@ class TransactionListPactConsumerTest {
         const val CONSUMER = "openbank-mcp-service"
         const val PROVIDER = "openbank-transaction-service"
 
-        /** Any well-formed UUID: the provider state deliberately holds no transactions for it. */
-        const val PACT_ACCOUNT_ID = "e1e1e1e1-f2f2-4a4a-8b8b-c9c9c9c9c9c9"
+        /** transaction-service's `PactTransactionSeed.SEEDED_ACCOUNT_ID`: the state books one row for it. */
+        const val PACT_ACCOUNT_ID = "e2e2e2e2-f3f3-4b4b-8c8c-d0d0d0d0d0d0"
 
         /** The client's own `@DefaultValue("20")`, sent explicitly so the query contract is pinned. */
         const val PACT_LIMIT = 20

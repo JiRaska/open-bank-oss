@@ -167,6 +167,13 @@ class TransactionPactProviderVerificationTest {
         // unhandled state name, which is how #468's missing states stayed invisible.
     }
 
+    @State(PactTransactionSeed.SEEDED_STATE)
+    fun stateTransactionForPactAccount() {
+        // mcp-service's TransactionListPactConsumerTest (#13225): one real row, so the element shape
+        // is compared instead of an empty page matching anything.
+        PactTransactionSeed.seed(testPort.toInt())
+    }
+
     @State("transaction-service has initiated a payment transaction")
     fun stateTransactionInitiated() {
         // No setup needed: the message producer below returns a deterministic payload.
