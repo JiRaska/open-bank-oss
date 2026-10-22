@@ -59,7 +59,10 @@ class AccountingClassGlMapIT {
             listOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103").map { (ccy, code) ->
                 row(cls, "PRINCIPAL", ccy, code)
             }
-        } + row("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK", "4003")
+        } + listOf("CZK" to "4003", "EUR" to "4004", "USD" to "4005", "GBP" to "4006").map { (ccy, code) ->
+            // V15 (CZK) + V35 (#13226): fee income is booked in the fee's own currency.
+            row("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy, code)
+        }
         ).toMap()
 
     private fun row(accountingClass: String, role: String, currency: String, code: String) =
@@ -145,28 +148,61 @@ class AccountingClassGlMapIT {
     }
 
     @Test
-    fun `a non-CZK fee debits its own control account, and its income leg is an explicit 422 until a chart decision`() {
-        // Billing's old fixed 2100/4003 are CZK accounts and the ledger refuses a line whose currency is not
-        // the account's, so a non-CZK fee has never posted. The debit now resolves to the currency's control
-        // account; the income leg has no account to land in and says so, instead of a currency mismatch.
-        for ((ccy, id) in listOf("EUR" to "2101", "USD" to "2102", "GBP" to "2103")) {
+    fun `a non-CZK fee debits its own control account and credits its own fee-income account`() {
+        // #13226: billing's old fixed 2100/4003 are CZK accounts and the ledger refuses a line whose currency
+        // is not the account's, so a non-CZK fee never posted. V35 gives fee income a per-currency sibling.
+        for ((ccy, control, income) in listOf(
+            Triple("EUR", "2101", "4004"),
+            Triple("USD", "2102", "4005"),
+            Triple("GBP", "2103", "4006"),
+        )) {
             Given {
                 queryParam("accountingClass", "CUSTOMER_DEPOSIT_DEMAND")
                 queryParam("role", "PRINCIPAL")
                 queryParam("currency", ccy)
             } When { get("/api/v1/accounting-classes/resolve") } Then {
                 statusCode(200)
-                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$id"))
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$control"))
             }
             Given {
                 queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
                 queryParam("role", "FEE_INCOME")
                 queryParam("currency", ccy)
             } When { get("/api/v1/accounting-classes/resolve") } Then {
-                statusCode(422)
-                body("error", containsString("no GL account is mapped"))
+                statusCode(200)
+                body("glAccountId", equalTo("a0000000-0000-0000-0000-00000000$income"))
             }
         }
+        // A currency the chart has no fee-income account for is still an explicit refusal, never a guess.
+        Given {
+            queryParam("accountingClass", "FEE_INCOME_ACCOUNT")
+            queryParam("role", "FEE_INCOME")
+            queryParam("currency", "CHF")
+        } When { get("/api/v1/accounting-classes/resolve") } Then {
+            statusCode(422)
+            body("error", containsString("no GL account is mapped"))
+        }
+    }
+
+    @Test
+    fun `a EUR fee journal posted by class is accepted and balanced in EUR on 2101 and 4004`() {
+        // Byte-for-byte the shape BillingJournalFactory.buildLines sends for a EUR fee (#13226).
+        val today = LocalDate.now().toString()
+        val debit = """{"accountingClass":"CUSTOMER_DEPOSIT_DEMAND","accountingRole":"PRINCIPAL","side":"DEBIT",""" +
+            """"amount":"12.50","currencyCode":"EUR","baseAmount":"12.50","baseCurrencyCode":"EUR",""" +
+            """"subAccountId":"${UUID.randomUUID()}"}"""
+        val credit = """{"accountingClass":"FEE_INCOME_ACCOUNT","accountingRole":"FEE_INCOME","side":"CREDIT",""" +
+            """"amount":"12.50","currencyCode":"EUR","baseAmount":"12.50","baseCurrencyCode":"EUR"}"""
+        val posted = post("fee-eur-${UUID.randomUUID()}", debit, credit, today)
+        assertThat(posted.getList<String>("lines.glAccountId")).containsExactly(
+            "a0000000-0000-0000-0000-000000002101",
+            "a0000000-0000-0000-0000-000000004004",
+        )
+        assertThat(posted.getList<String>("lines.side")).containsExactly("DEBIT", "CREDIT")
+        assertThat(posted.getList<Any>("lines.amount").map { java.math.BigDecimal(it.toString()) })
+            .describedAs("balanced: debit == credit, both in EUR")
+            .allSatisfy { assertThat(it).isEqualByComparingTo("12.50") }
+        assertThat(posted.getList<String>("lines.currencyCode")).containsOnly("EUR")
     }
 
     @Test
