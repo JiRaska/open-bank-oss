@@ -19,7 +19,7 @@
 #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
 #                                               ROLE_TREASURY_SENIOR_APPROVER only
 #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
-#   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
+#   treasury.cashflow.override.propose        — ROLE_TREASURY_BACK_OFFICE
 #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
 #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
 #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
@@ -144,12 +144,24 @@ allowed_reasons contains "treasury-reference-decide" if {
 	input.action in {"treasury.reference.reject", "treasury.reference.verify"}
 }
 
-# Approving any kind but `counterparty`: the approver.
+# Approving a kind that carries no credit limit: the approver. An ALLOWLIST, not "anything but
+# counterparty": a missing, differently-cased or unknown kind matches nothing here and is denied,
+# so a spelling the domain might still resolve can never reach the plain approver.
 allowed_reasons contains "treasury-reference-approve" if {
 	treasury_staff
 	"ROLE_TREASURY_APPROVER" in input.principal.roles
 	input.action == "treasury.reference.approve"
-	not reference_kind_is_counterparty
+	input.resource.id in non_limit_reference_kinds
+}
+
+# Every ADR-0344 reference kind (the reference_records kind CHECK) except `counterparty`.
+non_limit_reference_kinds := {
+	"calendar", "index", "ssi", "netting", "security", "book", "bucket-set", "regulatory-code",
+	"product-type", "party-group", "party-type", "country", "document-type", "account",
+	"settlement-place", "loan-type", "communication-channel", "market-factor", "own-capital-item",
+	"period-length", "scenario", "behavioural-scenario", "calculation-settings", "limit-settings",
+	"derivative-conversion-factor", "collateral-haircut", "portfolio-group", "accounting-settings",
+	"balance-sheet-side", "dealing-filter",
 }
 
 # A counterparty record carries the credit limits the booking check reads, so activating one is a
@@ -171,7 +183,6 @@ allowed_reasons contains "treasury-back-office-write" if {
 	input.action in {
 		"treasury.cashflow.override.propose",
 		"treasury.deal.send-confirmation",
-		"treasury.position.close",
 	}
 }
 

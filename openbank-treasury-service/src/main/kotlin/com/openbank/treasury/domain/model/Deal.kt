@@ -600,54 +600,6 @@ data class Deal(
     }
 
     /**
-     * ADR-0344 D7: the deal as an APPROVED correction makes it — a new terms version with the same
-     * identity, creator, approvals and timeline, the new [terms] merged over this one's. A leg-described
-     * deal's flat fields follow from the corrected legs (the same rule a draft obeys). A full unwind
-     * ends the deal REVERSED: its delta journals offset everything it posted, which is how a SETTLED
-     * matrix deal — refused by [reverse] — is taken back.
-     */
-    fun correct(terms: CorrectionTerms, fullUnwind: Boolean, actor: Actor, reason: String, at: Instant): Deal {
-        requireHuman(actor, "approve a correction of")
-        requireCorrectable(this)
-        val corrected = withCorrectedTerms(terms)
-        val note = "corrected (terms version ${version + 1}): $reason"
-        return if (fullUnwind) {
-            corrected.transition(
-                DealState.REVERSED,
-                actor,
-                at,
-                "fully unwound by correction (terms version ${version + 1}): $reason",
-            )
-        } else {
-            corrected.copy(updatedAt = at, history = history + DealTransition(state, state, actor, at, note))
-        }
-    }
-
-    /** [terms] merged over this deal as the next terms version; no state change (the preview's input). */
-    fun withCorrectedTerms(terms: CorrectionTerms): Deal {
-        val newLegs = terms.legs ?: legs
-        val ccy = newLegs.firstOrNull()?.currency ?: currency
-        return copy(
-            legs = newLegs,
-            rate = terms.rate ?: rate,
-            currency = ccy,
-            principal = newLegs.filter { it.currency == ccy }.maxOfOrNull { it.notional } ?: principal,
-            valueDate = if (product == ProductType.BOND || terms.legs == null) {
-                valueDate
-            } else {
-                newLegs.minOf { it.accrualStart }
-            },
-            maturityDate = terms.legs?.let { l -> l.maxOf { it.accrualEnd } } ?: maturityDate,
-            header = header.copy(
-                calendars = terms.calendars ?: header.calendars,
-                businessDayConvention = terms.businessDayConvention ?: header.businessDayConvention,
-                note = terms.note ?: header.note,
-            ),
-            version = version + 1,
-        )
-    }
-
-    /**
      * ADR-0344 D7 boundary: only an ACTUAL deal moves cash or posts; PLANNED and HYPOTHETICAL never
      * do. Every product has posting rules (legacy [PostingRules], the others [PostingMatrix]).
      */
@@ -793,17 +745,6 @@ data class Deal(
          */
         val LIMIT_CONSUMING_STATES: Set<DealState> =
             setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.CONFIRMED, DealState.SETTLED)
-
-        /** Only a live, ACTUAL, leg-described (posting-matrix) deal is corrected; the legacy products reverse. */
-        fun requireCorrectable(deal: Deal) {
-            check(deal.kind == DealKind.ACTUAL) { "a ${deal.kind} deal never posts; edit it instead of correcting it" }
-            check(!deal.product.legacy) { "a ${deal.product} deal is reversed and re-booked, not corrected" }
-            check(deal.state in CORRECTABLE_STATES) {
-                "only a BOOKED, CONFIRMED or SETTLED deal is corrected (deal is ${deal.state})"
-            }
-        }
-
-        val CORRECTABLE_STATES = setOf(DealState.BOOKED, DealState.CONFIRMED, DealState.SETTLED)
 
         /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or

@@ -238,6 +238,11 @@ test_counterparty_approval_needs_the_senior if {
 	not allowed_on(approver, "treasury.reference.approve", "counterparty")
 	allowed_on(senior, "treasury.reference.approve", "counterparty")
 	not allowed_on(senior, "treasury.reference.approve", "calendar")
+
+	# An unknown, differently-cased or absent kind never reaches the plain approver (fail closed).
+	not allowed_on(approver, "treasury.reference.approve", "Counterparty")
+	not allowed_on(approver, "treasury.reference.approve", "no-such-kind")
+	not rest.allow.allow with input as {"principal": approver, "action": "treasury.reference.approve"}
 }
 
 test_reference_machines_and_agents_get_nothing if {

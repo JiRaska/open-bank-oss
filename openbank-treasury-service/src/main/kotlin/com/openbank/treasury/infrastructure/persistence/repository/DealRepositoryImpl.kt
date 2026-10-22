@@ -361,6 +361,36 @@ class DealRepositoryImpl(
         }.awaitSuspending()
 
     /**
+     * The limit-consuming exposure of one (counterparty, LIMIT currency) line, [excludeDealId] aside:
+     * the principal of ACTUAL asset deals in that currency in a consuming state, plus — on the CZK
+     * line — the CZK counter-amount of unsettled ACTUAL FX spots ([Deal.limitAmount] of each).
+     */
+    private fun lineExposure(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        counterpartyId: String,
+        currency: String,
+        excludeDealId: UUID?,
+    ): Uni<BigDecimal> {
+        val fxPart = if (currency == Deal.CZK) {
+            " + coalesce((select sum(fx_counter_amount) from deals where counterparty_id = :cp " +
+                "and product = 'FX_SPOT' and state in (:fxStates) and kind = 'ACTUAL' and deal_id <> :d), 0)"
+        } else {
+            ""
+        }
+        val q = session.createNativeQuery<Any>(
+            "select coalesce((select sum(principal) from deals where counterparty_id = :cp " +
+                "and currency = :ccy and state in (:states) and product in (:products) " +
+                "and kind = 'ACTUAL' and deal_id <> :d), 0)" +
+                fxPart,
+        ).setParameter("cp", counterpartyId).setParameter("ccy", currency)
+            .setParameter("d", excludeDealId ?: NO_DEAL)
+            .setParameter("states", LIMIT_CONSUMING_STATE_NAMES)
+            .setParameter("products", LIMIT_CONSUMING_PRODUCT_NAMES)
+        if (fxPart.isNotEmpty()) q.setParameter("fxStates", Deal.FX_LIMIT_CONSUMING_STATES.map { it.name })
+        return q.singleResult.map { BigDecimal(it.toString()) }
+    }
+
+    /**
      * Deals currently PENDING_APPROVAL that carry a senior limit override (ADR-0315 D4, #10896).
      * NOT filtered by counterparty or currency in SQL: the limit line an override counts against is
      * [Deal.limitCurrency], which is not the `currency` column for every product, so the grouping

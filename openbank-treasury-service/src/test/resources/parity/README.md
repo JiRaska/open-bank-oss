@@ -23,8 +23,15 @@ python3 -m unittest discover -s openbank-treasury-service/src/test/parity-oracle
 ```
 
 `.github/scripts/check-treasury-parity-fixtures.py` (gate `treasury-parity-fixtures`) validates the
-format, requires at least one fixture per product type, and re-runs the oracle on every
+format, requires at least one fixture per DELIVERED product type, and re-runs the oracle on every
 `source: independent-oracle` fixture, so `expected` cannot be hand-edited to match the code.
+
+ADR-0344 delivers products in phases. Only the products whose cash-flow ledger is on main have
+committed fixtures here (`DELIVERED_PRODUCTS` in `generate_fixtures.py`, `REQUIRED_PRODUCTS` in the
+gate; phase 0 = MM placement and borrowing, CNB deposit facility, CNB lombard, FX spot). The
+oracle and `generate_fixtures.py` already describe every ADR-0344 product, and `test_oracle.py`
+checks them, so a later phase widens both lists and commits its fixtures in the same PR. The
+format and conventions below cover all of them.
 
 ## Format
 

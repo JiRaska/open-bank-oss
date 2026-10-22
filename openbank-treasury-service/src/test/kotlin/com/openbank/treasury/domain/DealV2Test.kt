@@ -130,36 +130,6 @@ class DealV2Test {
     }
 
     @Test
-    fun `the day-completion record lists every step, an unrecorded one PENDING, a failure as FAILED`() {
-        val day = LocalDate.parse("2026-11-02")
-        val accruals = com.openbank.treasury.domain.model.DayStepRecord.of(
-            day,
-            com.openbank.treasury.domain.model.DayStep.ACCRUALS,
-            12,
-            0,
-            NOW,
-        )
-        val failed = com.openbank.treasury.domain.model.DayStepRecord.of(
-            day,
-            com.openbank.treasury.domain.model.DayStep.MATURITIES,
-            1,
-            2,
-            NOW,
-        )
-        val full = com.openbank.treasury.domain.model.DayStepRecord.day(day, listOf(accruals, failed))
-        assertThat(
-            full.map {
-                it.step
-            },
-        ).containsExactly(*com.openbank.treasury.domain.model.DayStep.entries.toTypedArray())
-        assertThat(full.single { it.step.name == "ACCRUALS" }.status.name).isEqualTo("DONE")
-        assertThat(full.single { it.step.name == "MATURITIES" }.status.name).isEqualTo("FAILED")
-        assertThat(full.single { it.step.name == "FIXINGS" }.let { it.status.name to it.at }).isEqualTo(
-            "PENDING" to null,
-        )
-    }
-
-    @Test
     fun `the legacy products derive their legs from the flat fields`() {
         val d = DealFixtures.placement()
         assertThat(d.legs).singleElement().satisfies({

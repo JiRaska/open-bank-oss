@@ -189,8 +189,11 @@ data class CounterpartyPayload(
     override fun references() = listOfNotNull(nettingAgreementId?.let { ReferenceRef(ReferenceKind.NETTING, it) })
 }
 
-/** How an SSI says the counterparty is paid (owned by `openbank-libs-iso20022`, beside the bank-own rails). */
-typealias SettlementRail = com.openbank.libs.iso20022.SettlementRail
+/**
+ * How a counterparty's standing settlement instruction (SSI) says it is paid. The payment phase of
+ * ADR-0344 moves this vocabulary to `openbank-libs-iso20022`, beside the bank-own rails it maps to.
+ */
+enum class SettlementRail { CERTIS, SEPA, TARGET2, SWIFT }
 
 data class SsiPayload(
     val counterpartyId: String,
