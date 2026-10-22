@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.1...admin-ui-v3.10.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop running the readiness collector inside the image build ([#13577](https://github.com/JiRaska/open-bank-oss/issues/13577)) ([00c6dfe](https://github.com/JiRaska/open-bank-oss/commit/00c6dfeca7b357d4bca7d72168230c5da12595b9)), closes [#13014](https://github.com/JiRaska/open-bank-oss/issues/13014)
+
 ## [3.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.0...admin-ui-v3.10.1) (2026-10-22)
 
 
