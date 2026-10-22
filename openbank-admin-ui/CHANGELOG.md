@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.0...admin-ui-v3.10.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** correct the Camera QR pilot step for the bank chooser ([#13569](https://github.com/JiRaska/open-bank-oss/issues/13569)) ([c7f52bc](https://github.com/JiRaska/open-bank-oss/commit/c7f52bce3b4a447e9bedad6e676b2cb971da7f5c)), closes [#13541](https://github.com/JiRaska/open-bank-oss/issues/13541)
+
 ## [3.10.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.1...admin-ui-v3.10.0) (2026-10-22)
 
 
