@@ -128,7 +128,6 @@ jobs:
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
-          python3 .github/scripts/shard-verification-modules.py --self-test
           python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
@@ -403,7 +402,6 @@ jobs:
           # Emit both module-plan formats from the same validated changed-file set.
           VERIFICATION=$(printf '%s\n' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py)
           printf '%s\n' "$VERIFICATION" >> "$GITHUB_OUTPUT"
-          # Coarse shards over the SAME set: union == set, one module -> one shard.
           printf '%s\n' "$VERIFICATION" | python3 .github/scripts/shard-verification-modules.py >> "$GITHUB_OUTPUT"
           echo "Modules to build: ${CHANGED:-<none>}"
           if [ -z "${CHANGED// /}" ]; then
