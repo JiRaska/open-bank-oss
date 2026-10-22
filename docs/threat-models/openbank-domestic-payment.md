@@ -141,7 +141,7 @@ not change any existing request's outcome until explicitly flipped.
   Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
   a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -359,7 +359,7 @@ not change any existing request's outcome until explicitly flipped.
   sequence); verified by a sandbox canary (worker registers + polls `openbank-domestic-payments`, real
   payments complete via Temporal end-to-end).
 - **2026-07-08** — ADR-0155 rollout (issue #413): wired the four-eyes maker-checker mechanism
-  piloted on sepa-payment. New `ApprovalConfig` (`ApprovalStore` via `RedisApprovalStore`) and
+  piloted on sepa-payment. New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (`ApprovalStore` via `RedisApprovalStore`) and
   new checker-facing endpoint `PATCH /api/v1/domestic-payments/approvals/{id}`
   (`@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")`,
   `@Authorize(action="domestic-payment.approval.decide")`). Two new exception mappers
@@ -784,3 +784,7 @@ cutover, revert caller URLs and policies before removing the listener.
   with a verified interactive human token (`ServiceAccountIdentity.isHumanStaff`). A machine
   token that holds a staff role in some realm resolves to `Undeclared` and fails closed.
 - **Rollback:** reverting the class restores name-based matching; no schema or data change.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

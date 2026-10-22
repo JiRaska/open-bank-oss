@@ -21,9 +21,13 @@ import org.eclipse.microprofile.config.ConfigProvider
  *   `@Authorize` would carry one action string for every service; overriding the method to change
  *   it would re-declare everything anyway. So each service keeps a thin resource that owns its
  *   annotations and nullable parameters, and delegates here.
+ *   Worse than redundant, a base resource would FAIL OPEN: `AuthorizeInterceptor` reads `@Authorize`
+ *   from the invoked method only and proceeds without an OPA decision when it finds none, so an
+ *   inherited method with a class-level `@Authorize` skips authorization silently.
  * - It is not a bean, so adding it to libs-runtime changes no service's CDI graph. That matters:
- *   `AuthorizeInterceptor` keys four-eyes behaviour off `ApprovalStore` bean PRESENCE, so a
- *   libs-level producer would silently switch four-eyes on in every consumer.
+ *   `AuthorizeInterceptor` keys four-eyes behaviour off `ApprovalStore` bean PRESENCE, so an
+ *   unconditional libs-level producer would silently switch four-eyes on in every consumer — which
+ *   is why `RedisApprovalStoreProducer` is a build-time opt-in (`openbank.approval.store=redis`).
  *
  * Security properties kept here, once:
  * - The checker id comes from [SecurityIdentity] (`principal.name`, the same form

@@ -571,7 +571,7 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 - **2026-10-03** — **`lending_outbox` is EXEMPT from fleet SENT-row retention** (ADR-0329). Every other outbox now purges SENT rows after 7 days; this one does not, because its SENT rows are the ADR-0214 evidence bundle (`GET /applications/{id}/evidence` reads them through `findByAggregateId`) and purging them would empty that bundle. Residual risk, recorded rather than fixed here: loan-event payloads (applicant and credit data) stay in this table for the life of the database. Closing it needs the evidence moved to a store with its own retention; the exemption sits in `check-outbox-sent-retention.py` and fails CI once lending opts in.
 - **2026-09-26** — **Replay key bound to a request fingerprint on `POST /api/v1/lending/applications` and `POST /api/v1/lending/intake/applications` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different loan application was answered as the first and silently never happened. Now the key is claimed atomically (`IdempotencyStore.reserve`) together with a SHA-256 fingerprint of method + path + the canonicalised request DTO (libs `RequestFingerprints`, #10916/#10922) before any use case runs: a mismatch is refused **409 `IDEMPOTENCY_KEY_REUSED`**, a concurrent duplicate **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a refused or failed submit releases the claim, while a submit that created the application keeps it even if storing the response fails. The binding lives only in Redis (no DB-level check). Records stored before this deploy carry no fingerprint and are treated as a match for one TTL window. No new endpoint, caller, privilege, event or migration. Rollback: revert. Intake fingerprints the customer's `CustomerIntakeRequest`, not the clock-derived application built from it.
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -667,7 +667,7 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   origination guard behind `lending.compliance.enforce-pack` (default off — bootstrap). Threat
   supplement in §8.
 - **2026-07-22** — Deploy an in-namespace Redis backing the four-eyes `ApprovalStore` (issue #1354).
-  The CDI bean already resolved (`ApprovalConfig` @Produces `RedisApprovalStore`), so
+  The CDI bean already resolved (ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) @Produces `RedisApprovalStore`), so
   `AuthorizeInterceptor`'s "no store → log + proceed" branch was never taken for lending; the store
   pointed at `redis://localhost:6379` in-pod. Flipping `AUTHZ_FOUR_EYES_ENFORCE=true` would have
   failed every `lending.disburse`/`lending.collateralRegister` on a connection refusal — a latent
@@ -721,7 +721,7 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
   §7 (STRIDE supplement extended to cover collateral alongside disbursement). Rollback: revert the
   commit (`V5`'s own rollback note drops the new columns/type; pre-migration behavior returns).
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
-  sepa-payment pilot. New endpoint `PATCH /api/v1/lending/approvals/{id}` + `ApprovalConfig`
+  sepa-payment pilot. New endpoint `PATCH /api/v1/lending/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate on `lending.disburse`
   (openbank-libs-runtime, shared, opt-in). New STRIDE supplement §7. `authz.four-eyes.enforce`
   defaults `false` — no behavior change to any existing request in this PR; flipping it is a
@@ -953,3 +953,5 @@ historical-replay / reconciliation policy is tracked in #10275.
 ## Machine-caller identity binding (#12448)
 
 The customer self-service intake, quote, credit-journey and financial-health endpoints admit only customer-edge. That caller is recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT whose `azp` is the configured client and whose `preferred_username` is that client's own `service-account-<azp>`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying the edge's username but issued to another client, or a human token issued through the edge client, is refused with 403.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

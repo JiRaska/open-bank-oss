@@ -908,6 +908,15 @@ public final class com/openbank/libs/authz/ResourceRef {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/close/CloseOutcome : java/lang/Enum {
+	public static final field RAN Lcom/openbank/libs/close/CloseOutcome;
+	public static final field REFUSED Lcom/openbank/libs/close/CloseOutcome;
+	public static final field SKIPPED Lcom/openbank/libs/close/CloseOutcome;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/close/CloseOutcome;
+	public static fun values ()[Lcom/openbank/libs/close/CloseOutcome;
+}
+
 public abstract interface annotation class com/openbank/libs/contact/MarketingCallSite : java/lang/annotation/Annotation {
 }
 
