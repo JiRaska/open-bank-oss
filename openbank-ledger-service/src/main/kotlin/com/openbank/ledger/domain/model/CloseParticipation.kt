@@ -4,7 +4,7 @@
 
 package com.openbank.ledger.domain.model
 
-import com.openbank.libs.domain.close.CloseOutcome
+import com.openbank.libs.close.CloseOutcome
 import java.time.Instant
 import java.time.LocalDate
 

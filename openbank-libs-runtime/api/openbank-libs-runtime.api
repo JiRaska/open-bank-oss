@@ -647,6 +647,7 @@ public final class com/openbank/libs/close/CloseParticipationReport {
 
 public final class com/openbank/libs/close/CloseParticipationReporter {
 	public static final field Companion Lcom/openbank/libs/close/CloseParticipationReporter$Companion;
+	public static final field METRIC Ljava/lang/String;
 	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/close/CloseParticipationSink;Lio/micrometer/core/instrument/MeterRegistry;)V
 	public final fun report (Lcom/openbank/libs/close/CloseParticipationReport;)Lio/smallrye/mutiny/Uni;
 }

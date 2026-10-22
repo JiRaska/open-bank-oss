@@ -11,8 +11,8 @@ import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
-import com.openbank.libs.domain.close.CloseOutcome
-import com.openbank.libs.domain.close.ParticipantDayStatus
+import com.openbank.libs.close.CloseOutcome
+import com.openbank.libs.close.ParticipantDayStatus
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
