@@ -160,17 +160,13 @@ class RestProductRevisionPort(
             null
         }
         val legacyFees = legacyFeesOf(revision)
-        // The catalog's PriceComponent has NO role/type field: nothing in the schema says that an AMOUNT is a
-        // fee rather than a minimum balance or a limit. A price component is therefore a fee only when it is
-        // one of the revision's legacy v1 fees (matched by the price code the catalog derives from the fee
-        // id) -- the only place a fee is identified. Every other component is not billed, and is not
-        // reported as dropped either, because it was never a fee. A FEE_-coded component without an
-        // identity in the document IS reported (it looks like a fee billing cannot place).
         val prices = revision.content.prices
-        val usable = prices.filter { it.code in legacyFees && it.kind == "AMOUNT" && it.currency != null }
-        val dropped = droppedFeeComponents(prices, usable, legacyFees.keys)
-        reportDropped(revision.id, dropped)
-        val noIdentity = prices.count { it.kind == "AMOUNT" && it.code !in legacyFees && !it.code.startsWith("FEE_") }
+        val selection = if (prices.any { it.role != null }) {
+            FeeComponentSelection.byRole(prices, legacyFees)
+        } else {
+            FeeComponentSelection.byLegacyMatch(prices, legacyFees)
+        }
+        reportDropped(revision.id, selection.dropped)
         return RevisionTerms(
             revisionId = revision.id,
             accountingClass = explicit ?: derived,
@@ -179,32 +175,11 @@ class RestProductRevisionPort(
                 derived != null -> AccountingClassSource.DERIVED_FROM_LEGACY_PRODUCT_TYPE
                 else -> AccountingClassSource.NONE
             },
-            fees = usable.map { price -> toFee(price, legacyFees[price.code]) },
-            feeBearing = legacyFees.isNotEmpty() || dropped.isNotEmpty(),
-            droppedFeeComponents = dropped.size,
-            noFeeIdentityComponents = noIdentity,
+            fees = selection.usable.map { price -> toFee(price, legacyFees[price.code]) },
+            feeBearing = selection.feeBearing,
+            droppedFeeComponents = selection.dropped.size,
+            noFeeIdentityComponents = selection.noIdentity,
         )
-    }
-
-    /**
-     * A legacy v1 fee the document declares but the revision has no price component for, plus every
-     * fee component (legacy or fee-coded) that billing cannot price. Each is a fee the bill silently lacks.
-     */
-    private fun droppedFeeComponents(
-        prices: List<PriceComponentDto>,
-        usable: List<PriceComponentDto>,
-        legacyCodes: Set<String>,
-    ): List<Pair<String, String>> {
-        val unusable = prices.filter { it !in usable && (it.code in legacyCodes || it.code.startsWith("FEE_")) }.map {
-            val reason = when {
-                it.code !in legacyCodes -> "NOT_IN_LEGACY_DOCUMENT"
-                it.kind != "AMOUNT" -> "NON_AMOUNT_KIND"
-                else -> "NULL_CURRENCY"
-            }
-            it.code to reason
-        }
-        val missing = (legacyCodes - prices.map { it.code }.toSet()).sorted().map { it to "MISSING_PRICE_COMPONENT" }
-        return unusable + missing
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -255,5 +230,78 @@ class RestAccountPartyLookupPort(@RestClient private val accounts: AccountRestCl
         val account = runCatching { accounts.getAccount(accountId).awaitSuspending() }.getOrNull()
             ?: return null
         return account.partyId
+    }
+}
+
+/**
+ * Which of a revision's price components billing charges as fees (catalog #13230). Pure: no I/O, no
+ * metrics -- [RestProductRevisionPort] reports what it returns as dropped.
+ */
+internal object FeeComponentSelection {
+    private const val FEE_ROLE = "FEE"
+
+    data class FeeSelection(
+        val usable: List<PriceComponentDto>,
+        val dropped: List<Pair<String, String>>,
+        val feeBearing: Boolean,
+        val noIdentity: Int,
+    )
+
+    /**
+     * A revision whose components carry a role (catalog #13230): a FEE is billed, and nothing else ever is --
+     * a LIMIT, THRESHOLD or RATE is not a fee whatever its kind or code. This is what lets a product defined
+     * only in the v2 kernel, with no embedded v1 document, be billed at all. A FEE billing cannot price (no
+     * currency, or not an AMOUNT) is dropped loudly. The v1 fee metadata (id, name, waiver) is still taken
+     * from the embedded document when the code matches, so a fee billed before the cutover keeps its
+     * idempotency key.
+     */
+    fun byRole(prices: List<PriceComponentDto>, legacyFees: Map<String, LegacyFees.LegacyFee>): FeeSelection {
+        val fees = prices.filter { it.role == FEE_ROLE }
+        val usable = fees.filter { it.kind == "AMOUNT" && it.currency != null }
+        val dropped = (fees - usable.toSet()).map {
+            it.code to if (it.kind != "AMOUNT") "NON_AMOUNT_KIND" else "NULL_CURRENCY"
+        }
+        // An AMOUNT with no role in a revision that otherwise has roles cannot be classified: counted as a
+        // component billing does not know to be a fee, never billed.
+        val unclassified = prices.count { it.role == null && it.kind == "AMOUNT" }
+        // a v1 fee the document declares but no FEE component carries is a fee the bill silently lacks
+        val missing = (legacyFees.keys - fees.map { it.code }.toSet()).sorted().map { it to "MISSING_PRICE_COMPONENT" }
+        return FeeSelection(usable, dropped + missing, fees.isNotEmpty() || missing.isNotEmpty(), unclassified)
+    }
+
+    /**
+     * LEGACY: a revision authored before roles existed, whose components say nothing about what they are.
+     * A component is a fee only when it is one of the revision's legacy v1 fees (matched by the price code
+     * the catalog derives from the fee id) -- the only place such a revision identifies a fee. Every other
+     * component is not billed, and is not reported as dropped either, because it was never a fee. A
+     * FEE_-coded component without an identity in the document IS reported (it looks like a fee billing
+     * cannot place). Kept for every revision published before #13230; such revisions are immutable.
+     */
+    fun byLegacyMatch(prices: List<PriceComponentDto>, legacyFees: Map<String, LegacyFees.LegacyFee>): FeeSelection {
+        val usable = prices.filter { it.code in legacyFees && it.kind == "AMOUNT" && it.currency != null }
+        val dropped = droppedFeeComponents(prices, usable, legacyFees.keys)
+        val noIdentity = prices.count { it.kind == "AMOUNT" && it.code !in legacyFees && !it.code.startsWith("FEE_") }
+        return FeeSelection(usable, dropped, legacyFees.isNotEmpty() || dropped.isNotEmpty(), noIdentity)
+    }
+
+    /**
+     * A legacy v1 fee the document declares but the revision has no price component for, plus every
+     * fee component (legacy or fee-coded) that billing cannot price. Each is a fee the bill silently lacks.
+     */
+    private fun droppedFeeComponents(
+        prices: List<PriceComponentDto>,
+        usable: List<PriceComponentDto>,
+        legacyCodes: Set<String>,
+    ): List<Pair<String, String>> {
+        val unusable = prices.filter { it !in usable && (it.code in legacyCodes || it.code.startsWith("FEE_")) }.map {
+            val reason = when {
+                it.code !in legacyCodes -> "NOT_IN_LEGACY_DOCUMENT"
+                it.kind != "AMOUNT" -> "NON_AMOUNT_KIND"
+                else -> "NULL_CURRENCY"
+            }
+            it.code to reason
+        }
+        val missing = (legacyCodes - prices.map { it.code }.toSet()).sorted().map { it to "MISSING_PRICE_COMPONENT" }
+        return unusable + missing
     }
 }

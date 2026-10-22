@@ -181,6 +181,75 @@ class RestBillingAdaptersTest {
         assertThat(meters.find("openbank.billing.accounting_class.derived").counter()).isNull()
     }
 
+    private fun roled(code: String, value: String, currency: String?, role: String, kind: String = "AMOUNT") =
+        PriceComponentDto(code, kind, BigDecimal(value), currency, "monthly", "MONTHLY", role)
+
+    @Test
+    fun `a v2-only product with a FEE component and no v1 document is billed`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+            revision(
+                attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
+                prices = arrayOf(roled("MAINTENANCE", "49", "CZK", "FEE")),
+            ),
+        )
+        val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+        val fee = terms.fees.single()
+        assertThat(fee.feeId).isEqualTo("MAINTENANCE")
+        assertThat(fee.amount).isEqualByComparingTo("49")
+        assertThat(terms.feeBearing).isTrue()
+        assertThat(terms.droppedFeeComponents).isZero()
+    }
+
+    @Test
+    fun `a LIMIT, THRESHOLD or RATE component is never billed, even when coded like a v1 fee`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+            revision(
+                attributes = mapOf(
+                    "accountingClass" to "CUSTOMER_DEPOSIT_DEMAND",
+                    "legacyDocument" to legacyDocument(),
+                ),
+                prices = arrayOf(
+                    roled("FEE_F1_3F524CDC07A11D7C6220", "50000", "CZK", "LIMIT"),
+                    roled("MINIMUM_BALANCE", "1000", "CZK", "THRESHOLD"),
+                    roled("INTEREST", "0.02", null, "RATE", kind = "RATE"),
+                ),
+            ),
+        )
+        val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+        assertThat(terms.fees).isEmpty()
+        assertThat(terms.feeBearing).isFalse()
+        assertThat(terms.droppedFeeComponents).isZero()
+        assertThat(terms.noFeeIdentityComponents).isZero()
+    }
+
+    @Test
+    fun `with roles, a v1 fee keeps its id and waiver, and a FEE that cannot be priced is dropped loudly`(): Unit =
+        runBlocking {
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+                revision(
+                    attributes = mapOf("productType" to "CURRENT", "legacyDocument" to legacyDocument("f1")),
+                    prices = arrayOf(
+                        roled("FEE_F1_3F524CDC07A11D7C6220", "5", "CZK", "FEE"),
+                        roled("FEE_NO_CCY", "3", null, "FEE"),
+                    ),
+                ),
+            )
+            val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+            assertThat(terms.fees.single().feeId).isEqualTo("f1")
+            assertThat(terms.fees.single().waivable).isTrue()
+            assertThat(terms.droppedFeeComponents).isEqualTo(1)
+            assertThat(
+                meters.get("openbank.billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count(),
+            )
+                .isEqualTo(1.0)
+        }
+
     @Test
     fun `only legacy v1 fees are fees - a minimum balance or a limit is never billed but is counted`(): Unit =
         runBlocking {
