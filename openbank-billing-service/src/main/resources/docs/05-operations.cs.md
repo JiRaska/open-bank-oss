@@ -10,6 +10,16 @@ podrobnosti výjimky ani počty složek. Zaznamenané důvody přeskočení urč
 vynechanými složkami, nikoli samotné složky. Tyto souhrnné čítače neurčují konkrétní vyhodnocení;
 dotčené záznamy vyšetřujte přes oprávněný přístup k obchodním datům, nikoli provozní logy.
 
+## Které cenové složky se účtují (#13230)
+
+Revize, jejíž cenové složky nesou `role` z katalogu, se účtuje podle role. Účtuje se jen `FEE`; `LIMIT`,
+`THRESHOLD` ani `RATE` nikdy. Obsahuje-li revize také dokument v1, účtuje se `FEE` jen tehdy, když jeho kód
+odvozuje dokument v1, a ponechá si id tohoto poplatku v1. Idempotenční klíč (cyklus, účet, id poplatku,
+měna) proto zůstane stejný i při přepnutí účtu na jinou revizi uprostřed cyklu a nic se nezaúčtuje dvakrát.
+`FEE` s jakýmkoli jiným kódem se vynechá a započítá jako
+`openbank.billing.fee.component.dropped{reason=NOT_IN_LEGACY_DOCUMENT}`. Revize bez rolí se účtuje
+starým párováním proti vloženým poplatkům v1, přesně jako dřív.
+
 ## Přechod na prefix metrik billingu
 
 Sedm čítačů billingu nyní používá prefix Micrometer `openbank.billing.*`. Jejich koncovky jsou
