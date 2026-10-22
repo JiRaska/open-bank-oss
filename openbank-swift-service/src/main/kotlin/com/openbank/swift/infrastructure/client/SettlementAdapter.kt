@@ -60,7 +60,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
 
         return try {
             when (val outcome = transactions.initiate(request).awaitSuspending()) {
-                is TransactionCallOutcome.HttpSuccess -> booked(message, outcome)
+                is TransactionCallOutcome.HttpSuccess -> booked(message, request, outcome)
                 // transaction-service WAS reached and refused: the message stays SENT, as it always did.
                 TransactionCallOutcome.Conflict -> refused(message, HTTP_CONFLICT)
                 is TransactionCallOutcome.Rejected -> refused(message, outcome.status)
@@ -92,14 +92,41 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         instructionType = "ONE_OFF",
     )
 
+    /**
+     * HTTP 201 (the provider's answer to a create, including its idempotent replay) with a COMPLETED
+     * transaction that matches the request is the ONLY settlement (#13217): type, source account, numeric
+     * amount, currency, rail and instruction type, as sepa-instant's `SettlementAdapter` binds them.
+     * valueDate is not compared - the provider resolves it to a business day. 200/202, a missing id or a
+     * booking for something else leaves the message SENT; the shared facade has already thrown on a
+     * missing, unreadable or non-final body.
+     */
     private fun booked(
         message: SwiftMessage,
+        request: InitiateTransactionRequest,
         outcome: TransactionCallOutcome.HttpSuccess<TransactionResponse>,
     ): SettlementOutcome {
-        // The shared write facade has already required a readable COMPLETED response.
-        // Preserve the settlement endpoint's accepted HTTP statuses as an additional bound.
-        if (outcome.status !in ACCEPTED_STATUSES) return refused(message, outcome.status)
-        return SettlementOutcome(settled = true, transactionId = outcome.body?.id)
+        if (outcome.status != HTTP_CREATED) return refused(message, outcome.status)
+        val tx = outcome.body ?: return refused(message, outcome.status)
+        val id = tx.id ?: return unbound(message, "no transaction id")
+        val amount = tx.amount ?: return unbound(message, "no numeric amount")
+        val matchesRequest = tx.status == COMPLETED &&
+            tx.type == request.type &&
+            tx.sourceAccountId == request.sourceAccountId &&
+            amount.compareTo(request.amount) == 0 &&
+            tx.currencyCode == request.currencyCode &&
+            tx.rail == request.rail &&
+            tx.instructionType == request.instructionType
+        if (!matchesRequest) return unbound(message, "a booking that does not match the request")
+        return SettlementOutcome(settled = true, transactionId = id)
+    }
+
+    private fun unbound(message: SwiftMessage, reason: String): SettlementOutcome {
+        log.warnf(
+            "transaction-service answered with %s for SWIFT message %s settlement; message stays SENT",
+            reason,
+            message.id,
+        )
+        return SettlementOutcome(settled = false, transactionId = null)
     }
 
     private fun refused(message: SwiftMessage, status: Int): SettlementOutcome {
@@ -112,7 +139,8 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     }
 
     private companion object {
-        val ACCEPTED_STATUSES = setOf(200, 201, 202)
+        const val HTTP_CREATED = 201
         const val HTTP_CONFLICT = 409
+        const val COMPLETED = "COMPLETED"
     }
 }

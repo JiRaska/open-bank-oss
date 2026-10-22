@@ -4,6 +4,8 @@
 
 package com.openbank.swift.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
@@ -23,6 +25,7 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -35,11 +38,31 @@ class SettlementAdapterTest {
     private fun created(id: UUID, status: Int = 201): Response =
         Response.status(status).entity(TransactionResponse(id = id, status = "COMPLETED")).build()
 
+    /** The booking transaction-service makes for [request]: the only response that may settle. */
+    private fun matching(request: InitiateTransactionRequest, id: UUID = UUID.randomUUID()) = TransactionResponse(
+        id = id,
+        status = "COMPLETED",
+        type = request.type,
+        sourceAccountId = request.sourceAccountId,
+        amount = request.amount,
+        currencyCode = request.currencyCode,
+        rail = request.rail,
+        instructionType = request.instructionType,
+        // A later business day: valueDate is deliberately not part of the binding.
+        valueDate = request.valueDate.plusDays(1),
+    )
+
+    /** Answers with [status] and the body [body] derives from the request actually sent. */
+    private fun answer(status: Int = 201, body: (InitiateTransactionRequest) -> TransactionResponse) {
+        every { client.initiateTransaction(any()) } answers {
+            Uni.createFrom().item(Response.status(status).entity(body(firstArg())).build())
+        }
+    }
+
     @Test
     fun `settle returns settled=true with transactionId on HTTP 201`(): Unit = runBlocking {
         val txId = UUID.randomUUID()
-        every { client.initiateTransaction(any()) } returns
-            Uni.createFrom().item(created(txId))
+        answer { matching(it, txId) }
 
         val outcome = adapter.settle(message())
 
@@ -87,11 +110,52 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `settle accepts 200 and 202 as a booking`(): Unit = runBlocking {
-        listOf(200, 202).forEach { code ->
-            every { client.initiateTransaction(any()) } returns Uni.createFrom().item(created(UUID.randomUUID(), code))
-            assertThat(adapter.settle(message()).settled).describedAs("HTTP %d", code).isTrue()
+    fun `a matching COMPLETED 200 or 202 is not the provider's answer to a create and never settles`(): Unit =
+        runBlocking {
+            listOf(200, 202).forEach { code ->
+                answer(code) { matching(it) }
+                val outcome = adapter.settle(message())
+                assertThat(outcome.settled).describedAs("HTTP %d", code).isFalse()
+                assertThat(outcome.transactionId).isNull()
+            }
         }
+
+    @Test
+    fun `a PENDING 202 has unproven completion and is unavailable`() {
+        answer(202) { matching(it).copy(status = "PENDING") }
+
+        assertThatThrownBy { runBlocking { adapter.settle(message()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+            .hasCauseInstanceOf(TransactionCompletionUncertainException::class.java)
+    }
+
+    @ParameterizedTest(name = "mismatched {0}")
+    @CsvSource("type", "account", "amount", "currency", "rail", "instructionType")
+    fun `a COMPLETED 201 for a different booking never settles the SWIFT message`(field: String): Unit = runBlocking {
+        answer { request ->
+            val tx = matching(request)
+            when (field) {
+                "type" -> tx.copy(type = "CREDIT")
+                "account" -> tx.copy(sourceAccountId = UUID.randomUUID())
+                "amount" -> tx.copy(amount = request.amount.add(BigDecimal.ONE))
+                "currency" -> tx.copy(currencyCode = "USD")
+                "rail" -> tx.copy(rail = "SEPA_CT")
+                "instructionType" -> tx.copy(instructionType = "STANDING_ORDER")
+                else -> error(field)
+            }
+        }
+
+        val outcome = adapter.settle(message())
+
+        assertThat(outcome.settled).isFalse()
+        assertThat(outcome.transactionId).isNull()
+    }
+
+    @Test
+    fun `a matching COMPLETED 201 with no transaction id never settles`(): Unit = runBlocking {
+        answer { matching(it).copy(id = null) }
+
+        assertThat(adapter.settle(message()).settled).isFalse()
     }
 
     @Test
@@ -164,8 +228,7 @@ class SettlementAdapterTest {
                         .entity(TransactionResponse(id = UUID.randomUUID(), status = "PENDING"))
                         .build(),
                 ),
-                Uni.createFrom().item(created(UUID.randomUUID())),
-            )
+            ) andThenAnswer { Uni.createFrom().item(Response.status(201).entity(matching(firstArg())).build()) }
 
         assertThatThrownBy { runBlocking { adapter.settle(msg) } }
             .isInstanceOf(SettlementUnavailableException::class.java)
@@ -200,8 +263,8 @@ class SettlementAdapterTest {
     // raw string used to go on the wire unchanged and could not be parsed on the other side.
     @Test
     fun `settle sends the MT103 YYYYMMDD value date as an ISO date`(): Unit = runBlocking {
-        every { client.initiateTransaction(match { it.valueDate == LocalDate.parse("2026-06-22") }) } returns
-            Uni.createFrom().item(created(UUID.randomUUID()))
+        every { client.initiateTransaction(match { it.valueDate == LocalDate.parse("2026-06-22") }) } answers
+            { Uni.createFrom().item(Response.status(201).entity(matching(firstArg())).build()) }
 
         assertThat(adapter.settle(message()).settled).isTrue()
     }
@@ -209,8 +272,8 @@ class SettlementAdapterTest {
     @Test
     fun `settle uses idempotency key prefixed with swift-settlement`(): Unit = runBlocking {
         val msgId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-        every { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-$msgId" }) } returns
-            Uni.createFrom().item(created(UUID.randomUUID()))
+        every { client.initiateTransaction(match { it.idempotencyKey == "swift-settlement-$msgId" }) } answers
+            { Uni.createFrom().item(Response.status(201).entity(matching(firstArg())).build()) }
 
         val outcome = adapter.settle(message(id = msgId))
 
@@ -223,7 +286,7 @@ class SettlementAdapterTest {
             client.initiateTransaction(
                 match { it.amount.toPlainString() == "100.00" && it.currencyCode == "EUR" },
             )
-        } returns Uni.createFrom().item(created(UUID.randomUUID()))
+        } answers { Uni.createFrom().item(Response.status(201).entity(matching(firstArg())).build()) }
 
         val outcome = adapter.settle(message(amountMinorUnits = 10_000L))
 
@@ -240,7 +303,7 @@ class SettlementAdapterTest {
         // #11604: main shifted by a fixed two places and booked 1000 yen as 10.00 JPY.
         every {
             client.initiateTransaction(match { it.amount.toPlainString() == booked && it.currencyCode == currency })
-        } returns Uni.createFrom().item(created(UUID.randomUUID()))
+        } answers { Uni.createFrom().item(Response.status(201).entity(matching(firstArg())).build()) }
 
         assertThat(adapter.settle(message(amountMinorUnits = minorUnits, currency = currency)).settled).isTrue()
     }

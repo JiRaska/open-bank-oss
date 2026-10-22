@@ -37,10 +37,14 @@
       },
       "response": {
         "body": {
+          "amount": 12500.00,
+          "currencyCode": "EUR",
           "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
           "instructionType": "ONE_OFF",
           "rail": "SWIFT",
-          "status": "COMPLETED"
+          "sourceAccountId": "eeeeeeee-1111-4222-8333-444444444444",
+          "status": "COMPLETED",
+          "type": "DEBIT"
         },
         "generators": {
           "body": {
@@ -54,6 +58,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.id": {
               "combine": "AND",
               "matchers": [
