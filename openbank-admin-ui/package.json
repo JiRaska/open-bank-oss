@@ -1,12 +1,13 @@
 {
   "name": "openbank-admin-ui",
-  "version": "3.10.1",
+  "version": "3.10.2",
   "private": true,
   "type": "module",
   "scripts": {
     "predev": "node scripts/generate-gate-catalog.mjs && node scripts/generate-platform-versions.mjs",
     "dev": "next dev -p 3000",
-    "prebuild": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/collect-prod-readiness.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs && node scripts/generate-gate-catalog.mjs && node scripts/generate-platform-versions.mjs",
+    "prebuild": "node scripts/collect-prod-readiness.mjs && npm run prebuild:image",
+    "prebuild:image": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs && node scripts/generate-gate-catalog.mjs && node scripts/generate-platform-versions.mjs",
     "build": "next build --webpack",
     "start": "next start -p 3000",
     "lint": "eslint .",

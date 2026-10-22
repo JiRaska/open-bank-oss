@@ -236,16 +236,83 @@ for name in sorted(held(os.environ["BRANCH_RULES"]) - held(os.environ["MAIN_RULE
 '
 }
 
-# rc 0 iff PR $1 already carries the owner-hold notice. Overridable via SUPERSEDE_NOTICE_HOOK.
+# rc 0 iff PR $1 already carries the notice marked $2 (default: the owner-hold notice).
+# Overridable via SUPERSEDE_NOTICE_HOOK.
 hold_noticed() {
-  local bodies
+  local bodies marker="${2:-$HOLD_NOTICE_MARKER}"
   if [ -n "${SUPERSEDE_NOTICE_HOOK:-}" ]; then
-    "$SUPERSEDE_NOTICE_HOOK" "$1"
+    "$SUPERSEDE_NOTICE_HOOK" "$1" "$marker"
     return
   fi
   # Unreadable comments count as noticed: a duplicate notice is noise, a missing one is not harm.
   bodies="$(gh api --paginate "repos/$REPO/issues/$1/comments" --jq '.[].body' 2>/dev/null)" || return 0
-  grep -qF -- "$HOLD_NOTICE_MARKER" <<<"$bodies"
+  grep -qF -- "$marker" <<<"$bodies"
+}
+
+# ── an owner hold blocks an OVERLAPPING survivor (regression of #13531) ────────────────────────
+# An owner hold on an older deploy PR lives only on that PR until someone records it in main's
+# deploy_holds — auto-deploy's filter and the deploy-hold-image-pins gate cannot see it. Arming a
+# newer PR that pins any of the same services would therefore deploy straight through the hold.
+# So when a predecessor is held by an owner (or by an applier that cannot be established) and the
+# survivor pins ANY service it pins — or that overlap cannot be computed — the run fails and the
+# survivor is not armed, whatever the ancestry/coverage verdict. A bot-applied state never blocks.
+BLOCK_NOTICE_MARKER='<!-- supersede-owner-hold-blocks -->'
+
+# The patch of PR $1 (`gh pr diff`). Overridable via SUPERSEDE_PATCH_HOOK for the self-test.
+pr_patch() {
+  if [ -n "${SUPERSEDE_PATCH_HOOK:-}" ]; then
+    "$SUPERSEDE_PATCH_HOOK" "$1"
+    return
+  fi
+  gh pr diff "$1" --repo "$REPO" 2>/dev/null
+}
+
+# Service identities a deploy patch pins, one per line: the image REPOSITORY name each changed
+# `image:` line (or kustomize `newTag:` under its `name:`/`newName:`) edits — never the manifest's
+# filename, because one service can be pinned through differently named files (deployment.yaml
+# vs rollout.yaml) and a basename would never see them collide. A changed manifest from which no
+# image can be read prints `?<path>`: unknown identity, which callers treat as not computable.
+# rules.yaml (the retired hold copy) is not a pin and is skipped.
+pins_from_patch() {
+  awk -v rules="$RULES_PATH" '
+    function flush() { if (file != "" && changed && !found) print "?" file; file = ""; changed = 0; found = 0 }
+    function emit(ref) {
+      gsub(/["'\''[:space:]]/, "", ref); sub(/@.*/, "", ref)
+      n = split(ref, seg, "/"); ref = seg[n]; sub(/:.*/, "", ref)
+      if (ref != "") { print ref; found = 1 }
+    }
+    /^diff --git /     { flush(); next }
+    /^\+\+\+ /          { f = $2; sub(/^b\//, "", f); file = (f == rules || f == "/dev/null") ? "" : f; next }
+    /^--- /             { next }
+    /^@@/               { lastname = ""; next }
+    {
+      sign = substr($0, 1, 1); body = substr($0, 2)
+      if (body ~ /^[[:space:]]*-?[[:space:]]*(newName|name):[[:space:]]*[^[:space:]]/ && body !~ /newTag/) {
+        v = body; sub(/^[[:space:]]*-?[[:space:]]*(newName|name):[[:space:]]*/, "", v); lastname = v
+      }
+      if ((sign != "+" && sign != "-") || file == "") next
+      if (body ~ /^[[:space:]]*$/) next
+      changed = 1
+      if (body ~ /image:[[:space:]]*[^[:space:]]/) { v = body; sub(/.*image:[[:space:]]*/, "", v); emit(v) }
+      else if (body ~ /newTag:/ && lastname != "") emit(lastname)
+    }
+    END { flush() }
+  ' | sort -u
+}
+
+# Pins of PR $1; non-zero when its patch cannot be read.
+pr_pins() {
+  local patch
+  patch="$(pr_patch "$1")" || return 1
+  pins_from_patch <<<"$patch"
+}
+
+# Prints the identities both pin lists share. rc 2 when either side pins nothing or carries an
+# unmappable manifest (`?<path>`) — the overlap is then not computable, which never means "none".
+pin_overlap() {
+  [ -n "$1" ] && [ -n "$2" ] || return 2
+  if grep -q '^?' <<<"$1" || grep -q '^?' <<<"$2"; then return 2; fi
+  comm -12 <(printf '%s\n' "$1") <(printf '%s\n' "$2")
 }
 
 # ── main ────────────────────────────────────────────────────────────────────────────────────────
@@ -253,6 +320,19 @@ run() {
   local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
   local n ref held other_sha verdict applier failed=0 stale_keep=0 closed=0 skipped=0 owner_held=0
   local KEEP_FILES other_files cov_verdict keep_files_ok=1 safety_unknown=0 carries_rules=0 legacy
+  local other_pins pre_files overlap owner_block=0 block_list="" KEEP_PINS="" keep_pins_state=""
+  # Survivor pins, read once on first need; a failed read stays failed (never retried as "none").
+  keep_pins_ready() {
+    if [ -z "$keep_pins_state" ]; then
+      if KEEP_PINS="$(pr_pins "$KEEP")"; then keep_pins_state=ok; else KEEP_PINS=""; keep_pins_state=fail; fi
+    fi
+    [ "$keep_pins_state" = ok ]
+  }
+  block() { # block <pr> <reason>
+    owner_block=1
+    case " $block_list " in *" #$1 "*) ;; *) block_list="$block_list #$1" ;; esac
+    echo "::error::supersede: $2 — #$KEEP must not be armed."
+  }
 
   if [ -z "$PAIRS" ]; then
     echo "supersede: no other open '$PREFIX*' PRs besides #$KEEP — nothing to close."
@@ -270,6 +350,45 @@ run() {
   while IFS=$'\t' read -r n ref held; do
     [ -n "$n" ] || continue
     other_sha="$(sha_of_branch "$ref" "$PREFIX")"
+    # Holds are decided ONCE, before any verdict, because the block below must apply on every
+    # path (CLOSE, STALE_KEEP, SKIP and coverage SKIP) — not only where a close was on the table.
+    # Two kinds: an owner/unknown-applied draft or `blocked` (compared pin-to-pin), and a legacy
+    # branch whose deploy_holds main lacks (compared hold-list-to-pin). Either can only live on
+    # that PR, so a survivor that pins any of the same services must not be armed.
+    applier=""
+    if [ "${held:-0}" = "1" ]; then
+      applier="$(hold_applier "$n")"
+      if [ "$applier" != "bot" ]; then
+        if keep_pins_ready && other_pins="$(pr_pins "$n")" \
+           && overlap="$(pin_overlap "$KEEP_PINS" "$other_pins")"; then
+          if [ -n "$overlap" ]; then
+            block "$n" "#$n is held (applier: $applier) and #$KEEP pins the same services — overlap: $(printf '%s' "$overlap" | tr '\n' ' ')"
+          else
+            echo "supersede: #$n is held (applier: $applier), but #$KEEP pins none of its services — not blocking."
+          fi
+        else
+          block "$n" "#$n is held (applier: $applier) and its pins vs #$KEEP's: overlap cannot be computed — failing closed"
+        fi
+      fi
+    fi
+    if ! pre_files="$(changed_files "$n")"; then
+      block "$n" "cannot read #$n's changed files, so whether it carries legacy deploy_holds is unknown — failing closed"
+    elif grep -qxF -- "$RULES_PATH" <<<"$pre_files"; then
+      if ! legacy="$(unmigrated_branch_holds "$n")"; then
+        block "$n" "cannot read #$n's branch deploy_holds against main — failing closed"
+      elif [ -n "$legacy" ]; then
+        legacy="$(printf '%s\n' "$legacy" | sort -u)"
+        if keep_pins_ready && overlap="$(pin_overlap "$KEEP_PINS" "$legacy")"; then
+          if [ -n "$overlap" ]; then
+            block "$n" "#$n carries deploy_holds not yet on main and #$KEEP pins them — overlap: $(printf '%s' "$overlap" | tr '\n' ' ')"
+          else
+            echo "supersede: #$n carries unmigrated deploy_holds, but #$KEEP pins none of them — not blocking."
+          fi
+        else
+          block "$n" "#$n carries deploy_holds not yet on main and its overlap with #$KEEP's pins cannot be computed — failing closed"
+        fi
+      fi
+    fi
     verdict="$(classify "$KEEP_SHA" "$other_sha")"
     if [ "$verdict" = "CLOSE" ]; then
       if [ "$keep_files_ok" -eq 1 ] && other_files="$(changed_files "$n")"; then
@@ -318,7 +437,6 @@ run() {
           fi
         fi
         if [ "${held:-0}" = "1" ]; then
-          applier="$(hold_applier "$n")"
           case "$applier" in
             bot)
               echo "supersede: #$n's draft/blocked state was applied only by automation — not an owner hold." ;;
@@ -377,9 +495,20 @@ EOF
 
   echo "supersede: #$KEEP (${KEEP_SHA:0:8}) — closed=$closed skipped=$skipped stale_keep=$stale_keep owner_held=$owner_held"
 
-  # Non-zero only when THIS PR must not be armed: it would roll services back, or the evidence
-  # needed to decide was unreadable. An owner-held predecessor no longer blocks it — holds are
-  # enforced on main, where auto-deploy already filtered this PR's services.
+  # Non-zero when THIS PR must not be armed: it would roll services back, it would deploy through
+  # an owner hold that is not on main yet, or the evidence needed to decide was unreadable.
+  if [ "$owner_block" -ne 0 ]; then
+    echo "::error::supersede: hold on${block_list} overlaps #$KEEP — refusing to let #$KEEP be armed."
+    if hold_noticed "$KEEP" "$BLOCK_NOTICE_MARKER"; then
+      :
+    elif [ "${DRY_RUN:-}" = "true" ]; then
+      echo "supersede: DRY_RUN — would post the owner-hold block notice on #$KEEP."
+    elif ! gh pr comment "$KEEP" --repo "$REPO" --body \
+"This deploy PR pins services that an owner holds on${block_list}, so it will not be armed. The owner hold on${block_list} must be recorded in main's \`rules.yaml: deploy_holds\` (or${block_list} released) before this PR can deploy. $BLOCK_NOTICE_MARKER"; then
+      echo "::warning::supersede: could not post the owner-hold block notice on #$KEEP."
+    fi
+    return 1
+  fi
   if [ "$stale_keep" -ne 0 ]; then
     return 1
   fi
@@ -468,6 +597,22 @@ case "$pr" in
   13032|13033) echo '' ;;
   13040|13041) echo 'openbank-infra/gitops/components/payments/payments-services.yaml' ;;
   13042|13043) echo 'openbank-infra/gitops/components/payments/payments-services.yaml'; exit 48 ;;
+  # owner-hold overlap fixtures (cases 37-41): keep 13061 shares kyc with 13060, 13062 shares
+  # nothing; 13064 cannot be read and 13065 pins nothing, so their overlap is not computable.
+  13060) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/kyc/kyc-service.yaml' \
+          'openbank-infra/gitops/components/fraud-service/fraud-service.yaml' ;;
+  13061) printf '%s\n%s\n' \
+          'openbank-infra/gitops/components/kyc/kyc-service.yaml' \
+          'openbank-infra/gitops/components/aml/aml-service.yaml' ;;
+  13062) printf '%s\n' 'openbank-infra/gitops/components/aml/aml-service.yaml' ;;
+  13064) exit 1 ;;
+  # image-identity fixtures (cases 42-44): one service pinned through two different filenames.
+  13070) printf '%s\n' 'openbank-infra/gitops/components/kyc/deployment.yaml' ;;
+  13071) printf '%s\n' 'openbank-infra/gitops/components/kyc/rollout.yaml' ;;
+  13072) printf '%s\n' 'openbank-infra/gitops/components/kyc/kyc-service.yaml' ;;
+  13073) printf '%s\n' 'openbank-infra/gitops/components/aml/rollout.yaml' ;;
+  13065) printf '%s\n' 'openbank-libs/governance/rules.yaml' ;;
   6222|6225|1|2) echo "openbank-infra/gitops/components/shared/shared-service.yaml" ;;
   7313) printf '%s\n' "openbank-infra/gitops/components/balances/balance-service.yaml" ;;
   7319) printf '%s\n' "openbank-infra/gitops/components/accounts/account-service.yaml" ;;
@@ -481,6 +626,34 @@ esac
 HOOK
   chmod +x "$tmp/files"
   export SUPERSEDE_FILES_HOOK="$tmp/files"
+  # Fake `gh pr diff` patches, keyed by PR number. `pin <file> <image>` emits one image-tag bump;
+  # `edit <file>` emits a changed line that names no image (an unmappable pin).
+  cat > "$tmp/patch" <<'HOOK'
+#!/usr/bin/env bash
+pin() { printf 'diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,3 +1,3 @@\n       containers:\n-          image: 123.dkr.ecr.example/%s:sandbox-old\n+          image: "123.dkr.ecr.example/%s:sandbox-new"\n' "$1" "$1" "$1" "$1" "$2" "$2"; }
+kpin() { printf 'diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,3 +1,3 @@\n images:\n   - name: 123.dkr.ecr.example/%s\n-    newTag: old\n+    newTag: new\n' "$1" "$1" "$1" "$1" "$2"; }
+edit() { printf 'diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,2 +1,2 @@\n-  replicas: 1\n+  replicas: 2\n' "$1" "$1" "$1" "$1"; }
+G=openbank-infra/gitops/components
+case "$1" in
+  11491) pin $G/sanctions-service/sanctions-service.yaml openbank-sanctions-service
+         if [ -n "${HOLD_BRANCH:-}" ]; then edit openbank-libs/governance/rules.yaml; fi ;;
+  11499) pin $G/sanctions-service/sanctions-service.yaml openbank-sanctions-service ;;
+  13060) pin $G/kyc/kyc-service.yaml openbank-kyc-service
+         pin $G/fraud-service/fraud-service.yaml openbank-fraud-service ;;
+  13061) pin $G/kyc/kyc-service.yaml openbank-kyc-service
+         pin $G/aml/aml-service.yaml openbank-aml-service ;;
+  13062) pin $G/aml/aml-service.yaml openbank-aml-service ;;
+  13064) exit 1 ;;
+  13065) edit openbank-libs/governance/rules.yaml ;;
+  13070) pin $G/kyc/deployment.yaml openbank-kyc-service ;;
+  13071) kpin $G/kyc/rollout.yaml openbank-kyc-service ;;
+  13072) edit $G/kyc/kyc-service.yaml ;;
+  13073) pin $G/aml/rollout.yaml openbank-aml-service ;;
+  *) exit 0 ;;
+esac
+HOOK
+  chmod +x "$tmp/patch"
+  export SUPERSEDE_PATCH_HOOK="$tmp/patch"
   local OLD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   local NEW=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   local P=chore/gitops-auto-deploy-
@@ -597,6 +770,7 @@ HOOK
 [ "${HOLD_NOTICED:-false}" = true ]
 HOOK
   chmod +x "$hb/gh" "$tmp/timeline" "$tmp/branchholds" "$tmp/notice"
+  # shellcheck disable=SC2030,SC2031  # deliberately subshell-local exports (see ov_run)
   hold_run() { # hold_run <timeline spec> [noticed] [branch-holds spec] -> rc; events in $hev
     : >"$hev"
     ( export PATH="$hb:$PATH" HOLD_EVENTS="$hev" HOLD_APPLIER="$1" HOLD_NOTICED="${2:-false}" \
@@ -628,14 +802,16 @@ HOOK
     echo "self-test case 31 OK (bot-applied draft/blocked -> superseded and closed)"
   fi
 
-  # case 32 — an owner-held predecessor is left open and untouched: exactly one one-line notice,
-  # posted once (a second run with the notice present posts nothing), nothing closed, rc 0.
+  # case 32 — an owner-held predecessor is left open and untouched: exactly one one-line notice on
+  # it, posted once (a second run with the notice present posts nothing), nothing closed. Its pins
+  # overlap the survivor's, so the run is non-zero (case 37); only the predecessor is asserted here.
+  older_mutations() { mutations | grep -vE '^pr comment 11499 ' || true; }
   out="$(hold_run owner 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 0 ] || [ "$(mutations)" != "pr comment 11491 --repo fixture/repo --body $HOLD_NOTICE_TEXT" ]; then
+  if [ "$rc" -eq 0 ] || [ "$(older_mutations)" != "pr comment 11491 --repo fixture/repo --body $HOLD_NOTICE_TEXT" ]; then
     echo "SELF-TEST FAIL case 32: owner hold was not left open with one notice; rc=$rc mutations=$(mutations | tr '\n' '|')"; ok=1; dump_out "$out"
   else
     out="$(hold_run owner true 2>&1)" && rc=0 || rc=$?
-    if [ "$rc" -ne 0 ] || [ -n "$(mutations)" ]; then
+    if [ "$rc" -eq 0 ] || [ -n "$(mutations)" ]; then
       echo "SELF-TEST FAIL case 32: repeated run touched the owner-held PR; mutations=$(mutations | tr '\n' '|')"; ok=1
     else
       echo "self-test case 32 OK (owner hold left open; notice posted once)"
@@ -645,7 +821,7 @@ HOOK
   # case 33 — an applier that cannot be established is treated as an owner hold, but without a
   # notice: nothing is closed, commented or written.
   out="$(hold_run unknown 2>&1)" && rc=0 || rc=$?
-  if [ -n "$(mutations)" ]; then
+  if [ -n "$(older_mutations)" ]; then
     echo "SELF-TEST FAIL case 33: unknown applier led to a mutation: $(mutations | tr '\n' '|')"; ok=1
   else
     echo "self-test case 33 OK (unknown applier -> left open, untouched)"
@@ -681,7 +857,7 @@ HOOK
   local bh
   for bh in 'openbank-kyc-service|openbank-fraud-service' ERR; do
     out="$(hold_run bot false "$bh" 2>&1)" || true
-    if [ -n "$(mutations)" ]; then
+    if [ -n "$(older_mutations)" ]; then
       echo "SELF-TEST FAIL case 36: branch holds '$bh' did not block closure: $(mutations | tr '\n' '|')"; ok=1; dump_out "$out"
     fi
   done
@@ -690,6 +866,142 @@ HOOK
     echo "SELF-TEST FAIL case 36: services to migrate were not reported"; ok=1; dump_out "$out"
   fi
   echo "self-test case 36 checked (unmigrated branch holds -> held, untouched, reported)"
+
+  # ── an owner hold on a predecessor blocks an OVERLAPPING survivor (#13531 regression) ────────
+  # The hold lives only on the older PR until it is copied to main's deploy_holds, so arming a
+  # newer PR that pins any of the same services deploys straight through it. Each case runs LIVE
+  # (fake gh) and asserts the exit code the arming step keys on.
+  local CCC=cccccccccccccccccccccccccccccccccccccccc
+  # Same isolated-subshell pattern as hold_run: the exports must NOT leak into later cases.
+  # shellcheck disable=SC2030,SC2031
+  ov_run() { # ov_run <timeline spec> <keep> <other> <other sha> [keep sha] [noticed] [held] [branch holds] -> rc
+    : >"$hev"
+    ( export PATH="$hb:$PATH" HOLD_EVENTS="$hev" HOLD_APPLIER="$1" HOLD_NOTICED="${6:-false}" \
+             HOLD_BRANCH="${8:-}" DRY_RUN=false REPO=fixture/repo \
+             SUPERSEDE_TIMELINE_HOOK="$tmp/timeline" SUPERSEDE_BRANCH_HOLDS_HOOK="$tmp/branchholds" \
+             SUPERSEDE_NOTICE_HOOK="$tmp/notice"
+      run "$P" "$2" "${5:-$NEW}" "$(printf '%s\t%s%s\t%s' "$3" "$P" "$4" "${7:-1}")" )
+  }
+  keep_noticed() { grep -cE "^pr comment $1 .*supersede-owner-hold-blocks" "$hev" || true; }
+  local path_sha path_name
+  # case 37 — owner hold + overlapping pins blocks the survivor on EVERY verdict path:
+  # coverage SKIP (ancestor, uncovered files), SKIP (diverged) and STALE_KEEP (keep is older).
+  for path_name in coverage-skip:$OLD diverged:$CCC; do
+    path_sha="${path_name#*:}"
+    out="$(ov_run owner 13061 13060 "$path_sha" 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
+       || [ "$(keep_noticed 13061)" != 1 ] || grep -q '^pr close' "$hev"; then
+      echo "SELF-TEST FAIL case 37 (${path_name%%:*}): owner hold + overlap did not block #13061; rc=$rc notices=$(keep_noticed 13061)"; ok=1; dump_out "$out"
+    fi
+  done
+  out="$(ov_run owner 13061 13060 "$NEW" "$OLD" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
+    echo "SELF-TEST FAIL case 37 (stale-keep): owner overlap not reported/noticed; rc=$rc"; ok=1; dump_out "$out"
+  fi
+  # CLOSE path: case 32's pair shares the sanctions manifest.
+  out="$(hold_run owner 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || [ "$(keep_noticed 11499)" != 1 ] || grep -q '^pr close' "$hev"; then
+    echo "SELF-TEST FAIL case 37 (close): owner-held ancestor with shared pins did not block #11499; rc=$rc"; ok=1; dump_out "$out"
+  fi
+  # A notice already present is not posted again; the block itself still holds.
+  out="$(ov_run owner 13061 13060 "$CCC" "$NEW" true 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || [ -n "$(mutations)" ]; then
+    echo "SELF-TEST FAIL case 37 (noticed): rc=$rc mutations=$(mutations | tr '\n' '|')"; ok=1
+  fi
+  echo "self-test case 37 checked (owner hold + overlap -> non-zero on close/coverage-skip/skip/stale paths, one notice)"
+
+  # case 38 — an unknown applier with overlapping pins blocks the same way.
+  out="$(ov_run unknown 13061 13060 "$CCC" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service'; then
+    echo "SELF-TEST FAIL case 38: unknown applier + overlap exited $rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 38 OK (unknown applier + overlap -> rc=$rc)"
+  fi
+
+  # case 39 — an owner hold on DISJOINT services does not block: rc 0, no survivor notice.
+  out="$(ov_run owner 13062 13060 "$CCC" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(keep_noticed 13062)" != 0 ]; then
+    echo "SELF-TEST FAIL case 39: owner hold on disjoint pins blocked #13062; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 39 OK (owner hold, disjoint pins -> rc=0)"
+  fi
+
+  # case 40 — a bot-applied state never blocks, overlap or not.
+  out="$(ov_run bot 13061 13060 "$CCC" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(keep_noticed 13061)" != 0 ]; then
+    echo "SELF-TEST FAIL case 40: bot-applied state blocked #13061; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 40 OK (bot-applied state + overlap -> rc=0)"
+  fi
+
+  # case 41 — overlap that cannot be computed (unreadable list, or no image pins) is a block.
+  local other
+  for other in 13064 13065; do
+    out="$(ov_run owner 13061 "$other" "$CCC" 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap cannot be computed'; then
+      echo "SELF-TEST FAIL case 41: uncomputable overlap with #$other exited $rc"; ok=1; dump_out "$out"
+    fi
+  done
+  echo "self-test case 41 checked (uncomputable overlap -> non-zero)"
+
+  # ── service identity is the IMAGE a pin edits, not the manifest's filename ──────────────────
+  # case 42 — one image pinned through two different filenames (deployment.yaml vs a kustomize
+  # newTag in rollout.yaml) is the same service: an owner hold on one blocks the other.
+  out="$(ov_run owner 13071 13070 "$CCC" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service'; then
+    echo "SELF-TEST FAIL case 42: same image through different filenames did not overlap; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 42 OK (same image, different filenames -> overlap, rc=$rc)"
+  fi
+  # case 43 — a changed manifest with no determinable image identity fails closed, on either side.
+  local c43=0
+  out="$(ov_run owner 13061 13072 "$CCC" 2>&1)" && rc=0 || rc=$?
+  { [ "$rc" -ne 0 ] && contains_text "$out" 'overlap cannot be computed'; } || c43=1
+  out="$(ov_run owner 13072 13062 "$CCC" 2>&1)" && rc=0 || rc=$?
+  { [ "$rc" -ne 0 ] && contains_text "$out" 'overlap cannot be computed'; } || c43=1
+  if [ "$c43" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 43: an unmappable manifest did not block"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 43 OK (unmappable manifest on either side -> non-zero)"
+  fi
+  # case 44 — disjoint images through the same filename (rollout.yaml) do not overlap.
+  out="$(ov_run owner 13073 13071 "$CCC" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 44: disjoint images blocked; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 44 OK (disjoint images, same filename -> rc=0)"
+  fi
+
+  # ── legacy branch holds block an overlapping survivor too, on every verdict path ─────────────
+  # #11491 is UNHELD (no draft/label) but its branch carries deploy_holds main lacks.
+  local lp
+  # case 45 — legacy holds overlapping the survivor's pins: coverage-close and diverged paths.
+  for lp in "$OLD" "$CCC"; do
+    out="$(ov_run bot 11499 11491 "$lp" "$NEW" false 0 'openbank-sanctions-service' 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-sanctions-service' \
+       || [ "$(keep_noticed 11499)" != 1 ] || grep -q '^pr close' "$hev"; then
+      echo "SELF-TEST FAIL case 45 (${lp:0:4}): legacy hold overlap did not block #11499; rc=$rc"; ok=1; dump_out "$out"
+    fi
+  done
+  out="$(ov_run bot 11499 11491 "$NEW" "$OLD" false 0 'openbank-sanctions-service' 2>&1)" && rc=0 || rc=$?
+  contains_text "$out" 'overlap: openbank-sanctions-service' \
+    || { echo "SELF-TEST FAIL case 45 (stale-keep): legacy overlap not reported"; ok=1; dump_out "$out"; }
+  echo "self-test case 45 checked (legacy branch holds + overlap -> non-zero on every path)"
+  # case 46 — an unreadable branch deploy_holds fails closed, on every path.
+  for lp in "$OLD" "$CCC"; do
+    out="$(ov_run bot 11499 11491 "$lp" "$NEW" false 0 ERR 2>&1)" && rc=0 || rc=$?
+    if [ "$rc" -eq 0 ] || grep -q '^pr close' "$hev"; then
+      echo "SELF-TEST FAIL case 46 (${lp:0:4}): unreadable legacy holds did not block; rc=$rc"; ok=1; dump_out "$out"
+    fi
+  done
+  echo "self-test case 46 checked (unreadable branch deploy_holds -> non-zero)"
+  # case 47 — legacy holds on services the survivor does not pin: not a block (left open, rc 0).
+  out="$(ov_run bot 11499 11491 "$CCC" "$NEW" false 0 'openbank-kyc-service' 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || [ "$(keep_noticed 11499)" != 0 ]; then
+    echo "SELF-TEST FAIL case 47: disjoint legacy holds blocked #11499; rc=$rc"; ok=1; dump_out "$out"
+  else
+    echo "self-test case 47 OK (legacy holds, disjoint pins -> rc=0)"
+  fi
 
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on
