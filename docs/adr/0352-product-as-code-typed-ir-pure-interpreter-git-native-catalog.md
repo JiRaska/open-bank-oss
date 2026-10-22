@@ -1,13 +1,14 @@
 ---
 date: 2026-10-22
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [product-catalog, interest, fees-billing, libs]
 summary: "Product behaviour becomes a typed, total, signed JSON IR authored in git and executed by one pure interpreter shared by production, simulation, CI and Studio; publishing needs both PR review and Studio role approval."
+followup: "#668 — phase 1 (IR, interpreter, finance primitives, golden runner, gates) built; phases 2-6 (signing, loader, openbank-products, consumers, simulation, Studio) unbuilt"
 ---
 
 # ADR-0352 — Product as Code: typed IR, pure interpreter, git-native product catalog

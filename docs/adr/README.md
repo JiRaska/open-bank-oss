@@ -352,7 +352,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0345](0345-catalog-packs-declare-revision-approval-policy-as-data-legacy-v1-vocabulary-is-frozen.md) | Catalog packs declare revision approval policy as data; legacy v1 vocabulary is frozen | Accepted | Partial | product-catalog,governance,api-contract | — |
 | [0346](0346-shared-library-delivery-and-quality-evidence.md) | Shared library delivery and quality evidence | Proposed | Partial | libs,architecture,testing,resilience | — |
 | [0347](0347-fraud-rule-thresholds-as-versioned-effective-dated-four-eyes-data.md) | Fraud rule thresholds as versioned effective-dated four-eyes data | Proposed | Shipped | fraud,governance,audit | — |
-| [0352](0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md) | Product as Code: typed IR, pure interpreter, git-native product catalog | Proposed | Planned | product-catalog,interest,fees-billing,libs | — |
+| [0352](0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md) | Product as Code: typed IR, pure interpreter, git-native product catalog | Proposed | Partial | product-catalog,interest,fees-billing,libs | — |
 
 ## By tag
 
