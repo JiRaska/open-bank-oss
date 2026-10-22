@@ -127,7 +127,7 @@ not change any existing request's outcome until explicitly flipped.
   libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -142,7 +142,7 @@ not change any existing request's outcome until explicitly flipped.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal clearing and transaction REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
 - **2026-05-30** — Added `swift_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
-  boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-23** — ADR-0104 D4: real ISO 20022 `pacs.008` submission to SWIFT SWIFTNet via
   `clearing-simulator`. New outbound trust boundary: `swift-service → clearing-simulator`
@@ -179,7 +179,7 @@ not change any existing request's outcome until explicitly flipped.
   annotations. Also updated `SwiftResourceAuthzTest`'s anonymous-access assertion (404 -> 401)
   to match the new `@RolesAllowed` outer gate.
 - **2026-07-08** — ADR-0155 four-eyes enforcement rollout (issue #413), mirroring the
-  sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + `ApprovalConfig`
+  sepa-payment pilot. New endpoint `PATCH /api/v1/swift/approvals/{id}` + ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (Redis-backed `ApprovalStore`) + `AuthorizeInterceptor` four-eyes gate (openbank-libs-runtime,
   shared, opt-in) on `swift.send`. New STRIDE supplement §4a; new residual risk noting
   `swift.send`'s `PendingApproval` has no `resourceId` binding (action-scoped only, no path
@@ -274,3 +274,7 @@ not change any existing request's outcome until explicitly flipped.
   the change: 6 rows, all `EUR` (5000–12345 minor units), so no stored row reads differently. The
   `GET`/`POST` response shape is held by a `SwiftMessageView` mirroring the former domain members.
   No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

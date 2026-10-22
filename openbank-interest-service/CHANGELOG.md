@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.24.0...interest-service-v0.24.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **account:** preserve booking proof across transaction client consumers ([#13222](https://github.com/JiRaska/open-bank-oss/issues/13222)) ([427ce5a](https://github.com/JiRaska/open-bank-oss/commit/427ce5a055719d8e5f0cc805f44b581b9bf5c55f))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.23.0...interest-service-v0.24.0) (2026-10-18)
 
 

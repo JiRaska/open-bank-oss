@@ -106,6 +106,10 @@ hodnoty a nezaznamená úspěch, takže gauge živosti workflow zestárne a spus
 alert. Pravidla alertů jsou v `prometheus-rules-pension-fund.yaml`, runbook v
 `docs/runbooks/pension-alerts.md`.
 
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.
+
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

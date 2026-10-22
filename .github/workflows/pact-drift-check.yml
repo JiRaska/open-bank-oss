@@ -15,6 +15,10 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      # Ledger regeneration loads this profile and its manifest before filtering tests.
+      - "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt"
+      - "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml"
+      - "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
@@ -27,6 +31,9 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/scripts/derive-pact-drift-scope.sh"
+      - ".github/scripts/classify-pact-drift-scope.py"
+      - ".github/scripts/test-classify-pact-drift-scope.py"
+      - ".github/scripts/test-admin-ui-pact-scope.py"
       - ".github/scripts/shard-pact-gradle-args.py"
       - ".github/scripts/test-shard-pact-gradle-args.py"
       - ".github/scripts/pact-js-contracts.py"
@@ -42,6 +49,10 @@ on:
     paths:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
+      # Ledger regeneration loads this profile and its manifest before filtering tests.
+      - "openbank-ledger-service/src/test/kotlin/com/openbank/ledger/integration/PensionCoInstanceSwitchesIT.kt"
+      - "openbank-infra/gitops/components/ledger-pension-co/ledger-service.yaml"
+      - "openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"
       - "openbank-admin-ui/**"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
@@ -53,6 +64,9 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/scripts/derive-pact-drift-scope.sh"
+      - ".github/scripts/classify-pact-drift-scope.py"
+      - ".github/scripts/test-classify-pact-drift-scope.py"
+      - ".github/scripts/test-admin-ui-pact-scope.py"
       - ".github/scripts/shard-pact-gradle-args.py"
       - ".github/scripts/test-shard-pact-gradle-args.py"
       - ".github/scripts/pact-js-contracts.py"
@@ -73,17 +87,62 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  gradle-pacts:
-    name: Regenerate JVM pacts (${{ matrix.shard }}/4)
+  pact-scope:
+    name: Classify Pact regeneration scope
     runs-on: ubuntu-latest
-    # A single 31-module invocation hit the 30-minute job timeout while still regenerating pacts.
-    # Four independent checkouts bound memory and wall time; the aggregator below proves that the
-    # union of their newly generated files is exactly the full derived JVM pact set.
+    outputs:
+      mode: ${{ steps.scope.outputs.mode }}
+      shards: ${{ steps.scope.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Select scoped mode only for a complete Admin UI-only diff
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BASE_SHA=""
+          if [ "$EVENT_NAME" = pull_request ]; then
+            BASE_SHA="$PR_BASE_SHA"
+          elif [ "$EVENT_NAME" = push ]; then
+            BASE_SHA="$PUSH_BASE_SHA"
+          fi
+          if [ -n "$BASE_SHA" ]; then
+            # The classifier itself must come from the event base, so a change to the policy file
+            # cannot authorize its own JVM-test skip. Missing base source selects the full run.
+            if git show "$BASE_SHA:.github/scripts/classify-pact-drift-scope.py" \
+                > "${RUNNER_TEMP}/classify-pact-drift-scope.py"; then
+              python3 "${RUNNER_TEMP}/classify-pact-drift-scope.py" \
+                --repo "$GITHUB_WORKSPACE" --base "$BASE_SHA" --head "$HEAD_SHA" \
+                --output "$GITHUB_OUTPUT"
+            else
+              echo "mode=full" >> "$GITHUB_OUTPUT"
+              echo 'shards=["0", "1", "2", "3"]' >> "$GITHUB_OUTPUT"
+              echo "Pact regeneration scope: full (base classifier unavailable)"
+            fi
+          else
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo 'shards=["0", "1", "2", "3"]' >> "$GITHUB_OUTPUT"
+            echo "Pact regeneration scope: full (non-PR event)"
+          fi
+
+  gradle-pacts:
+    name: Regenerate JVM pacts (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    needs: pact-scope
+    if: ${{ !cancelled() }}
+    # Successful UI-only classification creates one dynamically derived shard; missing or
+    # failed classification falls back to all four shards. The aggregator proves exact ownership.
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.pact-scope.result == 'success' && needs.pact-scope.outputs.mode == 'ui-only' && needs.pact-scope.outputs.shards == '["ui"]' && '["ui"]' || '["0", "1", "2", "3"]') }}
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
     steps:
@@ -98,15 +157,60 @@ jobs:
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - name: Derive and partition the complete JVM scope
+      - name: Derive and partition the JVM scope
         env:
           SHARD: ${{ matrix.shard }}
+          SCOPE_MODE: ${{ needs.pact-scope.outputs.mode }}
+          SCOPE_RESULT: ${{ needs.pact-scope.result }}
         run: |
           set -euo pipefail
           python3 .github/scripts/test-shard-pact-gradle-args.py
-          .github/scripts/derive-pact-drift-scope.sh > "${RUNNER_TEMP}/all-args.txt"
-          python3 .github/scripts/shard-pact-gradle-args.py \
-            "${RUNNER_TEMP}/all-args.txt" "$SHARD" 4 > "${RUNNER_TEMP}/shard-args.txt"
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = ui-only ]; then
+            [ "$SHARD" = ui ] || { echo "::error::Unexpected UI Pact shard: $SHARD"; exit 1; }
+            python3 .github/scripts/pact-js-contracts.py --self-test
+            .github/scripts/derive-pact-drift-scope.sh --self-test
+            .github/scripts/derive-pact-drift-scope.sh --admin-ui-selected-scope \
+              > "${RUNNER_TEMP}/admin-ui-jvm-scope.json"
+            python3 - "${RUNNER_TEMP}/admin-ui-jvm-scope.json" "${RUNNER_TEMP}/shard-args.txt" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          scope = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          tests = scope["tests"]
+          if not tests or any(len(item) != 2 or not all(item) for item in tests):
+              raise SystemExit("invalid or empty derived Admin UI JVM test scope")
+          lines = []
+          for module in sorted({item[0] for item in tests}):
+              if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", module):
+                  raise SystemExit("invalid derived Gradle module")
+              lines.extend([f":{module}:test", "--rerun"])
+              for test_class in sorted({item[1] for item in tests if item[0] == module}):
+                  if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)*", test_class):
+                      raise SystemExit("invalid derived Pact test class")
+                  lines.extend(["--tests", test_class])
+          Path(sys.argv[2]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+            python3 - "${RUNNER_TEMP}/admin-ui-jvm-scope.json" "${RUNNER_TEMP}/expected-jvm-pacts.txt" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          scope = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          selected = sorted(set(scope["selectedPacts"]))
+          consumer = set(scope["consumerPacts"])
+          if not selected or not consumer or not consumer <= set(selected):
+              raise SystemExit("selected JVM archive scope omits an Admin UI consumer pact")
+          if any(not path.startswith("pacts/") or ".." in Path(path).parts for path in selected):
+              raise SystemExit("invalid path in derived JVM pact scope")
+          Path(sys.argv[2]).write_text("".join(path + "\n" for path in selected), encoding="utf-8")
+          PY
+          else
+            .github/scripts/derive-pact-drift-scope.sh > "${RUNNER_TEMP}/all-args.txt"
+            python3 .github/scripts/shard-pact-gradle-args.py \
+              "${RUNNER_TEMP}/all-args.txt" "$SHARD" 4 > "${RUNNER_TEMP}/shard-args.txt"
+          fi
 
       - name: Regenerate this shard and archive only rewritten pacts
         env:
@@ -118,32 +222,42 @@ jobs:
           ./gradlew --continue "${GRADLE_ARGS[@]}"
           find pacts -maxdepth 1 -name '*.json' -newer "${RUNNER_TEMP}/pact-regen-marker" \
             -print | sort > "${RUNNER_TEMP}/regenerated.txt"
-          tar -cf "${RUNNER_TEMP}/shard-${SHARD}.tar" -T "${RUNNER_TEMP}/regenerated.txt"
+          tar -cf "${RUNNER_TEMP}/jvm-pacts-${SHARD}.tar" -T "${RUNNER_TEMP}/regenerated.txt"
 
       - name: Hand off this shard's regenerated contracts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: jvm-pacts-${{ matrix.shard }}
-          path: ${{ runner.temp }}/shard-${{ matrix.shard }}.tar
+          path: ${{ runner.temp }}/jvm-pacts-${{ matrix.shard }}.tar
           if-no-files-found: error
           retention-days: 7
 
   drift-check:
     name: Regenerate consumer pacts and diff against committed
-    needs: gradle-pacts
+    needs: [pact-scope, gradle-pacts]
     # Validate failed shards, but let a cancelled run stop before this downstream job.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Require every JVM shard to succeed
+      - name: Require the selected JVM Pact scope to succeed
         env:
-          SHARD_RESULT: ${{ needs.gradle-pacts.result }}
+          SCOPE_MODE: ${{ needs.pact-scope.outputs.mode }}
+          SCOPE_RESULT: ${{ needs.pact-scope.result }}
+          FULL_RESULT: ${{ needs.gradle-pacts.result }}
         run: |
-          [ "$SHARD_RESULT" = success ] || {
-            echo "::error::JVM pact regeneration did not complete in every shard: $SHARD_RESULT"
-            exit 1
-          }
+          set -euo pipefail
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = ui-only ]; then
+            [ "$FULL_RESULT" = success ] || {
+              echo "::error::Admin UI JVM Pact producers did not complete: $FULL_RESULT"
+              exit 1
+            }
+          else
+            [ "$FULL_RESULT" = success ] || {
+              echo "::error::Full JVM pact regeneration did not complete in every shard: $FULL_RESULT"
+              exit 1
+            }
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -171,17 +285,50 @@ jobs:
       # It is bash-3.2 clean, so it runs (and can be fed a failing case) on a dev machine too.
       - name: Verify publication boundaries
         run: |
+          python3 .github/scripts/test-classify-pact-drift-scope.py
+          python3 .github/scripts/test-admin-ui-pact-scope.py
           python3 .github/scripts/test-pact-archive-freshness.py
           python3 .github/scripts/test-publish-admin-ui-pacts.py
           python3 .github/scripts/test-await-admin-ui-pact-publication.py
 
       - name: Derive the set of modules to regenerate
+        env:
+          SCOPE_MODE: ${{ needs.pact-scope.outputs.mode }}
+          SCOPE_RESULT: ${{ needs.pact-scope.result }}
         run: |
           set -euo pipefail
           python3 .github/scripts/pact-js-contracts.py --self-test
           .github/scripts/derive-pact-drift-scope.sh --self-test
-          .github/scripts/derive-pact-drift-scope.sh --gated-pacts > "${RUNNER_TEMP}/expected-jvm-pacts.txt"
-          .github/scripts/derive-pact-drift-scope.sh --uncovered > "${RUNNER_TEMP}/pact-uncovered.txt"
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = ui-only ]; then
+            .github/scripts/derive-pact-drift-scope.sh --admin-ui-selected-scope \
+              > "${RUNNER_TEMP}/admin-ui-jvm-scope.json"
+            python3 - "${RUNNER_TEMP}/admin-ui-jvm-scope.json" \
+              "${RUNNER_TEMP}/all-jvm-pacts.txt" "${RUNNER_TEMP}/expected-jvm-pacts.txt" \
+              "${RUNNER_TEMP}/pact-uncovered.txt" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          scope_path, all_path, selected_path, uncovered_path = map(Path, sys.argv[1:])
+          scope = json.loads(scope_path.read_text(encoding="utf-8"))
+          all_pacts = sorted(set(scope["allJvmPacts"]))
+          selected = sorted(set(scope["selectedPacts"]))
+          consumer = set(scope["consumerPacts"])
+          uncovered = sorted(set(scope["uncoveredPacts"]))
+          if not all_pacts or not selected or not consumer or not consumer <= set(selected) or not set(selected) <= set(all_pacts):
+              raise SystemExit("Admin UI JVM scope is empty or not a subset of the complete derived JVM scope")
+          if any(not path.startswith("pacts/") or ".." in Path(path).parts
+                 for path in [*all_pacts, *selected, *consumer]):
+              raise SystemExit("invalid path in derived Admin UI JVM scope")
+          all_path.write_text("".join(path + "\n" for path in all_pacts), encoding="utf-8")
+          selected_path.write_text("".join(path + "\n" for path in selected), encoding="utf-8")
+          uncovered_path.write_text("".join(path + "\n" for path in uncovered), encoding="utf-8")
+          PY
+          else
+            .github/scripts/derive-pact-drift-scope.sh --gated-pacts > "${RUNNER_TEMP}/all-jvm-pacts.txt"
+            .github/scripts/derive-pact-drift-scope.sh --uncovered > "${RUNNER_TEMP}/pact-uncovered.txt"
+            cp -- "${RUNNER_TEMP}/all-jvm-pacts.txt" "${RUNNER_TEMP}/expected-jvm-pacts.txt"
+          fi
           python3 .github/scripts/pact-js-contracts.py --tests > "${RUNNER_TEMP}/pact-js-tests.txt"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -191,24 +338,34 @@ jobs:
           path: ${{ runner.temp }}/jvm-pacts
 
       - name: Verify shard coverage and restore regenerated JVM contracts
+        env:
+          SCOPE_MODE: ${{ needs.pact-scope.outputs.mode }}
+          SCOPE_RESULT: ${{ needs.pact-scope.result }}
         run: |
           set -euo pipefail
           : > "${RUNNER_TEMP}/observed-jvm-pacts.txt"
-          for shard in 0 1 2 3; do
-            archive="${RUNNER_TEMP}/jvm-pacts/shard-${shard}.tar"
+          if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = ui-only ]; then
+            archives=("${RUNNER_TEMP}/jvm-pacts/jvm-pacts-ui.tar")
+          else
+            archives=()
+            for shard in 0 1 2 3; do
+              archives+=("${RUNNER_TEMP}/jvm-pacts/jvm-pacts-${shard}.tar")
+            done
+          fi
+          for archive in "${archives[@]}"; do
             [ -f "$archive" ] || {
-              echo "::error::Missing regenerated Pact artifact for shard $shard"
+              echo "::error::Missing regenerated JVM Pact archive: $archive"
               exit 1
             }
             tar -tf "$archive" >> "${RUNNER_TEMP}/observed-jvm-pacts.txt"
           done
           if [ -n "$(sort "${RUNNER_TEMP}/observed-jvm-pacts.txt" | uniq -d)" ]; then
-            echo "::error::Two JVM shards generated the same pact; ownership is ambiguous"
+            echo "::error::Two JVM archives generated the same pact; ownership is ambiguous"
             exit 1
           fi
           if ! diff -u "${RUNNER_TEMP}/expected-jvm-pacts.txt" \
               <(sort "${RUNNER_TEMP}/observed-jvm-pacts.txt"); then
-            echo "::error::The JVM shards did not regenerate exactly the derived committed pact set"
+            echo "::error::JVM archives did not regenerate exactly the selected derived committed pact set"
             exit 1
           fi
           # Provenance is the exact validated archive set, not wall-clock ordering:
@@ -218,8 +375,8 @@ jobs:
             rm -f -- "$pact"
           done < "${RUNNER_TEMP}/expected-jvm-pacts.txt"
           touch "${RUNNER_TEMP}/pact-regen-marker"
-          for shard in 0 1 2 3; do
-            tar -xf "${RUNNER_TEMP}/jvm-pacts/shard-${shard}.tar"
+          for archive in "${archives[@]}"; do
+            tar -xf "$archive"
           done
           while IFS= read -r pact; do
             [ -f "$pact" ] && [ ! -L "$pact" ] || {
@@ -256,11 +413,14 @@ jobs:
           )
 
       # Belt to --rerun's braces. The diff step cannot tell "regenerated and identical" from
-      # "never regenerated" — both look clean. This can: every file under pacts/ must have been
-      # rewritten by the step above. It catches the UP-TO-DATE/FROM-CACHE skip if --rerun ever
-      # regresses, and it is the runtime proof that the derived scope actually covered what it
-      # claimed — a derivation bug would otherwise be as silent as the hand-written list was.
+      # "never regenerated" — both look clean. This proves each JVM output selected for this run
+      # came from its validated archive, and every PactJS output was rewritten after the marker.
+      # Full runs select all JVM outputs; Admin UI-only runs select the complete discovered JVM
+      # producer closure for that consumer while leaving other, unchanged JVM outputs untouched.
       - name: Verify every committed pact was actually regenerated
+        env:
+          SCOPE_MODE: ${{ needs.pact-scope.outputs.mode }}
+          SCOPE_RESULT: ${{ needs.pact-scope.result }}
         run: |
           set -euo pipefail
           uncovered="$(cat "${RUNNER_TEMP}/pact-uncovered.txt")"
@@ -275,6 +435,12 @@ jobs:
               [ -f "$f" ] && [ ! -L "$f" ] || stale="$stale $f"
               continue
             fi
+            if [ "$SCOPE_RESULT" = success ] && [ "$SCOPE_MODE" = ui-only ] && \
+                grep -qxF -- "$f" "${RUNNER_TEMP}/all-jvm-pacts.txt"; then
+              # The complete owner derivation proved this is a JVM pact outside the selected
+              # Admin UI-consumer producer closure; its inputs were unchanged by this UI-only PR.
+              continue
+            fi
             if [ ! "$f" -nt "${RUNNER_TEMP}/pact-regen-marker" ]; then
               stale="$stale $f"
             fi
@@ -285,7 +451,7 @@ jobs:
             echo "::error::The JVM/PactJS derivation did not put this consumer in scope, or its test task was skipped. Run derive-pact-drift-scope.sh and pact-js-contracts.py locally to inspect the scope."
             exit 1
           fi
-          echo "Coverage OK — every committed pact except the declared exclusions was regenerated by this run."
+          echo "Coverage OK — every pact in the selected JVM scope and every PactJS scope was regenerated."
           cp -- "${RUNNER_TEMP}/expected-jvm-pacts.txt" \
             "${RUNNER_TEMP}/verified-jvm-pacts.txt"
 

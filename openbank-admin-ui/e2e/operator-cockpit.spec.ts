@@ -152,7 +152,8 @@ test('Temporal and approvals show live source-backed state without inventing hum
     metrics: { workflows: { scheduled1h: 12, completed1h: 11, failed1h: 1, timedOut1h: 0 }, latency: { activityScheduleToStartMs: 20, workflowTaskScheduleToStartMs: 10, serverRequestP99Ms: 30 }, persistence: { requestsPerSec: 4 }, workers: { totalSlotsAvailable: 8, slotsUsed: 2 }, namespaces: ['openbank'] },
   })
   await page.goto('/temporal')
-  await expect(page.getByText(/Provozní|Running/)).toBeVisible()
+  await expect(page.getByText(/Metriky Temporal nalezeny|Temporal metrics observed/)).toBeVisible()
+  await expect(page.getByText(/^(Provozní|Running)$/)).toHaveCount(0)
   await page.getByRole('button', { name: /Metriky|Metrics/ }).click()
   await expect(page.getByRole('heading', { name: /Workflowy \(posledních 60 minut\)|Workflows \(last 60 minutes\)/ })).toBeVisible()
   await expect(page.getByLabel(/^(Spuštěno|Scheduled): 12$/)).toBeVisible()

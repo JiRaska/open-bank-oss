@@ -192,6 +192,104 @@ GOT_AL="$(RECONCILE_SERVICES='openbank-stale-svc openbank-placeholder-svc openba
             bash "$PROBE" "$WORK/gitops")"
 [ "$(sorted "$GOT_AL")" = "$(sorted "$WANT_AL")" ] || fail "allowlist filter" "$WANT_AL" "$GOT_AL"
 
+# Explicit targets narrow the stale candidate set BEFORE ranking/capping. A targeted manual
+# reconcile can therefore re-offer one stranded image without building the other laggers.
+GOT_TARGET="$(RECONCILE_SERVICES='openbank-stale-svc openbank-lib-svc openbank-current-svc' \
+  RECONCILE_TARGETS='openbank-lib-svc' RECONCILE_MAX=1 \
+  bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+[ "$(jq -c . <<< "$GOT_TARGET")" = '["openbank-lib-svc"]' ] \
+  || fail "target filter runs before cap and returns only requested stale service" \
+    '["openbank-lib-svc"]' "$GOT_TARGET"
+GOT_TARGET_SET="$(RECONCILE_SERVICES='openbank-stale-svc openbank-lib-svc openbank-current-svc' \
+  RECONCILE_TARGETS='openbank-lib-svc openbank-stale-svc' \
+  bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+[ "$(sorted "$GOT_TARGET_SET")" = '["openbank-lib-svc","openbank-stale-svc"]' ] \
+  || fail "multiple explicitly targeted stale services are selected together" \
+    '["openbank-lib-svc","openbank-stale-svc"]' "$GOT_TARGET_SET"
+GOT_TARGET_CURRENT="$(RECONCILE_SERVICES='openbank-current-svc' \
+  RECONCILE_TARGETS='openbank-current-svc' bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+[ "$(jq -c . <<< "$GOT_TARGET_CURRENT")" = '[]' ] \
+  || fail "requested up-to-date service is not rebuilt" '[]' "$GOT_TARGET_CURRENT"
+
+expect_target_failure() {
+  local label="$1" allowlist="$2" targets="$3"
+  if RECONCILE_SERVICES="$allowlist" RECONCILE_TARGETS="$targets" \
+       bash "$PROBE" "$WORK/gitops" >/dev/null 2>&1; then
+    echo "FAIL: targeted reconcile accepted ${label}"; exit 1
+  fi
+}
+expect_target_failure "an unbuildable/unknown service" \
+  'openbank-stale-svc' 'openbank-foreign-svc'
+expect_target_failure "a service with no GitOps image pin" \
+  'openbank-no-manifest-svc' 'openbank-no-manifest-svc'
+expect_target_failure "duplicate service names" \
+  'openbank-stale-svc' 'openbank-stale-svc openbank-stale-svc'
+expect_target_failure "more than three services" \
+  'openbank-stale-svc openbank-lib-svc openbank-placeholder-svc openbank-current-svc' \
+  'openbank-stale-svc openbank-lib-svc openbank-placeholder-svc openbank-current-svc'
+expect_target_failure "a selector without the buildable allowlist" \
+  '' 'openbank-stale-svc'
+expect_target_failure "a malformed service name" \
+  'openbank-stale-svc' '../openbank-stale-svc'
+expect_target_failure "a whitespace-only targeted service list" \
+  'openbank-stale-svc' $' \t\n\t '
+
+# Keep the workflow input wired only through the reconcile path and anchored to current main.
+WORKFLOW="${SCRIPT_DIR}/../workflows/auto-deploy.yml"
+VALIDATOR="${SCRIPT_DIR}/validate-auto-deploy-reconcile-inputs.sh"
+validate_dispatch() {
+  INPUT_RECONCILE_SERVICES="${1:-}" \
+    INPUT_RECONCILE="${2:-}" \
+    INPUT_CODEPLOY="${3:-false}" \
+    INPUT_CODEPLOY_PACT_VERSIONS="${4:-}" \
+    INPUT_BOOTSTRAP_IMAGE_ONLY="${5:-false}" \
+    bash "$VALIDATOR" >/dev/null 2>&1
+}
+if validate_dispatch '' '' true '{"openbank-stale-svc":"0123456789012345678901234567890123456789"}' true; then
+  echo 'ok: unrelated dispatch inputs bypass targeted-reconcile-only guards'
+else
+  echo 'FAIL: non-targeted dispatch unexpectedly failed targeted-reconcile validation'; exit 1
+fi
+if validate_dispatch 'openbank-stale-svc' false; then
+  echo 'FAIL: targeted reconcile without reconcile=true was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile requires reconcile=true'
+fi
+if validate_dispatch 'openbank-stale-svc' true true; then
+  echo 'FAIL: targeted reconcile with co-deploy was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects co-deploy'
+fi
+if validate_dispatch 'openbank-stale-svc' true false '{"openbank-stale-svc":"0123456789012345678901234567890123456789"}'; then
+  echo 'FAIL: targeted reconcile with Pact replay was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects Pact replay'
+fi
+if validate_dispatch 'openbank-stale-svc' true false '' true; then
+  echo 'FAIL: targeted reconcile with bootstrap_image_only was accepted'; exit 1
+else
+  echo 'ok: targeted reconcile rejects bootstrap_image_only'
+fi
+if validate_dispatch 'openbank-stale-svc' true; then
+  echo 'ok: valid targeted reconcile dispatch inputs are accepted'
+else
+  echo 'FAIL: valid targeted reconcile dispatch inputs were rejected'; exit 1
+fi
+grep -Fq 'reconcile_services:' "$WORKFLOW" \
+  || { echo 'FAIL: workflow_dispatch has no reconcile_services input'; exit 1; }
+grep -Fq 'INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}' "$WORKFLOW" \
+  || { echo 'FAIL: workflow does not pass reconcile_services to the selector'; exit 1; }
+grep -Fq 'bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh' "$WORKFLOW" \
+  || { echo 'FAIL: workflow does not validate targeted reconcile inputs'; exit 1; }
+grep -Fq 'reconcile_services requires reconcile=true' "$VALIDATOR" \
+  || { echo 'FAIL: workflow accepts reconcile_services outside reconciliation'; exit 1; }
+grep -Fq 'targeted reconcile requires this run'"'"'s source SHA to be current main' "$WORKFLOW" \
+  || { echo 'FAIL: targeted reconciliation is not pinned to current main'; exit 1; }
+grep -Fq 'targeted reconcile cannot use co-deploy or Pact replay inputs' "$VALIDATOR" \
+  || { echo 'FAIL: targeted reconciliation does not reject co-deploy/Pact replay'; exit 1; }
+grep -Fq 'targeted reconcile cannot be combined with bootstrap_image_only' "$VALIDATOR" \
+  || { echo 'FAIL: targeted reconciliation does not reject image-only bootstrap'; exit 1; }
+
 # A held placeholder would rank first. It must be removed BEFORE the one-service
 # cap so the healthy stale service gets this tick. Once the hold is removed, the
 # still-stale placeholder is offered again without any special recovery action.
@@ -225,4 +323,4 @@ if [ "$(jq -c . <<< "$GOT2")" != "[]" ]; then
   exit 1
 fi
 
-echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, loop-stability"
+echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, target-only stale selection/validation, loop-stability"

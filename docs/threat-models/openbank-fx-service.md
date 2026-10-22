@@ -66,7 +66,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
   a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -157,7 +157,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   correctly, which is what makes this one identifiable as a typo rather than a renamed control.
 
 - **2026-05-30** — Added `fx_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
-  boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
+  boundary. Risk class = **availability**, mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`).
   Rollback: `DROP SEQUENCE`.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `fx-service → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.
@@ -272,3 +272,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

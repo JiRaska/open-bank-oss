@@ -16,14 +16,31 @@
 # settle and publish run this script as it exists on origin/main, under `python3 -I -S`, with no
 # system or global git config, and never check out, install or execute anything from a PR.
 #
-# PHASE 0 (now): MERGE_TRAIN_SHADOW=true — settle posts statuses and comments, merges nothing;
-# strict up-to-date stays on. PHASE 1: the owner adds `merge-train` (pinned to the App) to the
-# required contexts, turns strict off (commands in the ADR), and a follow-up PR flips the env.
+# PHASE 1: MERGE_TRAIN_SHADOW=false, but settle merges only once the LIVE ruleset says so: `merge-train`
+# is a required context pinned to this App (GITOPS_APP_ID) AND strict up-to-date is off. Until then it
+# behaves as shadow (statuses and comments, no merge) and logs why, so the order of this flag and the
+# owner's ruleset change (commands in ADR-0343) is irrelevant. Rollback is the ruleset revert alone.
 name: Merge train
 
+# EVENT-DRIVEN (#13400): the train is fired by every change it waits on, and the cron is only a
+# fallback heartbeat (GitHub ran 127 of ~235 expected `*/10` ticks over 39 h, median gap 17 min).
+# Triggers carry NO authority: no job reads any `github.event` field, every checkout is `ref: main`,
+# and settle/build/publish judge only live state, so a fork's arming or a non-required workflow
+# can at most cause one more read-only pass. The `merge-train` concurrency group below coalesces
+# bursts: one run in flight, at most ONE pending (a newer queued run replaces the older pending one).
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/10 * * * *"   # heartbeat fallback only
+  push:
+    branches: [main]         # main moved: strict-lane heads are behind, a carrier base is stale
+  workflow_run:
+    # Producers of the required contexts (main-protection) and of the extra gate (Security scan),
+    # on PRs, carriers and main. Names are workflow `name:` values.
+    workflows: ["Services CI", "CI", "Secret scan", "OPA policy", "Security scan", "Issue hygiene"]
+    types: [completed]
+  pull_request_target:
+    # Runs in the BASE context; nothing here checks out or executes the PR (all jobs use ref: main).
+    types: [auto_merge_enabled]
   workflow_dispatch:
     inputs:
       batch_size:
@@ -42,7 +59,7 @@ concurrency:
 env:
   # Shadow mode is the default (ADR-0343 phase 0). Flip to "false" only after the ruleset
   # requires `merge-train` and strict is off.
-  MERGE_TRAIN_SHADOW: "true"
+  MERGE_TRAIN_SHADOW: "false"
 
 jobs:
   settle:
@@ -71,6 +88,7 @@ jobs:
         id: settle
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}  # an id, not a credential; the guard pins the ruleset to it
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}
           # Isolated git config for THIS step only. At job level it also reached actions/checkout,

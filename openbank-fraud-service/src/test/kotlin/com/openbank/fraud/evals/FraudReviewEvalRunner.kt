@@ -10,6 +10,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.rules.FraudRuleEngine
+import com.openbank.fraud.domain.rules.FraudThresholdFixtures
 import java.time.Clock
 import java.time.Instant
 
@@ -52,7 +53,7 @@ object FraudReviewEvalRunner {
 
     /** Pure — the one comparison the whole gate rests on. No I/O, no clock, no randomness. */
     fun evaluate(scenario: FraudReviewScenario): ScenarioResult {
-        val score = FraudRuleEngine.score(scenario.request)
+        val score = FraudRuleEngine.score(scenario.request, FraudThresholdFixtures.SEED_V1)
         val missing = scenario.expectedReasons.filterNot { expected ->
             score.reasons.any { it.equals(expected, ignoreCase = true) }
         }

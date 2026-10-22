@@ -2,7 +2,7 @@
 import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-const sample = { services: [{ name: 'ledger-service', port: 8101, status: 'UP', reachable: true, latencyMs: 12 }] }
+const sample = { source: 'kubernetes', discoveryStatus: 'complete', services: [{ name: 'ledger-service', port: 8101, status: 'UP', reachable: true, latencyMs: 12 }] }
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
@@ -54,7 +54,7 @@ test('a real outage remains visible with a readable narrow summary', async ({ pa
   await page.setViewportSize({ width: 390, height: 844 })
   await page.route('**/api/services/health', route => route.fulfill({
     status: 200, contentType: 'application/json',
-    body: JSON.stringify({ services: [{ ...sample.services[0], status: 'DOWN', reachable: false }] }),
+    body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [{ ...sample.services[0], status: 'DOWN', reachable: false }] }),
   }))
   await page.goto('/system/health')
   const main = page.locator('main')
@@ -72,7 +72,7 @@ test('same-named workloads retain distinct namespace and health on narrow cards'
   await page.setViewportSize({ width: 390, height: 844 })
   await page.route('**/api/services/health', route => route.fulfill({
     status: 200, contentType: 'application/json',
-    body: JSON.stringify({ services: [
+    body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [
       { ...sample.services[0], namespace: 'tenant-a' },
       { ...sample.services[0], namespace: 'tenant-b', status: 'DOWN', reachable: false },
     ] }),

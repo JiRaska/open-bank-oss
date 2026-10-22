@@ -18,6 +18,8 @@ import { cn } from '@/lib/utils'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { EVENT_INSIGHTS } from '@/components/insights/catalog'
 import { parseInfrastructureStatuses, type InfrastructureStatus, type InfrastructureStatusResult } from '@/lib/infra/statusContract'
+import { classifyBffFailure } from '@/lib/services/bff'
+import { usePlatformView } from '@/lib/use-platform-view'
 
 type InfraStatus = InfrastructureStatus
 
@@ -29,17 +31,18 @@ interface InfraComponent {
 }
 
 const INFRA_COMPONENTS: InfraComponent[] = [
-  { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 via Gatus',                  icon: <Database size={20} /> },
-  { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9092 via Gatus',                  icon: <Layers size={20} /> },
-  { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /health/ready via Gatus',         icon: <Lock size={20} /> },
-  { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'TCP :6379 via Gatus',                  icon: <HardDrive size={20} /> },
-  { id: 'openbao',         name: 'OpenBao',            probeNote: 'HTTP /v1/sys/health via Gatus',        icon: <Lock size={20} /> },
-  { id: 'schema-registry', name: 'Schema Registry',   probeNote: 'HTTP :8081 via Gatus',                 icon: <Server size={20} /> },
-  { id: 'grafana',         name: 'Grafana',            probeNote: 'HTTP /api/health via Gatus',           icon: <Eye size={20} /> },
-  { id: 'prometheus',      name: 'Prometheus',         probeNote: 'HTTP /-/healthy via Gatus',            icon: <Activity size={20} /> },
-  { id: 'loki',            name: 'Loki',               probeNote: 'HTTP /ready via Gatus',                icon: <Activity size={20} /> },
-  { id: 'tempo',           name: 'Tempo',              probeNote: 'HTTP /ready via Gatus',                icon: <Activity size={20} /> },
-  { id: 'kafka-ui',        name: 'Kafka UI',           probeNote: 'HTTP /actuator/health via BFF',        icon: <LayoutTemplate size={20} /> },
+  { id: 'postgres',        name: 'PostgreSQL',        probeNote: 'TCP :5432 service probe',              icon: <Database size={20} /> },
+  { id: 'clickhouse',      name: 'ClickHouse',        probeNote: 'Configured endpoint TCP reachability', icon: <Database size={20} /> },
+  { id: 'kafka',           name: 'Apache Kafka',       probeNote: 'TCP :9093 mTLS listener',               icon: <Layers size={20} /> },
+  { id: 'keycloak',        name: 'Keycloak IAM',       probeNote: 'HTTP /realms/master',                   icon: <Lock size={20} /> },
+  { id: 'valkey',          name: 'Valkey (Cache)',      probeNote: 'Prometheus readiness (≤2m sample age)', icon: <HardDrive size={20} /> },
+  { id: 'openbao',         name: 'OpenBao',            probeNote: 'HTTP /v1/sys/health',                    icon: <Lock size={20} /> },
+  { id: 'schema-registry', name: 'Schema Registry',   probeNote: 'TCP :8080 service probe',              icon: <Server size={20} /> },
+  { id: 'grafana',         name: 'Grafana',            probeNote: 'HTTP /api/health',                      icon: <Eye size={20} /> },
+  { id: 'prometheus',      name: 'Prometheus',         probeNote: 'HTTP /-/ready',                         icon: <Activity size={20} /> },
+  { id: 'loki',            name: 'Loki',               probeNote: 'HTTP /ready',                           icon: <Activity size={20} /> },
+  { id: 'tempo',           name: 'Tempo',              probeNote: 'TCP :3200 service probe',              icon: <Activity size={20} /> },
+  { id: 'kafka-ui',        name: 'Kafka UI',           probeNote: 'HTTP /actuator/health',                icon: <LayoutTemplate size={20} /> },
   // Expanded observability stack (ADR-0077/0079/0088), all in the observability namespace.
   { id: 'pyroscope',       name: 'Pyroscope',          probeNote: 'TCP :4040 · continuous profiling',     icon: <Activity size={20} /> },
   { id: 'alertmanager',    name: 'Alertmanager',       probeNote: 'TCP :9093 · alert routing',            icon: <AlertTriangle size={20} /> },
@@ -74,6 +77,10 @@ function InfrastructureStatusBadge({ status }: { status: InfraStatus }) {
 
 export default function InfrastructurePage() {
   const { t, language } = useLanguage()
+  const platformView = usePlatformView()
+  const declaredApplications = platformView?.inventory?.gitops?.applications
+  const helmReleaseDeclarations = platformView?.inventory?.iac?.helmReleaseDeclarations
+  const moduleTraversalGaps = platformView?.inventory?.iac?.moduleTraversalGaps
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, StatusResult>>({})
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -99,7 +106,7 @@ export default function InfrastructurePage() {
     try {
       const res = await fetch('/api/infra/kafka-topics', { cache: 'no-store' })
       if (!res.ok) {
-        setKafkaUnavailable({ kind: 'not_deployed' })
+        setKafkaUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
       const data = await res.json() as { topics: KafkaTopic[]; clusterName: string }
@@ -117,7 +124,7 @@ export default function InfrastructurePage() {
     try {
       const res = await fetch('/api/infra/status', { cache: 'no-store' })
       if (!res.ok) {
-        setUnavailable({ kind: res.status === 404 ? 'not_deployed' : 'unreachable' })
+        setUnavailable({ kind: await classifyBffFailure(res) })
       } else {
         try {
           setStatuses(parseInfrastructureStatuses(await res.json() as unknown))
@@ -163,6 +170,8 @@ export default function InfrastructurePage() {
 
   const upCount = Object.values(statuses).filter(s => s.status === 'UP').length
   const totalCount = INFRA_COMPONENTS.length
+  const downCount = Object.values(statuses).filter(s => s.status === 'DOWN').length
+  const unknownCount = Math.max(0, totalCount - upCount - downCount)
   const attention = Object.values(lifecycle).filter(c => ['vulnerable', 'eol-soon', 'eol'].includes(c.urgency)).length
   const upgradable = Object.values(lifecycle).filter(c => c.urgency === 'patch-available' || c.urgency === 'major-available').length
 
@@ -180,8 +189,8 @@ export default function InfrastructurePage() {
             </span>
           )}
           {!loading && !unavailable && (
-            <span style={{ fontSize: '11px', color: upCount === totalCount ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
-              {upCount}/{totalCount} UP
+            <span role="status" style={{ fontSize: '11px', color: downCount > 0 ? 'var(--danger)' : unknownCount > 0 ? 'var(--warning-text)' : 'var(--success)', fontWeight: 600 }}>
+              {upCount}/{totalCount} UP · {downCount} DOWN · {unknownCount} UNKNOWN
             </span>
           )}
           {attention > 0 && (
@@ -213,7 +222,7 @@ export default function InfrastructurePage() {
         }}>
           <DataUnavailable
             kind={unavailable.kind}
-            service={t('Gatus monitoring agent', 'Gatus monitoring agent')}
+            service={t('Sonda infrastruktury', 'Infrastructure probe')}
             feature={t('Stav infrastruktury', 'Infrastructure status')}
             lang={language}
             detail={Object.keys(statuses).length > 0
@@ -366,6 +375,125 @@ export default function InfrastructurePage() {
           )}
         </>
       )}
+      <section aria-labelledby="declared-applications-title" style={{ marginTop: '32px', marginBottom: '32px' }}>
+        <h2 id="declared-applications-title" style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <LayoutTemplate size={16} color="var(--info)" />
+          {t('Deklarované GitOps aplikace', 'Declared GitOps applications')}
+        </h2>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+          {t(
+            'Zdrojový inventář deklarací. Neprokazuje nasazení, běh ani úplnost platformy; živé sondy jsou uvedeny výše.',
+            'Source inventory of declarations. It does not prove deployment, runtime, or platform completeness; live probes are shown above.',
+          )}
+        </p>
+        {!declaredApplications ? (
+          <div className="card" role="status" style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+            {t('Inventář deklarovaných aplikací není dostupný.', 'Declared application inventory is unavailable.')}
+          </div>
+        ) : (
+          <details style={{ marginBottom: '16px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', padding: '10px 0' }}>
+              {t('Deklarace GitOps aplikací', 'GitOps application declarations')} ({declaredApplications.length})
+            </summary>
+            {declaredApplications.length === 0 ? (
+              <div role="status" className="card" style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                {t('Inventář neobsahuje žádné záznamy aplikací.', 'The inventory contains no application records.')}
+              </div>
+            ) : (
+              <div className="card" style={{ padding: '0', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Deklarace', 'Declaration')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Namespace', 'Namespace')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Zdroj', 'Source')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Mapování workloadu', 'Workload mapping')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {declaredApplications.map((application, index) => (
+                      <tr key={`${application.sourceFile}:${index}`} style={{ borderBottom: index === declaredApplications.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-primary)' }}>
+                          <div style={{ fontWeight: 600 }}>{application.name ?? t('Neznámá deklarace', 'Unknown declaration')}</div>
+                          <div style={{ color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{application.sourceFile}</div>
+                          {application.kind === 'unknown' && <div style={{ color: 'var(--warning-text)' }}>{t('Typ deklarace neznámý', 'Declaration type unknown')}</div>}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{application.namespace ?? t('Neznámý', 'Unknown')}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                          {application.sources.length === 0 ? t('Neznámý zdroj', 'Unknown source') : application.sources.map((source, sourceIndex) => (
+                            <div key={`${source.kind}:${sourceIndex}`} style={{ overflowWrap: 'anywhere' }}>
+                              {source.kind === 'helm-chart' ? `Helm chart: ${source.chart}` : source.kind === 'manifest-path' ? `Manifest path: ${source.path}` : t('Neznámý zdroj', 'Unknown source')}
+                            </div>
+                          ))}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                          {application.workloadMapping === 'unknown' ? t('Neznámé; pouze deklarace', 'Unknown; declaration only') : t('Neznámé', 'Unknown')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </details>
+        )}
+        {!helmReleaseDeclarations ? (
+          <div role="status" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            {t('Inventář Helm deklarací není dostupný.', 'Helm declaration inventory is unavailable.')}
+          </div>
+        ) : (
+          <details style={{ marginBottom: '16px' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', padding: '10px 0' }}>
+              {t('Deklarace Helm release v IaC', 'IaC Helm release declarations')} ({helmReleaseDeclarations.length})
+              {moduleTraversalGaps && moduleTraversalGaps.length > 0 && ` · ${t('mezery v procházení modulů', 'module traversal gaps')}: ${moduleTraversalGaps.length}`}
+            </summary>
+            {helmReleaseDeclarations.length === 0 ? (
+              <div role="status" className="card" style={{ padding: '16px', color: 'var(--text-secondary)' }}>
+                {t('Inventář neobsahuje žádné záznamy Helm deklarací.', 'The inventory contains no Helm declaration records.')}
+              </div>
+            ) : (
+              <div className="card" style={{ padding: '0', overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Prostředí', 'Environment')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Deklarace', 'Declaration')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Zdroj', 'Source')}</th>
+                      <th style={{ padding: '10px 14px', fontWeight: 600 }}>{t('Rozbalení instance', 'Instance expansion')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {helmReleaseDeclarations.map((release, index) => (
+                      <tr key={`${release.environment}:${release.sourceFile}:${release.address}:${index}`} style={{ borderBottom: index === helmReleaseDeclarations.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{release.environment}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{release.address}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace', overflowWrap: 'anywhere' }}>{release.sourceFile}</td>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
+                          {release.instanceExpansion === 'unknown' ? t('Neznámé; deklarace není instance', 'Unknown; declaration is not an instance') : t('Neznámé', 'Unknown')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </details>
+        )}
+        {moduleTraversalGaps && moduleTraversalGaps.length > 0 && (
+          <div role="status" className="card" style={{ padding: '16px', marginTop: '8px', borderColor: 'var(--warning)' }}>
+            <div style={{ fontWeight: 600, marginBottom: '8px', color: 'var(--warning-text)' }}>
+              {t('Inventář IaC je částečný: neprošly všechny moduly.', 'IaC inventory is partial: some modules could not be traversed.')}
+            </div>
+            <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+              {moduleTraversalGaps.map((gap, index) => (
+                <li key={`${gap.environment}:${gap.modulePath}:${index}`}>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{gap.environment}: {gap.modulePath}</span> — {gap.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

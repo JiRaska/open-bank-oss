@@ -103,9 +103,11 @@ jobs:
             git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags
             # The extra pathspecs are the governance gate's INPUTS, not UI code:
             # every per-service governance.yaml, plus the schema it validates them
-            # against. The generator itself lives under openbank-admin-ui/.
+            # against, plus the backend OpenAPI consumed by the catalog type generator.
+            # The generators themselves live under openbank-admin-ui/.
             N=$(git diff --name-only "${BASE}...HEAD" -- \
                   openbank-admin-ui/ \
+                  openbank-product-catalog/src/main/resources/openapi.yaml \
                   '*/governance.yaml' \
                   openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
@@ -448,6 +450,9 @@ jobs:
       # commit (the sha an image tag names) through the contents API, because CI checks out
       # at fetch-depth: 1 and GitHub will not serve an arbitrary sha to `git fetch`.
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # An id, not a credential: check-deploy-holds.py (gate deploy-hold-image-pins) accepts a
+      # `merge-train` context pinned to this App in place of strict up-to-date (ADR-0343).
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -467,6 +472,16 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26"
+
+      # The evidence publisher governance tests include the strict source-content schema,
+      # which imports the UI's YAML/Zod runtime. The parallel governance-manifest gate also
+      # needs jsdom, so install the complete locked graph before starting gates. This avoids
+      # a second npm ci replacing node_modules while another gate reads the schema.
+      - name: Install locked Admin UI dependencies before parallel governance gates
+        if: contains(matrix.groups, 'supplychain')
+        run: |
+          source .github/scripts/ensure-admin-ui-deps.sh
+          ensure_admin_ui_deps "governance-preflight"
 
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
       # be installed inside the gen-network-policies gate, which happened to be the first
@@ -604,7 +619,9 @@ jobs:
         with:
           # matrix.slug, not matrix.groups: a space is not valid in an artifact name, and
           # this must match the --json path above exactly or the upload finds no file.
-          name: gate-results-${{ matrix.slug }}
+          # A rerun retains artifacts from earlier attempts of the same run. Keep the
+          # evidence tied to the attempt whose gate job produced it.
+          name: gate-results-${{ matrix.slug }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/gate-results-${{ matrix.slug }}.json
           if-no-files-found: warn
           retention-days: 90

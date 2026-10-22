@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.2...risk-engine-v0.28.0) (2026-10-21)
+
+
+### Features
+
+* **risk-engine:** value the own treasury book on a shared schedule and pricing engine (ADR-0344) ([#13408](https://github.com/JiRaska/open-bank-oss/issues/13408)) ([9c311d0](https://github.com/JiRaska/open-bank-oss/commit/9c311d082d452bfb76d6347b1830ce6008ac5c92))
+
 ## [0.27.2](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.1...risk-engine-v0.27.2) (2026-10-14)
 
 

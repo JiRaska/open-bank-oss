@@ -27,6 +27,8 @@ export interface InfraStatusResult {
 type InfraProbe =
   | { kind: 'http'; url: string; okCodes?: number[] }
   | { kind: 'tcp'; host: string; port: number }
+  | { kind: 'configured-tcp'; urlEnv: 'CLICKHOUSE_URL' }
+  | { kind: 'prometheus-deployment'; namespace: string; deployment: string }
   | { kind: 'absent' } // not deployed in this topology → UNKNOWN, never a false DOWN
 
 export interface InfraDef {
@@ -42,10 +44,13 @@ export interface InfraDef {
 // keys consumed by /docs/bcp and /infrastructure.
 export const CLUSTER_INFRA: InfraDef[] = [
   { id: 'postgres',        probe: { kind: 'tcp',  host: 'accounts-db-rw.accounts.svc',                       port: 5432 } },
-  { id: 'kafka',           probe: { kind: 'tcp',  host: 'openbank-cluster-kafka-bootstrap.messaging.svc',    port: 9092 } },
+  { id: 'clickhouse',      probe: { kind: 'configured-tcp', urlEnv: 'CLICKHOUSE_URL' } },
+  { id: 'kafka',           probe: { kind: 'tcp',  host: 'openbank-cluster-kafka-bootstrap.messaging.svc',    port: 9093 } },
   { id: 'keycloak',        probe: { kind: 'http', url: 'http://keycloak.iam.svc:8080/realms/master', okCodes: [200] } },
   { id: 'openbao',         probe: { kind: 'http', url: 'http://openbao.vault.svc:8200/v1/sys/health', okCodes: [200, 429, 472, 473] } },
-  { id: 'valkey',          probe: { kind: 'tcp',  host: 'redis.accounts.svc',                                port: 6379 } },
+  // The accounts NetworkPolicy intentionally admits Redis only from its own namespace.
+  // Read its kube-state-metrics readiness instead of probing across that boundary.
+  { id: 'valkey',          probe: { kind: 'prometheus-deployment', namespace: 'accounts', deployment: 'redis' } },
   { id: 'schema-registry', probe: { kind: 'tcp',  host: 'apicurio-registry.messaging.svc',                   port: 8080 } },
   { id: 'grafana',         probe: { kind: 'http', url: 'http://kube-prometheus-stack-grafana.observability.svc:80/api/health', okCodes: [200] } },
   { id: 'prometheus',      probe: { kind: 'http', url: 'http://kube-prometheus-stack-prometheus.observability.svc:9090/-/ready', okCodes: [200] } },
@@ -82,6 +87,7 @@ function containerHost(name: string): string {
 
 export const LOCAL_INFRA: InfraDef[] = [
   { id: 'postgres',        probe: { kind: 'tcp',  host: containerHost('openbank-postgres'),         port: 5432 } },
+  { id: 'clickhouse',      probe: { kind: 'configured-tcp', urlEnv: 'CLICKHOUSE_URL' } },
   { id: 'kafka',           probe: { kind: 'tcp',  host: containerHost('openbank-kafka'),             port: process.env.SERVICES_HOST === 'container' ? 9092 : 29092 } },
   { id: 'keycloak',        probe: { kind: 'http', url: `http://${containerHost('openbank-keycloak')}:8080/realms/master`, okCodes: [200] } },
   // Local docker-compose still ships Vault; the in-cluster store is OpenBao (runbook 0005).
@@ -119,6 +125,22 @@ function tcpProbe(host: string, port: number, timeoutMs = 3000): Promise<number 
   })
 }
 
+export function parseConfiguredTcpTarget(urlEnv: string): { host: string; port: number } | null {
+  const value = process.env[urlEnv]
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) return null
+    const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+    // WHATWG URL retains brackets for IPv6; net.connect expects the bare IP literal.
+    const host = url.hostname.startsWith('[') ? url.hostname.slice(1, -1) : url.hostname
+    return { host, port }
+  } catch {
+    return null
+  }
+}
+
 export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
   const now = new Date().toISOString()
   try {
@@ -129,7 +151,30 @@ export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
     }
     if (def.probe.kind === 'tcp') {
       const latencyMs = await tcpProbe(def.probe.host, def.probe.port)
-      return { id: def.id, status: latencyMs !== null ? 'UP' : 'DOWN', latencyMs, checkedAt: now }
+      // A failed connect establishes that this probe could not reach the port, not
+      // that the component itself is down (DNS, routing and policy failures look the same).
+      return { id: def.id, status: latencyMs !== null ? 'UP' : 'UNKNOWN', latencyMs, checkedAt: now }
+    }
+    if (def.probe.kind === 'configured-tcp') {
+      const target = parseConfiguredTcpTarget(def.probe.urlEnv)
+      if (!target) return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
+      const latencyMs = await tcpProbe(target.host, target.port)
+      return { id: def.id, status: latencyMs !== null ? 'UP' : 'UNKNOWN', latencyMs, checkedAt: now }
+    }
+    if (def.probe.kind === 'prometheus-deployment') {
+      const base = process.env.PROMETHEUS_URL ?? 'http://localhost:9090'
+      const query = `kube_deployment_status_replicas_ready{namespace="${def.probe.namespace}",deployment="${def.probe.deployment}"}`
+      const params = new URLSearchParams({ query, lookback_delta: '2m' })
+      const url = `${base}/api/v1/query?${params}`
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000), cache: 'no-store', headers: { Accept: 'application/json' } })
+      if (!res.ok) return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
+      const payload = await res.json() as { status?: string; data?: { result?: Array<{ value?: [number, string] }> } }
+      if (payload.status !== 'success' || !Array.isArray(payload.data?.result) || payload.data.result.length !== 1) {
+        return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
+      }
+      const ready = Number(payload.data.result[0]?.value?.[1])
+      if (!Number.isFinite(ready)) return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
+      return { id: def.id, status: ready > 0 ? 'UP' : 'DOWN', latencyMs: null, checkedAt: now }
     }
 
     const start = Date.now()
@@ -142,7 +187,7 @@ export async function probeInfra(def: InfraDef): Promise<InfraStatusResult> {
     const status = okCodes.includes(res.status) ? 'UP' : 'DOWN'
     return { id: def.id, status, latencyMs, checkedAt: now }
   } catch {
-    return { id: def.id, status: 'DOWN', latencyMs: null, checkedAt: now }
+    return { id: def.id, status: 'UNKNOWN', latencyMs: null, checkedAt: now }
   }
 }
 

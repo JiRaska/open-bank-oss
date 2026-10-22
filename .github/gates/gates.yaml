@@ -100,7 +100,7 @@ gates:
     review_after: "2027-10-17"
     selftest: python3 .github/scripts/check-coverage-floor-ratchet.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py"]
+    selftest_inputs: [".github/scripts/check-coverage-floor-ratchet.py", ".github/scripts/merge_train_carrier.py"]
     run: |
       # Compares every Kover minValue at HEAD against the PR's merge base, position by position.
       # The trailer is read from the PR body (optional: a PR with no body can still justify a
@@ -397,7 +397,10 @@ gates:
     group: lint
     mode: enforced
     min_subjects: 30   # 63 shell scripts today (2026-08-09)
-    budget_seconds: 30   # 5.7s over 63 scripts
+    # Re-derived 2026-10-20 per derive-gate-observability-budgets.py: ceil(max(p95*3, max*1.5, 5)).
+    # 25 CI runs: min 12.6 / p50 19.4 / p95 26.8 / max 30.2s over 104 scripts (30s budget
+    # failed a clean run at 30.2s). p95*3 = 80.4 -> 81.
+    budget_seconds: 81
     run: |
       # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
       # files implementing the gates themselves — the code every other gate's verdict rests
@@ -558,7 +561,7 @@ gates:
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
   - id: deploy-window-decision
-    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    selftest_exempt: "is-a-test-suite — the run: exercises deploy-window decisions and producer isolation"
     name: "deploy window batches bot deploy commits without losing a deploy"
     group: gitops
     mode: enforced
@@ -574,7 +577,9 @@ gates:
     review_after: "2027-03-30"
     budget_seconds: 15
     run: |
+      set -e
       python3 .github/scripts/deploy-window.py --self-test
+      python3 .github/scripts/test-deploy-producer-isolation.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -1803,9 +1808,13 @@ gates:
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+      bash .github/scripts/tests/test-resolve-historical-service-ref.sh
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
-      node --test .github/scripts/test-publish-admin-ui-gate-health.mjs
+      node --test .github/scripts/test-publish-admin-ui-evidence-import-boundary.mjs
+      node --test .github/scripts/test-publish-admin-ui-gate-health.mjs .github/scripts/test-publish-admin-ui-evidence.mjs
+      python3 .github/scripts/test-collect-admin-ui-test-evidence.py
+      python3 .github/scripts/test-collect-admin-ui-security-kpis.py
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
   # a version.txt, and must be registered in release-please-config.json AND
@@ -2737,13 +2746,13 @@ gates:
       python3 .github/scripts/check-gates-not-deregistered.py --enforce
 
   - id: dockerfile-runtime-only
-    name: "Dockerfiles are runtime-only, declare EXPOSE, share the deploy base (#3016/#3354, enforced)"
+    name: "Dockerfiles are runtime-only, share the deploy base, port from application.yaml (#3016/#3354, enforced)"
     group: registry
     mode: enforced
     selftest: |
       python3 .github/scripts/check-dockerfile-no-build-stage.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py"]
+    selftest_inputs: [".github/scripts/check-dockerfile-no-build-stage.py", ".github/scripts/service-port.py"]
     run: |
       # This lived as an inline step in ci.yml's `ui-build` job, which runs only when
       # openbank-admin-ui/, */governance.yaml or the governance schema changed. So the gate
@@ -2992,7 +3001,7 @@ gates:
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/merge-train.py"]
+    selftest_inputs: [".github/scripts/merge-train.py", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -3581,6 +3590,27 @@ gates:
   # reported too. Self-test first — the must-NOT-flag half is what matters here,
   # since an outbound REST-client interface carries the identical annotation and
   # is not a defect (52 of the 115 raw matches on main). ENFORCED.
+  # ADR-0257 says the product-catalog kernel "contains no bank, insurance or telecom enum"; a
+  # pension approval workflow landed inside it anyway (#13429) and nothing noticed. Default-deny:
+  # every Kotlin file is kernel unless rules.yaml catalog_kernel_neutrality names it, and the pack
+  # vocabulary is DERIVED from catalog-packs/, so a new pack extends the check by existing.
+  - id: catalog-kernel-industry-neutral
+    name: "product-catalog kernel carries no industry vocabulary; legacy v1 enums frozen (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      A pack-specific enum, schema-id branch or column in the generic catalog kernel compiles,
+      passes every test and reads as a reasonable feature, so only a decidable check keeps
+      industry vocabulary in pack data where ADR-0257 put it.
+    review_after: 2027-04-20
+    min_subjects: 30   # 43 Kotlin files in the service on 2026-10-20
+    budget_seconds: 10   # 0.4 s measured 2026-10-20
+    selftest: python3 .github/scripts/check-catalog-kernel-neutral.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-catalog-kernel-neutral.py"]
+    run: |
+      python3 .github/scripts/check-catalog-kernel-neutral.py
+
   - id: nonnull-jaxrs-param-ratchet
     name: "non-nullable required JAX-RS param ratchet (issue #3104, enforced)"
     group: kotlin
@@ -3940,6 +3970,30 @@ gates:
   #
   # Scope is DERIVED from rules.yaml money_path_services, not hand-kept: check-clock-injection
   # lists 8 of the 20 and reads as passing about the 12 it never looks at.
+  # ADR-0342 D2 (#13167): the day-close participant set is named in three places — rules.yaml
+  # close_participants, the ledger's openbank.ledger.close.participants, and the services that
+  # construct a CloseParticipationReporter. Drift between them is silent in each module: the ledger
+  # waits forever for a name nobody reports, or a reporter gets 404/403 and the close passes
+  # without it. Advisory on arrival while the participant check itself is in shadow.
+  - id: close-participants-declared
+    name: "day-close participants agree across rules.yaml, ledger config and reporters (ADR-0342, advisory)"
+    group: kotlin
+    mode: advisory
+    budget_seconds: 30  # one rglob over */src/main/**.kt; measured ~2s locally
+    verified: "2026-10-18 — 1 participant (interest) declared in rules.yaml, ledger application.yaml and wired by InterestCloseParticipationScheduler; 0 findings; --self-test flags principal drift, a missing reporter and an undeclared ledger participant"
+    rationale: >-
+      The participant set is the denominator of the day-close completeness check; a set kept in
+      three files without a comparison drifts exactly like the hand-kept gate scopes this repo has
+      measured before.
+    review_after: "2027-01-17"
+    min_subjects: 1   # interest is the first participant (2026-10-17)
+    selftest_inputs: [".github/scripts/check-close-participants.py"]
+    selftest: |
+      python3 .github/scripts/check-close-participants.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-close-participants.py
+
   - id: accounting-clock-gate
     name: "accounting-clock gate — one business-date authority (ADR-0207 D1, enforced)"
     group: kotlin
@@ -5147,6 +5201,24 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-dotted-keys.py --root .
 
+  - id: metric-name-prefix
+    name: "metric names start with openbank. (observability audit 2026-10-17, enforced)"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 15
+    rationale: >-
+      An unprefixed Micrometer name escapes every openbank_* selector and is invisible to
+      check-alert-metric-emitted.py. Seven existed on 2026-10-17 (three found by the audit, two
+      more by this gate itself); all were renamed with their readers, so the baseline is empty
+      and the gate is prevention only.
+    review_after: '2027-04-17'
+    min_subjects: 100   # 198 literal metric names measured 2026-10-17
+    selftest: python3 .github/scripts/check-metric-name-prefix.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-metric-name-prefix.py"]
+    run: |
+      python3 .github/scripts/check-metric-name-prefix.py --root .
+
   # ADR-0337: a second ledger-service deployment (the pension company's books) runs the bank's
   # image, so every scheduler and outbound edge in it is live by default. The switch list is
   # derived from the ledger source; a new scheduler without a switch is red until the instance
@@ -5317,7 +5389,7 @@ gates:
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md"]
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge_train_carrier.py", ".github/scripts/merge-train.py"]
     run: |
       # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
       # Editing the body to add the checklist (the documented remediation) only reached this
@@ -6842,6 +6914,31 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-pdp-flag-rollout.sh"]
 
+  # Hibernate Reactive + Kotlin PanacheEntity draw ids from `<table>_seq`; a migration that makes
+  # the table with BIGSERIAL (only `<table>_id_seq`) or a QUOTED "X_SEQ" leaves the sequence
+  # missing, and every INSERT answers `relation "<table>_seq" does not exist` at runtime. This
+  # replaces 25 per-service HibernateSequenceGuardTest copies (three byte variants) with one source
+  # gate, and also covers services that never carried the copy. Match real annotated classes,
+  # following same-module superclasses to PanacheEntity; a sibling module's sequence does not
+  # count. Comments and string examples cannot invent entities.
+  - id: hibernate-sequence-guard
+    name: "PanacheEntity tables have their <table>_seq sequence (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      A missing or wrongly-cased hibernate sequence passes every mocked unit test and the pod
+      stays Ready; the INSERT fails only at runtime. Shipped repeatedly (party V5/V6,
+      notification V4/V5) before a per-service test existed.
+    review_after: "2027-04-17"
+    verified: "2026-10-17 — self-test has a PanacheEntity missing its _seq (flagged), a correct one (clean), quoted/_id_seq/cross-module negatives; run on origin/main: 55 tables, 0 findings; dropping one CREATE SEQUENCE from a real migration made it exit 1"
+    budget_seconds: 30
+    min_subjects: 27   # 55 PanacheEntity tables measured 2026-10-17; half
+    selftest: python3 .github/scripts/check-hibernate-sequence-guard.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-hibernate-sequence-guard.py", ".github/scripts/collect-test-run-evidence.py"]
+    run: |
+      python3 .github/scripts/check-hibernate-sequence-guard.py --root .
+
   # #13172: an ExternalSecret reading `creds/<role>` for a role the openbao-config CronJob never
   # creates fails every reconcile with `unknown role` and nothing pages (the service keeps its
   # static secret). The declared set is derived from configure.sh, not listed a second time.
@@ -6862,3 +6959,25 @@ gates:
     selftest_inputs: [".github/scripts/check-dynamic-db-roles-declared.py"]
     run: |
       python3 .github/scripts/check-dynamic-db-roles-declared.py --root .
+
+  # rules.yaml enum_reference_data: business vocabulary hard-coded as a Kotlin enum. Ratchet over
+  # two mechanically decidable shapes (numeric-encoded values, cross-module value-set copies);
+  # today's 99 findings are baselined against #13434-#13441, a new one or a stale entry fails.
+  - id: enum-reference-data-ratchet
+    name: "enum reference-data ratchet (rules.yaml enum_reference_data, enforced)"
+    group: data
+    mode: enforced
+    budget_seconds: 15   # ~1s measured locally 2026-10-20
+    rationale: >-
+      An enum value naming a threshold (UP_TO_30K, DAYS_7) or an enum re-declaring another
+      module's value set (three benchmark-index enums, seven AML risk enums on three scales) is
+      reference data in code: changing it is a release in every copy, and the copies drift.
+      Ratchet so the 2026-10-20 estate is tracked and no new copy lands unnoticed.
+    review_after: '2027-04-20'
+    verified: "2026-10-20 — origin/main b99d45e14b: correcting Kotlin string/comment masking revealed 3 enum classes missed by the initial scan; 674 enum classes, 34 numeric + 65 duplicate findings (97 initial + 2 newly tracked #13441), with both newly revealed declarations manually checked; generic lifecycle-only overlaps excluded after a first pass reported 146 pairs, ~60% unrelated status machines; injected enum exits 1; disabling either half fails self-test"
+    min_subjects: 337   # 674 enum classes measured 2026-10-20; half
+    selftest: python3 .github/scripts/check-enum-reference-data.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-enum-reference-data.py --root .

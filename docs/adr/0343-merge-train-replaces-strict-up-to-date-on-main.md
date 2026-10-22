@@ -230,12 +230,122 @@ governance PRs without his own review — together with `agent-pr-guard`, which 
 the member's head and treats as a refusal. Adding an approval requirement would require the sole
 human to approve his own PRs, which GitHub forbids, and would stall the train entirely.
 
-**Manual lane.** PRs touching an executable or execution-deciding path under `.github/`, or a generator, PRs adding a symlink, and trains whose
-regeneration leaves the inventory cannot ride a train. In phase 0 that costs nothing (strict is
-still on). In phase 1 such a PR needs the `merge-train` status from a human: the owner reviews it
-and posts the status by hand with the App pin in mind (an owner-token status does not satisfy a
-context pinned to the App), or merges with the ruleset bypass he already holds. Both leave an
-audit trail naming the human. Its volume is a phase-0 measurement.
+**Manual lane = the strict lane.** PRs touching an executable or execution-deciding path under
+`.github/`, a generator, `gates.yaml` or the derived-output inventory never ride a train: the build
+job would execute them. In phase 1 they are not stranded either — the first phase-1 run showed why
+they would be: an owner-token status cannot satisfy a context pinned to the App, and the ruleset has
+no bypass actors. So `settle` gives them a *strict lane*, which restores per PR exactly the
+guarantee strict up-to-date gave every PR: CI green on a tree that already contains main.
+For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane reason, settle
+(App token, git and the API only, executing no PR code):
+1. if `git merge-base --is-ancestor <live main> <head>` holds and every required context other
+   than `merge-train` is green on that head, posts `merge-train` success
+   (`strict lane: green on an up-to-date head over main <sha12>`) and squash-merges pinned to that
+   head — after re-reading live main, and never while a train carrier is in flight (a strict-lane
+   merge would move the carrier's base; the carrier's own "main moved since publish" check also
+   rejects it if one ever does), and at most one per tick, since a merge makes every other
+   strict-lane head behind;
+2. if the head is up to date and its required CI is still running — including not yet reported, the
+   normal state for the first minutes after update-branch — (or has just gone green), *reserves*
+   main: settle reports in-flight, so no train is built under it; no other strict-lane PR is updated;
+   **and nothing else may move main** — the fast lane posts no status (GitHub auto-merge acts on it)
+   and a carrier that finished green is held, not merged. Main moves only when the reserved PR
+   settles: merged, failed, or timed out. Holding only other strict-lane updates was not enough: on
+   2026-10-20 #13456 was updated at 23:18Z, fast-lane #13490 merged at 23:29Z while its CI ran, it
+   was updated again at 23:53Z, and fast-lane #13492 merged one minute later — re-updated on every
+   cycle, so it could starve forever. The reservation is read before any carrier is settled, and an
+   update-branch starts it in the same tick, before the fast lane is posted;
+3. if it is green but behind, calls update-branch (pinned to the judged head) for the oldest such PR
+   only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
+   and a later tick merges it. A reservation is bounded by `RESERVATION_TIMEOUT_S`, twice the p95 of
+   green pull-request CI (measured: p50 17 min, p95 32 min, so 64 min), counted from the head's
+   committer time, which update-branch sets (a committer time in the future, which only an author can
+   write, counts as timed out): past it the reservation is released, the fast lane and
+   trains resume, and the PR goes to the back of the strict queue, so a hung CI cannot freeze main.
+   The cost is bounded too: fast-lane and train merges wait at most one strict-lane CI cycle. A
+   file-disjoint fast lane during the reservation was rejected: any merge makes the reserved head
+   behind, and since strict up-to-date is what this lane restores, re-proving it without a new update
+   would mean a second definition of "up to date". With strict off `auto-update-armed-prs.yml` exits before enumerating
+   PRs, so the train owns this update.
+Refusals other than the manual-lane one keep a PR out of this lane: red, pending, disarmed, draft,
+fork, `codex/`, a `merge-train` failure, `agent-pr-guard`, a path with a control character, and a
+symlink or gitlink. **The human gate is unchanged:** only ARMED PRs are considered, and arming
+money-path, governance and workflow PRs is already human-only through the owner's local hook — the
+strict lane adds no new way for an unarmed or agent-armed workflow change to reach main.
+
+**Stale-red refresh.** When `main` itself breaks, every armed PR whose CI runs meanwhile goes red on
+that context — and stays red after main is fixed, because neither the train nor the strict lane
+touches a red PR (on the first day of phase 1 a broken deploy-hold gate left seven PRs to be
+updated by hand). So `settle` refreshes a red PR whose red is *main's*, not its own. An armed,
+non-draft, same-repo PR that `agent-pr-guard` did not refuse is refreshed only when all hold:
+1. a required context other than `merge-train` is FAILURE on its head;
+2. its head is behind live main (`merge-base --is-ancestor` fails);
+3. every such failing context is attributable to main: at `mb = merge-base(head, live main)` — or
+   the nearest first-parent ancestor of `mb` with a completed result — main's own CI reported that
+   same context as FAILURE, and on the live tip (or its nearest ancestor with a completed result,
+   i.e. the latest completed main run) it is now green.
+
+Then settle calls update-branch for it (`stale-red refresh: <context> was red on main <mb12>, green
+on <tip12>`, reported under `refreshed`), oldest first, at most two per tick, never in shadow.
+**It cannot loop.** After the refresh the PR's merge-base *is* the fixed main, on which the context is
+green, so if the PR is still red, condition 3 fails — the red is now its own and it is left alone;
+and a PR that is not behind fails condition 2 outright. A PR red on its own merits (the context was
+green on main at its base) is never refreshed at all. Like the strict lane it uses the App token,
+git queries and the API only, and executes no PR code; it adds no merge, only the update a human
+would otherwise click.
+
+**Main-red awareness.** The strict lane served manual-lane PRs oldest-first and updated the oldest
+green-but-behind one onto live main whatever main's state. With main red on a required context,
+that update could only manufacture main-caused red: the old PR went red on main's gate, the next
+oldest was updated onto the same red tip, and the PR carrying the fix — newer, so last in line —
+was never served (2026-10-20: `gates (gitops-api)` red on main, the fix waited while settle reported
+`updated: [<older PR>]` and then nothing). So at the start of settle, `main_red` is the set of
+required contexts (merge-train aside) that are FAILURE in main's latest completed CI at the live
+tip (the tip, or its nearest first-parent ancestor with a completed result — a fix that has merged
+keeps main red until its own push run reports). Then, in the strict lane only:
+1. a PR whose failing required contexts are all in `main_red` is **waiting**
+   (`strict: waiting for main (<ctx> red on main <sha12>)`, reported under `waiting`): it cannot
+   go green until main is fixed, so it is never served and never reserves main;
+2. **no update-branch is issued onto a red main** to any PR: a behind PR simply waits, and the
+   stale-red refresh (which already requires the context green on the tip) updates it once main
+   is green;
+3. **the fix is preferred**: a strict-lane PR green on every required context, whose merge-base
+   (or nearest ancestor with a result) was red on a `main_red` context, demonstrably carries the
+   fix. It is ranked first and merges **without being up to date**
+   (`strict lane: fix for <ctx> red on main <sha12>, green over its red base`). Every other
+   condition still applies — armed, not draft, same repo, no excluded prefix, `agent-pr-guard` not
+   refusing, no symlink/gitlink or control-character path, no train in flight, never in shadow —
+   and live main is re-read immediately before the merge. The fix holds the strict-lane
+   reservation (it is the holder, ahead of any up-to-date PR), so neither the fast lane nor a train
+   moves main under it in the tick it merges; a waiting PR (1) is never the holder.
+
+*Trade-off of (3).* The fix is merged over a main it has not been tested against: commits that
+landed between its base and the tip are unverified in combination with it. That is accepted
+because (a) main is already red, so the strict guarantee it gives up is one main has already
+lost; (b) the PR's own CI ran the failing gate green over a base on which main's CI had it red,
+which is the strongest available evidence that it is the remedy; (c) the alternative — updating
+it onto the red tip and waiting a CI cycle — is exactly what deadlocked, since any older PR takes
+the lane first. Being red-based is required, not merely green: a PR whose CI ran over a still-
+green base proves nothing about the breakage and is not treated as a fix. A fix that is wrong in
+combination shows up on main's own next push run, as any red main does. When main is green none
+of this applies and the strict lane behaves exactly as before.
+
+*Every lane, not only the strict lane (#13400).* Rule 3 originally applied only to manual-lane PRs,
+and a red main also reached the other two lanes: a train built over the red tip came back red on the
+main-red context whatever its members did, and settle named its single member the culprit for a
+check main itself was failing. So, while `main_red` is non-empty:
+4. **a fix is served first in every lane**: a train/fast-lane candidate that passes the same
+   `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
+   lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
+   merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+   *amended (2026-10-21): a fix behind main is no longer merged without update — it is update-branched and holds the reservation, and only its combined head merges, with the fix set green and every other required context green or red on main too.*
+5. **no train is planned over a red main**: it could only come back red on the main-red context,
+   so building it would spend a CI run to learn nothing; the fast lane is unchanged;
+6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
+   inconclusive (closed, no status, no comment, no bisect); a carrier also red on a context main is
+   green on still blames, and the culprit status names only those contexts.
+And every open PR leaves a decision line in the settle log, armed or not: a disarmed or draft PR was
+filtered out in silence, so a log with no line for it could not say whether it was ever seen.
 
 ### What the train is NOT
 
@@ -244,6 +354,140 @@ not a scheduler for CI capacity: one train per 10 minutes, at most 8 members, bo
 one CI run per batch plus one per halving for a culprit. And it is not four-eyes: `agent-pr-guard`,
 the money-path approval rules and the security checklist gate are evaluated on the member PR
 exactly as today, and a refusal there removes the PR from the candidate set.
+
+### Amendment (2026-10-20) — carriers are judged by their members; cancelled is inconclusive
+
+The first live hour of phase 1 marked two innocent members as culprits, one per defect (#13400).
+
+**Rule 1 — a body gate judges a carrier's MEMBERS.** A gate that reads the live PR body judged the
+carrier's bot boilerplate, so `security-checklist-money-path` failed every train holding a
+money-path member (#12506: carriers #13424/#13451 red on that alone, while #12506's own body had
+all six boxes ticked). The attestation is a human's, on the member; copying ticks onto the carrier
+would turn it into bot text, so that is never done. Instead the gate recognises a **verified
+carrier** — ALL of: head branch `^train/[0-9]+-[0-9]+$` in this repository, author exactly
+`openbank-gitops-bot[bot]` of type `Bot`, label `merge-train`, all read from the live PR object —
+derives the members from the carrier's own commits (`PR-Number: #N` trailers on the train's member
+commits over `base..head`; any other commit fails closed) and requires each member's LIVE body to
+pass the same rule against that member's own diff (its train commit). A human-opened `train/…` PR is
+an ordinary PR. The single regeneration commit is not a member's diff: it is bounded to
+DERIVED_OUTPUTS and proven by main's freshness gates on the same tree. The carrier identity lives in
+`.github/scripts/merge_train_carrier.py`, held equal to `merge-train.py` by the checklist self-test.
+
+Per gate that reads the PR body or PR metadata:
+
+| Gate | Carrier problem? | Decision |
+|---|---|---|
+| `security-checklist-money-path` | yes (the #12506 defect) | members judged on their own bodies and diffs |
+| `coverage-floor-ratchet` | yes, latent: a member's `coverage-floor-lowered:` trailer is in its body, never on the carrier | trailer text also read from the verified carrier's member bodies |
+| `issue-hygiene` | no | already exempt for `[bot]` authors, and the train already excludes it (`TREE_INDEPENDENT_CONTEXTS`); each member is judged on its own PR |
+| `security-regression-test` | no verdict problem: the carrier body closes nothing, so the rule never applies | members are judged on their own PRs; see rule 2 for its trigger fix |
+| `release-scope-mismatch-gate` | title-based and advisory (exit 0) | unchanged |
+| `agent-pr-guard` | no: it reads the event author, branch and diff; the carrier's `train/` branch is outside every agent prefix | unchanged |
+| `api-contract` (migration assertion) | yes, latent: the `## Idempotency caller migration` section lives in the member body | section read from the verified carrier's member bodies too (each line names its service) |
+
+**Rule 2 — a cancelled job is INCONCLUSIVE, never red.** #13137 was named culprit because carrier
+#13452's `security-regression-test` was cancelled by concurrency ("a higher priority waiting
+request") with no step run. In `settle`, a required context that is `cancelled` or `stale`, or
+`skipped` next to a cancellation on the same head, is inconclusive: it never bisects and never
+blames. If nothing failed and something is inconclusive, settle re-runs the cancelled jobs of that
+carrier **once** (App `merge-train/rerun` status as the marker) and the carrier is in flight again;
+still inconclusive after that, or a refused rerun, closes the carrier with no verdict and the next
+tick rebuilds. A real failure next to a cancellation still blames, and the culprit status names only
+the really failing contexts (`culprit: <contexts> red on a train over main <sha>`). The two competing
+runs had one cause: `security-regression-test` triggered on `labeled`, and a carrier is opened and
+then labelled `merge-train`, so the `labeled` run cancelled the `opened` one. That workflow never
+reads PR labels (its scope is the closed issue's `security` label), so `labeled`/`unlabeled` were
+dropped — cheaper and more correct than reordering the carrier's opening, which cannot attach a
+label in the same API call.
+
+**Clearing the wrong marks.** Culprit statuses written before this amendment start with
+`isolated as the cause of a red train`. Such a status is no longer final: the member re-qualifies,
+rides one more train, and that train overwrites the status either way — `success` when the old mark
+was an artifact (#12506, #13137), a `culprit: …` failure when it was real. No new status is written
+with the legacy text, so the mechanism retires itself; nobody needs to push an empty commit.
+
+### Amendment (2026-10-21) — a gate's budget overrun or NOT EVALUATED is inconclusive (#13400)
+
+Carrier #13501 (CI run 39526539131), the first carrier judged in carrier mode, named #13137 culprit
+for two gates that passed on content — `security-checklist-money-path` printed "every member of the
+carrier passes on its own body" in 33.7 s and `coverage-floor-ratchet` "none lowered" in 44.9 s —
+and went red only on their 20 s `budget_seconds`. Measured over the last 10 carrier and 12 ordinary
+PR runs, the same gates took 0.2–5.9 s everywhere else; the nine other carriers ran before carrier
+mode existed, so this one run was the whole carrier-mode sample. The cost was not the API: each gate
+called `git fetch --deepen=128 origin` in the depth-2 checkout, which deepens every one of the
+remote's ~665 branch refs — 29.4 s from a depth-2 clone, against 1.7 s for
+`git fetch --no-tags --deepen=128 origin <head sha>`, which yields the same walkable chain. Every
+gate repeated it, because the checkout stays shallow after a deepen.
+
+**Rule 3 — carrier facts are resolved once per job, under one deadline.**
+`merge_train_carrier.resolve()` reads the live PR, the member chain (deepening only the head's
+history, and not at all when the chain is already walkable) and every member body (one GraphQL
+query), within 15 s, and writes the result to run-gates' per-job cache directory keyed by PR number,
+head sha and base; every later gate in the job reads that file. `coverage-floor-ratchet` asks only
+once it has found a lowering, so a carrier that lowers nothing costs it no fetch at all.
+
+**Rule 4 — an unreadable subject is NOT EVALUATED, never PASS and never a finding.** A timed-out or
+failed read (the PR object on a `train/…` head, the chain, a member body that the verdict needs)
+makes the gate print `GATE_VERDICT=NOT_EVALUATED` and exit non-zero: red, so an unjudged train never
+merges, but not a statement about any member. Previously an unreadable member body was judged as
+empty and blamed the member.
+
+**Rule 5 — settle reads the gate runner's verdict, not the log.** `run-gates.py --json` records a
+`failure_kind` per gate (`content`, `budget`, `not_evaluated`, `timeout`, `unfalsified`, `setup`);
+a budget overrun is `budget` only when the gate passed on content. In `settle`, a carrier whose
+failing required contexts come from one CI run whose every failed job is a gate shard (or the
+`Validate manifests` aggregate), and whose every failed gate in those shards' `gate-results-<slug>`
+artifacts is `budget` or `not_evaluated`, is INCONCLUSIVE exactly as under Rule 2: re-run once, then
+closed with no verdict. A missing or unreadable artifact, a record without `failure_kind`, any other
+failed job, or any content failure keeps the verdict conclusive. Budgets were not raised: with the
+fetch fixed, carrier mode is not legitimately slower than an ordinary run.
+
+### Amendment (2026-10-21) — extra gates: a red security scan blocks serving
+
+The train judged only the ruleset-required contexts, so a PR with a red `Security scan / Trivy`
+was served while sessions disarmed it by hand (`--disable-auto`): two automations enforcing
+opposite policies, and nothing merged. **This replaces manual disarming.** The policy now has one
+declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` (today: `Trivy`,
+the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
+by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
+PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
+armed); running = wait; never reported = wait too (fail closed, #13400) — not applicable only
+when the pinned workflow has a COMPLETED run for that head without the check, or it concluded
+skipped or neutral. A carrier red on an
+extra gate is a verdict like any required context, unless main is red on that gate too: then it
+counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
+Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
+`github-actions` check runs from that workflow count, and any red one of them is red, so a same-name
+run from another app or workflow can neither turn it green nor mask a red. The declaration fails
+closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
+`--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
+
+### Amendment (2026-10-21) — lane fairness: the strict lane yields one turn to the train
+
+The strict-lane reservation holds main for one manual-lane PR, and while any reservation runs no
+train is built. With a strict queue that never empties this starved the train lane completely:
+over 12.5 h of `merge-train.yml` (2026-10-20T23:38Z .. 2026-10-21T12:28Z, 40 runs) 11 carriers were
+published, **0 train members merged**, and 13 strict-lane PRs merged. Every strict merge was
+followed in the next tick by an update-branch for the next strict PR, and that update-branch was
+issued even while a carrier was open, so a carrier that went green was held for the new
+reservation and then voided by its merge (carrier #13529: held for #13526, then "main moved since
+publish"). The strict lane now does not START a reservation (update-branch) when:
+
+1. **a train carrier is open** — the carrier is the train's turn in flight, bounded by its own CI
+   and settlement; or
+2. **main's head is a strict-lane merge** (its PR head carries the App's `strict lane:` status)
+   **and train candidates wait** — the train gets the next turn, bounded by `TRAIN_TURN_S`
+   (30 min, two ticks at the measured p90 cron gap) from that merge, so a train that cannot be
+   built never freezes the strict lane.
+
+The result is alternation: one strict-lane PR, then one train, then one strict-lane PR. Neither
+lane can starve the other — the strict turn returns as soon as a train merges, its carrier closes,
+or the turn expires. A reservation already running, a green up-to-date strict PR, and the main-red
+fix path are unchanged.
+
+### Amendment (2026-10-21) — event-driven trigger, cron as heartbeat (#13400)
+
+The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
 
 ## Rollout
 
@@ -259,7 +503,10 @@ any merge the shadow train would have made disagrees with what strict mode event
 **Phase 1 — flip.** Requires: (a) shadow has shown the status landing on every armed green PR,
 (b) `ruleset-context-parity` is green with `merge-train` present in the required set,
 (c) the owner runs the commands below, (d) the workflow `env` is set to
-`MERGE_TRAIN_SHADOW=false` in a follow-up PR. `auto-update-armed-prs.yml` then exits before PR
+`MERGE_TRAIN_SHADOW=false` in a follow-up PR. Phase 1 is gated at runtime on the ruleset: with the flag
+off, `settle` still merges nothing (it behaves as shadow and logs why) until the live ruleset requires
+`merge-train` pinned to the App (`GITOPS_APP_ID`) and strict is off, so the order of (c) and (d) does
+not matter. `auto-update-armed-prs.yml` then exits before PR
 enumeration on its own (it already does when strict is off) and can be retired in a later ADR.
 
 ```sh
@@ -286,8 +533,9 @@ gh api repos/JiRaska/open-bank-oss/rules/branches/main \
   --jq '.[] | select(.type=="required_status_checks") | .parameters | {strict: .strict_required_status_checks_policy, ctx: [.required_status_checks[] | {context, integration_id}]}'
 ```
 
-**Rollback.** Re-enable strict and remove the context, in that order (removing the context
-first, with strict still off, is the one state with no protection at all); then set
+**Rollback.** The ruleset revert alone stops all merging by the train (the runtime guard sees the pin
+or strict change on the next tick); the env flag need not change. Re-enable strict and remove the context, in that order (removing the context
+first, with strict still off, is the one state with no protection at all); optionally set
 `MERGE_TRAIN_SHADOW=true` or disable the workflow. Same PUT with
 `strict_required_status_checks_policy: true` and the `merge-train` entry filtered out. Every PR
 that merged through the train is an ordinary squash merge with its own CI history; nothing to
@@ -340,7 +588,8 @@ undo in git.
   1) to isolate one culprit, each a tick or more apart. That is slower than bisecting within one
   run, and is the price of `settle` never consuming state a build produced.
 - PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
-  routinely) take the manual lane in phase 1. The volume of that lane is a phase-0 measurement.
+  routinely) take the strict lane in phase 1: serial, one update-and-CI cycle per PR, with main
+  reserved while it runs — strict mode's throughput for roughly a third of PRs, the train's for the rest.
 - Carrier PRs: up to one every 10 minutes, closed on completion. They carry the `merge-train`
   label so every PR-list query can filter them out.
 
@@ -349,7 +598,8 @@ undo in git.
   `STATUS_CONTEXT` in a tracked script). That is a widening of the gate and is derived from the
   script, not from a list in the checker.
 - `auto-update-armed-prs.yml` becomes inert at phase 1 (it already exits when strict is off) and
-  is retired separately.
+  is retired separately; the strict lane in `settle` takes over the one update it still owed
+  (manual-lane PRs).
 
 ## Compliance impact
 

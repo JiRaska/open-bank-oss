@@ -27,6 +27,28 @@ suites. They are not a claim that every route or business transaction has been m
 audited. Backend financial authorization remains authoritative; BCP is a read-only
 readiness view, not a payment execution gate.
 
+## Readiness and BCP component scope
+
+The Production Readiness matrix and BCP roster use the shared
+`openbank-admin-ui/scripts/service-inventory.mjs` detector: root Gradle modules with
+`src/main` and the Quarkus service convention plus shared runtime dependency, or the
+direct Quarkus plugin. The detector is structural; naming suffix, governance metadata,
+release registration and a GitOps workload do not decide whether an application is in
+scope. Thus runnable agents and analytics/product/risk components remain visible, and a
+runnable component without a workload remains an explicit `NOT-DEPLOYED` row. Catalog
+evidence gaps such as missing `version.txt`, release registration or `governance.yaml`
+remain visible; they do not imply production readiness.
+
+Python readiness collection invokes this helper through `node`, so Node.js is required
+for both collector implementations. The helper and collectors fail closed on execution
+or roster errors. In particular, a declared money-path module missing from the runnable
+inventory stops collection rather than disappearing from the matrix. Distinct module
+names that normalize to one short identity also stop inventory generation. The readiness
+report retains its existing `services[]` and `service_count` schema. BCP uses the same
+`runnable` catalog marker; it applies only explicit policy tiers, including the authored
+“all other services” tier when present. Without that policy row, unclassified components
+remain unknown and coverage is incomplete.
+
 ## Delivery baseline
 
 Run `python3 .github/scripts/admin-ui-delivery-baseline.py --repo OWNER/REPO --target 30
@@ -242,3 +264,41 @@ Acceptance for broad route coverage is:
    build-artifact reuse as separate reviewable changes. The conceptual destination is
    one validated application artifact, independently refreshed data, and explicit feature
    contracts; separate frontend deployments require a measured benefit first.
+
+
+## Runtime evidence and content correctness
+
+Navigation coverage is only one acceptance layer. A source audit of 170 page templates
+separately classified API reads, service hooks, reference content and generated snapshots.
+The audit found two distinct ages that must remain visible: when the browser last checked,
+and when the producer observed the underlying fact. `cache: no-store` does not refresh a
+producer, and a successful HTTP response does not establish a valid domain payload.
+
+The independent evidence workflow now publishes four named datasets: Gate Health,
+Production Readiness, Test Intelligence and Security KPIs. Each has a validated payload,
+immutable content-addressed snapshot, source revision and conditional `current.json`
+selector. Readers verify the digest, dataset schema, timestamps and bounds before showing
+it. A one-hour selector expiry detects publisher failure independently of the dataset's
+age threshold. Re-publication never changes the original observation time. Security KPI
+collection remains weekly; its trusted workflow artifact reaches the runtime publisher
+without waiting for the reference snapshot's refresh PR or an application image rebuild.
+
+Readiness counts service modules from the canonical governance roster; Test Intelligence
+counts released components and its explicitly included test components. Those populations
+must be named, not forced to the same number. Readiness is repository/GitOps maturity and
+TTL-bound attestations, not an assertion that pods are healthy. Test evidence is bound to
+its producer run and component commit; a missing match cannot retain an unrelated green
+verdict. Stale or unavailable evidence remains distinguishable from failed execution.
+
+Reporting must validate the actual warehouse wire format. ClickHouse JSON DateTime64 values
+need ISO output for the browser's datetime contract. Invalid payloads are contract errors,
+not proof the warehouse is down. The report timestamp means query completion, not an
+unmeasured ingestion watermark. Populated browser fixtures exercise the Run report action
+as well as initial page navigation.
+
+Rollout requires the approved, narrowly scoped publisher policy, valid initial snapshots,
+and a verified application image. Then verify the live timestamp/source revision and a
+subsequent publication without rebuilding the image. For proxied tools, retain OIDC session
+and per-tool role checks, fail-closed edge policies and network isolation. Verify anonymous
+denial and authenticated content/assets through the real edge; direct gate unit tests alone
+do not establish that the complete browser journey works.

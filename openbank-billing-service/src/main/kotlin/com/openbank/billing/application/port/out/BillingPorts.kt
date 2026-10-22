@@ -19,7 +19,16 @@ import java.util.UUID
  * `null` from [AccountContextPort.resolve] means "could not resolve" — billing fails closed
  * and does not charge (ADR-0143).
  */
-data class AccountBilling(val productId: String, val context: FeeContext)
+data class AccountBilling(
+    val productId: String,
+    val context: FeeContext,
+    /**
+     * When the account was opened. The pin is resolved as the revision effective AT THIS INSTANT, not
+     * "now" (ADR-0341 D1/D2): an account opened under older terms must not be repriced by a later
+     * publication just because billing happened to see it for the first time afterwards.
+     */
+    val openedAt: Instant? = null,
+)
 
 /**
  * Reads the account-side facts a waiver rule is evaluated against (balance, turnover, segment,
@@ -31,11 +40,89 @@ interface AccountContextPort {
 }
 
 /**
- * Reads the billable fee definitions for a product/currency from the product catalogue
- * (`GET /api/v1/fees`). Backed by a reactive REST client in phase 2c.
+ * One published catalog revision's billable terms (ADR-0341 D2/D3). [accountingClass] is the class
+ * the revision carries, or null when it carries none and cannot be derived; [accountingClassSource]
+ * says which. [fees] are the revision's AMOUNT price components in a currency, never the product's
+ * "currently published" fees: a revision is immutable, so these terms never change under a contract
+ * that pinned it.
  */
-interface ProductCatalogPort {
-    suspend fun billableFees(productId: String, currency: String): List<BillableFee>
+data class RevisionTerms(
+    val revisionId: String,
+    val accountingClass: String?,
+    val accountingClassSource: AccountingClassSource,
+    val fees: List<BillableFee>,
+    /**
+     * True when the revision declares fees at all: any AMOUNT price component in ANY currency, any
+     * component coded as a fee, or a fee in its embedded v1 document. A fee-bearing revision whose
+     * [fees] come out empty for the account's currency is a defect to surface (skip), never "zero fees".
+     */
+    val feeBearing: Boolean = false,
+    /**
+     * Fee price components of this revision that billing cannot price (a fee of the wrong kind or with no
+     * currency, or fee-coded with no identity in the revision's v1 document). Each makes the assessment
+     * charge LESS than the product declares, so the assessment counts it
+     * (`openbank.billing.assessment.dropped_components`) every time, not only when the revision is first read.
+     */
+    val droppedFeeComponents: Int = 0,
+    /**
+     * AMOUNT price components that carry no fee identity: not one of the revision's legacy v1 fees and
+     * not fee-coded. By decision (consistent with #13230) they are NOT fees -- a minimum balance, a limit
+     * -- so nothing is charged for them, but every assessment under such a revision is counted
+     * (`openbank.billing.assessment.no_fee_identity`) so a v2 product whose fees are all unidentified is visible.
+     */
+    val noFeeIdentityComponents: Int = 0,
+)
+
+/**
+ * The revision's embedded v1 document could not be read, so its fee identities are unknown. Distinct from
+ * a catalog outage: the catalog answered, the content is what is wrong, and retrying will not fix it.
+ */
+class RevisionTermsUnreadableException(message: String, cause: Throwable) : RuntimeException(message, cause)
+
+/** Where [RevisionTerms.accountingClass] came from. */
+enum class AccountingClassSource {
+    /** The revision's own `accountingClass` attribute (catalog banking pack v3 and later). */
+    REVISION,
+
+    /**
+     * Derived from the `productType` of a lossless v1 projection (`legacy-product`), which predates
+     * the attribute. Transitional and COUNTED (`openbank.billing.accounting_class.derived`): it disappears
+     * when those revisions are re-published under a schema that carries the class.
+     */
+    DERIVED_FROM_LEGACY_PRODUCT_TYPE,
+
+    /** No class on the revision and none derivable. */
+    NONE,
+}
+
+/**
+ * Reads billing terms from the catalog by published revision (ADR-0341 D2). Fail-closed like every
+ * read port here: a failure throws and the caller turns it into an explicit skip.
+ */
+interface ProductRevisionPort {
+    /**
+     * The id of the revision effective at [effectiveAt] (null = now) for a v1 product id, or null when
+     * none is published. When the product has no revision effective that far back (an account that
+     * predates the catalog's first revision), implementations fall back to the one effective now and
+     * COUNT it, because the catalog holds no older terms for that account.
+     */
+    suspend fun publishedRevisionIdFor(productId: String, effectiveAt: Instant? = null): String?
+
+    /** The terms of [revisionId] in [currency]; cached by revision id, since a revision is immutable. */
+    suspend fun terms(revisionId: String, currency: String): RevisionTerms
+}
+
+/**
+ * The account's pinned catalog revision (ADR-0341 D1). Billing pins at the account's first
+ * assessment -- the earliest moment billing sees the account -- until account-service records the
+ * pin at opening (the last adoption step) and billing can read it from there. Once pinned the
+ * revision is never silently replaced; a change of terms is an explicit re-pin.
+ */
+interface AccountRevisionPinPort {
+    suspend fun find(accountId: String): String?
+
+    /** Pins [revisionId] unless a pin already exists; returns the pin that stands afterwards. */
+    suspend fun pinIfAbsent(accountId: String, revisionId: String): String
 }
 
 /**

@@ -100,6 +100,7 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the welcome-bonus credit keeps its request fields; the response is now the spec's `TransactionResponse` (only `id` and `status` are read elsewhere). **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `m2m` (Keycloak client `openbank-account`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `account_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
@@ -124,7 +125,7 @@ not change any existing request's outcome until explicitly flipped.
   `.github/asvs-l3-baseline.txt`); TLS for pricing's edges is a follow-up.
 - **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/accounts` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different account opening was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed open releases the claim so a retry can run. Because the Redis record expires (24 h) while the `account_idempotency` row (V14) does not, migration V30 adds nullable `account_idempotency.request_hash`, written in the same transaction as the account; `AccountService` refuses a key whose stored hash differs (409) — on the sequential replay path and on the concurrent-loser recovery path — so the check survives Redis expiry or eviction. **Residual window:** Redis records and `account_idempotency` rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely); onboarding-driven opens carry no fingerprint either. No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE account_idempotency DROP COLUMN request_hash` (see V30 header).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -418,7 +419,7 @@ not change any existing request's outcome until explicitly flipped.
   (decision) + `AccountApiIT` (end-to-end header behaviour).
 - **2026-05-30** — Added `account_outbox_seq` (Hibernate sequence fix). Additive DDL only:
   no new data flow, external surface or trust boundary. Risk class = **availability** (a missing/
-  wrong sequence breaks INSERTs); mitigated by `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  wrong sequence breaks INSERTs); mitigated by the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-06-01** — IBAN generation correctness (`IbanGenerator` + new `CzechAccountNumber` in
   openbank-libs). The previous generator emitted a padded `System.nanoTime()` tail under a hard-coded
   `0000` bank code: ISO 13616 mod-97-valid but with a **BBAN that no Czech bank could issue** (no ČNB
@@ -523,7 +524,7 @@ not change any existing request's outcome until explicitly flipped.
   satisfies the threat-model requirement for the 2-approval gate (rule #8); the change itself moves
   no money and needs no additional compensating control beyond what's documented above.
 - **2026-07-08** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
-  `account.freeze`, mirroring the sepa-payment pilot (issue #413). New `ApprovalConfig`
+  `account.freeze`, mirroring the sepa-payment pilot (issue #413). New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (`RedisApprovalStore` producer) and `PATCH /api/v1/accounts/approvals/{id}` checker-decide
   endpoint (`@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`, `@Authorize(action =
   "account.approval.decide")`); two new exception mappers (`SelfApprovalNotAllowedMapper` → 403,
@@ -1041,3 +1042,5 @@ The account ownership projection still returns an account identifier only for an
 active account owned by the supplied party. A compromised pension credential can
 invoke its scoped projection; it does not acquire shared operator or compliance
 roles. Realm import and credential delivery must be verified before deployment.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.

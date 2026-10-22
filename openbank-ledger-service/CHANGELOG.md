@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.36.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.35.0...ledger-service-v1.36.0) (2026-10-19)
+
+
+### Features
+
+* **ledger:** own the accountingClass to GL map; treasury posts by class (ADR-0341) ([#13205](https://github.com/JiRaska/open-bank-oss/issues/13205)) ([b936611](https://github.com/JiRaska/open-bank-oss/commit/b936611a8c9f622a076b30377e0757485c29a6f6))
+
 ## [1.35.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.34.3...ledger-service-v1.35.0) (2026-10-16)
 
 

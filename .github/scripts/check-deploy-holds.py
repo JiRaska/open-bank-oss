@@ -191,8 +191,16 @@ def pins(text):
 def validate_services(root, entries, removed_pins=frozenset()):
     needed = set(entries) - set(removed_pins)
     for service in entries:
-        if not (root / service / "version.txt").is_file():
-            raise InvalidHold(f"{service}: no released module found")
+        module = root / service
+        released = (module / "version.txt").is_file()
+        # analytics-sink has a real GitOps image but is not a release-please
+        # component. Its Dockerfile is port/runtime metadata; the shared
+        # Dockerfile.deploy builds the image. Keep this exception exact; other
+        # unversioned directories must not become valid hold targets.
+        analytics_image = service == "openbank-analytics-sink" and (
+            module / "build.gradle.kts").is_file() and (module / "Dockerfile").is_file()
+        if not (released or analytics_image):
+            raise InvalidHold(f"{service}: no released or deployable module found")
     for path in (root / GITOPS).rglob("*"):
         if not needed:
             break
@@ -264,17 +272,33 @@ def check(root, base):
     return 1 if violations else 0
 
 
-def strict_required_checks(rules):
-    """A held deploy needs GitHub to invalidate green checks after main moves."""
+MERGE_TRAIN_CONTEXT = "merge-train"
+
+
+def strict_required_checks(rules, app_id=None):
+    """A held deploy needs a green check to be invalidated when main moves, so an older green
+    auto-deploy PR cannot merge over a hold. Two live protections give that (ADR-0343):
+    strict up-to-date on every required-status-checks rule, OR `merge-train` required and pinned
+    to the gitops App (`app_id`, read from GITOPS_APP_ID as merge-train.py does). The App posts
+    that status only on a head verified over live main (a train tree or a strict-lane head that
+    contains main), so a stale head never carries it. Neither -> False; an unset id never matches."""
     if not isinstance(rules, list):
         raise InvalidHold("live branch rules response is not a list")
     status_rules = [rule for rule in rules if isinstance(rule, dict)
                     and rule.get("type") == "required_status_checks"]
     if not status_rules:
         raise InvalidHold("main has no live required-status-checks rule")
-    return all(isinstance(rule.get("parameters"), dict)
-               and rule["parameters"].get("strict_required_status_checks_policy") is True
-               for rule in status_rules)
+    if all(isinstance(rule.get("parameters"), dict)
+           and rule["parameters"].get("strict_required_status_checks_policy") is True
+           for rule in status_rules):
+        return True
+    try:
+        want = int(str(app_id).strip())
+    except (TypeError, ValueError):
+        return False
+    return any(isinstance(c, dict) and c.get("context") == MERGE_TRAIN_CONTEXT and c.get("integration_id") == want
+               for rule in status_rules if isinstance(rule.get("parameters"), dict)
+               for c in rule["parameters"].get("required_status_checks") or [])
 
 
 def require_live_strict(root, base, repo):
@@ -294,8 +318,9 @@ def require_live_strict(root, base, repo):
         live_rules = json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise InvalidHold("live main protection response is not JSON") from error
-    if not strict_required_checks(live_rules):
-        raise InvalidHold("deploy hold requires strict up-to-date checks on main before it can merge; "
+    if not strict_required_checks(live_rules, os.environ.get("GITOPS_APP_ID", "")):
+        raise InvalidHold("deploy hold requires strict up-to-date checks on main, or `merge-train` required "
+                          "and pinned to the gitops App (GITOPS_APP_ID), before it can merge; "
                           "an older green auto-deploy PR would otherwise remain mergeable")
     print("deploy hold: live main protection requires current-base checks")
 
@@ -330,6 +355,38 @@ def self_test():
                '"openbank-ledger-service":"sandbox-bbbbbbbb"}'
         assert filter_tags(root, tags) == {
                                      "openbank-ledger-service": "sandbox-bbbbbbbb"}
+        analytics = root / "openbank-analytics-sink"
+        analytics.mkdir()
+        (analytics / "build.gradle.kts").write_text("plugins {}\n")
+        (analytics / "Dockerfile").write_text("FROM scratch\n")
+        analytics_hold = {"openbank-analytics-sink": {
+            "issue": "#13304", "reason": "review", "release_condition": "owner release"}}
+        manifest.write_text(original.replace(
+            "    - image: registry/openbank-ledger-service:sandbox-aaaaaaaa\n",
+            "    - image: registry/openbank-ledger-service:sandbox-aaaaaaaa\n"
+            "    - image: registry/openbank-analytics-sink:sandbox-aaaaaaaa\n"))
+        validate_services(root, analytics_hold)
+        other = root / "openbank-other-service"
+        other.mkdir()
+        (other / "build.gradle.kts").write_text("plugins {}\n")
+        (other / "Dockerfile").write_text("FROM scratch\n")
+        manifest.write_text(manifest.read_text() +
+                            "    - image: registry/openbank-other-service:sandbox-aaaaaaaa\n")
+        try:
+            validate_services(root, {"openbank-other-service": {
+                "issue": "#13304", "reason": "review", "release_condition": "owner release"}})
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("another unversioned module passed")
+        (analytics / "Dockerfile").unlink()
+        try:
+            validate_services(root, analytics_hold)
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("non-deployable unversioned module passed")
+        manifest.write_text(original)
         rule.write_text("deploy_holds:\n  services: {}\n")
         assert filter_tags(root, tags) == json.loads(tags)  # eligible on next reconcile
         rule.write_text("deploy_holds:\n  services:\n    openbank-typo-service:\n"
@@ -399,6 +456,24 @@ def self_test():
         assert strict_required_checks([strict_rule])
         assert not strict_required_checks([{**strict_rule, "parameters": {
             **strict_rule["parameters"], "strict_required_status_checks_policy": False}}])
+        from unittest.mock import patch
+        # ADR-0343: strict off is acceptable only with merge-train required AND pinned to the App.
+        def rs(strict, ctx):
+            return [{"type": "required_status_checks", "parameters": {
+                "required_status_checks": ctx, "strict_required_status_checks_policy": strict}}]
+        assert not strict_required_checks(rs(False, [{"context": "Validate manifests"}]), "4242"), "no merge-train passed"
+        assert not strict_required_checks(rs(False, [{"context": "merge-train"}]), "4242"), "unpinned merge-train passed"
+        assert not strict_required_checks(rs(False, [{"context": "merge-train", "integration_id": 99}]), "4242"), \
+            "merge-train pinned to another integration passed"
+        assert not strict_required_checks(rs(False, [{"context": "merge-train", "integration_id": 4242}]), ""), \
+            "pinned merge-train passed with GITOPS_APP_ID unset"
+        assert strict_required_checks(rs(False, [{"context": "merge-train", "integration_id": 4242}]), "4242"), \
+            "pinned merge-train with strict off refused"
+        assert strict_required_checks(rs(True, [{"context": "Validate manifests"}]), ""), "strict on refused"
+        pinned_rule = rs(False, [{"context": "merge-train", "integration_id": 4242}])
+        with patch.dict(os.environ, {"GITOPS_APP_ID": "4242"}), patch(
+                "subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps(pinned_rule), stderr="")):
+            require_live_strict(root, None, "example/repo")
         try:
             strict_required_checks([])
         except InvalidHold:

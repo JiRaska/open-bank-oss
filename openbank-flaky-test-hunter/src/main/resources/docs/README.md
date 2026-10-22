@@ -6,6 +6,14 @@ Internal development-plane agent API.
 
 The committed `src/main/resources/openapi.yaml` defines the API contract. Read `/q/openapi` on the running service for the exact paths, request bodies, responses, and contract version of its image.
 
+## Observe an admitted operator workflow
+
+`GET /api/v1/flaky-test-hunter/check/workflows/{workflowId}` is a read-only endpoint for `ROLE_ADMIN`. Supply the exact identifier returned by operator admission. The service accepts only its operator workflow prefix and a valid bounded UTC date identifier; it does not expose arbitrary Temporal workflows or their payloads.
+
+The response contains only `workflowId` and the observed execution `status`. The lookup uses the configured Temporal namespace and a three-second describe deadline. An unknown workflow returns 404; a failed status lookup remains an error, rather than being reported as a completed or absent execution.
+
+An admitted request and a successful workflow execution are separate observations. Execution completion also does not establish approval or application of a proposed change. Clients should timestamp the last observed status and explicitly expose a paused or failed refresh.
+
 ## GitHub proposal egress
 
 The proposal adapter uses `SafeHttpClient` for its configurable GitHub API URL. `openbank.egress.allowed-hosts` defaults to `api.github.com`; explicitly allow the hostname when using a different GitHub API. DNS answers are checked before a connection to a pinned public address; TLS still verifies the original hostname, and redirects are refused. An unlisted host produces no outbound request.
@@ -46,6 +54,10 @@ A finding with no mechanical fix opens a GitHub issue labelled `flaky-test` with
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
 
 ## Shared build dependencies
 

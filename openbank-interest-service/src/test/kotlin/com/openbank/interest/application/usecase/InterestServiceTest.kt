@@ -530,6 +530,135 @@ class InterestServiceTest {
     }
 
     @Test
+    fun `capitalizeAllWithOutcome counts a non-closed-day pair failure, so the run is not complete`() {
+        val toDate = LocalDate.of(2026, 1, 20)
+        val prod = "SAVINGS"
+        val accountA = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        val accountB = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        stubCapitalization()
+        every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
+            Uni.createFrom().item(listOf(accountA to prod, accountB to prod))
+        every { accrualRepo.findPendingCapitalization(accountA, prod, toDate) } returns
+            Uni.createFrom().item(listOf(sampleAccrual(accountA, prod, LocalDate.of(2026, 1, 18), BigDecimal("1.50"))))
+        every { accrualRepo.findPendingCapitalization(accountB, prod, toDate) } returns
+            Uni.createFrom().item(emptyList())
+
+        val outcome = service.capitalizeAllWithOutcome(toDate).await().indefinitely()
+
+        assertThat(outcome.capitalized).isEqualTo(1)
+        assertThat(outcome.refusedClosedDay).isEqualTo(0)
+        assertThat(outcome.failed).describedAs("B failed for a reason that is not the closed-day 409").isEqualTo(1)
+        assertThat(outcome.failureReason).isNotBlank()
+        assertThat(outcome.complete).isFalse()
+    }
+
+    @Test
+    fun `accrueAllWithOutcome counts accounts whose balance is unavailable, so the run is not complete`() {
+        val date = LocalDate.of(2026, 1, 20)
+        val a = UUID.fromString("00000000-0000-0000-0000-0000000000b1")
+        val b = UUID.fromString("00000000-0000-0000-0000-0000000000b2")
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(
+                items = listOf(
+                    AccountSnapshot(a, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                    AccountSnapshot(b, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                ),
+                nextCursor = null,
+            ),
+        )
+        // account-service is down for every account: the adapter answers null.
+        every { accountDirectoryPort.bookedBalance(any()) } returns Uni.createFrom().item(null as BalanceSnapshot?)
+
+        val outcome = service.accrueAllWithOutcome(date).await().indefinitely()
+
+        assertThat(outcome.accrued).isEqualTo(0)
+        assertThat(outcome.unavailable).isEqualTo(2)
+        assertThat(outcome.failed).isEqualTo(0)
+        assertThat(outcome.complete).isFalse()
+        assertThat(service.accrueAll(date).await().indefinitely()).describedAs("legacy count unchanged").isEqualTo(0)
+    }
+
+    @Test
+    fun `accrueAllWithOutcome counts a thrown accrual as failed but a zero balance and a missing rate as no-ops`() {
+        val date = LocalDate.of(2026, 1, 20)
+        val zero = UUID.fromString("00000000-0000-0000-0000-0000000000c1")
+        val noRate = UUID.fromString("00000000-0000-0000-0000-0000000000c2")
+        val boom = UUID.fromString("00000000-0000-0000-0000-0000000000c3")
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(
+                items = listOf(
+                    AccountSnapshot(zero, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                    AccountSnapshot(noRate, "NO_RATE_PRODUCT", "SAVINGS", "CZK"),
+                    AccountSnapshot(boom, "SAVINGS_PRODUCT", "SAVINGS", "CZK"),
+                ),
+                nextCursor = null,
+            ),
+        )
+        every { accountDirectoryPort.bookedBalance(zero) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal.ZERO, "CZK"))
+        every { accountDirectoryPort.bookedBalance(noRate) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("10.00"), "CZK"))
+        every { accountDirectoryPort.bookedBalance(boom) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("10.00"), "CZK"))
+        stubNoExistingAccrual()
+        every { configRepo.findEffectiveRate(noRate, any(), date, any()) } returns
+            Uni.createFrom().item(null as InterestRateConfig?)
+        every { configRepo.findEffectiveRate(boom, any(), date, any()) } returns
+            Uni.createFrom().failure(IllegalStateException("db down"))
+
+        val outcome = service.accrueAllWithOutcome(date).await().indefinitely()
+
+        assertThat(outcome.failed).isEqualTo(1)
+        assertThat(outcome.unavailable).isEqualTo(0)
+        assertThat(outcome.firstFailure).contains(boom.toString())
+    }
+
+    @Test
+    fun `a failed account listing - first page or page N - is never an empty successful run`() {
+        val date = LocalDate.of(2026, 1, 20)
+        val a = UUID.fromString("00000000-0000-0000-0000-0000000000d1")
+
+        // First page fails.
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns
+            Uni.createFrom().failure(IllegalStateException("account-service 503"))
+        val first = service.accrueAllWithOutcome(date).await().indefinitely()
+        assertThat(first.listingFailed).isTrue()
+        assertThat(first.complete).describedAs("an unreadable list is not 'no accounts'").isFalse()
+        assertThatThrownBy { service.accrueAll(date).await().indefinitely() }
+            .hasMessageContaining("account listing failed")
+
+        // Page 1 succeeds, page 2 (cursor) fails: nothing is accrued from a silently truncated list.
+        every { accountDirectoryPort.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(listOf(AccountSnapshot(a, "SAVINGS_PRODUCT", "SAVINGS", "CZK")), nextCursor = "c1"),
+        )
+        every { accountDirectoryPort.listActiveAccounts("c1", any()) } returns
+            Uni.createFrom().failure(IllegalStateException("account-service 503"))
+        val pageN = service.accrueAllWithOutcome(date).await().indefinitely()
+        assertThat(pageN.listingFailed).isTrue()
+        assertThat(pageN.accrued).isEqualTo(0)
+        assertThat(pageN.complete).isFalse()
+        verify(exactly = 0) { accountDirectoryPort.bookedBalance(any()) }
+    }
+
+    @Test
+    fun `capitalizeAllWithOutcome counts a stranded claim that recovery could not complete as failed`() {
+        val toDate = LocalDate.of(2026, 1, 20)
+        val account = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd")
+        every { accrualRepo.findOutstandingCapitalizationClaims() } returns
+            Uni.createFrom().item(listOf(Triple(account, "SAVINGS", LocalDate.of(2026, 1, 1))))
+        every { accrualRepo.findClaimedForCapitalization(account, "SAVINGS") } returns
+            Uni.createFrom().failure(IllegalStateException("ledger 503"))
+        every { accrualRepo.findAccountsWithPendingCapitalization(toDate) } returns
+            Uni.createFrom().item(emptyList())
+
+        val outcome = service.capitalizeAllWithOutcome(toDate).await().indefinitely()
+
+        assertThat(outcome.failed).describedAs("money frozen mid-credit is a failed pair").isEqualTo(1)
+        assertThat(outcome.failureReason).contains("ledger 503")
+        assertThat(outcome.complete).isFalse()
+    }
+
+    @Test
     fun `capitalizeAll returns 0 and does nothing when no pair is pending`() {
         val toDate = LocalDate.of(2026, 1, 20)
         every { accrualRepo.findOutstandingCapitalizationClaims() } returns Uni.createFrom().item(emptyList())

@@ -64,7 +64,7 @@ export interface GeneratedReport {
   templates: GeneratedTemplate[]
 }
 
-export type ReportSourceFailure = 'not_deployed' | 'unauthorized' | 'unreachable' | 'error' | 'result_limit'
+export type ReportSourceFailure = 'not_deployed' | 'discovery_unavailable' | 'unauthorized' | 'unreachable' | 'error' | 'result_limit'
 
 export class ReportSourceError extends Error {
   constructor(readonly kind: ReportSourceFailure, readonly service: string, detail: string) {

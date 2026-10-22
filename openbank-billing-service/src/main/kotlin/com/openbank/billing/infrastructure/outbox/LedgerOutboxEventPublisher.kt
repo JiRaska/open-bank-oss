@@ -12,6 +12,7 @@ import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
@@ -46,6 +47,7 @@ class LedgerOutboxEventPublisher(
     private val ledger: LedgerPostingPort,
     private val assessments: BillingAssessmentRepository,
     @Channel("billing-events-out") private val emitter: MutinyEmitter<String>,
+    private val meters: MeterRegistry,
 ) : OutboxEventPublisher {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
@@ -68,6 +70,7 @@ class LedgerOutboxEventPublisher(
             amount = payload.amount,
             currency = payload.currency,
             description = payload.description,
+            accountingClass = accountingClassOf(payload.accountingClass, payload.idempotencyKey),
         )
         val journalId = ledger.post(command)
         assessments.markPosted(payload.idempotencyKey, journalId)
@@ -84,6 +87,7 @@ class LedgerOutboxEventPublisher(
             amount = payload.amount,
             currency = payload.currency,
             reason = payload.reason,
+            accountingClass = accountingClassOf(payload.accountingClass, payload.idempotencyKey),
         )
         val reversalJournalId = ledger.postReversal(command)
         assessments.markReversed(payload.originalIdempotencyKey, reversalJournalId)
@@ -108,7 +112,26 @@ class LedgerOutboxEventPublisher(
         emitter.sendMessage(Message.of(entry.payload).addMetadata(metadata)).awaitSuspending()
     }
 
+    /**
+     * A row written before ADR-0341 carries no class. It is still posted -- refusing would strand a
+     * charge the customer's statement already shows -- as the demand-deposit class. In CZK
+     * (CUSTOMER_DEPOSIT_DEMAND, PRINCIPAL, CZK) resolves to 2100, exactly the account those rows were
+     * written for (`FeeJournalsUnchangedTest` pins it). Such a row in another currency resolves to that
+     * currency's control account (2101-2103) rather than the CZK 2100 the ledger always refused it on.
+     * The fallback is COUNTED so its disappearance is observable. Rows written by this release always
+     * carry the class.
+     */
+    private fun accountingClassOf(fromPayload: String?, idempotencyKey: String): String {
+        if (fromPayload != null) return fromPayload
+        meters.counter("openbank.billing.fee.post.legacy_payload").increment()
+        log.warnf("outbox row %s predates accounting classes; posting as %s", idempotencyKey, LEGACY_FALLBACK_CLASS)
+        return LEGACY_FALLBACK_CLASS
+    }
+
+    private val log = org.jboss.logging.Logger.getLogger(LedgerOutboxEventPublisher::class.java)
+
     private companion object {
+        const val LEGACY_FALLBACK_CLASS = "CUSTOMER_DEPOSIT_DEMAND"
         const val REVERSAL_INTENT_EVENT_TYPE = "billing.fee.reversal-intent.v1"
 
         /** Mirrors `BillingAssessmentRepositoryImpl.ANNUAL_FEE_SUMMARY_EVENT_TYPE` (ADR-0248). */
@@ -126,6 +149,8 @@ private data class FeePostIntentPayload(
     val amount: java.math.BigDecimal,
     val currency: String,
     val description: String,
+    val accountingClass: String? = null,
+    val productRevisionId: String? = null,
 )
 
 /** The `billing.fee.reversal-intent.v1` outbox payload shape (written by `BillingAssessmentRepositoryImpl`). */
@@ -139,4 +164,5 @@ private data class FeeReversalIntentPayload(
     val amount: java.math.BigDecimal,
     val currency: String,
     val reason: String,
+    val accountingClass: String? = null,
 )

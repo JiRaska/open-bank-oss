@@ -54,6 +54,10 @@ object FeeBillingScenario {
 
     private const val MAX_FEE_MINOR_UNITS = 500L // up to 5.00 in a 2-dp currency — a modest fee, not a payment
     private const val REVERSAL_RATE = 0.25 // seeded fraction of steps whose charge is also reversed this run
+
+    // The billing command now names the customer leg by accounting class (ADR-0341 D3); the
+    // simulation builds the journal itself against fixed GL ids, so the class is carried, not resolved.
+    private const val SIMULATED_ACCOUNTING_CLASS = "CUSTOMER_DEPOSIT_DEMAND"
     private val ZONE = ZoneId.of("Europe/Prague")
 
     // Mirrors BillingLedgerConfig.Gl's two leaf GL accounts (billing-service's own fixed chart-of-
@@ -127,6 +131,7 @@ object FeeBillingScenario {
             feeId = feeId,
             amount = amount,
             currency = currency,
+            accountingClass = SIMULATED_ACCOUNTING_CLASS,
             description = "Fee charge: ${assessedFee.name}",
         )
         val chargeEntry = buildChargeJournal(world, chargeCommand, accountId)
@@ -155,6 +160,7 @@ object FeeBillingScenario {
             feeId = fee.feeId,
             amount = fee.chargedAmount,
             currency = fee.currency,
+            accountingClass = SIMULATED_ACCOUNTING_CLASS,
             reason = "simulated reversal (DST)",
         )
         val reversalEntry = buildReversalJournal(world, reversalCommand, accountId)
