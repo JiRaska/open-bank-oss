@@ -39,6 +39,10 @@ For HTTPS, `SafeHttpClient` in `openbank-libs-runtime` uses JVM certificate chai
 
 Internal clients that retain an injected JDK `HttpClient` (the LLM gateway, content guard, embeddings, flagd and OPA sidecar) use `BoundedBodyHandlers.ofString()` instead of unbounded `BodyHandlers.ofString()`. The default response cap is 4 MiB; exceeding it cancels the response subscription and fails the call with `IOException`. Use `SafeHttpClient` for external egress, where the response cap and destination-host policy are enforced together.
 
+## Day-close participation (ADR-0342)
+
+`com.openbank.libs.close` (in `openbank-libs-runtime`) is the participant side of the ledger's day-close contract: `CloseParticipationAssembler` folds a service's persisted job runs into one report per accounting day, and `CloseParticipationReporter` delivers it without ever failing the calling job. A job run that was refused or partially failed folds to `REFUSED`, which the ledger treats as NOT complete: the day stays in `CUTOFF` until the participant reports `RAN` or an operator waives it. Business dates must come from `AccountingClock`, never from the UTC `Clock` bean.
+
 ## Blob store opt-in and warm-up entity skipping (2026-10-17)
 
 `PostgresBlobStore` is opt-in. It is enabled only when `openbank.objectstore.backend=postgres` is set; when the property is missing, the store is not enabled. `openbank-document-service` sets it explicitly (default `postgres`), and `openbank-customer-edge` sets it explicitly to `s3`.

@@ -67,6 +67,21 @@ money-path service, not adjacent.
 
 ## 6. Change log
 
+- **2026-10-17** — **Interest is the first day-close participant (ADR-0342, #13167).** New outbound
+  edge: `PUT /api/v1/ledger/accounting-days/{date}/participants/interest` to ledger-service, over the
+  same base URL, TLS bucket and named oidc-client `ledger` (Keycloak `openbank-interest`) as the
+  existing journal POST — no new credential, client or port. New table `interest_close_job_run`
+  (V18) recording that the accrual / capitalization job ran for a day; a new hourly
+  `InterestCloseParticipationScheduler` folds those rows into the report. **STRIDE-S:** the ledger
+  accepts the report only from `service-account-openbank-interest`, so another service cannot report
+  for interest and interest cannot report for another participant. **STRIDE-T/R:** the report is
+  derived from the service's own persisted runs, never caller input; a due job with no recorded run
+  produces NO report, so a failed or late run holds the ledger's close instead of reporting a false
+  completion. **STRIDE-D:** a ledger outage only delays the report (re-offered every tick; the day
+  waits). A capitalization the ledger refuses with `ACCOUNTING_DAY_CLOSED` is now counted and
+  reported `REFUSED` instead of only logged; the claim semantics on a rejected post are unchanged.
+  Rollback: revert the application while preserving additive V18 past-run evidence; schema removal needs a separate reviewed retention/rollback plan.
+
 - **2026-10-17** — **`TransactionServiceClient` is now GENERATED from transaction-service's `openapi.yaml` (ADR-0319).** The hand-written interface and DTOs were replaced by a sub-interface of the client built in `openbank-client-transaction`; the withholding-remittance debit keeps its fields and `dueDate` is now parsed to a date before sending (a non-ISO date fails in the consumer and is dead-lettered, where transaction-service used to answer 400). A non-2xx answer arrives as an exception: 409 is still treated as an idempotent settle and any other status still throws `WithholdingRemittanceBookingFailedException` for dead-lettering. **STRIDE-T/S (trust boundary):** the outbound call is the same route, the same NAMED oidc-client `ledger` (Keycloak client `openbank-interest`) and the same `SyntheticTaintClientFilter` registration, pinned by the existing `M2mOidcClientIdentityWiringTest`-style wiring assertions and by the consumer pact (literal `/api/v1/transactions`, replayed by transaction-service's `@PactFolder` class). What changes is where the request/response types come from: the provider's own spec, so a spec change now fails this service's compile instead of production, and the request carries the spec's full optional field set serialised as `null` (transaction-service ignores them). No new credential, no new scope, no new network path. Rollback: revert the commit (the hand-written client returns).
 - **2026-10-14** — **Tax-profile resolution now reads party attributes** (ADR-0339 B, #12811). The
   constant-only tax-profile stub is replaced by `PartyTaxProfileProvider`: account
@@ -89,7 +104,7 @@ money-path service, not adjacent.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `interest_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -322,6 +337,8 @@ money-path service, not adjacent.
   the shared client". Rollback: revert the commit (the ledger client returns to the shared token).
 - **2026-09-21** — **Remittance leg joins the existing own identity (#10486 batch 2).** `TransactionServiceClient` (the withholding-tax remittance debit, #999) now selects the NAMED oidc-client `ledger` — the same Keycloak client `openbank-interest` (`ROLE_API` only) the capitalization journal already uses — instead of the shared default. transaction-service grants that principal exactly `transaction.create` (`service-interest-transaction-create`). **No new credential, secret, ExternalSecret or env var:** the existing `OIDC_LEDGER_CLIENT_SECRET` is reused, so nothing needs provisioning for this service. The blast radius of the `openbank-interest` secret grows from `ledger.create` to `ledger.create` + `transaction.create`, still far short of the shared secret's 54 money-path writes. `AccountServiceClient` and `ProductCatalogClient` stay on the shared client (asserted by `LedgerOidcClientIdentityWiringTest`). Rollback: revert the commit.
 - **2026-09-21** — **Accrual-run account reads move to the service's own machine identity (#10486 batch 5).** `AccountServiceClient` (`GET /api/v1/accounts/active`, `GET /api/v1/accounts/{id}/balance`) now mints its bearer from the NAMED oidc-client `ledger`, Keycloak client `openbank-interest` (`ROLE_API` only), which its ledger and remittance legs already use. account-service grants it `account.list` and `account.read` (`service-interest-account-read`). **STRIDE-S/E:** no new credential; the existing secret now also reaches those two reads. **Repudiation improves:** the reads name this service. Rollback: revert the commit.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 - **2026-10-17** — **Catalog reads move to the service's own machine identity (#8481, ADR-0341 step 1).**
   `ProductCatalogClient` now selects the NAMED oidc-client `ledger` (Keycloak client `openbank-interest`)
   instead of the shared `openbank-services` token, and that client gains the narrow `catalog:read` scope
@@ -332,3 +349,5 @@ money-path service, not adjacent.
   reads published terms, cannot author or publish); a revoked scope fails the sync closed and the cursor
   does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
   then idles on 403 (catalog sync stays off by default until the follow-up PR).
+
+- **2026-10-19** — New automatic day-close export boundaries store/report only counts and fixed failure categories, not raw account/product identifiers, exception text or closed-day response bodies. Their aggregate warnings follow the same rule; the newly added account-listing error message omits the throwable. Existing per-account capitalization/recovery logs are outside this correction and are not claimed anonymous. Ledger operator identity/free-text waiver reasons remain intentional audit personal data. Counts, REFUSED/RAN semantics, liveness and the default shadow rollout are unchanged.

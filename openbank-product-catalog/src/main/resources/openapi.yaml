@@ -6,7 +6,7 @@ info:
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
   # 2.4.0 -> 2.5.0 (ADR-0341): additive GET /api/v2/legacy-products/{productId}/published-revision, the
   # revision a contract pins when it still knows a product only by its v1 id.
-  version: 2.6.0
+  version: 2.7.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
@@ -897,7 +897,32 @@ components:
         document: { type: object, additionalProperties: true }
         sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
         registeredAt: { type: string, format: date-time }
+        approvalPolicy:
+          $ref: '#/components/schemas/RevisionApprovalPolicy'
+          description: >-
+            Role approvals the pack requires before a revision of this exact schema version may
+            publish; absent when publication is maker-checker only. Internal authorities stay private.
       required: [id, version, document, sha256, registeredAt]
+    RevisionApprovalPolicy:
+      type: object
+      additionalProperties: false
+      required: [roles, requireEffectiveFrom, requiredAttributes]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/RevisionApprovalRole' }
+        requireEffectiveFrom: { type: boolean }
+        requiredAttributes:
+          type: object
+          description: Top-level attribute values a draft must carry before any role may approve it.
+          additionalProperties: { type: string }
+    RevisionApprovalRole:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,31}$' }
     SchemaViolation:
       type: object
       additionalProperties: false

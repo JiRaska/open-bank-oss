@@ -34,7 +34,7 @@ class PublicationTest(unittest.TestCase):
             p.write_text(json.dumps({"consumer": {"name": "openbank-admin-ui"},
                                      "provider": {"name": provider},
                                      "interactions": [{"description": provider}]}))
-        # The verified JVM receipt is repo-wide, while this publisher bundles only Admin UI.
+        # The verified JVM receipt may be run-scoped, while this publisher bundles only Admin UI.
         (self.root / "pacts" / "openbank-ledger-openbank-payment-service.json").write_text(
             json.dumps({"consumer": {"name": "openbank-ledger"},
                         "provider": {"name": "openbank-payment-service"},
@@ -113,7 +113,7 @@ class PublicationTest(unittest.TestCase):
         bundle = publisher.prepare(self.root, self.sha, self.marker, self.jvm_manifest)
         self.assertNotIn(str(pact.relative_to(self.root)), bundle["files"])
 
-    def test_prepare_accepts_repo_wide_jvm_manifest_and_bundles_only_admin_ui(self):
+    def test_prepare_accepts_selected_jvm_manifest_and_bundles_only_admin_ui(self):
         pacts = sorted((self.root / "pacts").glob("*.json"))
         jvm_paths = [pacts[0].relative_to(self.root), pacts[-1].relative_to(self.root)]
         for pact in pacts:
