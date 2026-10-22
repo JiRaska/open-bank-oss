@@ -65,7 +65,7 @@ function generateJson(repoRoot, temporaryDirectory, name, script) {
 }
 
 /** Generate a single bounded payload from the reviewed source tree; no network or credentials. */
-export function collectAdminUiContent({ repoRoot = REPO, sourceSha, now = Date.now } = {}) {
+export function collectAdminUiContent({ repoRoot = REPO, sourceSha, includePlatformDeclarations = false, now = Date.now } = {}) {
   const root = resolve(repoRoot)
   if (typeof sourceSha !== 'string' || !SOURCE_SHA.test(sourceSha)) throw new Error('source SHA must be a full lowercase 40-character Git SHA')
   const checkedOutSha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
@@ -82,6 +82,8 @@ export function collectAdminUiContent({ repoRoot = REPO, sourceSha, now = Date.n
       sourceSha,
       collectedAt: new Date(now()).toISOString(),
       content: {
+        // Enable only after readers accepting the additive field have rolled out.
+        ...(includePlatformDeclarations ? { platformVersions: generateJson(root, temporaryDirectory, 'platform-versions', 'generate-platform-versions.mjs') } : {}),
         catalog: generateJson(root, temporaryDirectory, 'catalog', 'generate-catalog.mjs'),
         serviceGraph: generateJson(root, temporaryDirectory, 'service-graph', 'generate-service-graph.mjs'),
         governance: generateJson(root, temporaryDirectory, 'governance', 'generate-governance.mjs'),
@@ -104,7 +106,7 @@ export function collectAdminUiContent({ repoRoot = REPO, sourceSha, now = Date.n
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   try {
     const { sourceSha, out } = parseArgs(process.argv.slice(2))
-    const bytes = collectAdminUiContent({ sourceSha })
+    const bytes = collectAdminUiContent({ sourceSha, includePlatformDeclarations: process.env.OPENBANK_CONTENT_PLATFORM_DECLARATIONS === 'true' })
     writeFileSync(out, bytes, { mode: 0o600 })
     process.stdout.write(`Collected admin-ui source content (${bytes.byteLength} bytes) for ${sourceSha}\n`)
   } catch (error) {
