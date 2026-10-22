@@ -4,47 +4,46 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.SettlementOutcome
 import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
-import io.quarkus.oidc.client.NamedOidcClient
-import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
- * Adapter over [TransactionServiceClient] — books the debit leg in transaction-service once
- * the Czech CERTIS scheme returns ACSC (ADR-0108). The idempotency key is payment-scoped so
- * Temporal retries never double-book: transaction-service early-returns the existing transaction
- * for a repeated key and answers 201 with it, which is the arm that actually fires. The 409 branch
- * below is unreachable against that service today and kept only as defence if it ever adopts a
- * conflict response — do not cite it as the deduplication mechanism.
+ * Books the debit leg in transaction-service once the Czech CERTIS scheme returns ACSC (ADR-0108), through
+ * the shared [TransactionClient] facade (ADR-0319), the only place that interprets the HTTP answer.
  *
- * The OIDC token is acquired explicitly (not via OidcClientRequestReactiveFilter) because the
- * filter loses the Vert.x context on Temporal activity threads — same root cause as ADR-0104
- * BUG #3 for the SEPA scheme gateway.
+ * Settlement is confirmed ONLY by HTTP 201 carrying a COMPLETED transaction (the facade throws on anything
+ * else) whose type, accounts, amount, currency, rail and instruction type match the request (#13217).
+ * Every other answer throws [SettlementUnavailableException]; the activity rethrows it, Temporal retries,
+ * and the payment stays SENT_TO_CLEARING:
+ *  - 409 is a concurrent-state conflict on the provider, never proof of an earlier booking (#13225);
+ *    transaction-service replays a repeated key as 201 with the existing transaction, so the payment-scoped
+ *    `domestic-settlement-<paymentId>` key is what keeps every retry from booking twice;
+ *  - an unreadable or non-final 2xx is completion-UNCERTAIN and retried under that same key.
+ *
+ * The bearer comes from the named `m2m` oidc-client filter on [TransactionServiceClient] (#13224).
  */
 @ApplicationScoped
 class SettlementAdapter(
     @RestClient private val client: TransactionServiceClient,
-    // Lazy Instance: absent when oidc-client is disabled under %test so a direct injection
-    // would fail Arc validation for every @QuarkusTest. Resolved on demand in prod only.
-    // #10486: domestic-payment's OWN Keycloak client `openbank-domestic-payment` (ROLE_API only),
-    // never the shared default client. transaction-service's OPA grants it transaction.create only.
-    @NamedOidcClient("m2m") private val oidcClient: Instance<OidcClient>,
     private val accountLookup: AccountLookupPort,
     private val clock: Clock,
 ) : SettlementPort {
@@ -53,10 +52,13 @@ class SettlementAdapter(
     lateinit var self: SettlementAdapter
 
     private val log = Logger.getLogger(SettlementAdapter::class.java)
+    private val transactions = TransactionClient(client)
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun settle(payment: DomesticPayment): SettlementOutcome = try {
         self.settleWithResilience(payment)
+    } catch (ex: CancellationException) {
+        throw ex
     } catch (ex: SettlementUnavailableException) {
         throw ex
     } catch (ex: Exception) {
@@ -66,13 +68,15 @@ class SettlementAdapter(
         )
     }
 
-    @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
+    @Retry(
+        maxRetries = 2,
+        delay = 300,
+        jitter = 150,
+        retryOn = [Exception::class],
+        abortOn = [SettlementUnavailableException::class, CancellationException::class],
+    )
     @Timeout(SETTLE_TIMEOUT_MS)
     open suspend fun settleWithResilience(payment: DomesticPayment): SettlementOutcome {
-        val token = oidcClient.get().tokens.awaitSuspending().accessToken
-        val valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val description = buildDescription(payment)
-
         // transaction-service rejects an amount whose scale exceeds the currency's fraction digits.
         // payment.amount is a kernel Money (#11604), built at the inbound boundary without rounding,
         // so it is already at exactly the currency's minor-unit scale (123.000000 in the column reads
@@ -87,46 +91,66 @@ class SettlementAdapter(
         // External transfers keep a null target (the money genuinely leaves the bank).
         val targetAccountId = resolveInternalCreditorAccountId(payment)
 
-        val response = client.initiateTransaction(
-            "Bearer $token",
-            InitiateSettlementRequest(
-                idempotencyKey = "domestic-settlement-${payment.id}",
-                type = "DEBIT",
-                sourceAccountId = payment.debtorAccountId,
-                targetAccountId = targetAccountId,
-                amount = settlementAmount,
-                currencyCode = payment.currency,
-                description = description,
-                valueDate = valueDate,
-                rail = "DOMESTIC",
-                instructionType = "ONE_OFF",
-            ),
-        ).awaitSuspending()
+        val request = InitiateTransactionRequest(
+            idempotencyKey = "domestic-settlement-${payment.id}",
+            type = "DEBIT",
+            sourceAccountId = payment.debtorAccountId,
+            targetAccountId = targetAccountId,
+            amount = settlementAmount,
+            currencyCode = payment.currency,
+            description = buildDescription(payment),
+            valueDate = LocalDate.now(clock),
+            rail = "DOMESTIC",
+            instructionType = "ONE_OFF",
+        )
+        val txId = confirm(payment, request, transactions.initiate(request).awaitSuspending())
+        log.infof("Settlement booked for payment %s → transactionId=%s", payment.id, txId)
+        return SettlementOutcome(settled = true, transactionId = txId)
+    }
 
-        return when (response.status) {
-            HTTP_CREATED -> {
-                val txId = extractTransactionId(response)
-                log.infof("Settlement booked for payment %s → transactionId=%s", payment.id, txId)
-                SettlementOutcome(settled = true, transactionId = txId)
-            }
-            // Unreachable against transaction-service today — it replays a duplicate key as 201
-            // with the existing transaction (see this class's KDoc). Kept as defence, and logged
-            // loudly enough to notice if that ever changes.
-            HTTP_CONFLICT -> {
-                log.infof(
-                    "Settlement already booked (409) for payment %s — idempotent success. " +
-                        "NOTE: transaction-service is not expected to answer 409; if this line " +
-                        "appears, its duplicate handling changed and the docs need revisiting.",
-                    payment.id,
-                )
-                SettlementOutcome(settled = true, transactionId = null)
-            }
-            else -> {
-                throw SettlementUnavailableException(
-                    "transaction-service returned HTTP ${response.status} for payment ${payment.id}",
-                )
-            }
+    /**
+     * The response-vs-request binding sepa-instant's `SettlementAdapter` applies (#13217). Messages name only
+     * the reason, never body content (it may carry customer data).
+     */
+    @Suppress("ThrowsCount", "CyclomaticComplexMethod")
+    private fun confirm(
+        payment: DomesticPayment,
+        request: InitiateTransactionRequest,
+        outcome: TransactionCallOutcome<TransactionResponse>,
+    ): UUID {
+        val booked = when (outcome) {
+            is TransactionCallOutcome.HttpSuccess -> outcome
+            TransactionCallOutcome.Conflict -> throw SettlementUnavailableException(
+                "transaction-service returned HTTP $HTTP_CONFLICT (a concurrent-state conflict, not a booking) " +
+                    "for payment ${payment.id}",
+            )
+            is TransactionCallOutcome.Rejected -> throw SettlementUnavailableException(
+                "transaction-service returned HTTP ${outcome.status} for payment ${payment.id}",
+            )
         }
+        if (booked.status != HTTP_CREATED) {
+            throw SettlementUnavailableException(
+                "transaction-service returned HTTP ${booked.status} for payment ${payment.id}",
+            )
+        }
+        val tx = booked.body
+            ?: throw SettlementUnavailableException("Settlement response has no transaction", booked.bodyError)
+        val id = tx.id ?: throw SettlementUnavailableException("Settlement response has no transaction id")
+        val amount = tx.amount ?: throw SettlementUnavailableException("Settlement response has no numeric amount")
+        // valueDate is deliberately not compared: the provider resolves it to a business day. The target account
+        // is compared only when one was requested; a debit-only booking's counter-leg is the provider's choice.
+        val matchesRequest = tx.status == CONFIRMED_STATUS &&
+            tx.type == request.type &&
+            tx.sourceAccountId == request.sourceAccountId &&
+            (request.targetAccountId == null || tx.targetAccountId == request.targetAccountId) &&
+            amount.compareTo(request.amount) == 0 &&
+            tx.currencyCode == request.currencyCode &&
+            tx.rail == request.rail &&
+            tx.instructionType == request.instructionType
+        if (!matchesRequest) {
+            throw SettlementUnavailableException("Settlement response does not match payment ${payment.id}")
+        }
+        return id
     }
 
     /**
@@ -195,20 +219,10 @@ class SettlementAdapter(
         return "$scheme $info".take(MAX_DESCRIPTION)
     }
 
-    @Suppress("TooGenericExceptionCaught")
-    private fun extractTransactionId(response: jakarta.ws.rs.core.Response): UUID? = try {
-        val body = response.readEntity(String::class.java) ?: return null
-        // Minimal JSON extraction — the response body is {"id":"<uuid>",...}.
-        val match = UUID_PATTERN.find(body)
-        match?.groupValues?.get(1)?.let { UUID.fromString(it) }
-    } catch (ex: Exception) {
-        log.warnf(ex, "Could not parse transactionId from transaction-service response")
-        null
-    }
-
     private companion object {
         const val HTTP_CREATED = 201
         const val HTTP_CONFLICT = 409
+        const val CONFIRMED_STATUS = "COMPLETED"
         const val MAX_DESCRIPTION = 140
         const val SETTLE_TIMEOUT_MS = 8_000L
         const val IBAN_BANK_DIGITS = 4
@@ -216,7 +230,5 @@ class SettlementAdapter(
         const val MOD_97 = 97
         const val MOD_97_COMPLEMENT = 98
         const val RADIX_10 = 10
-        val UUID_PATTERN =
-            Regex(""""id"\s*:\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"""")
     }
 }

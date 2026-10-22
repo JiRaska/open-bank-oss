@@ -16,6 +16,7 @@
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "idempotencyKey": "pact-domestic-txn-001",
+          "instructionType": "ONE_OFF",
           "rail": "DOMESTIC",
           "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           "type": "DEBIT",
@@ -29,8 +30,14 @@
       },
       "response": {
         "body": {
+          "amount": 1000.00,
+          "currencyCode": "CZK",
           "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
-          "status": "COMPLETED"
+          "instructionType": "ONE_OFF",
+          "rail": "DOMESTIC",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "status": "COMPLETED",
+          "type": "DEBIT"
         },
         "generators": {
           "body": {
@@ -44,6 +51,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.id": {
               "combine": "AND",
               "matchers": [

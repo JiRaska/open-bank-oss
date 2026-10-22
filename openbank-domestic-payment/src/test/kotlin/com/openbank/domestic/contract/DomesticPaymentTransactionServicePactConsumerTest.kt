@@ -41,7 +41,8 @@ class DomesticPaymentTransactionServicePactConsumerTest {
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "valueDate": "2026-01-20",
-          "rail": "DOMESTIC"
+          "rail": "DOMESTIC",
+          "instructionType": "ONE_OFF"
         }
     """.trimIndent()
 
@@ -66,6 +67,15 @@ class DomesticPaymentTransactionServicePactConsumerTest {
                 // made all four replays green about it for the life of the contracts.
                 // stringValue, NOT stringType: this is the field the consumer branches on.
                 o.stringValue("status", "COMPLETED")
+                // #13217: SettlementAdapter settles only a booking that matches its request, so the
+                // provider must keep answering with these. Values, not types: they are what is compared.
+                o.stringValue("type", "DEBIT")
+                o.stringValue("sourceAccountId", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                o.stringValue("currencyCode", "CZK")
+                o.stringValue("rail", "DOMESTIC")
+                o.stringValue("instructionType", "ONE_OFF")
+                // Compared numerically (compareTo), so the provider's scale is free; the field must exist.
+                o.decimalType("amount", java.math.BigDecimal("1000.00"))
             }.build(),
         )
         .toPact()
@@ -84,5 +94,8 @@ class DomesticPaymentTransactionServicePactConsumerTest {
 
         assertThat(body.getString("id")).isNotBlank()
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
+        assertThat(body.getString("type")).isEqualTo("DEBIT")
+        assertThat(body.getString("rail")).isEqualTo("DOMESTIC")
+        assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
     }
 }
