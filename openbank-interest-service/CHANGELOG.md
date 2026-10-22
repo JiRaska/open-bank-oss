@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.24.1...interest-service-v0.25.0) (2026-10-22)
+
+
+### Features
+
+* **ledger:** day-close participants — the accounting day waits for product services (ADR-0342) ([#13197](https://github.com/JiRaska/open-bank-oss/issues/13197)) ([cc8b400](https://github.com/JiRaska/open-bank-oss/commit/cc8b40005ac00a2c73142a6890fa146556017950))
+
 ## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.24.0...interest-service-v0.24.1) (2026-10-19)
 
 
