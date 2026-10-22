@@ -1033,7 +1033,7 @@ gates:
     review_after: 2027-02-19
     min_subjects: 10   # 11 fixtures across the 5 phase-0 product types (2026-10-22)
     budget_seconds: 20   # measured 0.3 s locally (2026-10-19)
-    verified: "VERIFIED_PLACEHOLDER"
+    verified: "2026-10-22 — 11 fixtures across the 5 phase-0 products, 0 findings, self-test 13/13; TreasuryParityReplayTest 13/13 (every fixture replayed through ScheduleService, plus a tampered-amount case that must yield named findings)"
     selftest_inputs:
       - ".github/scripts/check-treasury-parity-fixtures.py"
       - "openbank-treasury-service/src/test/parity-oracle/oracle.py"
