@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.28.0...risk-engine-v0.28.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **risk-engine:** bound payment and fixing lags and check the deadline while preparing legs ([#13546](https://github.com/JiRaska/open-bank-oss/issues/13546)) ([a72945a](https://github.com/JiRaska/open-bank-oss/commit/a72945ad5e6005f111ea1940c3b49642fe174602))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.27.2...risk-engine-v0.28.0) (2026-10-21)
 
 
