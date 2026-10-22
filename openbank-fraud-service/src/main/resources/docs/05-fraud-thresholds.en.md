@@ -16,6 +16,10 @@ Version 1 is seeded by `V9__fraud_threshold_set.sql`. It holds exactly the figur
 
 `GET /api/v1/fraud/thresholds/proposals/pending` lists open proposals. `GET /api/v1/fraud/thresholds/active` shows the set in force. Operators and machine principals cannot use these endpoints.
 
+## The record cannot be erased
+
+Every proposal and decision stays in the table. The service's own database role can read it, add a proposal and record a decision, and nothing else. It cannot delete a version, empty the table, or change an approved set's amounts or who proposed it.
+
 ## Failing closed
 
 - A currency missing from a rule's map makes that rule return REVIEW (`…-unmapped-currency`) for that currency.
