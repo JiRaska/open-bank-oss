@@ -494,6 +494,10 @@ fix path are unchanged.
 
 The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
 
+### Amendment (2026-10-22) — a reservation ends on a stall, not on a fixed age (#13400)
+
+The fixed `RESERVATION_TIMEOUT_S` (64 min from the head's committer time) is replaced: a reservation is released when the holder's CI is idle — no check run on the head started or completed for `RESERVATION_STALL_S` (15 min, 3 x the longest gap between consecutive job completions measured on #13204's four heads), with the idle clock starting at the committer time so a CI that never starts is a stall too — or when it passes `RESERVATION_CEILING_S` (4 h from the committer time), and a future-dated head still holds nothing (#13485). Progress is read from GitHub's check-run timestamps, never from the author-supplied commit date. Measured 2026-10-22: #13204's Services CI took 87.1, 70.4 and 67.8 min per head; the 64 min bound released it 2 min 50 s before its CI went green, the next strict-lane PR merged 6 s later, and the next update-branch restarted the clock — a livelock the fixed bound cannot escape for any CI slower than it.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
