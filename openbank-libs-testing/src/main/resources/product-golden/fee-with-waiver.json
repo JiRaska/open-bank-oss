@@ -1,0 +1,102 @@
+{
+  "name": "fee-with-waiver",
+  "description": "A 5.00 monthly maintenance fee waived at a balance of 50 000 or more: charged on 1 000, not charged after a 60 000 deposit.",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "CUR-GOLD-FEE",
+    "currency": "EUR",
+    "fees": [
+      {
+        "ruleId": "fee.maintenance",
+        "feeCode": "MAINT",
+        "amount": "5.00",
+        "cadence": "MONTHLY",
+        "accountingClass": "FEE_INCOME",
+        "waiver": {
+          "type": "comparison",
+          "attribute": "BALANCE",
+          "operator": "GTE",
+          "threshold": "50000.00",
+          "currency": "EUR"
+        }
+      }
+    ],
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-fee",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "FEE_MAINT",
+            "cadence": "MONTHLY"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.fee",
+          "trigger": "FEE_MAINT",
+          "action": {
+            "type": "CHARGE_FEE",
+            "feeRuleId": "fee.maintenance"
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "1000.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-01-01"
+  },
+  "steps": [
+    {
+      "at": "2026-01-31T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "FEE_MAINT",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.fee",
+          "irVersion": 1,
+          "narrative": "fee MAINT",
+          "lines": [
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "DEBIT",
+              "amount": "5.00",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "FEE_INCOME",
+              "direction": "CREDIT",
+              "amount": "5.00",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-02-10T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "DEPOSIT",
+        "direction": "CREDIT",
+        "amount": "60000.00"
+      },
+      "expected": []
+    },
+    {
+      "at": "2026-02-28T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "FEE_MAINT",
+      "expected": []
+    }
+  ]
+}

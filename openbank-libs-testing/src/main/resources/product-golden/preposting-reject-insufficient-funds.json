@@ -1,0 +1,138 @@
+{
+  "name": "preposting-reject-insufficient-funds",
+  "description": "A prePosting rule rejects any posting whose projected balance is negative with a stable reason code; an affordable withdrawal passes and is applied, the next one over the new balance is rejected.",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "CUR-GOLD-NOOD",
+    "currency": "EUR",
+    "interest": {
+      "ruleId": "interest.base",
+      "rateType": "FIXED",
+      "dayCount": "ACT_365_FIXED",
+      "accrualCadence": "DAILY",
+      "capitalisationCadence": "MONTHLY",
+      "accrualRounding": "INTEREST_ACCRUAL",
+      "postingRounding": "LEDGER_POSTING",
+      "rate": "0.0365"
+    },
+    "fees": [],
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-accrual",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "ACCRUAL",
+            "cadence": "DAILY"
+          }
+        },
+        {
+          "ruleId": "open.schedule-capitalisation",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "CAPITALISATION",
+            "cadence": "MONTHLY"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.accrue",
+          "trigger": "ACCRUAL",
+          "action": {
+            "type": "ACCRUE_INTEREST"
+          }
+        },
+        {
+          "ruleId": "scheduled.capitalise",
+          "trigger": "CAPITALISATION",
+          "action": {
+            "type": "CAPITALISE_INTEREST"
+          }
+        }
+      ],
+      "prePosting": [
+        {
+          "ruleId": "posting.no-overdraft",
+          "when": {
+            "type": "postingComparison",
+            "attribute": "PROJECTED_BALANCE",
+            "operator": "LT",
+            "threshold": "0.00"
+          },
+          "action": {
+            "type": "REJECT",
+            "reasonCode": "INSUFFICIENT_FUNDS"
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "100.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-01-01"
+  },
+  "steps": [
+    {
+      "at": "2026-02-01T10:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "150.00"
+      },
+      "expected": [
+        {
+          "type": "REJECT",
+          "ruleId": "posting.no-overdraft",
+          "irVersion": 1,
+          "reasonCode": "INSUFFICIENT_FUNDS"
+        }
+      ]
+    },
+    {
+      "at": "2026-02-01T11:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "WITHDRAWAL",
+        "direction": "DEBIT",
+        "amount": "50.00"
+      },
+      "expected": []
+    },
+    {
+      "at": "2026-02-01T12:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "CARD_PAYMENT",
+        "direction": "DEBIT",
+        "amount": "60.00"
+      },
+      "expected": [
+        {
+          "type": "REJECT",
+          "ruleId": "posting.no-overdraft",
+          "irVersion": 1,
+          "reasonCode": "INSUFFICIENT_FUNDS"
+        }
+      ]
+    },
+    {
+      "at": "2026-02-01T13:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "DEPOSIT",
+        "direction": "CREDIT",
+        "amount": "1000.00"
+      },
+      "expected": []
+    }
+  ]
+}
