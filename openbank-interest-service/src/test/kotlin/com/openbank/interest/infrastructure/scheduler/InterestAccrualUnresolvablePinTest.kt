@@ -121,4 +121,53 @@ class InterestAccrualUnresolvablePinTest {
         assertThat(run.refused).isGreaterThan(0)
         assertThat(run.refusalReason).startsWith("ACCRUAL_INCOMPLETE")
     }
+
+    @Test
+    fun `a catalog rate with no pin fails the account and counts once on rate unpinned, daily and manual`() {
+        val now = OffsetDateTime.now(clock)
+        val effective = InterestRateConfig(
+            productId = "SAVINGS",
+            currency = "EUR",
+            annualRate = BigDecimal("0.03"),
+            dayCount = DayCount.ACT_365,
+            effectiveFrom = LocalDate.of(2027, 1, 1),
+            createdAt = now,
+            updatedAt = now,
+        )
+        val date = LocalDate.of(2027, 2, 10)
+        every { directory.listActiveAccounts(null, any()) } returns Uni.createFrom().item(
+            AccountPage(listOf(AccountSnapshot(account, "SAVINGS", "SAVINGS", "EUR")), null),
+        )
+        every { directory.bookedBalance(account) } returns
+            Uni.createFrom().item(BalanceSnapshot(BigDecimal("1000.00"), "EUR"))
+        every { accrualRepo.findByNaturalKey(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { accrualRepo.save(any()) } answers { Uni.createFrom().item(firstArg<InterestAccrual>()) }
+        every { configRepo.findEffectiveRate(account, "SAVINGS", any(), "EUR") } returns
+            Uni.createFrom().item(effective)
+        // Catalog-sourced effective rate, no pin row, no history, nothing written, nothing resolvable.
+        every { pins.findPinnedConfig(account, "SAVINGS", "EUR") } returns Uni.createFrom().nullItem()
+        every { pins.hasPin(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
+        every { pins.hasCatalogHistory(account, "SAVINGS", "EUR") } returns Uni.createFrom().item(false)
+        every { pins.pinIfCatalogSourced(account, "SAVINGS", "EUR", effective) } returns Uni.createFrom().item(false)
+        every { pins.isCatalogSourced(effective.id) } returns Uni.createFrom().item(true)
+
+        val outcome = service().accrueAllWithOutcome(date).await().indefinitely()
+
+        assertThat(outcome.complete).isFalse()
+        assertThat(outcome.failed).isEqualTo(1)
+        assertThat(counter("openbank.interest.accrual.catalog.rate.unpinned")).isEqualTo(1.0)
+        assertThat(counter("openbank.interest.accrual.catalog.revision.unresolved")).isEqualTo(0.0)
+
+        // The manual POST /accrue path (409) counts the same event once, on the same counter.
+        val request = com.openbank.interest.domain.model.AccrualRequest(
+            account,
+            "SAVINGS",
+            BigDecimal("1000.00"),
+            "EUR",
+            date,
+        )
+        runCatching { service().accrue(request).await().indefinitely() }
+        assertThat(counter("openbank.interest.accrual.catalog.rate.unpinned")).isEqualTo(2.0)
+        assertThat(counter("openbank.interest.accrual.catalog.revision.unresolved")).isEqualTo(0.0)
+    }
 }

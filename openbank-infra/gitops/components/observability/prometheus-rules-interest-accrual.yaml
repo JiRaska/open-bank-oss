@@ -22,7 +22,10 @@ spec:
     - name: openbank.interest.accrual
       rules:
         - alert: InterestAccrualCatalogRevisionUnresolved
-          expr: sum(increase(openbank_interest_accrual_catalog_revision_unresolved_total[2d])) > 0
+          expr: |
+            sum(increase(openbank_interest_accrual_catalog_revision_unresolved_total[2d])) > 0
+            or
+            sum(increase(openbank_interest_accrual_catalog_rate_unpinned_total[2d])) > 0
           for: 5m
           labels:
             severity: warning
@@ -33,6 +36,6 @@ spec:
             description: >-
               interest-service refused to accrue at least one account in the last two days because the
               revision it is pinned to has no cached rate config (or the account has catalog history
-              but no pin). The accrual run is reported incomplete and the ledger holds the accounting
+              but no pin, or a catalog rate applied with no pin). The accrual run is reported incomplete and the ledger holds the accounting
               day. Repair the catalog cache (or the missing pin) and re-run the accrual for the same
               business date; it is idempotent per account and day.

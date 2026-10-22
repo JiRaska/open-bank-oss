@@ -22,12 +22,39 @@ tests:
             exp_annotations:
               subject_period: 24h
               summary: "Interest accrual refused for accounts whose catalog revision is unresolvable"
-              description: "interest-service refused to accrue at least one account in the last two days because the revision it is pinned to has no cached rate config (or the account has catalog history but no pin). The accrual run is reported incomplete and the ledger holds the accounting day. Repair the catalog cache (or the missing pin) and re-run the accrual for the same business date; it is idempotent per account and day."
+              description: "interest-service refused to accrue at least one account in the last two days because the revision it is pinned to has no cached rate config (or the account has catalog history but no pin, or a catalog rate applied with no pin). The accrual run is reported incomplete and the ledger holds the accounting day. Repair the catalog cache (or the missing pin) and re-run the accrual for the same business date; it is idempotent per account and day."
 
   - interval: 1h
     name: "a flat counter does NOT fire"
     input_series:
       - series: 'openbank_interest_accrual_catalog_revision_unresolved_total{pod="a"}'
+        values: "1+0x80"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: InterestAccrualCatalogRevisionUnresolved
+        exp_alerts: []
+
+  - interval: 1h
+    name: "an unpinned-catalog-rate increment within the last 2d fires"
+    input_series:
+      - series: 'openbank_interest_accrual_catalog_rate_unpinned_total{pod="a"}'
+        values: "0+0x10 1+0x70"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: InterestAccrualCatalogRevisionUnresolved
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              subject_period: 24h
+              summary: "Interest accrual refused for accounts whose catalog revision is unresolvable"
+              description: "interest-service refused to accrue at least one account in the last two days because the revision it is pinned to has no cached rate config (or the account has catalog history but no pin, or a catalog rate applied with no pin). The accrual run is reported incomplete and the ledger holds the accounting day. Repair the catalog cache (or the missing pin) and re-run the accrual for the same business date; it is idempotent per account and day."
+
+  - interval: 1h
+    name: "a flat unpinned-catalog-rate counter does NOT fire"
+    input_series:
+      - series: 'openbank_interest_accrual_catalog_rate_unpinned_total{pod="a"}'
         values: "1+0x80"
     alert_rule_test:
       - eval_time: 30h

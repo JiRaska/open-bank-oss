@@ -133,6 +133,13 @@ class InterestService(
                 .flatMap { existing ->
                     if (existing != null) Uni.createFrom().item(existing) else accrueNew(request)
                 }
+        }.onFailure(CatalogRevisionUnresolvableException::class.java).invoke { e ->
+            // The single counting point for BOTH callers (manual 409 and the daily run): once per event.
+            if (e.unpinnedCatalogRate) {
+                capitalizationMetrics?.catalogRateUnpinned()
+            } else {
+                capitalizationMetrics?.catalogRevisionUnresolved()
+            }
         }.onFailure().recoverWithUni { failure ->
             // Recover only after the outer transaction has rolled back. Querying the winner
             // inside a transaction aborted by the V12 unique constraint cannot succeed.
@@ -346,7 +353,7 @@ class InterestService(
                         accrualDate = date,
                     ),
                 ).map { AccountAccrualResult(AccrualState.ACCRUED) }
-                    .onFailure().recoverWithItem { e -> classifyAccrualFailure(account, e, capitalizationMetrics, log) }
+                    .onFailure().recoverWithItem { e -> classifyAccrualFailure(account, e, log) }
             }
         }
 
