@@ -10,9 +10,9 @@ tests:
   - interval: 1m
     name: "an owed revaluation held over 1h fires TreasuryRevaluationUnposted"
     input_series:
-      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+      - series: 'openbank_treasury_revaluation_unposted{pod="treasury-a"}'
         values: "1+0x90"
-      - series: 'treasury_revaluation_unposted{pod="treasury-b"}'
+      - series: 'openbank_treasury_revaluation_unposted{pod="treasury-b"}'
         values: "NaN+0x90"
     alert_rule_test:
       - eval_time: 65m
@@ -27,7 +27,7 @@ tests:
   - interval: 1m
     name: "owed for less than 1h does NOT fire yet"
     input_series:
-      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+      - series: 'openbank_treasury_revaluation_unposted{pod="treasury-a"}'
         values: "1+0x90"
     alert_rule_test:
       - eval_time: 50m
@@ -37,7 +37,7 @@ tests:
   - interval: 1m
     name: "nothing owed does NOT fire"
     input_series:
-      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+      - series: 'openbank_treasury_revaluation_unposted{pod="treasury-a"}'
         values: "0+0x90"
     alert_rule_test:
       - eval_time: 65m
@@ -47,7 +47,7 @@ tests:
   - interval: 1m
     name: "a cold pod reading NaN does NOT fire"
     input_series:
-      - series: 'treasury_revaluation_unposted{pod="treasury-a"}'
+      - series: 'openbank_treasury_revaluation_unposted{pod="treasury-a"}'
         values: "NaN+0x90"
     alert_rule_test:
       - eval_time: 65m

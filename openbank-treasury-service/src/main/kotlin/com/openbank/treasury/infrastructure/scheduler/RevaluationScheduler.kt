@@ -91,7 +91,7 @@ class RevaluationScheduler(
     private companion object {
         const val WORKFLOW_NAME = "treasury-revaluation-run"
         const val METRIC = "openbank.treasury.revaluations"
-        const val UNPOSTED_METRIC = "treasury.revaluation.unposted"
+        const val UNPOSTED_METRIC = "openbank.treasury.revaluation.unposted"
         val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }

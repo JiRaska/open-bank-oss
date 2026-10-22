@@ -75,7 +75,7 @@ spec:
     - name: openbank.treasury.revaluation
       rules:
         - alert: TreasuryRevaluationUnposted
-          expr: max(treasury_revaluation_unposted) > 0
+          expr: max(openbank_treasury_revaluation_unposted) > 0
           for: 1h
           labels:
             severity: warning

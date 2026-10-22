@@ -45,6 +45,7 @@ LOCAL_ONLY: dict[str, str] = {}
 # switches only — never one that makes the instance DO something on the bank's behalf.
 KEEP_ON = {
     "openbank.rate-limit.enabled": "inbound concurrency cap (protective; reaches nothing outside the pod)",
+    "openbank.authz.opa-pdp-producer.enabled": "build-time OPA sidecar PDP producer (authorization itself; reaches only the pod's own sidecar)",
 }
 
 OFF_VALUES = {"off", "disabled"}
@@ -211,6 +212,7 @@ _SRC = {
 }
 _APP = {"openbank": {"outbox": {"dispatch-enabled": True},
                      "rate-limit": {"enabled": True},
+                     "authz": {"opa-pdp-producer": {"enabled": True}},
                      "treasury": {"simulated-market": {"quotes": {"enabled": "${OPENBANK_TREASURY_SIMULATED_QUOTES_ENABLED:false}"}}}},
         "mp": {"messaging": {"outgoing": {"ev-out": {"topic": "bank.topic"}}}},
         "quarkus": {"rest-client": {"ledger-service": {"url": "${LEDGER_SERVICE_URL:http://localhost}"}}}}
