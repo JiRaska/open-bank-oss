@@ -78,6 +78,12 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ## Runbooky
 
+### Nevyřešené výsledky interního zaúčtování
+
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="..."}` počítá neúspěšné pokusy vůči transaction-service. Povolené hodnoty jsou `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou před prvním pokusem. Opakované pokusy se počítají samostatně, nejde tedy o počet unikátních zpráv. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` označuje dekódovanou odpověď FAILED, nikoli důkaz, že tento požadavek byl replay.
+
+Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu s odeslanými údaji. Ostatní výsledky ponechají zprávu SENT. Při šetření zachovejte klíč `swift-settlement-<messageId>`: 409 ani nejistá odpověď nedokazují dokončené zaúčtování. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání. Veřejné vyhledání transakce podle idempotentního klíče ani alarm stáří vůči SLA tato změna čítače nepřidává; zůstávají součástí #13623.
+
 ### Outbox lag / události neproudí
 
 1. Počet pending: `SELECT count(*) FROM swift_outbox WHERE status='PENDING'`.

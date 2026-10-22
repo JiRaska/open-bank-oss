@@ -78,6 +78,12 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Unsettled internal booking outcomes
+
+`openbank_payment_unsettled_total{rail="SWIFT",outcome="..."}` counts unsuccessful transaction-service attempts. The bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; five zero series are registered before any attempt. Retries count as separate attempts, so this is not a count of unique messages. Cancellation and matched successful responses do not increment it. `failed-replay` denotes a decoded FAILED response and does not prove that this call was a replay.
+
+Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted booking fields. Other outcomes leave the message SENT. Preserve the existing `swift-settlement-<messageId>` key during investigation: a 409 or an uncertain response is not proof of a completed booking. Establish the transaction outcome through approved reconciliation tooling before selecting a corrective action; do not rotate the key or use a new booking POST as a lookup. A public transaction lookup by idempotency key and an unsettled-booking age/SLA alert are not supplied by this counter change; those remain tracked in #13623.
+
 ### Outbox lag / events not flowing
 
 1. Count pending: `SELECT count(*) FROM swift_outbox WHERE status='PENDING'`.
