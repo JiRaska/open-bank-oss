@@ -365,7 +365,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses.
     `pr["files"]` must come from `git diff` against the verified head, never from the files API.
     `extra`: TRAIN_EXTRA_GATES — red refuses, running or never reported waits (fail closed), and only
-    skipped/neutral (which GitHub.extra_checks also reports for a completed pinned run without it) is n/a."""
+    skipped/neutral (which GitHub.extra_checks also reports when every pinned run SUCCEEDED without it)
+    is n/a — and not even that when the PR's own diff touches the gate's pinned workflow (red)."""
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
     if pr.get("state", "open") != "open":
         return False, f"state {pr.get('state')}"
@@ -398,6 +399,9 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
             return False, f"required context {checks[c]}: {c}"
     for g in extra_gate_red(checks, extra):
         return False, f"extra gate red: {g}" + ("" if checks[g] == "failure" else f" ({checks[g]})")
+    for g in own_workflow_red({c: v for c, v in checks.items() if c in (extra or {})}, extra, pr.get("files")):
+        if g in checks:   # absent stays "never reported" (pending) below; a settled n/a is red
+            return False, f"extra gate red: {g} (the PR changes the extra gate's own workflow)"
     for c in member:
         if c not in checks:
             return False, f"required context never reported: {c}"
@@ -448,6 +452,23 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
+
+
+def own_workflow_red(checks: dict[str, str | None], extra, files: list[str] | None) -> list[str]:
+    """Declared extra gates that are absent or not applicable on a head whose diff touches the gate's
+    OWN pinned workflow (#13400): a PR that removes or renames the job must not thereby skip it, so the
+    n/a is red here — even when every pinned run succeeded. A present green gate is unaffected."""
+    touched = set(files or ())
+    return [g for g, wf in (extra or {}).items()
+            if wf in touched and (g not in checks or checks[g] in EXTRA_GATE_NA_STATES)]
+
+
+def own_workflow_checks(checks: dict[str, str | None], extra, files: list[str] | None) -> dict[str, str | None]:
+    """Carrier form of own_workflow_red over the union of member diffs: the n/a becomes "failure".
+    `files` None = the carrier diff could not be read: an n/a gate is held pending (fail closed)."""
+    if files is None:
+        return {**checks, **{g: None for g in extra or {} if checks.get(g) in EXTRA_GATE_NA_STATES}}
+    return {**checks, **{g: "failure" for g in own_workflow_red(checks, extra, files)}}
 
 
 def carrier_contexts(required: list[str], extra, checks: dict[str, str | None]) -> list[str]:
@@ -1000,7 +1021,9 @@ class GitHub:
         run's path is the declared workflow. Any completed non-success, non-skipped run = that state (red
         wins over every later green); else running = None; else success/skipped. No pinned check run:
         "skipped" (not applicable) ONLY when the pinned workflow has a run for `sha` and every such run
-        is completed; otherwise absent, which every caller holds as pending (fail closed, #13400)."""
+        completed with conclusion success; "failure" when one failed; None (pending) when one ended
+        cancelled/timed_out/startup_failure/action_required; absent while none has completed — every
+        caller holds absent and None as pending (fail closed, #13400)."""
         runs: dict[str, list[str | None]] = {}
         for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
             name = check.get("name")
@@ -1020,8 +1043,14 @@ class GitHub:
             for name in missing:
                 pinned = [r for r in wruns if r.get("head_sha", sha) == sha
                           and (r.get("path") or "").split("@", 1)[0] == gates[name]]
-                if pinned and all(r.get("status") == "completed" for r in pinned):
-                    out[name] = "skipped"
+                if not pinned or any(r.get("status") != "completed" for r in pinned):
+                    continue   # absent: no completed pinned run yet — pending (fail closed)
+                concl = [r.get("conclusion") for r in pinned]
+                # #13400: n/a ONLY when every pinned run SUCCEEDED. A failed run is red; any other
+                # conclusion (cancelled, timed_out, startup_failure, action_required, ...) proves
+                # nothing — pending, never served.
+                out[name] = ("failure" if "failure" in concl
+                             else "skipped" if all(c == "success" for c in concl) else None)
         return out
 
     def _run_path(self, run_id: int) -> str:
@@ -1433,6 +1462,12 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             carrier_in_flight = True
             continue
         checks = pinned_checks(gh, sha, extra)
+        if any(checks.get(g) in EXTRA_GATE_NA_STATES for g in extra):
+            # An n/a extra gate holds only if no member touches the gate's own workflow (#13400):
+            # read the carrier's diff (= the union of member diffs) from its verified head.
+            got = git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode == 0
+            ok = got and git("rev-parse", "refs/merge-train/settle", check=False).stdout.strip() == sha
+            checks = own_workflow_checks(checks, extra, changed_paths(git, f"{base}...{sha}") if ok else None)
         failing, pending, inconclusive = classify_carrier(
             checks, carrier_contexts(train_required, extra, checks))
         main_extra = [c for c in failing if c in extra and c in main_red]
@@ -2470,21 +2505,54 @@ def self_test() -> int:
             check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
         # No pinned check run: n/a ONLY when the pinned workflow has a COMPLETED run for this head.
         def _wf(*specs):
-            return [{"id": 10 + i, "path": f"{p}@refs/heads/x", "status": st, "head_sha": "a" * 40}
-                    for i, (p, st) in enumerate(specs)]
+            return [{"id": 10 + i, "path": f"{p}@refs/heads/x", "status": st, "head_sha": "a" * 40,
+                     "conclusion": (c[0] if c else ("success" if st == "completed" else None))}
+                    for i, (p, st, *c) in enumerate(specs)]
         sec, evil = ".github/workflows/security.yml", ".github/workflows/evil.yml"
         for label, wruns, want in [
                 ("absent, no workflow run at all: absent (pending)", _wf(), "absent"),
                 ("absent, pinned workflow still running: absent (pending)", _wf((sec, "in_progress")), "absent"),
                 ("absent, only ANOTHER workflow completed: absent (pending)", _wf((evil, "completed")), "absent"),
                 ("absent, pinned run completed + a rerun queued: absent (pending)", _wf((sec, "completed"), (sec, "queued")), "absent"),
-                ("absent, pinned workflow COMPLETED without the job: skipped (n/a)", _wf((sec, "completed")), "skipped")]:
+                ("absent, pinned workflow COMPLETED without the job: skipped (n/a)", _wf((sec, "completed")), "skipped"),
+                # #13400 fail closed: absent is n/a ONLY over pinned runs that all concluded SUCCESS.
+                ("absent, pinned run CANCELLED: pending, never n/a", _wf((sec, "completed", "cancelled")), None),
+                ("absent, pinned run TIMED OUT: pending", _wf((sec, "completed", "timed_out")), None),
+                ("absent, pinned run STARTUP_FAILURE: pending", _wf((sec, "completed", "startup_failure")), None),
+                ("absent, pinned run ACTION_REQUIRED: pending", _wf((sec, "completed", "action_required")), None),
+                ("absent, pinned run FAILED: red", _wf((sec, "completed", "failure")), "failure"),
+                ("absent, one success + one failed pinned run: red", _wf((sec, "completed"), (sec, "completed", "failure")), "failure"),
+                ("absent, one success + one cancelled pinned run: pending", _wf((sec, "completed"), (sec, "completed", "cancelled")), None)]:
             globals()["paginate"] = lambda path, key=None, _w=wruns: _w if key == "workflow_runs" else []
             got = GitHub("o/r", "main", "").extra_checks("a" * 40, {"Trivy": sec})
             check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
             if want == "skipped":
                 check("extra gates: absent but the pinned run completed without it is served",
                       qualifies(base_pr, req, {**green, **got}, extra=xg)[0])
+                own = {**base_pr, "files": [sec]}
+                check("extra gates: absent + the PR changes the pinned workflow is RED even over a successful run",
+                      qualifies(own, req, {**green, **got}, untrainable=lambda _f: False, extra=xg)
+                      == (False, "extra gate red: Trivy (the PR changes the extra gate's own workflow)"),
+                      str(qualifies(own, req, {**green, **got}, untrainable=lambda _f: False, extra=xg)))
+                check("extra gates: strict lane refuses an absent gate whose own workflow the PR changes",
+                      strict_lane_state(own, req, {**green, **got}, None, U, [], None, xg)[0] is None)
+                check("extra gates: a PRESENT green gate is served though the PR changes its workflow (strict lane)",
+                      strict_lane_state(own, req, {**green, "Trivy": "success"}, None, U, [], None, xg)[0] == "green")
+                cks = own_workflow_checks({**green, **got}, xg, [sec, "x.kt"])
+                check("extra gates: a carrier whose member changes the pinned workflow is failing on an absent gate",
+                      "Trivy" in classify_carrier(cks, carrier_contexts(req, xg, cks))[0], str(cks))
+                cks = own_workflow_checks({**green, **got}, xg, None)
+                check("extra gates: a carrier whose diff cannot be read holds an absent gate as pending",
+                      "Trivy" in classify_carrier(cks, carrier_contexts(req, xg, cks))[1], str(cks))
+                cks = own_workflow_checks({**green, **got}, xg, ["x.kt"])
+                check("extra gates: a carrier not touching the pinned workflow keeps the n/a",
+                      "Trivy" not in sum(classify_carrier(cks, carrier_contexts(req, xg, cks)), []), str(cks))
+            elif want is None:
+                check(f"extra gates: {label} is not served", qualifies(base_pr, req, {**green, **got}, extra=xg)
+                      == (False, "extra gate pending: Trivy"), str(qualifies(base_pr, req, {**green, **got}, extra=xg)))
+            elif want == "failure":
+                check(f"extra gates: {label} refuses", qualifies(base_pr, req, {**green, **got}, extra=xg)
+                      == (False, "extra gate red: Trivy"))
     finally:
         globals()["paginate"], globals()["get"] = saved_api
     check("extra gates: one red pinned run beats a later green one", extra_verdict(["failure", "success"]) == "failure")

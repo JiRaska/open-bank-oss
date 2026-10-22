@@ -451,9 +451,14 @@ declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` 
 the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
 by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
 PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
-armed); running = wait; never reported = wait too (fail closed, #13400) — not applicable only
-when the pinned workflow has a COMPLETED run for that head without the check, or it concluded
-skipped or neutral. A carrier red on an
+armed); running = wait; never reported = wait too (fail closed, #13400). An absent check is not
+applicable only when every run of the pinned workflow for that head COMPLETED with conclusion
+`success` (or the check itself concluded skipped or neutral); a pinned run that concluded
+`failure` makes the absent gate red, and one that concluded cancelled, timed_out, startup_failure
+or action_required leaves it pending — inconclusive, never served. And when the PR's diff (for a
+carrier: any member's diff) touches the gate's own pinned workflow file, an absent or
+not-applicable gate is red ("the PR changes the extra gate's own workflow"): a PR that removes or
+renames the job cannot thereby skip it. A carrier red on an
 extra gate is a verdict like any required context, unless main is red on that gate too: then it
 counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
 Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
