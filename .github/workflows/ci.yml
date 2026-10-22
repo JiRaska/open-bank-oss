@@ -285,6 +285,7 @@ jobs:
           path: |
             openbank-admin-ui/build/test-intelligence/run.json
             openbank-admin-ui/build/test-results/**/*.xml
+            openbank-admin-ui/build/test-results/e2e/sidebar-navigation-*.json
           retention-days: 14
           overwrite: true
 
