@@ -6,7 +6,7 @@
 // derived footprints and 200s with an allocation; degrades to available:false (still 200) when a
 // snapshot is missing, so the page never sees a raw error (admin-ui graceful-state rule).
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { promises as fs } from 'fs'
 
 const { readSnapshot } = vi.hoisted(() => ({ readSnapshot: vi.fn() }))
@@ -18,6 +18,7 @@ vi.mock('@/lib/evidence/contentSnapshot', () => ({ createAdminUiContentSnapshotR
 // in CI on a fresh checkout). The mock must passthrough unknown paths to the real readFile
 // so that Vitest's module loader can resolve the route + its dependency tree.
 const _realReadFile = fs.readFile.bind(fs)
+const governancePathBeforeSuite = process.env.OPENBANK_GOVERNANCE
 
 const COST = JSON.stringify({
   available: true, currency: 'USD', periodStart: '2026-05-04', periodEnd: '2026-06-03',
@@ -54,12 +55,16 @@ function mockFiles(map: Record<string, string>) {
 describe('GET /api/finops/allocation', () => {
   beforeEach(() => {
     readSnapshot.mockReset().mockResolvedValue({ status: 'unavailable', snapshot: null, provenance: null })
-    delete process.env.OPENBANK_COST_REPORT_LIVE
-    delete process.env.OPENBANK_COST_REPORT
-    delete process.env.OPENBANK_GOVERNANCE
-    delete process.env.OPENBANK_COST_FOOTPRINTS
+    vi.stubEnv('OPENBANK_COST_REPORT_LIVE', undefined)
+    vi.stubEnv('OPENBANK_COST_REPORT', undefined)
+    vi.stubEnv('OPENBANK_GOVERNANCE', undefined)
+    vi.stubEnv('OPENBANK_COST_FOOTPRINTS', undefined)
   })
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
+  afterAll(() => {
+    // VM workers reuse process state across suites; a missing-source fixture must not leak.
+    expect(process.env.OPENBANK_GOVERNANCE).toBe(governancePathBeforeSuite)
+  })
 
   it('200s with an allocation joining costs + footprints', async () => {
     mockFiles({ cost: COST, footprints: FOOTPRINTS })
@@ -127,7 +132,7 @@ describe('GET /api/finops/allocation', () => {
 
   it('keeps domains unmapped when neither published nor image governance is available', async () => {
     mockFiles({ cost: COST, footprints: FOOTPRINTS })
-    process.env.OPENBANK_GOVERNANCE = '/nonexistent-test-governance.json'
+    vi.stubEnv('OPENBANK_GOVERNANCE', '/nonexistent-test-governance.json')
     const { GET } = await import('../app/api/finops/allocation/route')
     const body = await (await GET()).json()
     expect(body.unmapped).toEqual(['account-service', 'ledger-service'])
