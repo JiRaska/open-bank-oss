@@ -40,7 +40,7 @@ object BillingJournalFactory {
      * The shim applies to CZK ONLY (#13226). Both ids are CZK accounts and the ledger refuses a line whose
      * currency is not its account's, so the shim never posted a single non-CZK fee -- it only wedged the
      * outbox row on a 422. A non-CZK fee therefore always posts by class, and the ledger picks that
-     * currency's own deposit-control (2101-2103) and fee-income (4004-4006, ledger V35) accounts.
+     * currency's own deposit-control (2101-2103) and fee-income (4004-4006, ledger V34) accounts.
      */
     private val FEE_RECEIVABLE_GL: UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
     private val FEE_INCOME_GL: UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")

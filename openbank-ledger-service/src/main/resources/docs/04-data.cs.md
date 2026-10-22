@@ -21,7 +21,7 @@ Dedikovaná PostgreSQL databáze **`openbank_ledger`** (reaktivní PG klient pro
 
 ### Naseedované účty HK
 
-V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000, 2001, 2002, 3000, 4000, 4001). V3 přidává well-known účty se stabilním UUID (1100 cash clearing, 2100 deposit control CZK). V5 přidává per-měnové deposit-control (2101 EUR, 2102 USD, 2103 GBP), FX position účty (1990–1993), výsledkový účet kurzových rozdílů (5900) a FX margin income (4002). V6 přidává per-měnové CZK counter-value účty (1995–1997) pro denní revalvaci.
+V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000, 2001, 2002, 3000, 4000, 4001). V3 přidává well-known účty se stabilním UUID (1100 cash clearing, 2100 deposit control CZK). V5 přidává per-měnové deposit-control (2101 EUR, 2102 USD, 2103 GBP), FX position účty (1990–1993), výsledkový účet kurzových rozdílů (5900) a FX margin income (4002). V6 přidává per-měnové CZK counter-value účty (1995–1997) pro denní revalvaci. V15 přidává stabilní účet výnosů z poplatků 4003 (CZK); V34 přidává jeho per-měnové sourozence 4004 (EUR), 4005 (USD), 4006 (GBP) a mapuje na ně `FEE_INCOME_ACCOUNT`, takže se výnos z poplatku účtuje v původní měně (#13226).
 
 ## Flyway migrace
 
@@ -36,6 +36,7 @@ V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000,
 | `V6__fx_revaluation_counter_value_accounts` | CZK counter-value účty 1995–1997 (ADR-0046) | smazat naseedované řádky |
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 fáze B) | dokumentováno v souboru: drop indexu + sloupce (zpětně kompatibilní) |
 | `V8__journal_partition_lifecycle` | pre-create partitionů 2027/2028, tabulka `partition_lifecycle_audit` | drop partitionů/tabulky |
+| `V34__per_currency_fee_income_accounts` | výnosy z poplatků 4004 EUR / 4005 USD / 4006 GBP + řádky mapy `FEE_INCOME_ACCOUNT`; selže, pokud se měny výnosů z poplatků a deposit-control liší (#13226) | smazat řádky mapy a účty, jen před prvním odkazem z účetního řádku |
 
 **Nikdy needituj migraci po aplikaci na živou DB** — Flyway checksum mismatch shodí startup (dočasná náprava `QUARKUS_FLYWAY_REPAIR_AT_START=true`, poté odstranit).
 

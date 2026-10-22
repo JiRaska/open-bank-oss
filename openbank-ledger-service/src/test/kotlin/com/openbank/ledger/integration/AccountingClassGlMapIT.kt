@@ -60,7 +60,7 @@ class AccountingClassGlMapIT {
                 row(cls, "PRINCIPAL", ccy, code)
             }
         } + listOf("CZK" to "4003", "EUR" to "4004", "USD" to "4005", "GBP" to "4006").map { (ccy, code) ->
-            // V15 (CZK) + V35 (#13226): fee income is booked in the fee's own currency.
+            // V15 (CZK) + V34 (#13226): fee income is booked in the fee's own currency.
             row("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy, code)
         }
         ).toMap()
@@ -150,7 +150,7 @@ class AccountingClassGlMapIT {
     @Test
     fun `a non-CZK fee debits its own control account and credits its own fee-income account`() {
         // #13226: billing's old fixed 2100/4003 are CZK accounts and the ledger refuses a line whose currency
-        // is not the account's, so a non-CZK fee never posted. V35 gives fee income a per-currency sibling.
+        // is not the account's, so a non-CZK fee never posted. V34 gives fee income a per-currency sibling.
         for ((ccy, control, income) in listOf(
             Triple("EUR", "2101", "4004"),
             Triple("USD", "2102", "4005"),

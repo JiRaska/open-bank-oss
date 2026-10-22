@@ -40,7 +40,7 @@ import java.util.UUID
  * release's EUR/USD/GBP fee journals were refused at the ledger and never posted. The tests below pin
  * that fact (so nobody "restores" a behaviour that never worked) and what the new path does instead:
  * the debit leg lands on the currency's own control account and the income leg on the currency's own
- * fee-income account (ledger V35, #13226), so the journal balances in the fee's currency and the ledger
+ * fee-income account (ledger V34, #13226), so the journal balances in the fee's currency and the ledger
  * accepts both legs -- with the rollout shim on or off.
  *
  * The map is held here as a literal and, in the last test, parsed out of the ledger's own migration so
@@ -193,8 +193,8 @@ class FeeJournalsUnchangedTest {
             Path.of("openbank-ledger-service/src/main/resources/db/migration/$name"),
         ).firstOrNull { Files.exists(it) }
         val v32 = migration("V32__accounting_class_gl_map.sql")
-        val v35 = migration("V35__per_currency_fee_income_accounts.sql")
-        assertThat(listOf(v32, v35)).describedAs("the ledger migrations must be readable from the billing build")
+        val v34 = migration("V34__per_currency_fee_income_accounts.sql")
+        assertThat(listOf(v32, v34)).describedAs("the ledger migrations must be readable from the billing build")
             .doesNotContainNull()
         val row = Regex("""\('([A-Z_]+)',\s*'([A-Z_]+)',\s*'([A-Z]{3})',\s*'(\d{4})'\)""")
         val fromV32 = Files.readAllLines(checkNotNull(v32)).flatMap { line ->
@@ -202,15 +202,15 @@ class FeeJournalsUnchangedTest {
                 Triple(m.groupValues[1], m.groupValues[2], m.groupValues[3]) to m.groupValues[4]
             }.toList()
         }.filter { (key, _) -> key.first.startsWith("CUSTOMER_DEPOSIT_") || key.first == "FEE_INCOME_ACCOUNT" }
-        // V35 seeds FEE_INCOME_ACCOUNT/FEE_INCOME as (currency, code) pairs
+        // V34 seeds FEE_INCOME_ACCOUNT/FEE_INCOME as (currency, code) pairs
         val feeIncomeRow = Regex("""\('([A-Z]{3})',\s*'(4\d{3})'\)""")
-        val fromV35 = Files.readAllLines(checkNotNull(v35)).flatMap { line ->
+        val fromV34 = Files.readAllLines(checkNotNull(v34)).flatMap { line ->
             feeIncomeRow.findAll(line).map { m ->
                 Triple("FEE_INCOME_ACCOUNT", "FEE_INCOME", m.groupValues[1]) to m.groupValues[2]
             }.toList()
         }
-        assertThat(fromV35).hasSize(3)
-        val seeded = (fromV32 + fromV35).toMap()
+        assertThat(fromV34).hasSize(3)
+        val seeded = (fromV32 + fromV34).toMap()
         // billing's fail-closed currency list is exactly the currencies the ledger books fee income in
         assertThat(seeded.keys.filter { it.first == "FEE_INCOME_ACCOUNT" }.map { it.third }.toSet())
             .isEqualTo(FeeIncomeCurrencies.MAPPED)
@@ -243,7 +243,7 @@ private data class Landed(
     val subAccountId: UUID?,
 )
 
-/** The billing rows of the ledger map (V32 + V35), as chart ids; 2100 is the chart's `...0002`. */
+/** The billing rows of the ledger map (V32 + V34), as chart ids; 2100 is the chart's `...0002`. */
 private object LedgerMap {
     fun idOf(code: String): UUID = UUID.fromString(
         if (code == "2100") "a0000000-0000-0000-0000-000000000002" else "a0000000-0000-0000-0000-00000000$code",
@@ -252,7 +252,7 @@ private object LedgerMap {
     private val classes = listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM")
     private val control = mapOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103")
 
-    /** V15 (CZK) + V35 (#13226). */
+    /** V15 (CZK) + V34 (#13226). */
     private val feeIncome = mapOf("CZK" to "4003", "EUR" to "4004", "USD" to "4005", "GBP" to "4006")
 
     val billing: Map<Triple<String, String, String>, UUID> = buildMap {

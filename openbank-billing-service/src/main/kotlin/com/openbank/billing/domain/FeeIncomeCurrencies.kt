@@ -6,7 +6,7 @@ package com.openbank.billing.domain
 
 /**
  * The currencies the ledger's chart can book fee income in (#13226): `FEE_INCOME_ACCOUNT` is mapped
- * to 4003 (CZK, ledger V15) and to its per-currency siblings 4004/4005/4006 (EUR/USD/GBP, ledger V35).
+ * to 4003 (CZK, ledger V15) and to its per-currency siblings 4004/4005/4006 (EUR/USD/GBP, ledger V34).
  * Income is booked in the fee's ORIGINAL currency -- billing never converts.
  *
  * The ledger owns the map (ADR-0341 D3); billing keeps this list only to refuse BEFORE it writes an

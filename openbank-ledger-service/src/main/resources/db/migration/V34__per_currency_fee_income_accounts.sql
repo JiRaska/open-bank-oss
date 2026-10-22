@@ -13,7 +13,7 @@
 -- stable UUID whose last segment is the account code. Revaluing these balances into CZK is FX
 -- revaluation (ADR-0025/0046) and out of scope here; nothing in this migration converts an amount.
 --
--- 4004-4006 are free on main and are not claimed by any open migration (#13413's V34 uses 42xx/43xx).
+-- Codes 4004-4006 are free on main and are not used by any open migration (#13413 uses 42xx/43xx).
 --
 -- Rollback (only while no journal_lines reference the new accounts -- the FK blocks it otherwise, and
 -- once a non-CZK fee has posted, rolling back means reversing those journals first):
@@ -32,16 +32,34 @@ SELECT gen_random_uuid(), 'FEE_INCOME_ACCOUNT', 'FEE_INCOME', m.currency_code, g
 FROM (VALUES ('EUR', '4004'), ('USD', '4005'), ('GBP', '4006')) AS m (currency_code, gl_code)
 JOIN gl_accounts g ON g.code = m.gl_code;
 
--- Every currency that has a deposit-control mapping for fees must now have a fee-income mapping too,
--- each on an account of its own currency. A hole here is the exact defect this migration closes, so it
--- fails the migration rather than shipping.
+-- The currencies fee income is mapped in must be EXACTLY the currencies a fee can debit, i.e. those
+-- CUSTOMER_DEPOSIT_DEMAND/PRINCIPAL is mapped in (V32: CZK, EUR, USD, GBP). Derived, not a literal count,
+-- so a later currency added on one side only fails here. Each row must also sit on an account of its own
+-- currency. A hole is the exact defect this migration closes, so it fails the migration.
 DO $$
+DECLARE
+    missing TEXT;
+    extra   TEXT;
 BEGIN
-    IF (SELECT count(*) FROM accounting_class_gl_map
-        WHERE accounting_class = 'FEE_INCOME_ACCOUNT' AND role = 'FEE_INCOME') <> 4 THEN
-        RAISE EXCEPTION 'FEE_INCOME_ACCOUNT is mapped in % of 4 currencies (CZK, EUR, USD, GBP)',
-            (SELECT count(*) FROM accounting_class_gl_map
-             WHERE accounting_class = 'FEE_INCOME_ACCOUNT' AND role = 'FEE_INCOME');
+    SELECT string_agg(currency_code, ', ' ORDER BY currency_code) INTO missing
+    FROM (
+        SELECT currency_code FROM accounting_class_gl_map
+        WHERE accounting_class = 'CUSTOMER_DEPOSIT_DEMAND' AND role = 'PRINCIPAL'
+        EXCEPT
+        SELECT currency_code FROM accounting_class_gl_map
+        WHERE accounting_class = 'FEE_INCOME_ACCOUNT' AND role = 'FEE_INCOME'
+    ) d;
+    SELECT string_agg(currency_code, ', ' ORDER BY currency_code) INTO extra
+    FROM (
+        SELECT currency_code FROM accounting_class_gl_map
+        WHERE accounting_class = 'FEE_INCOME_ACCOUNT' AND role = 'FEE_INCOME'
+        EXCEPT
+        SELECT currency_code FROM accounting_class_gl_map
+        WHERE accounting_class = 'CUSTOMER_DEPOSIT_DEMAND' AND role = 'PRINCIPAL'
+    ) d;
+    IF missing IS NOT NULL OR extra IS NOT NULL THEN
+        RAISE EXCEPTION 'fee income and deposit control disagree on currencies: no fee income in [%], no deposit control in [%]',
+            coalesce(missing, ''), coalesce(extra, '');
     END IF;
     IF EXISTS (
         SELECT 1 FROM accounting_class_gl_map m JOIN gl_accounts g ON g.id = m.gl_account_id
