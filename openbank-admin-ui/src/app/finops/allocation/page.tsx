@@ -14,6 +14,8 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 // Cost-allocation (showback) view — ADR-0062. Reads /api/finops/allocation, which joins the AWS
 // cost snapshot with build-time resource footprints and rolls spend up service -> domain -> flow.
@@ -37,6 +39,7 @@ interface AllocationResult {
   unmapped: string[]
   method: string
   collectedAt: string | null
+  governanceSource?: ContentSourceMetadata
 }
 
 const DOMAIN_COLOR: Record<string, string> = {
@@ -156,6 +159,10 @@ function AllocationContent() {
           </button>
         </div>}
       />
+
+      <div aria-label={t('Zdroj klasifikace nákladových domén', 'Cost domain classification source')}>
+        <ContentSourceNote source={data?.governanceSource} />
+      </div>
 
       {loading && !data ? (
         <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>

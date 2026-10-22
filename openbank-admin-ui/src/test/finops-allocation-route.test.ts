@@ -9,6 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { promises as fs } from 'fs'
 
+const { readSnapshot } = vi.hoisted(() => ({ readSnapshot: vi.fn() }))
+vi.mock('@/lib/evidence/contentSnapshot', () => ({ createAdminUiContentSnapshotReader: () => ({ read: readSnapshot }) }))
+
 // Capture the real readFile BEFORE any spy is installed.
 // Vitest 4 uses fs.promises.readFile internally (async) to load TypeScript source files
 // when a dynamic import() is called without a warm Vite transform cache (always the case
@@ -50,8 +53,10 @@ function mockFiles(map: Record<string, string>) {
 
 describe('GET /api/finops/allocation', () => {
   beforeEach(() => {
+    readSnapshot.mockReset().mockResolvedValue({ status: 'unavailable', snapshot: null, provenance: null })
     delete process.env.OPENBANK_COST_REPORT_LIVE
     delete process.env.OPENBANK_COST_REPORT
+    delete process.env.OPENBANK_GOVERNANCE
     delete process.env.OPENBANK_COST_FOOTPRINTS
   })
   afterEach(() => vi.restoreAllMocks())
@@ -88,4 +93,46 @@ describe('GET /api/finops/allocation', () => {
     expect(body.allocatable).toBe(90)
     expect(body.byService).toEqual([])
   })
+  it('uses the next published domain revision without an image rebuild and preserves unknown mappings', async () => {
+    mockFiles({ cost: COST, footprints: FOOTPRINTS })
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const provenance = { sourceSha: 'a'.repeat(40), collectedAt: '2026-10-22T10:00:00.000Z', runId: 123, runAttempt: 1 }
+    const published = (domain: string, status = 'ready') => ({ status, provenance,
+      snapshot: { content: { governance: { services: [{ serviceName: 'openbank-account-service', dataDomain: domain }] } } },
+    })
+    readSnapshot.mockResolvedValue(published('payments'))
+    const first = await (await GET()).json()
+    expect(first.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('payments')
+    expect(first.unmapped).toContain('ledger-service')
+    expect(first.governanceSource).toMatchObject({ source: 'published', status: 'ready', sourceSha: provenance.sourceSha, sourceCollectedAt: provenance.collectedAt })
+    readSnapshot.mockResolvedValue(published('identity', 'stale'))
+    const second = await (await GET()).json()
+    expect(second.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('identity')
+    expect(second.governanceSource).toMatchObject({ source: 'published', status: 'stale', sourceCollectedAt: provenance.collectedAt })
+    expect(second.collectedAt).toBe('2026-06-03T00:00:00Z')
+  })
+
+  it('labels the image governance fallback stale and rejects unknown domain values', async () => {
+    mockFiles({ cost: COST, footprints: FOOTPRINTS })
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const fallback = await (await GET()).json()
+    expect(fallback.governanceSource).toMatchObject({ source: 'image-baked', status: 'stale', sourceCollectedAt: null })
+    readSnapshot.mockResolvedValue({ status: 'ready', provenance: { sourceSha: 'b'.repeat(40) },
+      snapshot: { content: { governance: { services: [{ serviceName: 'account-service', dataDomain: 'invented' }] } } },
+    })
+    const unknown = await (await GET()).json()
+    expect(unknown.unmapped).toContain('account-service')
+    expect(unknown.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('platform')
+  })
+
+  it('keeps domains unmapped when neither published nor image governance is available', async () => {
+    mockFiles({ cost: COST, footprints: FOOTPRINTS })
+    process.env.OPENBANK_GOVERNANCE = '/nonexistent-test-governance.json'
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const body = await (await GET()).json()
+    expect(body.unmapped).toEqual(['account-service', 'ledger-service'])
+    expect(body.byDomain).toEqual([expect.objectContaining({ domain: 'platform' })])
+    expect(body.governanceSource).toMatchObject({ source: 'unavailable', status: 'unavailable' })
+  })
+
 })
