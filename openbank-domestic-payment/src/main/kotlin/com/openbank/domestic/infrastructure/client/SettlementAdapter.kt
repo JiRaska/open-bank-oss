@@ -6,6 +6,9 @@ package com.openbank.domestic.infrastructure.client
 
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionFailure
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.domestic.application.port.out.AccountLookupPort
@@ -14,6 +17,7 @@ import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -46,6 +50,7 @@ class SettlementAdapter(
     @RestClient private val client: TransactionServiceClient,
     private val accountLookup: AccountLookupPort,
     private val clock: Clock,
+    registry: MeterRegistry,
 ) : SettlementPort {
 
     @Inject
@@ -53,6 +58,9 @@ class SettlementAdapter(
 
     private val log = Logger.getLogger(SettlementAdapter::class.java)
     private val transactions = TransactionClient(client)
+    private val unsettledCounters = UNSETTLED_OUTCOMES.associateWith { outcome ->
+        registry.counter(UNSETTLED_METRIC, "rail", UNSETTLED_RAIL, "outcome", outcome)
+    }
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun settle(payment: DomesticPayment): SettlementOutcome = try {
@@ -103,9 +111,41 @@ class SettlementAdapter(
             rail = "DOMESTIC",
             instructionType = "ONE_OFF",
         )
-        val txId = confirm(payment, request, transactions.initiate(request).awaitSuspending())
+        val txId = confirm(payment, request, initiate(request))
         log.infof("Settlement booked for payment %s → transactionId=%s", payment.id, txId)
         return SettlementOutcome(settled = true, transactionId = txId)
+    }
+
+    /** Count one unsuccessful provider call, inside each resilience attempt, never again in [settle]. */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun initiate(request: InitiateTransactionRequest): TransactionCallOutcome<TransactionResponse> =
+        try {
+            transactions.initiate(request).awaitSuspending()
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: Exception) {
+            val outcome = when (ex) {
+                // FAILED includes a replayed FAILED response, not proof this request was a replay.
+                is TransactionCompletionUncertainException ->
+                    if (ex.completionFailure == TransactionCompletionFailure.FAILED) {
+                        FAILED_REPLAY
+                    } else {
+                        UNEXPECTED_STATUS
+                    }
+                is TransactionHttpException -> UNEXPECTED_STATUS
+                else -> TRANSPORT_ERROR
+            }
+            recordUnsettled(outcome)
+            throw ex
+        }
+
+    private fun recordUnsettled(outcome: String) {
+        unsettledCounters.getValue(outcome).increment()
+    }
+
+    private fun refuse(outcome: String, message: String, cause: Throwable? = null): Nothing {
+        recordUnsettled(outcome)
+        throw SettlementUnavailableException(message, cause)
     }
 
     /**
@@ -120,23 +160,26 @@ class SettlementAdapter(
     ): UUID {
         val booked = when (outcome) {
             is TransactionCallOutcome.HttpSuccess -> outcome
-            TransactionCallOutcome.Conflict -> throw SettlementUnavailableException(
+            TransactionCallOutcome.Conflict -> refuse(
+                CONFLICT,
                 "transaction-service returned HTTP $HTTP_CONFLICT (a concurrent-state conflict, not a booking) " +
                     "for payment ${payment.id}",
             )
-            is TransactionCallOutcome.Rejected -> throw SettlementUnavailableException(
+            is TransactionCallOutcome.Rejected -> refuse(
+                UNEXPECTED_STATUS,
                 "transaction-service returned HTTP ${outcome.status} for payment ${payment.id}",
             )
         }
         if (booked.status != HTTP_CREATED) {
-            throw SettlementUnavailableException(
+            refuse(
+                UNEXPECTED_STATUS,
                 "transaction-service returned HTTP ${booked.status} for payment ${payment.id}",
             )
         }
         val tx = booked.body
-            ?: throw SettlementUnavailableException("Settlement response has no transaction", booked.bodyError)
-        val id = tx.id ?: throw SettlementUnavailableException("Settlement response has no transaction id")
-        val amount = tx.amount ?: throw SettlementUnavailableException("Settlement response has no numeric amount")
+            ?: refuse(UNEXPECTED_STATUS, "Settlement response has no transaction", booked.bodyError)
+        val id = tx.id ?: refuse(MISMATCH, "Settlement response has no transaction id")
+        val amount = tx.amount ?: refuse(MISMATCH, "Settlement response has no numeric amount")
         // valueDate is deliberately not compared: the provider resolves it to a business day. The target account
         // is compared only when one was requested; a debit-only booking's counter-leg is the provider's choice.
         val matchesRequest = tx.status == CONFIRMED_STATUS &&
@@ -148,7 +191,7 @@ class SettlementAdapter(
             tx.rail == request.rail &&
             tx.instructionType == request.instructionType
         if (!matchesRequest) {
-            throw SettlementUnavailableException("Settlement response does not match payment ${payment.id}")
+            refuse(MISMATCH, "Settlement response does not match payment ${payment.id}")
         }
         return id
     }
@@ -220,6 +263,14 @@ class SettlementAdapter(
     }
 
     private companion object {
+        const val UNSETTLED_METRIC = "openbank.payment.unsettled"
+        const val UNSETTLED_RAIL = "DOMESTIC_CZK"
+        const val MISMATCH = "mismatch"
+        const val FAILED_REPLAY = "failed-replay"
+        const val CONFLICT = "conflict"
+        const val UNEXPECTED_STATUS = "unexpected-status"
+        const val TRANSPORT_ERROR = "transport-error"
+        val UNSETTLED_OUTCOMES = setOf(MISMATCH, FAILED_REPLAY, CONFLICT, UNEXPECTED_STATUS, TRANSPORT_ERROR)
         const val HTTP_CREATED = 201
         const val HTTP_CONFLICT = 409
         const val CONFIRMED_STATUS = "COMPLETED"

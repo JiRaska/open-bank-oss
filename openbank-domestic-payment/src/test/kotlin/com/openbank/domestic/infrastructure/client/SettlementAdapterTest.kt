@@ -14,6 +14,8 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.libs.domain.money.Money
+import io.micrometer.prometheus.PrometheusConfig
+import io.micrometer.prometheus.PrometheusMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -36,12 +38,13 @@ import java.util.UUID
 class SettlementAdapterTest {
 
     private val client: TransactionServiceClient = mockk()
+    private val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     private val accountLookup: AccountLookupPort = mockk()
     private val txId = UUID.randomUUID()
     private val debtor = UUID.fromString("22222222-2222-2222-2222-222222222222")
 
     private fun adapter(): SettlementAdapter =
-        SettlementAdapter(client, accountLookup, Clock.systemUTC()).also { it.self = it }
+        SettlementAdapter(client, accountLookup, Clock.systemUTC(), registry).also { it.self = it }
 
     @BeforeEach
     fun setUp() {
@@ -234,6 +237,95 @@ class SettlementAdapterTest {
         coVerify(exactly = 0) { accountLookup.findAccountIdByIban(any()) }
         // An interbank transfer settles through CERTIS, so it keeps the "CERTIS" prefix.
         assertThat(reqSlot.captured.description).startsWith("CERTIS")
+    }
+
+    @Test
+    fun `each unsuccessful call counts exactly one bounded outcome`() {
+        val cases: List<Pair<String, () -> Unit>> = listOf(
+            "mismatch" to { answer { echo(it).copy(amount = it.amount.add(BigDecimal.ONE)) } },
+            "mismatch" to { answer { echo(it).copy(id = null) } },
+            "mismatch" to { answer { echo(it).copy(amount = null) } },
+            "failed-replay" to { answer { echo(it, status = "FAILED") } },
+            "conflict" to { answer(409) { null } },
+            "unexpected-status" to { answer(200) },
+            "unexpected-status" to { answer(202) },
+            "unexpected-status" to { answer(400) { null } },
+            "unexpected-status" to { answer(422) { null } },
+            "unexpected-status" to { answer(500) { null } },
+            "unexpected-status" to { answer { echo(it, status = "PENDING") } },
+            "unexpected-status" to { answer { null } },
+            "transport-error" to {
+                every { client.initiateTransaction(any()) } returns
+                    Uni.createFrom().failure(RuntimeException("synthetic connection failure"))
+            },
+        )
+        val expected = mutableMapOf<String, Double>()
+        cases.forEach { (outcome, configure) ->
+            configure()
+            assertThat(settleFails()).isInstanceOf(SettlementUnavailableException::class.java)
+            expected[outcome] = (expected[outcome] ?: 0.0) + 1.0
+            assertUnsettledCounts(expected)
+        }
+    }
+
+    @Test
+    fun `repeated failed responses count attempts without counting the outer wrapper again`() {
+        val keys = mutableListOf<String>()
+        every { client.initiateTransaction(any()) } answers {
+            val request = firstArg<InitiateTransactionRequest>()
+            keys += requireNotNull(request.idempotencyKey)
+            Uni.createFrom().item(Response.status(201).entity(echo(request, status = "FAILED")).build())
+        }
+
+        // These are three actual provider calls, not a claim to execute the CDI Retry interceptor.
+        repeat(3) { settleFails() }
+
+        assertThat(keys).containsExactlyElementsOf(List(3) { "domestic-settlement-${payment().id}" })
+        assertUnsettledCounts(mapOf("failed-replay" to 3.0))
+    }
+
+    @Test
+    fun `matching completed responses including an idempotent replay never count unsettled`(): Unit = runBlocking {
+        answer()
+        val payment = payment()
+        val settlement = adapter()
+
+        assertThat(settlement.settle(payment).transactionId).isEqualTo(txId)
+        assertThat(settlement.settle(payment).transactionId).isEqualTo(txId)
+
+        assertUnsettledCounts(emptyMap())
+        assertThat(registry.scrape()).contains(
+            """openbank_payment_unsettled_total{outcome="mismatch",rail="DOMESTIC_CZK",} 0.0""",
+        )
+        // Only bounded rail/outcome labels: never payment, account, card or caller identities.
+        assertThat(registry.meters).hasSize(5)
+        registry.meters.forEach { meter ->
+            assertThat(meter.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
+            assertThat(meter.id.getTag("rail")).isEqualTo("DOMESTIC_CZK")
+            assertThat(meter.id.name).isEqualTo("openbank.payment.unsettled")
+        }
+    }
+
+    @Test
+    fun `shutdown cancellation is rethrown unchanged without an unsettled count`() {
+        val cancellation = CancellationException("synthetic shutdown")
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(cancellation)
+
+        val failure = settleFails()
+        // Coroutine stack-trace recovery may copy CancellationException while retaining the original as its cause.
+        assertThat(failure).isInstanceOf(CancellationException::class.java).hasMessage("synthetic shutdown")
+        assertThat(generateSequence(failure) { it.cause }.any { it === cancellation }).isTrue()
+        assertUnsettledCounts(emptyMap())
+    }
+
+    private fun assertUnsettledCounts(expected: Map<String, Double>) {
+        listOf("mismatch", "failed-replay", "conflict", "unexpected-status", "transport-error").forEach { outcome ->
+            assertThat(
+                registry.get("openbank.payment.unsettled")
+                    .tags("rail", "DOMESTIC_CZK", "outcome", outcome).counter().count(),
+            ).describedAs("exact unsuccessful attempts for %s", outcome)
+                .isEqualTo(expected[outcome] ?: 0.0)
+        }
     }
 
     private fun payment() = DomesticPayment(
