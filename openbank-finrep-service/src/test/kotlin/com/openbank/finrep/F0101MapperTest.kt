@@ -41,7 +41,7 @@ class F0101MapperTest {
         val template = F0101Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf)
 
         assertThat(template.templateId).isEqualTo("F01.01")
-        assertThat(template.cells).hasSize(6)
+        assertThat(template.cells).hasSize(7)
         assertThat(cell(template.cells, "r0380")).isEqualByComparingTo("500000")
         assertThat(template.cells).allMatch { it.colRef == "c0010" }
         assertThat(template.hasDataGaps).isFalse()

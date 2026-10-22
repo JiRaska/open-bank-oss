@@ -77,6 +77,7 @@ class TreasuryGlMappingTest {
         val cells = F0101Mapper.map(s, asOf).cells
         // r0010 = cash + central bank balances + other demand deposits (nostro + ČNB facility)
         assertThat(cell(cells, "r0010")).isEqualByComparingTo("1110")
+        assertThat(cell(cells, "r0030")).isEqualByComparingTo("1000")
         // r0040 = other demand deposits only: the ČNB facility is a central-bank balance, not a demand deposit
         assertThat(cell(cells, "r0040")).isEqualByComparingTo("110")
         // loans and advances to credit institutions incl. accrued interest (IFRS 9 carrying amount)
@@ -95,9 +96,57 @@ class TreasuryGlMappingTest {
             line("2311", "LIABILITY", "-3"),
         )
         val cells = F0102Mapper.map(s, asOf).cells
+        assertThat(cell(cells, "r0130")).isEqualByComparingTo("500")
+        assertThat(cell(cells, "r0150")).isEqualByComparingTo("3310")
         assertThat(cell(cells, "r0110")).isEqualByComparingTo("3810")
         assertThat(cell(cells, "r0120")).isEqualByComparingTo("3810")
         assertThat(cell(cells, "r0300")).isEqualByComparingTo("3810")
+    }
+
+    @Test
+    fun `CNB deposit facility fills r0030 and feeds neither r0040 nor loans`() {
+        val s = snapshot(line("1510", "ASSET", "1000"), line("1001", "ASSET", "40"))
+        val cells = F0101Mapper.map(s, asOf).cells
+        assertThat(cell(cells, "r0030")).isEqualByComparingTo("1000")
+        assertThat(cell(cells, "r0040")).isEqualByComparingTo("40")
+        assertThat(cell(cells, "r0010")).isEqualByComparingTo("1040")
+        assertThat(cell(cells, "r0181")).isEqualByComparingTo("0")
+    }
+
+    @Test
+    fun `CNB accrued interest stays with loans - accepted limitation of the shared 1520 account`() {
+        val s = snapshot(line("1520", "ASSET", "5"), line("1521", "ASSET", "1"))
+        val cells = F0101Mapper.map(s, asOf).cells
+        assertThat(cell(cells, "r0181")).isEqualByComparingTo("6")
+        assertThat(cell(cells, "r0183")).isEqualByComparingTo("6")
+        assertThat(cell(cells, "r0030")).isEqualByComparingTo("0")
+        assertThat(cell(cells, "r0010")).isEqualByComparingTo("0")
+    }
+
+    @Test
+    fun `lombard borrowing lands in r0130 central banks and not in r0150`() {
+        val s = snapshot(line("2320", "LIABILITY", "-500"), line("2300", "LIABILITY", "-200"))
+        val cells = F0102Mapper.map(s, asOf).cells
+        assertThat(cell(cells, "r0130")).isEqualByComparingTo("500")
+        assertThat(cell(cells, "r0150")).isEqualByComparingTo("200")
+        assertThat(cell(cells, "r0120")).isEqualByComparingTo("700")
+        assertThat(cell(cells, "r0300")).isEqualByComparingTo("700")
+    }
+
+    @Test
+    fun `nostro overdraft is reclassified from cash to credit-institution liabilities`() {
+        // 1001 holds a 30 credit balance (overdraft); 1002 a 100 debit balance.
+        val s = snapshot(line("1001", "ASSET", "-30"), line("1002", "ASSET", "100"))
+        val assets = F0101Mapper.map(s, asOf).cells
+        assertThat(cell(assets, "r0040")).isEqualByComparingTo("100")
+        assertThat(cell(assets, "r0010")).isEqualByComparingTo("100")
+        // gross assets: the overdraft is no longer netted against the positive nostro
+        assertThat(cell(assets, "r0380")).isEqualByComparingTo("100")
+        val liabs = F0102Mapper.map(s, asOf).cells
+        assertThat(cell(liabs, "r0150")).isEqualByComparingTo("30")
+        assertThat(cell(liabs, "r0120")).isEqualByComparingTo("30")
+        assertThat(cell(liabs, "r0130")).isEqualByComparingTo("0")
+        assertThat(cell(liabs, "r0300")).isEqualByComparingTo("30")
     }
 
     @Test

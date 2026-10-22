@@ -164,7 +164,7 @@ class TemplateWireFormatTest {
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(6)
+        assertThat(cells).hasSize(7)
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
         assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0040", "r0181", "r0183", "r0360", "r0380")
         assertThat(cells.map { it["colRef"] }).containsOnly("c0010")

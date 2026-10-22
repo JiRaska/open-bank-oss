@@ -29,13 +29,13 @@ Every GL account with a balance must be in the `FinrepCoverage` allowlist; an un
 
 | GL | Meaning | Template rows |
 |---|---|---|
-| 1001, 1002 | Nostro accounts at correspondent banks | F01.01 r0010 and r0040 (other demand deposits) |
-| 1510 | ČNB deposit facility | F01.01 r0010 only — a central-bank balance, not an other demand deposit |
+| 1001, 1002 | Nostro accounts at correspondent banks | F01.01 r0010 and r0040 (other demand deposits). A credit balance (overdraft) per ledger line is excluded here and reported in F01.02 r0150, r0120, r0110 and r0300; F01.01 r0380 adds it back |
+| 1510 | ČNB deposit facility | F01.01 r0030 (cash balances at central banks) and therefore r0010; not r0040 |
 | 1500, 1501; 1520, 1521 | Placements with credit institutions and their accrued interest receivable | F01.01 r0181, r0183 (loans and advances at amortised cost) |
-| 2300, 2301; 2310, 2311; 2320 | Deposits from credit institutions, their accrued interest payable, ČNB lombard borrowing | F01.02 r0110, r0120 |
+| 2300, 2301; 2310, 2311; 2320 | Deposits from credit institutions, their accrued interest payable, ČNB lombard borrowing | F01.02 r0110, r0120; 2320 also r0130 (central banks); 2300, 2301, 2310, 2311 and nostro overdrafts also r0150 (credit institutions) |
 | 4200, 4201 / 5200, 5201 | Money-market interest income / expense | F02.00 r0010, r0051 / r0090, r0120 |
 
-Accrued interest receivable (1520/1521) is one account shared by interbank placements and the ČNB deposit facility, so the facility's accrued interest is reported with loans and advances rather than with cash. Splitting it requires a separate ledger account per counterparty type.
+Accrued interest receivable (1520/1521) is one account shared by interbank placements and the ČNB deposit facility, so the facility's accrued interest is reported with loans and advances rather than with cash. The same holds for accrued interest payable 2310/2311: it is reported in r0150 although part of it belongs to the lombard borrowing (r0130). Both are accepted limitations (#13189): splitting them requires a separate ledger account per counterparty class, which ADR-0341's `regulatoryClass` on the product revision is meant to carry. F01.02 r0130 and r0150 and F01.01 r0030 are emitted without a verified EBA datapoint id; confirm them against the annotated templates before regulatory submission.
 
 ## Shared configuration defaults
 

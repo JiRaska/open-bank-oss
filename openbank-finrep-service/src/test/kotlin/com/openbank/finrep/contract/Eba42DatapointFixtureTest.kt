@@ -33,7 +33,7 @@ class Eba42DatapointFixtureTest {
         assertThat(EbaReportingFramework42.TAXONOMY_VERSION).isEqualTo(fixture["taxonomyVersion"].asText())
         assertThat(fixture["taxonomyPackageSha256"].asText())
             .isEqualTo("0bf9e33720de1472e809417999cfd29e4b5eadb31750c7770622e502590bbdd0")
-        assertThat(fixture["supportedFacts"]).hasSize(33)
+        assertThat(fixture["supportedFacts"]).hasSize(36)
         assertThat(fixture["supportedFacts"].map { it["meaning"].asText() })
             .contains("TOTAL ASSETS", "TOTAL LIABILITIES", "TOTAL EQUITY", "PROFIT OR LOSS FOR THE YEAR")
 

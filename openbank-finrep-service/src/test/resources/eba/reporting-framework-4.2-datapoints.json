@@ -7,6 +7,7 @@
   "annotatedTemplatesUrl": "https://www.eba.europa.eu/sites/default/files/2026-02/c92d5e2b-bcd7-4767-ab5b-cdf0b1737368/260106%20Annotated%20templates_with_finpre9dp_4.2.1.zip",
   "supportedFacts": [
     { "templateId": "F01.01", "rowRef": "r0010", "colRef": "c0010", "datapointId": 10898, "meaning": "CASH, CENTRAL BANK BALANCES AND OTHER DEMAND DEPOSITS" },
+    { "templateId": "F01.01", "rowRef": "r0030", "colRef": "c0010", "datapointId": null, "meaning": "CASH BALANCES AT CENTRAL BANKS (datapoint id UNVERIFIED against the annotated templates)" },
     { "templateId": "F01.01", "rowRef": "r0040", "colRef": "c0010", "datapointId": 32244, "meaning": "OTHER DEMAND DEPOSITS" },
     { "templateId": "F01.01", "rowRef": "r0181", "colRef": "c0010", "datapointId": 152251, "meaning": "FINANCIAL ASSETS AT AMORTISED COST" },
     { "templateId": "F01.01", "rowRef": "r0183", "colRef": "c0010", "datapointId": 152253, "meaning": "LOANS AND ADVANCES" },
@@ -14,6 +15,8 @@
     { "templateId": "F01.01", "rowRef": "r0380", "colRef": "c0010", "datapointId": 32354, "meaning": "TOTAL ASSETS" },
     { "templateId": "F01.02", "rowRef": "r0110", "colRef": "c0010", "datapointId": 11451, "meaning": "FINANCIAL LIABILITIES MEASURED AT AMORTISED COST" },
     { "templateId": "F01.02", "rowRef": "r0120", "colRef": "c0010", "datapointId": 11447, "meaning": "DEPOSITS" },
+    { "templateId": "F01.02", "rowRef": "r0130", "colRef": "c0010", "datapointId": null, "meaning": "DEPOSITS - CENTRAL BANKS (datapoint id UNVERIFIED against the annotated templates)" },
+    { "templateId": "F01.02", "rowRef": "r0150", "colRef": "c0010", "datapointId": null, "meaning": "DEPOSITS - CREDIT INSTITUTIONS (datapoint id UNVERIFIED against the annotated templates)" },
     { "templateId": "F01.02", "rowRef": "r0240", "colRef": "c0010", "datapointId": 32651, "meaning": "TAX LIABILITIES" },
     { "templateId": "F01.02", "rowRef": "r0250", "colRef": "c0010", "datapointId": 32594, "meaning": "CURRENT TAX LIABILITIES" },
     { "templateId": "F01.02", "rowRef": "r0300", "colRef": "c0010", "datapointId": 32592, "meaning": "TOTAL LIABILITIES" },

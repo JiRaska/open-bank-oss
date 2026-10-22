@@ -16,18 +16,20 @@ import java.time.LocalDate
 object F0102Mapper {
     fun map(snapshot: TrialBalanceSnapshot, asOf: LocalDate): FinrepTemplate {
         val lines = snapshot.lines
+        val overdraft = NostroOverdraft.of(lines)
         val liabilities = lines
             .filter { it.accountType == "LIABILITY" }
             .fold(BigDecimal.ZERO) { total, line -> total.add(line.net) }
             .negate()
-        val deposits = creditBalance(
-            lines,
-            "2001", "2002", "2100", "2101", "2102", "2103",
-            // Treasury: deposits from credit institutions (2300/2301), ČNB lombard borrowing (2320, a
-            // deposit from a central bank) and their accrued interest payable (2310/2311), which is
-            // part of the amortised-cost carrying amount.
-            "2300", "2301", "2310", "2311", "2320",
-        )
+            .add(overdraft)
+        // Central banks (r0130): ČNB lombard borrowing 2320 only.
+        val centralBank = creditBalance(lines, "2320")
+        // Credit institutions (r0150): interbank deposits 2300/2301, nostro overdrafts, and accrued
+        // interest payable 2310/2311. The accrual is shared with the lombard facility and cannot be
+        // split by counterparty (accepted limitation, README), so it is reported here.
+        val creditInstitutions = creditBalance(lines, "2300", "2301", "2310", "2311").add(overdraft)
+        val deposits = creditBalance(lines, "2001", "2002", "2100", "2101", "2102", "2103", "2320")
+            .add(creditInstitutions)
         val taxPayable = creditBalance(lines, "2200")
         val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(
@@ -36,6 +38,8 @@ object F0102Mapper {
             cells = listOf(
                 FinrepCell("r0110", "c0010", deposits),
                 FinrepCell("r0120", "c0010", deposits),
+                FinrepCell("r0130", "c0010", centralBank),
+                FinrepCell("r0150", "c0010", creditInstitutions),
                 FinrepCell("r0240", "c0010", taxPayable),
                 FinrepCell("r0250", "c0010", taxPayable),
                 FinrepCell("r0300", "c0010", liabilities),
