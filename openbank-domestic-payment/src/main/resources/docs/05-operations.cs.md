@@ -72,6 +72,14 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ## Runbooky
 
+### Nevyřešené výsledky interního zaúčtování
+
+`openbank_payment_unsettled_total{rail="DOMESTIC_CZK",outcome="..."}` počítá neúspěšné pokusy vůči transaction-service. Název v Micrometeru je `openbank.payment.unsettled`. Povolené výsledky jsou `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou před prvním pokusem. Opakované pokusy se počítají samostatně, nejde o počet unikátních plateb. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` označuje dekódovanou odpověď FAILED, nikoli důkaz, že tento požadavek byl replay. Metrika používá label `DOMESTIC_CZK`; požadavek na transakci nadále obsahuje `rail=DOMESTIC` a `instructionType=ONE_OFF`.
+
+Zaúčtování vyžaduje HTTP 201, transakci COMPLETED s identifikátorem a shodu typu, identit účtů, částky, měny, railu a typu instrukce s odeslanými údaji. Neúspěšný či nejistý pokus neposune platbu ze SENT_TO_CLEARING do SETTLED. Existující resilience vůči provideru a politika Temporal activity mohou pokus opakovat; čítač tyto politiky nemění ani znovu nezapočítává vnější obalení výjimky. Při šetření zachovejte `domestic-settlement-<paymentId>`: 409 ani nejistá odpověď nedokazují, že zaúčtování neproběhlo. Před nápravnou akcí ověřte výsledek schváleným reconciliation nástrojem; neměňte klíč ani nepoužívejte nový booking POST jako vyhledávání.
+
+Čítač nepřidává veřejné vyhledání transakce podle idempotentního klíče, trvalé stáří nevyřešené platby, alarm stáří vůči SLA ani recovery endpoint. Existující gauge uvízlých plateb zůstává beze změny a tyto chybějící záruky nedokládá. Tyto části #13623 zůstávají otevřené; nulový čítač ani úspěšný lokální build nedokazují dokončenou reconciliation nebo připravenost nasazení.
+
 ### Platby uvíznuté v RECEIVED
 
 Očekávané, když screening vrátí REVIEW (potenciální zásah ≤ 0,85) nebo když byla sanctions-service nedostupná (fail-closed). Postup:

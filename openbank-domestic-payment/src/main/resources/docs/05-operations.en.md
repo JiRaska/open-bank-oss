@@ -72,6 +72,14 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Unsettled internal booking outcomes
+
+`openbank_payment_unsettled_total{rail="DOMESTIC_CZK",outcome="..."}` counts unsuccessful transaction-service attempts. Its Micrometer name is `openbank.payment.unsettled`. The bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; five zero series are registered before any attempt. Retries count as separate attempts, not unique payments. Cancellation and matched successful responses do not increment it. `failed-replay` denotes a decoded FAILED response, not proof that this call was a replay. The metric rail label is `DOMESTIC_CZK`; the transaction request still uses `rail=DOMESTIC` and `instructionType=ONE_OFF`.
+
+Settlement requires HTTP 201, a COMPLETED transaction with an id, and a match to the submitted type, account identities, amount, currency, rail and instruction type. A failed or uncertain attempt does not advance the payment from SENT_TO_CLEARING to SETTLED. The existing provider resilience and Temporal activity policies may retry; this counter does not change those policies or count the outer exception wrapper again. Preserve `domestic-settlement-<paymentId>` during investigation: a 409 or uncertain response is not proof that no booking occurred. Establish the transaction outcome through approved reconciliation tooling before corrective action; do not rotate the key or use a new booking POST as a lookup.
+
+This counter does not add a public transaction lookup by idempotency key, a durable per-payment unsettled age, an age/SLA alert or a recovery endpoint. The existing stranded-payment gauge remains unchanged and does not establish those missing guarantees. These parts of #13623 remain open; neither a zero counter nor a successful local build proves reconciliation or deployment readiness.
+
 ### Payments stuck in RECEIVED
 
 Expected when screening returns REVIEW (potential hit ≤ 0.85) or when sanctions-service was unavailable (fail-closed). Action:
