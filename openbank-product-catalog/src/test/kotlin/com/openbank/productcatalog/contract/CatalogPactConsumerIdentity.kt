@@ -11,11 +11,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
  * Both folder and broker replays use the scoped service identity of the consumer.
  * Real token authentication and authorization remain covered by CatalogPensionOidcApprovalIT.
  */
-fun <T> withCatalogPactConsumerIdentity(
-    association: TestIdentityAssociation,
-    consumer: String?,
-    verify: () -> T,
-): T {
+fun <T> withCatalogPactConsumerIdentity(association: TestIdentityAssociation, consumer: String?, verify: () -> T): T {
     val original = association.testIdentity
     try {
         if (consumer == "openbank-pension-service") {

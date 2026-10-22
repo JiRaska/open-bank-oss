@@ -37,7 +37,7 @@ class CatalogPactConsumerIdentityTest {
     }
 
     @Test
-    fun unrelatedConsumerDoesNotGainMachineReaderIdentity() {
+    fun unauthorizedConsumerDoesNotGainMachineReaderIdentity() {
         withCatalogPactConsumerIdentity(association, "unrelated-service") {
             assertThat(current).isSameAs(operator)
             assertThat(current.hasRole("ROLE_API")).isFalse()
