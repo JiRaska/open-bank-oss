@@ -104,6 +104,7 @@ class BankV1CatalogMapping(private val mapper: ObjectMapper, private val catalog
             taxTreatment = price.taxTreatment.name
             effectiveFrom = price.effectiveFrom
             effectiveTo = price.effectiveTo
+            role = price.role?.name
         }
     }
 

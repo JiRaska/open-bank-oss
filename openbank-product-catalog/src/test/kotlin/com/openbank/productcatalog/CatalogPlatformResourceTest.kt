@@ -14,6 +14,7 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -391,6 +392,39 @@ class CatalogPlatformResourceTest {
             body("content.attributes.premium.amount", equalTo("12.3400"))
             body("content.prices[0].value", equalTo(EXACT_PRICE))
         }
+    }
+
+    @Test
+    fun priceComponentRoleIsClosedOptionalAndRoundTrips() {
+        // #13230: a component may say what it is; absent means "authored before roles" and stays absent.
+        val offeringId = createOffering(createSpecification("INS_TERM_LIFE_ROLE"), "INS_TERM_LIFE_ROLE_CZ")
+        val withRole = revisionPayload(
+            "Roled",
+        ).replace(""""taxTreatment":"EXEMPT"""", """"taxTreatment":"EXEMPT","role":"LIMIT"""")
+        val roledId = Given {
+            contentType("application/json")
+            body(withRole)
+        } When { post("/api/v2/offerings/$offeringId/revisions") } Then {
+            statusCode(201)
+            body("content.prices[0].role", equalTo("LIMIT"))
+        } Extract { path<String>("id") }
+        Given { this } When { get("/api/v2/revisions/$roledId") } Then {
+            statusCode(200)
+            body("content.prices[0].role", equalTo("LIMIT"))
+        }
+        val legacyOffering = createOffering(createSpecification("INS_TERM_LIFE_NOROLE"), "INS_TERM_LIFE_NOROLE_CZ")
+        val plainId = createRevision(legacyOffering, "No role")
+        Given { this } When { get("/api/v2/revisions/$plainId") } Then {
+            statusCode(200)
+            body("content.prices[0].role", nullValue())
+        }
+        val unknown = revisionPayload(
+            "Bad role",
+        ).replace(""""taxTreatment":"EXEMPT"""", """"taxTreatment":"EXEMPT","role":"BONUS"""")
+        Given {
+            contentType("application/json")
+            body(unknown)
+        } When { post("/api/v2/offerings/$offeringId/revisions") } Then { statusCode(400) }
     }
 
     @Test

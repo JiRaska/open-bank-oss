@@ -44,6 +44,15 @@ data class LocalizedText(val values: Map<String, String>) {
 
 enum class RevisionState { DRAFT, PUBLISHED, SUPERSEDED }
 enum class PriceKind { AMOUNT, RATE }
+
+/**
+ * What a price component IS, as opposed to how it is priced ([PriceKind]) (#13230). Closed: a consumer may
+ * act on a component only by its role -- billing charges [FEE] and nothing else, so a minimum balance or
+ * a limit priced as an AMOUNT can never be charged as a fee. Optional on the wire and in storage: a
+ * revision authored before roles existed carries none, keeps its content hash, and its consumers keep
+ * their legacy interpretation (billing: match against the embedded v1 fees).
+ */
+enum class PriceRole { FEE, RATE, LIMIT, THRESHOLD }
 enum class PriceCadence { ONCE, DAILY, MONTHLY, QUARTERLY, ANNUALLY, USAGE }
 enum class TaxTreatment { INCLUSIVE, EXCLUSIVE, EXEMPT, UNSPECIFIED }
 enum class EligibilityOperator { EQUALS, NOT_EQUALS, IN, GREATER_THAN, GREATER_OR_EQUAL, LESS_THAN, LESS_OR_EQUAL }
@@ -89,6 +98,8 @@ data class PriceComponent(
     val taxTreatment: TaxTreatment = TaxTreatment.UNSPECIFIED,
     val effectiveFrom: Instant? = null,
     val effectiveTo: Instant? = null,
+    /** Null only on components authored before #13230; see [PriceRole]. */
+    val role: PriceRole? = null,
 ) {
     init {
         require(code.isNotBlank() && code.length <= MAX_PRICE_TEXT_LENGTH) {
@@ -108,6 +119,7 @@ data class PriceComponent(
         require(effectiveFrom == null || effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
             "price effectiveTo must be after effectiveFrom"
         }
+        require(role != PriceRole.FEE || kind == PriceKind.AMOUNT) { "a FEE price component must be an AMOUNT" }
     }
 
     private companion object {
