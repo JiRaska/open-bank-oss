@@ -65,6 +65,10 @@ BEGIN
         SELECT 1 FROM accounting_class_gl_map m JOIN gl_accounts g ON g.id = m.gl_account_id
         WHERE g.currency_code <> m.currency_code
     ) THEN
-        RAISE EXCEPTION 'accounting_class_gl_map has a row whose currency differs from its GL account''s';
+        RAISE EXCEPTION 'accounting_class_gl_map has a row whose currency differs from its GL account''s: %',
+            (SELECT string_agg(m.accounting_class || '/' || m.role || '/' || m.currency_code || '->' || g.code
+                               || ' (' || g.currency_code || ')', ', ' ORDER BY m.accounting_class, m.currency_code)
+             FROM accounting_class_gl_map m JOIN gl_accounts g ON g.id = m.gl_account_id
+             WHERE g.currency_code <> m.currency_code);
     END IF;
 END $$;
