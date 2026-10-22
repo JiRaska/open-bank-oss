@@ -61,6 +61,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd --system --gid openbank --no-create-home --shell /usr/sbin/nologin openbank
 
 COPY --from=builder /opt/venv /opt/venv
+# Dependencies are installed in the builder; the runtime only renders documents.
+RUN /opt/venv/bin/python -m pip uninstall --yes pip \
+    && /usr/local/bin/python -m pip uninstall --yes pip
 ENV PATH="/opt/venv/bin:${PATH}"
 
 WORKDIR /app
