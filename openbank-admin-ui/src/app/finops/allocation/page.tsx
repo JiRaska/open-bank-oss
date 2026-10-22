@@ -160,9 +160,9 @@ function AllocationContent() {
         </div>}
       />
 
-      <div aria-label={t('Zdroj klasifikace nákladových domén', 'Cost domain classification source')}>
+      <section aria-label={t('Zdroj klasifikace nákladových domén', 'Cost domain classification source')}>
         <ContentSourceNote source={data?.governanceSource} />
-      </div>
+      </section>
 
       {loading && !data ? (
         <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
