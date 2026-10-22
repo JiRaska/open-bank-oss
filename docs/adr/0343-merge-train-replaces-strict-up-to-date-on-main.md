@@ -245,7 +245,8 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    merge would move the carrier's base; the carrier's own "main moved since publish" check also
    rejects it if one ever does), and at most one per tick, since a merge makes every other
    strict-lane head behind;
-2. if the head is up to date and its required CI is still running (or has just gone green), *reserves*
+2. if the head is up to date and its required CI is still running — including not yet reported, the
+   normal state for the first minutes after update-branch — (or has just gone green), *reserves*
    main: settle reports in-flight, so no train is built under it; no other strict-lane PR is updated;
    **and nothing else may move main** — the fast lane posts no status (GitHub auto-merge acts on it)
    and a carrier that finished green is held, not merged. Main moves only when the reserved PR
@@ -258,7 +259,8 @@ For each armed, non-draft PR that `qualifies()` refuses ONLY for the manual-lane
    only — one per tick, none while another is reserved — so CI is never flooded. Its CI then runs
    and a later tick merges it. A reservation is bounded by `RESERVATION_TIMEOUT_S`, twice the p95 of
    green pull-request CI (measured: p50 17 min, p95 32 min, so 64 min), counted from the head's
-   committer time, which update-branch sets: past it the reservation is released, the fast lane and
+   committer time, which update-branch sets (a committer time in the future, which only an author can
+   write, counts as timed out): past it the reservation is released, the fast lane and
    trains resume, and the PR goes to the back of the strict queue, so a hung CI cannot freeze main.
    The cost is bounded too: fast-lane and train merges wait at most one strict-lane CI cycle. A
    file-disjoint fast lane during the reservation was rejected: any merge makes the reserved head
@@ -336,6 +338,7 @@ check main itself was failing. So, while `main_red` is non-empty:
    `fix_contexts` test as rule 3 leaves the train and the fast lane and is served by the strict
    lane as a fix — first, alone, without update-branch, live main re-read before the merge, the
    merge pinned to its head (`sha`, i.e. `--match-head-commit`);
+   *amended (2026-10-21): a fix behind main is no longer merged without update — it is update-branched and holds the reservation, and only its combined head merges, with the fix set green and every other required context green or red on main too.*
 5. **no train is planned over a red main**: it could only come back red on the main-red context,
    so building it would spend a CI run to learn nothing; the fast lane is unchanged;
 6. **no culprit for a main-red context**: a carrier red only on contexts in `main_red` is
@@ -448,7 +451,14 @@ declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` 
 the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
 by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
 PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
-armed); running = wait; never triggered, skipped or neutral = not applicable. A carrier red on an
+armed); running = wait; never reported = wait too (fail closed, #13400). An absent check is not
+applicable only when every run of the pinned workflow for that head COMPLETED with conclusion
+`success` (or the check itself concluded skipped or neutral); a pinned run that concluded
+`failure` makes the absent gate red, and one that concluded cancelled, timed_out, startup_failure
+or action_required leaves it pending — inconclusive, never served. And when the PR's diff (for a
+carrier: any member's diff) touches the gate's own pinned workflow file, an absent or
+not-applicable gate is red ("the PR changes the extra gate's own workflow"): a PR that removes or
+renames the job cannot thereby skip it. A carrier red on an
 extra gate is a verdict like any required context, unless main is red on that gate too: then it
 counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
 Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
@@ -456,6 +466,45 @@ Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml,
 run from another app or workflow can neither turn it green nor mask a red. The declaration fails
 closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
 `--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
+
+### Amendment (2026-10-21) — lane fairness: the strict lane yields one turn to the train
+
+The strict-lane reservation holds main for one manual-lane PR, and while any reservation runs no
+train is built. With a strict queue that never empties this starved the train lane completely:
+over 12.5 h of `merge-train.yml` (2026-10-20T23:38Z .. 2026-10-21T12:28Z, 40 runs) 11 carriers were
+published, **0 train members merged**, and 13 strict-lane PRs merged. Every strict merge was
+followed in the next tick by an update-branch for the next strict PR, and that update-branch was
+issued even while a carrier was open, so a carrier that went green was held for the new
+reservation and then voided by its merge (carrier #13529: held for #13526, then "main moved since
+publish"). The strict lane now does not START a reservation (update-branch) when:
+
+1. **a train carrier is open** — the carrier is the train's turn in flight, bounded by its own CI
+   and settlement; or
+2. **main's head is a strict-lane merge** (its PR head carries the App's `strict lane:` status)
+   **and train candidates wait** — the train gets the next turn, bounded by `TRAIN_TURN_S`
+   (30 min, two ticks at the measured p90 cron gap) from that merge, so a train that cannot be
+   built never freezes the strict lane.
+
+The result is alternation: one strict-lane PR, then one train, then one strict-lane PR. Neither
+lane can starve the other — the strict turn returns as soon as a train merges, its carrier closes,
+or the turn expires. A reservation already running, a green up-to-date strict PR, and the main-red
+fix path are unchanged.
+
+### Amendment (2026-10-21) — event-driven trigger, cron as heartbeat (#13400)
+
+The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
+
+### Amendment (2026-10-21) — silent drops are told once per head (#13400)
+
+A candidate build drops because `git merge-tree` conflicts with main, and a strict-lane PR whose update-branch is refused, now get one `merge-train` failure (`conflicts with main <sha12>` / `update-branch refused over main <sha12>`), one comment listing the conflicting paths and a `merge-train/notice` marker per head — posted by publish (re-deriving the conflict itself from build's data-only `drops.txt`) or settle, read by `qualifies` as information rather than a verdict, so no merge decision changes and a push clears it.
+
+### Amendment (2026-10-22) — a reservation ends on a stall, not on a fixed age (#13400)
+
+The fixed `RESERVATION_TIMEOUT_S` (64 min from the head's committer time) is replaced: a reservation is released when the holder's CI is idle — no check run on the head started or completed for `RESERVATION_STALL_S` (15 min, 3 x the longest gap between consecutive job completions measured on #13204's four heads), with the idle clock starting at the committer time so a CI that never starts is a stall too — or when it passes `RESERVATION_CEILING_S` (4 h from the committer time), and a future-dated head still holds nothing (#13485). Progress is read from GitHub's check-run timestamps, never from the author-supplied commit date. Measured 2026-10-22: #13204's Services CI took 87.1, 70.4 and 67.8 min per head; the 64 min bound released it 2 min 50 s before its CI went green, the next strict-lane PR merged 6 s later, and the next update-branch restarted the clock — a livelock the fixed bound cannot escape for any CI slower than it.
+
+### Amendment (2026-10-22) — bounded strict deferral: one carrier during a running reservation (#13400)
+
+While a strict reservation's CI is running and that head has never yielded, settle lets the train build and publish one carrier from green candidates; publish records the yield as the App's `merge-train/strict-deferral` status on the strict head, a green carrier merges past it only under that record, the update-branch that follows inherits it through the first parent, and a green strict head is never pre-empted — so the strict PR still merges within two CI cycles.
 
 ## Rollout
 

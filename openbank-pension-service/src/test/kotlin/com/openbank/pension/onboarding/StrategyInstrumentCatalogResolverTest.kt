@@ -32,7 +32,7 @@ class StrategyInstrumentCatalogResolverTest {
         """{"id":"$revisionId","offeringId":"$offeringId","number":7,
            "schemaRef":{"id":"org.openbank.retirement.pension-savings","version":$schemaVersion},
            "state":"$state","makerId":"maker","checkerId":"checker","reason":"reviewed revision",
-           "contentHash":"${"a".repeat(64)}","pensionApprovalDigest":"$approvalDigest",
+           "contentHash":"${"a".repeat(64)}","approvalDigest":"$approvalDigest",
            "effectiveFrom":"2026-10-09T00:00:00Z","effectiveTo":"2026-10-10T00:00:00Z",
            "content":{"attributes":$attributes}}""",
     )
@@ -56,7 +56,7 @@ class StrategyInstrumentCatalogResolverTest {
 
             override suspend fun published(offeringId: UUID, at: OffsetDateTime) = read(offeringId, at)
 
-            override suspend fun pensionApprovals(offeringId: UUID, revisionId: UUID) =
+            override suspend fun revisionApprovals(offeringId: UUID, revisionId: UUID) =
                 readApprovals(offeringId, revisionId)
         },
     )
@@ -128,10 +128,10 @@ class StrategyInstrumentCatalogResolverTest {
         assertThatThrownBy { lookup(resolver(read = { _, _ -> malformedHash })) }
             .hasMessageContaining("publication hash")
         val missingDigest = approved.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>().apply {
-            remove("pensionApprovalDigest")
+            remove("approvalDigest")
         }
         assertThatThrownBy { lookup(resolver(read = { _, _ -> missingDigest })) }
-            .hasMessageContaining("pensionApprovalDigest")
+            .hasMessageContaining("approvalDigest")
     }
 
     @Test

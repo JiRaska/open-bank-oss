@@ -1,5 +1,16 @@
 # 05 — Operations
 
+## Fee-assessment warnings
+
+Warnings for unavailable revision terms, failed pin-store operations, failed catalog lookup, and
+dropped fee components contain fixed text. They do not include account, product, cycle, revision,
+exception details, or component counts. The bounded `openbank.billing.assessment.skipped` counter's
+`reason` label identifies skip reasons recorded by that counter; it does not represent every
+skipped assessment. `openbank.billing.assessment.dropped_components` counts assessments with one or more
+dropped components; it does not count the components themselves. These aggregate counters do not
+identify an individual assessment;
+investigate affected records through authorized business data access, not operational logs.
+
 ## Billing metric prefix migration
 
 Seven billing counters now use the `openbank.billing.*` Micrometer prefix. The suffixes are

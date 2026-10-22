@@ -5,22 +5,6 @@ quarkus:
   http:
     port: 8101
 
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
-
   datasource:
     db-kind: postgresql
     username: openbank
@@ -88,11 +72,6 @@ quarkus:
       attributes:
         service.name: openbank-ledger-service
 
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -146,6 +125,11 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -183,6 +167,22 @@ openbank:
       # threshold the day counts into openbank_ledger_accounting_day_stuck_cutoff_days, which
       # pages via prometheus-rules-accounting-day.yaml.
       stuck-cutoff-hours: 8
+    # Day-close participants (ADR-0342). Each calendar-driven product service reports per
+    # accounting day (RAN / SKIPPED / REFUSED) and AccountingDayScheduler waits for every declared
+    # participant before CUTOFF -> TIED_OUT. The map key is the participant name; `principal` is the
+    # ONE verified service-account that may report for it (a token of any other client is 403).
+    #
+    # Ships in SHADOW for the same reason as the locks above: it counts
+    # openbank_ledger_close_participants_decisions_total{outcome="would_hold"} and moves the day
+    # anyway. Flip to enforce once that counter reads zero across a full month (capitalization
+    # runs on the 1st). The list must match rules.yaml: close_participants
+    # (check-close-participants.py). A second ledger deployment for another legal entity
+    # (ADR-0337) sets LEDGER_CLOSE_PARTICIPANTS_MODE=off until it declares its own participants.
+    close:
+      participants-mode: "${LEDGER_CLOSE_PARTICIPANTS_MODE:shadow}"
+      participants:
+        interest:
+          principal: service-account-openbank-interest
     # Period-granular lock (ADR-0096 D1). Modes: off | shadow | enforce. Same staged rollout and
     # the same reason as the day lock above — it ships in SHADOW and refuses nothing until the
     # counter openbank_ledger_period_lock_decisions_total{outcome="would_refuse"} reads zero (or

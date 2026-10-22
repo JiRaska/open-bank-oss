@@ -342,8 +342,8 @@ jobs:
                 exit 1
               fi
               svc="$REQUESTED"
-              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -f "$svc/Dockerfile" ]; then
-                echo "::error::bootstrap target must be a known service with a committed Dockerfile"
+              if ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}" || [ ! -d "$svc" ]; then
+                echo "::error::bootstrap target must be a known service directory"
                 exit 1
               fi
               if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
@@ -715,8 +715,8 @@ jobs:
               { echo "[${svc}] quarkus-run.jar not found — skip push"; return 0; }
 
             local port
-            port="$(grep -oE 'EXPOSE[[:space:]]+[0-9]+' "${svc}/Dockerfile" 2>/dev/null \
-              | grep -oE '[0-9]+' | head -1 || echo "8080")"
+            # One source for the port: quarkus.http.port (service-port.py header).
+            port="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/service-port.py" "${svc}")"
 
             local image="${ECR_REGISTRY}/${svc}:${TAG}"
             local ctx; ctx="$(mktemp -d)"

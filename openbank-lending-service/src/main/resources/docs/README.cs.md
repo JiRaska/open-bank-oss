@@ -25,3 +25,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 - **Účetní zápisy:** nikdy nemění zůstatky — posílá vyvážené podvojné zápisy do `ledger-service` (`POST /api/v1/journals`), aktivováno build-time přepínačem `lending.ledger.backend=rest`
 - **Auth:** Keycloak OIDC; role `ROLE_LENDING_OFFICER`, `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN`
 - **Money-path:** ano — vyžaduje 2 schválení + threat model (`docs/threat-models/openbank-lending-service.md`)
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

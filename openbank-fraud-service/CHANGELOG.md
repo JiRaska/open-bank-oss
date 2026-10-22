@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.0...fraud-service-v0.17.1) (2026-10-22)
+
+
+### Security
+
+* **fraud:** take DELETE/TRUNCATE on fraud_threshold_set away from the app role ([#13562](https://github.com/JiRaska/open-bank-oss/issues/13562)) ([a6b2624](https://github.com/JiRaska/open-bank-oss/commit/a6b262489aca5c5edc94a71f1d895ea8ee40adeb))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.16.1...fraud-service-v0.17.0) (2026-10-21)
+
+
+### Features
+
+* **fraud:** rule money thresholds as four-eyes-activated data (ADR-0347) ([#13457](https://github.com/JiRaska/open-bank-oss/issues/13457)) ([954dabd](https://github.com/JiRaska/open-bank-oss/commit/954dabd18f465c1680b22f8bea7166670aee1553))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.16.0...fraud-service-v0.16.1) (2026-10-14)
 
 

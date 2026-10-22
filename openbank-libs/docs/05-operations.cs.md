@@ -38,3 +38,7 @@ Pro nedůvěryhodné XML používejte `SecureXml` z `openbank-libs-domain`; vyd�
 `SafeHttpClient` z `openbank-libs-runtime` při HTTPS ověřuje certifikační řetězec pomocí JVM a kontroluje hostname. Testovací kořeny stále procházejí platformním PKIX trust managerem; volající nemůže předat vlastní trust manager ani TLS kontext.
 
 Klienti interních služeb s injektovaným JDK `HttpClient` (LLM gateway, obsahový guard, embeddingy, flagd a OPA sidecar) používají `BoundedBodyHandlers.ofString()` místo neomezeného `BodyHandlers.ofString()`. Výchozí limit činí 4 MiB; při jeho překročení handler ukončí odběr odpovědi a volání selže s `IOException`. Externí odchozí provoz patří přes `SafeHttpClient`, který omezuje tělo odpovědi a kontroluje cílové hosty.
+
+## Účast na závěrce dne (ADR-0342)
+
+`com.openbank.libs.close` (v `openbank-libs-runtime`) je strana účastníka kontraktu závěrky dne s ledgerem: `CloseParticipationAssembler` skládá uložené běhy úloh služby do jednoho hlášení za účetní den a `CloseParticipationReporter` ho doručuje, aniž by kdy shodil volající úlohu. Běh, který byl odmítnut nebo částečně selhal, se složí na `REFUSED`, což ledger bere jako NEÚPLNÉ: den zůstane v `CUTOFF`, dokud účastník nenahlásí `RAN` nebo ho operátor nepromině. Obchodní data musí pocházet z `AccountingClock`, nikdy z UTC beanu `Clock`.

@@ -40,6 +40,10 @@ The root build uses Gradle subprojects. Service modules generally declare `imple
 
 `openbank-libs-domain` maps `openbank.fx.cnb-policy-rate.published` to `fx-service` in `TopicProducers`. This records the producing service for shared analytics and governance checks; it does not publish or consume the event. The producer is the FX ingestion pipeline, while risk-engine and audit-service consume its facts and audit trail. Keep the mapping in step with a topic rename or ownership change.
 
+## Build-time producers
+
+`RedisApprovalStoreProducer` (four-eyes `ApprovalStore`, opt-in `openbank.approval.store: redis`) and `OpaPolicyDecisionPointProducer` (OPA sidecar PDP, opt-in `openbank.authz.opa-pdp-producer.enabled: true`) are gated with `@IfBuildProperty`, off when the property is missing. Neither is `@DefaultBean`: a service that opts in and also keeps its own producer fails `quarkusBuild` as an ambiguous dependency. Bean presence matters because `AuthorizeInterceptor` switches four-eyes on when an `ApprovalStore` exists.
+
 ## Outbox trace context
 
 `PanacheOutboxEntityTraced` (libs-runtime) extends the v2 outbox entity with a nullable `trace_context` column holding the W3C `traceparent` captured by `TraceparentCapture` when the row is written. `OutboxEntry.traceparent` carries it to the dispatcher and `OutboxKafkaHeaders` emits it as the `traceparent` Kafka header. It is opt-in per service together with an `ALTER TABLE ... ADD COLUMN trace_context TEXT` migration; the v1 and v2 bases are unchanged because a mapped column a table lacks fails every SELECT.

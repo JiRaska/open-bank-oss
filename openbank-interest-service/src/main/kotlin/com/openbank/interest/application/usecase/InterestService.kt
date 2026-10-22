@@ -4,7 +4,9 @@
 
 package com.openbank.interest.application.usecase
 
+import com.openbank.interest.application.port.`in`.AccrualRunOutcome
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.interest.application.port.`in`.CapitalizationRunOutcome
 import com.openbank.interest.application.port.`in`.CapitalizeInterestUseCase
 import com.openbank.interest.application.port.`in`.GetAccrualsUseCase
 import com.openbank.interest.application.port.`in`.ManageRateConfigUseCase
@@ -12,15 +14,19 @@ import com.openbank.interest.application.port.out.AccountDirectoryPort
 import com.openbank.interest.application.port.out.AccountSnapshot
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.InterestAccrualRepository
+import com.openbank.interest.application.port.out.InterestAccrualTransaction
 import com.openbank.interest.application.port.out.InterestCapitalizationRepository
 import com.openbank.interest.application.port.out.InterestRateConfigRepository
 import com.openbank.interest.application.port.out.LedgerPostingPort
 import com.openbank.interest.application.port.out.LedgerPostingRejectedException
+import com.openbank.interest.application.port.out.RateRevisionPinRepository
 import com.openbank.interest.application.port.out.TaxProfilePort
 import com.openbank.interest.domain.event.InterestRateChanged
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.AccrualSummary
+import com.openbank.interest.domain.model.CatalogRevisionUnresolvableException
+import com.openbank.interest.domain.model.CatalogSourcedRateException
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
@@ -30,6 +36,7 @@ import com.openbank.interest.domain.tax.TaxProfile
 import com.openbank.interest.domain.tax.WithholdingTax
 import com.openbank.interest.domain.tax.WithholdingTaxPolicy
 import com.openbank.interest.infrastructure.observability.InterestCapitalizationMetrics
+import com.openbank.libs.close.AccountingDayClosed
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.money.RoundingPolicy
@@ -104,64 +111,161 @@ class InterestService(
     @Inject
     internal var capitalizationMetrics: InterestCapitalizationMetrics? = null
 
+    /**
+     * ADR-0341 revision pinning. Field injection for the same reasons as [capitalizationMetrics]
+     * (nine-parameter constructor at the detekt threshold; hand-constructed in unit tests). Null
+     * means "no pinning": the date-effective rate answers, exactly as before.
+     */
+    @Inject
+    internal var revisionPins: RateRevisionPinRepository? = null
+
+    /** Required unit-of-work boundary; handmade tests must supply their explicit test double. */
+    @Inject
+    internal lateinit var accrualTransactions: InterestAccrualTransaction
+
     private val log = Logger.getLogger(InterestService::class.java)
 
     override fun accrue(request: AccrualRequest): Uni<InterestAccrual> =
-        // Idempotent replay (ADR-0291, #8351): (account, date, product, currency) IS one day's
-        // accrual — the V12 UNIQUE constraint backs it — so a retried accrue replays the ORIGINAL
-        // row with no second write. The check runs BEFORE the rate resolution on purpose: a replay
-        // arriving after the config was deactivated must still return the original accrual, not
-        // fail closed with RateConfigNotFoundException. The constraint is the race backstop.
-        accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
-            .flatMap { existing ->
-                if (existing != null) {
-                    Uni.createFrom().item(existing)
-                } else {
-                    accrueNew(request)
+        // The catalog pin and the day's accrual share one transaction. Read the existing natural
+        // key before rate resolution so a retry still works after its config is deactivated.
+        accrualTransactions.withAccrual {
+            accrualRepo.findByNaturalKey(request.accountId, request.accrualDate, request.productId, request.currency)
+                .flatMap { existing ->
+                    if (existing != null) Uni.createFrom().item(existing) else accrueNew(request)
+                }
+        }.onFailure(CatalogRevisionUnresolvableException::class.java).invoke { e ->
+            // The single counting point for BOTH callers (manual 409 and the daily run): once per event.
+            if (e.unpinnedCatalogRate) {
+                capitalizationMetrics?.catalogRateUnpinned()
+            } else {
+                capitalizationMetrics?.catalogRevisionUnresolved()
+            }
+        }.onFailure().recoverWithUni { failure ->
+            // Recover only after the outer transaction has rolled back. Querying the winner
+            // inside a transaction aborted by the V12 unique constraint cannot succeed.
+            if (!failure.isAccrualConflict()) {
+                Uni.createFrom().failure(failure)
+            } else {
+                accrualRepo.findByNaturalKey(
+                    request.accountId,
+                    request.accrualDate,
+                    request.productId,
+                    request.currency,
+                ).flatMap { winner ->
+                    if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(failure)
                 }
             }
+        }
 
-    private fun accrueNew(request: AccrualRequest): Uni<InterestAccrual> =
-        configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
-            .flatMap { config ->
-                if (config == null) {
-                    // Fails closed: no rate for this (account/product, currency) — see #1265. 422, not 500.
-                    Uni.createFrom().failure(
-                        RateConfigNotFoundException(request.productId, request.currency),
-                    )
+    private fun accrueNew(request: AccrualRequest): Uni<InterestAccrual> = resolveRate(request).flatMap { config ->
+        if (config == null) {
+            // Fails closed: no rate for this (account/product, currency) — see #1265. 422, not 500.
+            Uni.createFrom().failure(
+                RateConfigNotFoundException(request.productId, request.currency),
+            )
+        } else {
+            val dailyRate = config.dayCount.dailyRate(config.annualRate, request.accrualDate)
+            val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
+            val accrual = InterestAccrual(
+                accountId = request.accountId,
+                productId = request.productId,
+                configId = config.id,
+                accrualDate = request.accrualDate,
+                balance = request.balance,
+                dailyRate = dailyRate,
+                accruedAmount = accruedAmount,
+                currency = request.currency,
+                createdAt = OffsetDateTime.now(clock),
+            )
+            accrualRepo.save(accrual)
+        }
+    }
+
+    /**
+     * ADR-0341: the pinned revision's terms, never "the currently published" ones. An operator's
+     * account-specific override still wins (an exception granted to one account). Otherwise an account
+     * already pinned to a catalog revision keeps that revision's rate for life - a superseding revision
+     * changes nothing for it - and an unpinned account accruing from a catalog-sourced rate is pinned to
+     * it now. A purely operator-managed rate is untouched.
+     */
+    private fun resolveRate(request: AccrualRequest): Uni<InterestRateConfig?> {
+        val pins = revisionPins
+        return configRepo.findEffectiveRate(request.accountId, request.productId, request.accrualDate, request.currency)
+            .flatMap { effective ->
+                if (pins == null || effective?.accountId != null) {
+                    Uni.createFrom().item(effective)
                 } else {
-                    val dailyRate = config.dayCount.dailyRate(config.annualRate, request.accrualDate)
-                    val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
-                    val accrual = InterestAccrual(
-                        accountId = request.accountId,
-                        productId = request.productId,
-                        configId = config.id,
-                        accrualDate = request.accrualDate,
-                        balance = request.balance,
-                        dailyRate = dailyRate,
-                        accruedAmount = accruedAmount,
-                        currency = request.currency,
-                        createdAt = OffsetDateTime.now(clock),
-                    )
-                    accrualRepo.save(accrual).onFailure().recoverWithUni { e ->
-                        // Lost the race against a concurrent first attempt with the same natural
-                        // key: the V12 constraint rejected our insert, so the winner's row IS the
-                        // correct replay answer. Anything else propagates unchanged.
-                        if (!e.isAccrualConflict()) {
-                            Uni.createFrom().failure(e)
+                    pins.findPinnedConfig(request.accountId, request.productId, request.currency).flatMap { pinned ->
+                        if (pinned != null) {
+                            Uni.createFrom().item<InterestRateConfig?>(pinned)
                         } else {
-                            accrualRepo.findByNaturalKey(
-                                request.accountId,
-                                request.accrualDate,
-                                request.productId,
-                                request.currency,
-                            ).flatMap { winner ->
-                                if (winner != null) Uni.createFrom().item(winner) else Uni.createFrom().failure(e)
-                            }
+                            // A pin ROW that does not resolve is a missing snapshot: it must fail here,
+                            // before the effective-rate fallback is reachable (ADR-0341).
+                            pins.hasPin(request.accountId, request.productId, request.currency)
+                                .flatMap { exists -> unpinned(request, effective, pins, exists) }
                         }
                     }
                 }
             }
+    }
+
+    private fun unpinned(
+        request: AccrualRequest,
+        effective: InterestRateConfig?,
+        pins: RateRevisionPinRepository,
+        pinRowExists: Boolean,
+    ): Uni<InterestRateConfig?> = when {
+        pinRowExists -> Uni.createFrom().failure(unresolvable(request))
+        effective == null -> Uni.createFrom().item<InterestRateConfig?>(null)
+        else -> pins.hasCatalogHistory(request.accountId, request.productId, request.currency).flatMap { history ->
+            if (history) {
+                // Accrued under a catalog config before but no pin: the backfill missed it. Fail closed -
+                // accruing at today's catalog rate would reprice the contract.
+                Uni.createFrom().failure(unresolvable(request))
+            } else {
+                pins.pinIfCatalogSourced(request.accountId, request.productId, request.currency, effective)
+                    .flatMap { wrote ->
+                        // First writer wins: re-read so a concurrent pin is honoured.
+                        pins.findPinnedConfig(request.accountId, request.productId, request.currency)
+                            .flatMap { reread -> settle(request, effective, wrote, reread, pins) }
+                    }
+            }
+        }
+    }
+
+    private fun unresolvable(request: AccrualRequest, unpinnedCatalogRate: Boolean = false) =
+        CatalogRevisionUnresolvableException(
+            request.accountId,
+            request.productId,
+            request.currency,
+            unpinnedCatalogRate,
+        )
+
+    /**
+     * After a pin attempt. A resolvable pin wins. A pin written by this call that does not resolve fails
+     * visibly. Nothing written and nothing pinned: an operator-managed rate stands; a catalog-sourced
+     * effective config with no resolvable pin is counted and fails closed.
+     */
+    private fun settle(
+        request: AccrualRequest,
+        effective: InterestRateConfig,
+        wrote: Boolean,
+        reread: InterestRateConfig?,
+        pins: RateRevisionPinRepository,
+    ): Uni<InterestRateConfig?> = when {
+        reread != null -> Uni.createFrom().item<InterestRateConfig?>(reread)
+        wrote -> Uni.createFrom().failure(unresolvable(request))
+        else -> pins.isCatalogSourced(effective.id).flatMap { catalogSourced ->
+            if (catalogSourced) {
+                // A catalog-sourced rate with no resolvable pin: never accrue at "currently effective".
+                log.warnf("catalog rate %s has no resolvable pin for account %s", effective.id, request.accountId)
+                // Counted once, by the caller, as rate.unpinned (not also as revision.unresolved).
+                Uni.createFrom().failure<InterestRateConfig?>(unresolvable(request, unpinnedCatalogRate = true))
+            } else {
+                Uni.createFrom().item<InterestRateConfig?>(effective)
+            }
+        }
+    }
 
     /**
      * The daily accrual run: discover every ACTIVE interest-bearing account fleet-wide (paged via
@@ -174,18 +278,41 @@ class InterestService(
      * account to a no-op (0), never aborting the batch. Accounts are processed sequentially
      * (`concatenate`) to keep a bounded, polite load on account-service.
      */
-    override fun accrueAll(date: LocalDate): Uni<Int> {
+    override fun accrueAll(date: LocalDate): Uni<Int> = accrueAllWithOutcome(date).map {
+        // A manual run must not answer "processed 0" over an outage it could not even list accounts in.
+        check(!it.listingFailed) { it.firstFailure ?: "account listing failed" }
+        it.accrued
+    }
+
+    override fun accrueAllWithOutcome(date: LocalDate): Uni<AccrualRunOutcome> {
         val accruableTypes = accruableAccountTypes.split(",").map {
             it.trim().uppercase()
         }.filter { it.isNotEmpty() }.toSet()
         return collectAccruableAccounts(cursor = null, acc = emptyList(), accruableTypes = accruableTypes)
+            .map<List<AccountSnapshot>?> { it }
+            .onFailure().recoverWithItem { _ ->
+                log.errorf("accrual for %s: account listing failed - the run is not complete", date)
+                null
+            }
             .flatMap { accounts ->
-                if (accounts.isEmpty()) {
-                    Uni.createFrom().item(0)
+                if (accounts == null) {
+                    Uni.createFrom().item(
+                        AccrualRunOutcome(0, 0, 0, "account listing failed (account-service unavailable)", true),
+                    )
+                } else if (accounts.isEmpty()) {
+                    Uni.createFrom().item(AccrualRunOutcome(0, 0, 0, null))
                 } else {
                     Multi.createFrom().iterable(accounts)
                         .onItem().transformToUniAndConcatenate { account -> accrueOneForDate(account, date) }
-                        .collect().with(java.util.stream.Collectors.summingInt { it })
+                        .collect().asList()
+                        .map { results ->
+                            AccrualRunOutcome(
+                                accrued = results.count { it.state == AccrualState.ACCRUED },
+                                failed = results.count { it.state == AccrualState.FAILED },
+                                unavailable = results.count { it.state == AccrualState.UNAVAILABLE },
+                                firstFailure = results.firstNotNullOfOrNull { it.reason },
+                            )
+                        }
                 }
             }
     }
@@ -205,12 +332,17 @@ class InterestService(
         }
     }
 
-    /** Accrue one account for [date]; 1 if written, 0 if skipped (zero/negative balance, no rate
-     *  config, unavailable balance, or already accrued for [date]). Never fails the caller. */
-    private fun accrueOneForDate(account: AccountSnapshot, date: LocalDate): Uni<Int> =
+    /** Accrue one account for [date]. A zero/negative balance and a product with no rate are legitimate
+     *  no-ops; a missing balance (account-service unavailable) and an accrual that threw are NOT - they
+     *  are counted so the run cannot be reported as complete. Never fails the caller. */
+    private fun accrueOneForDate(account: AccountSnapshot, date: LocalDate): Uni<AccountAccrualResult> =
         accountDirectoryPort.bookedBalance(account.id).flatMap { balance ->
-            if (balance == null || balance.booked.signum() <= 0) {
-                Uni.createFrom().item(0)
+            if (balance == null) {
+                Uni.createFrom().item(
+                    AccountAccrualResult(AccrualState.UNAVAILABLE, "balance unavailable for account ${account.id}"),
+                )
+            } else if (balance.booked.signum() <= 0) {
+                Uni.createFrom().item(AccountAccrualResult(AccrualState.SKIPPED))
             } else {
                 accrue(
                     AccrualRequest(
@@ -220,7 +352,8 @@ class InterestService(
                         currency = balance.currency,
                         accrualDate = date,
                     ),
-                ).map { 1 }.onFailure().recoverWithItem(0)
+                ).map { AccountAccrualResult(AccrualState.ACCRUED) }
+                    .onFailure().recoverWithItem { e -> classifyAccrualFailure(account, e, log) }
             }
         }
 
@@ -609,13 +742,16 @@ class InterestService(
      * `interest-capitalization` workflow-liveness gauge stops reading "succeeded, 0 pairs" over a
      * wedge — which is how this went unnoticed for seven weeks.
      */
-    override fun recoverOutstandingClaims(): Uni<Int> =
+    override fun recoverOutstandingClaims(): Uni<Int> = recoverOutstandingClaimsCounted().map { it.recovered }
+
+    /** [recoverOutstandingClaims] with the claims that could NOT be completed counted. */
+    private fun recoverOutstandingClaimsCounted(): Uni<RecoveryCount> =
         accrualRepo.findOutstandingCapitalizationClaims().flatMap { claims ->
             if (claims.isEmpty()) {
                 // Report the zero explicitly: a gauge only ever written when something is wrong can
                 // never say "this is fixed now", which is the state an alert needs in order to clear.
                 capitalizationMetrics?.outstandingClaims(0)
-                Uni.createFrom().item(0)
+                Uni.createFrom().item(RecoveryCount(0, 0, null))
             } else {
                 log.warnf(
                     "capitalization recovery: %d outstanding claim(s) found; completing each at its claimed period",
@@ -625,7 +761,7 @@ class InterestService(
                 Multi.createFrom().iterable(claims)
                     .onItem().transformToUniAndConcatenate { (accountId, productId, claimedPeriodTo) ->
                         capitalize(accountId, productId, claimedPeriodTo)
-                            .map { 1 }
+                            .map { RecoveryCount(1, 0, null) }
                             .onItem().invoke { _ ->
                                 log.warnf(
                                     "capitalization recovery: completed stale claim account=%s product=%s period=%s",
@@ -650,45 +786,101 @@ class InterestService(
                                     capitalizationMetrics?.claimRecoveryFailed()
                                 }
                             }
-                            .onFailure().recoverWithItem(0)
+                            .onFailure().recoverWithItem { e -> RecoveryCount.failed(accountId, productId, e) }
                     }
-                    .collect().with(java.util.stream.Collectors.summingInt { it })
+                    .collect().with(
+                        java.util.stream.Collectors.reducing(RecoveryCount(0, 0, null)) { a, b ->
+                            RecoveryCount(
+                                a.recovered + b.recovered,
+                                a.failed + b.failed,
+                                a.firstFailure ?: b.firstFailure,
+                            )
+                        },
+                    )
                     // Re-report AFTER the pass, not just before it. Setting the gauge only from the
                     // pre-recovery count leaves it pinned at the wedged value even once every claim
                     // is completed — an alert that can never clear, which is the same class of
                     // silent-wrongness this whole change exists to remove. What remains outstanding
                     // is what was found minus what was completed.
-                    .onItem().invoke { recovered ->
-                        capitalizationMetrics?.outstandingClaims(claims.size - recovered)
+                    .onItem().invoke { counted ->
+                        capitalizationMetrics?.outstandingClaims(claims.size - counted.recovered)
                     }
             }
         }
 
-    override fun capitalizeAll(toDate: LocalDate): Uni<Int> = recoverOutstandingClaims().flatMap { recovered ->
-        accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
-            if (pairs.isEmpty()) {
-                Uni.createFrom().item(0)
-            } else {
-                Multi.createFrom().iterable(pairs)
-                    .onItem().transformToUniAndConcatenate { (accountId, productId) ->
-                        capitalize(accountId, productId, toDate)
-                            .map { 1 }
-                            .onFailure().invoke { e ->
-                                log.warnf(
-                                    e,
-                                    "capitalization skipped for account %s product %s up to %s: %s",
-                                    accountId,
-                                    productId,
-                                    toDate,
-                                    e.message,
-                                )
-                            }
-                            .onFailure().recoverWithItem(0)
-                    }
-                    .collect().with(java.util.stream.Collectors.summingInt { it })
+    override fun capitalizeAll(toDate: LocalDate): Uni<Int> = capitalizeAllWithOutcome(toDate).map { it.capitalized }
+
+    override fun capitalizeAllWithOutcome(toDate: LocalDate): Uni<CapitalizationRunOutcome> =
+        recoverOutstandingClaimsCounted().flatMap { recoveryCount ->
+            accrualRepo.findAccountsWithPendingCapitalization(toDate).flatMap { pairs ->
+                if (pairs.isEmpty()) {
+                    Uni.createFrom().item(emptyList<PairResult>())
+                } else {
+                    Multi.createFrom().iterable(pairs)
+                        .onItem().transformToUniAndConcatenate { (accountId, productId) ->
+                            capitalize(accountId, productId, toDate)
+                                .map { PairResult(capitalized = true) }
+                                .onFailure().recoverWithItem { e ->
+                                    log.warnf(
+                                        e,
+                                        "capitalization skipped for account %s product %s up to %s: %s",
+                                        accountId,
+                                        productId,
+                                        toDate,
+                                        e.message,
+                                    )
+                                    val closedDay = closedDayRejection(e)
+                                    val other = e.message ?: e.javaClass.simpleName
+                                    PairResult(
+                                        capitalized = false,
+                                        closedDayReason = closedDay,
+                                        failureReason = other.takeIf { closedDay == null },
+                                    )
+                                }
+                        }
+                        .collect().asList()
+                }
+            }.map { results ->
+                val refused = results.mapNotNull { it.closedDayReason }
+                val failures = results.mapNotNull { it.failureReason }
+                CapitalizationRunOutcome(
+                    capitalized = recoveryCount.recovered + results.count { it.capitalized },
+                    refusedClosedDay = refused.size,
+                    refusalReason = refused.firstOrNull(),
+                    // A stranded claim that could not be completed is money frozen mid-credit: a failed
+                    // pair exactly like one that failed in the main loop.
+                    failed = failures.size + recoveryCount.failed,
+                    failureReason = failures.firstOrNull() ?: recoveryCount.firstFailure,
+                )
             }
-        }.map { capitalized -> recovered + capitalized }
+        }
+
+    /** Outcome of one claim-recovery pass. */
+    private data class RecoveryCount(val recovered: Int, val failed: Int, val firstFailure: String?) {
+        companion object {
+            fun failed(accountId: UUID, productId: String, e: Throwable) = RecoveryCount(
+                0,
+                1,
+                "claim recovery account=$accountId product=$productId: ${e.message ?: e.javaClass.simpleName}",
+            )
+        }
     }
+
+    /** One pair's result inside [capitalizeAllWithOutcome]. */
+    private data class PairResult(
+        val capitalized: Boolean,
+        val closedDayReason: String? = null,
+        val failureReason: String? = null,
+    )
+
+    /**
+     * The ledger's closed-day 409 (ADR-0342 D4), found anywhere in the cause chain — the guard and
+     * the claim machinery may wrap it. Null for every other failure, which stays an ordinary skip.
+     */
+    private fun closedDayRejection(failure: Throwable): String? = generateSequence(failure) { it.cause }
+        .filterIsInstance<LedgerPostingRejectedException>()
+        .firstOrNull { AccountingDayClosed.isClosedDayRejection(it.status, it.message) }
+        ?.message
 
     override fun listAllAccruals(): Uni<List<InterestAccrual>> = accrualRepo.findAll()
 
@@ -787,12 +979,23 @@ class InterestService(
         if (config == null) {
             Uni.createFrom().failure(IllegalArgumentException("Config not found"))
         } else {
-            val deactivated = config.copy(active = false, updatedAt = OffsetDateTime.now(clock))
-            configRepo.updateWithOutbox(
-                deactivated,
-                InterestRateChanged.outboxMessage(deactivated, InterestRateChanged.Change.DEACTIVATED, clock.instant()),
-            )
+            // ADR-0341: a catalog-sourced row is a cache of an immutable revision, never edited here.
+            (revisionPins?.isCatalogSourced(id) ?: Uni.createFrom().item(false)).flatMap { catalogSourced ->
+                if (catalogSourced) {
+                    Uni.createFrom().failure<InterestRateConfig>(CatalogSourcedRateException(id))
+                } else {
+                    deactivateOperatorConfig(config)
+                }
+            }
         }
+    }
+
+    private fun deactivateOperatorConfig(config: InterestRateConfig): Uni<InterestRateConfig> {
+        val deactivated = config.copy(active = false, updatedAt = OffsetDateTime.now(clock))
+        return configRepo.updateWithOutbox(
+            deactivated,
+            InterestRateChanged.outboxMessage(deactivated, InterestRateChanged.Change.DEACTIVATED, clock.instant()),
+        )
     }
 
     /**

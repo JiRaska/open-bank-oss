@@ -361,7 +361,7 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   (same ordering `decide` documents in libs-runtime, fixed in #11033/#11047).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -432,7 +432,7 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listTransactions. Listing "transactions for an account" with no account is a malformed request; the null reached `ListTransactionsQuery` and answered 500. The sibling searchTransactions endpoint already declares `accountId` nullable by design (search is deliberately multi-criteria) and is untouched. No new caller or boundary; `@RolesAllowed` and `@Authorize(action = "transaction.list")` are unchanged and still run first. Rollback: revert.
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
-  `transaction.reverse`, mirroring the account-service rollout (issue #413). New `ApprovalConfig`
+  `transaction.reverse`, mirroring the account-service rollout (issue #413). New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`)
   (`RedisApprovalStore` producer, wired onto this service's first-ever Redis client — reuses the
   payments namespace's existing shared Redis instance rather than a new dedicated one) and
   `PATCH /api/v1/transactions/approvals/{id}` checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR,
@@ -649,6 +649,7 @@ transaction callers. Verify the listener policy and 401/429 responses on the Gat
 address before DNS moves. Roll back the four `api.open-bank.tech` routes together to
 nginx; its Ingress and network allowance remain until Phase 5.
 
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 
 ## Global initiation key race (#13231)
 

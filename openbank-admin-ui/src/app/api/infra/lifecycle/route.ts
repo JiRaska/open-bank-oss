@@ -130,6 +130,9 @@ function cmp(a: string, b: string): number {
   }
   return 0
 }
+function isReleaseVersion(value: string | null): value is string {
+  return value !== null && /^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(value)
+}
 // The endoflife cycle whose label is the longest prefix of the running version
 // (cycles are "16" for Postgres, "1.17" for Vault, "11" for Grafana, …).
 function matchCycle(version: string, cycles: EolCycle[]): EolCycle | null {
@@ -212,8 +215,15 @@ export async function GET() {
 
     // recommended upgrade target: safe patch first, else the newest major
     const target = patchAvailable ? latestInCycle : (majorAvailable ? newest?.latest ?? null : null)
-    const releaseNotesUrl = c.releaseNotes && target
-      ? c.releaseNotes.replace('{version}', target)
+    const releaseVersion = isReleaseVersion(target)
+      ? target
+      : isReleaseVersion(runningVersion)
+        ? runningVersion
+        : null
+    const releaseNotesUrl = c.releaseNotes?.includes('{version}')
+      ? releaseVersion
+        ? c.releaseNotes.replaceAll('{version}', encodeURIComponent(releaseVersion))
+        : null
       : c.releaseNotes ?? null
 
     // 3. vulnerabilities

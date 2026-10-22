@@ -125,6 +125,7 @@ class TreasuryValuator(private val market: MarketState, private val deadline: De
             .ifEmpty { return Preparation.Unpriced("no legs or stored cash flows") }
         val slots = mutableListOf<Slot>()
         for (i in legIndices) {
+            deadline.check()
             val leg = deal.legs.getOrNull(i)
             val rows = stored[i].orEmpty()
             val currency = leg?.currency?.code ?: rows.first().currency

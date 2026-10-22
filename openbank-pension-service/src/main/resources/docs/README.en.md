@@ -103,6 +103,14 @@ This stage provides server authentication; it does not establish mutual TLS.
 certificate, and continued HTTP service with ephemeral test keys. Deployment
 declarations and this test do not prove that a cluster Certificate is ready.
 
+## Catalog revision approvals
+
+The strategy-instrument catalog adapter reads generic revision approvals and the
+`approvalDigest` from product-catalog. The older `pension-approvals` alias remains
+served by the catalog during the transition, but this service no longer calls it.
+Roll out the updated pension client before retiring the alias in a later catalog
+change; the catalog must keep both routes available until then.
+
 ## Published DIP catalog regression
 
 Run `./gradlew :openbank-pension-service:dipCrossServiceIT` from the repository root.
@@ -143,6 +151,10 @@ null-valued map entries; they do not send JSON null as an alternative value.
 Partner responses may add fields without breaking parsing; decimal amounts
 and date handling retain the protocol contract. The protocol contract tests
 validate outgoing requests and parse the documented offer examples.
+
+## Build-time wiring
+
+- **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.
 
 ## Shared build dependencies
 
