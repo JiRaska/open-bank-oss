@@ -88,3 +88,21 @@ spec:
             summary: "billing-service has unresolved dead-lettered outbox rows (fees never posted to the ledger)"
             description: "{{ $value }} billing_outbox row(s) are in terminal DEAD and will never be retried. Each is a fee assessed but never posted, so the GL is short by exactly those rows. Needs an operator disposition (replay or write-off), not a page. Refs #4701, #4005, #9690."
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-billing-outbox-dead-letter.md"
+    - name: openbank.billing.revenue
+      rules:
+        # #13230. A role-tagged FEE on a revision that also embeds a v1 document is billed only when its code
+        # is one the v1 document derives, so its fee id (and the idempotency key) survives a mid-cycle re-pin.
+        # A FEE with any other code is DROPPED rather than billed under a fresh id. That avoids a double charge,
+        # but the fee is then never charged at all: every assessment under that revision loses it, cycle after
+        # cycle, and the counter is the only trace. Summed over all labels, so a pod restart (counter reset) is
+        # absorbed by increase(). The 6h window keeps it visible well past a billing sweep. Warning, not a page:
+        # a product owner corrects the revision, nobody needs waking.
+        - alert: BillingFeeComponentNotBilledNotInLegacyDocument
+          expr: sum(increase(openbank_billing_fee_component_dropped_total{reason="NOT_IN_LEGACY_DOCUMENT"}[6h])) > 0
+          labels:
+            severity: warning
+            service: billing
+          annotations:
+            summary: "billing-service is dropping a FEE price component that no v1 fee identifies (revenue not billed)"
+            description: "A published revision tags a price component as FEE, but the v1 document it embeds derives no such code, so billing cannot give it a stable fee id and does not charge it. Every assessment under that revision misses the fee until the revision is corrected. Remedy (runbook): add the fee to the v1 document so its code is derived, or publish a revision without the embedded v1 document. Refs #13230."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0031-billing-fee-not-in-legacy-document.md"

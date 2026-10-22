@@ -21,6 +21,12 @@ nothing is charged twice. A `FEE` with any other code is dropped and counted as
 `openbank.billing.fee.component.dropped{reason=NOT_IN_LEGACY_DOCUMENT}`. A revision with no roles at all
 is billed by the legacy match against its embedded v1 fees, exactly as before.
 
+A dropped `NOT_IN_LEGACY_DOCUMENT` fee is never charged, so it is lost revenue on every assessment
+under that revision. The `BillingFeeComponentNotBilledNotInLegacyDocument` alert (warning) fires on
+it. The remedy is a new catalog revision: either add the fee to the v1 product so its code is derived,
+or publish a revision without the embedded v1 document. Then re-pin the affected accounts. The steps
+are in `docs/runbooks/0031-billing-fee-not-in-legacy-document.md`.
+
 ## Billing metric prefix migration
 
 Seven billing counters now use the `openbank.billing.*` Micrometer prefix. The suffixes are

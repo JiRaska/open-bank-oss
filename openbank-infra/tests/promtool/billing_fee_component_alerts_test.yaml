@@ -1,0 +1,74 @@
+# PromQL unit tests for BillingFeeComponentNotBilledNotInLegacyDocument (prometheus-rules-billing.yaml, #13230).
+#
+# Run via openbank-infra/tests/promtool/run.sh, which unwraps `.spec` out of the SHIPPED PrometheusRule CR.
+#
+# The rule watches a fee that is silently never charged. `fee.component.dropped` is ONE counter with several
+# reasons, so each firing case is paired with the quiet one that must not fire: an expression that lost its
+# reason selector would fire on every NULL_CURRENCY drop and get silenced, and one that read the raw counter
+# instead of its increase would fire forever after a single historic drop.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-billing.yaml
+
+tests:
+  # 1. A NOT_IN_LEGACY_DOCUMENT drop fires.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_component_dropped_total{reason="NOT_IN_LEGACY_DOCUMENT",instance="billing-0"}'
+        values: "0x30 1x30"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: BillingFeeComponentNotBilledNotInLegacyDocument
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: billing
+            exp_annotations:
+              summary: "billing-service is dropping a FEE price component that no v1 fee identifies (revenue not billed)"
+              description: "A published revision tags a price component as FEE, but the v1 document it embeds derives no such code, so billing cannot give it a stable fee id and does not charge it. Every assessment under that revision misses the fee until the revision is corrected. Remedy (runbook): add the fee to the v1 document so its code is derived, or publish a revision without the embedded v1 document. Refs #13230."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0031-billing-fee-not-in-legacy-document.md"
+
+  # 2. Drops for OTHER reasons never fire it, however many there are.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_component_dropped_total{reason="NULL_CURRENCY",instance="billing-0"}'
+        values: "0+3x60"
+      - series: 'openbank_billing_fee_component_dropped_total{reason="MISSING_PRICE_COMPONENT",instance="billing-0"}'
+        values: "0+1x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: BillingFeeComponentNotBilledNotInLegacyDocument
+        exp_alerts: []
+
+  # 3. A flat counter (a drop long ago, nothing new) does not fire, and the alert resolves once the 6h window
+  #    has passed the last drop.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_component_dropped_total{reason="NOT_IN_LEGACY_DOCUMENT",instance="billing-0"}'
+        values: "0x10 4x500"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: BillingFeeComponentNotBilledNotInLegacyDocument
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: billing
+            exp_annotations:
+              summary: "billing-service is dropping a FEE price component that no v1 fee identifies (revenue not billed)"
+              description: "A published revision tags a price component as FEE, but the v1 document it embeds derives no such code, so billing cannot give it a stable fee id and does not charge it. Every assessment under that revision misses the fee until the revision is corrected. Remedy (runbook): add the fee to the v1 document so its code is derived, or publish a revision without the embedded v1 document. Refs #13230."
+              runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0031-billing-fee-not-in-legacy-document.md"
+      - eval_time: 8h
+        alertname: BillingFeeComponentNotBilledNotInLegacyDocument
+        exp_alerts: []
+
+  # 4. A pod restart (counter back to 0) with no new drop does not fire.
+  - interval: 1m
+    input_series:
+      - series: 'openbank_billing_fee_component_dropped_total{reason="NOT_IN_LEGACY_DOCUMENT",instance="billing-0"}'
+        values: "5x30 _x5"
+      - series: 'openbank_billing_fee_component_dropped_total{reason="NOT_IN_LEGACY_DOCUMENT",instance="billing-1"}'
+        values: "_x35 0x30"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: BillingFeeComponentNotBilledNotInLegacyDocument
+        exp_alerts: []
