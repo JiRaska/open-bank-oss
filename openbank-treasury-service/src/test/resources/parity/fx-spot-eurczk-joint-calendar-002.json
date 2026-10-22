@@ -1,0 +1,60 @@
+{
+  "id": "fx-spot-eurczk-joint-calendar-002",
+  "product": "FX_SPOT",
+  "source": "independent-oracle",
+  "sourceNote": "Trade on Friday 2026-11-13; Tuesday 2026-11-17 is a CZ-only holiday (TARGET2 open), so T+2 on the JOINT calendar is Wednesday 2026-11-18.",
+  "deal": {
+    "product": "FX_SPOT",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-13",
+    "currencyPair": "EUR/CZK",
+    "side": "SELL",
+    "baseAmount": "250000.00",
+    "spotRate": "24.4125",
+    "calendars": [
+      "TARGET2",
+      "CERTIS"
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "spotDate": "2026-11-18",
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-18",
+        "notional": "250000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "250000.00"
+      },
+      {
+        "legIndex": 1,
+        "periodIndex": 0,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-18",
+        "notional": "6103125.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "6103125.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

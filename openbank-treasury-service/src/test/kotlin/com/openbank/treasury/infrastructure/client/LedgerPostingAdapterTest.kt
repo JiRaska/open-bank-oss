@@ -5,6 +5,7 @@
 package com.openbank.treasury.infrastructure.client
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.domain.LedgerMapGolden
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LedgerRole
@@ -16,6 +17,7 @@ import io.mockk.mockk
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -121,5 +123,31 @@ class LedgerPostingAdapterTest {
     @Test
     fun `the rollout shim holds exactly the treasury rows of the ledger map`() {
         assertThat(LegacyGlChart.entries).isEqualTo(LedgerMapGolden.treasury)
+    }
+
+    private fun refusing(status: Int, body: String): LedgerPostingAdapter {
+        val client = mockk<LedgerRestClient>()
+        every { client.postJournal(any()) } returns Uni.createFrom().failure(
+            jakarta.ws.rs.WebApplicationException(
+                jakarta.ws.rs.core.Response.status(status).entity(body).type("application/json").build(),
+            ),
+        )
+        return LedgerPostingAdapter(client, true)
+    }
+
+    @Test
+    fun `a 409 ACCOUNTING_DAY_CLOSED is a closed-day refusal, any other 409 stays an error`() {
+        assertThatThrownBy {
+            runBlocking {
+                refusing(409, """{"code":"ACCOUNTING_DAY_CLOSED","error":"day closed"}""")
+                    .post(placement, LocalDate.parse("2026-03-16"), "t")
+            }
+        }.isInstanceOf(AccountingDayClosedException::class.java).hasMessageContaining("2026-03-16")
+        assertThatThrownBy {
+            runBlocking {
+                refusing(409, """{"code":"IDEMPOTENCY_CONFLICT"}""").post(placement, LocalDate.parse("2026-03-16"), "t")
+            }
+        }.isInstanceOf(jakarta.ws.rs.WebApplicationException::class.java)
+            .isNotInstanceOf(AccountingDayClosedException::class.java)
     }
 }

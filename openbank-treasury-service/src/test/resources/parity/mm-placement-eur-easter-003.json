@@ -1,0 +1,98 @@
+{
+  "id": "mm-placement-eur-easter-003",
+  "product": "MM_PLACEMENT",
+  "source": "independent-oracle",
+  "sourceNote": "EUR placement maturing on Easter Monday 2027-03-29 (TARGET2 closed); MF rolls to 2027-03-30.",
+  "deal": {
+    "product": "MM_PLACEMENT",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2027-02-25",
+    "currency": "EUR",
+    "calendars": [
+      "TARGET2"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "EUR",
+        "notional": "10000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2027-03-01",
+        "accrualEnd": "2027-03-29",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "2.1500"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": -1,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-03-01",
+        "notional": "10000000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "10000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": "2027-03-01",
+        "accrualEnd": "2027-03-30",
+        "fixingDate": null,
+        "paymentDate": "2027-03-30",
+        "notional": "10000000.00",
+        "rate": "2.1500",
+        "rateSource": "FIXED",
+        "amount": "17319.44"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "IN",
+        "currency": "EUR",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2027-03-30",
+        "notional": "10000000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "10000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

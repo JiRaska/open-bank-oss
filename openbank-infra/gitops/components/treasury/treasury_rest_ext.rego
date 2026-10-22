@@ -14,6 +14,15 @@
 #       approver role, never the dealer; the domain also refuses the deal's creator and submitter)
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
+#   treasury.reference.read, treasury.cashflow.read, treasury.calendar.read — treasury staff (ADR-0344)
+#   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
+#   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
+#                                               ROLE_TREASURY_SENIOR_APPROVER only
+#   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
+#   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
+#   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
+#   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
+#   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
 #
@@ -54,7 +63,11 @@ treasury_staff if {
 
 allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
-	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
+	some role in {
+		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
+		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR",
+		"ROLE_ADMIN",
+	}
 	role in input.principal.roles
 	input.action in {
 		"treasury.deal.read",
@@ -63,6 +76,10 @@ allowed_reasons contains "treasury-staff-read" if {
 		"treasury.nostro.read",
 		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
 		"treasury.quote.read",
+		# ADR-0344: reference data, the cash-flow ledger and the event calendar.
+		"treasury.reference.read",
+		"treasury.cashflow.read",
+		"treasury.calendar.read",
 	}
 }
 
@@ -109,4 +126,70 @@ allowed_reasons contains "treasury-nostro-upload" if {
 	treasury_staff
 	"ROLE_TREASURY_APPROVER" in input.principal.roles
 	input.action == "treasury.nostro.upload"
+}
+
+# ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role
+# here both writes and activates. The domain additionally refuses the proposer as decider and any
+# non-human as decider; AI agents get nothing from this file (their charter is the one grant).
+allowed_reasons contains "treasury-reference-propose" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_REFERENCE_EDITOR", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action in {"treasury.reference.propose", "treasury.reference.import"}
+}
+
+allowed_reasons contains "treasury-reference-decide" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {"treasury.reference.reject", "treasury.reference.verify"}
+}
+
+# Approving any kind but `counterparty`: the approver.
+allowed_reasons contains "treasury-reference-approve" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.reference.approve"
+	not reference_kind_is_counterparty
+}
+
+# A counterparty record carries the credit limits the booking check reads, so activating one is a
+# limit decision and needs the SENIOR approver — never a cheaper path than the senior limit
+# override. The domain refines this (only a raise strictly needs the senior); the policy is the
+# coarser, safe side of the same rule.
+allowed_reasons contains "treasury-reference-approve-counterparty" if {
+	treasury_staff
+	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+	input.action == "treasury.reference.approve"
+	reference_kind_is_counterparty
+}
+
+reference_kind_is_counterparty if input.resource.id == "counterparty"
+
+allowed_reasons contains "treasury-back-office-write" if {
+	treasury_staff
+	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+	input.action in {
+		"treasury.cashflow.override.propose",
+		"treasury.deal.send-confirmation",
+		"treasury.position.close",
+	}
+}
+
+allowed_reasons contains "treasury-approver-cashflow" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action in {
+		"treasury.cashflow.override.approve",
+		"treasury.cashflow.override.reject",
+		"treasury.deal.send-confirmation",
+	}
+}
+
+# Schedule preview runs the schedule engine: real work per call, so only the roles that build or
+# check a ticket (dealer, back office) may ask for it — not every reader.
+allowed_reasons contains "treasury-schedule-preview" if {
+	treasury_staff
+	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
+	role in input.principal.roles
+	input.action == "treasury.deal.preview"
 }

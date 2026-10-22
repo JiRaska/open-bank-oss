@@ -1,0 +1,98 @@
+{
+  "id": "cnb-deposit-facility-weekend-001",
+  "product": "CNB_DEPOSIT_FACILITY",
+  "source": "independent-oracle",
+  "sourceNote": "Overnight deposit Friday to Monday: 3 calendar days at ACT/360 (overnight standing facility).",
+  "deal": {
+    "product": "CNB_DEPOSIT_FACILITY",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-11-06",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "500000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-11-06",
+        "accrualEnd": "2026-11-09",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "2.5000"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": -1,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-06",
+        "notional": "500000000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "500000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-11-06",
+        "accrualEnd": "2026-11-09",
+        "fixingDate": null,
+        "paymentDate": "2026-11-09",
+        "notional": "500000000.00",
+        "rate": "2.5000",
+        "rateSource": "FIXED",
+        "amount": "104166.67"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-11-09",
+        "notional": "500000000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "500000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

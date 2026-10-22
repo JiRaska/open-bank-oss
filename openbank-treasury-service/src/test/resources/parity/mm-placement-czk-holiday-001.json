@@ -1,0 +1,98 @@
+{
+  "id": "mm-placement-czk-holiday-001",
+  "product": "MM_PLACEMENT",
+  "source": "independent-oracle",
+  "sourceNote": "Money-market convention: accrual follows the ADJUSTED maturity. 2026-10-28 is a CZ holiday; MF rolls to 2026-10-29, so 29 days ACT/360.",
+  "deal": {
+    "product": "MM_PLACEMENT",
+    "kind": "ACTUAL",
+    "bookId": "BOOK-PARITY",
+    "tradeDate": "2026-09-28",
+    "currency": "CZK",
+    "calendars": [
+      "CERTIS"
+    ],
+    "businessDayConvention": "MODIFIED_FOLLOWING",
+    "rollDirection": "FROM_START",
+    "legs": [
+      {
+        "payReceive": "RECEIVE",
+        "currency": "CZK",
+        "notional": "50000000.00",
+        "amortisation": {
+          "type": "BULLET",
+          "schedule": []
+        },
+        "accrualStart": "2026-09-30",
+        "accrualEnd": "2026-10-28",
+        "accrualFrequency": "ONCE",
+        "paymentFrequency": "ONCE",
+        "stub": "NONE",
+        "adjustPaymentDate": true,
+        "adjustAccrualPeriod": true,
+        "paymentLagBusinessDays": 0,
+        "dayCount": "ACT/360",
+        "rate": {
+          "type": "FIXED",
+          "rate": "3.5000"
+        },
+        "initialNotionalExchange": true,
+        "finalNotionalExchange": true
+      }
+    ]
+  },
+  "fixings": [],
+  "referenceData": {},
+  "expected": {
+    "flows": [
+      {
+        "legIndex": 0,
+        "periodIndex": -1,
+        "kind": "NOTIONAL_EXCHANGE",
+        "direction": "OUT",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-09-30",
+        "notional": "50000000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "50000000.00"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "INTEREST",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": "2026-09-30",
+        "accrualEnd": "2026-10-29",
+        "fixingDate": null,
+        "paymentDate": "2026-10-29",
+        "notional": "50000000.00",
+        "rate": "3.5000",
+        "rateSource": "FIXED",
+        "amount": "140972.22"
+      },
+      {
+        "legIndex": 0,
+        "periodIndex": 0,
+        "kind": "PRINCIPAL",
+        "direction": "IN",
+        "currency": "CZK",
+        "accrualStart": null,
+        "accrualEnd": null,
+        "fixingDate": null,
+        "paymentDate": "2026-10-29",
+        "notional": "50000000.00",
+        "rate": null,
+        "rateSource": "FIXED",
+        "amount": "50000000.00"
+      }
+    ]
+  },
+  "tolerance": {
+    "amount": "0.01"
+  }
+}

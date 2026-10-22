@@ -21,6 +21,7 @@ import com.openbank.treasury.domain.model.PostingLine
 import com.openbank.treasury.domain.model.PostingRules
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.Side
+import com.openbank.treasury.infrastructure.LegWireJackson
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -45,7 +46,7 @@ class TreasuryReversalPinningTest {
         override suspend fun findById(id: String) = listOf(DealFixtures.bankA).find { it.id == id }
         override suspend fun list() = listOf(DealFixtures.bankA)
     }
-    private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule()))
     private val service get() = TreasuryDealService(
         deals, cps, ledger, mapper, clock, FxMidRatePort.NONE, FxRateTolerance.DISABLED, true, null,
         DealFixtures.permissiveProductLimits,

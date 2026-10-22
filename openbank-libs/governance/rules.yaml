@@ -737,6 +737,16 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
     ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  treasury_parity_fixtures:
+    detect: ["openbank-treasury-service/src/test/resources/parity/*.json — the ADR-0344 D9 golden fixtures"]
+    require:
+      - "the fixture format holds (required keys, ISO dates, decimal strings, product in the closed list)"
+      - "every DELIVERED treasury product type has at least one fixture; ids are unique"
+      - "an independent-oracle fixture's expected block equals the Python oracle's output (never hand-edited)"
+    gate: treasury-parity-fixtures
+    enforced: enforce                   # ADR-0344 D9: the Kotlin replay test consumes the fixtures
+    enforced_since: "2026-10-22"
+    ci_producer: ".github/scripts/check-treasury-parity-fixtures.py"
   outbox_conformance_it_present:
     detect: ["openbank-*/src/main/**/*.kt extending AbstractOutboxDispatcher (supertype, comments stripped)"]
     require:

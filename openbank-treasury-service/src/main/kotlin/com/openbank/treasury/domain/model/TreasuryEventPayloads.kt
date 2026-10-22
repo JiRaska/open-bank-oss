@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.treasury.domain.cashflow.RateSourceWire
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -42,6 +43,25 @@ data class DealBooked(
      * within it). Additive and optional, so `v1` consumers are unaffected.
      */
     val productLimit: ProductLimitApplied? = null,
+    /** ADR-0344 D2 (additive): ACTUAL books and pays; PLANNED is booked for the forecast only. Absent = ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
+    val bookId: String? = null,
+    val legs: List<LegSpec> = emptyList(),
+    val scheduleVersion: Int = 0,
+    val scheduleHash: String? = null,
+    /**
+     * The deal's roll direction (additive, asyncapi 1.10.0). A leg published with stub `NONE` is
+     * placed by it (`StubType.resolve`), so a consumer derives the schedule treasury stored. Absent
+     * on older events = FROM_END, the deal default.
+     */
+    val rollDirection: RollDirection = RollDirection.FROM_END,
+    /**
+     * The deal header's calendar codes (additive, asyncapi 1.10.0): the joint calendar a leg without
+     * its own `paymentCalendars` is generated on. Empty = the leg currency's calendar.
+     */
+    val calendars: List<String> = emptyList(),
+    /** The deal header's business-day convention (additive, 1.10.0); null = the product default. */
+    val businessDayConvention: String? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.booked.v1"
@@ -64,6 +84,8 @@ data class DealConfirmed(
     val simulated: Boolean,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
+    /** ADR-0344 D2 (additive): absent = ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.confirmed.v1"
@@ -124,6 +146,8 @@ data class DealReversed(
     val fxSide: FxSide? = null,
     /** FX_SPOT only: the CZK leg (`principal` x `rate`); null for money-market deals. */
     val counterAmount: BigDecimal? = null,
+    /** ADR-0344 D2 (additive): absent = ACTUAL. */
+    val kind: DealKind = DealKind.ACTUAL,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.reversed.v1"
@@ -162,5 +186,153 @@ data class ProductLimitApplied(val decision: String, val maxPrincipal: BigDecima
 
         fun of(limit: ProductLimit, currency: String) =
             ProductLimitApplied(WITHIN, limit.maxPrincipal[currency], limit.maxTenorDays)
+    }
+}
+
+/**
+ * ADR-0344 D4: a cash-flow ledger version was generated (at submission). Carries counts and the
+ * hash, not the rows: consumers read the rows through the API by `scheduleVersion`.
+ */
+data class CashFlowGenerated(
+    val dealId: UUID,
+    val product: ProductType,
+    val kind: DealKind,
+    val bookId: String?,
+    val dealVersion: Int,
+    val scheduleVersion: Int,
+    val scheduleHash: String,
+    val flowCount: Int,
+    val projectedCount: Int,
+    val carriedOverrides: Int,
+    val conflicts: Int,
+    val occurredAt: Instant,
+    /**
+     * The stored rows themselves (asyncapi 1.8.0). The risk engine keeps them as the deal's facts;
+     * before 1.8.0 they were absent and every event was acked by it as malformed.
+     */
+    val flows: List<LedgerFlowItem> = emptyList(),
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.generated.v1"
+    }
+}
+
+/** One stored cash-flow row as [CashFlowGenerated] carries it (contract `CashFlow`, ADR-0344 D4). */
+data class LedgerFlowItem(
+    val flowId: UUID,
+    val legIndex: Int,
+    val periodIndex: Int,
+    val kind: String,
+    val direction: String,
+    val currency: String,
+    val accrualStart: LocalDate?,
+    val accrualEnd: LocalDate?,
+    val fixingDate: LocalDate?,
+    val paymentDate: LocalDate,
+    val notional: BigDecimal?,
+    val rate: BigDecimal?,
+    val rateSource: String,
+    val amount: BigDecimal?,
+    val state: String,
+    val manual: Boolean,
+) {
+    companion object {
+        fun of(f: com.openbank.treasury.domain.cashflow.CashFlow) = LedgerFlowItem(
+            f.flowId, f.legIndex, f.periodIndex, f.kind.name, f.direction.name, f.currency, f.accrualStart,
+            f.accrualEnd, f.fixingDate, f.paymentDate, f.notional, f.rate,
+            RateSourceWire.encode(
+                f.rateSource,
+            ),
+            f.amount,
+            f.state.name, f.manual,
+        )
+    }
+}
+
+/** One flow fixed by [CashFlowFixed]: its slot, the observed rate and the amount it now pays. */
+data class FixedFlowItem(
+    val flowId: UUID,
+    val legIndex: Int,
+    val periodIndex: Int,
+    val kind: String,
+    val direction: String,
+    val currency: String,
+    val accrualStart: LocalDate?,
+    val accrualEnd: LocalDate?,
+    val paymentDate: LocalDate,
+    val rate: BigDecimal,
+    val amount: BigDecimal,
+    val rateSource: String,
+    val state: String,
+)
+
+/**
+ * ADR-0344 D5: floating flows of one deal moved PROJECTED/MISSING -> FIXED from an observed index
+ * value that passed the quality gate. [sha256] is the provenance hash of (index, date, value, source).
+ */
+data class CashFlowFixed(
+    val dealId: UUID,
+    val dealVersion: Int,
+    val scheduleVersion: Int,
+    val index: String,
+    val fixingDate: LocalDate,
+    val value: BigDecimal,
+    val source: String,
+    val sha256: String,
+    val flows: List<FixedFlowItem>,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.fixed.v1"
+    }
+}
+
+/** ADR-0344 D4: a four-eyes cash-flow override was approved or rejected. */
+data class CashFlowOverridden(
+    val dealId: UUID,
+    val flowId: UUID,
+    val overrideId: UUID,
+    val status: String,
+    val paymentDate: LocalDate?,
+    val amount: BigDecimal?,
+    val originalPaymentDate: LocalDate?,
+    val originalAmount: BigDecimal?,
+    val reason: String,
+    val proposedBy: String,
+    val decidedBy: String,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.cashflow.overridden.v1"
+    }
+}
+
+/**
+ * ADR-0344 D7: a four-eyes correction of a booked deal was approved. The new terms version and its
+ * cash-flow ledger committed in this transaction; [deltaJournals] are the journals it owes the
+ * ledger (posted after the commit, idempotent on their keys). [fullUnwind]: the deal ended REVERSED.
+ */
+data class DealCorrected(
+    val dealId: UUID,
+    val correctionId: UUID,
+    val product: ProductType,
+    val fromVersion: Int,
+    val toVersion: Int,
+    val scheduleVersion: Int,
+    val fullUnwind: Boolean,
+    val changedFlows: Int,
+    val deltaJournals: Int,
+    val effectiveFrom: LocalDate,
+    val reason: String,
+    val proposedBy: String,
+    val approvedBy: String,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.deal.corrected.v1"
     }
 }

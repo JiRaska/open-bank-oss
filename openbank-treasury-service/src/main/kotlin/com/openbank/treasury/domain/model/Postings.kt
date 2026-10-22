@@ -16,6 +16,19 @@ enum class Side { DEBIT, CREDIT }
 enum class PostingEvent(val key: String) {
     SETTLED("settled"),
 
+    // ADR-0344 D7: the posting-rule matrix events of the leg-described products. Their keys are
+    // `treasury:<dealId>:<event>:<flowId|date>`.
+    TRADE("trade"),
+    SETTLEMENT("settlement"),
+    ACCRUAL("accrual"),
+    FIXING("fixing"),
+    PAYMENT("payment"),
+    AMORTISATION("amortisation"),
+    REVALUATION("revaluation"),
+    MATURITY("maturity"),
+    EARLY_TERMINATION("early-termination"),
+    CORRECTION("correction"),
+
     /** One calendar day of interest recognised on an accrual basis (ADR-0315 D5); keyed per day. */
     ACCRUED("accrued"),
     MATURED("matured"),
@@ -26,11 +39,45 @@ enum class PostingEvent(val key: String) {
  * Which of a product's ledger accounts a leg belongs to. Mirrors the ledger's `AccountingRole`
  * (ADR-0341 D3) by name: the ledger, not the treasury, decides which GL account that is.
  */
-enum class LedgerRole { PRINCIPAL, ACCRUED_INTEREST, INTEREST_INCOME, INTEREST_EXPENSE }
+enum class LedgerRole {
+    PRINCIPAL,
+    ACCRUED_INTEREST,
+    INTEREST_INCOME,
+    INTEREST_EXPENSE,
+
+    // ADR-0344 D7: the instrument roles of the posting-rule matrix (ledger V34 adds them to the map).
+    PREMIUM_DISCOUNT,
+    FAIR_VALUE,
+    REVALUATION_RESERVE,
+    REALISED_GAIN,
+    REALISED_LOSS,
+    UNREALISED_GAIN,
+    UNREALISED_LOSS,
+    MEMO,
+    MEMO_CONTRA,
+}
 
 /** The accounting classes treasury posts under (ADR-0341 D3); the ledger maps each to GL accounts. */
 object AccountingClasses {
     const val NOSTRO = "NOSTRO_ACCOUNT"
+    const val FX_POSITION = "FX_SPOT_POSITION"
+
+    // ADR-0344 D7: the classes of the posting-rule matrix products (ledger V34).
+    const val CASH_IN_TRANSIT = "CASH_IN_TRANSIT"
+    const val TREASURY_LOAN = "TREASURY_LOAN"
+    const val SECURITY_AMORTISED_COST = "DEBT_SECURITY_AMORTISED_COST"
+    const val SECURITY_FVOCI = "DEBT_SECURITY_FVOCI"
+    const val SECURITY_FVTPL = "DEBT_SECURITY_FVTPL"
+    const val REPO_BORROWING = "REPO_BORROWING"
+    const val REVERSE_REPO_LENDING = "REVERSE_REPO_LENDING"
+    const val DERIVATIVE_ASSET = "DERIVATIVE_ASSET"
+    const val DERIVATIVE_LIABILITY = "DERIVATIVE_LIABILITY"
+    const val DERIVATIVE_RECEIVE_LEG = "DERIVATIVE_RECEIVE_LEG"
+    const val DERIVATIVE_PAY_LEG = "DERIVATIVE_PAY_LEG"
+    const val TRADING_RESULT = "TREASURY_TRADING_RESULT"
+    const val FORWARD_COMMITMENT = "FORWARD_COMMITMENT"
+    const val COLLATERAL_RECEIVED = "COLLATERAL_RECEIVED"
+    const val COLLATERAL_PLEDGED = "COLLATERAL_PLEDGED"
 }
 
 /**
@@ -112,9 +159,14 @@ data class JournalSpec(
  * It never accrues or matures; its reversal is the flipped settlement. Revaluation of the open
  * position is the ledger's daily FX revaluation, not the treasury's.
  */
+@Suppress("TooManyFunctions") // one function per legacy posting event plus leg builders
 object PostingRules {
+    /** ADR-0344 D7: the leg-described products get their journals from the posting-rule matrix. */
+    private fun requireLegacy(deal: Deal) =
+        check(deal.product.legacy) { "${deal.product} has no posting rules yet (ADR-0344 D7)" }
 
     fun settlement(deal: Deal): JournalSpec {
+        requireLegacy(deal)
         val p = deal.principal
         val ccy = deal.currency
         val lines = when (deal.product) {
@@ -127,6 +179,7 @@ object PostingRules {
                 leg(deal, LedgerRole.PRINCIPAL, Side.CREDIT, p),
             )
             ProductType.FX_SPOT -> fxSpotSettlement(deal)
+            else -> error("${deal.product} has no posting rules yet (ADR-0344 D7)")
         }
         return JournalSpec(deal.id, PostingEvent.SETTLED, lines)
     }
@@ -135,7 +188,7 @@ object PostingRules {
         val fx = checkNotNull(deal.fx) { "FX_SPOT deal ${deal.id} without FX terms" }
         val ccy = deal.currency
         val czk = Deal.CZK
-        val position = ProductType.FX_SPOT.accountingClass
+        val position = AccountingClasses.FX_POSITION
         val buy = listOf(
             nostro(ccy, Side.DEBIT, deal.principal),
             PostingLine(position, LedgerRole.PRINCIPAL, Side.CREDIT, deal.principal, ccy),
@@ -160,7 +213,7 @@ object PostingRules {
 
     /** The journal accruing [date]'s interest, or null when that day adds nothing. */
     fun accrual(deal: Deal, date: LocalDate): JournalSpec? {
-        if (deal.product == ProductType.FX_SPOT) return null
+        if (deal.product == ProductType.FX_SPOT || !deal.product.legacy) return null
         val amount = accruedThrough(deal, date) - accruedThrough(deal, date.minusDays(1))
         if (amount.signum() <= 0) return null
         val lines = if (deal.product.isAsset) {
@@ -178,6 +231,7 @@ object PostingRules {
     }
 
     fun maturity(deal: Deal, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec {
+        requireLegacy(deal)
         require(deal.product != ProductType.FX_SPOT) { "an FX spot deal has no maturity journal" }
         val p = deal.principal
         val i = deal.interest
@@ -198,6 +252,7 @@ object PostingRules {
                 optional(deal, LedgerRole.INTEREST_EXPENSE, Side.DEBIT, rest),
                 nostro(ccy, Side.CREDIT, p + i),
             )
+            else -> error("${deal.product} has no posting rules yet (ADR-0344 D7)")
         }
         return JournalSpec(deal.id, PostingEvent.MATURED, lines)
     }
@@ -220,8 +275,13 @@ object PostingRules {
         return JournalSpec(deal.id, PostingEvent.REVERSED, flipped + unwind)
     }
 
-    private fun leg(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal) =
-        PostingLine(deal.product.accountingClass, role, side, amount, deal.currency)
+    private fun leg(deal: Deal, role: LedgerRole, side: Side, amount: BigDecimal) = PostingLine(
+        checkNotNull(deal.product.accountingClass) { "${deal.product} posts through the matrix (ADR-0344 D7)" },
+        role,
+        side,
+        amount,
+        deal.currency,
+    )
 
     private fun nostro(currency: String, side: Side, amount: BigDecimal) =
         PostingLine(AccountingClasses.NOSTRO, LedgerRole.PRINCIPAL, side, amount, currency)
