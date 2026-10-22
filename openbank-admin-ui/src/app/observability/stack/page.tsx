@@ -12,6 +12,7 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { lokiAppVersion } from '@/lib/platform-versions'
 import { LIVE_UNAVAILABLE_NOTE, formatVersion, versionText } from '@/lib/platform-view'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import { usePlatformView } from '@/lib/use-platform-view'
 import { PageHeader } from '@/components/ui/PageHeader'
 
@@ -129,6 +130,7 @@ export default function ObservabilityStackPage() {
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+      <ContentSourceNote source={view?.declarationSource} />
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Observabilita', 'Observability')}</span></div>}
         icon={<Globe size={20} aria-hidden="true" />}

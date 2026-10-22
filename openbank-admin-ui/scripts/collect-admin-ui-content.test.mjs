@@ -93,3 +93,31 @@ test('validator rejects malformed generated rows and totals instead of accepting
 test('collector refuses a source SHA that does not identify the checked-out tree', () => {
   assert.throws(() => collectAdminUiContent({ repoRoot: ROOT, sourceSha: 'a'.repeat(40) }), /does not match checked-out/)
 })
+
+
+test('platform declaration publication is opt-in and legacy content stays valid', () => {
+  const legacy = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA }))
+  assert.equal(Object.hasOwn(legacy.content, 'platformVersions'), false)
+  assert.ok(isAdminUiContentSnapshot(legacy))
+  const extended = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA, includePlatformDeclarations: true }))
+  assert.equal(extended.content.platformVersions.schema, 'openbank.platform-versions/v1')
+  const platform = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `import { derivePlatformVersions } from './openbank-admin-ui/scripts/lib/platform-versions.mjs'; process.stdout.write(JSON.stringify(derivePlatformVersions(process.cwd())))`], { cwd: ROOT, encoding: 'utf8' }))
+  assert.deepEqual(extended.content.platformVersions, platform)
+  assert.ok(extended.content.platformVersions.inventory.gitops.applications.length > 0)
+  assert.ok(isAdminUiContentSnapshot(extended))
+  const rootGap = structuredClone(extended)
+  rootGap.content.platformVersions.inventory.iac.moduleTraversalGaps = [{ environment: 'sandbox', modulePath: '', reason: 'unresolved-local-module' }]
+  assert.ok(isAdminUiContentSnapshot(rootGap))
+  for (const mutate of [
+    value => { value.content.platformVersions.inventory.gitops.applications[0].sourceFile = '../private' },
+    value => { value.content.platformVersions.nodeGroup.desiredSize = -1 },
+    value => { value.content.platformVersions.components.kafka = { version: '1', source: '/secret' } },
+    value => { value.content.platformVersions.runtimeHealthy = true },
+    value => { value.content.platformVersions.inventory.gitops.applications[0].sourceFile = 'normal' + String.fromCharCode(0) + 'path.yaml' },
+    value => { value.content.platformVersions.inventory.gitops.applications[0].sourceFile = 'normal' + String.fromCharCode(92) + 'path.yaml' },
+  ]) {
+    const copy = structuredClone(extended)
+    mutate(copy)
+    assert.equal(isAdminUiContentSnapshot(copy), false)
+  }
+})
