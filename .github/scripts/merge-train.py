@@ -91,6 +91,7 @@ TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BUNDLE_FILE = "train.bundle"
 MANIFEST_FILE = "members.txt"   # build's declared batch: "<number> <head sha>" per line, in order
+DROPS_FILE = "drops.txt"        # build's dropped members, same format: a HINT publish re-derives, never trusts
 BUNDLE_REF = "refs/heads/merge-train-bundle"
 # Contexts that judge the PR object (its body, its issue link), not the tree.
 TREE_INDEPENDENT_CONTEXTS = frozenset({"issue-hygiene"})
@@ -125,6 +126,23 @@ EXTRA_GATE_NA_STATES = frozenset({"skipped", "neutral"})
 EXTRA_GATE_MESSAGE = ("merge-train: this PR is not served while a declared extra gate (`merge_train.extra_gates` in "
                       "rules.yaml, e.g. Security scan / Trivy) is red on its head. It stays armed: push a commit that "
                       "turns the scan green and the train picks it up on its own. Do not disable auto-merge for this.")
+# Notices (#13400): a candidate build dropped because it conflicts with MAIN, or a strict-lane PR whose
+# update-branch GitHub refused, was dropped/retried every tick in silence while GitHub showed BLOCKED,
+# not DIRTY. The author is told once per head: a `merge-train` failure carrying one of NOTICE_PREFIXES
+# (INFORMATION, not a verdict — qualifies ignores it, so no merge decision changes and a later train
+# that applies the head overwrites it), one comment, and the NOTICE_CONTEXT marker. All per-sha: a
+# push starts clean.
+NOTICE_CONTEXT = "merge-train/notice"           # App marker: the author was told once for this head
+CONFLICT_PREFIX = "conflicts with main "
+REFUSED_PREFIX = "update-branch refused over main "
+NOTICE_PREFIXES = (CONFLICT_PREFIX, REFUSED_PREFIX)
+CONFLICT_COMMENT = ("merge-train: this PR conflicts with main, so every train leaves it out and GitHub can still "
+                    "show it as BLOCKED rather than conflicting. Merge main into the branch (or rebase) and push; "
+                    "the new head is picked up on its own. It stays armed.")
+REFUSED_COMMENT = ("merge-train: GitHub refused to update this branch with main (update-branch), so the strict "
+                   "lane cannot serve it. Merge main into the branch and push; the new head is picked up on its "
+                   "own. It stays armed.")
+NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
@@ -365,7 +383,8 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
     """`checks`: context -> conclusion (None = running). `app`: the App's own latest statuses.
     `pr["files"]` must come from `git diff` against the verified head, never from the files API.
     `extra`: TRAIN_EXTRA_GATES — red refuses, running or never reported waits (fail closed), and only
-    skipped/neutral (which GitHub.extra_checks also reports for a completed pinned run without it) is n/a."""
+    skipped/neutral (which GitHub.extra_checks also reports when every pinned run SUCCEEDED without it)
+    is n/a — and not even that when the PR's own diff touches the gate's pinned workflow (red)."""
     untrainable = untrainable or FAIL_CLOSED_UNTRAINABLE
     if pr.get("state", "open") != "open":
         return False, f"state {pr.get('state')}"
@@ -385,7 +404,7 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         if untrainable(f):
             return False, f"touches {f} (workflows, gates, generators, inventory) — manual lane, never a train"
     app_state, app_desc = (app or {}).get(STATUS_CONTEXT, ("", ""))
-    if app_state == "failure" and not app_desc.startswith(LEGACY_CULPRIT_PREFIX):
+    if app_state == "failure" and not app_desc.startswith((LEGACY_CULPRIT_PREFIX, *NOTICE_PREFIXES)):
         return False, "merge-train failure on this head (culprit or manual lane) — waits for a push"
     if not required:
         return False, "no required contexts resolved — refusing to judge green"
@@ -398,6 +417,9 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
             return False, f"required context {checks[c]}: {c}"
     for g in extra_gate_red(checks, extra):
         return False, f"extra gate red: {g}" + ("" if checks[g] == "failure" else f" ({checks[g]})")
+    for g in own_workflow_red({c: v for c, v in checks.items() if c in (extra or {})}, extra, pr.get("files")):
+        if g in checks:   # absent stays "never reported" (pending) below; a settled n/a is red
+            return False, f"extra gate red: {g} (the PR changes the extra gate's own workflow)"
     for c in member:
         if c not in checks:
             return False, f"required context never reported: {c}"
@@ -448,6 +470,23 @@ def strict_lane_state(pr: dict, required: list[str], checks: dict[str, str | Non
             checks.get(c) is not None and checks.get(c) not in OK_STATES for c in member if c in checks):
         return "pending", why
     return None, why
+
+
+def own_workflow_red(checks: dict[str, str | None], extra, files: list[str] | None) -> list[str]:
+    """Declared extra gates that are absent or not applicable on a head whose diff touches the gate's
+    OWN pinned workflow (#13400): a PR that removes or renames the job must not thereby skip it, so the
+    n/a is red here — even when every pinned run succeeded. A present green gate is unaffected."""
+    touched = set(files or ())
+    return [g for g, wf in (extra or {}).items()
+            if wf in touched and (g not in checks or checks[g] in EXTRA_GATE_NA_STATES)]
+
+
+def own_workflow_checks(checks: dict[str, str | None], extra, files: list[str] | None) -> dict[str, str | None]:
+    """Carrier form of own_workflow_red over the union of member diffs: the n/a becomes "failure".
+    `files` None = the carrier diff could not be read: an n/a gate is held pending (fail closed)."""
+    if files is None:
+        return {**checks, **{g: None for g in extra or {} if checks.get(g) in EXTRA_GATE_NA_STATES}}
+    return {**checks, **{g: "failure" for g in own_workflow_red(checks, extra, files)}}
 
 
 def carrier_contexts(required: list[str], extra, checks: dict[str, str | None]) -> list[str]:
@@ -1000,7 +1039,9 @@ class GitHub:
         run's path is the declared workflow. Any completed non-success, non-skipped run = that state (red
         wins over every later green); else running = None; else success/skipped. No pinned check run:
         "skipped" (not applicable) ONLY when the pinned workflow has a run for `sha` and every such run
-        is completed; otherwise absent, which every caller holds as pending (fail closed, #13400)."""
+        completed with conclusion success; "failure" when one failed; None (pending) when one ended
+        cancelled/timed_out/startup_failure/action_required; absent while none has completed — every
+        caller holds absent and None as pending (fail closed, #13400)."""
         runs: dict[str, list[str | None]] = {}
         for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
             name = check.get("name")
@@ -1020,8 +1061,14 @@ class GitHub:
             for name in missing:
                 pinned = [r for r in wruns if r.get("head_sha", sha) == sha
                           and (r.get("path") or "").split("@", 1)[0] == gates[name]]
-                if pinned and all(r.get("status") == "completed" for r in pinned):
-                    out[name] = "skipped"
+                if not pinned or any(r.get("status") != "completed" for r in pinned):
+                    continue   # absent: no completed pinned run yet — pending (fail closed)
+                concl = [r.get("conclusion") for r in pinned]
+                # #13400: n/a ONLY when every pinned run SUCCEEDED. A failed run is red; any other
+                # conclusion (cancelled, timed_out, startup_failure, action_required, ...) proves
+                # nothing — pending, never served.
+                out[name] = ("failure" if "failure" in concl
+                             else "skipped" if all(c == "success" for c in concl) else None)
         return out
 
     def _run_path(self, run_id: int) -> str:
@@ -1346,11 +1393,79 @@ def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_si
         return []
     tip, applied, dropped = builder.build(base, batch)
     log(f"build over {base[:12]}: applied {applied}, dropped {dropped}")
+    if dropped:
+        heads = {m.number: m.head_sha for m in batch}
+        pathlib.Path(out_dir, DROPS_FILE).write_text("".join(f"{n} {heads[n]}\n" for n in dropped))
     if applied:
         write_manifest(os.path.join(out_dir, MANIFEST_FILE), batch)
         git("update-ref", BUNDLE_REF, tip)
         git("bundle", "create", os.path.join(out_dir, BUNDLE_FILE), BUNDLE_REF, f"^{base}")
     return applied
+
+
+def conflict_paths(git, base: str, head: str) -> list[str] | None:
+    """Paths `head` conflicts on against `base` by `git merge-tree` (execution-free), or None when it
+    merges cleanly or merge-tree could not decide (anything but exit 1 is not a conflict)."""
+    r = git("merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", base, head, check=False)
+    if r.returncode != 1:
+        return None
+    return sorted({f for f in r.stdout.split("\0")[1:] if f})
+
+
+def notice_text(message: str, paths: list[str] | None) -> str:
+    """Fixed text plus the conflicting paths as inline code. A path that could break out of the code
+    span or the line (control character, backtick) is counted, never printed."""
+    shown = [f for f in (paths or []) if not unsafe_path(f) and "`" not in f][:NOTICE_PATH_CAP]
+    if not paths:
+        return message
+    more = len(paths) - len(shown)
+    return message + "\n\nConflicting paths:\n" + "".join(f"- `{f}`\n" for f in shown) + (
+        f"- ... and {more} more\n" if more else "")
+
+
+def notice_once(gh, n: int, head: str, description: str, text: str) -> bool:
+    """Tell the author once per head (NOTICE_CONTEXT marks it). The `merge-train` failure is posted
+    only over no App failure, so a culprit or manual-lane verdict on the same head is never replaced."""
+    app = gh.app_statuses(head)
+    if NOTICE_CONTEXT in app:
+        return False
+    if app.get(STATUS_CONTEXT, ("", ""))[0] != "failure":
+        gh.post_status(head, "failure", description)
+    gh.comment(n, text)
+    gh.post_status(head, "failure", description, context=NOTICE_CONTEXT)
+    log(f"#{n:>6} notice    {description}")
+    return True
+
+
+def mode_notice_drops(gh, git, bundle_dir: str) -> list[int]:
+    """Publish (App token), before anything else: build's drops file is DATA from a job that ran
+    generators over PR code, so it only nominates. A line is admitted only as `<number> <sha>` of an
+    open, armed PR whose live head is exactly that sha, and a notice is posted only when THIS job's own
+    `git merge-tree` of that head against live main conflicts. Nothing in the file is executed."""
+    path = os.path.join(bundle_dir, DROPS_FILE)
+    if not os.path.isfile(path):
+        return []
+    lines = pathlib.Path(path).read_text()[:8192].splitlines()
+    nominated = [MANIFEST_RE.fullmatch(ln) for ln in lines[:64]]
+    if any(m is None for m in nominated):
+        log("::warning::drops file is malformed — no notices this tick")
+        return []
+    base = live_base(gh, git)
+    told: list[int] = []
+    for n, head in {int(m.group(1)): m.group(2) for m in nominated}.items():
+        p = gh.pr(n)
+        if p.get("state") != "open" or not p.get("auto_merge") or p["head"]["sha"] != head:
+            continue
+        git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:refs/merge-train/pr-{n}")
+        if git("rev-parse", "--verify", "--quiet", f"refs/merge-train/pr-{n}", check=False).stdout.strip() != head:
+            continue
+        paths = conflict_paths(git, base, head)
+        if paths is None:
+            continue   # dropped for another reason (an earlier member, a path rule): publish says so as before
+        if notice_once(gh, n, head, f"{CONFLICT_PREFIX}{base[:12]}: merge main into the branch",
+                       notice_text(CONFLICT_COMMENT, paths)):
+            told.append(n)
+    return told
 
 
 def mark_unverifiable(gh, batch: list[Member]) -> None:
@@ -1433,6 +1548,12 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             carrier_in_flight = True
             continue
         checks = pinned_checks(gh, sha, extra)
+        if any(checks.get(g) in EXTRA_GATE_NA_STATES for g in extra):
+            # An n/a extra gate holds only if no member touches the gate's own workflow (#13400):
+            # read the carrier's diff (= the union of member diffs) from its verified head.
+            got = git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/settle", check=False).returncode == 0
+            ok = got and git("rev-parse", "refs/merge-train/settle", check=False).stdout.strip() == sha
+            checks = own_workflow_checks(checks, extra, changed_paths(git, f"{base}...{sha}") if ok else None)
         failing, pending, inconclusive = classify_carrier(
             checks, carrier_contexts(train_required, extra, checks))
         main_extra = [c for c in failing if c in extra and c in main_red]
@@ -1876,6 +1997,9 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
                 updated = True
                 summary["in_flight"] = True  # the reservation starts now: no train is built under it
                 summary["updated"].append(n)
+            else:
+                notice_once(gh, n, head, f"{REFUSED_PREFIX}{base[:12]}: merge main into the branch",
+                            notice_text(REFUSED_COMMENT, conflict_paths(git, base, head)))
             continue
         if carrier_in_flight:
             log(f"#{n:>6} strict    green, but a train is in flight over main — next tick")
@@ -1925,9 +2049,13 @@ _ISOLATION = [("script from origin/main", "show origin/main:.github/scripts/merg
 JOB_MUST = {
     "build": [("build runs build", "merge-train.py build"), ("build: no credential left", "persist-credentials: false"),
               ("build regenerates with opa", "openpolicyagent.org/downloads/"),
-              ("build hands over a bundle", "actions/upload-artifact@")],
+              ("build hands over a bundle", "actions/upload-artifact@"),
+              ("build hands over its drops (data, for publish's notices)", "merge-train-bundle/drops.txt"),
+              ("build reports drops", "has_drops: ${{ steps.build.outputs.has_drops }}")],
     "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
-                                                              ("publish runs publish", "\" publish")],
+                                                              ("publish runs publish", "\" publish"),
+                                                              ("publish also runs on drops alone (notices)",
+                                                               "needs.build.outputs.has_drops == 'true'")],
     "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
                                                            ("settle gets the App id for the ruleset guard", "GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}")],
 }
@@ -2376,6 +2504,9 @@ def self_test() -> int:
                         {STATUS_CONTEXT: ("failure", "not verifiable by the merge train: manual lane")})[0])
     check("qualifies: an App failure (culprit) on the head waits for a push",
           not qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", "x")})[0])
+    for desc in (f"{CONFLICT_PREFIX}{'b' * 12}: merge main into the branch", f"{REFUSED_PREFIX}{'b' * 12}: merge main into the branch"):
+        check(f"qualifies: a notice ({desc[:20]}...) is information, not a verdict: the head still qualifies",
+              qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", desc)})[0])
     check("order: oldest first", [p["number"] for p in order_candidates(
         [{"number": 9, "created_at": "2026-02"}, {"number": 3, "created_at": "2026-01"}])] == [3, 9])
 
@@ -2470,21 +2601,54 @@ def self_test() -> int:
             check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
         # No pinned check run: n/a ONLY when the pinned workflow has a COMPLETED run for this head.
         def _wf(*specs):
-            return [{"id": 10 + i, "path": f"{p}@refs/heads/x", "status": st, "head_sha": "a" * 40}
-                    for i, (p, st) in enumerate(specs)]
+            return [{"id": 10 + i, "path": f"{p}@refs/heads/x", "status": st, "head_sha": "a" * 40,
+                     "conclusion": (c[0] if c else ("success" if st == "completed" else None))}
+                    for i, (p, st, *c) in enumerate(specs)]
         sec, evil = ".github/workflows/security.yml", ".github/workflows/evil.yml"
         for label, wruns, want in [
                 ("absent, no workflow run at all: absent (pending)", _wf(), "absent"),
                 ("absent, pinned workflow still running: absent (pending)", _wf((sec, "in_progress")), "absent"),
                 ("absent, only ANOTHER workflow completed: absent (pending)", _wf((evil, "completed")), "absent"),
                 ("absent, pinned run completed + a rerun queued: absent (pending)", _wf((sec, "completed"), (sec, "queued")), "absent"),
-                ("absent, pinned workflow COMPLETED without the job: skipped (n/a)", _wf((sec, "completed")), "skipped")]:
+                ("absent, pinned workflow COMPLETED without the job: skipped (n/a)", _wf((sec, "completed")), "skipped"),
+                # #13400 fail closed: absent is n/a ONLY over pinned runs that all concluded SUCCESS.
+                ("absent, pinned run CANCELLED: pending, never n/a", _wf((sec, "completed", "cancelled")), None),
+                ("absent, pinned run TIMED OUT: pending", _wf((sec, "completed", "timed_out")), None),
+                ("absent, pinned run STARTUP_FAILURE: pending", _wf((sec, "completed", "startup_failure")), None),
+                ("absent, pinned run ACTION_REQUIRED: pending", _wf((sec, "completed", "action_required")), None),
+                ("absent, pinned run FAILED: red", _wf((sec, "completed", "failure")), "failure"),
+                ("absent, one success + one failed pinned run: red", _wf((sec, "completed"), (sec, "completed", "failure")), "failure"),
+                ("absent, one success + one cancelled pinned run: pending", _wf((sec, "completed"), (sec, "completed", "cancelled")), None)]:
             globals()["paginate"] = lambda path, key=None, _w=wruns: _w if key == "workflow_runs" else []
             got = GitHub("o/r", "main", "").extra_checks("a" * 40, {"Trivy": sec})
             check(f"extra gates (GitHub.extra_checks): {label}", got.get("Trivy", "absent") == want, str(got))
             if want == "skipped":
                 check("extra gates: absent but the pinned run completed without it is served",
                       qualifies(base_pr, req, {**green, **got}, extra=xg)[0])
+                own = {**base_pr, "files": [sec]}
+                check("extra gates: absent + the PR changes the pinned workflow is RED even over a successful run",
+                      qualifies(own, req, {**green, **got}, untrainable=lambda _f: False, extra=xg)
+                      == (False, "extra gate red: Trivy (the PR changes the extra gate's own workflow)"),
+                      str(qualifies(own, req, {**green, **got}, untrainable=lambda _f: False, extra=xg)))
+                check("extra gates: strict lane refuses an absent gate whose own workflow the PR changes",
+                      strict_lane_state(own, req, {**green, **got}, None, U, [], None, xg)[0] is None)
+                check("extra gates: a PRESENT green gate is served though the PR changes its workflow (strict lane)",
+                      strict_lane_state(own, req, {**green, "Trivy": "success"}, None, U, [], None, xg)[0] == "green")
+                cks = own_workflow_checks({**green, **got}, xg, [sec, "x.kt"])
+                check("extra gates: a carrier whose member changes the pinned workflow is failing on an absent gate",
+                      "Trivy" in classify_carrier(cks, carrier_contexts(req, xg, cks))[0], str(cks))
+                cks = own_workflow_checks({**green, **got}, xg, None)
+                check("extra gates: a carrier whose diff cannot be read holds an absent gate as pending",
+                      "Trivy" in classify_carrier(cks, carrier_contexts(req, xg, cks))[1], str(cks))
+                cks = own_workflow_checks({**green, **got}, xg, ["x.kt"])
+                check("extra gates: a carrier not touching the pinned workflow keeps the n/a",
+                      "Trivy" not in sum(classify_carrier(cks, carrier_contexts(req, xg, cks)), []), str(cks))
+            elif want is None:
+                check(f"extra gates: {label} is not served", qualifies(base_pr, req, {**green, **got}, extra=xg)
+                      == (False, "extra gate pending: Trivy"), str(qualifies(base_pr, req, {**green, **got}, extra=xg)))
+            elif want == "failure":
+                check(f"extra gates: {label} refuses", qualifies(base_pr, req, {**green, **got}, extra=xg)
+                      == (False, "extra gate red: Trivy"))
     finally:
         globals()["paginate"], globals()["get"] = saved_api
     check("extra gates: one red pinned run beats a later green one", extra_verdict(["failure", "success"]) == "failure")
@@ -2556,6 +2720,7 @@ def self_test() -> int:
                 b.env["PROBE_OUT"] = probe
                 out = os.path.join(root, f"bundle-{counter[0]}")
                 mode_build(gh, Git(bdir), b, "o/r", out, batch_size)
+                mode_notice_drops(gh, Git(clone("publish")), out)   # publish runs it first, as in main()
                 return s, mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", batch_size)
 
             def open_only(*branches):
@@ -3841,6 +4006,69 @@ def self_test() -> int:
                       gh.merged == [] and gh.updates == [] and train == [] and _f == [],
                       f"merged={gh.merged} updates={gh.updates} train={[m.number for m in train]}")
                 extra_done()
+            # ---- notices (#13400): conflict-with-main drops and refused update-branch, once per head ----
+            reset()
+            gh.updates.clear()
+            gh.g("checkout", "-q", "-f", "main")
+            for rel, text in (("services/a.txt", "main-a\n"), ("count.txt", "2\n")):
+                pathlib.Path(origin, rel).write_text(text)
+            subprocess.run([sys.executable, SYN_GENERATOR], cwd=origin, check=True, env=base_env())
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "main adds services/a.txt: pA now conflicts with main itself")
+            open_only("pA")
+            old_head = gh.prs[11]["head"]["sha"]
+            for _ in range(3):
+                tick()
+            told = [t for n, t in gh.comments if n == 11 and t.startswith(CONFLICT_COMMENT)]
+            st = mt_status(11)
+            mt_posts = [x for x in gh.statuses.get(old_head, []) if x[0] == STATUS_CONTEXT]
+            check("notice: a candidate conflicting with main gets ONE merge-train failure naming main",
+                  st[0] == "failure" and st[1] == f"{CONFLICT_PREFIX}{gh.main_sha()[:12]}: merge main into the branch"
+                  and len(mt_posts) == 1, f"{st} {mt_posts}")
+            check("notice: ... and ONE comment listing the conflicting path, nothing repeated over 3 ticks",
+                  len(told) == 1 and "`services/a.txt`" in told[0] and "`count.txt`" not in told[0]
+                  and NOTICE_CONTEXT in gh.app_statuses(old_head), f"{gh.comments}")
+            check("notice: no merge decision changed (nothing merged, no carrier for it)", gh.merged == [], str(gh.merged))
+            # A new head (main merged in, conflict resolved) starts clean and is served.
+            gh.g("checkout", "-q", "-b", "pA-fixed", "pA")
+            pathlib.Path(origin, "services/a.txt").write_text("main-a\n")
+            pathlib.Path(origin, "a-resolved.md").write_text("still has a change of its own\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "resolve")
+            gh.g("checkout", "-q", "-f", "main")
+            gh.prs[11]["head"].update(ref="pA-fixed", sha=gh.g("rev-parse", "pA-fixed").stdout.strip())
+            check("notice: a new head carries none of it", not gh.app_statuses(gh.prs[11]["head"]["sha"]))
+            drain(max_ticks=4)
+            check("notice: a new head clears it — served, not told again",
+                  gh.merged == [11] and len([1 for n, t in gh.comments if n == 11 and t.startswith(CONFLICT_COMMENT)]) == 1,
+                  f"merged={gh.merged} {gh.comments}")
+            gh.g("branch", "-q", "-D", "pA-fixed")
+            reset()
+
+            # Strict lane: a green manual-lane PR behind main whose update-branch GitHub refuses.
+            gh.g("checkout", "-q", "-f", "main")
+            pathlib.Path(origin, "docs/moved.md").parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(origin, "docs/moved.md").write_text("m\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "main moves")
+            open_only("pW")
+            refused: list[int] = []
+            gh.update_branch = lambda n, head: refused.append(n) and False
+            try:
+                for _ in range(3):
+                    settle_once()
+            finally:
+                del gh.update_branch
+            head35 = gh.prs[35]["head"]["sha"]
+            told = [t for n, t in gh.comments if n == 35 and t.startswith(REFUSED_COMMENT)]
+            check("notice: a refused update-branch is still retried every tick (decision unchanged)",
+                  refused == [35, 35, 35] and gh.merged == [], f"{refused} {gh.merged}")
+            check("notice: a refused update-branch is told ONCE per head (status + comment + marker)",
+                  len(told) == 1 and mt_status(35)[1].startswith(REFUSED_PREFIX)
+                  and len([x for x in gh.statuses.get(head35, []) if x[0] == STATUS_CONTEXT]) == 1
+                  and NOTICE_CONTEXT in gh.app_statuses(head35), f"{gh.comments} {gh.statuses.get(head35)}")
+            gh.updates.clear()
+            reset()
     finally:
         for k, v in saved.items():
             if v is None:
@@ -3886,11 +4114,13 @@ def main() -> int:
             ap.error("build needs --out")
         applied = mode_build(gh, Git(workdir), TrainBuilder(workdir), args.repo, args.out, args.batch_size)
         write_output("has_train", "true" if applied else "false")
+        write_output("has_drops", "true" if os.path.isfile(os.path.join(args.out, DROPS_FILE)) else "false")
         return 0
     git = Git(workdir, token=os.environ["GH_TOKEN"])
     if args.mode == "publish":
         if not args.bundle or not args.run_id or not args.attempt:
             ap.error("publish needs --bundle, --run-id and --attempt")
+        log(f"publish: notices {mode_notice_drops(gh, git, args.bundle)}")
         log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size)}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow)
