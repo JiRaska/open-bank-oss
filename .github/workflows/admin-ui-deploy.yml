@@ -114,6 +114,8 @@ jobs:
       contents: read
       pull-requests: read
       actions: read
+    env:
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     outputs:
       proceed: ${{ steps.post_validation.outputs.proceed }}
       source_sha: ${{ steps.source.outputs.source_sha }}
@@ -128,11 +130,24 @@ jobs:
         with:
           ref: refs/heads/main
           fetch-depth: 1
+      # Use the existing installation with only this repository's read permissions.
+      # A configured App mint failure is terminal; never fall back after a failed mint.
+      - name: Mint repository read token
+        id: read_token
+        if: env.GITOPS_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+
       - id: source
         name: Reject stale or self-generated deploy source
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"
@@ -142,7 +157,7 @@ jobs:
         name: Require exact-source Admin UI validation
         if: steps.source.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -162,7 +177,7 @@ jobs:
         if: steps.validation.outputs.proceed == 'true'
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
         run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ steps.source.outputs.source_sha }}" "$EVENT_NAME"
 
   build-push:
@@ -222,11 +237,24 @@ jobs:
       # This job is serialized behind other image pushes. Recheck after acquiring that
       # slot: a validated source can become stale while queued. A false result skips every
       # later step, including OIDC, registry login, image publication and GitOps writes.
+      # Use the existing installation with only this repository's read permissions.
+      # A configured App mint failure is terminal; never fall back after a failed mint.
+      - name: Mint repository read token
+        id: read_token
+        if: env.GITOPS_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          permission-actions: read
+          permission-contents: read
+          permission-pull-requests: read
+
       - id: build_admission
         name: Recheck source at serialized build entry
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
         run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ needs.deploy-source.outputs.source_sha }}" "$EVENT_NAME"
 
       - name: Checkout mobile RUM capability metadata
@@ -381,7 +409,7 @@ jobs:
         # (/home/runner) does not have gh in PATH. curl and python3 are standard macOS tools.
         # Requires actions: read permission on GITHUB_TOKEN (added to permissions above).
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage sbom)" || true
@@ -438,7 +466,7 @@ jobs:
         # An API failure is not: fail the image build instead of replacing a
         # complete sandbox snapshot with a partially empty one.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage service_ti)" || true
@@ -584,7 +612,7 @@ jobs:
         if: steps.build_admission.outputs.proceed == 'true'
         id: stage_immutable_ti
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           set -u
@@ -675,7 +703,7 @@ jobs:
         # older green run. Confirmed absence stays visible as missing evidence;
         # an API failure must stop the deploy instead of erasing PIT results.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage pit)" || true
@@ -758,7 +786,7 @@ jobs:
         # Missing or expired evidence remains `not-run` in the
         # UI; this best-effort staging step must never turn absence into a deployment failure.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage performance)" || true
@@ -954,7 +982,7 @@ jobs:
         # page's QG panel to a small inline notice, never a build failure.
         working-directory: openbank-admin-ui
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
         run: |
           eval "$(python3 ../.github/scripts/admin_ui_trace_ipc.py begin --stage gate_health)" || true
           if ! node scripts/collect-gate-health.mjs 2>&1; then
@@ -971,7 +999,7 @@ jobs:
         if: steps.build_admission.outputs.proceed == 'true'
         id: stage_deploy_ti
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
           REPO: ${{ github.repository }}
         run: |
           set -u

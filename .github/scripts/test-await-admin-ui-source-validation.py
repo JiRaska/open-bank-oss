@@ -92,6 +92,8 @@ class SourceValidationTest(unittest.TestCase):
     def test_github_fetch_reports_rate_limit_headers_without_response_secrets(self):
         url = f"https://api.github.com/repos/{REPO}/actions/runs?branch=main"
         error = urllib.error.HTTPError(url, 403, "Forbidden", {
+            "X-RateLimit-Limit": "5000",
+            "X-RateLimit-Resource": "core",
             "X-RateLimit-Remaining": "0",
             "X-RateLimit-Reset": "1790000123",
             "Retry-After": "60",
@@ -105,6 +107,8 @@ class SourceValidationTest(unittest.TestCase):
         message = str(raised.exception)
         self.assertIn(f"/repos/{REPO}/actions/runs?branch=main", message)
         self.assertIn("HTTP 403", message)
+        self.assertIn("rate-limit-limit=5000", message)
+        self.assertIn("rate-limit-resource=core", message)
         self.assertIn("rate-limit-remaining=0", message)
         self.assertIn("rate-limit-reset=1790000123", message)
         self.assertIn("retry-after=60", message)
@@ -112,6 +116,19 @@ class SourceValidationTest(unittest.TestCase):
         self.assertNotIn("response-secret", message)
         self.assertNotIn("body-secret", message)
         self.assertEqual(urlopen.call_count, 1)
+
+    def test_github_fetch_drops_untrusted_rate_limit_header_values(self):
+        error = urllib.error.HTTPError("https://api.github.com/", 403, "Forbidden", {
+            "X-RateLimit-Limit": "5000 token-secret",
+            "X-RateLimit-Resource": "core\nresponse-secret",
+        }, io.BytesIO(b"body-secret"))
+        self.addCleanup(error.close)
+        with mock.patch.object(urllib.request, "urlopen", side_effect=error), \
+                self.assertRaises(RuntimeError) as raised:
+            validation.github_fetch("request-secret")("repos/example/repo/actions/runs")
+        self.assertNotIn("rate-limit-limit=", str(raised.exception))
+        self.assertNotIn("rate-limit-resource=", str(raised.exception))
+        self.assertNotIn("secret", str(raised.exception))
 
     def test_github_fetch_keeps_generic_403_and_401_terminal_without_quota_headers(self):
         for status in (403, 401):
@@ -416,6 +433,30 @@ class SourceValidationTest(unittest.TestCase):
         self.api.jobs[2][1]["conclusion"] = "skipped"
         with self.assertRaises(RuntimeError):
             self.verify()
+
+    def test_workflow_read_tokens_are_repository_scoped_and_downscoped(self):
+        workflow = (SCRIPT.parents[1] / "workflows" / "admin-ui-deploy.yml").read_text()
+        for job in (workflow.split("  deploy-source:", 1)[1].split("  build-push:", 1)[0],
+                    workflow.split("  build-push:", 1)[1]):
+            mint = job.split("      - name: Mint repository read token", 1)[1].split("\n      - ", 1)[0]
+            self.assertIn("if: env.GITOPS_APP_ID != ''", mint)
+            self.assertNotIn("continue-on-error", mint)
+            self.assertNotIn("owner:", mint)
+            self.assertNotIn("repositories:", mint)
+            self.assertNotIn("enterprise:", mint)
+            self.assertNotIn("skip-token-revoke: true", mint)
+            permissions = [line.strip() for line in mint.splitlines() if "permission-" in line]
+            self.assertEqual(permissions, ["permission-actions: read", "permission-contents: read",
+                                          "permission-pull-requests: read"])
+            self.assertIn("env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token", job)
+            outputs = job.split("    outputs:", 1)[1].split("    steps:", 1)[0]
+            self.assertNotIn("read_token", outputs)
+            self.assertNotIn("token", outputs)
+        write_mint = workflow.split("      - name: Mint a GitHub App installation token", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("id: app_token", write_mint)
+        self.assertNotIn("permission-", write_mint)
+        self.assertIn("GH_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}", workflow)
+        self.assertNotIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", workflow)
 
     def test_workflow_wiring_precedes_privileged_build(self):
         workflow = (SCRIPT.parents[1] / "workflows" / "admin-ui-deploy.yml").read_text()
