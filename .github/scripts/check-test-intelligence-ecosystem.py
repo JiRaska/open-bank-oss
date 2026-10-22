@@ -275,6 +275,28 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
         # This pinned checkout only materializes the already-authorized source SHA;
         # no repository code executes until the admission step allows later steps.
         allowed_admission_index = 1
+    # A read-only installation token is an admission dependency, never build work.
+    # Match the entire step, not an extensible allowlist: no repository/enterprise
+    # broadening, injected environment, arbitrary code or disabled revocation.
+    expected_read_mint = {
+        "name": "Mint repository read token",
+        "id": "read_token",
+        "if": "env.GITOPS_APP_ID != ''",
+        "uses": "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "with": {
+            "app-id": "${{ secrets.GITOPS_APP_ID }}",
+            "private-key": "${{ secrets.GITOPS_APP_PRIVATE_KEY }}",
+            "permission-actions": "read",
+            "permission-contents": "read",
+            "permission-pull-requests": "read",
+        },
+    }
+    if (isinstance(build_steps, list) and len(build_steps) > allowed_admission_index
+            and build_steps[allowed_admission_index] == expected_read_mint):
+        allowed_admission_index += 1
+    for job in (deploy_source, build_push):
+        if "read_token" in json.dumps(job.get("outputs", {})):
+            errors.append("repository read token must not escape through job outputs")
     if admission_index != allowed_admission_index:
         errors.append("serialized build-entry admission does not precede all build-push work")
     elif isinstance(build_steps, list):
@@ -1311,6 +1333,45 @@ def self_test() -> int:
             return 1
 
         original_deploy = deploy_workflow.read_text()
+        read_mint = (
+            "      - name: Mint repository read token\n"
+            "        id: read_token\n"
+            "        if: env.GITOPS_APP_ID != ''\n"
+            "        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1\n"
+            "        with:\n"
+            "          app-id: ${{ secrets.GITOPS_APP_ID }}\n"
+            "          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}\n"
+            "          permission-actions: read\n"
+            "          permission-contents: read\n"
+            "          permission-pull-requests: read\n"
+        )
+        bounded_deploy = original_deploy.replace("      - id: build_admission\n", read_mint + "      - id: build_admission\n")
+        deploy_workflow.write_text(bounded_deploy)
+        if admin_ui_deploy_liveness_errors(root):
+            print("self-test failed: bounded repository read mint prerequisite was rejected")
+            return 1
+        mutations = {
+            "owner": bounded_deploy.replace("          permission-actions: read", "          owner: other\n          permission-actions: read"),
+            "repositories": bounded_deploy.replace("          permission-actions: read", "          repositories: other\n          permission-actions: read"),
+            "enterprise": bounded_deploy.replace("          permission-actions: read", "          enterprise: other\n          permission-actions: read"),
+            "write": bounded_deploy.replace("permission-actions: read", "permission-actions: write"),
+            "extra-env": bounded_deploy.replace("        id: read_token", "        env: {INJECTED: value}\n        id: read_token"),
+            "revoke": bounded_deploy.replace("          permission-actions: read", "          skip-token-revoke: true\n          permission-actions: read"),
+            "token-output": bounded_deploy.replace("  build-push:\n", "  build-push:\n    outputs: {credential: '${{ steps.read_token.outputs.token }}'}\n"),
+            "reordered": bounded_deploy.replace(read_mint, "").replace("      - id: build\n", read_mint + "      - id: build\n"),
+            "setup": bounded_deploy.replace(read_mint, read_mint + "      - uses: actions/setup-node@untrusted\n"),
+            "oidc": bounded_deploy.replace(read_mint, read_mint + "      - uses: aws-actions/configure-aws-credentials@untrusted\n"),
+            "ecr": bounded_deploy.replace(read_mint, read_mint + "      - uses: aws-actions/amazon-ecr-login@untrusted\n"),
+            "run": bounded_deploy.replace(read_mint, read_mint + "      - run: echo unsafe\n"),
+            "source-token-output": bounded_deploy.replace("  deploy-source:\n", "  deploy-source:\n    outputs: {credential: '${{ steps.read_token.outputs.token }}'}\n"),
+        }
+        for label, mutated in mutations.items():
+            deploy_workflow.write_text(mutated)
+            if not admin_ui_deploy_liveness_errors(root):
+                print(f"self-test failed: unsafe read mint mutation accepted: {label}")
+                return 1
+        deploy_workflow.write_text(original_deploy)
+
         deploy_workflow.write_text(original_deploy.replace(
             "branches: [main]\n    workflows:", "branches: [main, '!main']\n    workflows:"))
         if not any("workflow_run is not restricted to main evidence" in error
