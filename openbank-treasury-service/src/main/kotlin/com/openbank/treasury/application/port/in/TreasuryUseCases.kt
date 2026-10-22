@@ -182,7 +182,6 @@ interface TreasuryDealUseCase {
 
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
     suspend fun accrueInterest(asOf: LocalDate): AccrualRun
-
 }
 
 interface NostroReconciliationUseCase {

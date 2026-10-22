@@ -6,7 +6,6 @@ package com.openbank.treasury.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.Roles
 import com.openbank.treasury.application.port.`in`.CashFlowUseCase
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
@@ -14,7 +13,6 @@ import com.openbank.treasury.application.port.`in`.TreasuryCalendarEvent
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryEventType
 import com.openbank.treasury.domain.model.Actor
-import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxTerms
@@ -23,7 +21,6 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -432,7 +429,6 @@ const val APPROVER = "ROLE_TREASURY_APPROVER"
 /** ADR-0315 D4: overrides a counterparty-limit breach. Never the same person who books the deal. */
 const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"
 
-private const val MAX_FILTER_NAME = 64
 private const val DEFAULT_QUEUE = 100
 
 /** ADR-0344 D3: proposes reference-data changes. Never approves them (that is [APPROVER]). */

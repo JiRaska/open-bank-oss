@@ -93,6 +93,14 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
+    # NOT drift — the wire spelling of an ABSENT value (ADR-0344 D4). A stored cash-flow row whose
+    # floating rate is not known yet has no rate source: `rateSource` is null in the domain, exactly
+    # as libs-finance's own `ProjectedCashFlow.rateSource`, and is published and stored as MISSING
+    # (treasury `RateSourceWire`). MISSING is not a source a rate can come from, so it is not a
+    # value of libs-finance's `RateSource`; the spec is right to carry it.
+    "openbank-treasury-service:FIXED,MISSING,OBSERVED,PROJECTED,RATE_UNTIL_FIRST_FIXING":
+        "ADR-0344 D4 — cash-flow `rateSource`: NOT drift. MISSING is the wire form of no rate yet "
+        "(null RateSource), treasury RateSourceWire.",
     # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
     # values are the `channel` of the app-interaction attribution response
     # (GET /api/v1/campaigns/interactions/{interactionRef}/attribution), which resolves ONLY an

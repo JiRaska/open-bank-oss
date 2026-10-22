@@ -1612,7 +1612,7 @@ components:
       properties:
         counterpartyId: { type: string }
         name: { type: string }
-        kind: { type: string, enum: [BANK, CENTRAL_BANK] } # 1.19.0: CORPORATE and ISSUER counterparties are not listed here (closed response enum); see GET /reference/counterparty
+        kind: { type: string, enum: [BANK, CENTRAL_BANK, CORPORATE, ISSUER] } # 1.19.0: every ACTIVE counterparty record is listed, CORPORATE and ISSUER included
         synthetic: { type: boolean }
         currency: { type: string }
         limit: { type: number }

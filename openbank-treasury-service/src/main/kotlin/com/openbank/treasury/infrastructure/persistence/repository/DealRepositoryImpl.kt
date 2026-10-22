@@ -8,7 +8,6 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
-import com.openbank.treasury.application.port.out.CashFlowConflictException
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
@@ -573,6 +572,5 @@ class DealRepositoryImpl(
         val POSTABLE_PRODUCT_NAMES = ProductType.entries.filter { it.legacy }.map { it.name }
 
         val LEGS_TYPE = object : TypeReference<List<LegSpec>>() {}
-
     }
 }

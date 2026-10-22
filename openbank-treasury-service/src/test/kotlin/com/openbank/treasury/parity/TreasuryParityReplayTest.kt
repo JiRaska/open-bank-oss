@@ -43,23 +43,25 @@ class TreasuryParityReplayTest {
         }
 
     @Test
-    fun `the fixture set is the one the gate counts - every product has one and none is skipped`() {
+    fun `the fixture set is the one the gate counts - every delivered product has one and none is skipped`() {
         val all = fixtures()
         assertThat(all).hasSizeGreaterThanOrEqualTo(MIN_FIXTURES)
+        // ADR-0344 delivers products in phases; phase 0 delivers the five legacy products, and each
+        // later phase widens this set together with the gate's REQUIRED_PRODUCTS and its fixtures.
         assertThat(all.map { ProductType.valueOf(it.second["product"].asText()) }.toSet())
-            .containsExactlyInAnyOrderElementsOf(ProductType.entries)
+            .containsExactlyInAnyOrderElementsOf(ProductType.entries.filter { it.legacy })
     }
 
     @Test
     fun `a wrong expected value is reported as a named finding, not swallowed`() {
-        val (_, node) = fixtures().first { it.second["id"].asText() == "loan-czk-annuity-002" }
+        val (_, node) = fixtures().first { it.second["id"].asText() == "mm-placement-czk-holiday-001" }
         val tampered = node.deepCopy<com.fasterxml.jackson.databind.node.ObjectNode>()
         val flow = tampered["expected"]["flows"][1] as com.fasterxml.jackson.databind.node.ObjectNode
         flow.put("amount", "1.00")
         flow.put("paymentDate", "2000-01-03")
         val findings = replay(tampered)
         assertThat(findings).hasSize(2)
-        assertThat(findings).allMatch { it.startsWith("loan-czk-annuity-002 leg 0 period 0 INTEREST:") }
+        assertThat(findings).allMatch { it.startsWith("mm-placement-czk-holiday-001 leg 0 period 0 INTEREST:") }
     }
 
     // ── replay ──────────────────────────────────────────────────────────────────────────────

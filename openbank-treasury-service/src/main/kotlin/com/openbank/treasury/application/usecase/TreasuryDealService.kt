@@ -16,7 +16,6 @@ import com.openbank.treasury.application.port.`in`.PositionBasis
 import com.openbank.treasury.application.port.`in`.PositionReport
 import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
-import com.openbank.treasury.application.port.out.CashFlowRepository
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
@@ -50,7 +49,6 @@ import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.ReversalAccountsUnknownException
-import com.openbank.treasury.domain.reference.Ifrs9Category
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate

@@ -4,15 +4,11 @@
 
 package com.openbank.treasury.infrastructure.rest
 
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.ProductType
-import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 /** The blotter filters (ADR-0344 catalogue); every field optional and ANDed. */
 data class DealFilter(
