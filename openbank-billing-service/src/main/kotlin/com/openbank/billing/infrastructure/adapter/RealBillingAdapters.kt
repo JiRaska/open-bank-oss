@@ -251,15 +251,26 @@ internal object FeeComponentSelection {
      * A revision whose components carry a role (catalog #13230): a FEE is billed, and nothing else ever is --
      * a LIMIT, THRESHOLD or RATE is not a fee whatever its kind or code. This is what lets a product defined
      * only in the v2 kernel, with no embedded v1 document, be billed at all. A FEE billing cannot price (no
-     * currency, or not an AMOUNT) is dropped loudly. The v1 fee metadata (id, name, waiver) is still taken
-     * from the embedded document when the code matches, so a fee billed before the cutover keeps its
-     * idempotency key.
+     * currency, or not an AMOUNT) is dropped loudly.
+     *
+     * Fee-id continuity: the idempotency key is (cycle, account, feeId, currency), so a fee must keep its
+     * id when the account's pin moves from a pre-role revision to a roled one, or the same fee would be
+     * charged twice in one cycle. When the revision embeds a v1 document, a FEE is therefore billed ONLY if
+     * its code is a legacy-derived code, and it takes that legacy fee's id, name and waiver. A FEE with any
+     * other code in such a revision has no id that is stable across the cutover; it is dropped loudly
+     * (`NOT_IN_LEGACY_DOCUMENT`), never billed under a fresh id. Without an embedded document there is no
+     * earlier id to collide with, so the component code is the id.
      */
     fun byRole(prices: List<PriceComponentDto>, legacyFees: Map<String, LegacyFees.LegacyFee>): FeeSelection {
         val fees = prices.filter { it.role == FEE_ROLE }
-        val usable = fees.filter { it.kind == "AMOUNT" && it.currency != null }
+        val identified = if (legacyFees.isEmpty()) fees else fees.filter { it.code in legacyFees }
+        val usable = identified.filter { it.kind == "AMOUNT" && it.currency != null }
         val dropped = (fees - usable.toSet()).map {
-            it.code to if (it.kind != "AMOUNT") "NON_AMOUNT_KIND" else "NULL_CURRENCY"
+            it.code to when {
+                it !in identified -> "NOT_IN_LEGACY_DOCUMENT"
+                it.kind != "AMOUNT" -> "NON_AMOUNT_KIND"
+                else -> "NULL_CURRENCY"
+            }
         }
         // An AMOUNT with no role in a revision that otherwise has roles cannot be classified: counted as a
         // component billing does not know to be a fee, never billed.

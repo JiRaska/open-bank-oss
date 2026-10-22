@@ -227,7 +227,7 @@ class RestBillingAdaptersTest {
     }
 
     @Test
-    fun `with roles, a v1 fee keeps its id and waiver, and a FEE that cannot be priced is dropped loudly`(): Unit =
+    fun `with roles and a v1 document, a FEE keeps the v1 id and one with a new code is dropped, never billed`(): Unit =
         runBlocking {
             val catalog = mockk<ProductCatalogRestClient>()
             every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
@@ -235,19 +235,87 @@ class RestBillingAdaptersTest {
                     attributes = mapOf("productType" to "CURRENT", "legacyDocument" to legacyDocument("f1")),
                     prices = arrayOf(
                         roled("FEE_F1_3F524CDC07A11D7C6220", "5", "CZK", "FEE"),
-                        roled("FEE_NO_CCY", "3", null, "FEE"),
+                        // a fee whose code the v1 document does not derive: no id that is stable across the cutover
+                        roled("MAINTENANCE_V2", "5", "CZK", "FEE"),
                     ),
                 ),
             )
             val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
 
-            assertThat(terms.fees.single().feeId).isEqualTo("f1")
+            assertThat(terms.fees.map { it.feeId }).containsExactly("f1")
             assertThat(terms.fees.single().waivable).isTrue()
             assertThat(terms.droppedFeeComponents).isEqualTo(1)
             assertThat(
-                meters.get("openbank.billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count(),
+                meters.get("openbank.billing.fee.component.dropped").tag("reason", "NOT_IN_LEGACY_DOCUMENT").counter()
+                    .count(),
+            ).isEqualTo(1.0)
+        }
+
+    @Test
+    fun `an unpriceable FEE on a v2-only product is dropped loudly by reason`(): Unit = runBlocking {
+        val catalog = mockk<ProductCatalogRestClient>()
+        every { catalog.getRevision(REVISION) } returns Uni.createFrom().item(
+            revision(
+                attributes = mapOf("accountingClass" to "CUSTOMER_DEPOSIT_DEMAND"),
+                prices = arrayOf(roled("MAINTENANCE", "5", "CZK", "FEE"), roled("FEE_NO_CCY", "3", null, "FEE")),
+            ),
+        )
+        val terms = RestProductRevisionPort(catalog, meters).terms(REVISION, "CZK")
+
+        assertThat(terms.fees.map { it.feeId }).containsExactly("MAINTENANCE")
+        assertThat(
+            meters.get("openbank.billing.fee.component.dropped").tag("reason", "NULL_CURRENCY").counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `the idempotency key of a fee is identical before and after a mid-cycle switch to a roled revision`(): Unit =
+        runBlocking {
+            // The account is pinned to a pre-role revision, billed, then re-pinned mid-cycle to a revision that
+            // carries roles for the same product. The same fee must produce the same key, or it is charged twice.
+            val legacyRevision = "0191c0de-0000-7000-8000-0000000000b1"
+            val roledRevision = "0191c0de-0000-7000-8000-0000000000b2"
+            val document = mapOf("productType" to "CURRENT", "legacyDocument" to legacyDocument("f1"))
+            val catalog = mockk<ProductCatalogRestClient>()
+            every { catalog.getRevision(legacyRevision) } returns Uni.createFrom().item(
+                RevisionDto(
+                    legacyRevision,
+                    "SUPERSEDED",
+                    RevisionContentDto(document, listOf(price("FEE_F1_3F524CDC07A11D7C6220", "5", "CZK"))),
+                ),
             )
-                .isEqualTo(1.0)
+            every { catalog.getRevision(roledRevision) } returns Uni.createFrom().item(
+                RevisionDto(
+                    roledRevision,
+                    "PUBLISHED",
+                    RevisionContentDto(
+                        document,
+                        listOf(
+                            roled("FEE_F1_3F524CDC07A11D7C6220", "5", "CZK", "FEE"),
+                            roled("DAILY_LIMIT", "50000", "CZK", "LIMIT"),
+                        ),
+                    ),
+                ),
+            )
+            val port = RestProductRevisionPort(catalog, meters)
+
+            fun keyUnder(revisionId: String): List<String> = runBlocking {
+                port.terms(revisionId, "CZK").fees.map { fee ->
+                    com.openbank.billing.domain.AssessedFee(
+                        cycleId = "2026-10",
+                        accountId = "acc-1",
+                        feeId = fee.feeId,
+                        name = fee.name,
+                        currency = fee.currency,
+                        chargedAmount = fee.amount,
+                        waived = false,
+                        reason = com.openbank.libs.product.WaiveReason.NOT_WAIVABLE,
+                    ).idempotencyKey
+                }
+            }
+
+            assertThat(keyUnder(legacyRevision)).containsExactly("fee-2026-10-acc-1-f1-CZK")
+            assertThat(keyUnder(roledRevision)).containsExactly("fee-2026-10-acc-1-f1-CZK")
         }
 
     @Test
