@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Reviewed repository content, published independently from the Admin UI image.
+import type { PlatformVersions } from '../platform-versions'
+import { isPlatformDeclarations } from './platformDeclarations.ts'
 import { parse as parseYaml } from 'yaml'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotReaderOptions } from './publishedSnapshot.ts'
 import { parseBcpPolicy } from '../bcp/continuityModel.ts'
@@ -10,6 +12,7 @@ export interface AdminUiContentSnapshot {
   sourceSha: string
   collectedAt: string
   content: {
+    platformVersions?: PlatformVersions
     catalog: Record<string, unknown>
     serviceGraph: Record<string, unknown>
     governance: Record<string, unknown>
@@ -273,10 +276,11 @@ function validLibDocs(items: unknown): items is AdminUiContentSnapshot['content'
 export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): value is AdminUiContentSnapshot {
   if (!record(value) || !hasExactKeys(value, ['schemaVersion', 'sourceSha', 'collectedAt', 'content'])
     || value.schemaVersion !== 1 || typeof value.sourceSha !== 'string' || !SOURCE_SHA.test(value.sourceSha)
-    || !validTimestamp(value.collectedAt, nowMs) || !record(value.content) || !hasExactKeys(value.content, CONTENT_KEYS)) return false
+    || !validTimestamp(value.collectedAt, nowMs) || !record(value.content) || !hasExactKeys(value.content, Object.hasOwn(value.content, 'platformVersions') ? [...CONTENT_KEYS, 'platformVersions'] : CONTENT_KEYS)) return false
 
   const content = value.content
-  if (!validCatalog(content.catalog)
+  if ((Object.hasOwn(content, 'platformVersions') && !isPlatformDeclarations(content.platformVersions))
+    || !validCatalog(content.catalog)
     || !validServiceGraph(content.serviceGraph)
     || !validGovernance(content.governance)
     || !validSecurityGraph(content.securityGraph)
