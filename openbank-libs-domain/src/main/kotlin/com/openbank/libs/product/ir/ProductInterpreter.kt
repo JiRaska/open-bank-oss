@@ -33,7 +33,9 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
             run.apply(rule)
             if (run.rejected) break
         }
-        return run.finish()
+        // A rejected posting does not happen, so nothing an earlier rule computed for it may be
+        // posted either: the result of a rejected evaluation is the Reject alone.
+        return if (run.rejected) run.finish().filterIsInstance<Instruction.Reject>() else run.finish()
     }
 
     private inner class Run(
@@ -189,7 +191,9 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
             val term = revision.termDeposit ?: return
             val penalty = term.earlyWithdrawal ?: return
             val posting = event.posting ?: return
-            if (posting.kind != EventKind.WITHDRAWAL || !today.isBefore(maturityDate())) return
+            // Any outflow before maturity is an early withdrawal, whatever its kind (withdrawal,
+            // transfer out, card payment): keying on one kind would let another kind bypass it.
+            if (posting.direction != PostingDirection.DEBIT || !today.isBefore(maturityDate())) return
             val postingRounding = revision.interest?.postingRounding ?: RoundingPolicy.LEDGER_POSTING
             when (penalty.kind) {
                 PenaltyKind.RATE -> {

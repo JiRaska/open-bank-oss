@@ -104,7 +104,30 @@ class ProductInterpreterTest {
         assertThat(post.lines[0].amount).isEqualByComparingTo("10.00")
         assertThat(interpreter.evaluate(term, IrFixtures.state(openedOn = IrFixtures.day.minusMonths(12)), withdrawal, clock)).isEmpty()
         val deposit = ProductEvent(Hook.PRE_POSTING, posting = Posting(EventKind.DEPOSIT, PostingDirection.CREDIT, BigDecimal("1000.00")))
+        // a credit is never a withdrawal, whatever kind it is labelled
         assertThat(interpreter.evaluate(term, IrFixtures.state(openedOn = IrFixtures.day.minusMonths(3)), deposit, clock)).isEmpty()
+    }
+
+    @Test
+    fun `every outflow kind before maturity pays the penalty`() {
+        for (kind in listOf(EventKind.WITHDRAWAL, EventKind.TRANSFER_OUT, EventKind.CARD_PAYMENT)) {
+            val event = ProductEvent(Hook.PRE_POSTING, posting = Posting(kind, PostingDirection.DEBIT, BigDecimal("1000.00")))
+            val out = interpreter.evaluate(term, IrFixtures.state(openedOn = IrFixtures.day.minusMonths(3)), event, clock)
+            assertThat(posts(out)).withFailMessage("$kind must pay the penalty").hasSize(1)
+        }
+    }
+
+    @Test
+    fun `a Reject after a posting rule discards the earlier posts`() {
+        val json = IrFixtures.termDepositJson.replace(
+            "{ \"ruleId\": \"posting.early-withdrawal\", \"action\": { \"type\": \"EARLY_WITHDRAWAL_PENALTY\" } }",
+            "{ \"ruleId\": \"posting.early-withdrawal\", \"action\": { \"type\": \"EARLY_WITHDRAWAL_PENALTY\" } }," +
+                "{ \"ruleId\": \"posting.no-overdraft\", \"when\": { \"type\": \"postingComparison\", \"attribute\": \"PROJECTED_BALANCE\", \"operator\": \"LT\", \"threshold\": \"0.00\" }, \"action\": { \"type\": \"REJECT\", \"reasonCode\": \"INSUFFICIENT_FUNDS\" } }",
+        )
+        val rev = ProductIrParser.parse(json)
+        val event = ProductEvent(Hook.PRE_POSTING, posting = Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("20000.00")))
+        val out = interpreter.evaluate(rev, IrFixtures.state(openedOn = IrFixtures.day.minusMonths(3)), event, clock)
+        assertThat(out).containsExactly(Instruction.Reject("posting.no-overdraft", rev.revisionHash, 1, "INSUFFICIENT_FUNDS"))
     }
 
     @Test
