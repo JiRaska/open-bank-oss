@@ -489,6 +489,10 @@ fix path are unchanged.
 
 The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
 
+### Amendment (2026-10-22) — bounded strict deferral: one carrier during a running reservation (#13400)
+
+While a strict reservation's CI is running and that head has never yielded, settle lets the train build and publish one carrier from green candidates; publish records the yield as the App's `merge-train/strict-deferral` status on the strict head, a green carrier merges past it only under that record, the update-branch that follows inherits it through the first parent, and a green strict head is never pre-empted — so the strict PR still merges within two CI cycles.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The
