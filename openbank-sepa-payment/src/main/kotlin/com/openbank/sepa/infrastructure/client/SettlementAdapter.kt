@@ -4,84 +4,144 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.clients.transaction.TransactionCallOutcome
+import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
+import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.sepa.application.port.out.SettlementOutcome
 import com.openbank.sepa.application.port.out.SettlementPort
 import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
-import io.quarkus.oidc.client.NamedOidcClient
-import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
-import jakarta.ws.rs.core.Response
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
+/**
+ * Books the debit leg of an accepted SEPA payment in transaction-service (ADR-0108) through the shared
+ * [TransactionClient] facade (ADR-0319), the only place that interprets the HTTP answer.
+ *
+ * Settlement is confirmed ONLY by HTTP 201 carrying a COMPLETED transaction (the facade throws on
+ * anything else) that matches the request ([SettlementResponseCheck], #13217). Every other answer is
+ * NOT a booking and ends as [SettlementUnavailableException], so the payment is held in PROCESSING:
+ *  - 409 is a concurrent-state conflict on the provider, never proof of an earlier booking (#13225);
+ *  - 400/422 refused the request; 200/202 are not the provider's answer to a create;
+ *  - an unreadable or non-final 2xx is completion-UNCERTAIN and is retried with the SAME
+ *    `sepa-settlement-<paymentId>` key, so the provider replays the existing booking, never books twice.
+ *
+ * Definitive refusals ([SettlementUnavailableException]) abort the retry; transport failures and
+ * uncertain completions retry within the budget below.
+ */
 @ApplicationScoped
-class SettlementAdapter(
-    @RestClient private val client: TransactionServiceClient,
-    // #10486: sepa-payment's OWN Keycloak client `openbank-sepa-payment` (ROLE_API only), never the
-    // shared default client. transaction-service's OPA grants it transaction.create/.reverse only.
-    @NamedOidcClient("m2m") private val oidcClient: Instance<OidcClient>,
-    private val clock: Clock,
-) : SettlementPort {
+class SettlementAdapter(@RestClient private val client: TransactionServiceClient, private val clock: Clock) :
+    SettlementPort {
 
     @Inject
     lateinit var self: SettlementAdapter
 
     private val log = Logger.getLogger(SettlementAdapter::class.java)
+    private val transactions = TransactionClient(client)
 
     @Suppress("TooGenericExceptionCaught")
     override suspend fun settle(payment: SepaPayment): SettlementOutcome {
         try {
             return self.settleWithResilience(payment)
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: SettlementUnavailableException) {
+            throw ex
         } catch (ex: Exception) {
             throw SettlementUnavailableException("transaction-service unavailable for payment ${payment.id}", ex)
         }
     }
 
     @Suppress("MagicNumber")
-    @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
+    @Retry(
+        maxRetries = 2,
+        delay = 300,
+        jitter = 150,
+        retryOn = [Exception::class],
+        abortOn = [SettlementUnavailableException::class, CancellationException::class],
+    )
     @Timeout(8_000)
     open suspend fun settleWithResilience(payment: SepaPayment): SettlementOutcome {
-        val token = oidcClient.get().tokens.awaitSuspending().accessToken
-        val valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val request = requestFor(payment)
+        val outcome = transactions.initiate(request).awaitSuspending()
+        val id = SettlementResponseCheck.confirm(payment.id.toString(), request, outcome)
+        log.infof("Settlement booked for SEPA payment %s → transaction %s", payment.id, id)
+        return SettlementOutcome(settled = true, transactionId = id)
+    }
 
-        val request = InitiateSettlementRequest(
-            idempotencyKey = "sepa-settlement-${payment.id}",
-            type = "TRANSFER",
-            sourceAccountId = payment.debtorAccountId,
-            amount = payment.amount.amount,
-            currencyCode = payment.currency,
-            description = "SEPA ${payment.type.name}: ${payment.remittanceInfo ?: payment.endToEndId}",
-            valueDate = valueDate,
-            rail = "SEPA_CT",
-            instructionType = payment.type.name,
-        )
+    private fun requestFor(payment: SepaPayment) = InitiateTransactionRequest(
+        idempotencyKey = "sepa-settlement-${payment.id}",
+        type = "TRANSFER",
+        sourceAccountId = payment.debtorAccountId,
+        amount = payment.amount.amount,
+        currencyCode = payment.currency,
+        description = "SEPA ${payment.type.name}: ${payment.remittanceInfo ?: payment.endToEndId}",
+        valueDate = LocalDate.now(clock),
+        rail = "SEPA_CT",
+        // An InstructionType (ADR-0103), orthogonal to the rail. This used to send the SEPA scheme name
+        // (`SCT` / `SCT_INST`), which transaction-service's strict enum parsing answers with 400, so a
+        // settlement could never book; a customer-initiated credit transfer is a one-off instruction.
+        instructionType = "ONE_OFF",
+    )
+}
 
-        val response = client.initiateTransaction("Bearer $token", request).awaitSuspending()
-        return when (response.status) {
-            Response.Status.CREATED.statusCode, Response.Status.OK.statusCode -> {
-                val body = response.readEntity(Map::class.java)
-                val txId = (body["id"] as? String)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-                log.infof("Settlement booked for SEPA payment %s → transaction %s", payment.id, txId)
-                SettlementOutcome(settled = true, transactionId = txId)
-            }
-            Response.Status.CONFLICT.statusCode -> {
-                log.infof("Settlement already exists for SEPA payment %s (idempotent)", payment.id)
-                SettlementOutcome(settled = true, transactionId = null)
-            }
-            else -> {
-                log.errorf("transaction-service returned %d for SEPA payment %s", response.status, payment.id)
-                throw SettlementUnavailableException("Unexpected status ${response.status} from transaction-service")
-            }
+/**
+ * The response-vs-request binding sepa-instant's `SettlementAdapter` applies (#13217): a COMPLETED
+ * transaction proves a booking, but only of THIS payment if it is the one that was asked for. Returns
+ * the booked transaction id or throws [SettlementUnavailableException] naming only the reason (outcome
+ * bodies may carry customer data, so none of it reaches the message).
+ */
+internal object SettlementResponseCheck {
+    private const val HTTP_CREATED = 201
+    private const val HTTP_CONFLICT = 409
+
+    @Suppress("ThrowsCount", "CyclomaticComplexMethod")
+    fun confirm(
+        paymentRef: String,
+        request: InitiateTransactionRequest,
+        outcome: TransactionCallOutcome<TransactionResponse>,
+    ): UUID {
+        val booked = when (outcome) {
+            is TransactionCallOutcome.HttpSuccess -> outcome
+            TransactionCallOutcome.Conflict -> throw SettlementUnavailableException(
+                "transaction-service answered HTTP $HTTP_CONFLICT (a concurrent-state conflict, not a booking) " +
+                    "for payment $paymentRef",
+            )
+            is TransactionCallOutcome.Rejected -> throw SettlementUnavailableException(
+                "transaction-service refused settlement of payment $paymentRef with HTTP ${outcome.status}",
+            )
         }
+        if (booked.status != HTTP_CREATED) {
+            throw SettlementUnavailableException(
+                "Unexpected HTTP ${booked.status} from transaction-service for payment $paymentRef",
+            )
+        }
+        val tx = booked.body
+            ?: throw SettlementUnavailableException("Settlement response has no transaction", booked.bodyError)
+        val id = tx.id ?: throw SettlementUnavailableException("Settlement response has no transaction id")
+        val amount = tx.amount ?: throw SettlementUnavailableException("Settlement response has no numeric amount")
+        // valueDate is deliberately not compared: the provider resolves it to a business day, so a completed
+        // booking may legitimately carry a later date, including on a cross-day idempotent replay.
+        val matchesRequest = tx.status == "COMPLETED" &&
+            tx.type == request.type &&
+            tx.sourceAccountId == request.sourceAccountId &&
+            amount.compareTo(request.amount) == 0 &&
+            tx.currencyCode == request.currencyCode &&
+            tx.rail == request.rail &&
+            tx.instructionType == request.instructionType
+        if (!matchesRequest) {
+            throw SettlementUnavailableException("Settlement response does not match payment $paymentRef")
+        }
+        return id
     }
 }
