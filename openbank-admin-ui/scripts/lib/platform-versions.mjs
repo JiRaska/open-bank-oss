@@ -198,6 +198,11 @@ function localModuleSource(body) {
   return literal && /^\.\.?\//.test(literal) && !literal.includes('${') ? literal : null
 }
 
+export function isRepositoryPath(repoRoot, candidate) {
+  const relative = path.relative(path.resolve(repoRoot), path.resolve(candidate))
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+}
+
 export function deriveIac(repoRoot) {
   const aws = path.join(repoRoot, 'openbank-infra', 'aws')
   const out = Object.fromEntries(Object.keys(IAC_TYPES).map(k => [k, []]))
@@ -212,7 +217,7 @@ export function deriveIac(repoRoot) {
         moduleTraversalGaps.push({ environment, modulePath, reason: 'cycle' })
         return
       }
-      if (!dir.startsWith(`${path.resolve(repoRoot)}/`) || !existsSync(dir) || !statSync(dir).isDirectory()) {
+      if (!isRepositoryPath(repoRoot, dir) || !existsSync(dir) || !statSync(dir).isDirectory()) {
         moduleTraversalGaps.push({ environment, modulePath, reason: 'unresolved-local-module' })
         return
       }
