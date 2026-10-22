@@ -16,6 +16,10 @@ Verzi 1 zakládá `V9__fraud_threshold_set.sql`. Obsahuje přesně hodnoty, kter
 
 `GET /api/v1/fraud/thresholds/proposals/pending` vypíše otevřené návrhy. `GET /api/v1/fraud/thresholds/active` ukáže platnou sadu. Operátoři a strojové identity tyto endpointy používat nemohou.
 
+## Záznam nelze smazat
+
+Každý návrh i rozhodnutí v tabulce zůstává. Databázová role služby smí záznamy číst, přidat návrh a zapsat rozhodnutí, nic víc. Nemůže smazat verzi, vyprázdnit tabulku ani změnit částky schválené sady nebo to, kdo ji navrhl.
+
 ## Selhání do bezpečného stavu
 
 - Měna, která chybí v mapě pravidla, způsobí, že pravidlo pro tuto měnu vrátí REVIEW (`…-unmapped-currency`).
