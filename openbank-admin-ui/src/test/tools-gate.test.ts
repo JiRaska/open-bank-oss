@@ -287,6 +287,32 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     expect([...new Set(navTools)].sort()).toEqual([...new Set(ingressTools)].sort())
   })
 
+  it('Pyrra browser query links use the existing protected Grafana root and provisioned proxy datasource', () => {
+    const pyrra = parseAllDocuments(readFileSync('../openbank-infra/gitops/components/observability/pyrra.yaml', 'utf8'))
+      .map(document => document.toJS())
+      .find(document => document?.kind === 'Deployment' && document.metadata.name === 'pyrra-api')
+    const args = pyrra.spec.template.spec.containers.find((container: { name: string }) => container.name === 'pyrra').args as string[]
+    const option = (name: string) => {
+      const values = args.filter(argument => argument.startsWith(`--${name}=`))
+      expect(values, `Pyrra needs exactly one ${name}`).toHaveLength(1)
+      return values[0].slice(name.length + 3)
+    }
+    const stack = parseAllDocuments(readFileSync('../openbank-infra/gitops/apps/kube-prometheus-stack.yaml', 'utf8'))
+      .map(document => document.toJS()).find(document => document?.kind === 'Application' && document.metadata.name === 'kube-prometheus-stack')
+    const grafana = stack.spec.source.helm.valuesObject.grafana
+    const root = option('grafana-external-url')
+    expect(root).toBe(grafana['grafana.ini'].server.root_url)
+    expect(new URL(root).pathname).toBe('/tools/grafana')
+    // Pinned Pyrra appends /explore itself; a trailing slash would duplicate the separator.
+    expect(root.endsWith('/')).toBe(false)
+    expect(option('grafana-external-org-id')).toBe('1')
+    const datasource = grafana.additionalDataSources.find((item: { uid: string }) => item.uid === option('grafana-external-datasource-id'))
+    expect(datasource).toMatchObject({ type: 'prometheus', access: 'proxy' })
+    expect(args.some(argument => argument.startsWith('--prometheus-external-url='))).toBe(false)
+    // Changing the browser destination must not send server queries through the session gate.
+    expect(new URL(option('prometheus-url')).hostname.endsWith('.svc')).toBe(true)
+  })
+
   it('Grafana pins ROLE_DEMO to Viewer, and tests it BEFORE the admin role', () => {
     // jmespath `||` short-circuits, so order IS the mechanism: placed after the
     // ROLE_ADMIN test this never fires and the public account lands as a Grafana

@@ -1,5 +1,15 @@
 # 05 — Provoz
 
+## Varování při vyhodnocení poplatků
+
+Varování o nedostupných podmínkách revize, selhání úložiště pinů, vyhledání v katalogu a
+vynechaných složkách poplatků mají pevný text. Neobsahují účet, produkt, cyklus, revizi,
+podrobnosti výjimky ani počty složek. Zaznamenané důvody přeskočení určuje omezený štítek
+`reason` čítače `openbank.billing.assessment.skipped`; čítač nepokrývá všechna vynechaná vyhodnocení.
+`openbank.billing.assessment.dropped_components` počítá vyhodnocení s jednou či více
+vynechanými složkami, nikoli samotné složky. Tyto souhrnné čítače neurčují konkrétní vyhodnocení;
+dotčené záznamy vyšetřujte přes oprávněný přístup k obchodním datům, nikoli provozní logy.
+
 ## Přechod na prefix metrik billingu
 
 Sedm čítačů billingu nyní používá prefix Micrometer `openbank.billing.*`. Jejich koncovky jsou

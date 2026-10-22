@@ -8,7 +8,7 @@
 ```
 
 - **Packaging:** fast-jar (never uber-jar — the runtime stage COPYs `quarkus-app/`). Generic build/push: `openbank-infra/scripts/build-push-service.sh openbank-agent-service` (host-side `quarkusBuild`, not in-Docker Gradle).
-- **Image:** see [`Dockerfile`](../../../../openbank-agent-service/Dockerfile) — fast-jar runtime stage.
+- **Image:** see [`Dockerfile.deploy`](../../../../.github/workflows/Dockerfile.deploy) — fast-jar runtime stage.
 - **DB:** Flyway migrations `V1`–`V6` apply at startup (proposal queue, kill-switch, audit outbox, merge records — see [04 — Data](./04-data.md)); the usual Flyway checksum/repair runbooks apply like for any JDBC service.
 
 ## Configuration (environment)

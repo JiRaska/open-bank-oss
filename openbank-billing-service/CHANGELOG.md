@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.1...billing-service-v0.16.2) (2026-10-21)
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.16.0...billing-service-v0.16.1) (2026-10-21)
 
 
