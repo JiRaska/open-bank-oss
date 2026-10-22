@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.25.0...interest-service-v0.26.0) (2026-10-22)
+
+
+### Features
+
+* **interest:** turn catalog sync on, pin each account to its revision ([#13202](https://github.com/JiRaska/open-bank-oss/issues/13202)) ([b0f3d18](https://github.com/JiRaska/open-bank-oss/commit/b0f3d18d0a90b272f38b7f2ae266d821e28204aa))
+
 ## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.24.1...interest-service-v0.25.0) (2026-10-22)
 
 

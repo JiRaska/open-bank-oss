@@ -502,6 +502,10 @@ A candidate build drops because `git merge-tree` conflicts with main, and a stri
 
 The fixed `RESERVATION_TIMEOUT_S` (64 min from the head's committer time) is replaced: a reservation is released when the holder's CI is idle — no check run on the head started or completed for `RESERVATION_STALL_S` (15 min, 3 x the longest gap between consecutive job completions measured on #13204's four heads), with the idle clock starting at the committer time so a CI that never starts is a stall too — or when it passes `RESERVATION_CEILING_S` (4 h from the committer time), and a future-dated head still holds nothing (#13485). Progress is read from GitHub's check-run timestamps, never from the author-supplied commit date. Measured 2026-10-22: #13204's Services CI took 87.1, 70.4 and 67.8 min per head; the 64 min bound released it 2 min 50 s before its CI went green, the next strict-lane PR merged 6 s later, and the next update-branch restarted the clock — a livelock the fixed bound cannot escape for any CI slower than it.
 
+### Amendment (2026-10-22) — bounded strict deferral: one carrier during a running reservation (#13400)
+
+While a strict reservation's CI is running and that head has never yielded, settle lets the train build and publish one carrier from green candidates; publish records the yield as the App's `merge-train/strict-deferral` status on the strict head, a green carrier merges past it only under that record, the update-branch that follows inherits it through the first parent, and a green strict head is never pre-empted — so the strict PR still merges within two CI cycles.
+
 ## Rollout
 
 **Phase 0 — shadow (this PR, default).** `MERGE_TRAIN_SHADOW=true` in the workflow `env`. The

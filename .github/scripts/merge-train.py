@@ -151,6 +151,7 @@ REFUSED_COMMENT = ("merge-train: GitHub refused to update this branch with main 
                    "own. It stays armed.")
 NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -1531,6 +1532,7 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     Pusher(git, branch, gh.remote).push(v.tip)
     gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
     gh.create_carrier(branch)
+    record_deferral(gh, git, repo, base, branch)
     log(f"published {branch} over {base[:12]}: members {v.applied}, dropped {v.dropped}")
     return "published"
 
@@ -1626,9 +1628,12 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         if not problem and chain[0] != live_main:
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
-            log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
-            summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
-            continue
+            if deferral_state(gh, git, strict, holder) == "granted":
+                log(f"carrier #{carrier}: green; strict-lane #{holder} still running and yielded once — merging (bounded deferral)")
+            else:
+                log(f"carrier #{carrier}: green, but main is reserved for strict-lane #{holder} — held")
+                summary["in_flight"] = True  # NOT carrier_in_flight: the reserved PR must still be able to merge
+                continue
         acted = True
         if problem:
             log(f"::warning::carrier #{carrier}: {problem}")
@@ -1689,6 +1694,14 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
+            and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
+            and deferral_state(gh, git, strict, holder) == "open"):
+        # Bounded deferral (#13400): the running reservation lets ONE carrier be built from green
+        # candidates during its CI; publish records the yield on the strict head (DEFER_CONTEXT).
+        log(f"strict-lane #{holder} CI running, no deferral yet: a carrier may be built during it (bounded deferral)")
+        summary["in_flight"] = False
+        summary["deferral_window"] = holder
     # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
     # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
     # and a merge now would put the reserved head behind main again.
@@ -1808,6 +1821,52 @@ def reservation_expired(git, head: str, now: float, activity=None) -> str | None
     if now - last > RESERVATION_STALL_S:
         return f"CI stalled: nothing started or completed for > {RESERVATION_STALL_S // 60} min"
     return None
+
+
+def deferral_used(gh, git, head: str) -> bool:
+    """The strict head, or the head it was update-branched from (first parent), already yielded."""
+    parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
+    return any(gh.app_statuses(sha).get(DEFER_CONTEXT, ("", ""))[0] == "success" for sha in [head] + parents[1:2])
+
+
+def deferral_state(gh, git, strict: list, holder: int) -> str | None:
+    """Bounded deferral (ADR-0343, #13400) for the reservation holder: "open" — its CI is still
+    RUNNING and it never yielded, so ONE carrier may be built under it; "granted" — a carrier was
+    published under it (DEFER_CONTEXT on THIS head), so that green carrier may merge past it; None —
+    held. A green head is never pre-empted. The carrier's merge puts the head behind main and its
+    update-branch inherits the record through the first parent: after that one yield the strict PR
+    has priority until it merges or fails."""
+    view = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
+    if view is None:
+        return None
+    head = view["head_sha"]
+    if gh.app_statuses(head).get(DEFER_CONTEXT, ("", ""))[0] == "success":
+        return "granted"
+    return None if deferral_used(gh, git, head) else "open"
+
+
+def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[int]:
+    """Publish: a carrier published while an armed PR's up-to-date head is still running CI consumes
+    that head's one deferral. Read from live data (head contains live main, a required context still
+    pending); settle opened the window and judges the carrier against the record."""
+    required = [c for c in gh.required() if c != STATUS_CONTEXT]
+    out = []
+    for p in gh.open_prs():
+        if is_carrier(p, repo) or not p.get("auto_merge") or p.get("draft"):
+            continue
+        n, head = p["number"], p["head"]["sha"]
+        checks = gh.checks(head)
+        if not any(checks.get(c, None) is None for c in required) or any(
+                checks.get(c) == "failure" for c in required):
+            continue
+        git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:refs/merge-train/pr-{n}", check=False)
+        if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0 or deferral_used(gh, git, head):
+            continue
+        gh.post_status(head, "success", f"strict lane: yielded once to carrier {carrier_branch}; priority from here",
+                       context=DEFER_CONTEXT)
+        log(f"#{n:>6} strict    deferral recorded: carrier {carrier_branch} published during its CI")
+        out.append(n)
+    return out
 
 
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
@@ -3481,6 +3540,71 @@ def self_test() -> int:
             s = settle_now()
             check("reservation: the held train, now over a stale main, is rejected for a rebuild",
                   gh.merged == [35] and s["rejected"], f"{s} merged={gh.merged}")
+            reset()
+
+            # BOUNDED STRICT DEFERRAL (#13400): a strict reservation whose CI is still running yields
+            # ONCE per strict head to a carrier built from green candidates DURING that CI. The deferral
+            # is recorded as DEFER_CONTEXT on the strict head when the carrier is published, and the
+            # update-branch that follows the carrier's merge inherits it through its first parent.
+            def deferral(sha):
+                return gh.app_statuses(sha).get(DEFER_CONTEXT, ("", ""))[0]
+
+            def running_reservation_and_green_candidate():
+                open_only("pW")
+                gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}   # pW up to date, CI running
+                open_only("p1")                                                    # a green train candidate
+
+            # (1) no deferral yet: a carrier is built and published, and the deferral recorded at publish.
+            running_reservation_and_green_candidate()
+            pw_a = gh.prs[35]["head"]["sha"]
+            s, st = tick()
+            check("deferral: running reservation + green candidate + no deferral -> a carrier is built",
+                  st == "published" and any(c["state"] == "open" for c in gh.carriers.values())
+                  and deferral(pw_a) == "success" and gh.merged == [], f"{s} st={st} defer={deferral(pw_a)!r}")
+            gh.head_checks.clear()
+            reset()
+
+            # (2) a deferral already recorded for this strict head: held, no carrier.
+            running_reservation_and_green_candidate()
+            gh.post_status(gh.prs[35]["head"]["sha"], "success", "yielded once", context=DEFER_CONTEXT)
+            s, st = tick()
+            check("deferral: a strict head that already yielded once is held (no carrier built)",
+                  st == "in-flight" and s["in_flight"] and not any(c["state"] == "open" for c in gh.carriers.values()),
+                  f"{s} st={st}")
+            gh.head_checks.clear()
+            reset()
+
+            # (3) a GREEN strict head is never pre-empted: the carrier built under its CI is held and
+            # the strict PR merges first, even though the deferral was recorded.
+            running_reservation_and_green_candidate()
+            tick()
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            s = settle_now()
+            check("deferral: a green strict head is never pre-empted - it merges first, the carrier is held",
+                  gh.merged == [35] and 1 not in gh.merged, f"{s} merged={gh.merged}")
+            reset()
+
+            # (4) bounded: the carrier merges past the running head A (the one deferral); A is
+            # update-branched to B, B inherits the record via its first parent, no further carrier is
+            # built while B's CI runs, and the strict PR merges within 2 of its CI cycles.
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()                                     # cycle 1: A's CI runs, carrier published
+            s1 = settle_now()                          # the carrier is green: it pre-empts A once
+            gh.head_checks.clear()                     # A's CI finishes green, now behind main
+            settle_now()                               # update-branch -> B
+            b_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks[b_head] = {"gates (data)": None}   # cycle 2: B's CI runs
+            open_only("p2")                            # another green candidate arrives
+            s2, st2 = tick()
+            gh.head_checks.clear()                     # B's CI finishes green
+            s3 = settle_now()
+            check("deferral: one yield only - the strict PR merges within 2 CI cycles, no second carrier",
+                  1 in s1["merged"] and gh.updates == [35] and st2 == "in-flight" and not deferral(b_head)
+                  and 35 in s3["merged"] and 2 not in gh.merged,
+                  f"s1={s1} st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
+            gh.head_checks.clear()
+            gh.updates.clear()
             reset()
 
             # LANE FAIRNESS (ADR-0343, 2026-10-21): the strict queue never empties, so before the fix
