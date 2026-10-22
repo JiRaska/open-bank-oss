@@ -305,6 +305,9 @@ deploy_holds:
       - issue: "#13167"
         reason: "Day-close participation V18 and its reporter require owner-controlled first image delivery."
         release_condition: "The owner approves the exact interest image and deployment window, accepts V18 schema and historical-run evidence semantics without inferred backfill, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval. Preserve every separately required catalog-sync activation condition when holds are combined."
+      - issue: "#13173"
+        reason: "Default-on catalog rate sync and V19/V20 account revision pinning require an owner-approved first deployment."
+        release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
     openbank-kyb-service:
       all_of:
       - issue: '#12948'
