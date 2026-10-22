@@ -517,6 +517,7 @@ gates:
     name: "service requirements.yaml rows are well-formed and BUILT evidence resolves (advisory)"
     group: gitops
     mode: advisory
+    needs_base: optional
     budget_seconds: 30
     verified: "2026-10-22 — 0 findings; 45 treasury rows seeded from ADR-0344's catalogue (2 BUILT, 12 PARTIAL, 31 MISSING)"
     rationale: >-
