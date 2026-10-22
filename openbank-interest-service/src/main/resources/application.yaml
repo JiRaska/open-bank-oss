@@ -196,10 +196,11 @@ authz:
 # because ADR-0033 §E withholds only CZK interest.
 interest:
   catalog-sync:
-    # Expand safely: disabled until an environment gives the openbank-services principal catalog
-    # read access and opts into the migration. Enabling later is idempotent because receipts and the
-    # cursor commit with each snapshot.
-    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:false}
+    # ADR-0341: on by default. The sync only caches immutable published revisions keyed by revision id;
+    # an account is pinned to the revision it first accrues under, so a newer revision never reprices
+    # an existing account. Needs interest's own catalog.read grant (#8481). Idempotent: receipts and
+    # the cursor commit with each snapshot. Set INTEREST_CATALOG_SYNC_ENABLED=false to switch it off.
+    enabled: ${INTEREST_CATALOG_SYNC_ENABLED:true}
     interval: ${INTEREST_CATALOG_SYNC_INTERVAL:30s}
     initial-delay: ${INTEREST_CATALOG_SYNC_INITIAL_DELAY:15s}
   ledger:
