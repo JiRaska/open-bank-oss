@@ -487,6 +487,95 @@ gates:
     run: |
       python3 .github/scripts/check-adr-proposed-staleness.py --root . --today "$(date -u +%F)"
 
+  # ADR-0344 read `delivery-status: planned` while code for its decisions landed, and its Delivery
+  # check block was prose nobody ran. This runs every extracted block (docs/adr/checks/<nnnn>.sh,
+  # derived by gen-adr-delivery-checks.py) in a checkout of origin/main and compares the result
+  # with the front-matter claim. Measured at authoring on origin/main 94852ab283: ADR-0344 1 pass /
+  # 4 fail / 1 unmeasured (consistent with planned), ADR-0317 1 pass / 2 fail (consistent with partial).
+  - id: adr-delivery-scripts
+    name: "ADR delivery-status agrees with its executed Delivery check (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 60
+    verified: "2026-10-22 — 0 findings on origin/main 94852ab283; ADR-0344 and ADR-0317 measured, both consistent"
+    rationale: >-
+      delivery-status is a claim and a Delivery check block is its falsifier; as prose nobody runs it,
+      so the registry and the tree drift apart until a hand audit notices. Executing the block on
+      origin/main makes "planned while every check passes" and "shipped while none does" visible.
+    review_after: "2027-01-31"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-adr-delivery-scripts.sh", ".github/scripts/gen-adr-delivery-checks.py"]
+    selftest: |
+      bash .github/scripts/check-adr-delivery-scripts.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/check-adr-delivery-scripts.sh --ref origin/main
+
+  # A functional-requirements file per service: each catalogue item a row with status + evidence.
+  # A BUILT row whose evidence is absent or does not resolve is the lie this makes impossible.
+  - id: requirements-traceability
+    name: "service requirements.yaml rows are well-formed and BUILT evidence resolves (advisory)"
+    group: gitops
+    mode: advisory
+    budget_seconds: 30
+    verified: "2026-10-22 — 0 findings; 45 treasury rows seeded from ADR-0344's catalogue (2 BUILT, 12 PARTIAL, 31 MISSING)"
+    rationale: >-
+      ADR-0344's functional baseline had no link from an item to the code delivering it, so 38 items
+      had to be audited by hand to learn which existed. A requirements file with resolvable evidence
+      makes that audit a gate run.
+    review_after: "2027-01-31"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-requirements-traceability.py"]
+    selftest: |
+      python3 .github/scripts/check-requirements-traceability.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-requirements-traceability.py --root . --diff-base "${PR_DIFF_BASE:-}"
+
+  # One feature PR reached 698 files across 9 released components (74377 changed lines) and 149
+  # conflicts before anything counted it. Limits in rules.yaml: pr_span_limits.
+  - id: pr-component-span
+    name: "releasing PR stays within the component-span and line limits (rules.yaml pr_span_limits, enforced)"
+    group: supplychain
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 30
+    rationale: >-
+      A releasing PR spanning many released components cannot be reviewed as one unit, conflicts
+      with everything, and lands one squash commit in many changelogs. Work that must land together
+      goes through an integration branch labelled integration-branch, which must not be based on main.
+    review_after: "2027-04-22"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-pr-component-span.py"]
+    selftest: |
+      python3 .github/scripts/check-pr-component-span.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-pr-component-span.py --diff-base "${PR_DIFF_BASE}" --pr "${PR_NUMBER}"
+
+  # A file byte-identical to another open PR's copy (both differing from main) is a copy: the e2e
+  # treasury branch carried 75 of #13408's 104 files that way. Names the overlap; never blocks.
+  - id: pr-shared-files
+    name: "files byte-identical to another open PR are named (advisory)"
+    group: supplychain
+    mode: advisory
+    when: pull_request
+    needs_base: required
+    budget_seconds: 90
+    verified: "2026-10-22 — known positive: 1425639b38 vs e447d5ad25 reports 75 of #13408's 104 files"
+    rationale: >-
+      Two PRs carrying the same file both read as authored work and both conflict once one merges;
+      git and CI see two independent green additions. Comparing blobs across open PR heads names it.
+    review_after: "2027-03-31"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-pr-shared-files.sh"]
+    selftest: |
+      bash .github/scripts/check-pr-shared-files.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/check-pr-shared-files.sh --pr "${PR_NUMBER}" --base "${PR_DIFF_BASE}"
+
   # ==== gitops =========================================================
   - id: deploy-hold-image-pins
     name: "held services cannot change GitOps image pins (issue #11503)"

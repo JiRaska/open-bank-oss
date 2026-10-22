@@ -1251,6 +1251,47 @@ change_requirements:
     ci_producer: ".github/scripts/check-adr-proposed-staleness.py"
     target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the 4-findings seed tail (0141, 0142, 0155, 0170) is decided, re-affirmed, or baselined
     blocked_on: "first live run flags 4 genuinely open proposals from 2026-06/07; enforcement is safe once that tail is triaged — the gate is sweep-proof by construction (creation-age + deliberate last-reviewed), so no mechanical commit can silently reset it"
+  adr_delivery_scripts:
+    # An ADR's `## Delivery check` is the falsifier of its own `delivery-status`, and as prose
+    # nobody runs it: ADR-0344 read `planned` while code for its decisions landed, found only by a
+    # hand audit. gen-adr-delivery-checks.py extracts each ```bash block into the DERIVED
+    # docs/adr/checks/<nnnn>.sh; the checker runs it in a checkout of origin/main and compares.
+    detect: ["docs/adr/*.md with a `## Delivery check` section holding a ```bash block"]
+    require:
+      - "every measurable line passes => delivery-status is not `planned`"
+      - "no measurable line passes => delivery-status is not `shipped`"
+      - "docs/adr/checks/<nnnn>.sh equals the generator's output (derived, never hand-edited)"
+    gate: adr-delivery-scripts
+    enforced: advisory
+    ci_producer: ".github/scripts/check-adr-delivery-scripts.sh"
+    target_enforce_date: "2027-01-31"   # ADR-0144; enforce once two more ADRs carry an executable block
+    blocked_on: "only ADR-0317 and ADR-0344 have a ```bash Delivery check today; a line whose tool the runner lacks (yq) is UNMEASURED, so enforcement waits until the blocks are written for the runner"
+  requirements_traceability:
+    # A functional-baseline catalogue in ADR prose has no traceability: 38 treasury items had to be
+    # audited by hand to learn which existed. <service>/governance/requirements.yaml makes each item
+    # a row with a status and evidence a machine can check.
+    detect: ["*/governance/requirements.yaml", "a PR touching <service>/src/main where that file exists"]
+    require:
+      - "every entry has id, text, status (BUILT|PARTIAL|MISSING), evidence (list)"
+      - "a BUILT entry has evidence, and every file evidence path exists"
+      - "a PR changing a service's src/main without touching its requirements.yaml gets an advisory note"
+    gate: requirements-traceability
+    enforced: advisory
+    ci_producer: ".github/scripts/check-requirements-traceability.py"
+    target_enforce_date: "2027-01-31"   # ADR-0144; the schema half can enforce once a second service adopts the file
+    blocked_on: "one seeded service (treasury); the touched-without-update note is advisory by design and stays so"
+  pr_shared_files:
+    # A PR carrying a file byte-identical to another open PR (both differing from main) carries a
+    # copy: whichever merges first turns the other's into a conflicting no-op. The treasury e2e
+    # branch carried 75 of #13408's 104 files that way.
+    detect: ["a path whose blob at this PR's head equals its blob at another open PR's head, differing from the merge-base"]
+    require:
+      - "the overlap is named in CI output as `<path> identical to #<n>`"
+    gate: pr-shared-files
+    enforced: advisory
+    ci_producer: ".github/scripts/check-pr-shared-files.sh"
+    target_enforce_date: "2027-03-31"   # ADR-0144; a stacked PR legitimately shares its parent's files, so this stays a report until stacks are labelled
+    blocked_on: "stacked PRs (child carries the parent's files by design) are indistinguishable from copies without a declared stack relation"
   service_code_change:
     detect: ["<service>/src/main/**"]
     require:
@@ -5201,3 +5242,20 @@ catalog_kernel_neutrality:
 merge_train:
   extra_gates:
     - {workflow: .github/workflows/security.yml, check: Trivy}
+
+# ---------------------------------------------------------------------------------------
+# PR span limits — check-pr-component-span.py (gate pr-component-span, enforced).
+# A releasing PR (feat/fix/perf/security or breaking) that touches more than max_version_dirs
+# directories holding a version.txt, or more than max_changed_lines changed lines, is not
+# reviewable as one unit: one PR grew to 698 files across 15 released modules and 149 conflicts.
+# Work that must land as one unit goes through a long-lived integration branch carrying
+# `integration_label`; that label on a PR based on main is itself a failure, or it is a bypass.
+# ---------------------------------------------------------------------------------------
+pr_span_limits:
+  max_version_dirs: 3
+  max_changed_lines: 15000
+  integration_label: integration-branch
+  releasing_types: [feat, fix, perf, security]
+  gate: pr-component-span
+  enforced: enforced
+  ci_producer: ".github/scripts/check-pr-component-span.py"

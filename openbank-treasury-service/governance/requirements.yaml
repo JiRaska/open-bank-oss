@@ -1,0 +1,229 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Functional requirements of the treasury service, one row per item of ADR-0344's
+# "Functional baseline catalogue", each with a status and the evidence a machine can check
+# (rules.yaml: requirements_traceability, gate requirements-traceability).
+#
+#   status    BUILT   — the capability exists on main; `evidence` must name where, and must resolve
+#             PARTIAL — some of it exists; `evidence` names that part, `text` keeps the whole ask
+#             MISSING — nothing on main yet (work on an unmerged branch is MISSING)
+#   evidence  a repo-relative file path, `openapi:<path>` (a path in this service's openapi.yaml),
+#             or `test:<ClassName>` (a test class under this service's src/test)
+#
+# Seeded 2026-10-22 against origin/main 94852ab283. Update a row in the PR that changes its truth.
+requirements:
+  # --- Deal ticket — header (every product) ---------------------------------------------
+  - id: TRS-HDR-01
+    text: "Counterparty, currency, notional and trade/value/maturity dates on every deal"
+    status: BUILT
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt
+      - openapi:/api/v1/treasury/deals
+      - test:DealTest
+  - id: TRS-HDR-02
+    text: "Legal entity (booking entity), counterparty's own deal reference, communication channel, portfolio/book"
+    status: MISSING
+    evidence: []
+  - id: TRS-HDR-03
+    text: "Instrument and deal kind (ACTUAL / PLANNED / HYPOTHETICAL)"
+    status: PARTIAL
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt
+  - id: TRS-HDR-04
+    text: "Trade date AND time, effective (start) date, validity from/to for framework or revolving deals"
+    status: MISSING
+    evidence: []
+  - id: TRS-HDR-05
+    text: "Jurisdiction / governing law, holiday calendar set, business-day convention, fixed-convention flag"
+    status: MISSING
+    evidence: []
+  - id: TRS-HDR-06
+    text: "Schedule generation direction, notional exchange flag, single-currency flag"
+    status: MISSING
+    evidence: []
+  - id: TRS-HDR-07
+    text: "Free-text note on the deal"
+    status: PARTIAL
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt
+  - id: TRS-HDR-08
+    text: "Regulatory block: derivative trade-reporting fields, central-bank codes, liquidity-ratio categories"
+    status: MISSING
+    evidence: []
+  # --- Deal ticket — per leg (interest-bearing products) --------------------------------
+  - id: TRS-LEG-01
+    text: "Per-leg notional and currency; amortisation start date and frequency"
+    status: MISSING
+    evidence: []
+  - id: TRS-LEG-02
+    text: "Accrual start date and frequency; payment frequency"
+    status: MISSING
+    evidence: []
+  - id: TRS-LEG-03
+    text: "Reference rate (index) with refixing frequency and fixing lead; fixed rate or spread"
+    status: PARTIAL
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt
+  - id: TRS-LEG-04
+    text: "Accrual convention (day count) per leg; total rate until the first fixing"
+    status: MISSING
+    evidence: []
+  - id: TRS-LEG-05
+    text: "Floor and cap, each on the index and on index plus spread; payment calendar"
+    status: MISSING
+    evidence: []
+  - id: TRS-LEG-06
+    text: "'Generate schedule' action previewing the cash-flow ledger before submission"
+    status: MISSING
+    evidence: []
+  # --- Deal ticket — product-specific ---------------------------------------------------
+  - id: TRS-PRD-01
+    text: "Deposit / loan / cash: principal account, interest account, early-withdrawal terms"
+    status: MISSING
+    evidence: []
+  - id: TRS-PRD-02
+    text: "Treasury bill / bond / bill of exchange: security, nominal, clean price or yield, accrued interest, settlement place, custody account"
+    status: MISSING
+    evidence: []
+  - id: TRS-PRD-03
+    text: "FX spot / forward / swap: buy and sell currency and amounts, rate, forward points, near and far legs"
+    status: PARTIAL
+    evidence:
+      - test:FxSpotTest
+  - id: TRS-PRD-04
+    text: "FRA: contract period, reference index, fixing date, settlement convention"
+    status: MISSING
+    evidence: []
+  - id: TRS-PRD-05
+    text: "Interest-rate swap: two legs, netting of same-day flows, notional exchange"
+    status: MISSING
+    evidence: []
+  - id: TRS-PRD-06
+    text: "Repo / reverse repo: collateral security, nominal, dirty price, haircut, substitution, repo rate, margin calls"
+    status: MISSING
+    evidence: []
+  # --- Deal ticket — tabs ----------------------------------------------------------------
+  - id: TRS-TAB-01
+    text: "State and timeline: state, timestamp, user and note per transition"
+    status: BUILT
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Deal.kt
+      - test:DealTest
+  - id: TRS-TAB-02
+    text: "Cash and securities settlement accounts; documents (confirmations, term sheets, signed scans)"
+    status: MISSING
+    evidence: []
+  - id: TRS-TAB-03
+    text: "Payment orders generated from the deal"
+    status: MISSING
+    evidence: []
+  - id: TRS-TAB-04
+    text: "Collateral; linked deals (hedge relationship, roll-over, netting set); fees"
+    status: MISSING
+    evidence: []
+  - id: TRS-TAB-05
+    text: "Credit-exposure limit check (counterparty, product, country, result, override)"
+    status: PARTIAL
+    evidence:
+      - openapi:/api/v1/treasury/deals/{id}/override-limit
+      - test:ProductLimitPolicyTest
+  - id: TRS-TAB-06
+    text: "Central-bank codes and liquidity-ratio parameters tabs"
+    status: MISSING
+    evidence: []
+  - id: TRS-TAB-07
+    text: "Actions: save, submit, approve, send confirmation, cancel, reverse, change history"
+    status: PARTIAL
+    evidence:
+      - openapi:/api/v1/treasury/deals/{id}/submit
+      - openapi:/api/v1/treasury/deals/{id}/approve
+      - openapi:/api/v1/treasury/deals/{id}/confirm
+      - openapi:/api/v1/treasury/deals/{id}/cancel
+      - openapi:/api/v1/treasury/deals/{id}/reverse
+      - test:TreasuryDealApiIT
+  # --- Deal overview ---------------------------------------------------------------------
+  - id: TRS-OVW-01
+    text: "Deal list with id, instrument, state, counterparty, currency, notional, rate, dates, last change"
+    status: PARTIAL
+    evidence:
+      - openapi:/api/v1/treasury/deals
+  - id: TRS-OVW-02
+    text: "Filters (instrument, state, portfolio, hide matured/authorised, free text) and saved personal filter sets"
+    status: MISSING
+    evidence: []
+  - id: TRS-OVW-03
+    text: "Export all / selection / regulatory layout; position close of day and special close"
+    status: MISSING
+    evidence: []
+  # --- Event calendar --------------------------------------------------------------------
+  - id: TRS-CAL-01
+    text: "Event calendar over a period preset: refixings, interest and principal payments, maturities, exercises, margin calls, actionable"
+    status: MISSING
+    evidence: []
+  # --- Cash-flow analysis view -----------------------------------------------------------
+  - id: TRS-CFA-01
+    text: "Cash-flow analysis by calculation date, portfolio node, reference currency, scenario, with drill-down to deal and leg"
+    status: MISSING
+    evidence: []
+  # --- Reports and analyses --------------------------------------------------------------
+  - id: TRS-RPT-01
+    text: "Payment orders and cash-flow reports over a portfolio node, with provenance"
+    status: MISSING
+    evidence: []
+  - id: TRS-RPT-02
+    text: "Liquidity analysis (ladder, survival horizon, regulatory ratios) and interest-rate risk (gap, duration, NII/EVE)"
+    status: MISSING
+    evidence: []
+  - id: TRS-RPT-03
+    text: "Limits and utilisation report"
+    status: PARTIAL
+    evidence:
+      - openapi:/api/v1/treasury/limits/utilisation
+  - id: TRS-RPT-04
+    text: "FX position report"
+    status: PARTIAL
+    evidence:
+      - openapi:/api/v1/treasury/positions
+  - id: TRS-RPT-05
+    text: "Sensitivity (PV01, key-rate DV01, FX delta), value at risk, valuation (clean, dirty, accrued, by book and IFRS 9 category)"
+    status: MISSING
+    evidence: []
+  - id: TRS-RPT-06
+    text: "Accounting: journals by deal, by event, by period; unposted events; corrections"
+    status: PARTIAL
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Postings.kt
+      - test:PostingRulesTest
+  # --- Market data -----------------------------------------------------------------------
+  - id: TRS-MKT-01
+    text: "Market data import, factor browser with history, curve construction portfolio, export"
+    status: MISSING
+    evidence: []
+  - id: TRS-MKT-02
+    text: "Suspicious factors (stale, jump beyond threshold) and missing factors for a date; internal rate sheets"
+    status: MISSING
+    evidence: []
+  # --- Reference data and configuration (code lists) -------------------------------------
+  - id: TRS-REF-01
+    text: "Parties (counterparties, issuers, central bank), party groups and types"
+    status: PARTIAL
+    evidence:
+      - openapi:/api/v1/treasury/counterparties
+  - id: TRS-REF-02
+    text: "Accounts (cash, securities, nostro), settlement places, standard settlement instructions, netting agreements"
+    status: PARTIAL
+    evidence:
+      - openbank-treasury-service/src/main/kotlin/com/openbank/treasury/domain/model/Nostro.kt
+  - id: TRS-REF-03
+    text: "Product types, loan types, securities master, holiday calendars, tenors, scenarios, calculation settings, limit settings, haircuts"
+    status: MISSING
+    evidence: []
+  - id: TRS-REF-04
+    text: "Portfolios, time-bucket groups, accounting settings (posting rules, GL mapping), balance-sheet sides"
+    status: MISSING
+    evidence: []
+  - id: TRS-REF-05
+    text: "Every code list effective-dated, versioned, four-eyes approved, with import/export and a dependency query"
+    status: MISSING
+    evidence: []
