@@ -41,6 +41,7 @@ export function parseKubeGitVersion(gitVersion: string): { full: string; minor: 
 
 /** Image pattern per component. First capture group is the version. */
 export const IMAGE_PATTERNS: Record<string, RegExp> = {
+  clickhouse: /(?:^|\/)clickhouse\/clickhouse-server:(\d+(?:\.\d+)+)(?=$|[-_@])/,
   postgres: /cloudnative-pg\/postgresql:(\d+\.\d+)(?![\d.])/,
   valkey: /valkey\/valkey:(\d+\.\d+\.\d+)/,
   // Strimzi publishes one image per Kafka version: quay.io/strimzi/kafka:<operator>-kafka-X.Y.Z
@@ -80,6 +81,7 @@ const PLATFORM_IMAGE_COMPONENTS = ['postgres', 'valkey', 'apicurio', 'kafka', 's
 // its tag does not encode a parseable release version. These entries come from
 // checked-in GitOps image refs/chart ownership, not display-name-only guesses.
 const IMAGE_REPOSITORIES: Record<string, RegExp> = {
+  clickhouse: /(?:^|\/)clickhouse\/clickhouse-server(?=[:@])/,
   postgres: /(?:^|\/)cloudnative-pg\/postgresql(?=[:@])/,
   valkey: /(?:^|\/)valkey\/valkey(?=[:@])/,
   kafka: /(?:^|\/)strimzi\/kafka(?=[:@])/,
@@ -123,14 +125,16 @@ export function parseImageVersion(component: string, image: string): string | nu
 /** Aggregate running-container image rows into distinct running versions per component. */
 export interface LiveImageVersion extends LiveVersion { observedAt: string }
 
-export function aggregateImages(rows: { image: string; container?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
+export function aggregateImages(rows: { image: string; container?: string; namespace?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
   const out: Record<string, Map<string, { count: number; observedAt: string }>> = {}
-  for (const { image, container, count, observedAt } of rows) {
+  for (const { image, container, namespace, count, observedAt } of rows) {
     for (const component of Object.keys(IMAGE_PATTERNS)) {
-      // Kafka's exporter is a separate Strimzi pod and can carry a Kafka-derived image tag.
-      // Only the broker container is evidence for the broker version; a missing or different
-      // container role must remain unknown rather than becoming a version observation.
+      // Role and workload identity are part of the image evidence: Kafka exporters can carry
+      // broker-like image tags, and the analytics card must not absorb other ClickHouse instances.
       if (component === 'kafka' && container !== 'kafka') continue
+      // The infrastructure card represents the analytics warehouse. Other ClickHouse
+      // instances (for example, an application-bundled database) are separate components.
+      if (component === 'clickhouse' && (container !== 'clickhouse' || namespace !== 'analytics')) continue
       const v = parseImageVersion(component, image)
       if (v) {
         const m = (out[component] ??= new Map())
@@ -228,12 +232,12 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
   const imageRows = rows(images)
   const freshImageRows = (imageRows ?? [])
     .filter(r => r.metric.image && Number.isFinite(r.value))
-    .map(r => ({ image: r.metric.image, container: r.metric.container, sampledAtMs: r.value * 1000 }))
+    .map(r => ({ image: r.metric.image, container: r.metric.container, namespace: r.metric.namespace, sampledAtMs: r.value * 1000 }))
     .filter(r => {
       const ageMs = fetchedAt.getTime() - r.sampledAtMs
       return ageMs >= -30_000 && ageMs <= IMAGE_SAMPLE_MAX_AGE_MS
     })
-    .map(r => ({ image: r.image, container: r.container, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
+    .map(r => ({ image: r.image, container: r.container, namespace: r.namespace, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
   const components = aggregateImages(freshImageRows)
 
   const readyRows = rows(ready)

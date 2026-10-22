@@ -248,6 +248,25 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
+  `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
+  reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
+  roles). New table `ledger_close_participation` (V33, append-only history). `AccountingDayScheduler`
+  now also requires every declared participant to have reported before `CUTOFF → TIED_OUT`
+  (`openbank.ledger.close.participants-mode`, ships `shadow`). **STRIDE-S/E:** the PUT is admitted
+  under the existing `ledger.create` grant (no rego change), so any principal that may post journals
+  reaches it; the use case then requires the caller's VERIFIED service-account
+  (`ServiceAccountIdentity.verifiedPrincipalName`: `azp` bound to `preferred_username`) to equal the
+  principal declared for that participant — a different service-account, or a human token, is 403.
+  A participant cannot write `WAIVED`; waiving is `ROLE_OPERATOR` + `ledger.approve` and records the
+  operator's `sub`. **STRIDE-T/R:** reports are append-only rows with reporter and time; a report into
+  a `TIED_OUT`/`LOCKED` day is stored with `late=true` and never moves the day, so a late or replayed
+  report cannot reopen or rewrite a closed day. **STRIDE-D:** a participant that never reports holds
+  the day in CUTOFF under `enforce`, which the existing stuck-CUTOFF alert pages and the waiver
+  releases; in `shadow` (shipped default) nothing is held. **Information disclosure:** rows carry
+  counts, service names and bounded automatic failure categories. Operator identities and free-text waiver reasons are intentional audit personal data, not anonymous counts. The closed-day 409 body now also carries
+  `code: ACCOUNTING_DAY_CLOSED` (no new data). Rollback: revert the application while preserving additive V33 audit history; schema removal needs a separate reviewed retention/rollback plan.
+
 - **2026-10-17** — **The pension company's co-instance (`ledger-pension-co`) gets its own outbound
   identity (PR #13127).** Previously the deployment projected account-service's `OIDC_CLIENT_SECRET`,
   so its outbound calls authenticated as another service's client. It now authenticates as its own
@@ -266,7 +285,7 @@ set) apply equally to the new `ledger.approval.decide` action.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `ledger_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -433,7 +452,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   ledger-service's first-ever Redis dependency: new in-namespace `redis` Deployment/Service
   (`openbank-infra/gitops/components/ledger/redis.yaml`) plus a `redis-ingress-allow-list`
   NetworkPolicy, `QUARKUS_REDIS_HOSTS` wired on the Rollout, and `quarkus-redis-client` added to
-  the build. New `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH
+  the build. New ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (`RedisApprovalStore` producer) and `PATCH
   /api/v1/journals/approvals/{id}` checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR,
   Roles.ADMIN)`, `@Authorize(action = "ledger.approval.decide")`); two new exception mappers
   (`SelfApprovalNotAllowedMapper` → 403, `InvalidApprovalStateMapper` → 409) appended to the
@@ -668,6 +687,12 @@ set) apply equally to the new `ledger.approval.decide` action.
   derives the switch list from source and fails if any is live. The chart of accounts is applied by a
   Flyway callback script mounted from a ConfigMap into this instance only, so no pension account reaches the
   bank's database. Rollback: delete the Argo app and its namespace; the bank's ledger is untouched.
+
+- **2026-10-19** — Day-close participant enforcement is owned by `AccountingDayService`, for both scheduler and manual operator CUTOFF → TIED_OUT transitions. Callers cannot omit a required participant set; the existing repository day lock and atomic completeness check remain. Missing/REFUSED participants require a valid report or explicit WAIVED record with operator identity and mandatory reason. The default stays shadow; no enforcement activation is authorized. Pure service tests model the persistence contract; HTTP/DB test source uses a test security identity and does not establish JWT signature validation or live identity configuration.
+
+- **2026-10-19** — Automatic interest day-close report reasons and new aggregate warnings export only dates, counts and fixed categories, excluding raw exceptions and customer/account/product identifiers. Operator identity and a reasoned waiver remain retained audit personal data and require GDPR review. This does not anonymize older per-account logs or authorize enforcement activation.
+
+- **2026-10-19** — A day-close waiver checks the existing verified-person classifier even when OPA is advisory. Audit attribution requires a nonblank authenticated JWT subject, rejecting missing or unreadable subjects instead of using a display name. Report-service identity binding and existing GitOps enforcement remain unchanged. Pure guard tests do not prove HTTP RBAC, token signatures or live realm configuration; the OIDC HTTP regression must still run in native CI.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 

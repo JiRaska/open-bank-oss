@@ -17,11 +17,11 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * The regression test for issue #1354: `ApprovalConfig.approvalStore` being a resolvable CDI
+ * The regression test for issue #1354: `RedisApprovalStoreProducer.approvalStore` being a resolvable CDI
  * bean is NOT proof that four-eyes actually works — `AuthorizeInterceptor` only checks
  * `Instance<ApprovalStore>.isResolvable` (bean presence), never whether the
  * `ReactiveRedisDataSource` behind it can reach anything. `lending-service` ships the identical
- * `ApprovalConfig` with no Redis deployed in gitops at all; this test is what that service is
+ * `RedisApprovalStoreProducer` with no Redis deployed in gitops at all; this test is what that service is
  * missing — a real round-trip against a real Redis, so a broken `QUARKUS_REDIS_HOSTS` fails
  * this IT instead of failing silently the first time `AUTHZ_FOUR_EYES_ENFORCE` is flipped true
  * in production.

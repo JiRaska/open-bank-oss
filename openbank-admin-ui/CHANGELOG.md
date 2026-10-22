@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.10.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.1...admin-ui-v3.10.0) (2026-10-22)
+
+
+### Features
+
+* **ledger:** day-close participants — the accounting day waits for product services (ADR-0342) ([#13197](https://github.com/JiRaska/open-bank-oss/issues/13197)) ([cc8b400](https://github.com/JiRaska/open-bank-oss/commit/cc8b40005ac00a2c73142a6890fa146556017950))
+
+## [3.9.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.9.0...admin-ui-v3.9.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** observe ClickHouse and resolve lifecycle release links ([#13497](https://github.com/JiRaska/open-bank-oss/issues/13497)) ([fd7f44d](https://github.com/JiRaska/open-bank-oss/commit/fd7f44dd42c223be3f63eea73360884d451beaad))
+
+
+### Security
+
+* **billing:** redact assessment logs and isolate role tests ([#13549](https://github.com/JiRaska/open-bank-oss/issues/13549)) ([9f80e96](https://github.com/JiRaska/open-bank-oss/commit/9f80e96a47c5abf33749c8b5d7c9bd20c488e8c9))
+
 ## [3.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.8.9...admin-ui-v3.9.0) (2026-10-21)
 
 

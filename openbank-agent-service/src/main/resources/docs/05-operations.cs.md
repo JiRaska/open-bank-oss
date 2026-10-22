@@ -8,7 +8,7 @@
 ```
 
 - **Balení:** fast-jar (nikdy uber-jar — runtime stage COPYuje `quarkus-app/`). Generický build/push: `openbank-infra/scripts/build-push-service.sh openbank-agent-service` (host-side `quarkusBuild`, ne Gradle v Dockeru).
-- **Image:** viz [`Dockerfile`](../../../../openbank-agent-service/Dockerfile) — fast-jar runtime stage.
+- **Image:** viz [`Dockerfile.deploy`](../../../../.github/workflows/Dockerfile.deploy) — fast-jar runtime stage.
 - **DB:** Flyway migrace `V1`–`V6` se aplikují při startu (fronta návrhů, kill-switch, audit outbox, merge záznamy — viz [04 — Data](./04-data.md)); obvyklé Flyway checksum/repair runbooky platí jako u jakékoliv JDBC služby.
 
 ## Konfigurace (prostředí)
