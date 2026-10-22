@@ -25,12 +25,13 @@ object IrFixtures {
     val day: LocalDate = LocalDate.of(2026, 3, 15)
     val clock = ProductClock(Instant.parse("2026-03-15T10:00:00Z"), ZoneOffset.UTC)
 
-    fun state(balance: String = "10000.00", accrued: String = "0", openedOn: LocalDate = day.minusMonths(6)) = ProductState(
-        currency = "EUR",
-        balance = BigDecimal(balance),
-        accruedInterest = BigDecimal(accrued),
-        openedOn = openedOn,
-    )
+    fun state(balance: String = "10000.00", accrued: String = "0", openedOn: LocalDate = day.minusMonths(6)) =
+        ProductState(
+            currency = "EUR",
+            balance = BigDecimal(balance),
+            accruedInterest = BigDecimal(accrued),
+            openedOn = openedOn,
+        )
 
     /**
      * A deliberately simple arithmetic so interpreter tests do not depend on openbank-libs-finance
@@ -39,24 +40,45 @@ object IrFixtures {
     object StubArithmetic : ProductArithmetic {
         private val DAYS = BigDecimal(365)
 
-        override fun dailyAccrual(balance: BigDecimal, annualRate: BigDecimal, dayCount: IrDayCount, date: LocalDate, accrualRounding: RoundingPolicy): BigDecimal =
-            balance.multiply(annualRate).divide(DAYS, accrualRounding.fixedScale!!, accrualRounding.mode)
+        override fun dailyAccrual(
+            balance: BigDecimal,
+            annualRate: BigDecimal,
+            dayCount: IrDayCount,
+            date: LocalDate,
+            accrualRounding: RoundingPolicy,
+        ): BigDecimal = balance.multiply(annualRate).divide(DAYS, accrualRounding.fixedScale!!, accrualRounding.mode)
 
-        override fun tieredDailyAccrual(balance: BigDecimal, tiers: List<Tier>, dayCount: IrDayCount, date: LocalDate, accrualRounding: RoundingPolicy): BigDecimal =
-            tiers.fold(BigDecimal.ZERO) { acc, t ->
-                val upper = t.to?.min(balance) ?: balance
-                val inBand = upper - t.from
-                if (inBand.signum() <= 0) acc else acc + dailyAccrual(inBand, t.rate, dayCount, date, accrualRounding)
-            }
+        override fun tieredDailyAccrual(
+            balance: BigDecimal,
+            tiers: List<Tier>,
+            dayCount: IrDayCount,
+            date: LocalDate,
+            accrualRounding: RoundingPolicy,
+        ): BigDecimal = tiers.fold(BigDecimal.ZERO) { acc, t ->
+            val upper = t.to?.min(balance) ?: balance
+            val inBand = upper - t.from
+            if (inBand.signum() <= 0) acc else acc + dailyAccrual(inBand, t.rate, dayCount, date, accrualRounding)
+        }
 
-        override fun capitalise(accrued: BigDecimal, currency: CurrencyCode, postingRounding: RoundingPolicy): BigDecimal =
-            postingRounding.round(accrued, currency)
+        override fun capitalise(
+            accrued: BigDecimal,
+            currency: CurrencyCode,
+            postingRounding: RoundingPolicy,
+        ): BigDecimal = postingRounding.round(accrued, currency)
 
-        override fun penaltyByRate(amount: BigDecimal, rate: BigDecimal, currency: CurrencyCode, postingRounding: RoundingPolicy): BigDecimal =
-            postingRounding.round(amount.multiply(rate), currency)
+        override fun penaltyByRate(
+            amount: BigDecimal,
+            rate: BigDecimal,
+            currency: CurrencyCode,
+            postingRounding: RoundingPolicy,
+        ): BigDecimal = postingRounding.round(amount.multiply(rate), currency)
 
-        override fun forfeitedInterest(accrued: BigDecimal, fraction: BigDecimal, currency: CurrencyCode, postingRounding: RoundingPolicy): BigDecimal =
-            postingRounding.round(accrued.multiply(fraction), currency)
+        override fun forfeitedInterest(
+            accrued: BigDecimal,
+            fraction: BigDecimal,
+            currency: CurrencyCode,
+            postingRounding: RoundingPolicy,
+        ): BigDecimal = postingRounding.round(accrued.multiply(fraction), currency)
     }
 
     val interpreter = ProductInterpreter(StubArithmetic)

@@ -34,16 +34,21 @@ class ProductArbPropertyTest {
     }
 
     @Test
-    fun `every generated revision is valid, hash-stable under re-parse, and evaluates within the limits`(): Unit = runBlocking {
-        checkAll(PropTestConfig(iterations = 300), cases) { (rev, stateAndDay, event) ->
-            val (state, today) = stateAndDay
-            val clock = ProductClock(today.atStartOfDay().toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
-            val out = interpreter.evaluate(rev, state, event, clock)
-            assertThat(out.size).isLessThanOrEqualTo(IrLimits.MAX_INSTRUCTIONS_PER_EVALUATION)
-            assertMoneyConserved(out)
-            assertThat(out).allMatch { it.revisionHash == rev.revisionHash && it.irVersion == rev.irVersion }
-            assertThat(InstructionCanonical.write(interpreter.evaluate(rev, state, event, clock))).isEqualTo(InstructionCanonical.write(out))
-            assertThat(ProductIrParser.parse(ProductIrCanonical.canonicalJson(rev)).revisionHash).isEqualTo(rev.revisionHash)
+    fun `every generated revision is valid, hash-stable under re-parse, and evaluates within the limits`(): Unit =
+        runBlocking {
+            checkAll(PropTestConfig(iterations = 300), cases) { (rev, stateAndDay, event) ->
+                val (state, today) = stateAndDay
+                val clock = ProductClock(today.atStartOfDay().toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+                val out = interpreter.evaluate(rev, state, event, clock)
+                assertThat(out.size).isLessThanOrEqualTo(IrLimits.MAX_INSTRUCTIONS_PER_EVALUATION)
+                assertMoneyConserved(out)
+                assertThat(out).allMatch { it.revisionHash == rev.revisionHash && it.irVersion == rev.irVersion }
+                assertThat(
+                    InstructionCanonical.write(interpreter.evaluate(rev, state, event, clock)),
+                ).isEqualTo(InstructionCanonical.write(out))
+                assertThat(
+                    ProductIrParser.parse(ProductIrCanonical.canonicalJson(rev)).revisionHash,
+                ).isEqualTo(rev.revisionHash)
+            }
         }
-    }
 }

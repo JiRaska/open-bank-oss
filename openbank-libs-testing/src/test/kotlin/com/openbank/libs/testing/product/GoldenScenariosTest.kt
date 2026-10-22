@@ -30,7 +30,17 @@ class GoldenScenariosTest {
     @Test
     fun `the runner reports a wrong expectation with both byte forms`() {
         val scenario = GoldenScenarios.load("preposting-reject-insufficient-funds.json")
-        val broken = scenario.copy(steps = scenario.steps.mapIndexed { i, s -> if (i == 0) s.copy(expectedCanonical = "[]") else s })
+        val broken = scenario.copy(
+            steps = scenario.steps.mapIndexed { i, s ->
+                if (i ==
+                    0
+                ) {
+                    s.copy(expectedCanonical = "[]")
+                } else {
+                    s
+                }
+            },
+        )
         val error = runCatching { runner.assertPasses(broken) }.exceptionOrNull()
         assertThat(error).isInstanceOf(AssertionError::class.java)
         assertThat(error!!.message).contains("step 0", "expected []", "actual   [{").contains("INSUFFICIENT_FUNDS")
@@ -40,6 +50,7 @@ class GoldenScenariosTest {
     fun `a step that is rejected does not apply its posting, an accepted one does`() {
         val results = runner.run(GoldenScenarios.load("preposting-reject-insufficient-funds.json"))
         assertThat(results.map { it.matches }).containsOnly(true)
-        assertThat(results[2].instructions).hasSize(1) // 60 over a balance of 50 is still rejected -> the 150 was never applied
+        // 60 over a balance of 50 is still rejected, so the rejected 150 was never applied
+        assertThat(results[2].instructions).hasSize(1)
     }
 }

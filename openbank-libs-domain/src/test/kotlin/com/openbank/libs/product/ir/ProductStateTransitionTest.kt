@@ -13,14 +13,20 @@ class ProductStateTransitionTest {
     private val day = IrFixtures.day
 
     private fun post(vararg lines: PostingLine) = Instruction.Post("r", "h", 1, lines.toList(), "n")
-    private fun line(cls: AccountingClass, dir: PostingDirection, amt: String) = PostingLine(cls, dir, BigDecimal(amt), "EUR")
+    private fun line(cls: AccountingClass, dir: PostingDirection, amt: String) =
+        PostingLine(cls, dir, BigDecimal(amt), "EUR")
 
     @Test
     fun `accrual raises accrued interest, capitalisation moves it to the balance, a fee lowers the balance`() {
         val s0 = IrFixtures.state("100.00")
         val s1 = ProductStateTransition.apply(
             s0,
-            listOf(post(line(AccountingClass.INTEREST_EXPENSE, PostingDirection.DEBIT, "0.5"), line(AccountingClass.ACCRUED_INTEREST_PAYABLE, PostingDirection.CREDIT, "0.5"))),
+            listOf(
+                post(
+                    line(AccountingClass.INTEREST_EXPENSE, PostingDirection.DEBIT, "0.5"),
+                    line(AccountingClass.ACCRUED_INTEREST_PAYABLE, PostingDirection.CREDIT, "0.5"),
+                ),
+            ),
             day,
         )
         assertThat(s1.accruedInterest).isEqualByComparingTo("0.5")
@@ -28,8 +34,14 @@ class ProductStateTransitionTest {
         val s2 = ProductStateTransition.apply(
             s1,
             listOf(
-                post(line(AccountingClass.ACCRUED_INTEREST_PAYABLE, PostingDirection.DEBIT, "0.5"), line(AccountingClass.CUSTOMER_DEPOSIT, PostingDirection.CREDIT, "0.5")),
-                post(line(AccountingClass.CUSTOMER_DEPOSIT, PostingDirection.DEBIT, "5"), line(AccountingClass.FEE_INCOME, PostingDirection.CREDIT, "5")),
+                post(
+                    line(AccountingClass.ACCRUED_INTEREST_PAYABLE, PostingDirection.DEBIT, "0.5"),
+                    line(AccountingClass.CUSTOMER_DEPOSIT, PostingDirection.CREDIT, "0.5"),
+                ),
+                post(
+                    line(AccountingClass.CUSTOMER_DEPOSIT, PostingDirection.DEBIT, "5"),
+                    line(AccountingClass.FEE_INCOME, PostingDirection.CREDIT, "5"),
+                ),
                 Instruction.Reprice("r", "h", 1, "interest.rate", BigDecimal("0.03")),
                 Instruction.Notify("r", "h", 1, "t", emptyMap()),
             ),
@@ -44,10 +56,18 @@ class ProductStateTransitionTest {
 
     @Test
     fun `an accepted customer posting moves the balance and records the event`() {
-        val s = ProductStateTransition.applyPosting(IrFixtures.state("100.00"), Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("30")), day)
+        val s = ProductStateTransition.applyPosting(
+            IrFixtures.state("100.00"),
+            Posting(EventKind.WITHDRAWAL, PostingDirection.DEBIT, BigDecimal("30")),
+            day,
+        )
         assertThat(s.balance).isEqualByComparingTo("70")
         assertThat(s.events.single().kind).isEqualTo(EventKind.WITHDRAWAL)
-        val d = ProductStateTransition.applyPosting(s, Posting(EventKind.DEPOSIT, PostingDirection.CREDIT, BigDecimal("5")), day)
+        val d = ProductStateTransition.applyPosting(
+            s,
+            Posting(EventKind.DEPOSIT, PostingDirection.CREDIT, BigDecimal("5")),
+            day,
+        )
         assertThat(d.balance).isEqualByComparingTo("75")
     }
 }

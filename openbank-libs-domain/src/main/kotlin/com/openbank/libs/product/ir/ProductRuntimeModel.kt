@@ -83,8 +83,14 @@ sealed interface Instruction {
     ) : Instruction {
         /** Money conservation: per currency, debits equal credits. Checked by the interpreter before it returns. */
         fun isBalancedPerCurrency(): Boolean = lines.groupBy { it.currency }.values.all { ls ->
-            val debit = ls.filter { it.direction == PostingDirection.DEBIT }.fold(BigDecimal.ZERO) { a, l -> a + l.amount }
-            val credit = ls.filter { it.direction == PostingDirection.CREDIT }.fold(BigDecimal.ZERO) { a, l -> a + l.amount }
+            val debit = ls.filter { it.direction == PostingDirection.DEBIT }.fold(BigDecimal.ZERO) { a, l ->
+                a +
+                    l.amount
+            }
+            val credit = ls.filter { it.direction == PostingDirection.CREDIT }.fold(BigDecimal.ZERO) { a, l ->
+                a +
+                    l.amount
+            }
             debit.compareTo(credit) == 0
         }
     }
@@ -153,10 +159,20 @@ interface ProductArithmetic {
     fun capitalise(accrued: BigDecimal, currency: CurrencyCode, postingRounding: RoundingPolicy): BigDecimal
 
     /** Early-withdrawal penalty as a rate of the withdrawn [amount]. */
-    fun penaltyByRate(amount: BigDecimal, rate: BigDecimal, currency: CurrencyCode, postingRounding: RoundingPolicy): BigDecimal
+    fun penaltyByRate(
+        amount: BigDecimal,
+        rate: BigDecimal,
+        currency: CurrencyCode,
+        postingRounding: RoundingPolicy,
+    ): BigDecimal
 
     /** Early-withdrawal penalty as a forfeited [fraction] of the [accrued] interest. */
-    fun forfeitedInterest(accrued: BigDecimal, fraction: BigDecimal, currency: CurrencyCode, postingRounding: RoundingPolicy): BigDecimal
+    fun forfeitedInterest(
+        accrued: BigDecimal,
+        fraction: BigDecimal,
+        currency: CurrencyCode,
+        postingRounding: RoundingPolicy,
+    ): BigDecimal
 }
 
 /** Thrown when an evaluation would exceed [IrLimits.MAX_INSTRUCTIONS_PER_EVALUATION] or emit an unbalanced `Post`. */

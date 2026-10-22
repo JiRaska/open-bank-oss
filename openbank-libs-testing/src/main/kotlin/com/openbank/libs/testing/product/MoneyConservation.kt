@@ -21,8 +21,14 @@ object MoneyConservation {
         .filterNot { it.isBalancedPerCurrency() }
         .map { post ->
             val byCurrency = post.lines.groupBy { it.currency }.mapValues { (_, ls) ->
-                val d = ls.filter { it.direction == PostingDirection.DEBIT }.fold(BigDecimal.ZERO) { a, l -> a + l.amount }
-                val c = ls.filter { it.direction == PostingDirection.CREDIT }.fold(BigDecimal.ZERO) { a, l -> a + l.amount }
+                val d = ls.filter { it.direction == PostingDirection.DEBIT }.fold(BigDecimal.ZERO) { a, l ->
+                    a +
+                        l.amount
+                }
+                val c = ls.filter { it.direction == PostingDirection.CREDIT }.fold(BigDecimal.ZERO) { a, l ->
+                    a +
+                        l.amount
+                }
                 "debit=$d credit=$c"
             }
             "rule ${post.ruleId}: $byCurrency"

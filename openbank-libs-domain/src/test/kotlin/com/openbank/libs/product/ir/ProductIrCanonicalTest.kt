@@ -34,7 +34,12 @@ class ProductIrCanonicalTest {
 
     @Test
     fun `a changed ruleId does not`() {
-        val renamed = ProductIrParser.parse(base.replace("\"ruleId\": \"fee.maintenance\"", "\"ruleId\": \"fee.maint\"").replace("\"feeRuleId\": \"fee.maintenance\"", "\"feeRuleId\": \"fee.maint\""))
+        val renamed = ProductIrParser.parse(
+            base.replace(
+                "\"ruleId\": \"fee.maintenance\"",
+                "\"ruleId\": \"fee.maint\"",
+            ).replace("\"feeRuleId\": \"fee.maintenance\"", "\"feeRuleId\": \"fee.maint\""),
+        )
         assertThat(renamed.revisionHash).isNotEqualTo(ProductIrParser.parse(base).revisionHash)
     }
 
@@ -50,16 +55,35 @@ class ProductIrCanonicalTest {
     @Test
     fun `the hash is the SHA-256 of the canonical bytes`() {
         val rev = IrFixtures.savings()
-        assertThat(rev.revisionHash).isEqualTo(com.openbank.libs.audit.AuditChain.sha256Hex(ProductIrCanonical.canonicalJson(rev)))
+        assertThat(
+            rev.revisionHash,
+        ).isEqualTo(com.openbank.libs.audit.AuditChain.sha256Hex(ProductIrCanonical.canonicalJson(rev)))
     }
 
     @Test
     fun `every action and predicate kind has a canonical form`() {
         val rev = IrFixtures.termDeposit()
         val json = ProductIrCanonical.canonicalJson(rev)
-        assertThat(json).contains("\"type\":\"MATURE\"", "\"type\":\"EARLY_WITHDRAWAL_PENALTY\"", "\"cadence\":\"AT_MATURITY\"")
+        assertThat(
+            json,
+        ).contains("\"type\":\"MATURE\"", "\"type\":\"EARLY_WITHDRAWAL_PENALTY\"", "\"cadence\":\"AT_MATURITY\"")
         val reprice = ProductIrCanonical.predicate(
-            Predicate.Or(listOf(Predicate.PostingComparison(PostingAttribute.POSTING_AMOUNT, com.openbank.libs.product.WaiveOperator.GT, java.math.BigDecimal.ONE), Predicate.CountEvents(EventKind.FEE, Window(3), com.openbank.libs.product.WaiveOperator.LT, 2), Predicate.SumEvents(EventKind.DEPOSIT, Window(3), com.openbank.libs.product.WaiveOperator.GTE, java.math.BigDecimal.TEN))),
+            Predicate.Or(
+                listOf(
+                    Predicate.PostingComparison(
+                        PostingAttribute.POSTING_AMOUNT,
+                        com.openbank.libs.product.WaiveOperator.GT,
+                        java.math.BigDecimal.ONE,
+                    ),
+                    Predicate.CountEvents(EventKind.FEE, Window(3), com.openbank.libs.product.WaiveOperator.LT, 2),
+                    Predicate.SumEvents(
+                        EventKind.DEPOSIT,
+                        Window(3),
+                        com.openbank.libs.product.WaiveOperator.GTE,
+                        java.math.BigDecimal.TEN,
+                    ),
+                ),
+            ),
         )
         assertThat(reprice["type"]).isEqualTo("or")
         assertThat((reprice["operands"] as List<*>)).hasSize(3)

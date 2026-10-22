@@ -3510,6 +3510,835 @@ public final class com/openbank/libs/product/WaiverEvaluator {
 	public final fun isWaived (Ljava/lang/String;Lcom/openbank/libs/product/FeeContext;)Z
 }
 
+public final class com/openbank/libs/product/ir/AccountEvent {
+	public fun <init> (Lcom/openbank/libs/product/ir/EventKind;Ljava/time/LocalDate;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun component2 ()Ljava/time/LocalDate;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun copy (Lcom/openbank/libs/product/ir/EventKind;Ljava/time/LocalDate;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/AccountEvent;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/AccountEvent;Lcom/openbank/libs/product/ir/EventKind;Ljava/time/LocalDate;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/AccountEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getAt ()Ljava/time/LocalDate;
+	public final fun getKind ()Lcom/openbank/libs/product/ir/EventKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/AccountingClass : java/lang/Enum {
+	public static final field ACCRUED_INTEREST_PAYABLE Lcom/openbank/libs/product/ir/AccountingClass;
+	public static final field CUSTOMER_DEPOSIT Lcom/openbank/libs/product/ir/AccountingClass;
+	public static final field FEE_INCOME Lcom/openbank/libs/product/ir/AccountingClass;
+	public static final field INTEREST_EXPENSE Lcom/openbank/libs/product/ir/AccountingClass;
+	public static final field PENALTY_INCOME Lcom/openbank/libs/product/ir/AccountingClass;
+	public static final field SETTLEMENT Lcom/openbank/libs/product/ir/AccountingClass;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/AccountingClass;
+	public static fun values ()[Lcom/openbank/libs/product/ir/AccountingClass;
+}
+
+public abstract interface class com/openbank/libs/product/ir/Action {
+}
+
+public final class com/openbank/libs/product/ir/Action$AccrueInterest : com/openbank/libs/product/ir/Action {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/Action$AccrueInterest;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$CapitaliseInterest : com/openbank/libs/product/ir/Action {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/Action$CapitaliseInterest;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$ChargeFee : com/openbank/libs/product/ir/Action {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/openbank/libs/product/ir/Action$ChargeFee;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Action$ChargeFee;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Action$ChargeFee;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFeeRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$EarlyWithdrawalPenalty : com/openbank/libs/product/ir/Action {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/Action$EarlyWithdrawalPenalty;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$Mature : com/openbank/libs/product/ir/Action {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/Action$Mature;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$Notify : com/openbank/libs/product/ir/Action {
+	public fun <init> (Ljava/lang/String;Ljava/util/Map;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy (Ljava/lang/String;Ljava/util/Map;)Lcom/openbank/libs/product/ir/Action$Notify;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Action$Notify;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Action$Notify;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getTemplateId ()Ljava/lang/String;
+	public final fun getVariables ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$Reject : com/openbank/libs/product/ir/Action {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/openbank/libs/product/ir/Action$Reject;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Action$Reject;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Action$Reject;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReasonCode ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$Reprice : com/openbank/libs/product/ir/Action {
+	public fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/lang/String;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Action$Reprice;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Action$Reprice;Ljava/lang/String;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Action$Reprice;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getParameter ()Ljava/lang/String;
+	public final fun getValue ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Action$Schedule : com/openbank/libs/product/ir/Action {
+	public fun <init> (Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Cadence;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/Hook;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun copy (Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Cadence;)Lcom/openbank/libs/product/ir/Action$Schedule;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Action$Schedule;Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Cadence;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Action$Schedule;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCadence ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun getHook ()Lcom/openbank/libs/product/ir/Hook;
+	public final fun getTag ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/BalanceSample {
+	public fun <init> (Ljava/time/LocalDate;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/time/LocalDate;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/time/LocalDate;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/BalanceSample;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/BalanceSample;Ljava/time/LocalDate;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/BalanceSample;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBalance ()Ljava/math/BigDecimal;
+	public final fun getOn ()Ljava/time/LocalDate;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/BonusRate {
+	public fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/Predicate;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Lcom/openbank/libs/product/ir/Predicate;
+	public final fun copy (Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/Predicate;)Lcom/openbank/libs/product/ir/BonusRate;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/BonusRate;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/Predicate;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/BonusRate;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPredicate ()Lcom/openbank/libs/product/ir/Predicate;
+	public final fun getRate ()Ljava/math/BigDecimal;
+	public final fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Cadence : java/lang/Enum {
+	public static final field ANNUALLY Lcom/openbank/libs/product/ir/Cadence;
+	public static final field AT_MATURITY Lcom/openbank/libs/product/ir/Cadence;
+	public static final field DAILY Lcom/openbank/libs/product/ir/Cadence;
+	public static final field MONTHLY Lcom/openbank/libs/product/ir/Cadence;
+	public static final field ON_EVENT Lcom/openbank/libs/product/ir/Cadence;
+	public static final field QUARTERLY Lcom/openbank/libs/product/ir/Cadence;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/Cadence;
+	public static fun values ()[Lcom/openbank/libs/product/ir/Cadence;
+}
+
+public final class com/openbank/libs/product/ir/EarlyWithdrawalPenalty {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/product/ir/PenaltyKind;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/PenaltyKind;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/product/ir/PenaltyKind;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;Ljava/lang/String;Lcom/openbank/libs/product/ir/PenaltyKind;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFraction ()Ljava/math/BigDecimal;
+	public final fun getKind ()Lcom/openbank/libs/product/ir/PenaltyKind;
+	public final fun getRate ()Ljava/math/BigDecimal;
+	public final fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/EventKind : java/lang/Enum {
+	public static final field CARD_PAYMENT Lcom/openbank/libs/product/ir/EventKind;
+	public static final field DEPOSIT Lcom/openbank/libs/product/ir/EventKind;
+	public static final field FEE Lcom/openbank/libs/product/ir/EventKind;
+	public static final field INTEREST Lcom/openbank/libs/product/ir/EventKind;
+	public static final field TRANSFER_IN Lcom/openbank/libs/product/ir/EventKind;
+	public static final field TRANSFER_OUT Lcom/openbank/libs/product/ir/EventKind;
+	public static final field WITHDRAWAL Lcom/openbank/libs/product/ir/EventKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/EventKind;
+	public static fun values ()[Lcom/openbank/libs/product/ir/EventKind;
+}
+
+public final class com/openbank/libs/product/ir/FeeTerms {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/product/ir/AccountingClass;Lcom/openbank/libs/product/ir/Predicate;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun component5 ()Lcom/openbank/libs/product/ir/AccountingClass;
+	public final fun component6 ()Lcom/openbank/libs/product/ir/Predicate;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/product/ir/AccountingClass;Lcom/openbank/libs/product/ir/Predicate;)Lcom/openbank/libs/product/ir/FeeTerms;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/FeeTerms;Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/product/ir/AccountingClass;Lcom/openbank/libs/product/ir/Predicate;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/FeeTerms;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccountingClass ()Lcom/openbank/libs/product/ir/AccountingClass;
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getCadence ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun getFeeCode ()Ljava/lang/String;
+	public final fun getRuleId ()Ljava/lang/String;
+	public final fun getWaiver ()Lcom/openbank/libs/product/ir/Predicate;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Hook : java/lang/Enum {
+	public static final field ON_CLOSE Lcom/openbank/libs/product/ir/Hook;
+	public static final field ON_OPEN Lcom/openbank/libs/product/ir/Hook;
+	public static final field ON_PARAMETER_CHANGE Lcom/openbank/libs/product/ir/Hook;
+	public static final field POST_POSTING Lcom/openbank/libs/product/ir/Hook;
+	public static final field PRE_POSTING Lcom/openbank/libs/product/ir/Hook;
+	public static final field SCHEDULED Lcom/openbank/libs/product/ir/Hook;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/Hook;
+	public static fun values ()[Lcom/openbank/libs/product/ir/Hook;
+}
+
+public final class com/openbank/libs/product/ir/HookRule {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/Predicate;Lcom/openbank/libs/product/ir/Action;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lcom/openbank/libs/product/ir/Predicate;
+	public final fun component4 ()Lcom/openbank/libs/product/ir/Action;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/Predicate;Lcom/openbank/libs/product/ir/Action;)Lcom/openbank/libs/product/ir/HookRule;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/HookRule;Ljava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/Predicate;Lcom/openbank/libs/product/ir/Action;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/HookRule;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAction ()Lcom/openbank/libs/product/ir/Action;
+	public final fun getRuleId ()Ljava/lang/String;
+	public final fun getTrigger ()Ljava/lang/String;
+	public final fun getWhenPredicate ()Lcom/openbank/libs/product/ir/Predicate;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/product/ir/Instruction {
+	public abstract fun getIrVersion ()I
+	public abstract fun getRevisionHash ()Ljava/lang/String;
+	public abstract fun getRuleId ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Instruction$Notify : com/openbank/libs/product/ir/Instruction {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/util/Map;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/util/Map;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/util/Map;)Lcom/openbank/libs/product/ir/Instruction$Notify;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Instruction$Notify;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Instruction$Notify;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getIrVersion ()I
+	public fun getRevisionHash ()Ljava/lang/String;
+	public fun getRuleId ()Ljava/lang/String;
+	public final fun getTemplateId ()Ljava/lang/String;
+	public final fun getVariables ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Instruction$Post : com/openbank/libs/product/ir/Instruction {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/util/List;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILjava/util/List;Ljava/lang/String;)Lcom/openbank/libs/product/ir/Instruction$Post;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Instruction$Post;Ljava/lang/String;Ljava/lang/String;ILjava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Instruction$Post;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getIrVersion ()I
+	public final fun getLines ()Ljava/util/List;
+	public final fun getNarrative ()Ljava/lang/String;
+	public fun getRevisionHash ()Ljava/lang/String;
+	public fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun isBalancedPerCurrency ()Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Instruction$Reject : com/openbank/libs/product/ir/Instruction {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)Lcom/openbank/libs/product/ir/Instruction$Reject;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Instruction$Reject;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Instruction$Reject;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getIrVersion ()I
+	public final fun getReasonCode ()Ljava/lang/String;
+	public fun getRevisionHash ()Ljava/lang/String;
+	public fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Instruction$Reprice : com/openbank/libs/product/ir/Instruction {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Instruction$Reprice;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Instruction$Reprice;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Instruction$Reprice;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getIrVersion ()I
+	public final fun getParameter ()Ljava/lang/String;
+	public fun getRevisionHash ()Ljava/lang/String;
+	public fun getRuleId ()Ljava/lang/String;
+	public final fun getValue ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Instruction$Schedule : com/openbank/libs/product/ir/Instruction {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;ILcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Cadence;Ljava/time/LocalDate;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Lcom/openbank/libs/product/ir/Hook;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun component7 ()Ljava/time/LocalDate;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;ILcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Cadence;Ljava/time/LocalDate;)Lcom/openbank/libs/product/ir/Instruction$Schedule;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Instruction$Schedule;Ljava/lang/String;Ljava/lang/String;ILcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Cadence;Ljava/time/LocalDate;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Instruction$Schedule;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAt ()Ljava/time/LocalDate;
+	public final fun getCadence ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun getHook ()Lcom/openbank/libs/product/ir/Hook;
+	public fun getIrVersion ()I
+	public fun getRevisionHash ()Ljava/lang/String;
+	public fun getRuleId ()Ljava/lang/String;
+	public final fun getTag ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/InstructionCanonical {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/InstructionCanonical;
+	public final fun tree (Lcom/openbank/libs/product/ir/Instruction;)Ljava/util/Map;
+	public final fun write (Ljava/util/List;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/InterestTerms {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/product/ir/RateType;Ljava/math/BigDecimal;Ljava/util/List;Lcom/openbank/libs/product/ir/IrDayCount;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/domain/money/RoundingPolicy;Lcom/openbank/libs/domain/money/RoundingPolicy;Lcom/openbank/libs/product/ir/BonusRate;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Lcom/openbank/libs/product/ir/BonusRate;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/RateType;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Lcom/openbank/libs/product/ir/IrDayCount;
+	public final fun component6 ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun component7 ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun component8 ()Lcom/openbank/libs/domain/money/RoundingPolicy;
+	public final fun component9 ()Lcom/openbank/libs/domain/money/RoundingPolicy;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/product/ir/RateType;Ljava/math/BigDecimal;Ljava/util/List;Lcom/openbank/libs/product/ir/IrDayCount;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/domain/money/RoundingPolicy;Lcom/openbank/libs/domain/money/RoundingPolicy;Lcom/openbank/libs/product/ir/BonusRate;)Lcom/openbank/libs/product/ir/InterestTerms;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/InterestTerms;Ljava/lang/String;Lcom/openbank/libs/product/ir/RateType;Ljava/math/BigDecimal;Ljava/util/List;Lcom/openbank/libs/product/ir/IrDayCount;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/product/ir/Cadence;Lcom/openbank/libs/domain/money/RoundingPolicy;Lcom/openbank/libs/domain/money/RoundingPolicy;Lcom/openbank/libs/product/ir/BonusRate;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/InterestTerms;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccrualCadence ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun getAccrualRounding ()Lcom/openbank/libs/domain/money/RoundingPolicy;
+	public final fun getBonus ()Lcom/openbank/libs/product/ir/BonusRate;
+	public final fun getCapitalisationCadence ()Lcom/openbank/libs/product/ir/Cadence;
+	public final fun getDayCount ()Lcom/openbank/libs/product/ir/IrDayCount;
+	public final fun getPostingRounding ()Lcom/openbank/libs/domain/money/RoundingPolicy;
+	public final fun getRate ()Ljava/math/BigDecimal;
+	public final fun getRateType ()Lcom/openbank/libs/product/ir/RateType;
+	public final fun getRuleId ()Ljava/lang/String;
+	public final fun getTiers ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/IrDayCount : java/lang/Enum {
+	public static final field ACT_360 Lcom/openbank/libs/product/ir/IrDayCount;
+	public static final field ACT_365_FIXED Lcom/openbank/libs/product/ir/IrDayCount;
+	public static final field ACT_ACT Lcom/openbank/libs/product/ir/IrDayCount;
+	public static final field THIRTY_360_BOND_BASIS Lcom/openbank/libs/product/ir/IrDayCount;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getKernel ()Lcom/openbank/libs/domain/calendar/DayCount;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/IrDayCount;
+	public static fun values ()[Lcom/openbank/libs/product/ir/IrDayCount;
+}
+
+public final class com/openbank/libs/product/ir/IrJson {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/IrJson;
+	public final fun parse (Ljava/lang/String;)Ljava/lang/Object;
+}
+
+public final class com/openbank/libs/product/ir/IrLimits {
+	public static final field AMOUNT_SCALE I
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/IrLimits;
+	public static final field INSTRUCTION_AMOUNT_SCALE I
+	public static final field MAX_FEES I
+	public static final field MAX_INSTRUCTIONS_PER_EVALUATION I
+	public static final field MAX_NOTIFY_VARIABLES I
+	public static final field MAX_PREDICATE_DEPTH I
+	public static final field MAX_RULES_PER_HOOK I
+	public static final field MAX_RULE_ID_LENGTH I
+	public static final field MAX_TERM_MONTHS I
+	public static final field MAX_TIERS I
+	public static final field MAX_WINDOW_DAYS I
+	public static final field RATE_SCALE I
+	public final fun getRULE_ID_PATTERN ()Lkotlin/text/Regex;
+}
+
+public final class com/openbank/libs/product/ir/IrVersion {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/IrVersion;
+	public static final field V1 I
+	public final fun getSUPPORTED ()Ljava/util/Set;
+}
+
+public final class com/openbank/libs/product/ir/MaturityAction : java/lang/Enum {
+	public static final field CAPITALISE Lcom/openbank/libs/product/ir/MaturityAction;
+	public static final field PAY_OUT Lcom/openbank/libs/product/ir/MaturityAction;
+	public static final field ROLL_OVER Lcom/openbank/libs/product/ir/MaturityAction;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/MaturityAction;
+	public static fun values ()[Lcom/openbank/libs/product/ir/MaturityAction;
+}
+
+public final class com/openbank/libs/product/ir/PenaltyKind : java/lang/Enum {
+	public static final field FORFEITED_INTEREST_FRACTION Lcom/openbank/libs/product/ir/PenaltyKind;
+	public static final field RATE Lcom/openbank/libs/product/ir/PenaltyKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/PenaltyKind;
+	public static fun values ()[Lcom/openbank/libs/product/ir/PenaltyKind;
+}
+
+public final class com/openbank/libs/product/ir/Posting {
+	public fun <init> (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/PostingDirection;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/PostingDirection;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun copy (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/PostingDirection;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Posting;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Posting;Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/PostingDirection;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Posting;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getDirection ()Lcom/openbank/libs/product/ir/PostingDirection;
+	public final fun getKind ()Lcom/openbank/libs/product/ir/EventKind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/PostingAttribute : java/lang/Enum {
+	public static final field POSTING_AMOUNT Lcom/openbank/libs/product/ir/PostingAttribute;
+	public static final field PROJECTED_BALANCE Lcom/openbank/libs/product/ir/PostingAttribute;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/PostingAttribute;
+	public static fun values ()[Lcom/openbank/libs/product/ir/PostingAttribute;
+}
+
+public final class com/openbank/libs/product/ir/PostingDirection : java/lang/Enum {
+	public static final field CREDIT Lcom/openbank/libs/product/ir/PostingDirection;
+	public static final field DEBIT Lcom/openbank/libs/product/ir/PostingDirection;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/PostingDirection;
+	public static fun values ()[Lcom/openbank/libs/product/ir/PostingDirection;
+}
+
+public final class com/openbank/libs/product/ir/PostingLine {
+	public fun <init> (Lcom/openbank/libs/product/ir/AccountingClass;Lcom/openbank/libs/product/ir/PostingDirection;Ljava/math/BigDecimal;Ljava/lang/String;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/AccountingClass;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/PostingDirection;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/product/ir/AccountingClass;Lcom/openbank/libs/product/ir/PostingDirection;Ljava/math/BigDecimal;Ljava/lang/String;)Lcom/openbank/libs/product/ir/PostingLine;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/PostingLine;Lcom/openbank/libs/product/ir/AccountingClass;Lcom/openbank/libs/product/ir/PostingDirection;Ljava/math/BigDecimal;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/PostingLine;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccountingClass ()Lcom/openbank/libs/product/ir/AccountingClass;
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getDirection ()Lcom/openbank/libs/product/ir/PostingDirection;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/product/ir/Predicate {
+}
+
+public final class com/openbank/libs/product/ir/Predicate$And : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/product/ir/Predicate$And;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$And;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$And;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOperands ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$BalanceMin : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/Window;
+	public final fun component2 ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun copy (Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Predicate$BalanceMin;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$BalanceMin;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$BalanceMin;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getOperator ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun getWindow ()Lcom/openbank/libs/product/ir/Window;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$Comparison : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/WaiveAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Lcom/openbank/libs/product/WaiveAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/product/WaiveAttribute;
+	public final fun component2 ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/product/WaiveAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/product/ir/Predicate$Comparison;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$Comparison;Lcom/openbank/libs/product/WaiveAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$Comparison;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttribute ()Lcom/openbank/libs/product/WaiveAttribute;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getOperator ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun getTextValue ()Ljava/lang/String;
+	public final fun getThreshold ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$CountEvents : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;I)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/Window;
+	public final fun component3 ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun component4 ()I
+	public final fun copy (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;I)Lcom/openbank/libs/product/ir/Predicate$CountEvents;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$CountEvents;Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;IILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$CountEvents;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCount ()I
+	public final fun getKind ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun getOperator ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun getWindow ()Lcom/openbank/libs/product/ir/Window;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$NoEvents : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/Window;
+	public final fun copy (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;)Lcom/openbank/libs/product/ir/Predicate$NoEvents;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$NoEvents;Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$NoEvents;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getKind ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun getWindow ()Lcom/openbank/libs/product/ir/Window;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$Not : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/ir/Predicate;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/Predicate;
+	public final fun copy (Lcom/openbank/libs/product/ir/Predicate;)Lcom/openbank/libs/product/ir/Predicate$Not;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$Not;Lcom/openbank/libs/product/ir/Predicate;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$Not;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOperand ()Lcom/openbank/libs/product/ir/Predicate;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$Or : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/product/ir/Predicate$Or;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$Or;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$Or;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getOperands ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$PostingComparison : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/ir/PostingAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/PostingAttribute;
+	public final fun component2 ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun copy (Lcom/openbank/libs/product/ir/PostingAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Predicate$PostingComparison;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$PostingComparison;Lcom/openbank/libs/product/ir/PostingAttribute;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$PostingComparison;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttribute ()Lcom/openbank/libs/product/ir/PostingAttribute;
+	public final fun getOperator ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun getThreshold ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Predicate$SumEvents : com/openbank/libs/product/ir/Predicate {
+	public fun <init> (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun component2 ()Lcom/openbank/libs/product/ir/Window;
+	public final fun component3 ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun copy (Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Predicate$SumEvents;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Predicate$SumEvents;Lcom/openbank/libs/product/ir/EventKind;Lcom/openbank/libs/product/ir/Window;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Predicate$SumEvents;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getKind ()Lcom/openbank/libs/product/ir/EventKind;
+	public final fun getOperator ()Lcom/openbank/libs/product/WaiveOperator;
+	public final fun getWindow ()Lcom/openbank/libs/product/ir/Window;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/PredicateEvaluator {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/PredicateEvaluator;
+	public final fun compare (Ljava/math/BigDecimal;Lcom/openbank/libs/product/WaiveOperator;Ljava/math/BigDecimal;)Z
+	public final fun test (Lcom/openbank/libs/product/ir/Predicate;Lcom/openbank/libs/product/ir/ProductState;Lcom/openbank/libs/product/ir/Posting;Ljava/time/LocalDate;)Z
+}
+
+public abstract interface class com/openbank/libs/product/ir/ProductArithmetic {
+	public abstract fun capitalise (Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/CurrencyCode;Lcom/openbank/libs/domain/money/RoundingPolicy;)Ljava/math/BigDecimal;
+	public abstract fun dailyAccrual (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/product/ir/IrDayCount;Ljava/time/LocalDate;Lcom/openbank/libs/domain/money/RoundingPolicy;)Ljava/math/BigDecimal;
+	public abstract fun forfeitedInterest (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/CurrencyCode;Lcom/openbank/libs/domain/money/RoundingPolicy;)Ljava/math/BigDecimal;
+	public abstract fun penaltyByRate (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/CurrencyCode;Lcom/openbank/libs/domain/money/RoundingPolicy;)Ljava/math/BigDecimal;
+	public abstract fun tieredDailyAccrual (Ljava/math/BigDecimal;Ljava/util/List;Lcom/openbank/libs/product/ir/IrDayCount;Ljava/time/LocalDate;Lcom/openbank/libs/domain/money/RoundingPolicy;)Ljava/math/BigDecimal;
+}
+
+public final class com/openbank/libs/product/ir/ProductClock {
+	public fun <init> (Ljava/time/Instant;Ljava/time/ZoneId;)V
+	public final fun component1 ()Ljava/time/Instant;
+	public final fun component2 ()Ljava/time/ZoneId;
+	public final fun copy (Ljava/time/Instant;Ljava/time/ZoneId;)Lcom/openbank/libs/product/ir/ProductClock;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/ProductClock;Ljava/time/Instant;Ljava/time/ZoneId;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/ProductClock;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNow ()Ljava/time/Instant;
+	public final fun getZone ()Ljava/time/ZoneId;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+	public final fun today ()Ljava/time/LocalDate;
+}
+
+public final class com/openbank/libs/product/ir/ProductEvaluationException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/openbank/libs/product/ir/ProductEvent {
+	public fun <init> (Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Posting;Ljava/lang/String;Ljava/math/BigDecimal;)V
+	public synthetic fun <init> (Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Posting;Ljava/lang/String;Ljava/math/BigDecimal;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/product/ir/Hook;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Lcom/openbank/libs/product/ir/Posting;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun copy (Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Posting;Ljava/lang/String;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/ProductEvent;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/ProductEvent;Lcom/openbank/libs/product/ir/Hook;Ljava/lang/String;Lcom/openbank/libs/product/ir/Posting;Ljava/lang/String;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/ProductEvent;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHook ()Lcom/openbank/libs/product/ir/Hook;
+	public final fun getNewValue ()Ljava/math/BigDecimal;
+	public final fun getParameter ()Ljava/lang/String;
+	public final fun getPosting ()Lcom/openbank/libs/product/ir/Posting;
+	public final fun getTag ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/ProductInterpreter {
+	public static final field Companion Lcom/openbank/libs/product/ir/ProductInterpreter$Companion;
+	public static final field PARAM_BONUS_RATE Ljava/lang/String;
+	public static final field PARAM_RATE Ljava/lang/String;
+	public fun <init> (Lcom/openbank/libs/product/ir/ProductArithmetic;)V
+	public final fun evaluate (Lcom/openbank/libs/product/ir/ProductRevisionIr;Lcom/openbank/libs/product/ir/ProductState;Lcom/openbank/libs/product/ir/ProductEvent;Lcom/openbank/libs/product/ir/ProductClock;)Ljava/util/List;
+}
+
+public final class com/openbank/libs/product/ir/ProductInterpreter$Companion {
+}
+
+public final class com/openbank/libs/product/ir/ProductIrCanonical {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/ProductIrCanonical;
+	public final fun amount (Ljava/math/BigDecimal;)Ljava/lang/String;
+	public final fun canonicalJson (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/lang/String;
+	public final fun instructionAmount (Ljava/math/BigDecimal;)Ljava/lang/String;
+	public final fun predicate (Lcom/openbank/libs/product/ir/Predicate;)Ljava/util/Map;
+	public final fun rate (Ljava/math/BigDecimal;)Ljava/lang/String;
+	public final fun revisionHash (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/lang/String;
+	public final fun tree (Lcom/openbank/libs/product/ir/ProductRevisionIr;)Ljava/util/Map;
+}
+
+public final class com/openbank/libs/product/ir/ProductIrParser {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/ProductIrParser;
+	public final fun fromTree (Ljava/lang/Object;)Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public final fun getHOOK_KEYS ()Ljava/util/Map;
+	public final fun parse (Ljava/lang/String;)Lcom/openbank/libs/product/ir/ProductRevisionIr;
+}
+
+public final class com/openbank/libs/product/ir/ProductIrValidationException : java/lang/IllegalArgumentException {
+	public fun <init> (Ljava/util/List;)V
+	public final fun getProblems ()Ljava/util/List;
+}
+
+public final class com/openbank/libs/product/ir/ProductIrValidationException$Problem {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/product/ir/ProductIrValidationException$Problem;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/ProductIrValidationException$Problem;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/ProductIrValidationException$Problem;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMessage ()Ljava/lang/String;
+	public final fun getPath ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/ProductRevisionIr {
+	public fun <init> (ILjava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/InterestTerms;Ljava/util/List;Lcom/openbank/libs/product/ir/TermDepositTerms;Ljava/util/Map;Ljava/lang/String;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Lcom/openbank/libs/product/ir/InterestTerms;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Lcom/openbank/libs/product/ir/TermDepositTerms;
+	public final fun component7 ()Ljava/util/Map;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun copy (ILjava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/InterestTerms;Ljava/util/List;Lcom/openbank/libs/product/ir/TermDepositTerms;Ljava/util/Map;Ljava/lang/String;)Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/ProductRevisionIr;ILjava/lang/String;Ljava/lang/String;Lcom/openbank/libs/product/ir/InterestTerms;Ljava/util/List;Lcom/openbank/libs/product/ir/TermDepositTerms;Ljava/util/Map;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/ProductRevisionIr;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAllRuleIds ()Ljava/util/List;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getFees ()Ljava/util/List;
+	public final fun getHooks ()Ljava/util/Map;
+	public final fun getInterest ()Lcom/openbank/libs/product/ir/InterestTerms;
+	public final fun getIrVersion ()I
+	public final fun getProductCode ()Ljava/lang/String;
+	public final fun getRevisionHash ()Ljava/lang/String;
+	public final fun getTermDeposit ()Lcom/openbank/libs/product/ir/TermDepositTerms;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/ProductState {
+	public fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/time/LocalDate;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;Ljava/util/List;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/time/LocalDate;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;Ljava/util/List;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/time/LocalDate;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun component7 ()Ljava/math/BigDecimal;
+	public final fun component8 ()Ljava/util/List;
+	public final fun component9 ()Ljava/util/List;
+	public final fun copy (Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/time/LocalDate;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;Ljava/util/List;Ljava/util/Map;)Lcom/openbank/libs/product/ir/ProductState;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/ProductState;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/time/LocalDate;Ljava/lang/String;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/util/List;Ljava/util/List;Ljava/util/Map;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/ProductState;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccruedInterest ()Ljava/math/BigDecimal;
+	public final fun getAggregatePocketBalance ()Ljava/math/BigDecimal;
+	public final fun getBalance ()Ljava/math/BigDecimal;
+	public final fun getBalanceSamples ()Ljava/util/List;
+	public final fun getCurrency ()Ljava/lang/String;
+	public final fun getEvents ()Ljava/util/List;
+	public final fun getMonthlyTurnover ()Ljava/math/BigDecimal;
+	public final fun getOpenedOn ()Ljava/time/LocalDate;
+	public final fun getParameters ()Ljava/util/Map;
+	public final fun getSegment ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/ProductStateTransition {
+	public static final field INSTANCE Lcom/openbank/libs/product/ir/ProductStateTransition;
+	public final fun apply (Lcom/openbank/libs/product/ir/ProductState;Ljava/util/List;Ljava/time/LocalDate;)Lcom/openbank/libs/product/ir/ProductState;
+	public final fun applyPosting (Lcom/openbank/libs/product/ir/ProductState;Lcom/openbank/libs/product/ir/Posting;Ljava/time/LocalDate;)Lcom/openbank/libs/product/ir/ProductState;
+}
+
+public final class com/openbank/libs/product/ir/RateType : java/lang/Enum {
+	public static final field FIXED Lcom/openbank/libs/product/ir/RateType;
+	public static final field TIERED Lcom/openbank/libs/product/ir/RateType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/product/ir/RateType;
+	public static fun values ()[Lcom/openbank/libs/product/ir/RateType;
+}
+
+public final class com/openbank/libs/product/ir/TermDepositTerms {
+	public fun <init> (Ljava/lang/String;ILcom/openbank/libs/product/ir/MaturityAction;Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()I
+	public final fun component3 ()Lcom/openbank/libs/product/ir/MaturityAction;
+	public final fun component4 ()Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;
+	public final fun copy (Ljava/lang/String;ILcom/openbank/libs/product/ir/MaturityAction;Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;)Lcom/openbank/libs/product/ir/TermDepositTerms;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/TermDepositTerms;Ljava/lang/String;ILcom/openbank/libs/product/ir/MaturityAction;Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/TermDepositTerms;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEarlyWithdrawal ()Lcom/openbank/libs/product/ir/EarlyWithdrawalPenalty;
+	public final fun getMaturityAction ()Lcom/openbank/libs/product/ir/MaturityAction;
+	public final fun getRuleId ()Ljava/lang/String;
+	public final fun getTermMonths ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Tier {
+	public fun <init> (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Lcom/openbank/libs/product/ir/Tier;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Tier;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/product/ir/Tier;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFrom ()Ljava/math/BigDecimal;
+	public final fun getRate ()Ljava/math/BigDecimal;
+	public final fun getTo ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/product/ir/Window {
+	public fun <init> (I)V
+	public final fun component1 ()I
+	public final fun copy (I)Lcom/openbank/libs/product/ir/Window;
+	public static synthetic fun copy$default (Lcom/openbank/libs/product/ir/Window;IILjava/lang/Object;)Lcom/openbank/libs/product/ir/Window;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDays ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/reasoning/ReasoningGraph {
 	public static final field Companion Lcom/openbank/libs/reasoning/ReasoningGraph$Companion;
 	public static final field DEFAULT_MAX_STEPS I

@@ -59,16 +59,19 @@ data class GoldenScenario(
             @Suppress("UNCHECKED_CAST")
             val root = IrJson.parse(json) as Map<String, Any?>
             val revision = ProductIrParser.fromTree(root.getValue("revision"))
+
             @Suppress("UNCHECKED_CAST")
-            val clock = root["clock"] as Map<String, Any?>? ?: emptyMap()
-            val zone = ZoneId.of(clock["zone"] as String? ?: "UTC")
+            val clock = root["clock"] as? Map<String, Any?> ?: emptyMap()
+            val zone = ZoneId.of(clock["zone"] as? String ?: "UTC")
+
             @Suppress("UNCHECKED_CAST")
             val stateTree = root.getValue("state") as Map<String, Any?>
+
             @Suppress("UNCHECKED_CAST")
             val steps = (root.getValue("steps") as List<Map<String, Any?>>).map { step(it) }
             return GoldenScenario(
                 name = root.getValue("name") as String,
-                description = root["description"] as String? ?: "",
+                description = root["description"] as? String ?: "",
                 revision = revision,
                 zone = zone,
                 initialState = state(stateTree),
@@ -89,22 +92,26 @@ data class GoldenScenario(
             balance = dec(t["balance"]),
             accruedInterest = dec(t["accruedInterest"]),
             openedOn = LocalDate.parse(t.getValue("openedOn") as String),
-            segment = t["segment"] as String?,
+            segment = t["segment"] as? String,
             monthlyTurnover = t["monthlyTurnover"]?.let { dec(it) },
             aggregatePocketBalance = t["aggregatePocketBalance"]?.let { dec(it) },
-            events = (t["events"] as List<Map<String, Any?>>? ?: emptyList()).map {
-                AccountEvent(EventKind.valueOf(it.getValue("kind") as String), LocalDate.parse(it.getValue("at") as String), dec(it["amount"]))
+            events = (t["events"] as? List<Map<String, Any?>> ?: emptyList()).map {
+                AccountEvent(
+                    EventKind.valueOf(it.getValue("kind") as String),
+                    LocalDate.parse(it.getValue("at") as String),
+                    dec(it["amount"]),
+                )
             },
-            balanceSamples = (t["balanceSamples"] as List<Map<String, Any?>>? ?: emptyList()).map {
+            balanceSamples = (t["balanceSamples"] as? List<Map<String, Any?>> ?: emptyList()).map {
                 BalanceSample(LocalDate.parse(it.getValue("on") as String), dec(it["balance"]))
             },
-            parameters = (t["parameters"] as Map<String, Any?>? ?: emptyMap()).mapValues { dec(it.value) },
+            parameters = (t["parameters"] as? Map<String, Any?> ?: emptyMap()).mapValues { dec(it.value) },
         )
 
         @Suppress("UNCHECKED_CAST")
         private fun step(t: Map<String, Any?>): Step {
             val hook = ProductIrParser.HOOK_KEYS.getValue(t.getValue("hook") as String)
-            val posting = (t["posting"] as Map<String, Any?>?)?.let {
+            val posting = (t["posting"] as? Map<String, Any?>)?.let {
                 Posting(
                     EventKind.valueOf(it.getValue("kind") as String),
                     PostingDirection.valueOf(it.getValue("direction") as String),
@@ -113,22 +120,26 @@ data class GoldenScenario(
             }
             val event = ProductEvent(
                 hook = hook,
-                tag = t["tag"] as String?,
+                tag = t["tag"] as? String,
                 posting = posting,
-                parameter = t["parameter"] as String?,
+                parameter = t["parameter"] as? String,
                 newValue = t["newValue"]?.let { dec(it) },
             )
-            val expected = (t["expected"] as List<Any?>? ?: emptyList()).map { normaliseExpected(it) }
+            val expected = (t["expected"] as? List<Any?> ?: emptyList()).map { normaliseExpected(it) }
             return Step(Instant.parse(t.getValue("at") as String), event, CanonicalJson.write(expected))
         }
 
-        /** Brings an authored expected instruction onto the canonical scales so `0.6849` and `0.684900` compare equal. */
+        /** Brings an authored expected instruction onto the canonical scales (`0.6849` equals `0.684900`). */
         private fun normaliseExpected(v: Any?): Any? = when (v) {
             is Map<*, *> -> v.entries.associate { (k, value) ->
                 val key = k as String
                 key to when {
-                    key == "amount" && (value is String || value is BigDecimal) -> dec(value).setScale(IrLimits.INSTRUCTION_AMOUNT_SCALE).toPlainString()
-                    key == "value" && (value is String || value is BigDecimal) -> dec(value).setScale(IrLimits.RATE_SCALE).toPlainString()
+                    key == "amount" && (value is String || value is BigDecimal) -> dec(
+                        value,
+                    ).setScale(IrLimits.INSTRUCTION_AMOUNT_SCALE).toPlainString()
+                    key == "value" && (value is String || value is BigDecimal) -> dec(
+                        value,
+                    ).setScale(IrLimits.RATE_SCALE).toPlainString()
                     key == "irVersion" && value is BigDecimal -> value.toInt()
                     else -> normaliseExpected(value)
                 }
@@ -181,15 +192,31 @@ class GoldenScenarioRunner(private val interpreter: ProductInterpreter = Product
         val failures = ArrayList<String>()
         for (r in results) {
             assertMoneyConserved(r.instructions)
-            r.instructions.filter { it.revisionHash != scenario.revision.revisionHash || it.irVersion != scenario.revision.irVersion }
-                .forEach { failures += "step ${r.index}: ${it.ruleId} carries hash ${it.revisionHash}/v${it.irVersion}, revision is ${scenario.revision.revisionHash}/v${scenario.revision.irVersion}" }
-            if (!r.matches) failures += "step ${r.index} (${r.event.hook}${r.event.tag?.let { " $it" } ?: ""}):\n    expected ${r.expectedCanonical}\n    actual   ${r.actualCanonical}"
+            r.instructions.filter {
+                it.revisionHash != scenario.revision.revisionHash ||
+                    it.irVersion != scenario.revision.irVersion
+            }
+                .forEach {
+                    failures +=
+                        "step ${r.index}: ${it.ruleId} carries hash ${it.revisionHash}/v${it.irVersion}, revisi" +
+                        "on is ${scenario.revision.revisionHash}/v${scenario.revision.irVersion}"
+                }
+            if (!r.matches) {
+                failures +=
+                    "step ${r.index} (${r.event.hook}${r.event.tag?.let {
+                        " $it"
+                    } ?: ""}):\n    expected ${r.expectedCanonical}\n    actual   ${r.actualCanonical}"
+            }
         }
-        if (failures.isNotEmpty()) throw AssertionError("golden scenario '${scenario.name}' failed:\n  " + failures.joinToString("\n  "))
+        if (failures.isNotEmpty()) {
+            throw AssertionError(
+                "golden scenario '${scenario.name}' failed:\n  " + failures.joinToString("\n  "),
+            )
+        }
     }
 }
 
-/** The committed golden set: every scenario file under `product-golden/` on the classpath, listed in `product-golden/index.txt`. */
+/** The committed golden set: every scenario under `product-golden/`, listed in its `index.txt`. */
 object GoldenScenarios {
     private const val INDEX = "/product-golden/index.txt"
 

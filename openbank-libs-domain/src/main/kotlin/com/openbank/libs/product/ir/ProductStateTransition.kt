@@ -2,6 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// Instruction kind, then line, then accounting class: the depth is the shape of the data.
+@file:Suppress("NestedBlockDepth")
+
 package com.openbank.libs.product.ir
 
 import java.math.BigDecimal

@@ -2,6 +2,10 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// A hand-written RFC 8259 reader: one dispatch over the character classes of the grammar, and the
+// four hex digits of a \u escape. Splitting it would scatter the grammar across helpers.
+@file:Suppress("CyclomaticComplexMethod", "ComplexCondition", "NestedBlockDepth", "MagicNumber")
+
 package com.openbank.libs.product.ir
 
 import java.math.BigDecimal

@@ -46,11 +46,15 @@ dependencies {
     jmh(project(":openbank-libs-runtime"))
     jmh(project(":openbank-libs-iso20022"))
     // ADR-0352 ProductInterpreterBench: the interpreter (libs-domain), its arithmetic (libs-finance)
-    // and the golden set it evaluates (libs-testing's GoldenScenarios).
+    // and the golden set it evaluates (see the jmh resources below).
     jmh(project(":openbank-libs-finance"))
-    // Non-transitive: only GoldenScenarios + the product-golden resources are needed; the module's
-    // Quarkus/testcontainers API surface would push the JMH jar past 65535 entries.
-    jmh(project(":openbank-libs-testing")) { isTransitive = false }
+}
+
+// ADR-0352 ProductInterpreterBench evaluates the committed golden set. The scenario JSON is read
+// straight from openbank-libs-testing's resources: that module is a test-fixture library and must not
+// sit on a non-test classpath (rules.yaml: authz_policy, gate no-allow-all-pdp-in-main).
+sourceSets.named("jmh") {
+    resources.srcDir("../openbank-libs-testing/src/main/resources")
 }
 
 jmh {

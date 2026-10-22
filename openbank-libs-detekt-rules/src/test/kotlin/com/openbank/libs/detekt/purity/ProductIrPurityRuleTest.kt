@@ -16,7 +16,8 @@ class ProductIrPurityRuleTest {
 
     private val rule = ProductIrPurityRule()
 
-    private fun lint(body: String, pkg: String = "com.openbank.libs.product.ir") = rule.compileAndLint("package $pkg\n\n$body")
+    private fun lint(body: String, pkg: String = "com.openbank.libs.product.ir") =
+        rule.compileAndLint("package $pkg\n\n$body")
 
     @Test
     fun `MUST FAIL - a java io import under the product package`() {
@@ -95,7 +96,8 @@ class ProductIrPurityRuleTest {
 
     @Test
     fun `ignores the same shapes outside the product package`() {
-        val src = "import java.io.File\nimport java.time.Instant\n\nclass X { fun t() = Instant.now().toString() + File(\"x\").name + System.nanoTime() }"
+        val src = "import java.io.File\nimport java.time.Instant\n\n" +
+            "class X { fun t() = Instant.now().toString() + File(\"x\").name + System.nanoTime() }"
         assertThat(lint(src, pkg = "com.openbank.libs.audit")).isEmpty()
         assertThat(lint(src, pkg = "com.openbank.libs.productcatalog")).isEmpty()
     }

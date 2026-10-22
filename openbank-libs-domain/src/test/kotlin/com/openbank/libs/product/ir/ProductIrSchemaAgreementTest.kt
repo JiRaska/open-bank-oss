@@ -47,16 +47,25 @@ class ProductIrSchemaAgreementTest {
     fun `both reject the same structural defects`() {
         val base = IrFixtures.savingsJson
         val defects = listOf(
-            "unknown key" to base.replace("\"productCode\": \"SAV-FIXED\",", "\"productCode\": \"SAV-FIXED\", \"script\": \"x\","),
+            "unknown key" to
+                base.replace("\"productCode\": \"SAV-FIXED\",", "\"productCode\": \"SAV-FIXED\", \"script\": \"x\","),
             "missing ruleId" to base.replace("\"ruleId\": \"fee.maintenance\",", ""),
             "ruleId pattern" to base.replace("\"ruleId\": \"open.welcome\"", "\"ruleId\": \"3\""),
             "unknown enum" to base.replace("\"dayCount\": \"ACT_365_FIXED\"", "\"dayCount\": \"ACT_364\""),
             "irVersion" to base.replace("\"irVersion\": 1", "\"irVersion\": 2"),
             "rate precision" to base.replace("\"rate\": \"0.0250\"", "\"rate\": \"0.02500000001\""),
-            "FIXED with tiers" to base.replace("\"rate\": \"0.0250\",", "\"rate\": \"0.0250\", \"tiers\": [{\"from\": \"0\", \"rate\": \"0.01\"}],"),
+            "FIXED with tiers" to
+                base.replace(
+                    "\"rate\": \"0.0250\",",
+                    "\"rate\": \"0.0250\", \"tiers\": [{\"from\": \"0\", \"rate\": \"0.01\"}],",
+                ),
             "unknown action" to base.replace("\"type\": \"ACCRUE_INTEREST\"", "\"type\": \"RUN_SCRIPT\""),
             "window days" to base.replace("\"days\": 30", "\"days\": 0"),
-            "bad variable name" to base.replace("\"variables\": { \"productCode\": \"SAV-FIXED\" }", "\"variables\": { \"Product Code\": \"SAV-FIXED\" }"),
+            "bad variable name" to
+                base.replace(
+                    "\"variables\": { \"productCode\": \"SAV-FIXED\" }",
+                    "\"variables\": { \"Product Code\": \"SAV-FIXED\" }",
+                ),
         )
         for ((label, json) in defects) {
             assertThat(schemaAccepts(json)).withFailMessage("schema should reject: $label").isFalse()

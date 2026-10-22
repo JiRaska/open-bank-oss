@@ -109,9 +109,11 @@ sealed interface Predicate {
 
     data class NoEvents(val kind: EventKind, val window: Window) : Predicate
 
-    data class CountEvents(val kind: EventKind, val window: Window, val operator: WaiveOperator, val count: Int) : Predicate
+    data class CountEvents(val kind: EventKind, val window: Window, val operator: WaiveOperator, val count: Int) :
+        Predicate
 
-    data class SumEvents(val kind: EventKind, val window: Window, val operator: WaiveOperator, val amount: BigDecimal) : Predicate
+    data class SumEvents(val kind: EventKind, val window: Window, val operator: WaiveOperator, val amount: BigDecimal) :
+        Predicate
 
     data class BalanceMin(val window: Window, val operator: WaiveOperator, val amount: BigDecimal) : Predicate
 
@@ -164,7 +166,12 @@ data class FeeTerms(
     val waiver: Predicate?,
 )
 
-data class EarlyWithdrawalPenalty(val ruleId: String, val kind: PenaltyKind, val rate: BigDecimal?, val fraction: BigDecimal?)
+data class EarlyWithdrawalPenalty(
+    val ruleId: String,
+    val kind: PenaltyKind,
+    val rate: BigDecimal?,
+    val fraction: BigDecimal?,
+)
 
 data class TermDepositTerms(
     val ruleId: String,
@@ -201,12 +208,7 @@ sealed interface Action {
  * One rule on one hook. [trigger] names the schedule tag that fires it (`scheduled` hook only);
  * [`when`][whenPredicate] gates it; [action] is what it does.
  */
-data class HookRule(
-    val ruleId: String,
-    val trigger: String?,
-    val whenPredicate: Predicate?,
-    val action: Action,
-)
+data class HookRule(val ruleId: String, val trigger: String?, val whenPredicate: Predicate?, val action: Action)
 
 /** A published revision's whole behaviour. [revisionHash] is computed by [ProductIrCanonical], never authored. */
 data class ProductRevisionIr(
@@ -221,9 +223,15 @@ data class ProductRevisionIr(
 ) {
     val allRuleIds: List<String>
         get() = buildList {
-            interest?.let { add(it.ruleId); it.bonus?.let { b -> add(b.ruleId) } }
+            interest?.let {
+                add(it.ruleId)
+                it.bonus?.let { b -> add(b.ruleId) }
+            }
             fees.forEach { add(it.ruleId) }
-            termDeposit?.let { add(it.ruleId); it.earlyWithdrawal?.let { e -> add(e.ruleId) } }
+            termDeposit?.let {
+                add(it.ruleId)
+                it.earlyWithdrawal?.let { e -> add(e.ruleId) }
+            }
             hooks.values.flatten().forEach { add(it.ruleId) }
         }
 }

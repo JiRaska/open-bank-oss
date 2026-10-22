@@ -2,6 +2,10 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// One function per action of the closed instruction set; the rule loop skips non-matching rules and stops
+// at the first Reject, which is the ADR-0352 §2 semantics.
+@file:Suppress("TooManyFunctions", "LoopWithTooManyJumpStatements")
+
 package com.openbank.libs.product.ir
 
 import com.openbank.libs.domain.money.CurrencyCode
@@ -23,7 +27,12 @@ import java.time.LocalDate
  */
 class ProductInterpreter(private val arithmetic: ProductArithmetic) {
 
-    fun evaluate(revision: ProductRevisionIr, state: ProductState, event: ProductEvent, clock: ProductClock): List<Instruction> {
+    fun evaluate(
+        revision: ProductRevisionIr,
+        state: ProductState,
+        event: ProductEvent,
+        clock: ProductClock,
+    ): List<Instruction> {
         val run = Run(revision, state, event, clock.today())
         val rules = revision.hooks[event.hook].orEmpty()
         for (rule in rules) {
@@ -81,7 +90,13 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
                     rejected = true
                 }
                 is Action.Notify -> emit(
-                    Instruction.Notify(rule.ruleId, revision.revisionHash, revision.irVersion, a.templateId, a.variables),
+                    Instruction.Notify(
+                        rule.ruleId,
+                        revision.revisionHash,
+                        revision.irVersion,
+                        a.templateId,
+                        a.variables,
+                    ),
                 )
                 is Action.Reprice -> emit(
                     Instruction.Reprice(rule.ruleId, revision.revisionHash, revision.irVersion, a.parameter, a.value),
@@ -108,7 +123,13 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
                     today,
                     terms.accrualRounding,
                 )
-                RateType.TIERED -> arithmetic.tieredDailyAccrual(state.balance, terms.tiers, terms.dayCount, today, terms.accrualRounding)
+                RateType.TIERED -> arithmetic.tieredDailyAccrual(
+                    state.balance,
+                    terms.tiers,
+                    terms.dayCount,
+                    today,
+                    terms.accrualRounding,
+                )
             }
             if (base.signum() > 0) accrualPost(terms.ruleId, base, "interest accrual")
             val bonus = terms.bonus ?: return
@@ -208,7 +229,12 @@ class ProductInterpreter(private val arithmetic: ProductArithmetic) {
                     }
                 }
                 PenaltyKind.FORFEITED_INTEREST_FRACTION -> {
-                    val amount = arithmetic.forfeitedInterest(state.accruedInterest, penalty.fraction!!, currency, postingRounding)
+                    val amount = arithmetic.forfeitedInterest(
+                        state.accruedInterest,
+                        penalty.fraction!!,
+                        currency,
+                        postingRounding,
+                    )
                     if (amount.signum() > 0) {
                         post(
                             ruleId,

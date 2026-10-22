@@ -2,6 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// Generator ranges (rates, amounts, days, counts) are the test data; naming each bound adds nothing.
+@file:Suppress("MagicNumber")
+
 package com.openbank.libs.testing.product
 
 import com.openbank.libs.product.ir.AccountEvent
@@ -35,21 +38,59 @@ import java.time.LocalDate
  */
 object ProductArb {
 
-    private val rate: Arb<String> = Arb.bigDecimal(BigDecimal("0.0000"), BigDecimal("0.2000")).map { it.setScale(4, RoundingMode.HALF_UP).toPlainString() }
-    private val amount: Arb<String> = Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("1000000.00")).map { it.setScale(2, RoundingMode.HALF_UP).toPlainString() }
+    private val rate: Arb<String> = Arb.bigDecimal(BigDecimal("0.0000"), BigDecimal("0.2000")).map {
+        it.setScale(4, RoundingMode.HALF_UP).toPlainString()
+    }
+    private val amount: Arb<String> = Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("1000000.00")).map {
+        it.setScale(2, RoundingMode.HALF_UP).toPlainString()
+    }
     private val dayCount: Arb<String> = Arb.element("ACT_365_FIXED", "ACT_360", "ACT_ACT", "THIRTY_360_BOND_BASIS")
     private val cadence: Arb<String> = Arb.element("DAILY", "MONTHLY", "QUARTERLY", "ANNUALLY")
 
     private val predicate: Arb<Map<String, Any?>> = arbitrary { rs ->
         val days = Arb.int(1, 400).bind()
         when (Arb.int(0, 6).bind()) {
-            0 -> mapOf("type" to "noEvents", "kind" to Arb.element(EventKind.entries).bind().name, "window" to mapOf("days" to days))
-            1 -> mapOf("type" to "countEvents", "kind" to Arb.element(EventKind.entries).bind().name, "window" to mapOf("days" to days), "operator" to Arb.element("GT", "GTE", "LT", "LTE", "EQ", "NEQ").bind(), "count" to Arb.int(0, 5).bind())
-            2 -> mapOf("type" to "sumEvents", "kind" to Arb.element(EventKind.entries).bind().name, "window" to mapOf("days" to days), "operator" to Arb.element("GT", "LT").bind(), "amount" to amount.bind())
-            3 -> mapOf("type" to "balanceMin", "window" to mapOf("days" to days), "operator" to Arb.element("GTE", "LT").bind(), "amount" to amount.bind())
-            4 -> mapOf("type" to "comparison", "attribute" to "BALANCE", "operator" to Arb.element("GT", "GTE", "LT", "LTE").bind(), "threshold" to amount.bind())
-            5 -> mapOf("type" to "comparison", "attribute" to "SEGMENT", "operator" to Arb.element("EQ", "NEQ").bind(), "textValue" to Arb.element("VIP", "RETAIL", "STUDENT").bind())
-            else -> mapOf("type" to "not", "operand" to mapOf("type" to "noEvents", "kind" to "WITHDRAWAL", "window" to mapOf("days" to days)))
+            0 -> mapOf(
+                "type" to "noEvents",
+                "kind" to Arb.element(EventKind.entries).bind().name,
+                "window" to mapOf("days" to days),
+            )
+            1 -> mapOf(
+                "type" to "countEvents",
+                "kind" to Arb.element(EventKind.entries).bind().name,
+                "window" to mapOf("days" to days),
+                "operator" to Arb.element("GT", "GTE", "LT", "LTE", "EQ", "NEQ").bind(),
+                "count" to Arb.int(0, 5).bind(),
+            )
+            2 -> mapOf(
+                "type" to "sumEvents",
+                "kind" to Arb.element(EventKind.entries).bind().name,
+                "window" to mapOf("days" to days),
+                "operator" to Arb.element("GT", "LT").bind(),
+                "amount" to amount.bind(),
+            )
+            3 -> mapOf(
+                "type" to "balanceMin",
+                "window" to mapOf("days" to days),
+                "operator" to Arb.element("GTE", "LT").bind(),
+                "amount" to amount.bind(),
+            )
+            4 -> mapOf(
+                "type" to "comparison",
+                "attribute" to "BALANCE",
+                "operator" to Arb.element("GT", "GTE", "LT", "LTE").bind(),
+                "threshold" to amount.bind(),
+            )
+            5 -> mapOf(
+                "type" to "comparison",
+                "attribute" to "SEGMENT",
+                "operator" to Arb.element("EQ", "NEQ").bind(),
+                "textValue" to Arb.element("VIP", "RETAIL", "STUDENT").bind(),
+            )
+            else -> mapOf(
+                "type" to "not",
+                "operand" to mapOf("type" to "noEvents", "kind" to "WITHDRAWAL", "window" to mapOf("days" to days)),
+            )
         }
     }
 
@@ -81,13 +122,28 @@ object ProductArb {
             put("capitalisationCadence", if (term) "AT_MATURITY" else cadence.bind())
             put("accrualRounding", "INTEREST_ACCRUAL")
             put("postingRounding", "LEDGER_POSTING")
-            if (withBonus) put("bonus", mapOf("ruleId" to "interest.bonus", "rate" to rate.bind(), "predicate" to predicate.bind()))
+            if (withBonus) {
+                put(
+                    "bonus",
+                    mapOf(
+                        "ruleId" to "interest.bonus",
+                        "rate" to rate.bind(),
+                        "predicate" to predicate.bind(),
+                    ),
+                )
+            }
         }
         val fees = (0 until feeCount).map { i ->
             buildMap<String, Any?> {
                 put("ruleId", "fee.f$i")
                 put("feeCode", "F$i")
-                put("amount", Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("50.00")).bind().setScale(2, RoundingMode.HALF_UP).toPlainString())
+                put(
+                    "amount",
+                    Arb.bigDecimal(
+                        BigDecimal("0.00"),
+                        BigDecimal("50.00"),
+                    ).bind().setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                )
                 put("cadence", cadence.bind())
                 put("accountingClass", "FEE_INCOME")
                 if (Arb.boolean().bind()) put("waiver", predicate.bind())
@@ -95,28 +151,92 @@ object ProductArb {
         }
         val onOpen = ArrayList<Map<String, Any?>>()
         val scheduled = ArrayList<Map<String, Any?>>()
-        onOpen += mapOf("ruleId" to "open.accrual", "action" to mapOf("type" to "SCHEDULE", "hook" to "scheduled", "tag" to "ACCRUAL", "cadence" to "DAILY"))
-        scheduled += mapOf("ruleId" to "scheduled.accrue", "trigger" to "ACCRUAL", "action" to mapOf("type" to "ACCRUE_INTEREST"))
+        onOpen +=
+            mapOf(
+                "ruleId" to "open.accrual",
+                "action" to mapOf(
+                    "type" to "SCHEDULE",
+                    "hook" to "scheduled",
+                    "tag" to "ACCRUAL",
+                    "cadence" to "DAILY",
+                ),
+            )
+        scheduled +=
+            mapOf(
+                "ruleId" to "scheduled.accrue",
+                "trigger" to "ACCRUAL",
+                "action" to mapOf("type" to "ACCRUE_INTEREST"),
+            )
         if (term) {
-            onOpen += mapOf("ruleId" to "open.maturity", "action" to mapOf("type" to "SCHEDULE", "hook" to "scheduled", "tag" to "MATURITY", "cadence" to "AT_MATURITY"))
-            scheduled += mapOf("ruleId" to "scheduled.mature", "trigger" to "MATURITY", "action" to mapOf("type" to "MATURE"))
+            onOpen +=
+                mapOf(
+                    "ruleId" to "open.maturity",
+                    "action" to
+                        mapOf(
+                            "type" to "SCHEDULE",
+                            "hook" to "scheduled",
+                            "tag" to "MATURITY",
+                            "cadence" to "AT_MATURITY",
+                        ),
+                )
+            scheduled +=
+                mapOf("ruleId" to "scheduled.mature", "trigger" to "MATURITY", "action" to mapOf("type" to "MATURE"))
         } else {
-            onOpen += mapOf("ruleId" to "open.capitalisation", "action" to mapOf("type" to "SCHEDULE", "hook" to "scheduled", "tag" to "CAPITALISATION", "cadence" to interest["capitalisationCadence"]))
-            scheduled += mapOf("ruleId" to "scheduled.capitalise", "trigger" to "CAPITALISATION", "action" to mapOf("type" to "CAPITALISE_INTEREST"))
+            onOpen +=
+                mapOf(
+                    "ruleId" to "open.capitalisation",
+                    "action" to
+                        mapOf(
+                            "type" to "SCHEDULE",
+                            "hook" to "scheduled",
+                            "tag" to "CAPITALISATION",
+                            "cadence" to interest["capitalisationCadence"],
+                        ),
+                )
+            scheduled +=
+                mapOf(
+                    "ruleId" to "scheduled.capitalise",
+                    "trigger" to "CAPITALISATION",
+                    "action" to mapOf("type" to "CAPITALISE_INTEREST"),
+                )
         }
         fees.forEachIndexed { i, f ->
-            onOpen += mapOf("ruleId" to "open.fee$i", "action" to mapOf("type" to "SCHEDULE", "hook" to "scheduled", "tag" to "FEE_$i", "cadence" to f["cadence"]))
-            scheduled += mapOf("ruleId" to "scheduled.fee$i", "trigger" to "FEE_$i", "action" to mapOf("type" to "CHARGE_FEE", "feeRuleId" to f["ruleId"]))
+            onOpen +=
+                mapOf(
+                    "ruleId" to "open.fee$i",
+                    "action" to
+                        mapOf(
+                            "type" to "SCHEDULE",
+                            "hook" to "scheduled",
+                            "tag" to "FEE_$i",
+                            "cadence" to f["cadence"],
+                        ),
+                )
+            scheduled +=
+                mapOf(
+                    "ruleId" to "scheduled.fee$i",
+                    "trigger" to "FEE_$i",
+                    "action" to mapOf("type" to "CHARGE_FEE", "feeRuleId" to f["ruleId"]),
+                )
         }
         val prePosting = ArrayList<Map<String, Any?>>()
         if (Arb.boolean().bind()) {
             prePosting += mapOf(
                 "ruleId" to "posting.no-overdraft",
-                "when" to mapOf("type" to "postingComparison", "attribute" to "PROJECTED_BALANCE", "operator" to "LT", "threshold" to "0.00"),
+                "when" to
+                    mapOf(
+                        "type" to "postingComparison",
+                        "attribute" to "PROJECTED_BALANCE",
+                        "operator" to "LT",
+                        "threshold" to "0.00",
+                    ),
                 "action" to mapOf("type" to "REJECT", "reasonCode" to "INSUFFICIENT_FUNDS"),
             )
         }
-        if (term) prePosting += mapOf("ruleId" to "posting.early", "action" to mapOf("type" to "EARLY_WITHDRAWAL_PENALTY"))
+        if (term) {
+            prePosting +=
+                mapOf("ruleId" to "posting.early", "action" to mapOf("type" to "EARLY_WITHDRAWAL_PENALTY"))
+        }
         buildMap<String, Any?> {
             put("irVersion", 1)
             put("productCode", "ARB-" + Arb.int(1, 999).bind())
@@ -131,14 +251,35 @@ object ProductArb {
                         put("termMonths", Arb.int(1, 60).bind())
                         put("maturityAction", Arb.element("CAPITALISE", "PAY_OUT", "ROLL_OVER").bind())
                         if (Arb.boolean().bind()) {
-                            put("earlyWithdrawal", mapOf("ruleId" to "term.early", "kind" to "RATE", "rate" to rate.bind()))
+                            put(
+                                "earlyWithdrawal",
+                                mapOf(
+                                    "ruleId" to "term.early",
+                                    "kind" to "RATE",
+                                    "rate" to rate.bind(),
+                                ),
+                            )
                         } else {
-                            put("earlyWithdrawal", mapOf("ruleId" to "term.early", "kind" to "FORFEITED_INTEREST_FRACTION", "fraction" to Arb.element("0.25", "0.5", "1").bind()))
+                            put(
+                                "earlyWithdrawal",
+                                mapOf(
+                                    "ruleId" to "term.early",
+                                    "kind" to "FORFEITED_INTEREST_FRACTION",
+                                    "fraction" to Arb.element("0.25", "0.5", "1").bind(),
+                                ),
+                            )
                         }
                     },
                 )
             }
-            put("hooks", buildMap<String, Any?> { put("onOpen", onOpen); put("scheduled", scheduled); if (prePosting.isNotEmpty()) put("prePosting", prePosting) })
+            put(
+                "hooks",
+                buildMap<String, Any?> {
+                    put("onOpen", onOpen)
+                    put("scheduled", scheduled)
+                    if (prePosting.isNotEmpty()) put("prePosting", prePosting)
+                },
+            )
         }
     }
 
@@ -149,20 +290,46 @@ object ProductArb {
 
     /** A state consistent with [currency]; balances non-negative, a few events and samples around [today]. */
     fun state(currency: String, today: LocalDate): Arb<ProductState> = arbitrary {
-        val balance = Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("500000.00")).bind().setScale(2, RoundingMode.HALF_UP)
+        val balance = Arb.bigDecimal(
+            BigDecimal("0.00"),
+            BigDecimal("500000.00"),
+        ).bind().setScale(2, RoundingMode.HALF_UP)
         ProductState(
             currency = currency,
             balance = balance,
-            accruedInterest = Arb.bigDecimal(BigDecimal("0.000000"), BigDecimal("5000.000000")).bind().setScale(6, RoundingMode.HALF_UP),
+            accruedInterest = Arb.bigDecimal(
+                BigDecimal("0.000000"),
+                BigDecimal("5000.000000"),
+            ).bind().setScale(6, RoundingMode.HALF_UP),
             openedOn = today.minusDays(Arb.int(0, 800).bind().toLong()),
             segment = Arb.element("VIP", "RETAIL", "STUDENT").orNull(0.3).bind(),
-            monthlyTurnover = Arb.bigDecimal(BigDecimal("0"), BigDecimal("100000")).orNull(0.3).bind()?.setScale(2, RoundingMode.HALF_UP),
+            monthlyTurnover = Arb.bigDecimal(
+                BigDecimal("0"),
+                BigDecimal("100000"),
+            ).orNull(0.3).bind()?.setScale(2, RoundingMode.HALF_UP),
             events = Arb.list(
-                arbitrary { AccountEvent(Arb.element(EventKind.entries).bind(), today.minusDays(Arb.int(0, 60).bind().toLong()), Arb.bigDecimal(BigDecimal("0.01"), BigDecimal("9999.00")).bind().setScale(2, RoundingMode.HALF_UP)) },
+                arbitrary {
+                    AccountEvent(
+                        Arb.element(EventKind.entries).bind(),
+                        today.minusDays(Arb.int(0, 60).bind().toLong()),
+                        Arb.bigDecimal(
+                            BigDecimal("0.01"),
+                            BigDecimal("9999.00"),
+                        ).bind().setScale(2, RoundingMode.HALF_UP),
+                    )
+                },
                 0..6,
             ).bind(),
             balanceSamples = Arb.list(
-                arbitrary { BalanceSample(today.minusDays(Arb.int(0, 60).bind().toLong()), Arb.bigDecimal(BigDecimal("0.00"), BigDecimal("500000.00")).bind().setScale(2, RoundingMode.HALF_UP)) },
+                arbitrary {
+                    BalanceSample(
+                        today.minusDays(Arb.int(0, 60).bind().toLong()),
+                        Arb.bigDecimal(
+                            BigDecimal("0.00"),
+                            BigDecimal("500000.00"),
+                        ).bind().setScale(2, RoundingMode.HALF_UP),
+                    )
+                },
                 0..6,
             ).bind(),
         )
@@ -181,7 +348,10 @@ object ProductArb {
                 posting = Posting(
                     Arb.element(EventKind.WITHDRAWAL, EventKind.DEPOSIT, EventKind.CARD_PAYMENT).bind(),
                     Arb.element(PostingDirection.entries).bind(),
-                    Arb.bigDecimal(BigDecimal("0.01"), BigDecimal("100000.00")).bind().setScale(2, RoundingMode.HALF_UP),
+                    Arb.bigDecimal(
+                        BigDecimal("0.01"),
+                        BigDecimal("100000.00"),
+                    ).bind().setScale(2, RoundingMode.HALF_UP),
                 ),
             )
         }

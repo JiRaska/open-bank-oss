@@ -65,18 +65,35 @@ object DepositInterest {
     ): BigDecimal = tiers.fold(BigDecimal.ZERO) { acc, tier ->
         val upper = tier.to?.min(balance) ?: balance
         val inBand = upper - tier.from
-        if (inBand.signum() <= 0) acc else acc + dailyAccrual(inBand, tier.rate, dayCount, date, accrualPolicy, dailyRatePolicy)
+        if (inBand.signum() <=
+            0
+        ) {
+            acc
+        } else {
+            acc + dailyAccrual(inBand, tier.rate, dayCount, date, accrualPolicy, dailyRatePolicy)
+        }
     }
 
     /** The amount a capitalisation posts from [accrued]: rounded to the currency under [policy]. */
-    fun capitalise(accrued: BigDecimal, currency: CurrencyCode, policy: RoundingPolicy = RoundingPolicy.LEDGER_POSTING): BigDecimal =
-        policy.round(accrued, currency)
+    fun capitalise(
+        accrued: BigDecimal,
+        currency: CurrencyCode,
+        policy: RoundingPolicy = RoundingPolicy.LEDGER_POSTING,
+    ): BigDecimal = policy.round(accrued, currency)
 
     /** A penalty expressed as [rate] of [amount], rounded to the currency under [policy]. */
-    fun penaltyByRate(amount: BigDecimal, rate: BigDecimal, currency: CurrencyCode, policy: RoundingPolicy): BigDecimal =
-        policy.round(amount.multiply(rate), currency)
+    fun penaltyByRate(
+        amount: BigDecimal,
+        rate: BigDecimal,
+        currency: CurrencyCode,
+        policy: RoundingPolicy,
+    ): BigDecimal = policy.round(amount.multiply(rate), currency)
 
     /** The forfeited part of [accrued] interest at [fraction], rounded to the currency under [policy]. */
-    fun forfeitedInterest(accrued: BigDecimal, fraction: BigDecimal, currency: CurrencyCode, policy: RoundingPolicy): BigDecimal =
-        policy.round(accrued.multiply(fraction), currency)
+    fun forfeitedInterest(
+        accrued: BigDecimal,
+        fraction: BigDecimal,
+        currency: CurrencyCode,
+        policy: RoundingPolicy,
+    ): BigDecimal = policy.round(accrued.multiply(fraction), currency)
 }

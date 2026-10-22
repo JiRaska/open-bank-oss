@@ -40,6 +40,9 @@ class GoldenDeterminismTest {
     @Test
     fun `one supported irVersion makes the cross-version half a no-op`() {
         assertThat(IrVersion.SUPPORTED).containsExactly(1)
-        println("product-ir-determinism: cross-irVersion equivalence is a NO-OP — one supported irVersion (${IrVersion.SUPPORTED}); add the equivalence table when a second version ships")
+        println(
+            "product-ir-determinism: cross-irVersion equivalence is a NO-OP — one supported irVersion " +
+                "(${IrVersion.SUPPORTED}); add the equivalence table when a second version ships",
+        )
     }
 }

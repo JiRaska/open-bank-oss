@@ -40,7 +40,11 @@ object InstructionCanonical {
                 "at" to i.at?.toString(),
             )
             is Instruction.Notify -> mapOf("type" to "NOTIFY", "templateId" to i.templateId, "variables" to i.variables)
-            is Instruction.Reprice -> mapOf("type" to "REPRICE", "parameter" to i.parameter, "value" to ProductIrCanonical.rate(i.value))
+            is Instruction.Reprice -> mapOf(
+                "type" to "REPRICE",
+                "parameter" to i.parameter,
+                "value" to ProductIrCanonical.rate(i.value),
+            )
         }
     }
 }

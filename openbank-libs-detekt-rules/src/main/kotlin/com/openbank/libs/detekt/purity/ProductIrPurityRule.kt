@@ -80,7 +80,13 @@ class ProductIrPurityRule(config: Config = Config.empty) : Rule(config) {
         val path = importDirective.importedFqName?.asString() ?: return
         val hit = FORBIDDEN_IMPORT_PREFIXES.firstOrNull { path == it.trimEnd('.') || path.startsWith(it) }
         if (hit != null) {
-            report(CodeSmell(issue, Entity.from(importDirective), "import of '$path' is not allowed under $PRODUCT_PACKAGE (ADR-0352 purity: $hit)"))
+            report(
+                CodeSmell(
+                    issue,
+                    Entity.from(importDirective),
+                    "import of '$path' is not allowed under $PRODUCT_PACKAGE (ADR-0352 purity: $hit)",
+                ),
+            )
         }
     }
 
@@ -90,9 +96,23 @@ class ProductIrPurityRule(config: Config = Config.empty) : Rule(config) {
         val callee = call.calleeExpression?.text ?: return
         val receiver = expression.receiverExpression.text.substringAfterLast('.')
         if (receiver in FORBIDDEN_RECEIVERS) {
-            report(CodeSmell(issue, Entity.from(expression), "'$receiver.$callee(...)' reads ambient state; the interpreter may only read its arguments (ADR-0352 purity)"))
+            report(
+                CodeSmell(
+                    issue,
+                    Entity.from(expression),
+                    "'$receiver.$callee(...)' reads ambient state; the interpreter may only read its arguments " +
+                        "(ADR-0352 purity)",
+                ),
+            )
         } else if (callee in AMBIENT_TIME_CALLS && receiver.firstOrNull()?.isUpperCase() == true) {
-            report(CodeSmell(issue, Entity.from(expression), "'$receiver.$callee(...)' reads the ambient clock; use the injected ProductClock (ADR-0352, ADR-0100)"))
+            report(
+                CodeSmell(
+                    issue,
+                    Entity.from(expression),
+                    "'$receiver.$callee(...)' reads the ambient clock; use the injected ProductClock (ADR-0352," +
+                        " ADR-0100)",
+                ),
+            )
         }
     }
 
@@ -101,7 +121,13 @@ class ProductIrPurityRule(config: Config = Config.empty) : Rule(config) {
         if (expression.parent is KtDotQualifiedExpression) return
         val callee = expression.calleeExpression?.text ?: return
         if (callee in FORBIDDEN_TOP_LEVEL_CALLS) {
-            report(CodeSmell(issue, Entity.from(expression), "'$callee(...)' is console I/O; the interpreter does not log (ADR-0352 purity)"))
+            report(
+                CodeSmell(
+                    issue,
+                    Entity.from(expression),
+                    "'$callee(...)' is console I/O; the interpreter does not log (ADR-0352 purity)",
+                ),
+            )
         }
     }
 }

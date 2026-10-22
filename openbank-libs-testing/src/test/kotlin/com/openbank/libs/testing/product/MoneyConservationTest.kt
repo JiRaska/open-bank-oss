@@ -26,6 +26,16 @@ class MoneyConservationTest {
         assertThatThrownBy { assertMoneyConserved(listOf(bad, Instruction.Reject("x", "h", 1, "R"))) }
             .isInstanceOf(AssertionError::class.java)
             .hasMessageContaining("rule r: {EUR=debit=5 credit=4}")
-        assertThat(MoneyConservation.violations(listOf(bad.copy(lines = bad.lines + PostingLine(AccountingClass.SETTLEMENT, PostingDirection.CREDIT, BigDecimal.ONE, "EUR"))))).isEmpty()
+        assertThat(
+            MoneyConservation.violations(
+                listOf(
+                    bad.copy(
+                        lines =
+                        bad.lines +
+                            PostingLine(AccountingClass.SETTLEMENT, PostingDirection.CREDIT, BigDecimal.ONE, "EUR"),
+                    ),
+                ),
+            ),
+        ).isEmpty()
     }
 }

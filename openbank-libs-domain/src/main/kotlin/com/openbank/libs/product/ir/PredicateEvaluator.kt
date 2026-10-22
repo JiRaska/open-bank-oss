@@ -2,6 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// One branch per predicate of the closed language (ADR-0352 §1).
+@file:Suppress("CyclomaticComplexMethod")
+
 package com.openbank.libs.product.ir
 
 import com.openbank.libs.product.WaiveAttribute

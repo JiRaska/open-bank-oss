@@ -2,6 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// One canonical-form function per IR section, mirroring ProductIrParser.
+@file:Suppress("TooManyFunctions")
+
 package com.openbank.libs.product.ir
 
 import com.openbank.libs.audit.AuditChain
@@ -58,13 +61,23 @@ object ProductIrCanonical {
         "ruleId" to i.ruleId,
         "rateType" to i.rateType,
         "rate" to i.rate?.let { rate(it) },
-        "tiers" to i.tiers.takeIf { it.isNotEmpty() }?.map { t -> mapOf("from" to amount(t.from), "to" to t.to?.let { amount(it) }, "rate" to rate(t.rate)) },
+        "tiers" to
+            i.tiers.takeIf { it.isNotEmpty() }?.map { t ->
+                mapOf(
+                    "from" to amount(t.from),
+                    "to" to t.to?.let { amount(it) },
+                    "rate" to rate(t.rate),
+                )
+            },
         "dayCount" to i.dayCount,
         "accrualCadence" to i.accrualCadence,
         "capitalisationCadence" to i.capitalisationCadence,
         "accrualRounding" to i.accrualRounding,
         "postingRounding" to i.postingRounding,
-        "bonus" to i.bonus?.let { mapOf("ruleId" to it.ruleId, "rate" to rate(it.rate), "predicate" to predicate(it.predicate)) },
+        "bonus" to
+            i.bonus?.let {
+                mapOf("ruleId" to it.ruleId, "rate" to rate(it.rate), "predicate" to predicate(it.predicate))
+            },
     )
 
     private fun fee(f: FeeTerms): Map<String, Any?> = mapOf(

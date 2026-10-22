@@ -209,8 +209,9 @@ def _scenario(name: str, version: int = 1) -> dict:
 def _junit(root: pathlib.Path, cases: dict[str, bool]) -> pathlib.Path:
     d = root / "junit"
     d.mkdir()
+    failure = '<failure message="boom"/>'
     body = "".join(
-        f'<testcase name="{n}" classname="x.{TEST_CLASS}" time="0.1">{"" if ok else "<failure message=\"boom\"/>"}</testcase>'
+        f'<testcase name="{n}" classname="x.{TEST_CLASS}" time="0.1">{"" if ok else failure}</testcase>'
         for n, ok in cases.items()
     )
     (d / f"TEST-x.{TEST_CLASS}.xml").write_text(f'<testsuite name="x.{TEST_CLASS}" tests="{len(cases)}">{body}</testsuite>', encoding="utf-8")

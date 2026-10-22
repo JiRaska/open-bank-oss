@@ -2,6 +2,10 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// One branch per construct of the closed IR v1 grammar (ADR-0352 §1): the size of these `when`s is the
+// size of the language, and keeping each construct's checks in one place is what makes it reviewable.
+@file:Suppress("CyclomaticComplexMethod", "LongMethod", "TooManyFunctions", "SpreadOperator")
+
 package com.openbank.libs.product.ir
 
 import com.openbank.libs.domain.money.CurrencyCode
@@ -97,7 +101,13 @@ object ProductIrParser {
         }
 
         /** A decimal authored as a JSON number or a decimal string; never more precise than [scale]. */
-        fun decimal(o: Map<String, Any?>, path: String, key: String, scale: Int, required: Boolean = true): BigDecimal? {
+        fun decimal(
+            o: Map<String, Any?>,
+            path: String,
+            key: String,
+            scale: Int,
+            required: Boolean = true,
+        ): BigDecimal? {
             val v = o[key]
             if (v == null) {
                 if (required) problem("$path/$key", "required")
@@ -120,7 +130,12 @@ object ProductIrParser {
             return d
         }
 
-        inline fun <reified E : Enum<E>> enum(o: Map<String, Any?>, path: String, key: String, required: Boolean = true): E? {
+        inline fun <reified E : Enum<E>> enum(
+            o: Map<String, Any?>,
+            path: String,
+            key: String,
+            required: Boolean = true,
+        ): E? {
             val s = str(o, path, key, required) ?: return null
             return enumValues<E>().firstOrNull { it.name == s } ?: run {
                 problem("$path/$key", "must be one of ${enumValues<E>().joinToString { it.name }}")
@@ -145,7 +160,11 @@ object ProductIrParser {
         fun ruleId(o: Map<String, Any?>, path: String): String {
             val s = str(o, path, "ruleId") ?: return "<missing@$path>"
             if (s.length > IrLimits.MAX_RULE_ID_LENGTH || !IrLimits.RULE_ID_PATTERN.matches(s)) {
-                problem("$path/ruleId", "must match ${IrLimits.RULE_ID_PATTERN.pattern} and be at most ${IrLimits.MAX_RULE_ID_LENGTH} chars")
+                problem(
+                    "$path/ruleId",
+                    "must match ${IrLimits.RULE_ID_PATTERN.pattern} " +
+                        "and be at most ${IrLimits.MAX_RULE_ID_LENGTH} chars",
+                )
             }
             return s
         }
@@ -155,26 +174,42 @@ object ProductIrParser {
         fun revision(root: Map<String, Any?>): ProductRevisionIr {
             known(root, "", "irVersion", "productCode", "currency", "interest", "fees", "termDeposit", "hooks")
             val irVersion = int(root, "", "irVersion", 1, Int.MAX_VALUE) ?: 0
-            if (irVersion != 0 && irVersion !in IrVersion.SUPPORTED) problem("/irVersion", "unsupported irVersion $irVersion; supported: ${IrVersion.SUPPORTED}")
+            if (irVersion != 0 &&
+                irVersion !in IrVersion.SUPPORTED
+            ) {
+                problem("/irVersion", "unsupported irVersion $irVersion; supported: ${IrVersion.SUPPORTED}")
+            }
             val productCode = str(root, "", "productCode") ?: ""
             val currency = str(root, "", "currency") ?: ""
-            if (currency.isNotEmpty() && runCatching { CurrencyCode.of(currency) }.isFailure) problem("/currency", "not an ISO 4217 code")
+            if (currency.isNotEmpty() &&
+                runCatching { CurrencyCode.of(currency) }.isFailure
+            ) {
+                problem("/currency", "not an ISO 4217 code")
+            }
             val interest = root["interest"]?.let { interest(obj(it, "/interest")) }
-            val fees = list(root, "", "fees", IrLimits.MAX_FEES).mapIndexed { i, f -> fee(obj(f, "/fees/$i"), "/fees/$i") }
+            val fees = list(root, "", "fees", IrLimits.MAX_FEES).mapIndexed { i, f ->
+                fee(obj(f, "/fees/$i"), "/fees/$i")
+            }
             val term = root["termDeposit"]?.let { termDeposit(obj(it, "/termDeposit")) }
             val hooks = hooks(obj(root["hooks"] ?: emptyMap<String, Any?>(), "/hooks"))
-            val rev = ProductRevisionIr(irVersion, productCode, currency, interest, fees, term, hooks, revisionHash = "")
+            val rev =
+                ProductRevisionIr(irVersion, productCode, currency, interest, fees, term, hooks, revisionHash = "")
             crossChecks(rev)
             return rev
         }
 
         fun interest(o: Map<String, Any?>): InterestTerms {
             val p = "/interest"
-            known(o, p, "ruleId", "rateType", "rate", "tiers", "dayCount", "accrualCadence", "capitalisationCadence", "accrualRounding", "postingRounding", "bonus")
+            known(o, p, *INTEREST_KEYS)
             val id = ruleId(o, p)
             val rateType = enum<RateType>(o, p, "rateType")
             val rate = decimal(o, p, "rate", IrLimits.RATE_SCALE, required = rateType == RateType.FIXED)
-            val tiers = list(o, p, "tiers", IrLimits.MAX_TIERS, required = rateType == RateType.TIERED).mapIndexed { i, t -> tier(obj(t, "$p/tiers/$i"), "$p/tiers/$i") }
+            val tiers = list(o, p, "tiers", IrLimits.MAX_TIERS, required = rateType == RateType.TIERED).mapIndexed {
+                    i,
+                    t,
+                ->
+                tier(obj(t, "$p/tiers/$i"), "$p/tiers/$i")
+            }
             if (rateType == RateType.FIXED && o["tiers"] != null) problem("$p/tiers", "not allowed for rateType FIXED")
             if (rateType == RateType.TIERED && o["rate"] != null) problem("$p/rate", "not allowed for rateType TIERED")
             if (rateType == RateType.TIERED) checkTiers(tiers, "$p/tiers")
@@ -184,7 +219,15 @@ object ProductIrParser {
             val postingRounding = enum<RoundingPolicy>(o, p, "postingRounding") ?: RoundingPolicy.LEDGER_POSTING
             if (accrualRounding.fixedScale == null) problem("$p/accrualRounding", "must name a fixed-scale policy")
             val bonus = o["bonus"]?.let { bonus(obj(it, "$p/bonus"), "$p/bonus") }
-            return InterestTerms(id, rateType ?: RateType.FIXED, rate, tiers, enum<IrDayCount>(o, p, "dayCount") ?: IrDayCount.ACT_365_FIXED, accrualCadence, capCadence, accrualRounding, postingRounding, bonus)
+            return InterestTerms(
+                id, rateType ?: RateType.FIXED, rate, tiers,
+                enum<IrDayCount>(
+                    o,
+                    p,
+                    "dayCount",
+                ) ?: IrDayCount.ACT_365_FIXED,
+                accrualCadence, capCadence, accrualRounding, postingRounding, bonus,
+            )
         }
 
         fun tier(o: Map<String, Any?>, p: String): Tier {
@@ -205,8 +248,13 @@ object ProductIrParser {
                 val to = t.to
                 if (to != null && to <= t.from) problem("$p/$i/to", "must exceed from")
                 if (i < tiers.lastIndex) {
-                    if (to == null) problem("$p/$i/to", "only the last tier may be open-ended")
-                    else if (tiers[i + 1].from.compareTo(to) != 0) problem("$p/${i + 1}/from", "tiers must be contiguous (expected $to)")
+                    if (to == null) {
+                        problem("$p/$i/to", "only the last tier may be open-ended")
+                    } else if (tiers[i + 1].from.compareTo(to) !=
+                        0
+                    ) {
+                        problem("$p/${i + 1}/from", "tiers must be contiguous (expected $to)")
+                    }
                 } else if (to != null) {
                     problem("$p/$i/to", "the last tier must be open-ended (omit to)")
                 }
@@ -249,10 +297,29 @@ object ProductIrParser {
                 val eid = ruleId(eo, ep)
                 val kind = enum<PenaltyKind>(eo, ep, "kind")
                 val rate = decimal(eo, ep, "rate", IrLimits.RATE_SCALE, required = kind == PenaltyKind.RATE)
-                val fraction = decimal(eo, ep, "fraction", IrLimits.RATE_SCALE, required = kind == PenaltyKind.FORFEITED_INTEREST_FRACTION)
-                if (kind == PenaltyKind.RATE && eo["fraction"] != null) problem("$ep/fraction", "not allowed for kind RATE")
-                if (kind == PenaltyKind.FORFEITED_INTEREST_FRACTION && eo["rate"] != null) problem("$ep/rate", "not allowed for kind FORFEITED_INTEREST_FRACTION")
-                if (fraction != null && (fraction.signum() < 0 || fraction > BigDecimal.ONE)) problem("$ep/fraction", "must be within [0, 1]")
+                val fraction = decimal(
+                    eo,
+                    ep,
+                    "fraction",
+                    IrLimits.RATE_SCALE,
+                    required =
+                    kind == PenaltyKind.FORFEITED_INTEREST_FRACTION,
+                )
+                if (kind == PenaltyKind.RATE &&
+                    eo["fraction"] != null
+                ) {
+                    problem("$ep/fraction", "not allowed for kind RATE")
+                }
+                if (kind == PenaltyKind.FORFEITED_INTEREST_FRACTION &&
+                    eo["rate"] != null
+                ) {
+                    problem("$ep/rate", "not allowed for kind FORFEITED_INTEREST_FRACTION")
+                }
+                if (fraction != null &&
+                    (fraction.signum() < 0 || fraction > BigDecimal.ONE)
+                ) {
+                    problem("$ep/fraction", "must be within [0, 1]")
+                }
                 EarlyWithdrawalPenalty(eid, kind ?: PenaltyKind.RATE, rate, fraction)
             }
             return TermDepositTerms(id, months, action, early)
@@ -263,7 +330,9 @@ object ProductIrParser {
             known(o, p, *HOOK_KEYS.keys.toTypedArray())
             val out = LinkedHashMap<Hook, List<HookRule>>()
             for ((key, hook) in HOOK_KEYS) {
-                val rules = list(o, p, key, IrLimits.MAX_RULES_PER_HOOK).mapIndexed { i, r -> hookRule(obj(r, "$p/$key/$i"), "$p/$key/$i", hook) }
+                val rules = list(o, p, key, IrLimits.MAX_RULES_PER_HOOK).mapIndexed { i, r ->
+                    hookRule(obj(r, "$p/$key/$i"), "$p/$key/$i", hook)
+                }
                 if (rules.isNotEmpty()) out[hook] = rules
             }
             return out
@@ -284,31 +353,65 @@ object ProductIrParser {
             return when (type) {
                 "SCHEDULE" -> {
                     known(o, p, "type", "hook", "tag", "cadence")
-                    val target = str(o, p, "hook")?.let { HOOK_KEYS[it] ?: run { problem("$p/hook", "must be one of ${HOOK_KEYS.keys}"); null } } ?: Hook.SCHEDULED
+                    val target =
+                        str(o, p, "hook")?.let {
+                            HOOK_KEYS[it]
+                                ?: run {
+                                    problem("$p/hook", "must be one of ${HOOK_KEYS.keys}")
+                                    null
+                                }
+                        }
+                            ?: Hook.SCHEDULED
                     val tag = str(o, p, "tag") ?: ""
                     if (tag.isNotEmpty() && !TAG.matches(tag)) problem("$p/tag", "must match ${TAG.pattern}")
                     val cadence = enum<Cadence>(o, p, "cadence") ?: Cadence.DAILY
-                    if (target != Hook.SCHEDULED && target != Hook.ON_CLOSE) problem("$p/hook", "a schedule may target scheduled or onClose only")
+                    if (target != Hook.SCHEDULED &&
+                        target != Hook.ON_CLOSE
+                    ) {
+                        problem("$p/hook", "a schedule may target scheduled or onClose only")
+                    }
                     Action.Schedule(target, tag, cadence)
                 }
-                "ACCRUE_INTEREST" -> { known(o, p, "type"); Action.AccrueInterest }
-                "CAPITALISE_INTEREST" -> { known(o, p, "type"); Action.CapitaliseInterest }
-                "CHARGE_FEE" -> { known(o, p, "type", "feeRuleId"); Action.ChargeFee(str(o, p, "feeRuleId") ?: "") }
+                "ACCRUE_INTEREST" -> {
+                    known(o, p, "type")
+                    Action.AccrueInterest
+                }
+                "CAPITALISE_INTEREST" -> {
+                    known(o, p, "type")
+                    Action.CapitaliseInterest
+                }
+                "CHARGE_FEE" -> {
+                    known(o, p, "type", "feeRuleId")
+                    Action.ChargeFee(str(o, p, "feeRuleId") ?: "")
+                }
                 "REJECT" -> {
                     known(o, p, "type", "reasonCode")
                     if (hook != Hook.PRE_POSTING) problem("$p/type", "REJECT is allowed on prePosting only")
                     val code = str(o, p, "reasonCode") ?: ""
-                    if (code.isNotEmpty() && !REASON.matches(code)) problem("$p/reasonCode", "must match ${REASON.pattern}")
+                    if (code.isNotEmpty() &&
+                        !REASON.matches(code)
+                    ) {
+                        problem("$p/reasonCode", "must match ${REASON.pattern}")
+                    }
                     Action.Reject(code)
                 }
                 "NOTIFY" -> {
                     known(o, p, "type", "templateId", "variables")
                     val template = str(o, p, "templateId") ?: ""
                     val vars = obj(o["variables"] ?: emptyMap<String, Any?>(), "$p/variables")
-                    if (vars.size > IrLimits.MAX_NOTIFY_VARIABLES) problem("$p/variables", "more than ${IrLimits.MAX_NOTIFY_VARIABLES} variables (limit)")
+                    if (vars.size >
+                        IrLimits.MAX_NOTIFY_VARIABLES
+                    ) {
+                        problem("$p/variables", "more than ${IrLimits.MAX_NOTIFY_VARIABLES} variables (limit)")
+                    }
                     val typed = LinkedHashMap<String, String>()
                     vars.forEach { (k, v) ->
-                        if (!VAR_NAME.matches(k)) problem("$p/variables/$k", "variable names must match ${VAR_NAME.pattern}")
+                        if (!VAR_NAME.matches(
+                                k,
+                            )
+                        ) {
+                            problem("$p/variables/$k", "variable names must match ${VAR_NAME.pattern}")
+                        }
                         if (v is String) typed[k] = v else problem("$p/variables/$k", "expected a string")
                     }
                     Action.Notify(template, typed)
@@ -316,16 +419,30 @@ object ProductIrParser {
                 "REPRICE" -> {
                     known(o, p, "type", "parameter", "value")
                     val param = str(o, p, "parameter") ?: ""
-                    if (param.isNotEmpty() && param !in REPRICEABLE) problem("$p/parameter", "must be one of $REPRICEABLE")
+                    if (param.isNotEmpty() &&
+                        param !in REPRICEABLE
+                    ) {
+                        problem("$p/parameter", "must be one of $REPRICEABLE")
+                    }
                     Action.Reprice(param, decimal(o, p, "value", IrLimits.RATE_SCALE) ?: BigDecimal.ZERO)
                 }
-                "MATURE" -> { known(o, p, "type"); Action.Mature }
+                "MATURE" -> {
+                    known(o, p, "type")
+                    Action.Mature
+                }
                 "EARLY_WITHDRAWAL_PENALTY" -> {
                     known(o, p, "type")
-                    if (hook != Hook.PRE_POSTING) problem("$p/type", "EARLY_WITHDRAWAL_PENALTY is allowed on prePosting only")
+                    if (hook !=
+                        Hook.PRE_POSTING
+                    ) {
+                        problem("$p/type", "EARLY_WITHDRAWAL_PENALTY is allowed on prePosting only")
+                    }
                     Action.EarlyWithdrawalPenalty
                 }
-                else -> { problem("$p/type", "unknown action type '$type'"); Action.AccrueInterest }
+                else -> {
+                    problem("$p/type", "unknown action type '$type'")
+                    Action.AccrueInterest
+                }
             }
         }
 
@@ -344,9 +461,22 @@ object ProductIrParser {
                     val threshold = decimal(o, p, "threshold", IrLimits.AMOUNT_SCALE, required = attr?.numeric == true)
                     val text = str(o, p, "textValue", required = attr?.numeric == false)
                     val ccy = str(o, p, "currency", required = false)
-                    if (attr?.numeric == false && op != WaiveOperator.EQ && op != WaiveOperator.NEQ) problem("$p/operator", "a text attribute allows EQ or NEQ only")
-                    if (attr?.numeric == false && (o["threshold"] != null || o["currency"] != null)) problem(p, "threshold/currency are for numeric attributes")
-                    if (attr?.numeric == true && o["textValue"] != null) problem("$p/textValue", "textValue is for text attributes")
+                    if (attr?.numeric == false &&
+                        op != WaiveOperator.EQ &&
+                        op != WaiveOperator.NEQ
+                    ) {
+                        problem("$p/operator", "a text attribute allows EQ or NEQ only")
+                    }
+                    if (attr?.numeric == false &&
+                        (o["threshold"] != null || o["currency"] != null)
+                    ) {
+                        problem(p, "threshold/currency are for numeric attributes")
+                    }
+                    if (attr?.numeric == true &&
+                        o["textValue"] != null
+                    ) {
+                        problem("$p/textValue", "textValue is for text attributes")
+                    }
                     Predicate.Comparison(attr ?: WaiveAttribute.BALANCE, op, threshold, text, ccy)
                 }
                 "postingComparison" -> {
@@ -363,19 +493,39 @@ object ProductIrParser {
                 }
                 "countEvents" -> {
                     known(o, p, "type", "kind", "window", "operator", "count")
-                    Predicate.CountEvents(enum<EventKind>(o, p, "kind") ?: EventKind.WITHDRAWAL, window(o, p), enum<WaiveOperator>(o, p, "operator") ?: WaiveOperator.EQ, int(o, p, "count", 0, Int.MAX_VALUE) ?: 0)
+                    Predicate.CountEvents(
+                        enum<EventKind>(o, p, "kind") ?: EventKind.WITHDRAWAL,
+                        window(o, p),
+                        enum<WaiveOperator>(o, p, "operator") ?: WaiveOperator.EQ,
+                        int(o, p, "count", 0, Int.MAX_VALUE) ?: 0,
+                    )
                 }
                 "sumEvents" -> {
                     known(o, p, "type", "kind", "window", "operator", "amount")
-                    Predicate.SumEvents(enum<EventKind>(o, p, "kind") ?: EventKind.WITHDRAWAL, window(o, p), enum<WaiveOperator>(o, p, "operator") ?: WaiveOperator.EQ, decimal(o, p, "amount", IrLimits.AMOUNT_SCALE) ?: BigDecimal.ZERO)
+                    Predicate.SumEvents(
+                        enum<EventKind>(o, p, "kind") ?: EventKind.WITHDRAWAL,
+                        window(o, p),
+                        enum<WaiveOperator>(o, p, "operator") ?: WaiveOperator.EQ,
+                        decimal(o, p, "amount", IrLimits.AMOUNT_SCALE) ?: BigDecimal.ZERO,
+                    )
                 }
                 "balanceMin" -> {
                     known(o, p, "type", "window", "operator", "amount")
-                    Predicate.BalanceMin(window(o, p), enum<WaiveOperator>(o, p, "operator") ?: WaiveOperator.EQ, decimal(o, p, "amount", IrLimits.AMOUNT_SCALE) ?: BigDecimal.ZERO)
+                    Predicate.BalanceMin(
+                        window(o, p),
+                        enum<WaiveOperator>(o, p, "operator") ?: WaiveOperator.EQ,
+                        decimal(o, p, "amount", IrLimits.AMOUNT_SCALE) ?: BigDecimal.ZERO,
+                    )
                 }
                 "and", "or" -> {
                     known(o, p, "type", "operands")
-                    val ops = list(o, p, "operands", IrLimits.MAX_PREDICATE_DEPTH, required = true).mapIndexed { i, x -> predicate(x, "$p/operands/$i", depth + 1) }
+                    val ops = list(o, p, "operands", IrLimits.MAX_PREDICATE_DEPTH, required = true).mapIndexed { i, x ->
+                        predicate(
+                            x,
+                            "$p/operands/$i",
+                            depth + 1,
+                        )
+                    }
                     if (ops.isEmpty()) problem("$p/operands", "at least one operand")
                     if (type == "and") Predicate.And(ops) else Predicate.Or(ops)
                 }
@@ -383,7 +533,10 @@ object ProductIrParser {
                     known(o, p, "type", "operand")
                     Predicate.Not(predicate(o["operand"], "$p/operand", depth + 1))
                 }
-                else -> { problem("$p/type", "unknown predicate type '$type'"); Predicate.And(emptyList()) }
+                else -> {
+                    problem("$p/type", "unknown predicate type '$type'")
+                    Predicate.And(emptyList())
+                }
             }
         }
 
@@ -397,7 +550,9 @@ object ProductIrParser {
 
         fun crossChecks(rev: ProductRevisionIr) {
             val ids = rev.allRuleIds
-            ids.groupingBy { it }.eachCount().filter { it.value > 1 }.keys.forEach { problem("/", "duplicate ruleId '$it'") }
+            ids.groupingBy {
+                it
+            }.eachCount().filter { it.value > 1 }.keys.forEach { problem("/", "duplicate ruleId '$it'") }
 
             val feeIds = rev.fees.map { it.ruleId }.toSet()
             val produced = HashSet<String>()
@@ -410,19 +565,41 @@ object ProductIrParser {
                         is Action.Schedule -> {
                             produced += a.tag
                             if (a.cadence == Cadence.ON_EVENT) sameCycleEdges += hook to a.hook
-                            if (a.cadence == Cadence.ON_EVENT && a.hook == hook) problem("$p/action", "a same-cycle Schedule may not target the hook that emits it")
-                            if (a.cadence == Cadence.AT_MATURITY && rev.termDeposit == null) problem("$p/action/cadence", "AT_MATURITY needs a termDeposit section")
+                            if (a.cadence == Cadence.ON_EVENT &&
+                                a.hook == hook
+                            ) {
+                                problem("$p/action", "a same-cycle Schedule may not target the hook that emits it")
+                            }
+                            if (a.cadence == Cadence.AT_MATURITY &&
+                                rev.termDeposit == null
+                            ) {
+                                problem("$p/action/cadence", "AT_MATURITY needs a termDeposit section")
+                            }
                         }
-                        is Action.ChargeFee -> if (a.feeRuleId !in feeIds) problem("$p/action/feeRuleId", "no fee with ruleId '${a.feeRuleId}'")
-                        Action.AccrueInterest, Action.CapitaliseInterest -> if (rev.interest == null) problem("$p/action", "needs an interest section")
-                        Action.Mature, Action.EarlyWithdrawalPenalty -> if (rev.termDeposit == null) problem("$p/action", "needs a termDeposit section")
+                        is Action.ChargeFee -> if (a.feeRuleId !in
+                            feeIds
+                        ) {
+                            problem("$p/action/feeRuleId", "no fee with ruleId '${a.feeRuleId}'")
+                        }
+                        Action.AccrueInterest, Action.CapitaliseInterest -> if (rev.interest ==
+                            null
+                        ) {
+                            problem("$p/action", "needs an interest section")
+                        }
+                        Action.Mature, Action.EarlyWithdrawalPenalty -> if (rev.termDeposit ==
+                            null
+                        ) {
+                            problem("$p/action", "needs a termDeposit section")
+                        }
                         is Action.Reprice -> if (rev.interest == null) problem("$p/action", "needs an interest section")
                         is Action.Reject, is Action.Notify -> Unit
                     }
                     r.trigger?.let { consumed += it }
                 }
             }
-            (consumed - produced).forEach { problem("/hooks/scheduled", "trigger '$it' is produced by no Schedule action") }
+            (consumed - produced).forEach {
+                problem("/hooks/scheduled", "trigger '$it' is produced by no Schedule action")
+            }
             (produced - consumed).forEach { problem("/hooks", "Schedule tag '$it' is consumed by no scheduled rule") }
             if (hasCycle(sameCycleEdges)) problem("/hooks", "same-cycle (ON_EVENT) Schedule edges form a cycle")
         }
@@ -452,6 +629,10 @@ object ProductIrParser {
         "scheduled" to Hook.SCHEDULED,
         "onParameterChange" to Hook.ON_PARAMETER_CHANGE,
         "onClose" to Hook.ON_CLOSE,
+    )
+    private val INTEREST_KEYS = arrayOf(
+        "ruleId", "rateType", "rate", "tiers", "dayCount", "accrualCadence",
+        "capitalisationCadence", "accrualRounding", "postingRounding", "bonus",
     )
     internal val REPRICEABLE: Set<String> = setOf("interest.rate", "interest.bonus.rate")
     private val DECIMAL = Regex("^-?[0-9]+(\\.[0-9]+)?$")

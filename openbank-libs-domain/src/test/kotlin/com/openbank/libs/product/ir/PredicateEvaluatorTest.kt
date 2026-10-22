@@ -28,7 +28,8 @@ class PredicateEvaluatorTest {
         ),
     )
 
-    private fun t(p: Predicate, s: ProductState = state, posting: Posting? = null) = PredicateEvaluator.test(p, s, posting, today)
+    private fun t(p: Predicate, s: ProductState = state, posting: Posting? = null) =
+        PredicateEvaluator.test(p, s, posting, today)
 
     @Test
     fun `event predicates honour the window inclusive of today`() {
@@ -38,7 +39,9 @@ class PredicateEvaluatorTest {
         assertThat(t(Predicate.NoEvents(EventKind.CARD_PAYMENT, Window(365)))).isTrue()
         assertThat(t(Predicate.CountEvents(EventKind.WITHDRAWAL, Window(365), WaiveOperator.EQ, 2))).isTrue()
         assertThat(t(Predicate.CountEvents(EventKind.WITHDRAWAL, Window(30), WaiveOperator.GT, 1))).isFalse()
-        assertThat(t(Predicate.SumEvents(EventKind.WITHDRAWAL, Window(365), WaiveOperator.GTE, BigDecimal("1099")))).isTrue()
+        assertThat(
+            t(Predicate.SumEvents(EventKind.WITHDRAWAL, Window(365), WaiveOperator.GTE, BigDecimal("1099"))),
+        ).isTrue()
         assertThat(t(Predicate.SumEvents(EventKind.DEPOSIT, Window(1), WaiveOperator.EQ, BigDecimal("50")))).isTrue()
     }
 
@@ -46,22 +49,42 @@ class PredicateEvaluatorTest {
     fun `balanceMin takes the minimum sample in the window and fails closed without samples`() {
         assertThat(t(Predicate.BalanceMin(Window(30), WaiveOperator.GTE, BigDecimal("1000")))).isTrue()
         assertThat(t(Predicate.BalanceMin(Window(90), WaiveOperator.GTE, BigDecimal("1000")))).isFalse()
-        assertThat(t(Predicate.BalanceMin(Window(30), WaiveOperator.GTE, BigDecimal.ZERO), state.copy(balanceSamples = emptyList()))).isFalse()
+        assertThat(
+            t(
+                Predicate.BalanceMin(Window(30), WaiveOperator.GTE, BigDecimal.ZERO),
+                state.copy(balanceSamples = emptyList()),
+            ),
+        ).isFalse()
     }
 
     @Test
     fun `comparison keeps the waiver-grammar semantics including fail-closed cases`() {
-        assertThat(t(Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.GT, BigDecimal("2000"), currency = "EUR"))).isTrue()
-        assertThat(t(Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.GT, BigDecimal("2000"), currency = "CZK"))).isFalse()
+        assertThat(
+            t(Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.GT, BigDecimal("2000"), currency = "EUR")),
+        ).isTrue()
+        assertThat(
+            t(Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.GT, BigDecimal("2000"), currency = "CZK")),
+        ).isFalse()
         assertThat(t(Predicate.Comparison(WaiveAttribute.BALANCE, WaiveOperator.GT, null))).isFalse()
-        assertThat(t(Predicate.Comparison(WaiveAttribute.MONTHLY_TURNOVER, WaiveOperator.LTE, BigDecimal("900")))).isTrue()
-        assertThat(t(Predicate.Comparison(WaiveAttribute.MONTHLY_TURNOVER, WaiveOperator.LT, BigDecimal("900")))).isFalse()
-        assertThat(t(Predicate.Comparison(WaiveAttribute.AGGREGATE_POCKET_BALANCE, WaiveOperator.NEQ, BigDecimal.ZERO))).isFalse()
+        assertThat(
+            t(Predicate.Comparison(WaiveAttribute.MONTHLY_TURNOVER, WaiveOperator.LTE, BigDecimal("900"))),
+        ).isTrue()
+        assertThat(
+            t(Predicate.Comparison(WaiveAttribute.MONTHLY_TURNOVER, WaiveOperator.LT, BigDecimal("900"))),
+        ).isFalse()
+        assertThat(
+            t(Predicate.Comparison(WaiveAttribute.AGGREGATE_POCKET_BALANCE, WaiveOperator.NEQ, BigDecimal.ZERO)),
+        ).isFalse()
         assertThat(t(Predicate.Comparison(WaiveAttribute.SEGMENT, WaiveOperator.EQ, textValue = "vip"))).isTrue()
         assertThat(t(Predicate.Comparison(WaiveAttribute.SEGMENT, WaiveOperator.NEQ, textValue = "VIP"))).isFalse()
         assertThat(t(Predicate.Comparison(WaiveAttribute.SEGMENT, WaiveOperator.GT, textValue = "VIP"))).isFalse()
         assertThat(t(Predicate.Comparison(WaiveAttribute.SEGMENT, WaiveOperator.EQ, textValue = null))).isFalse()
-        assertThat(t(Predicate.Comparison(WaiveAttribute.SEGMENT, WaiveOperator.EQ, textValue = "VIP"), state.copy(segment = null))).isFalse()
+        assertThat(
+            t(
+                Predicate.Comparison(WaiveAttribute.SEGMENT, WaiveOperator.EQ, textValue = "VIP"),
+                state.copy(segment = null),
+            ),
+        ).isFalse()
         assertThat(t(Predicate.Comparison(WaiveAttribute.CURRENCY, WaiveOperator.EQ, textValue = "EUR"))).isTrue()
     }
 
