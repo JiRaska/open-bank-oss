@@ -273,9 +273,17 @@ ENV NEXT_STANDALONE=true
 #
 # Absent secret = no upload and a normal build, so local and PR builds are unaffected and this can
 # never become the reason a build fails.
+#
+# `prebuild:image`, not `prebuild`: the production-readiness collector scores every runnable
+# backend module, and this stage deliberately stages none of them (repo root is `/`). Since the
+# collector refuses an inventory missing declared money-path modules, running it here failed
+# every image build. Its output was never used from this stage anyway: the workflow generates
+# openbank-admin-ui/prod-readiness.json over the full checkout and the runtime stage COPYs that.
+# `--ignore-scripts` keeps npm from re-running the full `prebuild` hook before `build`.
 RUN --mount=type=secret,id=glitchtip_token \
+    npm run prebuild:image && \
     SENTRY_AUTH_TOKEN="$(cat /run/secrets/glitchtip_token 2>/dev/null || true)" \
-    npm run build
+    npm run build --ignore-scripts
 
 # Client source maps NEVER enter the runtime image. The upload happens inside `npm run build`
 # above, so by this line the maps have already served their only purpose.
