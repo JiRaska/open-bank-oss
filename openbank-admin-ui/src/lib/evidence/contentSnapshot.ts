@@ -2,6 +2,7 @@
 // Reviewed repository content, published independently from the Admin UI image.
 import type { PlatformVersions } from '../platform-versions'
 import { isPlatformDeclarations } from './platformDeclarations.ts'
+import { isRepositoryDocumentation, type RepositoryDocumentation } from './repositoryDocumentation.ts'
 import { parse as parseYaml } from 'yaml'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotReaderOptions } from './publishedSnapshot.ts'
 import { parseBcpPolicy } from '../bcp/continuityModel.ts'
@@ -13,6 +14,7 @@ export interface AdminUiContentSnapshot {
   collectedAt: string
   content: {
     platformVersions?: PlatformVersions
+    repositoryDocumentation?: RepositoryDocumentation
     catalog: Record<string, unknown>
     serviceGraph: Record<string, unknown>
     governance: Record<string, unknown>
@@ -24,7 +26,7 @@ export interface AdminUiContentSnapshot {
   }
 }
 
-export const ADMIN_UI_CONTENT_MAX_BYTES = 1024 * 1024
+export const ADMIN_UI_CONTENT_MAX_BYTES = 8 * 1024 * 1024
 const SOURCE_SHA = /^[0-9a-f]{40}$/
 const ISO_UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/
 const MAX_FILE_BYTES = 256 * 1024
@@ -39,6 +41,11 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return keys.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => keys.includes(key))
+}
+
+function validContentKeys(value: Record<string, unknown>): boolean {
+  const optional = ['platformVersions', 'repositoryDocumentation'].filter(key => Object.hasOwn(value, key))
+  return hasExactKeys(value, [...CONTENT_KEYS, ...optional])
 }
 
 function validTimestamp(value: unknown, nowMs: number): value is string {
@@ -276,7 +283,7 @@ function validLibDocs(items: unknown): items is AdminUiContentSnapshot['content'
 export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): value is AdminUiContentSnapshot {
   if (!record(value) || !hasExactKeys(value, ['schemaVersion', 'sourceSha', 'collectedAt', 'content'])
     || value.schemaVersion !== 1 || typeof value.sourceSha !== 'string' || !SOURCE_SHA.test(value.sourceSha)
-    || !validTimestamp(value.collectedAt, nowMs) || !record(value.content) || !hasExactKeys(value.content, Object.hasOwn(value.content, 'platformVersions') ? [...CONTENT_KEYS, 'platformVersions'] : CONTENT_KEYS)) return false
+    || !validTimestamp(value.collectedAt, nowMs) || !record(value.content) || !validContentKeys(value.content)) return false
 
   const content = value.content
   if ((Object.hasOwn(content, 'platformVersions') && !isPlatformDeclarations(content.platformVersions))
@@ -289,6 +296,14 @@ export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): va
     || typeof content.complianceControlsYaml !== 'string' || Buffer.byteLength(content.complianceControlsYaml, 'utf8') > MAX_FILE_BYTES
     || !validComplianceYaml(content.complianceControlsYaml)
     || !validBpmn(content.bpmnManifests) || !validLibDocs(content.libsDocs)) return false
+
+  if (Object.hasOwn(content, 'repositoryDocumentation')) {
+    const services = (content.catalog as { services: Array<{ name: string; moneyPath: boolean }> }).services
+    const moneyPath = new Set(services.filter(service => service.moneyPath).map(service => service.name.replace(/^openbank-/, '')))
+    if (!isRepositoryDocumentation(content.repositoryDocumentation, moneyPath)) return false
+    const known = new Set(services.map(service => service.name.replace(/^openbank-/, '')))
+    if (content.repositoryDocumentation.featureFlags.some(flag => !known.has(flag.service.replace(/^openbank-/, '')))) return false
+  }
 
   try {
     return Buffer.byteLength(JSON.stringify(value), 'utf8') <= ADMIN_UI_CONTENT_MAX_BYTES
