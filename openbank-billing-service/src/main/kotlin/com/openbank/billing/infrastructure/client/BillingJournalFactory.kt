@@ -36,6 +36,11 @@ object BillingJournalFactory {
      * previous release named by id, `a0..0002` (2100) and `a0..4003` (4003), for every currency exactly as
      * before. It exists so deploying billing before the ledger that serves accounting classes cannot make
      * the ledger refuse every fee. Flip the switch once that ledger is live, then delete these two.
+     *
+     * The shim applies to CZK ONLY (#13226). Both ids are CZK accounts and the ledger refuses a line whose
+     * currency is not its account's, so the shim never posted a single non-CZK fee -- it only wedged the
+     * outbox row on a 422. A non-CZK fee therefore always posts by class, and the ledger picks that
+     * currency's own deposit-control (2101-2103) and fee-income (4004-4006, ledger V35) accounts.
      */
     private val FEE_RECEIVABLE_GL: UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
     private val FEE_INCOME_GL: UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
@@ -43,6 +48,12 @@ object BillingJournalFactory {
     /** The bank's fee income, a class of its own that no product revision carries (ADR-0341 D3). */
     private const val FEE_INCOME_CLASS = "FEE_INCOME_ACCOUNT"
     private const val FEE_INCOME_ROLE = "FEE_INCOME"
+
+    /** The only currency the rollout shim's two literal accounts can carry (both are CZK). */
+    private const val SHIM_CURRENCY = "CZK"
+
+    /** By class unless the shim is on AND the fee is in the one currency the shim's accounts are in. */
+    private fun byClass(postByClass: Boolean, currency: String): Boolean = postByClass || currency != SHIM_CURRENCY
 
     fun buildRequest(
         command: FeeJournalCommand,
@@ -62,8 +73,9 @@ object BillingJournalFactory {
         lines = buildLines(command, postByClass),
     )
 
-    fun buildLines(command: FeeJournalCommand, postByClass: Boolean = true): List<LedgerJournalLineRequest> {
+    fun buildLines(command: FeeJournalCommand, postByClassSwitch: Boolean = true): List<LedgerJournalLineRequest> {
         val ccy = command.currency
+        val postByClass = byClass(postByClassSwitch, ccy)
         val value = command.amount
         return listOf(
             LedgerJournalLineRequest(
@@ -123,8 +135,12 @@ object BillingJournalFactory {
         lines = buildReversalLines(command, postByClass),
     )
 
-    fun buildReversalLines(command: FeeReversalCommand, postByClass: Boolean = true): List<LedgerJournalLineRequest> {
+    fun buildReversalLines(
+        command: FeeReversalCommand,
+        postByClassSwitch: Boolean = true,
+    ): List<LedgerJournalLineRequest> {
         val ccy = command.currency
+        val postByClass = byClass(postByClassSwitch, ccy)
         val value = command.amount
         return listOf(
             LedgerJournalLineRequest(

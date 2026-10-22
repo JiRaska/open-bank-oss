@@ -6,6 +6,7 @@ package com.openbank.billing
 
 import com.openbank.billing.application.port.out.BillingAssessmentRepository
 import com.openbank.billing.application.port.out.LedgerPostingPort
+import com.openbank.billing.domain.FeeIncomeCurrencies
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.client.BillingJournalFactory
@@ -38,8 +39,9 @@ import java.util.UUID
  * currency is not its GL account's ([LedgerRules]), and both fixed accounts are CZK, so the previous
  * release's EUR/USD/GBP fee journals were refused at the ledger and never posted. The tests below pin
  * that fact (so nobody "restores" a behaviour that never worked) and what the new path does instead:
- * the debit leg lands on the currency's own control account and the income leg, for which the chart has
- * no account, is an explicit unmapped-row failure.
+ * the debit leg lands on the currency's own control account and the income leg on the currency's own
+ * fee-income account (ledger V35, #13226), so the journal balances in the fee's currency and the ledger
+ * accepts both legs -- with the rollout shim on or off.
  *
  * The map is held here as a literal and, in the last test, parsed out of the ledger's own migration so
  * the literal cannot drift away from what the database is seeded with.
@@ -139,33 +141,36 @@ class FeeJournalsUnchangedTest {
     }
 
     @Test
-    fun `a non-CZK fee debits its own control account and its income leg is an explicit unmapped failure`() {
+    fun `a non-CZK fee posts balanced on its own currency's control and fee-income accounts, shim on or off`() {
         val expectedControl = mapOf("EUR" to "2101", "USD" to "2102", "GBP" to "2103")
+        val expectedIncome = mapOf("EUR" to "4004", "USD" to "4005", "GBP" to "4006")
         for (ccy in nonCzk) {
             for (cls in classes) {
-                val debit = BillingJournalFactory.buildLines(charge(ccy, cls)).single { it.side == "DEBIT" }
-                val account = LedgerMap.resolve(
-                    checkNotNull(debit.accountingClass),
-                    checkNotNull(debit.accountingRole),
-                    debit.currencyCode,
-                )
-                assertThat(account).describedAs("$cls $ccy").isEqualTo(LedgerMap.idOf(expectedControl.getValue(ccy)))
-                // and the ledger would ACCEPT that leg: the currency is the account's
-                assertThat(LedgerRules.accountCurrency(account)).isEqualTo(ccy)
+                for (shim in listOf(true, false)) {
+                    val lines = BillingJournalFactory.buildLines(charge(ccy, cls), postByClassSwitch = shim)
+                    val landed = resolved(lines)
+                    assertThat(landed.map { it.account }).describedAs("$cls $ccy shim=$shim").containsExactly(
+                        LedgerMap.idOf(expectedControl.getValue(ccy)),
+                        LedgerMap.idOf(expectedIncome.getValue(ccy)),
+                    )
+                    // the ledger would ACCEPT both legs: each currency is its account's
+                    assertThat(landed.map { LedgerRules.refusal(it) }).containsOnly(null)
+                    // balanced in the fee's own currency: no conversion, debit == credit
+                    assertThat(landed.single { it.side == "DEBIT" }.amount)
+                        .isEqualByComparingTo(landed.single { it.side == "CREDIT" }.amount)
+                    assertThat(landed.map { it.currency } + landed.map { it.baseCurrency }).containsOnly(ccy)
+                }
             }
-            val credit = BillingJournalFactory.buildLines(charge(ccy, classes.first())).single { it.side == "CREDIT" }
-            val thrown = runCatching {
-                LedgerMap.resolve(
-                    checkNotNull(credit.accountingClass),
-                    checkNotNull(credit.accountingRole),
-                    credit.currencyCode,
-                )
-            }
-            assertThat(thrown.exceptionOrNull())
-                .describedAs("fee income in $ccy")
-                .isInstanceOf(IllegalArgumentException::class.java)
-                .hasMessageContaining("FEE_INCOME_ACCOUNT/FEE_INCOME/$ccy")
+            val reversal = resolved(BillingJournalFactory.buildReversalLines(reversal(ccy, classes.first()), false))
+            assertThat(reversal.map { LedgerRules.refusal(it) }).describedAs("reversal $ccy").containsOnly(null)
         }
+    }
+
+    @Test
+    fun `a CZK fee with the shim on still names the two literal accounts, not a class`() {
+        val lines = BillingJournalFactory.buildLines(charge("CZK", classes.first()), postByClassSwitch = false)
+        assertThat(lines.map { it.glAccountId }).containsExactly(LedgerMap.idOf("2100"), LedgerMap.idOf("4003"))
+        assertThat(lines.map { it.accountingClass }).containsOnly(null)
     }
 
     @Test
@@ -182,19 +187,33 @@ class FeeJournalsUnchangedTest {
     }
 
     @Test
-    fun `the literal map equals the billing rows the ledger migration seeds`() {
-        val migration = listOf(
-            Path.of("../openbank-ledger-service/src/main/resources/db/migration/V32__accounting_class_gl_map.sql"),
-            Path.of("openbank-ledger-service/src/main/resources/db/migration/V32__accounting_class_gl_map.sql"),
+    fun `the literal map equals the billing rows the ledger migrations seed`() {
+        fun migration(name: String) = listOf(
+            Path.of("../openbank-ledger-service/src/main/resources/db/migration/$name"),
+            Path.of("openbank-ledger-service/src/main/resources/db/migration/$name"),
         ).firstOrNull { Files.exists(it) }
-        assertThat(migration).describedAs("the ledger migration must be readable from the billing build").isNotNull()
+        val v32 = migration("V32__accounting_class_gl_map.sql")
+        val v35 = migration("V35__per_currency_fee_income_accounts.sql")
+        assertThat(listOf(v32, v35)).describedAs("the ledger migrations must be readable from the billing build")
+            .doesNotContainNull()
         val row = Regex("""\('([A-Z_]+)',\s*'([A-Z_]+)',\s*'([A-Z]{3})',\s*'(\d{4})'\)""")
-        val seeded = Files.readAllLines(checkNotNull(migration)).flatMap { line ->
+        val fromV32 = Files.readAllLines(checkNotNull(v32)).flatMap { line ->
             row.findAll(line).map { m ->
                 Triple(m.groupValues[1], m.groupValues[2], m.groupValues[3]) to m.groupValues[4]
             }.toList()
         }.filter { (key, _) -> key.first.startsWith("CUSTOMER_DEPOSIT_") || key.first == "FEE_INCOME_ACCOUNT" }
-            .toMap()
+        // V35 seeds FEE_INCOME_ACCOUNT/FEE_INCOME as (currency, code) pairs
+        val feeIncomeRow = Regex("""\('([A-Z]{3})',\s*'(4\d{3})'\)""")
+        val fromV35 = Files.readAllLines(checkNotNull(v35)).flatMap { line ->
+            feeIncomeRow.findAll(line).map { m ->
+                Triple("FEE_INCOME_ACCOUNT", "FEE_INCOME", m.groupValues[1]) to m.groupValues[2]
+            }.toList()
+        }
+        assertThat(fromV35).hasSize(3)
+        val seeded = (fromV32 + fromV35).toMap()
+        // billing's fail-closed currency list is exactly the currencies the ledger books fee income in
+        assertThat(seeded.keys.filter { it.first == "FEE_INCOME_ACCOUNT" }.map { it.third }.toSet())
+            .isEqualTo(FeeIncomeCurrencies.MAPPED)
         assertThat(seeded).isNotEmpty()
         assertThat(seeded.mapValues { (_, code) -> LedgerMap.idOf(code) }).isEqualTo(LedgerMap.billing)
     }
@@ -224,7 +243,7 @@ private data class Landed(
     val subAccountId: UUID?,
 )
 
-/** The billing rows of the ledger map (V32), as chart ids; 2100 is the chart's `...0002`. */
+/** The billing rows of the ledger map (V32 + V35), as chart ids; 2100 is the chart's `...0002`. */
 private object LedgerMap {
     fun idOf(code: String): UUID = UUID.fromString(
         if (code == "2100") "a0000000-0000-0000-0000-000000000002" else "a0000000-0000-0000-0000-00000000$code",
@@ -233,11 +252,14 @@ private object LedgerMap {
     private val classes = listOf("CUSTOMER_DEPOSIT_DEMAND", "CUSTOMER_DEPOSIT_SAVINGS", "CUSTOMER_DEPOSIT_TERM")
     private val control = mapOf("CZK" to "2100", "EUR" to "2101", "USD" to "2102", "GBP" to "2103")
 
+    /** V15 (CZK) + V35 (#13226). */
+    private val feeIncome = mapOf("CZK" to "4003", "EUR" to "4004", "USD" to "4005", "GBP" to "4006")
+
     val billing: Map<Triple<String, String, String>, UUID> = buildMap {
         for ((ccy, code) in control) {
             for (cls in classes) put(Triple(cls, "PRINCIPAL", ccy), idOf(code))
         }
-        put(Triple("FEE_INCOME_ACCOUNT", "FEE_INCOME", "CZK"), idOf("4003"))
+        for ((ccy, code) in feeIncome) put(Triple("FEE_INCOME_ACCOUNT", "FEE_INCOME", ccy), idOf(code))
     }
 
     fun resolve(accountingClass: String, role: String, currency: String): UUID = requireNotNull(
@@ -253,6 +275,9 @@ private object LedgerRules {
         LedgerMap.idOf("2102") to "USD",
         LedgerMap.idOf("2103") to "GBP",
         LedgerMap.idOf("4003") to "CZK",
+        LedgerMap.idOf("4004") to "EUR",
+        LedgerMap.idOf("4005") to "USD",
+        LedgerMap.idOf("4006") to "GBP",
     )
 
     fun accountCurrency(account: UUID): String = currencyOf.getValue(account)

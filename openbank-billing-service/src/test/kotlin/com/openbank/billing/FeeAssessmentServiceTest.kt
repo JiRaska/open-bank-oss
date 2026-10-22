@@ -84,6 +84,34 @@ class FeeAssessmentServiceTest {
     }
 
     @Test
+    fun `a EUR fee is assessed and charged in EUR, the ledger books it on its own fee-income account`(): Unit =
+        runBlocking {
+            val billing = AccountBilling("prod-1", FeeContext(currency = "EUR"), OPENED)
+            val a = service(billing, listOf(fee("f1", "12.50", currency = "EUR"))).assess("c", "acc", "EUR")
+            assertThat(a.skipped).isFalse()
+            val cmd = a.journalCommands().single()
+            assertThat(cmd.currency).isEqualTo("EUR")
+            assertThat(cmd.amount).isEqualByComparingTo("12.50")
+            assertThat(skipCount("FEE_INCOME_CURRENCY_UNMAPPED")).isZero()
+        }
+
+    @Test
+    fun `a currency the ledger has no fee-income account for is a counted skip, never a zero charge`(): Unit =
+        runBlocking {
+            val billing = AccountBilling("prod-1", FeeContext(currency = "CHF"), OPENED)
+            val revisions = FakeRevisions(listOf(fee("f1", "7", currency = "CHF")))
+            val a = service(billing, emptyList(), revisions).assess("c", "acc", "CHF")
+            assertThat(a.skipped).isTrue()
+            assertThat(a.skipReason).isEqualTo("FEE_INCOME_CURRENCY_UNMAPPED")
+            assertThat(a.assessedFees).isEmpty()
+            assertThat(a.journalCommands()).isEmpty()
+            assertThat(skipCount("FEE_INCOME_CURRENCY_UNMAPPED")).isEqualTo(1.0)
+            // refused before anything is pinned or read: nothing is half-done for a currency we cannot book
+            assertThat(pins.pins).isEmpty()
+            assertThat(revisions.termsReads).isEmpty()
+        }
+
+    @Test
     fun `unresolved account context skips the assessment and charges nothing`(): Unit = runBlocking {
         val a = service(null, emptyList()).assess("c", "acc", "CZK")
         assertThat(a.skipped).isTrue()
