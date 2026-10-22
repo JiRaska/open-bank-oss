@@ -9,8 +9,18 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.6.0
+  version: 1.7.0
   description: |
+    1.7.0 (additive, ADR-0344 phase 0): `DealBooked` gains `kind` (ACTUAL | PLANNED — absent means
+    ACTUAL; a consumer that books exposure must ignore PLANNED), `bookId`, `legs`, `scheduleVersion`,
+    `scheduleHash`, `rollDirection` (FROM_START | FROM_END; absent = FROM_END), `calendars` and
+    `businessDayConvention` (the conventions a leg without its own inherits, so a consumer derives the
+    schedule treasury generated). `ProductType` lists the leg-described products of ADR-0344 (a
+    consumer must tolerate a product it does not model); treasury books only the five pre-existing
+    products until each later phase lands. New on the same topic: `treasury.cashflow.generated.v1`
+    (a cash-flow ledger version was stored; `flows` carries the stored rows) and
+    `treasury.cashflow.overridden.v1` (a four-eyes override was approved or rejected).
+
     Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings, the
     ČNB overnight deposit facility and ČNB lombard (marginal lending) borrowings.
 
@@ -66,6 +76,11 @@ channels:
         $ref: '#/components/messages/DealReversed'
       NostroBreakAged:
         $ref: '#/components/messages/NostroBreakAged'
+      CashFlowGenerated:
+        $ref: '#/components/messages/CashFlowGenerated'
+      CashFlowOverridden:
+        $ref: '#/components/messages/CashFlowOverridden'
+
 
 operations:
   publishTreasuryDealEvents:
@@ -106,11 +121,24 @@ components:
       summary: "An open nostro reconciliation break reached the alert age and amount (ADR-0315 D7). Nothing posted."
       payload:
         $ref: '#/components/schemas/NostroBreakAged'
+    CashFlowGenerated:
+      name: treasury.cashflow.generated.v1
+      summary: "A cash-flow ledger version was generated and stored with the submission (ADR-0344 D4)."
+      payload:
+        $ref: '#/components/schemas/CashFlowGenerated'
+    CashFlowOverridden:
+      name: treasury.cashflow.overridden.v1
+      summary: "A four-eyes override of one cash flow was approved or rejected (ADR-0344 D4). Nothing posted."
+      payload:
+        $ref: '#/components/schemas/CashFlowOverridden'
 
   schemas:
     ProductType:
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT, CASH, TREASURY_BILL, BOND, BILL_OF_EXCHANGE, LOAN, FX_FORWARD, FX_SWAP, FRA, IRS, REPO, REVERSE_REPO]
+    DealKind:
+      type: string
+      enum: [ACTUAL, PLANNED, HYPOTHETICAL]
     FxSide:
       type: [string, 'null']
       enum: [BUY, SELL, null]
@@ -151,6 +179,17 @@ components:
             decision: { type: string, enum: [WITHIN_LIMIT] }
             maxPrincipal: { type: [number, 'null'], description: "In the deal's currency" }
             maxTenorDays: { type: [integer, 'null'], description: 'Null = no tenor cap (FX_SPOT)' }
+        kind: { $ref: '#/components/schemas/DealKind' }
+        bookId: { type: [string, 'null'] }
+        legs:
+          type: array
+          description: "`LegSpec` in `Legs.kt` (rates as annual percentages; dayCount as the enum name, e.g. ACT_360)."
+          items: { type: object, additionalProperties: true }
+        scheduleVersion: { type: integer }
+        scheduleHash: { type: [string, 'null'] }
+        rollDirection: { type: string, enum: [FROM_START, FROM_END], description: 'Absent = FROM_END. Places a leg whose stub is NONE.' }
+        calendars: { type: array, items: { type: string }, description: 'Deal header calendar codes; a leg without paymentCalendars uses their joint calendar. Empty/absent = leg currency calendar.' }
+        businessDayConvention: { type: [string, 'null'], description: 'Deal header convention a leg without its own inherits.' }
 
     DealConfirmed:
       type: object
@@ -167,6 +206,7 @@ components:
         simulated: { type: boolean, description: 'True when the simulated counterparty set (ADR-0315 D9, sandbox only) confirmed it: a SYNTHETIC confirmation.' }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        kind: { $ref: '#/components/schemas/DealKind' }
 
     DealSettled:
       type: object
@@ -220,6 +260,7 @@ components:
           description: Null when reversed from BOOKED or CONFIRMED, before anything had posted.
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        kind: { $ref: '#/components/schemas/DealKind' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
 
@@ -241,3 +282,74 @@ components:
         thresholdDays: { type: integer, description: 'openbank.treasury.nostro.break-alert-age-days at the time of the alert' }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    CashFlowGenerated:
+      type: object
+      description: "Constructor properties of `CashFlowGenerated` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, kind, dealVersion, scheduleVersion, scheduleHash, flowCount, projectedCount, carriedOverrides, conflicts, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        kind: { $ref: '#/components/schemas/DealKind' }
+        bookId: { type: [string, 'null'] }
+        dealVersion: { type: integer }
+        scheduleVersion: { type: integer }
+        scheduleHash: { type: string }
+        flowCount: { type: integer }
+        projectedCount: { type: integer, description: Floating flows whose amount awaits a fixing }
+        carriedOverrides: { type: integer }
+        conflicts: { type: integer, description: Approved overrides that could not be carried over }
+        occurredAt: { type: string, format: date-time }
+        flows:
+          type: array
+          maxItems: 20000
+          description: 1.7.0 — the stored rows (absent before 1.7.0)
+          items: { $ref: '#/components/schemas/LedgerFlowItem' }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    CashFlowOverridden:
+      type: object
+      description: "Constructor properties of `CashFlowOverridden` in `TreasuryEventPayloads.kt`."
+      required: [dealId, flowId, overrideId, status, reason, proposedBy, decidedBy, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        flowId: { type: string, format: uuid }
+        overrideId: { type: string, format: uuid }
+        status: { type: string, enum: [APPROVED, REJECTED] }
+        paymentDate: { type: [string, 'null'], format: date }
+        amount: { type: [number, 'null'] }
+        originalPaymentDate: { type: [string, 'null'], format: date }
+        originalAmount: { type: [number, 'null'] }
+        reason: { type: string }
+        proposedBy: { type: string }
+        decidedBy: { type: string, description: Never equal to proposedBy (four-eyes) }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    LedgerFlowItem:
+      type: object
+      description: "Constructor properties of `LedgerFlowItem` in `TreasuryEventPayloads.kt`."
+      required: [flowId, legIndex, periodIndex, kind, direction, currency, paymentDate, rateSource, state, manual]
+      properties:
+        flowId: { type: string, format: uuid }
+        legIndex: { type: integer }
+        periodIndex: { type: integer }
+        kind: { type: string, enum: [PRINCIPAL, INTEREST, FEE, NOTIONAL_EXCHANGE, PREMIUM] }
+        direction: { type: string, enum: [IN, OUT] }
+        currency: { type: string }
+        accrualStart: { type: [string, 'null'], format: date }
+        accrualEnd: { type: [string, 'null'], format: date }
+        fixingDate: { type: [string, 'null'], format: date }
+        paymentDate: { type: string, format: date }
+        notional: { type: [number, 'null'] }
+        rate: { type: [number, 'null'] }
+        rateSource: { type: string, enum: [FIXED, OBSERVED, PROJECTED, RATE_UNTIL_FIRST_FIXING, MISSING] }
+        amount: { type: [number, 'null'] }
+        state: { type: string, enum: [PROJECTED, FIXED, DUE, SETTLED, POSTED, CANCELLED] }
+        manual: { type: boolean }
+
+
+
+
+
+

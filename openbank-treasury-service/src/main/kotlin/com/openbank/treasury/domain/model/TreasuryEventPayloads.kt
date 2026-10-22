@@ -250,45 +250,6 @@ data class LedgerFlowItem(
     }
 }
 
-/** One flow fixed by [CashFlowFixed]: its slot, the observed rate and the amount it now pays. */
-data class FixedFlowItem(
-    val flowId: UUID,
-    val legIndex: Int,
-    val periodIndex: Int,
-    val kind: String,
-    val direction: String,
-    val currency: String,
-    val accrualStart: LocalDate?,
-    val accrualEnd: LocalDate?,
-    val paymentDate: LocalDate,
-    val rate: BigDecimal,
-    val amount: BigDecimal,
-    val rateSource: String,
-    val state: String,
-)
-
-/**
- * ADR-0344 D5: floating flows of one deal moved PROJECTED/MISSING -> FIXED from an observed index
- * value that passed the quality gate. [sha256] is the provenance hash of (index, date, value, source).
- */
-data class CashFlowFixed(
-    val dealId: UUID,
-    val dealVersion: Int,
-    val scheduleVersion: Int,
-    val index: String,
-    val fixingDate: LocalDate,
-    val value: BigDecimal,
-    val source: String,
-    val sha256: String,
-    val flows: List<FixedFlowItem>,
-    val occurredAt: Instant,
-    val sourceService: String = SOURCE_SERVICE,
-) {
-    companion object {
-        const val EVENT_TYPE = "treasury.cashflow.fixed.v1"
-    }
-}
-
 /** ADR-0344 D4: a four-eyes cash-flow override was approved or rejected. */
 data class CashFlowOverridden(
     val dealId: UUID,
@@ -307,32 +268,5 @@ data class CashFlowOverridden(
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.cashflow.overridden.v1"
-    }
-}
-
-/**
- * ADR-0344 D7: a four-eyes correction of a booked deal was approved. The new terms version and its
- * cash-flow ledger committed in this transaction; [deltaJournals] are the journals it owes the
- * ledger (posted after the commit, idempotent on their keys). [fullUnwind]: the deal ended REVERSED.
- */
-data class DealCorrected(
-    val dealId: UUID,
-    val correctionId: UUID,
-    val product: ProductType,
-    val fromVersion: Int,
-    val toVersion: Int,
-    val scheduleVersion: Int,
-    val fullUnwind: Boolean,
-    val changedFlows: Int,
-    val deltaJournals: Int,
-    val effectiveFrom: LocalDate,
-    val reason: String,
-    val proposedBy: String,
-    val approvedBy: String,
-    val occurredAt: Instant,
-    val sourceService: String = SOURCE_SERVICE,
-) {
-    companion object {
-        const val EVENT_TYPE = "treasury.deal.corrected.v1"
     }
 }
