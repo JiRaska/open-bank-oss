@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for InterestAccrualCatalogRevisionUnresolved (ADR-0341/0342).
+# Must-FIRE plus must-NOT-fire controls (flat counter; increment older than the window).
+rule_files:
+  - prometheus-rules-interest-accrual.yaml
+
+evaluation_interval: 1h
+
+tests:
+  - interval: 1h
+    name: "an increment within the last 2d fires"
+    input_series:
+      - series: 'openbank_interest_accrual_catalog_revision_unresolved_total{pod="a"}'
+        values: "0+0x10 1+0x70"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: InterestAccrualCatalogRevisionUnresolved
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              subject_period: 24h
+              summary: "Interest accrual refused for accounts whose catalog revision is unresolvable"
+              description: "interest-service refused to accrue at least one account in the last two days because the revision it is pinned to has no cached rate config (or the account has catalog history but no pin). The accrual run is reported incomplete and the ledger holds the accounting day. Repair the catalog cache (or the missing pin) and re-run the accrual for the same business date; it is idempotent per account and day."
+
+  - interval: 1h
+    name: "a flat counter does NOT fire"
+    input_series:
+      - series: 'openbank_interest_accrual_catalog_revision_unresolved_total{pod="a"}'
+        values: "1+0x80"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: InterestAccrualCatalogRevisionUnresolved
+        exp_alerts: []
+
+  - interval: 1h
+    name: "an increment older than the 2d window does NOT fire"
+    input_series:
+      - series: 'openbank_interest_accrual_catalog_revision_unresolved_total{pod="a"}'
+        values: "0+0x10 1+0x70"
+    alert_rule_test:
+      - eval_time: 70h
+        alertname: InterestAccrualCatalogRevisionUnresolved
+        exp_alerts: []

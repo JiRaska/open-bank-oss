@@ -124,12 +124,15 @@ a currency keeps its currency-agnostic behavior. Optional filtering is construct
 parameters, so a null-test placeholder cannot fail PostgreSQL type inference. Account override,
 product fallback and effective-date ordering are unchanged.
 
-**Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`; the daily run skips the
-account with a WARN and counts `openbank.interest.accrual.catalog.revision.unresolved`) when a pin row
-exists but its revision does not resolve to a cached rate config, or when the account has catalog accrual
-history but no pin. It is never accrued at the currently effective rate. Repair the cache (or the missing
-pin) and re-run; the accrual is idempotent per day. A catalog-sourced effective rate used for an unpinned
-account is counted by `openbank.interest.accrual.catalog.rate.unpinned` and should stay at zero.
+**Fail-closed behaviour.** An account is refused (`POST /accrue` answers `409`) when a pin row exists but its
+revision does not resolve to a cached rate config, or when the account has catalog accrual history but no
+pin. The catalog rate is never used: the account accrues nothing. In the daily run the account counts as
+**failed**, logs a WARN and increments `openbank.interest.accrual.catalog.revision.unresolved`; the run is
+therefore incomplete, the close-job record is REFUSED, and the ledger **holds the accounting day** rather than
+closing it without that interest. The alert `InterestAccrualCatalogRevisionUnresolved` fires on the counter.
+Repair the cache (or the missing pin) and re-run for the same business date; the accrual is idempotent per
+account and day. A catalog-sourced effective rate met for an unpinned account fails closed the same way and
+is counted once, by `openbank.interest.accrual.catalog.rate.unpinned`, which should stay at zero.
 
 ## Tech-stack matrix
 

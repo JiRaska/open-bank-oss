@@ -10,7 +10,12 @@ import java.util.UUID
  * to a cached rate config (ADR-0341). Accruing at "the currently effective" rate instead would
  * reprice a live contract, so the accrual fails visibly and is retried once the cache is repaired.
  */
-class CatalogRevisionUnresolvableException(val accountId: UUID, val productId: String, val currency: String) :
-    RuntimeException(
-        "Account $accountId is catalog-pinned for $productId/$currency but its revision's rate config is unresolvable",
-    )
+class CatalogRevisionUnresolvableException(
+    val accountId: UUID,
+    val productId: String,
+    val currency: String,
+    /** True when the cause was a catalog-sourced rate with no pin (counted as `rate.unpinned`, not as unresolved). */
+    val unpinnedCatalogRate: Boolean = false,
+) : RuntimeException(
+    "Account $accountId is catalog-pinned for $productId/$currency but its revision's rate config is unresolvable",
+)

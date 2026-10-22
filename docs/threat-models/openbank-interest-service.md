@@ -63,6 +63,9 @@ money-path service, not adjacent.
 
 - **Withholding-tax remittance to the tax authority is not yet wired to an external filing system** (#999 tracks actual remittance-to-authority; today the debit lands in an internal remittance-holding account). The money-path risk this threat model covers is the *internal* debit/capitalization flow, which is live.
 - Catalog-projected rate snapshots are an additional inbound reference-data boundary. A missing, malformed, stale or unsupported snapshot must prevent accrual for its affected product/currency; it must never fall back to a different current rate.
+- **First catalog pin and accrual atomicity.** The first catalog revision pin must not survive an unsuccessful accrual write. One accrual unit of work covers the natural-key replay lookup, rate and pin resolution, and accrual persistence; nested pin writes share that transaction, and a failed unique-key insert rolls back before the service reads the winner. Account-specific override precedence, lifetime pin selection and the V19/V20 backfill are unchanged. A native regression injects an accrual INSERT failure for one synthetic account and requires both the pin and the accrual to stay absent; once a newer revision arrives, the identical request must pin that revision. It runs in CI with the rest of the native suite.
+- **Currency-constrained accrual versus currency-agnostic reads.** The two lookups use explicit query branches that keep the account-override over product-default precedence and the effective-date order. A native regression places a newer USD rate beside EUR terms: the unrestricted read must choose USD, while an EUR accrual must keep the EUR config and rate, which separates a working filter from a change that merely avoids a database error.
+- **An unresolvable pin holds the day; it never accrues at a guessed rate.** If a pin row exists but its revision has no cached rate config, or an account has catalog accrual history but no pin, the account accrues nothing and counts as FAILED. The accrual run is then incomplete, the close-job record is REFUSED, and the ledger holds the accounting day instead of closing it without that interest. The counters `openbank.interest.accrual.catalog.revision.unresolved` and `...rate.unpinned` count each such account once, and the `InterestAccrualCatalogRevisionUnresolved` alert fires on the first. No catalog-sync activation, migration delivery or deployment is authorized by this document.
 - **Settlement ack consumer** (`WithholdingRemittanceSettlementConsumer`) trusts the Kafka topic's mTLS/ACL boundary as its authentication; no additional payload-level signature.
 
 ## 6. Change log
@@ -350,7 +353,6 @@ money-path service, not adjacent.
   (account-service carries no revision yet - the last adoption step); an account that opens and
   accrues under revision A before B is effective stays on A. Rollback: set
   `INTEREST_CATALOG_SYNC_ENABLED=false`; V19 is additive and is retained.
-
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 - **2026-10-17** — **Catalog reads move to the service's own machine identity (#8481, ADR-0341 step 1).**
   `ProductCatalogClient` now selects the NAMED oidc-client `ledger` (Keycloak client `openbank-interest`)
@@ -363,25 +365,5 @@ money-path service, not adjacent.
   does not advance. Rollback: remove `catalog:read` from the client and revert the rego rule; the sync
   then idles on 403 (catalog sync stays off by default until the follow-up PR).
 
-### First catalog pin and accrual atomicity
-
-The first catalog revision pin must not survive an unsuccessful accrual write. The accrual
-dedicated accrual unit-of-work boundary encompasses natural-key replay lookup, rate/pin resolution
-and accrual persistence. Nested pin writes share that transaction; a failed unique-key insert
-rolls back before the service reads the winner. Existing account-specific override precedence,
-lifetime pin selection, V19/V20 backfill and image holds remain unchanged.
-
-A new HTTP/JDBC regression injects an accrual INSERT failure for one synthetic account and
-verifies a nontransactional sequence marker proving the trigger actually executed, then
-requires both pin and accrual to remain absent; after a newer revision arrives, the identical
-request must pin that successful revision. This test has not run for this draft source and
-requires native CI. Source correspondence is not proof of transaction behavior or activation
-readiness. No catalog-sync activation, migration delivery or deployment is authorized here.
-
-Currency-constrained accrual and currency-agnostic read lookup use explicit query branches,
-retaining the account-override/product-default precedence and effective-date order. A native
-regression places a newer USD rate beside EUR terms: the unrestricted read must choose USD,
-while an EUR accrual must retain the EUR config/rate. This distinguishes a working filter from
-a change that merely avoids a database error. The updated native cases remain mandatory.
-
 - **2026-10-19** — New automatic day-close export boundaries store/report only counts and fixed failure categories, not raw account/product identifiers, exception text or closed-day response bodies. Their aggregate warnings follow the same rule; the newly added account-listing error message omits the throwable. Existing per-account capitalization/recovery logs are outside this correction and are not claimed anonymous. Ledger operator identity/free-text waiver reasons remain intentional audit personal data. Counts, REFUSED/RAN semantics, liveness and the default shadow rollout are unchanged.
+- **2026-10-22** — **Unresolvable catalog pin now fails the account and holds the day (ADR-0341/0342).** The per-account handler used to map it to a skip, which left the run complete and let the ledger close the day without that interest. It now returns FAILED, keeps the WARN and the counter (each account counted on exactly one of `revision.unresolved` / `rate.unpinned`), and a new PrometheusRule alerts on it. No new credential, endpoint or data. Rollback: revert the commit.

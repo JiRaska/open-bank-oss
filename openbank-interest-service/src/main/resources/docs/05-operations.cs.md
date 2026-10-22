@@ -130,16 +130,28 @@ Automaticky vystaveno v `/api/v1/info` (z `libs.versions.toml`):
 ## Připnutí revize katalogu (ADR-0341)
 
 Při zapnuté synchronizaci katalogu účet akruuje podle publikované revize, ke které je **připnut**, nikdy
-podle "aktuálně platné" sazby. Řádek v `account_rate_revision_pins` vzniká při prvním akruálu účtu pod
-katalogovou sazbou. Migrace V20 doplnila pin každému existujícímu účtu podle jeho posledního nezrušeného
-akruálu pod katalogovou konfigurací; účty s provozní sazbou pin nemají a zůstávají na provozní sémantice.
+podle "aktuálně platné" sazby. Řádek v `account_rate_revision_pins` se potvrzuje společně s prvním úspěšným
+akruálem účtu pod katalogovou sazbou. Určení sazby, první pin a zápis akruálu sdílejí jednu transakci, kterou
+vlastní vyhrazený port jednotky práce akruálu; selže-li zápis akruálu, pin se vrátí zpět. Adaptér transakce
+vyžaduje CDI, bez produkčního průchozího záložního řešení. Konflikt přirozeného klíče se řeší čtením
+potvrzeného vítěze až po vrácení neúspěšné transakce. Migrace V20 doplnila pin každému existujícímu účtu podle
+jeho posledního nezrušeného akruálu pod katalogovou konfigurací; účty s provozní sazbou pin nemají a zůstávají
+na provozní sémantice.
 
-**Chování fail-closed.** Účet je odmítnut (`POST /accrue` vrací `409`; denní běh účet přeskočí s WARN a
-zvýší `openbank.interest.accrual.catalog.revision.unresolved`), pokud pin existuje, ale jeho revize se
-nepřeloží na uloženou sazbu, nebo má účet katalogovou historii akruálů bez pinu. Nikdy se neakruuje podle
-aktuálně platné sazby. Opravte cache (nebo chybějící pin) a spusťte znovu; akruál je za den idempotentní.
-Použití katalogové sazby u nepřipnutého účtu počítá `openbank.interest.accrual.catalog.rate.unpinned`
-a má zůstat na nule.
+Vyhledání sazby pro akruál filtruje požadovanou měnu. Čistě čtecí vyhledání platné sazby bez měny si
+zachovává chování nezávislé na měně. Volitelný filtr se sestavuje před navázáním parametrů, takže zástupný
+symbol testu na null nemůže způsobit selhání odvození typu v PostgreSQL. Přednost účtu, produktový výchozí
+záznam a řazení podle data účinnosti zůstávají beze změny.
+
+**Chování fail-closed.** Účet je odmítnut (`POST /accrue` vrací `409`), pokud pin existuje, ale jeho revize se
+nepřeloží na uloženou sazbu, nebo má účet katalogovou historii akruálů bez pinu. Katalogová sazba se nikdy
+nepoužije: účet nic neakruuje. V denním běhu se účet počítá jako **selhaný**, zapíše WARN a zvýší
+`openbank.interest.accrual.catalog.revision.unresolved`; běh je proto neúplný, záznam závěrkové úlohy je
+REFUSED a ledger **drží účetní den** místo toho, aby ho uzavřel bez tohoto úroku. Na čítač upozorňuje alert
+`InterestAccrualCatalogRevisionUnresolved`. Opravte cache (nebo chybějící pin) a spusťte znovu pro stejné
+obchodní datum; akruál je idempotentní na účet a den. Katalogová účinná sazba zjištěná u nepřipnutého účtu
+selže stejným způsobem a počítá se jednou, v `openbank.interest.accrual.catalog.rate.unpinned`, který má
+zůstat na nule.
 
 ## Účast na závěrce dne (ADR-0342)
 

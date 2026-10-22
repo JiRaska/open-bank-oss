@@ -226,8 +226,13 @@ class InterestService(
         }
     }
 
-    private fun unresolvable(request: AccrualRequest) =
-        CatalogRevisionUnresolvableException(request.accountId, request.productId, request.currency)
+    private fun unresolvable(request: AccrualRequest, unpinnedCatalogRate: Boolean = false) =
+        CatalogRevisionUnresolvableException(
+            request.accountId,
+            request.productId,
+            request.currency,
+            unpinnedCatalogRate,
+        )
 
     /**
      * After a pin attempt. A resolvable pin wins. A pin written by this call that does not resolve fails
@@ -247,8 +252,8 @@ class InterestService(
             if (catalogSourced) {
                 // A catalog-sourced rate with no resolvable pin: never accrue at "currently effective".
                 log.warnf("catalog rate %s has no resolvable pin for account %s", effective.id, request.accountId)
-                capitalizationMetrics?.catalogRateUnpinned()
-                Uni.createFrom().failure<InterestRateConfig?>(unresolvable(request))
+                // Counted once, by the caller, as rate.unpinned (not also as revision.unresolved).
+                Uni.createFrom().failure<InterestRateConfig?>(unresolvable(request, unpinnedCatalogRate = true))
             } else {
                 Uni.createFrom().item<InterestRateConfig?>(effective)
             }
@@ -305,10 +310,6 @@ class InterestService(
             }
     }
 
-    private enum class AccrualState { ACCRUED, SKIPPED, FAILED, UNAVAILABLE }
-
-    private data class AccountAccrualResult(val state: AccrualState, val reason: String? = null)
-
     /** Walk account-service's cursor pages, keeping only the accruable account types, until the
      *  cursor is exhausted. Page count is small (fleet-wide ACTIVE set); recursion depth == pages. */
     private fun collectAccruableAccounts(
@@ -345,25 +346,8 @@ class InterestService(
                         accrualDate = date,
                     ),
                 ).map { AccountAccrualResult(AccrualState.ACCRUED) }
-                    .onFailure(CatalogRevisionUnresolvableException::class.java).recoverWithItem { e ->
-                        // Skipped WITH a reason and a metric: never accrued at a guessed rate (ADR-0341).
-                        log.warnf("accrual skipped for account %s: %s", account.id, e.message)
-                        capitalizationMetrics?.catalogRevisionUnresolved()
-                        AccountAccrualResult(AccrualState.SKIPPED)
-                    }
-                    .onFailure().recoverWithItem { e -> classifyAccrualFailure(account, e) }
+                    .onFailure().recoverWithItem { e -> classifyAccrualFailure(account, e, capitalizationMetrics, log) }
             }
-        }
-
-    /** No rate for the product is a configuration fact, not a transient failure; anything else failed. */
-    private fun classifyAccrualFailure(account: AccountSnapshot, e: Throwable): AccountAccrualResult =
-        if (e is RateConfigNotFoundException) {
-            AccountAccrualResult(AccrualState.SKIPPED)
-        } else {
-            AccountAccrualResult(
-                AccrualState.FAILED,
-                "accrual failed for account ${account.id}: ${e.message ?: e.javaClass.simpleName}",
-            )
         }
 
     /**
