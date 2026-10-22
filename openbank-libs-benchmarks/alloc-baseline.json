@@ -19,6 +19,12 @@
     "com.openbank.libs.benchmarks.MoneyBench.round": 24.0,
     "com.openbank.libs.benchmarks.PiiMaskBench.email": 248.0,
     "com.openbank.libs.benchmarks.PiiMaskBench.iban": 352.0,
-    "com.openbank.libs.benchmarks.PiiMaskBench.pan": 1256.0
+    "com.openbank.libs.benchmarks.PiiMaskBench.pan": 1256.0,
+    "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": 15251.6
+  },
+  "latency_bounds": {
+    "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": {
+      "p99_ms": 2.0
+    }
   }
 }

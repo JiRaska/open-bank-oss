@@ -45,6 +45,12 @@ dependencies {
     jmh(project(":openbank-libs-domain"))
     jmh(project(":openbank-libs-runtime"))
     jmh(project(":openbank-libs-iso20022"))
+    // ADR-0352 ProductInterpreterBench: the interpreter (libs-domain), its arithmetic (libs-finance)
+    // and the golden set it evaluates (libs-testing's GoldenScenarios).
+    jmh(project(":openbank-libs-finance"))
+    // Non-transitive: only GoldenScenarios + the product-golden resources are needed; the module's
+    // Quarkus/testcontainers API surface would push the JMH jar past 65535 entries.
+    jmh(project(":openbank-libs-testing")) { isTransitive = false }
 }
 
 jmh {
