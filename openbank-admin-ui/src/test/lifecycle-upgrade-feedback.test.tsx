@@ -41,13 +41,13 @@ describe('lifecycle upgrade proposal feedback', () => {
     expect(screen.getByText('18.1')).toBeVisible()
   })
 
-  it('renders every observed version during a rollout without implying one version is current', () => {
+  it('renders every observed workload version without implying one version is current', () => {
     render(<LifecycleStrip
       data={{
         ...data,
         running: {
           version: null,
-          source: 'mixed-running-images',
+          source: 'mixed-running-workloads',
           mixed: true,
           versions: [
             { version: '8.1.10', count: 2, observedAt: '2026-10-19T17:59:30.000Z' },
@@ -63,9 +63,18 @@ describe('lifecycle upgrade proposal feedback', () => {
     />)
     expect(screen.getByText('mixed versions')).toBeVisible()
     expect(screen.getByText('8.1.10 (2) · 8.1.9 (1)')).toBeVisible()
-    expect(screen.getByText(/lifecycle verdict is withheld/)).toBeVisible()
+    expect(screen.getByText(/Multiple versions are running across observed workloads; an aggregate lifecycle verdict is unavailable/)).toBeVisible()
+    expect(screen.queryByText(/during rollout/)).not.toBeInTheDocument()
     expect(screen.queryByText('8.1.10', { exact: true })).not.toBeInTheDocument()
     expect(screen.getByText('Unknown')).toBeVisible()
+  })
+
+  it('labels a runtime build-info observation without claiming image measurement', () => {
+    render(<LifecycleStrip data={{ ...data, running: {
+      version: '1.14.1', source: 'prometheus-runtime-build-info', observedAt: '2026-10-19T17:59:30.000Z',
+    } }} name="Karpenter" t={t} />)
+    expect(screen.getByText(/Runtime build version measured/)).toBeVisible()
+    expect(screen.queryByText(/Running workload image measured/)).not.toBeInTheDocument()
   })
 
   it('shows a digest-only running image identity and withholds version lifecycle advice', () => {
