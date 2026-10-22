@@ -4310,6 +4310,32 @@ libs_bench_alloc_baseline:
   target_enforce_date: "2026-12-15"   # ADR-0144; matches the gate's review_after
   ci_producer: ".github/scripts/check-bench-alloc-baseline.py"
 
+product_ir_determinism:
+  # ADR-0352 §8: every golden scenario runs twice in one JVM with byte-identical canonical output
+  # (GoldenDeterminismTest, openbank-libs-testing); the gate keeps that test's scope equal to the
+  # committed scenario files. Cross-irVersion equivalence is a declared no-op with one version.
+  detect: ["openbank-libs-testing/src/main/resources/product-golden/*.json", "openbank-libs-testing/src/main/resources/product-golden/index.txt"]
+  require:
+    - "every scenario file is listed in index.txt and every index entry exists"
+    - "every scenario's revision uses a supported irVersion and its name equals its file name"
+    - "GoldenDeterminismTest exists, is not disabled and iterates the committed index"
+  gate: product-ir-determinism
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144; ADR-0352 flips it at the end of phase 2
+  ci_producer: ".github/scripts/check-product-ir-determinism.py"
+
+product_ir_run_limits:
+  # ADR-0352 §2: hard run limits are part of the IR schema; review is not the control, the validator is.
+  detect: ["**/*.json carrying a top-level irVersion + hooks (product IR) or revision + steps (golden scenario)"]
+  require:
+    - "tiers, fees, rules per hook, notify variables and predicate depth stay within the maxima of product-ir/v1.schema.json"
+    - "every ruleId is present, matches the pattern and is unique within its revision"
+    - "no golden scenario step expects more than maxInstructionsPerEvaluation instructions"
+  gate: product-ir-run-limits
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144; ADR-0352 flips it at the end of phase 2
+  ci_producer: ".github/scripts/check-product-ir-run-limits.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",

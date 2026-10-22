@@ -6829,6 +6829,62 @@ gates:
     run: |
       python3 .github/scripts/check-bench-alloc-baseline.py --root .
 
+  # ADR-0352 §8 — product IR (Product as Code, phase 1). Three gates:
+  #   product-ir-determinism  the golden set is indexed, well-formed and fed to GoldenDeterminismTest,
+  #                           which runs every scenario twice in one JVM (openbank-libs-testing);
+  #                           the cross-irVersion half is a NO-OP while one version is supported and
+  #                           the script prints that on every run instead of passing silently.
+  #   product-ir-run-limits   every committed IR document and golden scenario is inside the schema
+  #                           maxima, read from product-ir/v1.schema.json itself.
+  #   product-ir-purity       ProductIrPurityRule (detekt) is registered and active, and no source
+  #                           under com.openbank.libs.product imports I/O, clock, logging or metrics.
+  # The first two are advisory until the end of phase 2 (ADR-0144 target 2026-12-31); purity is
+  # enforced from phase 1, as the ADR decides.
+  - id: product-ir-determinism
+    name: "product IR golden set is indexed and deterministic (ADR-0352, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "A golden scenario the index does not list is one the determinism test never opens; the JVM half compares two in-process runs byte for byte, and this half keeps its scope equal to the committed files."
+    review_after: "2026-12-31"
+    verified: "2026-10-22 — 6 scenarios indexed, GoldenDeterminismTest green (6 dynamic cases); an unindexed scenario file, an index entry with no file and an unsupported irVersion each turn it red"
+    budget_seconds: 10
+    min_subjects: 6   # six golden scenarios at introduction (2026-10-22)
+    selftest: python3 .github/scripts/check-product-ir-determinism.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-determinism.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-determinism.py --root .
+
+  - id: product-ir-run-limits
+    name: "committed product IR and golden scenarios stay inside the schema maxima (ADR-0352, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "The parser rejects an over-limit revision at load time, but a committed fixture nobody's test loads is never parsed; this reads every one on every PR and takes the limits from the schema so the two cannot drift."
+    review_after: "2026-12-31"
+    verified: "2026-10-22 — 8 documents (2 IR fixtures, 6 scenarios) within limits; a scenario with 17 tiers is red with '17 tiers exceeds the limit 16'"
+    budget_seconds: 15
+    min_subjects: 8   # 2 IR fixtures + 6 golden scenarios at introduction (2026-10-22)
+    selftest: python3 .github/scripts/check-product-ir-run-limits.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-run-limits.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-run-limits.py --root .
+
+  - id: product-ir-purity
+    name: "product interpreter package is pure: detekt rule active, no I/O/clock/logging/metrics imports (ADR-0352)"
+    group: kotlin
+    mode: enforced
+    rationale: "The interpreter is the same code in production, simulation and CI only while it reads nothing but its arguments; a custom detekt rule that is not active in the overlay never runs, so the wiring is checked here too."
+    review_after: "2027-04-30"
+    verified: "2026-10-22 — 11 files under com.openbank.libs.product clean; adding 'import java.io.File' to ProductInterpreter.kt turns it red"
+    budget_seconds: 10
+    min_subjects: 10  # 11 main sources under com.openbank.libs.product at introduction (2026-10-22)
+    selftest: python3 .github/scripts/check-product-ir-purity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-purity.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-purity.py --root .
+
 
   - id: dr-restore-orchestration
     name: "DR restore transport, result validation and owned cleanup"
