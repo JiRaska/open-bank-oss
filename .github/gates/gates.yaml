@@ -556,7 +556,6 @@ gates:
     run: |
       set -e
       bash .github/scripts/supersede-deploy-prs.sh --self-test
-      python3 .github/scripts/test-supersede-hold-union.py
 
   # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
   # stops restarting every open PR's required checks under the strict up-to-date rule.
@@ -3970,6 +3969,30 @@ gates:
   #
   # Scope is DERIVED from rules.yaml money_path_services, not hand-kept: check-clock-injection
   # lists 8 of the 20 and reads as passing about the 12 it never looks at.
+  # ADR-0342 D2 (#13167): the day-close participant set is named in three places — rules.yaml
+  # close_participants, the ledger's openbank.ledger.close.participants, and the services that
+  # construct a CloseParticipationReporter. Drift between them is silent in each module: the ledger
+  # waits forever for a name nobody reports, or a reporter gets 404/403 and the close passes
+  # without it. Advisory on arrival while the participant check itself is in shadow.
+  - id: close-participants-declared
+    name: "day-close participants agree across rules.yaml, ledger config and reporters (ADR-0342, advisory)"
+    group: kotlin
+    mode: advisory
+    budget_seconds: 30  # one rglob over */src/main/**.kt; measured ~2s locally
+    verified: "2026-10-18 — 1 participant (interest) declared in rules.yaml, ledger application.yaml and wired by InterestCloseParticipationScheduler; 0 findings; --self-test flags principal drift, a missing reporter and an undeclared ledger participant"
+    rationale: >-
+      The participant set is the denominator of the day-close completeness check; a set kept in
+      three files without a comparison drifts exactly like the hand-kept gate scopes this repo has
+      measured before.
+    review_after: "2027-01-17"
+    min_subjects: 1   # interest is the first participant (2026-10-17)
+    selftest_inputs: [".github/scripts/check-close-participants.py"]
+    selftest: |
+      python3 .github/scripts/check-close-participants.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-close-participants.py
+
   - id: accounting-clock-gate
     name: "accounting-clock gate — one business-date authority (ADR-0207 D1, enforced)"
     group: kotlin

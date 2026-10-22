@@ -5,6 +5,9 @@
 package com.openbank.interest.infrastructure.scheduler
 
 import com.openbank.interest.application.port.`in`.AccrueInterestUseCase
+import com.openbank.interest.application.port.out.CloseJobRunPort
+import com.openbank.libs.close.CloseJobRun
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
@@ -15,7 +18,6 @@ import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
-import java.time.LocalDate
 
 /**
  * Drives the daily interest accrual. One tick per day (cron in `openbank.interest.accrual.cron`)
@@ -32,8 +34,10 @@ class InterestAccrualScheduler(
     private val accrueInterestUseCase: AccrueInterestUseCase,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
+    private val closeJobRuns: CloseJobRunPort,
 ) {
     private val log = Logger.getLogger(InterestAccrualScheduler::class.java)
+    private val accountingClock = AccountingClock.bank(clock)
     private var liveness: WorkflowLivenessRecorder? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
@@ -43,10 +47,14 @@ class InterestAccrualScheduler(
     @Scheduled(
         cron = "{openbank.interest.accrual-cron}",
         identity = "interest-daily-accrual",
+        timeZone = InterestCloseJobs.SCHEDULE_ZONE,
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     fun runDailyAccrual(): Uni<Void> {
-        val date = LocalDate.now(clock)
+        // The business date is the ledger's accounting day (ADR-0207: Europe/Prague), not the UTC
+        // calendar date - a run at 00:30 Prague is still the UTC day before, and recording it there
+        // would report a day the ledger has not even opened for this job.
+        val date = accountingClock.today()
         log.infof("interest accrual tick starting for %s", date)
         // observed-by: the `interest-accrual` workflow-liveness gauge. `recordSuccess()` below runs on the
         // onItem path only, so a failed tick leaves
@@ -55,13 +63,49 @@ class InterestAccrualScheduler(
         // deliberate rather than lazy: `accrueAll` is idempotent per (account, date), so the next tick (or a
         // manual re-run) fills the gap, and failing the Uni would buy nothing the gauge does not
         // already say. #5745 section C.
-        return accrueInterestUseCase.accrueAll(date)
-            .onItem().invoke { count ->
-                log.infof("interest accrual for %s wrote %d accrual(s)", date, count)
-                liveness?.recordSuccess()
+        return accrueInterestUseCase.accrueAllWithOutcome(date)
+            .onItem().invoke { outcome ->
+                log.infof("interest accrual for %s wrote %d accrual(s)", date, outcome.accrued)
+                if (outcome.complete) {
+                    // Liveness means "the day's accrual completed", not "the tick ran": a tick that
+                    // could not read accounts or balances must keep the staleness alert climbing.
+                    liveness?.recordSuccess()
+                } else {
+                    log.warnf(
+                        "interest accrual for %s: %d account(s) FAILED, %d balance(s) UNAVAILABLE, " +
+                            "listingFailed=%s - the day is reported as not complete",
+                        date,
+                        outcome.failed,
+                        outcome.unavailable,
+                        outcome.listingFailed,
+                    )
+                }
+            }
+            // ADR-0342: the evidence InterestCloseParticipationScheduler reports to the ledger. Only
+            // a SUCCESSFUL run is recorded — a failed tick leaves the day unreported, so the ledger
+            // holds it in CUTOFF instead of closing it without interest.
+            .call { outcome ->
+                closeJobRuns.record(
+                    CloseJobRun(
+                        businessDate = date,
+                        job = InterestCloseJobs.ACCRUAL,
+                        itemsProcessed = outcome.accrued,
+                        journalsPosted = 0,
+                        // Accounts that failed or could not be read accrued nothing: reported like a
+                        // refusal so the day is held, not tied out over missing interest.
+                        refused = outcome.failed + outcome.unavailable + if (outcome.listingFailed) 1 else 0,
+                        refusalReason = if (outcome.complete) {
+                            null
+                        } else {
+                            "ACCRUAL_INCOMPLETE: ${outcome.failed} failed, ${outcome.unavailable} unavailable, " +
+                                "listingFailed=${outcome.listingFailed}"
+                        },
+                        completedAt = clock.instant(),
+                    ),
+                )
             }
             .onFailure().invoke { e -> log.errorf(e, "interest accrual for %s failed", date) }
-            .onFailure().recoverWithItem(0)
+            .onFailure().recoverWithNull()
             .replaceWithVoid()
     }
 

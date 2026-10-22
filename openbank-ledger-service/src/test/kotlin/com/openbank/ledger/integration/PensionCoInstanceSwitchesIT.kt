@@ -152,6 +152,8 @@ class PensionCoInstanceSwitchesIT {
             "OPENBANK_LEDGER_ACCOUNTING_DAY_CRON" to "openbank.ledger.accounting-day.cron",
             // application.yaml reads it as the expression ${LEDGER_DAY_LOCK_MODE:shadow}.
             "LEDGER_DAY_LOCK_MODE" to "LEDGER_DAY_LOCK_MODE",
+            // Same expression shape: ${LEDGER_CLOSE_PARTICIPANTS_MODE:shadow} (ADR-0342).
+            "LEDGER_CLOSE_PARTICIPANTS_MODE" to "LEDGER_CLOSE_PARTICIPANTS_MODE",
             "QUARKUS_FLYWAY_LOCATIONS" to "quarkus.flyway.locations",
         )
 
