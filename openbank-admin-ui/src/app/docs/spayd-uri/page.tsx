@@ -172,7 +172,7 @@ export default function SpaydUriPage() {
         <ol style={{ margin: 0, paddingLeft: 18, color: SUB, fontSize: 13, lineHeight: 1.8 }}>
           <li>{t('Telefon A: OpenBank z TestFlightu (0.47.0, build 176+), obrazovka Můj kód, přepnout na „Pro fotoaparát“.', 'Phone A: OpenBank from TestFlight (0.47.0, build 176+), My code screen, switch to “For the camera”.')}</li>
           <li>{t('Telefon B: běžný fotoaparát namířit na QR, ťuknout „Otevřít v OpenBank“. Formulář Poslat se předvyplní.', 'Phone B: point the stock camera at the QR, tap “Open in OpenBank”. The Send form is prefilled.')}</li>
-          <li>{t('Výběr banky na iOS: vedle OpenBank nainstalovat ukázkovou aplikaci SDK (registruje spayd-9999). OpenBank pak nabídne „Zaplatit v“.', 'Bank choice on iOS: install the SDK example app next to OpenBank (it registers spayd-9999). OpenBank then offers “Pay with”.')}</li>
+          <li>{t('Výběr banky na iOS (od buildu 177): vedle OpenBank nainstalovat ukázkovou aplikaci SDK. OpenBank registruje spayd-9998, ukázková aplikace spayd-9999. Po skenu iOS otevře jednu z nich a ta nabídne druhou v „Zaplatit v“.', 'Bank choice on iOS (from build 177): install the SDK example app next to OpenBank. OpenBank registers spayd-9998, the example spayd-9999. After the scan iOS opens one of them, and it offers the other under “Pay with”.')}</li>
           <li>{t('Zatím neměřeno: které aplikace fotoaparátu na Androidu předávají vlastní schéma systému. Zapisovat po aplikaci fotoaparátu, ne po modelu telefonu.', 'Not measured yet: which Android camera apps hand a custom scheme to the system. Record per camera app, not per phone model.')}</li>
         </ol>
       </Section>
