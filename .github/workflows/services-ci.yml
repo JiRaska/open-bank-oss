@@ -79,6 +79,7 @@ jobs:
       any: ${{ steps.detect.outputs.any }}
       verification-modules: ${{ steps.detect.outputs.verification-modules }}
       verification-modules-json: ${{ steps.detect.outputs.verification-modules-json }}
+      verification-shards-json: ${{ steps.detect.outputs.verification-shards-json }}
       admin-ui-pact-changed: ${{ steps.detect.outputs.admin-ui-pact-changed }}
     steps:
       # Read admission policy from the trusted base before checking out PR code.
@@ -399,7 +400,9 @@ jobs:
           # `|| true` stops `set -e` from aborting — empty is valid (build nothing).
           CHANGED=$(echo "$CHANGED" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ' || true)
           # Emit both module-plan formats from the same validated changed-file set.
-          printf '%s\n' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py >> "$GITHUB_OUTPUT"
+          VERIFICATION=$(printf '%s\n' "${FILES:-}" | python3 .github/scripts/derive-verification-modules.py)
+          printf '%s\n' "$VERIFICATION" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$VERIFICATION" | python3 .github/scripts/shard-verification-modules.py >> "$GITHUB_OUTPUT"
           echo "Modules to build: ${CHANGED:-<none>}"
           if [ -z "${CHANGED// /}" ]; then
             echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -504,20 +507,24 @@ jobs:
   # against a throwaway copy and the committed file is restored, which keeps that
   # trust boundary intact while still catching an unpinned artifact. See #3218.
   #
-  # Scoped to modules whose build files changed, with one process and timeout per
-  # module. A real 11-module PR exceeded the old single-job 30-minute budget twice;
-  # the verifier already regenerates each module independently to bound heap use.
+  # Scoped to modules whose build files changed. The verifier regenerates each module
+  # in its own Gradle invocation (bounded heap), so a job can take several modules:
+  # shard-verification-modules.py groups them into <= 12 strided shards of <= 7
+  # modules (union == input; one module -> one shard named after it). One job per
+  # module paid checkout + Java + Gradle setup 83 times on a fleet-wide change and
+  # queued 83 jobs behind max-parallel 4 (~83 min wall). Measured: ~217 s of check
+  # per module, max 359 s, so 7 modules worst case ~42 min — hence the 60 min budget.
   verification-metadata:
-    name: verification-metadata (${{ matrix.module }})
+    name: verification-metadata (${{ matrix.shard.label }})
     needs: [changes]
     if: needs.changes.result == 'success' && needs.changes.outputs.verification-modules != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 6
       matrix:
-        module: ${{ fromJSON(needs.changes.outputs.verification-modules-json) }}
+        shard: ${{ fromJSON(needs.changes.outputs.verification-shards-json) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -540,7 +547,7 @@ jobs:
       - name: Check verification metadata covers the changed modules
         run: |
           python3 .github/scripts/check-verification-metadata-complete.py \
-            --modules "${{ matrix.module }}" --enforce
+            --modules "${{ matrix.shard.modules }}" --enforce
 
   # SCOPE: this job is about SERVICE BUILDS ONLY — despite the name (#3955).
   #
