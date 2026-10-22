@@ -71,6 +71,62 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 ## Runbooks
 
+### Unsettled outbound booking attempts
+
+`openbank_payment_unsettled_total{rail="SEPA",outcome="..."}` uses the Micrometer name `openbank.payment.unsettled`. Its five bounded outcomes are `mismatch`, `failed-replay`, `conflict`, `unexpected-status` and `transport-error`; all five series are registered at zero. Each unsuccessful provider attempt increments once, including separate retries; this is not a unique-payment count. Cancellation and matched successful responses increment nothing. `failed-replay` means a decoded FAILED response, not proof that this request was replayed. Labels contain no payment, account or user identities or provider exception text. Zero means no observed unsuccessful attempts since process start, not evidence that a booking completed.
+
+Outbound settlement requires HTTP 201 and a COMPLETED transaction with an id whose type, source account, numeric amount, currency, rail and instruction type match the submitted request. The structured request maps `SCT` to `SEPA_CT` and `SCT_INST` to `SEPA_INST`, with `ONE_OFF` for both. These transaction fields do not themselves prove clearing completion or an instant-payment SLA. The existing `sepa-settlement-<payment-id>` key is unchanged. An existing booking under that key may still carry historical `SEPA_CT` or a null instruction type; a mismatched response remains unresolved. Do not infer that no old booking exists from today's strict request parsing, accept a mismatched booking, change its recorded history or submit a new key to force a retry. Establish the outcome through an approved reconciliation read path before corrective action.
+
+The counter supplies no durable outbound-booking age, SLA threshold/alert or new recovery endpoint. The refund clock below measures a different operation. A public read-only transaction lookup by idempotency key and the remaining booking clocks, alerts and operator integration remain open parts of #13623.
+
+### Unresolved inbound returns (#13623)
+
+A return is terminal `RETURNED` only after transaction-service proves a completed reversal with
+its transaction ID. HTTP 503 means reconciliation is still required, not proof that no credit
+occurred. The original payment row keeps the first return receipt, original transaction identity,
+server-derived actor/correlation and reason; retries do not replace these values. The internal
+`return_first_received_at` / `return_resolved_at` pair measures pending-refund age independently
+of payment creation. These columns are not a new public payment status.
+
+Reconcile against transaction-service using `sepa-reversal-<original-payment-id>` and the original
+transaction ID. Check the persisted reversal outcome before repeating the original return. Never
+create a new payment or reversal key to clear an uncertain outcome. A missing original transaction
+ID is `UNRESOLVED_ORIGINAL_TRANSACTION`; establish the original ledger identity through the existing
+reconciliation process before any further financial action. Absence of an ID does not prove no debit.
+There is no automatic rebooking, new operator endpoint, alert or recovery scheduler in this change.
+Legacy `RETURNED` rows are not retroactively certified refunded by this migration.
+
+The current transaction REST API has no read-only lookup by idempotency key. This change does not
+supply that missing operator integration or authorise a POST as a lookup. Use only an existing
+approved reconciliation read path; without one, key-based operator recovery remains blocked.
+
+API-contract note: `POST /api/v1/sepa-payments/returns` documents HTTP 409 when a state or persistence
+conflict prevents the return/evidence commit, and HTTP 503 when reversal completion remains unproven.
+Neither response proves that the ledger reversal did not occur. Preserve the original payment identity
+and reversal key while reconciling. The ADR-0048 classifier with oasdiff 1.22.0 classifies these added
+responses as additive: `1.16.0` → `1.17.0`; the served `/api/v1` major is unchanged. This contract axis
+is independent of the automatically managed release version.
+
+While a return intent is unresolved, conflicting terminal transitions are refused even when a
+writer has read a fresh aggregate revision. General aggregate writes cannot clear the intent,
+rewrite its request metadata or mark it resolved without the atomic return evidence. The database
+also constrains pending intents to the existing `PROCESSING`/`COMPLETED` recovery states.
+
+An initial settlement response may arrive after a return intent has committed without an original
+transaction ID. Only the workflow's explicit settlement-completion operation may attach that first
+ID after the existing adapter has validated the response against its exact original request.
+That short transaction reloads the latest aggregate, preserves the return receipt and metadata,
+and commits the attached identity and completion outbox row together. A compatible late callback
+after completion/return emits no duplicate event; a conflicting identity or terminal state is refused.
+This is not a historical identity lookup or general operator/PATCH permission to rewrite an intent.
+
+The refund-only `openbank_payment_refund_unsettled_oldest_age_seconds` gauge has fixed labels
+`rail="SEPA"` and `operation="refund"`. It reads the earliest unresolved durable return receipt,
+not payment creation, outbound-booking start or clearing age. Before the first successful query it
+is `NaN` (unknown); a successful empty query yields zero. Query failures preserve the last successful
+timestamp/empty snapshot and do not record refresh liveness success. Cached timestamps continue to
+age with the clock during a refresh outage. This change supplies no refund SLA threshold or alert.
+
 ### Payments stuck in RECEIVED
 
 This is **by design** when screening returns REVIEW or is unavailable (fail-closed, ADR-0032).

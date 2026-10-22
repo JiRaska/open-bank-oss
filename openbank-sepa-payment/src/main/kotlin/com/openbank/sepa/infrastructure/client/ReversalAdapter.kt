@@ -91,6 +91,9 @@ class ReversalAdapter(@RestClient private val client: TransactionServiceClient) 
         }
         val reversalId = reversed.body?.id
             ?: throw ReversalUnavailableException("Reversal response has no transaction id")
+        if (reversed.body?.type != "REVERSAL" || reversalId == transactionId) {
+            throw ReversalUnavailableException("Reversal response does not identify a reversal credit")
+        }
         log.infof("Reversal booked for transaction %s → reversal transaction %s", transactionId, reversalId)
         return ReversalOutcome(reversed = true, reversalTransactionId = reversalId)
     }

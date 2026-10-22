@@ -9,6 +9,7 @@ import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
 import com.openbank.sepa.domain.model.SepaRejectReason
+import com.openbank.sepa.domain.model.SepaReturnIntent
 import com.openbank.sepa.infrastructure.persistence.entity.SepaPaymentEntity
 
 fun SepaPayment.toEntity() = SepaPaymentEntity().also {
@@ -35,6 +36,7 @@ fun SepaPayment.toEntity() = SepaPaymentEntity().also {
     it.createdAt = createdAt
     it.updatedAt = updatedAt
     it.revision = revision
+    it.applyReturnIntent(returnIntent)
 }
 
 fun SepaPaymentEntity.toDomain() = SepaPayment(
@@ -60,6 +62,19 @@ fun SepaPaymentEntity.toDomain() = SepaPayment(
     createdAt = createdAt,
     updatedAt = updatedAt,
     revision = revision,
+    returnIntent = returnFirstReceivedAt?.let { received ->
+        SepaReturnIntent(
+            originalTransactionId = returnOriginalTransactionId,
+            firstReceivedAt = received,
+            reasonCode = returnReasonCode,
+            actorId = checkNotNull(returnActorId),
+            actorType = checkNotNull(returnActorType),
+            correlationId = returnCorrelationId,
+            unresolvedCause = checkNotNull(returnUnresolvedCause),
+            resolvedAt = returnResolvedAt,
+            reversalTransactionId = returnReversalTransactionId,
+        )
+    },
 )
 
 /**
@@ -75,4 +90,30 @@ private fun SepaPaymentEntity.storedMoney(): Money = try {
         "sepa_payments row $paymentId holds an amount/currency Money cannot represent",
         unrepresentable,
     )
+}
+
+/** Written under the aggregate lock with the lifecycle row and any evidence outbox rows. */
+fun SepaPaymentEntity.applyReturnIntent(intent: SepaReturnIntent?) {
+    returnOriginalTransactionId = intent?.originalTransactionId
+    returnFirstReceivedAt = intent?.firstReceivedAt
+    returnReasonCode = intent?.reasonCode
+    returnActorId = intent?.actorId
+    returnActorType = intent?.actorType
+    returnCorrelationId = intent?.correlationId
+    returnUnresolvedCause = intent?.unresolvedCause
+    returnResolvedAt = intent?.resolvedAt
+    returnReversalTransactionId = intent?.reversalTransactionId
+}
+
+/** Called only after the owning repository has validated the locked aggregate revision and intent. */
+fun SepaPaymentEntity.applyLifecycleUpdate(payment: SepaPayment) {
+    status = payment.status.name
+    transactionId = payment.transactionId
+    rejectReason = payment.rejectReason?.name
+    rejectDetail = payment.rejectDetail
+    submittedAt = payment.submittedAt
+    completedAt = payment.completedAt
+    updatedAt = payment.updatedAt
+    revision = payment.revision
+    applyReturnIntent(payment.returnIntent)
 }

@@ -71,6 +71,30 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 ## Runbooky
 
+### Nevyřešené pokusy o odchozí zaúčtování
+
+`openbank_payment_unsettled_total{rail="SEPA",outcome="..."}` používá v Micrometeru název `openbank.payment.unsettled`. Pět povolených výsledků je `mismatch`, `failed-replay`, `conflict`, `unexpected-status` a `transport-error`; všech pět řad se registruje s nulou. Každý neúspěšný pokus vůči provideru zvýší čítač právě jednou, včetně samostatných opakovaných pokusů; nejde o počet unikátních plateb. Zrušení coroutine ani úspěšná odpovídající reakce čítač nezvyšují. `failed-replay` znamená dekódovanou odpověď FAILED, nikoli důkaz, že požadavek byl replay. Labely neobsahují identitu platby, účtu či uživatele ani text výjimky provideru. Nula znamená absenci pozorovaných neúspěšných pokusů od startu procesu, nikoli důkaz dokončeného zaúčtování.
+
+Odchozí settlement vyžaduje HTTP 201 a transakci COMPLETED s identifikátorem a shodou typu, zdrojového účtu, číselné částky, měny, railu a typu instrukce s požadavkem. Strukturovaný požadavek mapuje `SCT` na `SEPA_CT` a `SCT_INST` na `SEPA_INST`, pro oba používá `ONE_OFF`. Tyto údaje o transakci samy nedokazují dokončení clearingu ani splnění SLA okamžité platby. Klíč `sepa-settlement-<payment-id>` zůstává stejný. Dřívější booking pod tímto klíčem může mít `SEPA_CT` nebo null typ instrukce; neodpovídající reakce zůstává nevyřešená. Z dnešního striktního parsování nevyvozujte, že historický booking neexistuje. Nepřijímejte neodpovídající booking, nepřepisujte jeho historii ani nevytvářejte nový klíč k vynucení opakování. Před nápravou ověřte výsledek schválenou reconciliation cestou pro čtení.
+
+Čítač nepřidává trvalé stáří odchozího bookingu, SLA limit/alarm ani recovery endpoint. Níže uvedené stáří refundu měří jinou operaci. Veřejné vyhledání transakce pouze pro čtení podle idempotentního klíče, zbývající booking clocks, alarmy a operátorská integrace zůstávají otevřenými částmi #13623.
+
+### Nevyřešené příchozí vratky (#13623)
+
+Vratka dosáhne terminálního stavu `RETURNED` až po prokázané dokončené reverzní transakci s identifikátorem. HTTP 503 znamená, že je stále nutná reconciliation, nikoli důkaz, že kredit neproběhl. Řádek původní platby uchovává první přijetí vratky, identitu původní transakce, serverem odvozeného aktéra, correlation a důvod; opakování tyto údaje nepřepisuje. Interní dvojice `return_first_received_at` / `return_resolved_at` měří čekání na refund nezávisle na vytvoření platby. Nepřidává veřejný stav platby.
+
+Při reconciliation zachovejte `sepa-reversal-<original-payment-id>` a původní transaction ID. Před opakováním původní vratky ověřte uložený výsledek reverzní transakce. Nejistý výsledek neřešte novou platbou či reversal klíčem. Chybějící původní ID znamená `UNRESOLVED_ORIGINAL_TRANSACTION`; před další finanční akcí ověřte původní ledger identitu schváleným postupem. Absence ID nedokazuje absenci debetu. Změna nepřidává automatické nové zaúčtování, operátorský endpoint, alarm ani recovery scheduler; staré řádky `RETURNED` migrace zpětně necertifikuje jako refundované.
+
+Současné transaction REST API nemá vyhledávání pouze pro čtení podle idempotentního klíče. Tato změna chybějící operátorskou integraci nedoplňuje ani nepovoluje POST jako vyhledávání. Bez existující schválené reconciliation cesty pro čtení zůstává recovery podle klíče blokovaná.
+
+API kontrakt `POST /api/v1/sepa-payments/returns` dokumentuje HTTP 409 při konfliktu stavu nebo persistence, který brání commitu vratky/evidence, a HTTP 503 při neprokázaném dokončení reverzní transakce. Ani jedna odpověď nedokazuje, že ledger reversal neproběhl. Při reconciliation zachovejte původní identitu platby a reversal klíč. Klasifikátor ADR-0048 s oasdiff 1.22.0 hodnotí přidané odpovědi jako aditivní změnu `1.16.0` → `1.17.0`; URL major `/api/v1` se nemění. Verze API kontraktu je nezávislá na automaticky spravované release verzi.
+
+Dokud je return intent nevyřešený, odmítají se konfliktní terminální přechody i po načtení čerstvé revize agregátu. Obecný zápis nesmí intent odstranit, přepsat původní metadata ani jej označit za vyřešený bez atomického zápisu evidence. Databáze omezuje pending intent na existující obnovitelné stavy `PROCESSING`/`COMPLETED`.
+
+První odpověď settlementu může přijít až po uložení intentu bez původního transaction ID. První ID smí připojit pouze explicitní settlement-completion operace workflow po validaci odpovědi adapterem vůči přesnému původnímu požadavku. Krátká transakce znovu načte aktuální agregát, zachová receipt a metadata a atomicky uloží připojené ID i completion outbox řádek. Kompatibilní opožděný callback po dokončení či vratce nevytvoří duplicitní event; konfliktní identita nebo terminální stav se odmítne. Nejde o historický lookup identity ani obecné oprávnění operátora/PATCH přepisovat intent.
+
+Refund-only gauge `openbank_payment_refund_unsettled_oldest_age_seconds` má pevné labely `rail="SEPA"` a `operation="refund"`. Čte nejstarší nevyřešený trvalý receipt vratky, nikoli vytvoření platby, začátek odchozího bookingu nebo stáří clearingu. Před prvním úspěšným dotazem vrací `NaN` (neznámé); úspěšný prázdný dotaz vrací nulu. Při selhání dotazu zůstane poslední úspěšný timestamp/prázdný snapshot a nezaznamená se refresh liveness success. Uložený timestamp dál stárne s časem i při výpadku obnovy. Změna nepřidává SLA limit ani alarm refundu.
+
 ### Platby uvíznuté v RECEIVED
 
 To je **záměr**, když screening vrátí REVIEW nebo je nedostupný (fail-closed, ADR-0032).

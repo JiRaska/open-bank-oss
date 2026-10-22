@@ -28,7 +28,7 @@ info:
   # 1.14 -> 1.15 (#11588): additive verified makerActorKind on approval responses.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.16.0
+  version: 1.17.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -142,6 +142,16 @@ paths:
                 $ref: '#/components/schemas/SepaPaymentResponse'
         '400':
           description: Invalid pacs.004 or unknown endToEndId
+        '409':
+          description: >-
+            Return state or evidence could not be committed because of a state or persistence conflict.
+            This does not establish whether the ledger reversal completed. Reconcile the original
+            payment identity and preserve the same reversal key before retrying.
+        '503':
+          description: >-
+            Return received durably but reversal completion is unproven, including an unresolved
+            original transaction identity. The payment is not marked RETURNED. Reconcile using
+            the original payment identity and same reversal key; never submit a replacement key.
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':

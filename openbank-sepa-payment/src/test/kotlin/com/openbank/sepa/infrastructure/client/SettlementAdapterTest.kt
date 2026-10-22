@@ -12,9 +12,12 @@ import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
+import com.openbank.sepa.infrastructure.observability.SepaSettlementMetrics
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.CancellationException
@@ -31,8 +34,13 @@ import java.util.UUID
 
 class SettlementAdapterTest {
     private val client = mockk<TransactionServiceClient>()
-    private val adapter = SettlementAdapter(client, Clock.fixed(Instant.parse("2026-01-20T10:00:00Z"), ZoneOffset.UTC))
-        .also { it.self = it }
+    private val registry = SimpleMeterRegistry()
+    private val metrics = SepaSettlementMetrics().also { it.bindTo(registry) }
+    private val adapter = SettlementAdapter(
+        client,
+        Clock.fixed(Instant.parse("2026-01-20T10:00:00Z"), ZoneOffset.UTC),
+        metrics,
+    ).also { it.self = it }
 
     private val txId = UUID.randomUUID()
     private val debtor = UUID.randomUUID()
@@ -98,6 +106,49 @@ class SettlementAdapterTest {
             assertThat(sent.captured.instructionType).isEqualTo("ONE_OFF")
             assertThat(sent.captured.rail).isEqualTo("SEPA_CT")
         }
+
+    @Test
+    fun `instant marker requests SEPA_INST ONE_OFF and accepts only its matching completed echo`(): Unit = runBlocking {
+        val sent = slot<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(sent)) } returns
+            Uni.createFrom().item(Response.status(201).entity(matching().copy(rail = "SEPA_INST")).build())
+        val p = payment().copy(type = SepaPaymentType.SCT_INST)
+
+        val outcome = adapter.settle(p)
+
+        assertThat(outcome.settled).isTrue()
+        assertThat(outcome.transactionId).isEqualTo(txId)
+        assertThat(sent.captured.rail).isEqualTo("SEPA_INST")
+        assertThat(sent.captured.instructionType).isEqualTo("ONE_OFF")
+        assertThat(sent.captured.idempotencyKey).isEqualTo("sepa-settlement-${p.id}")
+        verify(exactly = 1) { client.initiateTransaction(any()) }
+    }
+
+    @Test
+    fun `instant replay of an old SEPA_CT booking stays unresolved under the original key`(): Unit = runBlocking {
+        // Each HTTP response echoes the same existing booking; closing one must not affect the next.
+        every { client.initiateTransaction(any()) } answers {
+            Uni.createFrom().item(Response.status(201).entity(matching()).build())
+        }
+        val p = payment().copy(type = SepaPaymentType.SCT_INST)
+
+        repeat(2) {
+            val failure = runCatching { adapter.settle(p) }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(SettlementUnavailableException::class.java)
+                .hasMessageContaining("does not match")
+        }
+
+        verify(exactly = 2) {
+            client.initiateTransaction(
+                match {
+                    it.idempotencyKey == "sepa-settlement-${p.id}" &&
+                        it.rail == "SEPA_INST" &&
+                        it.instructionType == "ONE_OFF"
+                },
+            )
+        }
+        verify(exactly = 2) { client.initiateTransaction(any()) }
+    }
 
     @Test
     fun `each mismatched field of a COMPLETED 201 is not a settlement`() {
@@ -172,5 +223,80 @@ class SettlementAdapterTest {
         assertThatThrownBy { runBlocking { adapter.settle(payment()) } }
             .isInstanceOf(CancellationException::class.java)
             .isNotInstanceOf(SettlementUnavailableException::class.java)
+    }
+
+    private fun counts(): Map<String, Double> = SepaSettlementMetrics.Outcome.entries.associate { outcome ->
+        outcome.label to registry.get(SepaSettlementMetrics.METRIC)
+            .tags("rail", "SEPA", "outcome", outcome.label).counter().count()
+    }
+
+    @Test
+    fun `each failed provider call counts one bounded classified outcome only`(): Unit = runBlocking {
+        data class Case(val tx: TransactionResponse?, val http: Int, val expected: String)
+        val cases = listOf(
+            Case(matching().copy(amount = BigDecimal("99.00")), 201, "mismatch"),
+            Case(matching().copy(id = null), 201, "mismatch"),
+            Case(matching().copy(amount = null), 201, "mismatch"),
+            Case(matching("FAILED"), 201, "failed-replay"),
+            Case(matching("PENDING"), 201, "unexpected-status"),
+            Case(null, 201, "unexpected-status"),
+            Case(null, 409, "conflict"),
+            Case(null, 400, "unexpected-status"),
+            Case(null, 422, "unexpected-status"),
+            Case(matching(), 200, "unexpected-status"),
+            Case(matching(), 202, "unexpected-status"),
+            Case(null, 500, "unexpected-status"),
+        )
+        val expected = SepaSettlementMetrics.Outcome.entries.associate { it.label to 0.0 }.toMutableMap()
+        for (case in cases) {
+            answer(case.tx, case.http)
+            assertThat(runCatching { adapter.settle(payment()) }.exceptionOrNull())
+                .isInstanceOf(SettlementUnavailableException::class.java)
+            expected[case.expected] = expected.getValue(case.expected) + 1.0
+            assertThat(counts()).isEqualTo(expected)
+        }
+        every { client.initiateTransaction(any()) } returns
+            Uni.createFrom().failure(IllegalStateException("synthetic transport"))
+        assertThat(runCatching { adapter.settle(payment()) }.exceptionOrNull())
+            .isInstanceOf(SettlementUnavailableException::class.java)
+        expected["transport-error"] = 1.0
+        assertThat(counts()).isEqualTo(expected)
+    }
+
+    @Test
+    fun `matching SCT and instant calls count no unsettled attempt`(): Unit = runBlocking {
+        for (type in listOf(SepaPaymentType.SCT, SepaPaymentType.SCT_INST)) {
+            answer(matching().copy(rail = if (type == SepaPaymentType.SCT) "SEPA_CT" else "SEPA_INST"))
+            assertThat(adapter.settle(payment().copy(type = type)).settled).isTrue()
+        }
+        assertThat(counts().values).containsOnly(0.0)
+    }
+
+    @Test
+    fun `FAILED attempts retain same key and count once without outer double count`(): Unit = runBlocking {
+        val p = payment()
+        val sent = mutableListOf<InitiateTransactionRequest>()
+        every { client.initiateTransaction(capture(sent)) } answers {
+            Uni.createFrom().item(Response.status(201).entity(matching("FAILED")).build())
+        }
+        repeat(3) {
+            assertThat(runCatching { adapter.settle(p) }.exceptionOrNull())
+                .isInstanceOf(SettlementUnavailableException::class.java)
+        }
+        assertThat(sent.map { it.idempotencyKey }).containsOnly("sepa-settlement-${p.id}")
+        assertThat(counts().getValue("failed-replay")).isEqualTo(3.0)
+        assertThat(counts().values.sum()).isEqualTo(3.0)
+        verify(exactly = 3) { client.initiateTransaction(any()) }
+    }
+
+    @Test
+    fun `cancellation propagates its original cause and increments nothing`(): Unit = runBlocking {
+        val cancellation = CancellationException("synthetic cancellation")
+        every { client.initiateTransaction(any()) } returns Uni.createFrom().failure(cancellation)
+        val failure = runCatching { adapter.settle(payment()) }.exceptionOrNull()
+        // Coroutine stack-trace recovery may copy the exception while retaining the original as its cause.
+        assertThat(failure).isInstanceOf(CancellationException::class.java).hasMessage("synthetic cancellation")
+        assertThat(generateSequence(failure) { it.cause }.any { it === cancellation }).isTrue()
+        assertThat(counts().values).containsOnly(0.0)
     }
 }

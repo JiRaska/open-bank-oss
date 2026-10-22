@@ -84,4 +84,31 @@ class SepaPaymentEntity : PanacheEntity() {
 
     @Column(name = "aggregate_revision", nullable = false)
     var revision: Long = 0
+
+    @Column(name = "return_original_transaction_id")
+    var returnOriginalTransactionId: UUID? = null
+
+    @Column(name = "return_first_received_at")
+    var returnFirstReceivedAt: Instant? = null
+
+    @Column(name = "return_reason_code")
+    var returnReasonCode: String? = null
+
+    @Column(name = "return_actor_id")
+    var returnActorId: String? = null
+
+    @Column(name = "return_actor_type")
+    var returnActorType: String? = null
+
+    @Column(name = "return_correlation_id")
+    var returnCorrelationId: String? = null
+
+    @Column(name = "return_unresolved_cause")
+    var returnUnresolvedCause: String? = null
+
+    @Column(name = "return_resolved_at")
+    var returnResolvedAt: Instant? = null
+
+    @Column(name = "return_reversal_transaction_id")
+    var returnReversalTransactionId: UUID? = null
 }

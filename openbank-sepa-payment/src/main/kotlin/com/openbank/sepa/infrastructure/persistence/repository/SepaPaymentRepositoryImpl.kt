@@ -6,9 +6,14 @@ package com.openbank.sepa.infrastructure.persistence.repository
 
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
+import com.openbank.sepa.domain.event.RETURN_EVIDENCE_EVENT_TYPE
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepa.domain.model.SepaReturnIntent
+import com.openbank.sepa.domain.model.SepaReturnWritePolicy
+import com.openbank.sepa.domain.model.SepaSettlementCompletion
 import com.openbank.sepa.infrastructure.persistence.entity.SepaPaymentEntity
+import com.openbank.sepa.infrastructure.persistence.mapper.applyLifecycleUpdate
 import com.openbank.sepa.infrastructure.persistence.mapper.toDomain
 import com.openbank.sepa.infrastructure.persistence.mapper.toEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -17,6 +22,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
+import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
@@ -58,43 +64,61 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
         query.range(offset, offset + limit - 1).list()
     }.awaitSuspending().map { it.toDomain() }
 
+    override suspend fun beginReturn(paymentId: UUID, intent: SepaReturnIntent): SepaPayment =
+        mutateReturnIntent(paymentId) { payment ->
+            check(
+                payment.status in setOf(
+                    SepaPaymentStatus.RETURNED,
+                    SepaPaymentStatus.COMPLETED,
+                    SepaPaymentStatus.PROCESSING,
+                ),
+            ) { "Payment cannot accept a return" }
+            payment.returnIntent ?: intent.copy(originalTransactionId = payment.transactionId)
+        }
+
+    override suspend fun markReturnUnresolved(paymentId: UUID, cause: String): SepaPayment =
+        mutateReturnIntent(paymentId) { payment ->
+            checkNotNull(payment.returnIntent).let {
+                if (it.resolvedAt == null) it.copy(unresolvedCause = cause) else it
+            }
+        }
+
     override suspend fun update(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
-        updateWithMessages(payment, listOf(outboxMessage))
+        updateWithMessages(payment, listOf(outboxMessage), outboxRepository)
 
     override suspend fun updateWithEvidence(
         payment: SepaPayment,
         outboxMessage: SepaPaymentOutboxMessage,
         evidenceMessage: SepaPaymentOutboxMessage,
-    ): SepaPayment = updateWithMessages(payment, listOf(outboxMessage, evidenceMessage))
+    ): SepaPayment = updateWithMessages(
+        payment,
+        listOf(outboxMessage, evidenceMessage),
+        outboxRepository,
+        allowReturnResolution = evidenceMessage.eventType == RETURN_EVIDENCE_EVENT_TYPE &&
+            evidenceMessage.aggregateId == payment.id &&
+            outboxMessage.aggregateId == payment.id,
+    )
 
-    /**
-     * The single write path: the aggregate change and EVERY accompanying outbox message inside one
-     * `Panache.withTransaction`. The evidence row must not be able to commit without the transition
-     * (it would assert an act that did not happen) nor the transition without the evidence row
-     * (issue #6056 — that is the state this service shipped in).
-     */
-    private suspend fun updateWithMessages(
-        payment: SepaPayment,
-        outboxMessages: List<SepaPaymentOutboxMessage>,
+    override suspend fun completeSettlement(
+        requestedPayment: SepaPayment,
+        transactionId: UUID,
+        completedAt: Instant,
+        statusMessage: (SepaPayment) -> SepaPaymentOutboxMessage,
     ): SepaPayment = Panache.withTransaction {
-        find("paymentId", payment.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
-            .invoke { entity ->
-                requireNotNull(entity) { "SEPA payment ${payment.id} disappeared during transition" }
-                require(payment.revision == entity.revision + 1) {
-                    "stale SEPA payment revision ${payment.revision}; expected ${entity.revision + 1}"
+        find("paymentId", requestedPayment.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
+            .flatMap { entity ->
+                val current = checkNotNull(entity).toDomain()
+                SepaSettlementCompletion.validateRequest(current, requestedPayment, transactionId)
+                if (SepaSettlementCompletion.isCompatibleReplay(current, transactionId)) {
+                    Uni.createFrom().item(current)
+                } else {
+                    val completed = SepaSettlementCompletion.completed(current, transactionId, completedAt)
+                    SepaReturnWritePolicy.validate(current, completed, false, allowInitialSettlementIdentity = true)
+                    val message = statusMessage(completed)
+                    require(message.aggregateId == completed.id && message.eventType == "sepa.payment.status-changed")
+                    entity.applyLifecycleUpdate(completed)
+                    outboxRepository.persistWithinCurrentTransaction(message).replaceWith(completed)
                 }
-                entity.status = payment.status.name
-                entity.rejectReason = payment.rejectReason?.name
-                entity.rejectDetail = payment.rejectDetail
-                entity.submittedAt = payment.submittedAt
-                entity.completedAt = payment.completedAt
-                entity.updatedAt = payment.updatedAt
-                entity.revision = payment.revision
-            }
-            .flatMap {
-                outboxMessages.fold(Uni.createFrom().voidItem()) { chain, message ->
-                    chain.flatMap { outboxRepository.persistWithinCurrentTransaction(message).replaceWithVoid() }
-                }.replaceWith(payment)
             }
     }.awaitSuspending()
 }

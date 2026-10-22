@@ -6,12 +6,19 @@ package com.openbank.sepa.infrastructure.client
 
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionFailure
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
+import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.sepa.application.port.out.SettlementOutcome
 import com.openbank.sepa.application.port.out.SettlementPort
 import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
+import com.openbank.sepa.domain.model.SepaPaymentType
+import com.openbank.sepa.infrastructure.observability.SepaSettlementMetrics
+import com.openbank.sepa.infrastructure.observability.SepaSettlementMetrics.Outcome
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -40,8 +47,11 @@ import java.util.UUID
  * uncertain completions retry within the budget below.
  */
 @ApplicationScoped
-class SettlementAdapter(@RestClient private val client: TransactionServiceClient, private val clock: Clock) :
-    SettlementPort {
+class SettlementAdapter(
+    @RestClient private val client: TransactionServiceClient,
+    private val clock: Clock,
+    private val metrics: SepaSettlementMetrics,
+) : SettlementPort {
 
     @Inject
     lateinit var self: SettlementAdapter
@@ -73,10 +83,50 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     @Timeout(8_000)
     open suspend fun settleWithResilience(payment: SepaPayment): SettlementOutcome {
         val request = requestFor(payment)
-        val outcome = transactions.initiate(request).awaitSuspending()
-        val id = SettlementResponseCheck.confirm(payment.id.toString(), request, outcome)
+        // This method is the interceptor's actual provider-call attempt. Count here, never again
+        // in the outer settle wrapper, and preserve every exception/retry decision unchanged.
+        val outcome = initiate(request)
+        val id = try {
+            SettlementResponseCheck.confirm(payment.id.toString(), request, outcome)
+        } catch (ex: SettlementUnavailableException) {
+            val classification = when (outcome) {
+                TransactionCallOutcome.Conflict -> Outcome.CONFLICT
+                is TransactionCallOutcome.Rejected -> Outcome.UNEXPECTED_STATUS
+                is TransactionCallOutcome.HttpSuccess -> if (outcome.status == 201) {
+                    Outcome.MISMATCH
+                } else {
+                    Outcome.UNEXPECTED_STATUS
+                }
+            }
+            metrics.unsettled(classification)
+            throw ex
+        }
         log.infof("Settlement booked for SEPA payment %s → transaction %s", payment.id, id)
         return SettlementOutcome(settled = true, transactionId = id)
+    }
+
+    // Classify the actual provider attempt and propagate its original failure to the existing retry policy.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun initiate(request: InitiateTransactionRequest): TransactionCallOutcome<TransactionResponse> =
+        try {
+            transactions.initiate(request).awaitSuspending()
+        } catch (ex: CancellationException) {
+            throw ex
+        } catch (ex: Exception) {
+            metrics.unsettled(providerFailure(ex))
+            throw ex
+        }
+
+    private fun providerFailure(failure: Exception): Outcome = when (failure) {
+        is TransactionCompletionUncertainException -> if (failure.completionFailure ==
+            TransactionCompletionFailure.FAILED
+        ) {
+            Outcome.FAILED_REPLAY
+        } else {
+            Outcome.UNEXPECTED_STATUS
+        }
+        is TransactionHttpException -> Outcome.UNEXPECTED_STATUS
+        else -> Outcome.TRANSPORT_ERROR
     }
 
     private fun requestFor(payment: SepaPayment) = InitiateTransactionRequest(
@@ -87,7 +137,10 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
         currencyCode = payment.currency,
         description = "SEPA ${payment.type.name}: ${payment.remittanceInfo ?: payment.endToEndId}",
         valueDate = LocalDate.now(clock),
-        rail = "SEPA_CT",
+        rail = when (payment.type) {
+            SepaPaymentType.SCT -> PaymentRail.SEPA_CT.name
+            SepaPaymentType.SCT_INST -> PaymentRail.SEPA_INST.name
+        },
         // An InstructionType (ADR-0103), orthogonal to the rail. This used to send the SEPA scheme name
         // (`SCT` / `SCT_INST`), which transaction-service's strict enum parsing answers with 400, so a
         // settlement could never book; a customer-initiated credit transfer is a one-off instruction.
@@ -137,6 +190,7 @@ internal object SettlementResponseCheck {
             tx.sourceAccountId == request.sourceAccountId &&
             amount.compareTo(request.amount) == 0 &&
             tx.currencyCode == request.currencyCode &&
+            // A historical response under the same key must still match; never rebook with a new key.
             tx.rail == request.rail &&
             tx.instructionType == request.instructionType
         if (!matchesRequest) {

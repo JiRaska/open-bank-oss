@@ -102,8 +102,59 @@ class SepaPaymentActivitiesImplTest {
             schemeSubmissionEnabled = true,
         )
         coJustRun { amlCasePort.openCase(any()) }
-        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = null)
+        coEvery { settlementPort.settle(any()) } returns
+            SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
+        stubSettlementCompletion()
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
+    }
+
+    private fun stubSettlementCompletion(onMessage: (SepaPaymentOutboxMessage) -> Unit = {}) {
+        coEvery { paymentRepository.completeSettlement(any(), any(), any(), any()) } answers {
+            val completed = firstArg<SepaPayment>().transitionTo(
+                SepaPaymentStatus.COMPLETED,
+                clock = Clock.fixed(thirdArg(), ZoneOffset.UTC),
+            ).copy(transactionId = secondArg())
+            onMessage(arg<(SepaPayment) -> SepaPaymentOutboxMessage>(3)(completed))
+            completed
+        }
+    }
+
+    @Test
+    fun `settlement response uses explicit completion after return intent commits during network`() {
+        val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
+        var current = validated
+        val bookedId = UUID.randomUUID()
+        val firstReceipt = Instant.parse("2026-01-02T00:00:00Z")
+        coEvery { paymentRepository.findById(paymentId) } answers { current }
+        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(true, null)
+        coEvery { paymentRepository.update(any(), any()) } answers {
+            firstArg<SepaPayment>().also { current = it }
+        }
+        coEvery { settlementPort.settle(any()) } answers {
+            // The return intent commits while the validated request is outstanding. Its revision
+            // is newer than the snapshot the strict settlement adapter is about to confirm.
+            current = current.copy(
+                revision = current.revision + 1,
+                returnIntent = com.openbank.sepa.domain.model.SepaReturnIntent(
+                    null,
+                    firstReceipt,
+                    "AM09",
+                    "actor",
+                    "ROLE_API",
+                    "original-correlation",
+                ),
+            )
+            SettlementOutcome(true, bookedId)
+        }
+        coEvery { paymentRepository.completeSettlement(any(), bookedId, any(), any()) } answers {
+            assertThat(firstArg<SepaPayment>().revision).isLessThan(current.revision)
+            assertThat(current.returnIntent?.firstReceivedAt).isEqualTo(firstReceipt)
+            assertThat(current.returnIntent?.idempotencyKey(paymentId)).isEqualTo("sepa-reversal-$paymentId")
+            current.copy(status = SepaPaymentStatus.COMPLETED, transactionId = bookedId)
+        }
+        assertThat(activities.submitToScheme(paymentId)).isEqualTo(SepaPaymentStatus.COMPLETED)
+        coVerify(exactly = 1) { paymentRepository.completeSettlement(any(), bookedId, any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.update(match { it.status == SepaPaymentStatus.COMPLETED }, any()) }
     }
 
     @Test
@@ -239,12 +290,24 @@ class SepaPaymentActivitiesImplTest {
         coEvery { schemeGatewayPort.submit(any()) } returns
             SchemeSubmissionOutcome(accepted = true, reasonCode = null)
 
+        val bookedTransactionId = UUID.randomUUID()
+        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(true, bookedTransactionId)
         val result = activities.submitToScheme(paymentId)
 
+        coVerify { paymentRepository.completeSettlement(any(), bookedTransactionId, any(), any()) }
         assertThat(result).isEqualTo(SepaPaymentStatus.COMPLETED)
         coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
         coVerify { settlementPort.settle(match { it.status == SepaPaymentStatus.PROCESSING }) }
-        coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.COMPLETED }, any()) }
+        coVerify {
+            paymentRepository.completeSettlement(
+                match {
+                    it.status == SepaPaymentStatus.PROCESSING
+                },
+                any(),
+                any(),
+                any(),
+            )
+        }
     }
 
     @Test
@@ -260,7 +323,7 @@ class SepaPaymentActivitiesImplTest {
 
         assertThat(result).isEqualTo(SepaPaymentStatus.PROCESSING)
         coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.PROCESSING }, any()) }
-        coVerify(exactly = 0) { paymentRepository.update(match { it.status == SepaPaymentStatus.COMPLETED }, any()) }
+        coVerify(exactly = 0) { paymentRepository.completeSettlement(any(), any(), any(), any()) }
     }
 
     @Test
@@ -373,6 +436,7 @@ class SepaPaymentActivitiesImplTest {
         coEvery { paymentRepository.findById(paymentId) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
         coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
+        stubSettlementCompletion { outboxes.add(it) }
 
         val result = fixedClockActivities().submitToScheme(paymentId)
 
@@ -400,6 +464,7 @@ class SepaPaymentActivitiesImplTest {
     fun `every Temporal-path payload self-reports sepa-payment as its source service`() {
         val outboxes = mutableListOf<SepaPaymentOutboxMessage>()
         coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
+        stubSettlementCompletion { outboxes.add(it) }
 
         val activities = fixedClockActivities()
 

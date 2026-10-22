@@ -33,6 +33,17 @@ class ReversalAdapterTest {
             .exceptionOrNull() ?: error("reverseTransaction() unexpectedly succeeded")
 
     @Test
+    fun `completed unrelated transaction or original debit is never a reversal`() {
+        for ((id, type) in listOf(reversalId to "PAYMENT", original to "REVERSAL")) {
+            every { client.reverseTransaction(original, any()) } returns Uni.createFrom().item(
+                Response.ok(TransactionResponse(id = id, status = "COMPLETED", type = type)).build(),
+            )
+            assertThat(reverseFails()).isInstanceOf(ReversalUnavailableException::class.java)
+                .hasMessageContaining("does not identify a reversal credit")
+        }
+    }
+
+    @Test
     fun `a COMPLETED 200 (provider replay) or 201 is a reversal with its id`(): Unit = runBlocking {
         listOf(200, 201).forEach { code ->
             answer(code)
