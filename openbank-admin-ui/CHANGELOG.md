@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.10.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.2...admin-ui-v3.10.3) (2026-10-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** observe Karpenter runtime version with honest provenance ([#13592](https://github.com/JiRaska/open-bank-oss/issues/13592)) ([0c41dfa](https://github.com/JiRaska/open-bank-oss/commit/0c41dfad12b0862fcb5ef7babbbc99802d3c5002))
+* **admin-ui:** read published platform declarations independently of images ([#13591](https://github.com/JiRaska/open-bank-oss/issues/13591)) ([15ba450](https://github.com/JiRaska/open-bank-oss/commit/15ba450ee81b0eb0255ff90385db02d3c18cdb28))
+* **admin-ui:** resolve staged IaC and published BPMN inventory ([#13590](https://github.com/JiRaska/open-bank-oss/issues/13590)) ([94852ab](https://github.com/JiRaska/open-bank-oss/commit/94852ab2836a638892c56fd2c8a6a86ceb9960bd))
+
+
+### Performance
+
+* **admin-ui:** reuse verified immutable evidence bodies ([#13600](https://github.com/JiRaska/open-bank-oss/issues/13600)) ([9d211e9](https://github.com/JiRaska/open-bank-oss/commit/9d211e9370a14b3ba3b3e5d454b558c48379e14f))
+
 ## [3.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.10.1...admin-ui-v3.10.2) (2026-10-22)
 
 
