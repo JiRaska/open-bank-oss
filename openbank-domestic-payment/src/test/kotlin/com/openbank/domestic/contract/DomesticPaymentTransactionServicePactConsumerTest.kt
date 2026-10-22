@@ -98,4 +98,33 @@ class DomesticPaymentTransactionServicePactConsumerTest {
         assertThat(body.getString("rail")).isEqualTo("DOMESTIC")
         assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
     }
+
+    /**
+     * Missing credentials are an actual refusal contract. The shared provider state routes this
+     * interaction to TransactionNegativeAuthPactVerificationTest, which has no @TestSecurity;
+     * the authenticated positive verifier excludes that state and cannot stand in for this proof.
+     */
+    @Pact(consumer = "openbank-domestic-payment", provider = "openbank-transaction-service")
+    fun initiateDomesticTransactionUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST initiate domestic transaction with no credentials")
+        .path("/api/v1/transactions")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "initiateDomesticTransactionUnauthenticatedPact")
+    fun `initiateTransaction without credentials is refused with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/transactions")
+            .then()
+            .statusCode(401)
+    }
 }
