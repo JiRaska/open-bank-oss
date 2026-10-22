@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -96,11 +81,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -279,7 +259,7 @@ mp:
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —
-# the mechanism is wired here (ApprovalConfig producing a Redis-backed ApprovalStore) so it CAN
+# the mechanism is wired here (RedisApprovalStoreProducer producing a Redis-backed ApprovalStore) so it CAN
 # be enforced, but flipping it is a deliberate, separate operational decision, not shipped
 # enabled by this PR. Unlike lending-service's identical wiring, this one has a real Redis
 # behind it in gitops (redis.yaml + QUARKUS_REDIS_HOSTS) — see issue #1354 for what happens when
@@ -373,6 +353,11 @@ authz:
     scheduler:
       enabled: false
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own RedisApprovalStoreProducer. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

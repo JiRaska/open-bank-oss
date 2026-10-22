@@ -366,6 +366,16 @@ public final class com/openbank/libs/approval/impl/RedisApprovalStore : com/open
 public final class com/openbank/libs/approval/impl/RedisApprovalStore$Companion {
 }
 
+public final class com/openbank/libs/approval/impl/RedisApprovalStoreProducer {
+	public static final field Companion Lcom/openbank/libs/approval/impl/RedisApprovalStoreProducer$Companion;
+	public static final field STORE_PROPERTY Ljava/lang/String;
+	public fun <init> ()V
+	public final fun approvalStore (Lio/quarkus/redis/datasource/ReactiveRedisDataSource;Ljava/time/Clock;)Lcom/openbank/libs/approval/ApprovalStore;
+}
+
+public final class com/openbank/libs/approval/impl/RedisApprovalStoreProducer$Companion {
+}
+
 public final class com/openbank/libs/approval/web/ApprovalEndpointSupport {
 	public static final field Companion Lcom/openbank/libs/approval/web/ApprovalEndpointSupport$Companion;
 	public static final field MAX_PENDING_LIMIT I
@@ -578,6 +588,74 @@ public final class com/openbank/libs/authz/ServiceAccountIdentity {
 	public final fun verifiedClientId (Lio/quarkus/security/identity/SecurityIdentity;)Ljava/lang/String;
 	public final fun verifiedClientId (Ljava/security/Principal;)Ljava/lang/String;
 	public final fun verifiedPrincipalName (Lio/quarkus/security/identity/SecurityIdentity;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/close/AccountingDayClosed {
+	public static final field ERROR_CODE Ljava/lang/String;
+	public static final field INSTANCE Lcom/openbank/libs/close/AccountingDayClosed;
+	public final fun isClosedDayRejection (ILjava/lang/String;)Z
+}
+
+public final class com/openbank/libs/close/CloseJobRun {
+	public fun <init> (Ljava/time/LocalDate;Ljava/lang/String;IIILjava/lang/String;Ljava/time/Instant;)V
+	public final fun component1 ()Ljava/time/LocalDate;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/time/Instant;
+	public final fun copy (Ljava/time/LocalDate;Ljava/lang/String;IIILjava/lang/String;Ljava/time/Instant;)Lcom/openbank/libs/close/CloseJobRun;
+	public static synthetic fun copy$default (Lcom/openbank/libs/close/CloseJobRun;Ljava/time/LocalDate;Ljava/lang/String;IIILjava/lang/String;Ljava/time/Instant;ILjava/lang/Object;)Lcom/openbank/libs/close/CloseJobRun;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBusinessDate ()Ljava/time/LocalDate;
+	public final fun getCompletedAt ()Ljava/time/Instant;
+	public final fun getItemsProcessed ()I
+	public final fun getJob ()Ljava/lang/String;
+	public final fun getJournalsPosted ()I
+	public final fun getRefusalReason ()Ljava/lang/String;
+	public final fun getRefused ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/close/CloseParticipationAssembler {
+	public static final field INSTANCE Lcom/openbank/libs/close/CloseParticipationAssembler;
+	public final fun assemble (Ljava/time/LocalDate;Ljava/util/Set;Ljava/util/Collection;Ljava/lang/String;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public static synthetic fun assemble$default (Lcom/openbank/libs/close/CloseParticipationAssembler;Ljava/time/LocalDate;Ljava/util/Set;Ljava/util/Collection;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/close/CloseParticipationReport;
+}
+
+public final class com/openbank/libs/close/CloseParticipationReport {
+	public fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;)V
+	public synthetic fun <init> (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/time/LocalDate;
+	public final fun component2 ()Lcom/openbank/libs/close/CloseOutcome;
+	public final fun component3 ()I
+	public final fun component4 ()I
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public static synthetic fun copy$default (Lcom/openbank/libs/close/CloseParticipationReport;Ljava/time/LocalDate;Lcom/openbank/libs/close/CloseOutcome;IILjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/close/CloseParticipationReport;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBusinessDate ()Ljava/time/LocalDate;
+	public final fun getItemsProcessed ()I
+	public final fun getJournalsPosted ()I
+	public final fun getOutcome ()Lcom/openbank/libs/close/CloseOutcome;
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/close/CloseParticipationReporter {
+	public static final field Companion Lcom/openbank/libs/close/CloseParticipationReporter$Companion;
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/close/CloseParticipationSink;Lio/micrometer/core/instrument/MeterRegistry;)V
+	public final fun report (Lcom/openbank/libs/close/CloseParticipationReport;)Lio/smallrye/mutiny/Uni;
+}
+
+public final class com/openbank/libs/close/CloseParticipationReporter$Companion {
+}
+
+public abstract interface class com/openbank/libs/close/CloseParticipationSink {
+	public abstract fun deliver (Ljava/lang/String;Lcom/openbank/libs/close/CloseParticipationReport;)Lio/smallrye/mutiny/Uni;
 }
 
 public final class com/openbank/libs/contact/ContactArbitration {

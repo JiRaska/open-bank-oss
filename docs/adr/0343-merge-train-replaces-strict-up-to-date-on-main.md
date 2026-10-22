@@ -451,7 +451,9 @@ declaration, `merge_train.extra_gates` in `openbank-libs/governance/rules.yaml` 
 the `Security scan` job that runs on every `pull_request` with no path filter), read from live main
 by every lane — train candidates, fast lane, strict lane, fix-first — and by carrier judgement. On a
 PR head: red = not served (`skip  extra gate red: <name>`, one fixed comment per head, the PR stays
-armed); running = wait; never triggered, skipped or neutral = not applicable. A carrier red on an
+armed); running = wait; never reported = wait too (fail closed, #13400) — not applicable only
+when the pinned workflow has a COMPLETED run for that head without the check, or it concluded
+skipped or neutral. A carrier red on an
 extra gate is a verdict like any required context, unless main is red on that gate too: then it
 counts as main red — PRs wait and the carrier closes with no verdict, nobody blamed.
 Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml, check: Trivy}`): only
@@ -459,6 +461,33 @@ Each gate is pinned to its producer (`{workflow: .github/workflows/security.yml,
 run from another app or workflow can neither turn it green nor mask a red. The declaration fails
 closed: missing or unparseable on main means `::error::` and no PR is served, no carrier judged, and
 `--check-declaration` (which runs on every PR, and re-self-tests on a `rules.yaml` change) fails.
+
+### Amendment (2026-10-21) — lane fairness: the strict lane yields one turn to the train
+
+The strict-lane reservation holds main for one manual-lane PR, and while any reservation runs no
+train is built. With a strict queue that never empties this starved the train lane completely:
+over 12.5 h of `merge-train.yml` (2026-10-20T23:38Z .. 2026-10-21T12:28Z, 40 runs) 11 carriers were
+published, **0 train members merged**, and 13 strict-lane PRs merged. Every strict merge was
+followed in the next tick by an update-branch for the next strict PR, and that update-branch was
+issued even while a carrier was open, so a carrier that went green was held for the new
+reservation and then voided by its merge (carrier #13529: held for #13526, then "main moved since
+publish"). The strict lane now does not START a reservation (update-branch) when:
+
+1. **a train carrier is open** — the carrier is the train's turn in flight, bounded by its own CI
+   and settlement; or
+2. **main's head is a strict-lane merge** (its PR head carries the App's `strict lane:` status)
+   **and train candidates wait** — the train gets the next turn, bounded by `TRAIN_TURN_S`
+   (30 min, two ticks at the measured p90 cron gap) from that merge, so a train that cannot be
+   built never freezes the strict lane.
+
+The result is alternation: one strict-lane PR, then one train, then one strict-lane PR. Neither
+lane can starve the other — the strict turn returns as soon as a train merges, its carrier closes,
+or the turn expires. A reservation already running, a green up-to-date strict PR, and the main-red
+fix path are unchanged.
+
+### Amendment (2026-10-21) — event-driven trigger, cron as heartbeat (#13400)
+
+The train now also runs on `push` to main, `workflow_run: completed` of every required-context producer (Services CI, CI, Secret scan, OPA policy, Security scan, Issue hygiene) and `pull_request_target: [auto_merge_enabled]`, because the `*/10` cron fired 127 of ~235 expected ticks over 39 h (median gap 17 min); triggers carry no authority — no job reads the event payload, every checkout is `ref: main`, the `merge-train` concurrency group coalesces a burst into one pending run, and `--check-declaration` enforces the first two.
 
 ## Rollout
 
