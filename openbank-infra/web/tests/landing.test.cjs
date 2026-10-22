@@ -177,3 +177,61 @@ test('indexable pages expose unique canonical metadata and matching structured d
   assert.match(read('classic.html'), /<meta name="robots" content="noindex, follow"/);
   assert.match(read('robots.txt'), /Sitemap: https:\/\/open-bank.tech\/sitemap.xml/);
 });
+
+function brandBrowser({ reduced = false, rejectPlayback = false } = {}) {
+  const dom = new JSDOM(read('index.html'), { runScripts: 'outside-only' });
+  const film = dom.window.document.querySelector('.brand-film');
+  const calls = { play: 0, pause: 0, load: 0 };
+  const media = { matches: reduced, addEventListener(type, listener) { this.change = listener; } };
+  dom.window.matchMedia = () => media;
+  film.play = () => { calls.play++; return rejectPlayback ? Promise.reject(new Error('Autoplay blocked')) : Promise.resolve(); };
+  film.pause = () => { calls.pause++; };
+  film.load = () => { calls.load++; };
+  dom.window.eval(read('brand.js'));
+  return { dom, film, calls, media };
+}
+
+test('new logo is confined to the header on current pages; artwork and footer marks remain', () => {
+  for (const page of ['index.html', 'platform.html', 'labs.html']) {
+    const dom = new JSDOM(read(page)), d = dom.window.document;
+    assert.equal(d.querySelectorAll('.brand-film').length, 1);
+    const film = d.querySelector('header .brand-film');
+    assert.ok(film);
+    assert.equal(film.closest('a').getAttribute('aria-label'), 'OpenBank home');
+    assert.equal(film.hasAttribute('loop'), false);
+    assert.equal(film.hasAttribute('autoplay'), false);
+    assert.equal(film.hasAttribute('muted'), true);
+    assert.equal(film.hasAttribute('playsinline'), true);
+    assert.ok(fs.existsSync(path.join(site, film.getAttribute('poster'))));
+    assert.equal(d.querySelector('footer .brand img').getAttribute('src'), 'assets/ob-mark-complete.svg');
+    assert.equal(d.querySelectorAll('script[src="brand.js"]').length, 1);
+    if (page === 'index.html') {
+      assert.equal(d.querySelector('.hero-art img').getAttribute('src'), 'assets/explorers-hero.webp');
+      assert.equal(d.querySelector('.crew').getAttribute('src'), 'assets/agent-crew.webp');
+    }
+    dom.window.close();
+  }
+  assert.ok(!read('classic.html').includes('brand-film'));
+});
+
+test('logo plays once and restores the poster when reduced motion is enabled', () => {
+  const { dom, calls, media } = brandBrowser();
+  assert.deepEqual(calls, { play: 1, pause: 0, load: 0 });
+  media.matches = true;
+  media.change();
+  assert.deepEqual(calls, { play: 1, pause: 1, load: 1 });
+  dom.window.close();
+});
+
+test('reduced motion keeps the completed-logo poster without starting playback', () => {
+  const { dom, calls } = brandBrowser({ reduced: true });
+  assert.deepEqual(calls, { play: 0, pause: 0, load: 0 });
+  dom.window.close();
+});
+
+test('blocked autoplay falls back to the completed-logo poster', async () => {
+  const { dom, calls } = brandBrowser({ rejectPlayback: true });
+  await tick();
+  assert.deepEqual(calls, { play: 1, pause: 0, load: 1 });
+  dom.window.close();
+});
