@@ -6,12 +6,17 @@ package com.openbank.swift.infrastructure.client
 
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
+import com.openbank.clients.transaction.TransactionCompletionFailure
+import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementOutcome
 import com.openbank.swift.application.port.out.SettlementPort
 import com.openbank.swift.application.port.out.SettlementUnavailableException
 import com.openbank.swift.domain.model.SwiftMessage
+import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics
+import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics.Outcome
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CancellationException
@@ -29,7 +34,10 @@ import java.util.UUID
  * The caller retains SENT on uncertainty; no automatic SENT redriver is introduced here.
  */
 @ApplicationScoped
-class SettlementAdapter(@RestClient private val client: TransactionServiceClient) : SettlementPort {
+class SettlementAdapter(
+    @RestClient private val client: TransactionServiceClient,
+    private val metrics: SwiftSettlementMetrics,
+) : SettlementPort {
 
     private val log = Logger.getLogger(SettlementAdapter::class.java)
     private val transactions = TransactionClient(client)
@@ -69,6 +77,18 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             // Cancellation is not an outage: rethrow so the coroutine unwinds instead of being retried as one.
             throw e
         } catch (ex: Exception) {
+            val reason = when (ex) {
+                is TransactionCompletionUncertainException -> if (ex.completionFailure ==
+                    TransactionCompletionFailure.FAILED
+                ) {
+                    Outcome.FAILED_REPLAY
+                } else {
+                    Outcome.UNEXPECTED_STATUS
+                }
+                is TransactionHttpException -> Outcome.UNEXPECTED_STATUS
+                else -> Outcome.TRANSPORT_ERROR
+            }
+            metrics.unsettled(reason)
             // No proven completion (5xx, dropped connection): the caller retains SENT, never decided here.
             throw SettlementUnavailableException(
                 "transaction-service unreachable for SWIFT message ${message.id}",
@@ -121,6 +141,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     }
 
     private fun unbound(message: SwiftMessage, reason: String): SettlementOutcome {
+        metrics.unsettled(Outcome.MISMATCH)
         log.warnf(
             "transaction-service answered with %s for SWIFT message %s settlement; message stays SENT",
             reason,
@@ -130,6 +151,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     }
 
     private fun refused(message: SwiftMessage, status: Int): SettlementOutcome {
+        metrics.unsettled(if (status == HTTP_CONFLICT) Outcome.CONFLICT else Outcome.UNEXPECTED_STATUS)
         log.warnf(
             "transaction-service returned HTTP %d for SWIFT message %s settlement; message stays SENT",
             status,

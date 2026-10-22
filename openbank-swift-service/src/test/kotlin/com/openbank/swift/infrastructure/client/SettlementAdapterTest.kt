@@ -12,6 +12,9 @@ import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
 import com.openbank.swift.domain.model.SwiftPriority
 import com.openbank.swift.domain.model.SwiftStatus
+import com.openbank.swift.infrastructure.observability.SwiftSettlementMetrics
+import io.micrometer.prometheus.PrometheusConfig
+import io.micrometer.prometheus.PrometheusMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -33,7 +36,41 @@ import java.util.UUID
 class SettlementAdapterTest {
 
     private val client = mockk<TransactionServiceClient>()
-    private val adapter = SettlementAdapter(client)
+    private val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+    private val metrics = SwiftSettlementMetrics().apply { bindTo(registry) }
+    private val adapter = SettlementAdapter(client, metrics)
+
+    private fun assertSingleUnsettled(outcome: String) {
+        val meters = registry.find(SwiftSettlementMetrics.METRIC).counters()
+        assertThat(meters.sumOf { it.count() }).isEqualTo(1.0)
+        assertThat(meters.single { it.count() > 0 }.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
+        assertThat(meters.single { it.count() > 0 }.id.getTag("rail")).isEqualTo("SWIFT")
+        assertThat(meters.single { it.count() > 0 }.id.getTag("outcome")).isEqualTo(outcome)
+    }
+
+    private fun assertAllUnsettledZero() {
+        val counters = registry.find(SwiftSettlementMetrics.METRIC).counters()
+        assertThat(counters).hasSize(SwiftSettlementMetrics.Outcome.entries.size)
+        assertThat(counters.sumOf { it.count() }).isZero()
+    }
+
+    @Test
+    fun `Prometheus exports bounded rail and outcome tags and real zero counters before attempts`() {
+        assertAllUnsettledZero()
+        assertThat(registry.scrape()).contains(
+            """openbank_payment_unsettled_total{outcome="mismatch",rail="SWIFT",} 0.0""",
+        )
+        metrics.unsettled(SwiftSettlementMetrics.Outcome.MISMATCH)
+        assertSingleUnsettled("mismatch")
+        assertThat(registry.scrape()).contains(
+            """openbank_payment_unsettled_total{outcome="mismatch",rail="SWIFT",} 1.0""",
+        )
+        registry.meters.forEach { meter ->
+            assertThat(meter.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
+            assertThat(meter.id.getTag("rail")).isEqualTo("SWIFT")
+            assertThat(meter.id.getTag("outcome")).isIn(SwiftSettlementMetrics.Outcome.entries.map { it.label })
+        }
+    }
 
     private fun created(id: UUID, status: Int = 201): Response =
         Response.status(status).entity(TransactionResponse(id = id, status = "COMPLETED")).build()
@@ -68,6 +105,7 @@ class SettlementAdapterTest {
 
         assertThat(outcome.settled).isTrue()
         assertThat(outcome.transactionId).isEqualTo(txId)
+        assertAllUnsettledZero()
     }
 
     @Test
@@ -76,6 +114,7 @@ class SettlementAdapterTest {
 
         assertThat(outcome.settled).isFalse()
         assertThat(outcome.transactionId).isNull()
+        assertAllUnsettledZero()
     }
 
     @Test
@@ -87,6 +126,7 @@ class SettlementAdapterTest {
 
         assertThat(outcome.settled).isFalse()
         assertThat(outcome.transactionId).isNull()
+        assertSingleUnsettled("conflict")
     }
 
     @Test
@@ -97,6 +137,7 @@ class SettlementAdapterTest {
         assertThatThrownBy { runBlocking { adapter.settle(message()) } }
             .isInstanceOf(SettlementUnavailableException::class.java)
             .hasMessageContaining("transaction-service unreachable")
+        assertSingleUnsettled("transport-error")
     }
 
     @Test
@@ -107,6 +148,7 @@ class SettlementAdapterTest {
         assertThatThrownBy { runBlocking { adapter.settle(message()) } }
             .isInstanceOf(CancellationException::class.java)
             .isNotInstanceOf(SettlementUnavailableException::class.java)
+        assertAllUnsettledZero()
     }
 
     @Test
@@ -149,6 +191,7 @@ class SettlementAdapterTest {
 
         assertThat(outcome.settled).isFalse()
         assertThat(outcome.transactionId).isNull()
+        assertSingleUnsettled("mismatch")
     }
 
     @Test
@@ -187,6 +230,28 @@ class SettlementAdapterTest {
 
         assertThatThrownBy { runBlocking { adapter.settle(message()) } }
             .isInstanceOf(SettlementUnavailableException::class.java)
+        assertSingleUnsettled(if (status == "FAILED") "failed-replay" else "unexpected-status")
+    }
+
+    @Test
+    fun `each matching successful idempotent response emits no unsettled counter`(): Unit = runBlocking {
+        val payment = message()
+        answer { matching(it) }
+        repeat(2) { assertThat(adapter.settle(payment).settled).isTrue() }
+        assertAllUnsettledZero()
+        verify(exactly = 2) {
+            client.initiateTransaction(
+                match { it.idempotencyKey == "swift-settlement-${payment.id}" },
+            )
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource("200", "202", "400", "422", "503")
+    fun `unexpected HTTP statuses count one failed attempt`(status: Int) {
+        answer(status) { matching(it) }
+        runCatching { runBlocking { adapter.settle(message()) } }
+        assertSingleUnsettled("unexpected-status")
     }
 
     @Test
